@@ -91,7 +91,6 @@
   const ORDERBOOK_PRICE_SCALE = 10_000n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
   const ORDERBOOK_SNAPSHOT_FRESH_MS = 10_000;
-  const ENABLE_MULTIHOP_SWAP_UI = false;
   type PreparedSwapOrderLike = {
     side: 0 | 1;
     priceTicks: bigint;
@@ -159,8 +158,12 @@
   let preparedOrder: PreparedSwapOrderLike | null = null;
   let parsedOrderbookPair: { baseTokenId: number; quoteTokenId: number } | null = null;
   let orderbookPairDisplayLabel = '';
-  let orderbookBaseJurisdictionLabel = '';
-  let orderbookQuoteJurisdictionLabel = '';
+  let orderbookPairOptions: OrderbookPairOption[] = [];
+  let orderbookPairSelectValue = '';
+  let lastOrderbookPairSelectValue = '';
+  let lastOrderbookPairSelectMode = '';
+  let lastOrderbookPairSelectRoute = '';
+  let lastOrderbookPairSelectCommit = '';
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
   let orderListTab: 'open' | 'closed' = 'open';
@@ -415,6 +418,21 @@
     return cleanJurisdiction ? `${tokenSymbol(tokenIdValue)} (${cleanJurisdiction})` : tokenSymbol(tokenIdValue);
   }
 
+  function sameOrderbookPairLabel(baseTokenIdValue: number, quoteTokenIdValue: number, jurisdiction: string): string {
+    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
+    const pair = `${tokenSymbol(baseTokenIdValue)}-${tokenSymbol(quoteTokenIdValue)}`;
+    return cleanJurisdiction ? `${pair} (${cleanJurisdiction})` : pair;
+  }
+
+  function crossOrderbookPairLabel(
+    baseTokenIdValue: number,
+    baseJurisdiction: string,
+    quoteTokenIdValue: number,
+    quoteJurisdiction: string,
+  ): string {
+    return `${tokenNetworkLabel(baseTokenIdValue, baseJurisdiction)} - ${tokenNetworkLabel(quoteTokenIdValue, quoteJurisdiction)}`;
+  }
+
   function entityAvatarSrc(entityIdValue: string): string {
     const normalized = String(entityIdValue || '').trim();
     if (!normalized || !activeXlnFunctions?.isReady) return '';
@@ -444,6 +462,7 @@
   $: crossTargetOptions = buildCrossTargetOptions(activeFrame, sourceEntityIdValue, currentReplica);
   $: routeOptions = buildRouteOptions(sourceEntityIdValue, currentReplica, activeOrderAccountId, crossTargetOptions);
   $: visibleRouteOptions = selectedRouteOptionOverride
+    && routeMatchesCurrentSource(selectedRouteOptionOverride)
     && !routeOptions.some((option) => option.value === selectedRouteOptionOverride?.value)
     ? [...routeOptions, selectedRouteOptionOverride]
     : routeOptions;
@@ -466,7 +485,12 @@
     }
   }
   $: selectedRouteOption = visibleRouteOptions.find((option) => option.value === liveSelectedRouteValue)
-    || (selectedRouteOptionOverride?.value === liveSelectedRouteValue ? selectedRouteOptionOverride : null)
+    || (
+      selectedRouteOptionOverride?.value === liveSelectedRouteValue
+      && routeMatchesCurrentSource(selectedRouteOptionOverride)
+        ? selectedRouteOptionOverride
+        : null
+    )
     || visibleRouteOptions[0]
     || null;
   $: swapRouteMode = selectedRouteOption?.mode === 'cross' ? 'cross' : 'same';
@@ -474,24 +498,21 @@
   $: selectedCrossTarget = crossTargetOptions.find((option) => option.value === selectedCrossTargetValue)
     || (selectedCrossTargetOverride?.value === selectedCrossTargetValue ? selectedCrossTargetOverride : null)
     || null;
-  $: routedRouteRecommendations = !ENABLE_MULTIHOP_SWAP_UI
-    ? buildRoutedRouteCandidates(
-        swapRouteMode,
-        selectedCrossTarget,
-        activeOrderAccountId,
-        currentReplica,
-        sourceJurisdictionLabel,
-        giveToken,
-        wantToken,
-        giveAmount,
-        orderbookQuoteNonce,
-      )
-        .filter((candidate) => candidate.hops.length > 1 && candidate.id !== 'direct-cross')
-        .slice(0, 3)
-    : [];
+  $: routedRouteRecommendations = buildRoutedRouteCandidates(
+    swapRouteMode,
+    selectedCrossTarget,
+    activeOrderAccountId,
+    currentReplica,
+    sourceJurisdictionLabel,
+    giveToken,
+    wantToken,
+    giveAmount,
+    orderbookQuoteNonce,
+  )
+    .filter((candidate) => candidate.hops.length > 1 && candidate.id !== 'direct-cross')
+    .slice(0, 3);
   $: showManualRouteRecommendation = (
     swapRouteMode === 'cross'
-    && !ENABLE_MULTIHOP_SWAP_UI
     && routedRouteRecommendations.length > 0
     && String(orderbookSnapshot?.pairId || '').trim() === String(orderbookPairId || '').trim()
     && (
@@ -600,6 +621,8 @@
   type CrossMarketView = {
     venueId: string;
     sourceIsBase: boolean;
+    sourceKey: string;
+    targetKey: string;
     baseKey: string;
     quoteKey: string;
   };
@@ -901,6 +924,23 @@
     return options;
   }
 
+  function routeMatchesCurrentSource(route: SwapRouteOption | null | undefined): boolean {
+    if (!route) return false;
+    const currentSourceEntityId = String(sourceEntityIdValue || '').trim().toLowerCase();
+    const routeSourceEntityId = String(route.sourceEntityId || '').trim().toLowerCase();
+    if (currentSourceEntityId && routeSourceEntityId && currentSourceEntityId !== routeSourceEntityId) return false;
+    const currentSourceRef = String(getReplicaJurisdictionRef(currentReplica) || '').trim().toLowerCase();
+    const routeSourceRef = String(route.sourceJurisdictionRef || '').trim().toLowerCase();
+    if (currentSourceRef && routeSourceRef && currentSourceRef !== routeSourceRef) return false;
+    if (route.mode === 'cross') {
+      const routeTargetEntityId = String(route.targetEntityId || '').trim().toLowerCase();
+      const routeTargetRef = String(route.targetJurisdictionRef || '').trim().toLowerCase();
+      if (currentSourceEntityId && routeTargetEntityId && currentSourceEntityId === routeTargetEntityId) return false;
+      if (currentSourceRef && routeTargetRef && currentSourceRef === routeTargetRef) return false;
+    }
+    return true;
+  }
+
   function buildCommittedRouteSelectionFromDom(node: HTMLSelectElement | null, value: string): {
     route: SwapRouteOption;
     target: CrossTargetOption | null;
@@ -1096,6 +1136,20 @@
     liquidScore: number;
   };
 
+  type OrderbookPairOption = {
+    value: string;
+    label: string;
+    mode: 'same' | 'cross';
+    pairId: string;
+    baseTokenId: number;
+    quoteTokenId: number;
+    sourceTokenId: number;
+    targetTokenId: number;
+    routeValue: string;
+    sourceJurisdiction: string;
+    targetJurisdiction: string;
+  };
+
   function resolvePairOrientation(tokenA: number, tokenB: number): { baseTokenId: number; quoteTokenId: number; pairId: string } {
     const runtimeResolver = activeXlnFunctions?.getSwapPairOrientation;
     if (runtimeResolver) return runtimeResolver(tokenA, tokenB);
@@ -1220,6 +1274,92 @@
     });
   }
 
+  function crossAssetLabelForRoute(assetKey: string, route: SwapRouteOption): string {
+    const parsed = parseCrossAssetKey(assetKey);
+    if (!parsed) return sourceJurisdictionLabel;
+    const ref = parsed.jurisdictionRef.toLowerCase();
+    if (ref === String(route.sourceJurisdictionRef || '').toLowerCase()) return route.sourceJurisdiction;
+    if (ref === String(route.targetJurisdictionRef || '').toLowerCase()) return route.targetJurisdiction;
+    return normalizeJurisdictionDisplayName(parsed.jurisdictionRef);
+  }
+
+  function buildSameOrderbookPairOptions(hubId: string): OrderbookPairOption[] {
+    const hub = String(hubId || '').trim().toLowerCase();
+    if (!hub) return [];
+    return tradingPairsForHub(hub).map((pair) => ({
+      value: `same:${pair.pairId}`,
+      label: sameOrderbookPairLabel(pair.baseTokenId, pair.quoteTokenId, sourceJurisdictionLabel),
+      mode: 'same',
+      pairId: pair.pairId,
+      baseTokenId: pair.baseTokenId,
+      quoteTokenId: pair.quoteTokenId,
+      sourceTokenId: pair.baseTokenId,
+      targetTokenId: pair.quoteTokenId,
+      routeValue: 'same',
+      sourceJurisdiction: sourceJurisdictionLabel,
+      targetJurisdiction: sourceJurisdictionLabel,
+    }));
+  }
+
+  function buildCrossOrderbookPairOptions(): OrderbookPairOption[] {
+    const sourceTokens = tokenIdsForJurisdiction(sourceJurisdictionLabel);
+    const options: OrderbookPairOption[] = [];
+    const routes = swapRouteMode === 'cross' && selectedRouteOption?.mode === 'cross'
+      ? [selectedRouteOption]
+      : [];
+    for (const route of routes) {
+      if (route.mode !== 'cross' || route.disabled) continue;
+      const targetTokens = tokenIdsForJurisdiction(route.targetJurisdiction);
+      for (const sourceTokenId of sourceTokens) {
+        for (const targetTokenId of targetTokens) {
+          const market = deriveCanonicalCrossJurisdictionMarketForLegs(
+            route.sourceJurisdictionRef,
+            sourceTokenId,
+            route.targetJurisdictionRef,
+            targetTokenId,
+          ) as CrossMarketView;
+          if (!market.sourceKey || !market.targetKey || market.sourceKey === market.targetKey) continue;
+          const baseJurisdiction = crossAssetLabelForRoute(market.baseKey, route);
+          const quoteJurisdiction = crossAssetLabelForRoute(market.quoteKey, route);
+          const value = `cross:${route.value}:${sourceTokenId}:${targetTokenId}`;
+          options.push({
+            value,
+            label: crossOrderbookPairLabel(
+              market.sourceIsBase ? sourceTokenId : targetTokenId,
+              baseJurisdiction,
+              market.sourceIsBase ? targetTokenId : sourceTokenId,
+              quoteJurisdiction,
+            ),
+            mode: 'cross',
+            pairId: market.venueId,
+            baseTokenId: market.sourceIsBase ? sourceTokenId : targetTokenId,
+            quoteTokenId: market.sourceIsBase ? targetTokenId : sourceTokenId,
+            sourceTokenId,
+            targetTokenId,
+            routeValue: route.value,
+            sourceJurisdiction: route.sourceJurisdiction,
+            targetJurisdiction: route.targetJurisdiction,
+          });
+        }
+      }
+    }
+    const seen = new Set<string>();
+    return options
+      .filter((option) => {
+        const key = `${option.label}:${option.pairId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => compareStableText(a.label, b.label));
+  }
+
+  function buildOrderbookPairOptions(): OrderbookPairOption[] {
+    const sameOptions = buildSameOrderbookPairOptions(activeOrderAccountId || selectedBookAccountId || createOrderAccountId);
+    const crossOptions = buildCrossOrderbookPairOptions();
+    return [...sameOptions, ...crossOptions];
+  }
+
   $: pairOptions = buildPairOptions(sourceJurisdictionLabel);
   $: allowedSwapTokenIds = (() => {
     const tokenIds = new Set<number>();
@@ -1276,7 +1416,7 @@
     return fallback?.tokenId ?? null;
   }
 
-  function setSwapTokens(nextGiveToken: number, nextWantToken: number): void {
+  function setSwapTokens(nextGiveToken: number, nextWantToken: number, allowSameToken = false): void {
     if (!Number.isFinite(nextGiveToken) || !Number.isFinite(nextWantToken)) return;
     if (nextGiveToken <= 0 || nextWantToken <= 0) {
       giveTokenId = String(nextGiveToken || '');
@@ -1285,7 +1425,7 @@
       submitError = '';
       return;
     }
-    if (nextGiveToken === nextWantToken && liveSelectedRouteValue === 'same') {
+    if (nextGiveToken === nextWantToken && !allowSameToken && liveSelectedRouteValue === 'same') {
       const fallbackWantToken = fallbackCounterToken(nextGiveToken);
       if (!fallbackWantToken || fallbackWantToken === nextGiveToken) {
         submitError = 'Sell token and Buy token must be different.';
@@ -1354,6 +1494,11 @@
     const option = sourceEntityOptions.find((candidate) => candidate.value === value);
     if (!option) return;
     selectedSourceEntityValue = option.value;
+    selectedRouteValue = 'same';
+    committedRouteSelectionValue = 'same';
+    selectedRouteOptionOverride = null;
+    selectedCrossTargetOverride = null;
+    routeSelectionCommitNonce += 1;
     selectedOrderLevel = null;
     submitError = '';
     sourceMenuOpen = false;
@@ -2270,6 +2415,69 @@
     selectedOrderLevel = null;
   }
 
+  function resetOrderbookSelectionContext(): void {
+    selectedOrderLevel = null;
+    submitError = '';
+    priceRatioInput = '';
+    hasAutoSuggestedInitialPrice = false;
+    hasUserEditedPriceInput = false;
+  }
+
+  function commitOrderbookCrossRoute(option: OrderbookPairOption): boolean {
+    const route = visibleRouteOptions.find((candidate) => candidate.value === option.routeValue)
+      || (
+        selectedRouteOption?.value === option.routeValue && routeMatchesCurrentSource(selectedRouteOption)
+          ? selectedRouteOption
+          : null
+      );
+    const routeIsCurrentSelected = selectedRouteOption?.value === option.routeValue && swapRouteMode === 'cross';
+    const target = crossTargetOptions.find((candidate) => candidate.value === option.routeValue)
+      || (
+        selectedCrossTargetOverride?.value === option.routeValue
+          ? selectedCrossTargetOverride
+          : null
+      );
+    if (!route || route.mode !== 'cross' || route.disabled || (!routeIsCurrentSelected && !routeMatchesCurrentSource(route))) {
+      submitError = 'Selected cross route is no longer available.';
+      lastOrderbookPairSelectCommit = 'route-unavailable';
+      return false;
+    }
+    commitRouteSelection({ route, target });
+    lastOrderbookPairSelectCommit = 'cross-committed';
+    return true;
+  }
+
+  function selectOrderbookPairOption(value: string): void {
+    lastOrderbookPairSelectValue = value;
+    const option = orderbookPairOptions.find((candidate) => candidate.value === value);
+    if (!option) {
+      lastOrderbookPairSelectMode = 'missing';
+      lastOrderbookPairSelectRoute = '';
+      lastOrderbookPairSelectCommit = 'missing-option';
+      return;
+    }
+    lastOrderbookPairSelectMode = option.mode;
+    lastOrderbookPairSelectRoute = option.routeValue;
+    lastOrderbookPairSelectCommit = 'selected';
+    resetOrderbookSelectionContext();
+    if (option.mode === 'cross') {
+      if (!commitOrderbookCrossRoute(option)) return;
+      setSwapTokens(option.sourceTokenId, option.targetTokenId, true);
+      return;
+    }
+
+    if (liveSelectedRouteValue !== 'same') selectRouteOption('same');
+    lastOrderbookPairSelectCommit = 'same-committed';
+    const activeSide = orderMode !== 'none' ? orderMode : tradeSide;
+    const nextGiveToken = activeSide === 'sell-base' ? option.baseTokenId : option.quoteTokenId;
+    const nextWantToken = activeSide === 'sell-base' ? option.quoteTokenId : option.baseTokenId;
+    setSwapTokens(nextGiveToken, nextWantToken);
+  }
+
+  function handleOrderbookPairSelectChange(event: Event): void {
+    selectOrderbookPairOption(String((event.currentTarget as HTMLSelectElement | null)?.value || ''));
+  }
+
   function handleSelectedHubChange(nextValue: string): void {
     if (orderbookScopeMode === 'aggregated') {
       createOrderAccountId = nextValue;
@@ -2484,12 +2692,14 @@
   $: activeCrossMarket = (() => {
     if (swapRouteMode !== 'cross' || !selectedCrossTarget) return null;
     if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) return null;
-    return deriveCanonicalCrossJurisdictionMarketForLegs(
+    const market = deriveCanonicalCrossJurisdictionMarketForLegs(
       getReplicaJurisdictionRef(currentReplica),
       giveToken,
       selectedCrossTarget.targetJurisdictionRef,
       wantToken,
     ) as CrossMarketView;
+    if (!market.sourceKey || !market.targetKey || market.sourceKey === market.targetKey) return null;
+    return market;
   })();
   $: parsedOrderbookPair = (() => {
     if (swapRouteMode === 'cross' && activeCrossMarket) {
@@ -2537,13 +2747,40 @@
   $: quoteTokenId = parsedOrderbookPair?.quoteTokenId ?? wantToken;
   $: baseTokenSymbol = tokenSymbol(baseTokenId);
   $: quoteTokenSymbol = tokenSymbol(quoteTokenId);
-  $: orderbookBaseJurisdictionLabel = swapRouteMode === 'cross' && activeCrossMarket
-    ? jurisdictionLabelForAssetKey(activeCrossMarket.baseKey)
-    : sourceJurisdictionLabel;
-  $: orderbookQuoteJurisdictionLabel = swapRouteMode === 'cross' && activeCrossMarket
-    ? jurisdictionLabelForAssetKey(activeCrossMarket.quoteKey)
-    : sourceJurisdictionLabel;
-  $: orderbookPairDisplayLabel = `${tokenNetworkLabel(baseTokenId, orderbookBaseJurisdictionLabel)}/${tokenNetworkLabel(quoteTokenId, orderbookQuoteJurisdictionLabel)}`;
+  $: orderbookPairDisplayLabel = swapRouteMode === 'cross' && activeCrossMarket
+    ? crossOrderbookPairLabel(
+        baseTokenId,
+        jurisdictionLabelForAssetKey(activeCrossMarket.baseKey),
+        quoteTokenId,
+        jurisdictionLabelForAssetKey(activeCrossMarket.quoteKey),
+      )
+    : sameOrderbookPairLabel(baseTokenId, quoteTokenId, sourceJurisdictionLabel);
+  $: orderbookPairOptions = (
+    activeOrderAccountId,
+    selectedBookAccountId,
+    createOrderAccountId,
+    sourceJurisdictionLabel,
+    targetJurisdictionLabel,
+    swapRouteMode,
+    selectedRouteOption,
+    selectedCrossTarget,
+    liveSelectedRouteValue,
+    giveToken,
+    wantToken,
+    buildOrderbookPairOptions()
+  );
+  $: orderbookPairSelectValue = (() => {
+    if (swapRouteMode === 'cross') {
+      const exactCrossValue = `cross:${liveSelectedRouteValue}:${giveToken}:${wantToken}`;
+      return orderbookPairOptions.find((option) => option.value === exactCrossValue)?.value
+        || orderbookPairOptions.find((option) => option.mode === 'cross' && option.pairId === orderbookPairId)?.value
+        || '';
+    }
+    const exactSameValue = selectedPair ? `same:${selectedPair.pairId}` : '';
+    return orderbookPairOptions.find((option) => option.value === exactSameValue)?.value
+      || orderbookPairOptions.find((option) => option.mode === 'same' && option.pairId === orderbookPairId)?.value
+      || '';
+  })();
   $: baseTokenDecimals = getTokenDecimals(baseTokenId);
   $: quoteTokenDecimals = getTokenDecimals(quoteTokenId);
   $: orderbookSizeDisplayScale = baseTokenDecimals > 12 ? 10 ** Math.max(0, baseTokenDecimals - 12) : 1;
@@ -3622,7 +3859,7 @@
           <div class="manual-route-card" data-testid="swap-route-recommendation">
             <div class="manual-route-head">
               <span>No direct orderbook</span>
-              <strong>Manual route candidates</strong>
+              <strong>Swap manually in order</strong>
             </div>
             {#each routedRouteRecommendations as route (route.id)}
               <div
@@ -3701,11 +3938,29 @@
         data-selected-route-target-hub={selectedRouteOption?.targetHubEntityId || ''}
         data-selected-cross-target-hub={selectedCrossTarget?.targetHubEntityId || ''}
         data-route-mode={swapRouteMode}
+        data-orderbook-pair-select-value={orderbookPairSelectValue}
+        data-last-orderbook-pair-select-value={lastOrderbookPairSelectValue}
+        data-last-orderbook-pair-select-mode={lastOrderbookPairSelectMode}
+        data-last-orderbook-pair-select-route={lastOrderbookPairSelectRoute}
+        data-last-orderbook-pair-select-commit={lastOrderbookPairSelectCommit}
       >
         <div class="book-toolbar">
-          <div>
+          <div class="book-title">
             <span>Orderbook</span>
-            <strong>{orderbookPairDisplayLabel}</strong>
+            <label class="orderbook-pair-select">
+              <strong>{orderbookPairDisplayLabel}</strong>
+              <select
+                value={orderbookPairSelectValue}
+                data-testid="swap-orderbook-pair-select"
+                aria-label="Orderbook pair"
+                title={orderbookPairDisplayLabel}
+                on:change={handleOrderbookPairSelectChange}
+              >
+                {#each orderbookPairOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </label>
           </div>
           <button
             type="button"

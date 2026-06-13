@@ -1230,6 +1230,21 @@ async function configureTokens(page: Page, fromTokenId: number, toTokenId: numbe
   await toTokenSelect.selectOption(String(toTokenId));
 }
 
+async function selectOrderbookPairByLabel(page: Page, labelPattern: RegExp): Promise<string> {
+  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
+  await expect(pairSelect, 'orderbook pair selector must be mounted').toHaveCount(1, { timeout: 10_000 });
+  const options = await pairSelect.evaluate((node) =>
+    Array.from((node as HTMLSelectElement).options).map((option) => ({
+      value: option.value,
+      label: option.textContent?.replace(/\s+/g, ' ').trim() || '',
+    })),
+  );
+  const match = options.find((option) => labelPattern.test(option.label));
+  expect(match, `orderbook pair selector missing ${labelPattern}: ${JSON.stringify(options)}`).toBeTruthy();
+  await pairSelect.selectOption(match!.value);
+  return match!.label;
+}
+
 async function readOrderbookRowCounts(page: Page): Promise<{ asks: number; bids: number }> {
   return {
     asks: await page.getByTestId('orderbook-ask-row').count(),
@@ -1387,7 +1402,19 @@ async function expectCrossOrderbookReady(
   await expect(
     page.locator('[data-testid="swap-market-section"] .book-toolbar strong').first(),
     'cross orderbook title must disambiguate token jurisdictions',
-  ).toContainText(options.titlePattern ?? /\((Testnet|Tron)\).*\/.*\((Testnet|Tron)\)/, { timeout: 10_000 });
+  ).toContainText(options.titlePattern ?? /\((Testnet|Tron)\)\s*-\s*.*\((Testnet|Tron)\)/, { timeout: 10_000 });
+  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
+  await expect(pairSelect, 'cross orderbook pair selector must be present').toHaveCount(1, { timeout: 10_000 });
+  await expect
+    .poll(async () => pairSelect.evaluate((node) => {
+      const select = node as HTMLSelectElement;
+      return select.selectedOptions[0]?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    }), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'cross orderbook selector must show Asset (Jurisdiction) - Asset (Jurisdiction)',
+    })
+    .toMatch(options.titlePattern ?? /\((Testnet|Tron)\)\s*-\s*.*\((Testnet|Tron)\)/);
   await expect
     .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
       timeout: 20_000,
@@ -1429,380 +1456,8 @@ async function expectCrossOrderbookReady(
   await expect(orderbook.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
 }
 
-type RoutedRouteExpectationOptions = {
-  requireFullLiveQuotes?: boolean;
-  expectExecutableSettlement?: boolean;
-  preferComplexRoute?: boolean;
-};
-
-async function selectedRoutedCandidateLiveHopCount(page: Page, routeId: string): Promise<number> {
-  return page.getByTestId('swap-routed-candidate').evaluateAll((nodes, selectedRouteId) => {
-    const selected = nodes.find((node) => (node as HTMLElement).dataset.routeId === selectedRouteId) as HTMLElement | undefined;
-    if (!selected) return -1;
-    return Number(selected.dataset.liveHops || 0);
-  }, routeId);
-}
-
-async function collectRoutedQuoteDebug(page: Page): Promise<unknown> {
-  return page.evaluate(() => {
-    const readPanel = (root: ParentNode) => {
-      const panel = root.querySelector('.orderbook-panel') as HTMLElement | null;
-      const status = root.querySelector('[data-testid="orderbook-source-status"]') as HTMLElement | null;
-      return {
-        status: panel?.dataset.sourceStatus || '',
-        hubIds: panel?.dataset.hubIds || '',
-        pairId: panel?.dataset.pairId || '',
-        marketSubKey: panel?.dataset.marketSubKey || '',
-        relayUrl: panel?.dataset.relayUrl || '',
-        statusText: status?.textContent?.replace(/\s+/g, ' ').trim() || '',
-      };
-    };
-    return {
-      relayStats: (window as any).__silentRelayStats || null,
-      sockets: ((window as any).__silentRelaySockets || []).map((socket: any) => ({
-        url: String(socket?.url || ''),
-        readyState: socket?.readyState,
-        pendingMarketDispatch: Boolean(socket?.pendingMarketDispatch),
-        lastMarketSubscribe: socket?.lastMarketSubscribe || null,
-        sentMessages: Array.isArray(socket?.sentMessages) ? socket.sentMessages.slice(-5) : [],
-      })),
-      candidates: Array.from(document.querySelectorAll('[data-testid="swap-routed-candidate"]')).map((node) => {
-        const element = node as HTMLElement;
-        return {
-          routeId: element.dataset.routeId || '',
-          liveHops: element.dataset.liveHops || '',
-          totalHops: element.dataset.totalHops || '',
-          label: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 300) || '',
-        };
-      }),
-      routePicker: (() => {
-        const picker = document.querySelector('[data-testid="swap-route-picker"]') as HTMLElement | null;
-        return {
-          routedPlanEnabled: picker?.dataset.routedPlanEnabled || '',
-          selectedRoutedRouteId: picker?.dataset.selectedRoutedRouteId || '',
-        };
-      })(),
-      hops: Array.from(document.querySelectorAll('[data-testid="swap-routed-hop"]')).map((node) => {
-        const element = node as HTMLElement;
-        return {
-          pairId: element.dataset.pairId || '',
-          bookHubId: element.dataset.bookHubId || '',
-          label: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 200) || '',
-        };
-      }),
-      probes: Array.from(document.querySelectorAll('[data-testid="swap-routed-quote-probe"]')).map((node) => {
-        const element = node as HTMLElement;
-        return {
-          pairId: element.dataset.pairId || '',
-          bookHubId: element.dataset.bookHubId || '',
-          panel: readPanel(element),
-        };
-      }),
-      visiblePanel: readPanel(document),
-      execution: (() => {
-        const flow = document.querySelector('[data-testid="swap-routed-execution-flow"]') as HTMLElement | null;
-        const execute = document.querySelector('[data-testid="swap-execute-routed-route"]') as HTMLButtonElement | null;
-        return {
-          executeDisabled: execute?.disabled ?? null,
-          executeStatus: execute?.dataset.status || '',
-          executeText: execute?.textContent?.replace(/\s+/g, ' ').trim() || '',
-          flowStatus: flow?.dataset.status || '',
-          flowText: flow?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 500) || '',
-          steps: Array.from(document.querySelectorAll('[data-testid="swap-routed-execution-step"]')).map((node) => {
-            const element = node as HTMLElement;
-            return {
-              index: element.dataset.stepIndex || '',
-              status: element.dataset.status || '',
-              progressPpm: element.dataset.progressPpm || '',
-              text: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 250) || '',
-            };
-          }),
-        };
-      })(),
-    };
-  });
-}
-
-async function expectRoutedRouteOrderbooks(page: Page, options: RoutedRouteExpectationOptions = {}): Promise<void> {
-  void options;
-  await expect(page.getByTestId('swap-build-routed-route'), 'multihop routed swaps are intentionally deferred from the main swap UI').toHaveCount(0, { timeout: 5_000 });
-  await expect(page.getByTestId('swap-routed-candidate'), 'routed candidates must stay hidden while direct cross swaps are the mainnet path').toHaveCount(0, { timeout: 5_000 });
-  await expect(page.getByTestId('swap-routed-route'), 'routed hop chips must stay hidden while multihop is deferred').toHaveCount(0, { timeout: 5_000 });
-  await expect(page.getByTestId('swap-routed-quote-probe'), 'hidden routed planner must not open background orderbook probes').toHaveCount(0, { timeout: 5_000 });
+async function expectDirectCrossOrderbookReady(page: Page): Promise<void> {
   await expectCrossOrderbookReady(page);
-  return;
-
-  const buildButton = page.getByTestId('swap-build-routed-route').first();
-  await expect(buildButton, 'cross route builder button must be visible').toBeVisible({ timeout: 10_000 });
-  await expect(buildButton, 'cross route builder must be available for complex routed paths').toBeEnabled({ timeout: 10_000 });
-  const swapPanel = page.locator('.swap-panel').filter({ has: buildButton }).first();
-  const amountInput = swapPanel.getByTestId('swap-order-amount').first();
-  await expect(amountInput, 'routed best-effort runner needs the same user-entered source amount as a real swap').toBeVisible({ timeout: 10_000 });
-  await amountInput.fill('');
-  await amountInput.pressSequentially('0.01', { delay: 10 });
-  const routePicker = swapPanel.getByTestId('swap-route-picker').first();
-  let amountDiagnostics: Record<string, string | null> = {};
-  await expect
-    .poll(async () => {
-      amountDiagnostics = await routePicker.evaluate((node) => {
-        const element = node as HTMLElement;
-        const input = element.closest('.swap-panel')?.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]');
-        return {
-          inputValue: input?.value ?? null,
-          amountInput: element.dataset.orderAmountInput ?? null,
-          amountState: element.dataset.orderAmountState ?? null,
-          amountDom: element.dataset.orderAmountDom ?? null,
-          amountNode: element.dataset.orderAmountNode ?? null,
-          amountActionValue: element.dataset.orderAmountActionValue ?? null,
-          amountActionTicks: element.dataset.orderAmountActionTicks ?? null,
-          amountRevision: element.dataset.orderAmountRevision ?? null,
-          amountDomRevision: element.dataset.orderAmountDomRevision ?? null,
-          giveAmount: element.dataset.giveAmount ?? null,
-          canonicalGiveAmount: element.dataset.canonicalGiveAmount ?? null,
-        };
-      });
-      const raw = String(amountDiagnostics.giveAmount || '0');
-      return /^\d+$/.test(raw) ? BigInt(raw) > 0n : false;
-    }, {
-      timeout: 10_000,
-      intervals: [100, 250, 500],
-      message: 'visible source amount must be parsed into a non-zero route amount before building a route',
-    })
-    .toBe(true)
-    .catch((error) => {
-      throw new Error(`${String(error?.message || error)}\namount diagnostics: ${JSON.stringify(amountDiagnostics)}`);
-    });
-  const candidates = swapPanel.getByTestId('swap-routed-candidate');
-  await expect
-    .poll(async () => await candidates.count(), {
-      timeout: 10_000,
-      intervals: [100, 250, 500],
-      message: 'routed planner must expose at least one scored candidate before building a route',
-    })
-    .toBeGreaterThan(0);
-  const preferComplexRoute = options.preferComplexRoute !== false;
-  let complexRouteIndex = -1;
-  await expect
-    .poll(async () => candidates.evaluateAll((nodes) =>
-      nodes.findIndex((node) => Number((node as HTMLElement).dataset.totalHops || 0) >= 3),
-    ), {
-      timeout: 10_000,
-      intervals: [100, 250, 500],
-      message: 'complex routed planner must expose source/cross/target hop topology',
-    })
-    .toBeGreaterThanOrEqual(0);
-  complexRouteIndex = await candidates.evaluateAll((nodes) =>
-    nodes.findIndex((node) => Number((node as HTMLElement).dataset.totalHops || 0) >= 3),
-  );
-  expect(complexRouteIndex, 'complex routed candidate index must remain stable before selection').toBeGreaterThanOrEqual(0);
-  const selectedCandidate = preferComplexRoute ? candidates.nth(complexRouteIndex) : candidates.first();
-  const selectedRouteId = String(await selectedCandidate.getAttribute('data-route-id') || '');
-  expect(selectedRouteId, 'selected routed candidate must expose stable route id').toBeTruthy();
-  const selectedTotalHops = Number(await selectedCandidate.getAttribute('data-total-hops') || 0);
-  expect(selectedTotalHops, 'selected routed candidate must expose at least one executable hop').toBeGreaterThan(0);
-  if (preferComplexRoute) {
-    expect(selectedTotalHops, 'selected routed candidate must be the full source/cross/target topology').toBeGreaterThanOrEqual(3);
-  }
-  await selectedCandidate.scrollIntoViewIfNeeded({ timeout: 5_000 });
-  await selectedCandidate.click({ timeout: 10_000 }).catch(async (error) => {
-    const debug = await collectRoutedQuoteDebug(page);
-    console.log('[E2E routed candidate click debug]', JSON.stringify(debug, null, 2));
-    throw error;
-  });
-  const routeSelect = swapPanel.getByTestId('swap-routed-route-select').first();
-  await expect.poll(async () => String(await routeSelect.inputValue()).trim(), {
-    timeout: 10_000,
-    intervals: [100, 250, 500],
-    message: 'route option state must reflect the selected routed candidate',
-  }).toBe(selectedRouteId);
-  await buildButton.scrollIntoViewIfNeeded({ timeout: 5_000 });
-  await buildButton.click({ timeout: 10_000 }).catch(async (error) => {
-    const debug = await collectRoutedQuoteDebug(page);
-    console.log('[E2E routed build click debug]', JSON.stringify(debug, null, 2));
-    throw error;
-  });
-
-  const route = page.getByTestId('swap-routed-route').first();
-  await expect(route, 'routed path chips must be visible after one click').toBeVisible({ timeout: 10_000 });
-  const hops = page.getByTestId('swap-routed-hop');
-  await expect
-    .poll(async () => await hops.count(), {
-      timeout: 10_000,
-      intervals: [100, 250, 500],
-      message: 'selected cross route must expand into visible orderbook hops',
-    })
-    .toBe(selectedTotalHops);
-
-  const hopCount = await hops.count();
-  const pauseToggle = page.getByTestId('swap-routed-pause-toggle').first();
-  await expect(pauseToggle, 'routed flow must expose optional manual pause between hops').toBeVisible({ timeout: 10_000 });
-  if (options.requireFullLiveQuotes) {
-    const uniqueProbeTargets = await hops.evaluateAll((nodes) => new Set(nodes.map((node) => {
-      const element = node as HTMLElement;
-      return `${String(element.dataset.bookHubId || '').toLowerCase()}::${String(element.dataset.pairId || '')}`;
-    })).size);
-    const probes = page.getByTestId('swap-routed-quote-probe');
-    await expect
-      .poll(async () => await probes.count(), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: 'routed runner must start background quote probes for selected route hops',
-      })
-      .toBe(uniqueProbeTargets);
-    await expect
-      .poll(async () => selectedRoutedCandidateLiveHopCount(page, selectedRouteId), {
-        timeout: 12_000,
-        intervals: [100, 250, 500],
-        message: 'routed planner must quote every hop from background stream snapshots before manual hop clicks',
-      })
-      .toBe(hopCount)
-      .catch(async (error) => {
-        const debug = await collectRoutedQuoteDebug(page);
-        console.log('[E2E routed live quote debug]', JSON.stringify(debug, null, 2));
-        throw error;
-      });
-  }
-
-  const marketSection = page.getByTestId('swap-market-section').first();
-  const panel = marketSection.locator('.orderbook-panel').last();
-  for (let index = 0; index < hopCount; index += 1) {
-    const hop = hops.nth(index);
-    const expectedPair = String(await hop.getAttribute('data-pair-id') || '');
-    const expectedHub = String(await hop.getAttribute('data-book-hub-id') || '').toLowerCase();
-    expect(expectedPair, `routed hop ${index} must expose pair id`).toBeTruthy();
-    expect(expectedHub, `routed hop ${index} must expose book hub id`).toMatch(/^0x[a-f0-9]{64}$/);
-    await hop.click();
-    await expect
-      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: `routed hop ${index} must switch the visible orderbook pair`,
-      })
-      .toBe(expectedPair);
-    await expect
-      .poll(async () => String(await marketSection.getAttribute('data-active-book-hub-id') || '').toLowerCase(), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: `routed hop ${index} must switch the visible market section hub`,
-      })
-      .toContain(expectedHub);
-    await expect
-      .poll(async () => String(await marketSection.getAttribute('data-orderbook-hub-ids') || '').toLowerCase(), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: `routed hop ${index} must pass the selected hub list into the visible market section`,
-      })
-      .toContain(expectedHub);
-    await expect
-      .poll(async () => String(await panel.getAttribute('data-hub-ids') || '').toLowerCase(), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: `routed hop ${index} must switch the visible orderbook hub`,
-      })
-      .toContain(expectedHub);
-    await expect
-      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
-        timeout: 12_000,
-        intervals: [250, 500, 1000],
-        message: `routed hop ${index} orderbook must resolve terminally instead of hanging in syncing`,
-      })
-      .toMatch(/^(ready|empty|no-market|error)$/);
-  }
-
-  if (options.requireFullLiveQuotes) {
-    await expect
-      .poll(async () => selectedRoutedCandidateLiveHopCount(page, selectedRouteId), {
-        timeout: 10_000,
-        intervals: [100, 250, 500],
-        message: 'routed planner must keep full live quotes after visible hop orderbooks open',
-      })
-      .toBe(hopCount);
-  } else {
-    await expect
-      .poll(async () => selectedRoutedCandidateLiveHopCount(page, selectedRouteId), {
-        timeout: 5_000,
-        intervals: [100, 250, 500],
-        message: 'selected routed candidate must remain visible while the route is checked',
-      })
-      .toBeGreaterThanOrEqual(0);
-  }
-  const executeButton = page.getByTestId('swap-execute-routed-route').first();
-  await expect(executeButton, 'routed plan must expose a one-click staged route runner').toBeVisible({ timeout: 10_000 });
-  await expect(executeButton, 'routed runner must be enabled once the user enters an amount').toBeEnabled({ timeout: 10_000 });
-  const manualPause = Boolean(options.expectExecutableSettlement && hopCount > 1);
-  if (manualPause) {
-    await pauseToggle.locator('input[type="checkbox"]').check({ timeout: 5_000 });
-  }
-  await executeButton.click({ timeout: 10_000 }).catch(async (error) => {
-    const debug = await collectRoutedQuoteDebug(page);
-    console.log('[E2E routed execute click debug]', JSON.stringify(debug, null, 2));
-    throw error;
-  });
-  const flow = page.getByTestId('swap-routed-execution-flow').first();
-  await expect(flow, 'routed execution flow must render after one click').toBeVisible({ timeout: 10_000 });
-  if (manualPause) {
-    const continueButton = page.getByTestId('swap-continue-routed-route').first();
-    for (let pauseIndex = 0; pauseIndex < hopCount - 1; pauseIndex += 1) {
-      await expect
-        .poll(async () => String(await flow.getAttribute('data-status') || ''), {
-          timeout: 15_000,
-          intervals: [100, 250, 500],
-          message: `routed execution must pause after hop ${pauseIndex} before continuing`,
-        })
-        .toBe('paused');
-      await expect(continueButton, 'paused routed execution must expose an explicit Continue action').toBeVisible({ timeout: 5_000 });
-      await continueButton.click({ timeout: 5_000 });
-    }
-  }
-  await expect
-    .poll(async () => String(await flow.getAttribute('data-status') || ''), {
-      timeout: 15_000,
-      intervals: [100, 250, 500],
-      message: 'routed execution flow must reach a terminal state instead of hanging',
-    })
-    .toMatch(options.expectExecutableSettlement ? /^done$/ : /^(done|failed)$/)
-    .catch(async (error) => {
-      const debug = await collectRoutedQuoteDebug(page);
-      console.log('[E2E routed execution terminal debug]', JSON.stringify(debug, null, 2));
-      throw error;
-    });
-  await expect(flow, 'routed flow must be honest about either unavailable liquidity or sequential best-effort execution').toContainText(
-    options.expectExecutableSettlement
-      ? /Best-effort route completed/i
-      : /(No live|No market|Settlement checkpoint timed out|Best-effort route completed)/i,
-    { timeout: 5_000 },
-  );
-  const steps = page.getByTestId('swap-routed-execution-step');
-  await expect
-    .poll(async () => await steps.count(), {
-      timeout: 5_000,
-      intervals: [100, 250],
-      message: 'routed execution flow must show a row per hop',
-    })
-    .toBe(hopCount);
-  const nonTerminalSteps = await steps.evaluateAll((nodes) =>
-    nodes.filter((node) => {
-      const status = String((node as HTMLElement).dataset.status || '');
-      return status === 'queued' || status === 'active';
-    }).length,
-  );
-  expect(nonTerminalSteps, 'terminal routed flow must not leave queued/active steps hanging').toBe(0);
-  if (options.requireFullLiveQuotes) {
-    await expect(flow, 'full-live routed flow must submit or prepare a concrete per-hop runtime tx').toContainText(
-      /(Submitted|Submitting) (placeSwapOffer|requestCrossJurisdictionSwap)/i,
-      { timeout: 5_000 },
-    );
-    const incompleteDoneSteps = await steps.evaluateAll((nodes) =>
-      nodes.filter((node) => {
-        const element = node as HTMLElement;
-        return element.dataset.status === 'done' && Number(element.dataset.progressPpm || 0) !== 1_000_000;
-      }).length,
-    );
-    expect(incompleteDoneSteps, 'done routed hops must expose full progress').toBe(0);
-  }
-
-  await page.getByTestId('swap-clear-routed-route').first().click();
-  await expect(page.getByTestId('swap-routed-route')).toHaveCount(0, { timeout: 5_000 });
 }
 
 async function expectSwapTokens(page: Page, fromTokenId: number, toTokenId: number): Promise<void> {
@@ -1921,7 +1576,7 @@ async function placeCrossOrder(
     clickBookSide?: 'ask' | 'bid';
     expectedClickFromTokenId?: number;
     expectedClickToTokenId?: number;
-    checkRoutedPlan?: boolean;
+    checkMultihopDeferred?: boolean;
   },
 ): Promise<string> {
   await openSwapWorkspace(page);
@@ -1937,8 +1592,8 @@ async function placeCrossOrder(
   }
   await expectCrossOrderbookReady(page);
   await dismissSwapCompletionModal(page);
-  if (params.checkRoutedPlan) {
-    await expectRoutedRouteOrderbooks(page);
+  if (params.checkMultihopDeferred) {
+    await expectDirectCrossOrderbookReady(page);
     await expectCrossOrderbookReady(page);
   }
   if (params.clickBookSide) {
@@ -3018,8 +2673,6 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       .toBe('no-market');
     await expect(orderbook.getByTestId('orderbook-source-status').first()).toContainText(/No market/i, { timeout: 5_000 });
     await expect(orderbook.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing|loading/i, { timeout: 5_000 });
-    await expect(page.getByTestId('swap-build-routed-route'), 'multihop execution controls stay hidden from the direct swap flow').toHaveCount(0);
-    await expect(page.getByTestId('swap-routed-quote-probe'), 'manual route recommendations must not open hidden orderbook probes').toHaveCount(0);
     const recommendation = page.getByTestId('swap-route-recommendation').first();
     await expect(recommendation, 'terminal no-market direct cross route should show manual route candidates').toBeVisible({ timeout: 10_000 });
     await expect
@@ -3146,7 +2799,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
     await expectCrossOrderbookReady(page);
     await expectSwapTokens(page, WETH, USDC);
-    await expectRoutedRouteOrderbooks(page, { requireFullLiveQuotes: true });
+    await expectDirectCrossOrderbookReady(page);
     await expectCrossOrderbookReady(page);
     await expectSwapTokens(page, WETH, USDC);
     await expect(visibleOrderbookRow(page, 'ask'), 'synthetic cross book must show a non-takeable ask').toBeVisible({ timeout: 10_000 });
@@ -3204,7 +2857,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     });
 
     await expectCrossOrderbookReady(page, {
-      titlePattern: /WETH\s*\(Tron\)\s*\/\s*USDT\s*\(Testnet\)/,
+      titlePattern: /WETH\s*\(Tron\)\s*-\s*USDT\s*\(Testnet\)/,
       pairIdPattern: /^cross:stack:31338:[^/]+:2\/stack:31337:[^/]+:3$/,
     });
     const tokenOptions = await page.evaluate(() => {
@@ -3225,12 +2878,37 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     ).toHaveText('2500.0000', { timeout: 10_000 });
     await expectSwapTokens(page, WETH, USDT);
 
+    const dropdownPairLabel = await selectOrderbookPairByLabel(page, /USDT\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/i);
+    expect(dropdownPairLabel).toMatch(/USDT\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/i);
+    const marketSection = page.getByTestId('swap-market-section').first();
+    await expect
+      .poll(async () => ({
+        mode: String(await marketSection.getAttribute('data-last-orderbook-pair-select-mode') || ''),
+        commit: String(await marketSection.getAttribute('data-last-orderbook-pair-select-commit') || ''),
+        route: String(await marketSection.getAttribute('data-last-orderbook-pair-select-route') || ''),
+        value: String(await marketSection.getAttribute('data-last-orderbook-pair-select-value') || ''),
+      }), {
+        timeout: 5_000,
+        intervals: [50, 100, 200],
+        message: 'cross orderbook dropdown must commit the selected cross pair',
+      })
+      .toMatchObject({ mode: 'cross', commit: 'cross-committed' });
+    await expectSwapTokens(page, USDT, USDT);
+    const panel = page.getByTestId('swap-orderbook').first().locator('.orderbook-panel').first();
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'cross orderbook dropdown must switch the subscribed venue id',
+      })
+      .toMatch(/^cross:stack:31337:[^/]+:3\/stack:31338:[^/]+:3$/);
+
     await timedStep('cross_j_stable_quote.configure_reverse_stable_source', async () => {
       await configureTokens(page, USDT, WETH);
       await selectCrossRoute(page, testnetEntity.entityId);
     });
     await expectCrossOrderbookReady(page, {
-      titlePattern: /WETH\s*\(Testnet\)\s*\/\s*USDT\s*\(Tron\)/,
+      titlePattern: /WETH\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/,
       pairIdPattern: /^cross:stack:31337:[^/]+:2\/stack:31338:[^/]+:3$/,
     });
     await expect(
@@ -3353,7 +3031,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId,
         targetEntityId: aliceRpc2.entityId,
         side: 'sell',
-        checkRoutedPlan: true,
+        checkMultihopDeferred: true,
         amount: '0.03',
         price: '2500',
       }));

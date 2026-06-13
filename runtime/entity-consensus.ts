@@ -76,7 +76,7 @@ import {
   type HankoWitnessEntry,
 } from './entity-consensus/hanko-witness';
 import { cloneCrossJurisdictionAccountTxRoute } from './cross-jurisdiction';
-import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
+import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
 export { mergeEntityInputs } from './entity-input-merge';
 export { createEntityFrameHash } from './entity-consensus-frame';
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
@@ -336,12 +336,37 @@ const drainPendingCrossJurisdictionFillAcks = (
         entityId: currentEntityState.entityId,
         accountId: pendingAck.accountId,
         offerId: pendingAck.tx.data.offerId,
+        routeHash: pendingAck.tx.data.routeHash || '',
         fillSeq: pendingAck.tx.data.fillSeq,
+        previousFillSeq: pendingAck.tx.data.previousFillSeq,
+        fillId: buildCrossJurisdictionFillId({
+          routeHash: pendingAck.tx.data.routeHash || '',
+          offerId: pendingAck.tx.data.offerId,
+          ...(pendingAck.tx.data.fillSeq !== undefined ? { fillSeq: pendingAck.tx.data.fillSeq } : {}),
+          cumulativeFillRatio: pendingAck.tx.data.cumulativeFillRatio,
+          ...(pendingAck.tx.data.cumulativeSourceAmount !== undefined
+            ? { cumulativeSourceAmount: pendingAck.tx.data.cumulativeSourceAmount }
+            : {}),
+          ...(pendingAck.tx.data.cumulativeTargetAmount !== undefined
+            ? { cumulativeTargetAmount: pendingAck.tx.data.cumulativeTargetAmount }
+            : {}),
+        }),
+        ackKind: pendingAck.tx.data.ackKind || (pendingAck.tx.data.cancelRemainder ? 'cancel_or_fill' : 'fill'),
         cumulativeFillRatio: pendingAck.tx.data.cumulativeFillRatio,
+        cumulativeSourceAmount: pendingAck.tx.data.cumulativeSourceAmount?.toString() ?? '',
+        cumulativeTargetAmount: pendingAck.tx.data.cumulativeTargetAmount?.toString() ?? '',
+        fillNumerator: pendingAck.tx.data.fillNumerator?.toString() ?? '',
+        fillDenominator: pendingAck.tx.data.fillDenominator?.toString() ?? '',
         storedAt: pendingAck.storedAt,
         ageMs,
         ttlMs: CROSS_J_PENDING_FILL_ACK_TTL_MS,
         reason: pendingAck.reason ?? 'unknown',
+        repairProtocol: {
+          classification: 'unexpected_cross_j_fill_ack_without_local_source_offer',
+          preserveEvidence: true,
+          operatorAction: 'Inspect the source-hub route, account swapOffers, pending frames, and book-owner admission before replaying or voiding this order.',
+          forbiddenAction: 'Do not delete this pending ack silently; it is evidence for a possible cross-j state divergence.',
+        },
       };
       entityLog.error('crossj.fill_ack_expired_fatal', payload);
       throw new Error(`CROSS_J_FILL_ACK_EXPIRED_FATAL: ${safeStringify(payload)}`);

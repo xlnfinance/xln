@@ -147,6 +147,12 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         pendingFill,
         ageMs,
         ttlMs: CROSS_J_PENDING_FILL_ACK_TTL_MS,
+        repairProtocol: {
+          classification: 'unexpected_book_owner_pending_fill_without_terminal_ack',
+          preserveEvidence: true,
+          operatorAction: 'Inspect the book-owner admission, source fill notice delivery, source route progress, and pending account frames before replaying or terminally voiding this order.',
+          forbiddenAction: 'Do not clear pendingFill silently; the committed book mutation and exact fill payload must remain available for repair.',
+        },
       };
       orderbookCrossLog.error('pending_fill_ack_expired_fatal', payload);
       throw new Error(`ORDERBOOK_CROSS_J_PENDING_FILL_ACK_EXPIRED_FATAL: ${safeStringify(payload)}`);

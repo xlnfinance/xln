@@ -1251,20 +1251,90 @@ const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean
   return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
 };
 
+type MarketMakerCrossHealthPairExpectation = {
+  sourceTokenIds: number[];
+  targetTokenIds: number[];
+};
+
+type MarketMakerCrossHealthRouteGroup = {
+  sourceJurisdiction: string;
+  targetJurisdiction: string;
+  sourceHubEntityId: string;
+  targetHubEntityId: string;
+  expectedPairs: Map<string, MarketMakerCrossHealthPairExpectation>;
+  specs: MarketMakerOfferSpec[];
+};
+
+const buildExpectedMarketMakerCrossRouteGroups = (
+  contexts: MarketMakerEntityContext[],
+  visibleHubs: HubProfile[],
+  tokenIdsByContext: MarketMakerTokenIdsByContext,
+): Map<string, MarketMakerCrossHealthRouteGroup> => {
+  const groups = new Map<string, MarketMakerCrossHealthRouteGroup>();
+  for (const sourceContext of contexts) {
+    const sourceJurisdictionRef = sourceContext.jurisdictionRef;
+    const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
+    if (!sourceJurisdictionRef || sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+    const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
+    if (sourceHubs.length === 0) continue;
+    for (const targetContext of contexts) {
+      const targetJurisdictionRef = targetContext.jurisdictionRef;
+      if (
+        sourceContext.entityId === targetContext.entityId ||
+        sameJurisdiction(sourceContext, targetContext) ||
+        !targetJurisdictionRef
+      ) {
+        continue;
+      }
+      const targetTokenIds = getMarketMakerTokenIds(tokenIdsByContext, targetContext);
+      if (targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+      const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
+      if (targetHubs.length === 0) continue;
+      const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
+      for (const sourceHub of sourceHubs) {
+        const targetHub = targetByBaseName.get(hubBaseName(sourceHub.name));
+        if (!targetHub || sameJurisdiction(sourceHub, targetHub)) continue;
+        const sourceHubEntityId = normalizeEntityRef(sourceHub.entityId);
+        const targetHubEntityId = normalizeEntityRef(targetHub.entityId);
+        if (!sourceHubEntityId || !targetHubEntityId) continue;
+        const key = `${sourceContext.entityId}:${targetContext.entityId}:${sourceHubEntityId}:${targetHubEntityId}`;
+        const group = groups.get(key) ?? {
+          sourceJurisdiction: sourceContext.jurisdictionName,
+          targetJurisdiction: targetContext.jurisdictionName,
+          sourceHubEntityId,
+          targetHubEntityId,
+          expectedPairs: new Map<string, MarketMakerCrossHealthPairExpectation>(),
+          specs: [],
+        };
+        for (const pair of buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds)) {
+          const market = deriveCanonicalCrossJurisdictionMarketForLegs(
+            sourceJurisdictionRef,
+            pair.sourceTokenId,
+            targetJurisdictionRef,
+            pair.targetTokenId,
+          );
+          const expected = group.expectedPairs.get(market.venueId) ?? {
+            sourceTokenIds: [],
+            targetTokenIds: [],
+          };
+          expected.sourceTokenIds = normalizePositiveTokenIds([...expected.sourceTokenIds, pair.sourceTokenId]);
+          expected.targetTokenIds = normalizePositiveTokenIds([...expected.targetTokenIds, pair.targetTokenId]);
+          group.expectedPairs.set(market.venueId, expected);
+        }
+        groups.set(key, group);
+      }
+    }
+  }
+  return groups;
+};
+
 const buildMarketMakerCrossHealth = (
   env: Env,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
   tokenIdsByContext: MarketMakerTokenIdsByContext,
 ): MarketMakerHealth['cross'] => {
-  const jurisdictionCount = new Set(contexts.map(context => context.jurisdictionRef).filter(Boolean)).size;
-  const routeGroups = new Map<string, {
-    sourceJurisdiction: string;
-    targetJurisdiction: string;
-    sourceHubEntityId: string;
-    targetHubEntityId: string;
-    specs: MarketMakerOfferSpec[];
-  }>();
+  const routeGroups = buildExpectedMarketMakerCrossRouteGroups(contexts, visibleHubs, tokenIdsByContext);
 
   for (const sourceContext of contexts) {
     const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
@@ -1295,19 +1365,22 @@ const buildMarketMakerCrossHealth = (
           targetJurisdiction: targetContext.jurisdictionName,
           sourceHubEntityId,
           targetHubEntityId,
+          expectedPairs: new Map<string, MarketMakerCrossHealthPairExpectation>(),
           specs: [],
         };
+        if (!group.expectedPairs.has(spec.pairId)) {
+          group.expectedPairs.set(spec.pairId, {
+            sourceTokenIds: normalizePositiveTokenIds([route.source.tokenId]),
+            targetTokenIds: normalizePositiveTokenIds([route.target.tokenId]),
+          });
+        }
         group.specs.push(spec);
         routeGroups.set(key, group);
       }
     }
   }
 
-  const expectedRouteCount = jurisdictionCount > 1 && contexts.every(context =>
-    getMarketMakerTokenIds(tokenIdsByContext, context).length >= HUB_REQUIRED_TOKEN_COUNT,
-  )
-    ? routeGroups.size
-    : 0;
+  const expectedRouteCount = routeGroups.size;
   const routes = Array.from(routeGroups.values()).map((group) => {
     const expectedByPair = new Map<string, MarketMakerOfferSpec[]>();
     for (const spec of group.specs) {
@@ -1315,11 +1388,18 @@ const buildMarketMakerCrossHealth = (
       pairSpecs.push(spec);
       expectedByPair.set(spec.pairId, pairSpecs);
     }
-    const pairs = Array.from(expectedByPair.entries())
-      .map(([pairId, specs]) => {
+    const pairIds = Array.from(new Set([...group.expectedPairs.keys(), ...expectedByPair.keys()]));
+    const pairs = pairIds
+      .map((pairId) => {
+        const specs = expectedByPair.get(pairId) ?? [];
+        const expected = group.expectedPairs.get(pairId) ?? null;
         const offers = specs.filter(spec => hasMarketMakerCrossOffer(env, spec)).length;
-        const sourceTokenIds = normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.source.tokenId ?? 0));
-        const targetTokenIds = normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.target.tokenId ?? 0));
+        const sourceTokenIds = expected?.sourceTokenIds?.length
+          ? expected.sourceTokenIds
+          : normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.source.tokenId ?? 0));
+        const targetTokenIds = expected?.targetTokenIds?.length
+          ? expected.targetTokenIds
+          : normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.target.tokenId ?? 0));
         return {
           pairId,
           offers,
@@ -1346,18 +1426,21 @@ const buildMarketMakerCrossHealth = (
     compareStableText(left.targetHubEntityId, right.targetHubEntityId),
   );
 
-  const expectedOffersPerRoute = Math.max(0, ...Array.from(routeGroups.values()).map(group => group.specs.length));
-  const expectedOffersPerPair = Math.max(0, ...Array.from(routeGroups.values()).flatMap((group) => {
+  const expectedOffersPerRoute = expectedRouteCount > 0
+    ? Math.max(0, ...Array.from(routeGroups.values()).map(group =>
+        Math.max(group.specs.length, group.expectedPairs.size * MARKET_MAKER_CROSS_LEVELS_PER_PAIR),
+      ))
+    : 0;
+  const expectedOffersPerPair = expectedRouteCount > 0 ? Math.max(MARKET_MAKER_CROSS_LEVELS_PER_PAIR, ...Array.from(routeGroups.values()).flatMap((group) => {
     const counts = new Map<string, number>();
     for (const spec of group.specs) counts.set(spec.pairId, (counts.get(spec.pairId) || 0) + 1);
+    for (const pairId of group.expectedPairs.keys()) counts.set(pairId, Math.max(counts.get(pairId) || 0, MARKET_MAKER_CROSS_LEVELS_PER_PAIR));
     return Array.from(counts.values());
-  }));
+  })) : 0;
 
   return {
-    ok: expectedRouteCount > 0
-      ? routes.length >= expectedRouteCount && routes.every(route => route.ready)
-      : routes.every(route => route.ready),
-    expectedRoutes: expectedRouteCount || routes.length,
+    ok: expectedRouteCount > 0 && routes.length >= expectedRouteCount && routes.every(route => route.ready),
+    expectedRoutes: expectedRouteCount,
     expectedOffersPerRoute,
     expectedOffersPerPair,
     routes,
