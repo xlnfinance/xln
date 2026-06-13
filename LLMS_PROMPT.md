@@ -1,5 +1,47 @@
 # Optimal LLM Prompts for XLN llms.txt Analysis
 
+## GPT-Pro Deep Swap/Cross-J Design Weakness Audit
+
+```
+You are GPT-Pro acting as a senior protocol/security/product architect. You have hours, not minutes.
+Read the attached XLN llms.txt end to end, but prioritize the runtime, smart-contract,
+swap, cross-jurisdiction, orderbook, market-maker, routed-swap UI, E2E tests, and dispute/watchtower sections.
+
+Context you must respect:
+- XLN is pre-mainnet. Do not hand-wave "on-chain dispute" as a safety backstop unless the exact salvage -> evidence -> dispute -> finalization path works in code/tests.
+- Cross-jurisdiction swaps are best-effort, not atomic. Hop 2 must start only after hop 1 is fully settled; hop 3 only after hop 2 is fully settled.
+- Expected market failures (no liquidity, no route, quote expired, market maker not ready) should terminate/cancel clearly in UI. They are not protocol fatals.
+- Unexpected protocol/state contradictions must fail fast, stop loops, and expose a complete debug payload. No silent retries, restart budgets, or fallback guessing.
+- Direct orderbooks and routed paths must not be visually conflated. A multi-hop route is not one executable orderbook unless synthetic depth/slippage is explicitly computed and labeled.
+
+Read first:
+1. Semantic overview at the top of llms.txt.
+2. contracts/Depository.sol, Account.sol, DeltaTransformer.sol.
+3. runtime/types.ts, runtime/runtime.ts, runtime/entity-consensus.ts, runtime/account-consensus.ts.
+4. runtime/cross-jurisdiction*.ts, runtime/entity-consensus/cross-j-orderbook.ts.
+5. runtime/entity-tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
+6. runtime/entity-tx/handlers/account/orderbook-matching-*.ts.
+7. runtime/account-tx/handlers/swap-*.ts and cross-swap-fill-ack.ts.
+8. runtime/orchestrator/mm-node.ts, runtime/server/market-maker-health.ts, runtime/relay/market-subscriptions.ts.
+9. frontend SwapPanel.svelte, OrderbookPanel.svelte, routed-swap-planner.ts, routed-swap-execution.ts.
+10. tests/e2e-swap.spec.ts, tests/e2e-cross-j-swap.spec.ts, runtime cross-j/orderbook tests.
+
+Audit goals:
+1. Find fund-loss risks in same-chain swaps, cross-j swaps, partial fills, cancellation, salvage, dispute, and watchtower flows.
+2. Find state-divergence risks among source hub, target hub, book owner, market maker, runtime, relay, and UI.
+3. Find loops/hangs where errors repeat instead of stopping with a debug payload.
+4. Find UI lies: stale prices, wrong network labels, merged books that cannot be executed, route candidates that imply liquidity without proof.
+5. Find missing E2E coverage before mainnet: same-chain both directions, resting orders, self-trade prevention, cross ETH/TRON USDT-USDT both directions, no-market terminal states, route runner step-by-step behavior, watchtower/dispute backstop.
+6. Challenge architecture: should routed swaps be exposed to users now, or should UI only allow direct executable markets and make routed flow an advanced/manual route runner?
+
+Output format:
+- Score the system 0-1000 for mainnet readiness.
+- P0/P1/P2 findings first, with file references and exact attack/failure scenario.
+- For every finding: "why this can happen", "how user funds/state are affected", "minimal root fix", and "test that proves it".
+- Separate expected market failures from unexpected protocol failures.
+- End with the top 10 smallest changes that reduce the most risk.
+```
+
 ## Architecture Review Prompt (Senior Advice)
 
 ```

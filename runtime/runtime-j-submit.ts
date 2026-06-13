@@ -1,5 +1,6 @@
-import type { EntityInput, Env, JInput, RoutedEntityInput, RuntimeTx } from './types';
+import type { EntityInput, Env, JInput, JTx, RuntimeTx } from './types';
 import { getCachedSignerPrivateKey } from './account-crypto';
+import { isBatchEmpty } from './j-batch';
 
 export type RuntimeJOutboxQueue = (
   env: Env,
@@ -11,29 +12,6 @@ export type RuntimeJOutboxQueue = (
 
 export type RuntimeJSubmitDeps = {
   enqueueRuntimeInputs: RuntimeJOutboxQueue;
-};
-
-const buildAbortSentBatchInput = (
-  entityId: string,
-  reason: string,
-  signerId?: string,
-): RoutedEntityInput => {
-  if (!signerId) {
-    throw new Error(`J_ABORT_SENT_BATCH_SIGNER_MISSING: entity=${entityId}`);
-  }
-  return {
-    entityId,
-    signerId,
-    entityTxs: [
-      {
-        type: 'j_abort_sent_batch',
-        data: {
-          requeueToCurrent: true,
-          reason: `submit_failed:${String(reason || 'unknown').slice(0, 240)}`,
-        },
-      },
-    ],
-  };
 };
 
 const hasJEventTx = (input: EntityInput): boolean =>
@@ -75,18 +53,31 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
   }
 };
 
+const validateSealedBatchJTx = (jTx: JTx): void => {
+  if (jTx.type !== 'batch') return;
+  if (isBatchEmpty(jTx.data.batch)) return;
+  const missing: string[] = [];
+  if (!jTx.data.encodedBatch) missing.push('encodedBatch');
+  if (typeof jTx.data.entityNonce !== 'number') missing.push('entityNonce');
+  if (!jTx.data.hankoSignature) missing.push('hankoSignature');
+  if (missing.length === 0) return;
+  throw new Error(
+    `J_SUBMIT_FATAL: J_BATCH_CONSENSUS_HANKO_MISSING:${jTx.entityId}:missing=${missing.join(',')}`,
+  );
+};
+
 /**
  * Submit post-commit J batches after the R-frame is durable.
  *
- * This is deliberately outside consensus: a failed chain submit queues an
- * explicit j_abort_sent_batch for a later frame instead of mutating the just
- * committed state. Keeping it in one module makes the tick engine read as:
- * apply -> persist -> dispatch side effects.
+ * This is deliberately outside consensus. A failed chain submit is not a
+ * market outcome; it means the runtime produced an invalid batch or the chain
+ * transport is broken. Throw so the runtime loop halts with a debug payload
+ * instead of manufacturing follow-up consensus state from a side-effect failure.
  */
 export async function submitRuntimeJOutbox(
   env: Env,
   jOutbox: JInput[],
-  deps: RuntimeJSubmitDeps,
+  _deps: RuntimeJSubmitDeps,
 ): Promise<void> {
   if (jOutbox.length === 0) return;
 
@@ -94,50 +85,19 @@ export async function submitRuntimeJOutbox(
   console.log(`⚡ [SIDE-EFFECT] Submitting ${totalJTxs} J-txs via JAdapter (${jOutbox.length} JInputs)`);
 
   for (const jInput of jOutbox) {
-    const queueMissingInfraAbort = (reason: string) => {
-      for (const jTx of jInput.jTxs) {
-        if (jTx.type !== 'batch') continue;
-        const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
-        deps.enqueueRuntimeInputs(
-          env,
-          [buildAbortSentBatchInput(jTx.entityId, reason, signerId)],
-          undefined,
-          undefined,
-          env.timestamp,
-        );
-      }
-    };
-
     const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
     if (!jReplica) {
-      console.error(`❌ [J-SUBMIT] Jurisdiction "${jInput.jurisdictionName}" not found — skipping`);
-      queueMissingInfraAbort(`missing_jReplica:${jInput.jurisdictionName}`);
-      continue;
+      throw new Error(`J_SUBMIT_FATAL: missing_jReplica:${jInput.jurisdictionName}`);
     }
 
     const jAdapter = jReplica.jadapter;
     if (!jAdapter) {
-      console.error(`❌ [J-SUBMIT] No JAdapter for jurisdiction "${jInput.jurisdictionName}" — skipping`);
-      queueMissingInfraAbort(`missing_jAdapter:${jInput.jurisdictionName}`);
-      continue;
+      throw new Error(`J_SUBMIT_FATAL: missing_jAdapter:${jInput.jurisdictionName}`);
     }
 
     for (const jTx of jInput.jTxs) {
       console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
-      const queueAbortSentBatch = (reason: string) => {
-        if (jTx.type !== 'batch') return;
-        const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
-        deps.enqueueRuntimeInputs(
-          env,
-          [buildAbortSentBatchInput(jTx.entityId, reason, signerId)],
-          undefined,
-          undefined,
-          env.timestamp,
-        );
-        console.warn(
-          `⚠️ [J-SUBMIT] queued j_abort_sent_batch for ${jTx.entityId.slice(-4)} after failed batch submission`,
-        );
-      };
+      validateSealedBatchJTx(jTx);
 
       try {
         const submitData = jTx.data as { signerId?: unknown } | undefined;
@@ -157,20 +117,11 @@ export async function submitRuntimeJOutbox(
           await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
         } else {
           console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
-          if (!env.scenarioMode) {
-            queueAbortSentBatch(result.error || 'unknown');
-          }
-          if (env.scenarioMode) {
-            throw new Error(`J-SUBMIT FAILED: ${result.error || 'unknown'}`);
-          }
+          throw new Error(`J_SUBMIT_FATAL: ${result.error || 'unknown'}`);
         }
       } catch (error) {
         console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
-        if (!env.scenarioMode) {
-          const msg = error instanceof Error ? error.message : String(error);
-          queueAbortSentBatch(msg);
-        }
-        if (env.scenarioMode) throw error;
+        throw error;
       }
     }
 

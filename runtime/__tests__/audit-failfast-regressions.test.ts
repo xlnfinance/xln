@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { x25519 } from '@noble/curves/ed25519.js';
 
 import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
@@ -11,9 +12,16 @@ import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
 import { isLeftEntity } from '../entity-id-utils';
-import { applyEntityFrame, applyEntityInput } from '../entity-consensus';
+import {
+  CROSS_J_PENDING_FILL_ACK_TTL_MS,
+  applyEntityFrame,
+  applyEntityInput,
+} from '../entity-consensus';
 import { createEntityFrameHash } from '../entity-consensus-frame';
-import { assertCrossJurisdictionOrderAdmissible } from '../entity-consensus/cross-j-orderbook';
+import {
+  assertCrossJurisdictionOrderAdmissible,
+  findCrossJurisdictionBookAdmissionForAck,
+} from '../entity-consensus/cross-j-orderbook';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
   buildCrossJurisdictionMarketOffer,
@@ -22,29 +30,38 @@ import {
 } from '../cross-jurisdiction-orderbook';
 import {
   buildCrossJurisdictionPullBinding,
+  buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
+  deriveCrossJurisdictionPrivateSeed,
 } from '../cross-jurisdiction';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
+import { applyCommittedHtlcLockFollowup } from '../entity-tx/handlers/account/committed-htlc-followups';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/handlers/cross-j-book-order';
 import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity-tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { handleJEvent } from '../entity-tx/j-events';
+import { tryFinalizeAccountJEvents } from '../entity-tx/j-events-account';
+import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity-tx/j-events-htlc';
 import {
   buildJEventObservationDigest,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
 import { createEmptyBatch } from '../j-batch';
 import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
-import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput } from '../runtime';
+import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
+import { submitRuntimeJOutbox } from '../runtime-j-submit';
 import { safeStringify } from '../serialization-utils';
 import { projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../proof-builder';
 import { signEntityHashes } from '../hanko/signing';
-import type { AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, JurisdictionEvent } from '../types';
+import { NobleCryptoProvider } from '../crypto-noble';
+import { resolveEntityProposerId } from '../state-helpers';
+import type { AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
+import { ethers } from 'ethers';
 
 const makeSingleSignerConfig = (): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -61,6 +78,8 @@ const makeSingleSignerConfigFor = (signerId: string): ConsensusConfig => ({
 });
 
 const hex20 = (byte: string): string => `0x${byte.repeat(byte.length === 2 ? 20 : 40)}`;
+const hexBytes = (bytes: Uint8Array): string =>
+  `0x${Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 
 const makeProposalAccount = (
   mempool: AccountTx[],
@@ -258,7 +277,7 @@ describe('audit fail-fast regressions', () => {
         type: 'registerCrossJurisdictionSwap',
         data: { route: {} },
       } as any],
-    })).not.toThrow();
+    })).toThrow('ROUTE_TARGET_RUNTIME_UNKNOWN');
 
     registerEntityRuntimeHint(env, `0x${'22'.repeat(32)}`, remoteRuntime);
     expect(() => sendEntityInput(env, {
@@ -293,6 +312,285 @@ describe('audit fail-fast regressions', () => {
       entityTxs: [],
     }])).resolves.toBe(env);
     expect(env.eReplicas.has(`${entityId}:${actualSignerId}`)).toBe(true);
+  });
+
+  test('runtime ingress rejects stale signer hints for tx-bearing inputs even with one local replica', async () => {
+    const env = createEmptyEnv('stale-signer-tx-bearing');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'84'.repeat(32)}`;
+    const actualSignerId = `0x${'85'.repeat(20)}`;
+    const staleSignerId = `0x${'86'.repeat(20)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(actualSignerId);
+    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+      entityId,
+      signerId: actualSignerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    });
+
+    await expect(process(env, [{
+      entityId,
+      signerId: staleSignerId,
+      entityTxs: [{
+        type: 'openAccount',
+        data: {
+          targetEntityId: `0x${'87'.repeat(32)}`,
+          tokenId: 1,
+          creditAmount: 1n,
+        },
+      }],
+    }])).rejects.toThrow('RUNTIME_REPLICA_NOT_FOUND');
+  });
+
+  test('live runtime rejects stale signer tx-bearing inputs instead of dropping them', async () => {
+    const env = createEmptyEnv('stale-signer-live-drop');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'94'.repeat(32)}`;
+    const actualSignerId = `0x${'95'.repeat(20)}`;
+    const staleSignerId = `0x${'96'.repeat(20)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(actualSignerId);
+    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+      entityId,
+      signerId: actualSignerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    });
+
+    await expect(process(env, [{
+      entityId,
+      signerId: staleSignerId,
+      entityTxs: [{
+        type: 'openAccount',
+        data: {
+          targetEntityId: `0x${'97'.repeat(32)}`,
+          tokenId: 1,
+          creditAmount: 1n,
+        },
+      }],
+    }])).rejects.toThrow('RUNTIME_REPLICA_NOT_FOUND');
+    expect(env.runtimeState?.quarantinedRuntimeInputs?.[0]?.action).toBe('halted');
+    expect(env.eReplicas.get(`${entityId}:${actualSignerId}`)?.state.accounts.size).toBe(0);
+  });
+
+  test('live runtime quarantines invalid ingress once instead of requeueing a crash loop', async () => {
+    const env = createEmptyEnv('invalid-live-ingress-quarantine');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'98'.repeat(32)}`;
+
+    await expect(process(env, [{
+      entityId,
+      signerId: ' ',
+      entityTxs: [{
+        type: 'openAccount',
+        data: {
+          targetEntityId: `0x${'99'.repeat(32)}`,
+          tokenId: 1,
+          creditAmount: 1n,
+        },
+      }],
+    }])).rejects.toThrow('FINANCIAL-SAFETY: signerId is missing');
+
+    const quarantine = env.runtimeState?.quarantinedRuntimeInputs ?? [];
+    expect(quarantine.length).toBe(1);
+    expect(quarantine[0]?.reason).toBe('FINANCIAL-SAFETY:');
+    expect(quarantine[0]?.action).toBe('halted');
+    expect(quarantine[0]?.counts.entityInputs).toBe(1);
+    expect(env.runtimeMempool?.entityInputs.length).toBe(0);
+
+    await expect(process(env)).resolves.toBe(env);
+    expect(env.runtimeState?.quarantinedRuntimeInputs?.length).toBe(1);
+    expect(env.runtimeMempool?.entityInputs.length).toBe(0);
+  });
+
+  test('local signer resolution prefers an available local signer over stale config validator fallback', () => {
+    const env = createEmptyEnv('local-signer-resolution-stale-config');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const { entityId, signerId: actualSignerId } = registerLazySigner('local-signer-resolution-stale-config', 'actual');
+    const staleConfigSignerId = `0x${'9c'.repeat(20)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(staleConfigSignerId);
+    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+      entityId,
+      signerId: actualSignerId,
+      mempool: [],
+      isProposer: false,
+      state,
+    });
+
+    expect(resolveEntityProposerId(env, entityId, 'audit')).toBe(actualSignerId);
+  });
+
+  test('remote signer resolution trusts gossip board over imported replica signer fallback', () => {
+    const env = createEmptyEnv('remote-signer-resolution-gossip-board');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'9d'.repeat(32)}`;
+    const importedUserSignerId = `0x${'9e'.repeat(20)}`;
+    const hubSignerId = `0x${'9f'.repeat(20)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(importedUserSignerId);
+    env.eReplicas.set(`${entityId}:${importedUserSignerId}`, {
+      entityId,
+      signerId: importedUserSignerId,
+      mempool: [],
+      isProposer: false,
+      state,
+    } as unknown as EntityReplica);
+    env.gossip = {
+      getProfiles: () => [{
+        entityId,
+        metadata: {
+          board: {
+            validators: [{ signerId: hubSignerId }],
+          },
+        },
+      }],
+    } as Env['gossip'];
+
+    expect(resolveEntityProposerId(env, entityId, 'remote-output')).toBe(hubSignerId);
+  });
+
+  test('runtime input admission rejects tx-bearing stale signer before enqueue', () => {
+    const env = createEmptyEnv('runtime-input-admission-stale-signer');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const { entityId, signerId } = registerLazySigner('runtime-input-admission-stale-signer', '1');
+    const staleSignerId = `0x${'9d'.repeat(20)}`;
+    attachSigningReplica(env, entityId, signerId);
+
+    expect(() => validateRuntimeInputAdmission(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: staleSignerId,
+        entityTxs: [{
+          type: 'openAccount',
+          data: {
+            targetEntityId: `0x${'9e'.repeat(32)}`,
+            tokenId: 1,
+            creditAmount: 1n,
+          },
+        }],
+      }],
+    })).toThrow('RUNTIME_REPLICA_NOT_FOUND');
+    expect(env.runtimeMempool?.entityInputs.length).toBe(0);
+  });
+
+  test('runtime input admission accounts for importReplica earlier in the same batch', () => {
+    const env = createEmptyEnv('runtime-input-admission-import-replica');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'9f'.repeat(32)}`;
+    const signerId = `0x${'a0'.repeat(20)}`;
+
+    expect(() => validateRuntimeInputAdmission(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId,
+        data: {
+          config: makeSingleSignerConfigFor(signerId),
+          isProposer: true,
+        },
+      }],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [],
+      }],
+    })).not.toThrow();
+  });
+
+  test('cross-j salvage routes tx-bearing output to route target signer over stale gossip signer', () => {
+    const env = createEmptyEnv('cross-j-salvage-route-signer');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    const sourceUser = `0x${'a1'.repeat(32)}`;
+    const sourceHub = `0x${'a2'.repeat(32)}`;
+    const targetHub = `0x${'a3'.repeat(32)}`;
+    const targetUser = `0x${'a4'.repeat(32)}`;
+    const sourceSigner = `0x${'b1'.repeat(20)}`;
+    const sourceHubSigner = `0x${'b2'.repeat(20)}`;
+    const targetHubSigner = `0x${'b3'.repeat(20)}`;
+    const targetSigner = `0x${'b4'.repeat(20)}`;
+    const staleGossipSigner = `0x${'b5'.repeat(20)}`;
+    const sourceState = makeEntityState(sourceUser);
+    sourceState.config = makeSingleSignerConfigFor(sourceSigner);
+    sourceState.crossJurisdictionSwaps = new Map();
+    (env as Env & { gossip?: { getProfiles: () => unknown[] } }).gossip = {
+      getProfiles: () => [{
+        entityId: targetUser,
+        metadata: { board: { validators: [{ signerId: staleGossipSigner }] } },
+      }],
+    };
+
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'salvage-route-signer',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      sourceSignerId: sourceSigner,
+      sourceHubSignerId: sourceHubSigner,
+      targetHubSignerId: targetHubSigner,
+      targetSignerId: targetSigner,
+      source: {
+        jurisdiction: `stack:1:0x${'c1'.repeat(20)}`,
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 100n,
+      },
+      target: {
+        jurisdiction: `stack:2:0x${'c2'.repeat(20)}`,
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 2,
+        amount: 200n,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+    }, {
+      runtimeSeed: 'cross-j-salvage-route-signer',
+      sourceDisputeDelayMs: 5_000,
+      now: env.timestamp,
+    });
+    sourceState.crossJurisdictionSwaps.set(route.orderId, route);
+
+    const binary = buildCrossJurisdictionPullReveal(
+      route,
+      0x1234,
+      deriveCrossJurisdictionPrivateSeed('cross-j-salvage-route-signer', route),
+    ).binary;
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const crossPullArgs = abiCoder.encode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      [{ fillRatios: [], secrets: [], pulls: [binary] }],
+    );
+    const starterInitialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
+    const outputs: EntityInput[] = [];
+
+    expect(queueCrossJurisdictionSalvageFromArgumentList(
+      env,
+      sourceState,
+      outputs,
+      sourceHub,
+      [starterInitialArguments],
+      123,
+    )).toBe(true);
+
+    const salvageOutput = outputs.find((output) => output.entityTxs?.some((tx) => tx.type === 'crossJurisdictionSalvage'));
+    expect(salvageOutput?.entityId).toBe(targetUser);
+    expect(salvageOutput?.signerId).toBe(targetSigner);
+    expect(salvageOutput?.signerId).not.toBe(staleGossipSigner);
   });
 
   test('runtime ingress still rejects stale signer hints when local target signer is ambiguous', async () => {
@@ -1137,6 +1435,47 @@ describe('audit fail-fast regressions', () => {
     expect(account.mempool).toHaveLength(1);
   });
 
+  test('proposeAccountFrame throws instead of dropping invalid cross-j pull resolve', async () => {
+    const env = createEmptyEnv('cross-pull-resolve-propose-failfast');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const left = `0x${'11'.repeat(32)}`;
+    const right = `0x${'22'.repeat(32)}`;
+    const account = makeProposalAccount([
+      {
+        type: 'pull_resolve',
+        data: {
+          pullId: 'target-pull',
+          binary: '0x1234',
+        },
+      },
+    ], left, right);
+    account.pulls = new Map([
+      ['target-pull', {
+        pullId: 'target-pull',
+        tokenId: 1,
+        amount: 1_000n,
+        claimedRatio: 0,
+        claimedAmount: 0n,
+        revealedUntilTimestamp: 60_000,
+        fullHash: `0x${'aa'.repeat(32)}`,
+        partialRoot: `0x${'bb'.repeat(32)}`,
+        crossJurisdiction: {
+          orderId: 'cross-pull-propose-failfast',
+          routeHash: `0x${'cc'.repeat(32)}`,
+          leg: 'target',
+          status: 'clearing',
+          cumulativeFillRatio: 1,
+        },
+        createdHeight: 0,
+        createdTimestamp: 1,
+      }],
+    ]);
+
+    await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED/);
+    expect(account.mempool).toHaveLength(1);
+  });
+
   test('proposeAccountFrame keeps valid swap_resolve txs when optimistic batch validation falls back', async () => {
     const env = createEmptyEnv('swap-resolve-batch-fallback');
     env.timestamp = 10_000;
@@ -1280,6 +1619,85 @@ describe('audit fail-fast regressions', () => {
     const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
     expect(state.crontabState.hooks.has('test-settlement-window')).toBe(false);
     expect(marks.some((record) => record.family === 'entity' && record.entityId === entityId)).toBe(true);
+  });
+
+  test('single-signer j_broadcast attaches consensus hanko to J batch output', async () => {
+    const seed = 'single-signer-j-broadcast-hanko seed alpha beta gamma';
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 30_000;
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const jurisdiction = {
+      name: 'Testnet',
+      address: 'http://localhost:8545',
+      depositoryAddress: hex20('1'),
+      entityProviderAddress: hex20('2'),
+      chainId: 31337,
+    };
+    env.activeJurisdiction = 'Testnet';
+    env.jReplicas.set('Testnet', {
+      name: 'Testnet',
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+      depositoryAddress: jurisdiction.depositoryAddress,
+      entityProviderAddress: jurisdiction.entityProviderAddress,
+      contracts: {
+        account: hex20('3'),
+        depository: jurisdiction.depositoryAddress,
+        entityProvider: jurisdiction.entityProviderAddress,
+        deltaTransformer: hex20('4'),
+      },
+      rpcs: [jurisdiction.address],
+      chainId: jurisdiction.chainId,
+    });
+    const state = makeEntityState(entityId);
+    state.config = {
+      ...makeSingleSignerConfigFor(signerId),
+      jurisdiction,
+    };
+    const batch = createEmptyBatch();
+    batch.reserveToReserve.push({
+      receivingEntity: `0x${'ef'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+    });
+    state.jBatchState = {
+      batch,
+      jurisdiction,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'accumulating',
+      entityNonce: 0,
+    };
+    const replica = {
+      entityId,
+      signerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    } as EntityReplica;
+
+    const result = await applyEntityInput(env, replica, {
+      entityId,
+      signerId,
+      entityTxs: [{ type: 'j_broadcast', data: {} }],
+    });
+
+    expect(result.jOutputs).toHaveLength(1);
+    const jTx = result.jOutputs[0]?.jTxs[0];
+    expect(jTx?.type).toBe('batch');
+    if (jTx?.type === 'batch') {
+      expect(jTx.data.batchHash).toMatch(/^0x[a-fA-F0-9]{64}$/);
+      expect(jTx.data.encodedBatch).toMatch(/^0x/);
+      expect(jTx.data.entityNonce).toBe(1);
+      expect(jTx.data.hankoSignature).toMatch(/^0x/);
+    }
   });
 
   test('finalized j-events mark mutated account docs dirty for storage replay', async () => {
@@ -1489,6 +1907,116 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.jBatchState?.sentBatch).toBeUndefined();
     expect(result.newState.jBatchState?.batch.disputeFinalizations).toEqual([]);
     expect(result.newState.accounts.get(counterpartyId)?.activeDispute?.finalizeQueued).toBe(false);
+  });
+
+  test('submitRuntimeJOutbox fails fast without queuing abort state on submit failure', async () => {
+    const env = createEmptyEnv('j-submit-fail-fast');
+    env.timestamp = 123;
+    env.scenarioMode = false;
+    env.jReplicas = new Map([
+      [
+        'Testnet',
+        {
+          jadapter: {
+            submitTx: async () => ({ success: false, error: 'ECONNREFUSED' }),
+            pollNow: async () => {},
+          },
+        } as any,
+      ],
+    ]);
+    const queuedInputs: EntityInput[] = [];
+
+    await expect(submitRuntimeJOutbox(
+      env,
+      [
+        {
+          jurisdictionName: 'Testnet',
+          jTxs: [
+            {
+              type: 'batch',
+              entityId: `0x${'ab'.repeat(32)}`,
+              data: {
+                batch: {
+                  ...createEmptyBatch(),
+                  reserveToReserve: [{
+                    receivingEntity: `0x${'ef'.repeat(32)}`,
+                    tokenId: 1,
+                    amount: 10n,
+                  }],
+                },
+                batchHash: `0x${'11'.repeat(32)}`,
+                encodedBatch: '0x1234',
+                entityNonce: 1,
+                hankoSignature: '0x1234',
+                batchSize: 1,
+                signerId: `0x${'cd'.repeat(20)}`,
+              },
+              timestamp: env.timestamp,
+            } as any,
+          ],
+        },
+      ],
+      {
+        enqueueRuntimeInputs: (_env, inputs) => {
+          queuedInputs.push(...(inputs ?? []));
+        },
+      },
+    )).rejects.toThrow(/J_SUBMIT_FATAL: ECONNREFUSED/);
+
+    expect(queuedInputs).toHaveLength(0);
+  });
+
+  test('submitRuntimeJOutbox rejects non-empty consensus batch before adapter when hanko is missing', async () => {
+    const env = createEmptyEnv('j-submit-unsealed-batch');
+    env.timestamp = 123;
+    let adapterCalls = 0;
+    env.jReplicas = new Map([
+      [
+        'Testnet',
+        {
+          jadapter: {
+            submitTx: async () => {
+              adapterCalls += 1;
+              return { success: true };
+            },
+            pollNow: async () => {},
+          },
+        } as any,
+      ],
+    ]);
+
+    await expect(submitRuntimeJOutbox(
+      env,
+      [
+        {
+          jurisdictionName: 'Testnet',
+          jTxs: [
+            {
+              type: 'batch',
+              entityId: `0x${'ac'.repeat(32)}`,
+              data: {
+                batch: {
+                  ...createEmptyBatch(),
+                  reserveToReserve: [{
+                    receivingEntity: `0x${'ef'.repeat(32)}`,
+                    tokenId: 1,
+                    amount: 10n,
+                  }],
+                },
+                batchSize: 1,
+                signerId: `0x${'cd'.repeat(20)}`,
+              },
+              timestamp: env.timestamp,
+            } as any,
+          ],
+        },
+      ],
+      {
+        enqueueRuntimeInputs: () => {},
+      },
+    )).rejects.toThrow(/J_BATCH_CONSENSUS_HANKO_MISSING/);
+
+    expect(adapterCalls).toBe(0);
   });
 
   test('request_collateral checks prepaid fee against derived outCapacity', () => {
@@ -1778,6 +2306,77 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.workingReplica.state.height).toBe(1);
     expect(result.workingReplica.state.profile.name).toBe('Signed Profile');
+  });
+
+  test('entity commit rejects invalid secondary hash signatures', async () => {
+    const seed = 'entity-commit-secondary-signature-binding seed alpha beta gamma';
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 43_000;
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const frameTxs: EntityTx[] = [{
+      type: 'profile-update',
+      data: {
+        profile: {
+          entityId,
+          name: 'Signed Profile',
+        },
+      },
+    } as any];
+
+    const honestBaseState = makeEntityState(entityId);
+    honestBaseState.config = makeSingleSignerConfigFor(signerId);
+    const { newState: honestFrameState } = await applyEntityFrame(
+      env,
+      honestBaseState,
+      frameTxs,
+      env.timestamp,
+    );
+    const honestNewState: EntityState = {
+      ...honestFrameState,
+      entityId,
+      height: 1,
+      timestamp: env.timestamp,
+    };
+    const frameHash = await createEntityFrameHash(
+      'genesis',
+      1,
+      env.timestamp,
+      frameTxs,
+      honestNewState,
+    );
+    const secondaryHash = ethers.keccak256(ethers.toUtf8Bytes('account-frame-secondary-hash'));
+    const wrongSecondaryHash = ethers.keccak256(ethers.toUtf8Bytes('wrong-secondary-hash'));
+    const frameSig = signAccountFrame(env, signerId, frameHash);
+    const forgedSecondarySig = signAccountFrame(env, signerId, wrongSecondaryHash);
+    const replica = {
+      entityId,
+      signerId,
+      mempool: [],
+      isProposer: false,
+      state: makeEntityState(entityId),
+    } as EntityReplica;
+    replica.state.config = makeSingleSignerConfigFor(signerId);
+
+    const result = await applyEntityInput(env, replica, {
+      entityId,
+      signerId,
+      proposedFrame: {
+        height: 1,
+        txs: frameTxs,
+        hash: frameHash,
+        newState: honestNewState,
+        hashesToSign: [
+          { hash: frameHash, type: 'entityFrame', context: 'entity-frame' },
+          { hash: secondaryHash, type: 'accountFrame', context: 'account-frame' },
+        ],
+        collectedSigs: new Map([[signerId, [frameSig, forgedSecondarySig]]]),
+      },
+    });
+
+    expect(result.workingReplica.state.height).toBe(0);
+    expect(result.workingReplica.state.profile.name).not.toBe('Signed Profile');
   });
 
   test('swap_offer refuses to add more than the configured per-account cap', async () => {
@@ -2369,6 +2968,79 @@ describe('audit fail-fast regressions', () => {
     expect(newState.accounts.get(starterId)?.activeDispute?.finalizeQueued).toBe(true);
   });
 
+  test('settlement finalization activates post-settlement dispute hash atomically', () => {
+    const leftId = `0x${'31'.repeat(32)}`;
+    const rightId = `0x${'32'.repeat(32)}`;
+    const depositoryAddress = hex20('1');
+    const account = makeProposalAccount([], leftId, rightId);
+    account.proofHeader = { fromEntity: leftId, toEntity: rightId, nonce: 2 };
+    account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
+
+    const postProof = buildAccountProofBody(account);
+    const postDisputeHash = createDisputeProofHashWithNonce(
+      account,
+      postProof.proofBodyHash,
+      depositoryAddress,
+      2,
+    );
+    account.counterpartyDisputeHash = `0x${'aa'.repeat(32)}`;
+    account.settlementWorkspace = {
+      ops: [],
+      lastModifiedByLeft: true,
+      status: 'submitted',
+      version: 1,
+      createdAt: 1,
+      lastUpdatedAt: 2,
+      executorIsLeft: true,
+      nonceAtSign: 1,
+      leftHanko: '0x11',
+      rightHanko: '0x22',
+      postSettlementDisputeProof: {
+        leftHanko: '0x33',
+        rightHanko: '0x44',
+        disputeHash: postDisputeHash,
+        proofBodyHash: postProof.proofBodyHash,
+        nonce: 2,
+      },
+    };
+
+    const settledEvent: JurisdictionEvent = {
+      type: 'AccountSettled',
+      data: {
+        leftEntity: leftId,
+        rightEntity: rightId,
+        tokenId: 1,
+        leftReserve: '0',
+        rightReserve: '0',
+        collateral: '125',
+        ondelta: '0',
+        nonce: 1,
+      },
+    };
+    account.leftJObservations = [{
+      jHeight: 7,
+      jBlockHash: `0x${'77'.repeat(32)}`,
+      events: [settledEvent],
+      observedAt: 10,
+    }];
+    account.rightJObservations = [{
+      jHeight: 7,
+      jBlockHash: `0x${'77'.repeat(32)}`,
+      events: [settledEvent],
+      observedAt: 11,
+    }];
+
+    tryFinalizeAccountJEvents(account, rightId, { timestamp: 100 });
+
+    expect(account.settlementWorkspace).toBeUndefined();
+    expect(account.currentDisputeHash).toBe(postDisputeHash);
+    expect(account.counterpartyDisputeHash).toBe(postDisputeHash);
+    expect(account.currentDisputeProofBodyHash).toBe(postProof.proofBodyHash);
+    expect(account.counterpartyDisputeProofBodyHash).toBe(postProof.proofBodyHash);
+    expect(account.disputeProofNoncesByHash?.[postProof.proofBodyHash]).toBe(2);
+    expect(account.onChainSettlementNonce).toBe(1);
+  });
+
   test('disputeStart rejects unsupported incremented argument override instead of silently ignoring it', async () => {
     const entityId = `0x${'31'.repeat(32)}`;
     const counterpartyId = `0x${'32'.repeat(32)}`;
@@ -2784,6 +3456,581 @@ describe('audit fail-fast regressions', () => {
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
   });
 
+  test('cross-j book-owner fill ack routes admitted remote order to source hub', async () => {
+    const env = createEmptyEnv('cross-book-owner-fill-notice');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const lot = SWAP_LOT_SCALE;
+    const sourceHub = `0x${'20'.repeat(32)}`;
+    const bookOwnerHub = `0x${'30'.repeat(32)}`;
+    const remoteMaker = `0x${'31'.repeat(32)}`;
+    const remoteTargetUser = `0x${'32'.repeat(32)}`;
+    const localTaker = `0x${'33'.repeat(32)}`;
+    const localTargetUser = `0x${'34'.repeat(32)}`;
+    const pairId = 'cross:base:2/tron:1';
+
+    const buildRoute = (
+      orderId: string,
+      sourceJurisdiction: string,
+      sourceEntityId: string,
+      sourceHubId: string,
+      sourceTokenId: number,
+      sourceAmount: bigint,
+      targetJurisdiction: string,
+      targetHubId: string,
+      targetUserId: string,
+      targetTokenId: number,
+      targetAmount: bigint,
+    ): CrossJurisdictionSwapRoute => {
+      const prepared = buildPreparedCrossJurisdictionRoute({
+        orderId,
+        makerEntityId: sourceEntityId,
+        hubEntityId: bookOwnerHub,
+        bookOwnerEntityId: bookOwnerHub,
+        venueId: pairId,
+        sourceSignerId: `${orderId}-source-signer`,
+        sourceHubSignerId: sourceHubId === sourceHub ? 'source-hub-signer' : 'book-owner-signer',
+        targetHubSignerId: targetHubId === bookOwnerHub ? 'book-owner-signer' : 'target-hub-signer',
+        targetSignerId: `${orderId}-target-signer`,
+        bookHubSignerId: 'book-owner-signer',
+        source: {
+          jurisdiction: sourceJurisdiction,
+          entityId: sourceEntityId,
+          counterpartyEntityId: sourceHubId,
+          tokenId: sourceTokenId,
+          amount: sourceAmount,
+        },
+        target: {
+          jurisdiction: targetJurisdiction,
+          entityId: targetHubId,
+          counterpartyEntityId: targetUserId,
+          tokenId: targetTokenId,
+          amount: targetAmount,
+        },
+        status: 'resting',
+        createdAt: env.timestamp,
+        updatedAt: env.timestamp,
+        expiresAt: env.timestamp + 60_000,
+      }, { runtimeSeed: 'cross-book-owner-fill-notice', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+      return { ...prepared, status: 'resting', updatedAt: env.timestamp };
+    };
+
+    const makerRoute = buildRoute(
+      'remote-maker-cross',
+      'base',
+      remoteMaker,
+      sourceHub,
+      2,
+      30n * lot,
+      'tron',
+      bookOwnerHub,
+      remoteTargetUser,
+      1,
+      75_000n * lot,
+    );
+    const takerRoute = buildRoute(
+      'local-taker-cross',
+      'tron',
+      localTaker,
+      bookOwnerHub,
+      1,
+      75_000n * lot,
+      'base',
+      bookOwnerHub,
+      localTargetUser,
+      2,
+      30n * lot,
+    );
+
+    const receipt = (route: CrossJurisdictionSwapRoute, leg: 'source' | 'target') => {
+      const pull = leg === 'source' ? route.sourcePull! : route.targetPull!;
+      return buildCrossJurisdictionBookAdmissionReceipt(
+        route,
+        leg,
+        {
+          type: 'pull_lock',
+          data: {
+            pullId: pull.pullId,
+            tokenId: pull.tokenId,
+            amount: pull.signedAmount,
+            revealedUntilTimestamp: pull.revealedUntilTimestamp,
+            fullHash: pull.fullHash,
+            partialRoot: pull.partialRoot,
+          },
+        },
+        leg === 'source' ? route.source.counterpartyEntityId : route.target.entityId,
+        leg === 'source' ? route.source.entityId : route.target.counterpartyEntityId,
+        env.timestamp,
+      );
+    };
+
+    const sourceState = makeEntityState(sourceHub);
+    sourceState.config = makeSingleSignerConfigFor('source-hub-signer');
+    sourceState.config = {
+      ...sourceState.config,
+      validators: ['source-primary-signer', 'source-hub-signer'],
+      shares: { 'source-primary-signer': 1n, 'source-hub-signer': 1n },
+    };
+    sourceState.crossJurisdictionSwaps = new Map([[makerRoute.orderId, makerRoute]]);
+    const makerSourceAccount = makeProposalAccount([], sourceHub, remoteMaker);
+    makerSourceAccount.swapOffers.set(makerRoute.orderId, {
+      offerId: makerRoute.orderId,
+      giveTokenId: makerRoute.source.tokenId,
+      giveAmount: makerRoute.source.amount,
+      wantTokenId: makerRoute.target.tokenId,
+      wantAmount: makerRoute.target.amount,
+      makerIsLeft: makerSourceAccount.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
+      minFillRatio: 0,
+      timeInForce: 0,
+      createdHeight: 1,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: makerRoute,
+    });
+    sourceState.accounts.set(remoteMaker, makerSourceAccount);
+
+    const bookOwnerState = makeEntityState(bookOwnerHub);
+    bookOwnerState.config = makeSingleSignerConfigFor('book-owner-signer');
+    mergeCrossJurisdictionBookAdmission(bookOwnerState, makerRoute, env.timestamp, receipt(makerRoute, 'source'));
+    const makerAdmission = mergeCrossJurisdictionBookAdmission(
+      bookOwnerState,
+      makerRoute,
+      env.timestamp,
+      receipt(makerRoute, 'target'),
+    );
+    makerAdmission.status = 'admitted';
+    makerAdmission.admittedAt = env.timestamp;
+    bookOwnerState.crossJurisdictionSwaps?.set(makerRoute.orderId, makerRoute);
+
+    const makerMeta = buildCrossJurisdictionMarketOffer({
+      offerId: makerRoute.orderId,
+      accountId: remoteMaker,
+      makerIsLeft: true,
+      fromEntity: remoteMaker,
+      toEntity: sourceHub,
+      createdHeight: 1,
+      giveTokenId: makerRoute.source.tokenId,
+      giveAmount: makerRoute.source.amount,
+      wantTokenId: makerRoute.target.tokenId,
+      wantAmount: makerRoute.target.amount,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: makerRoute,
+    }, bookOwnerHub);
+    expect(makerMeta).not.toBeNull();
+    let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: makerMeta!.makerId,
+      orderId: `${remoteMaker}:${makerRoute.orderId}`,
+      side: makerMeta!.side,
+      tif: 0,
+      postOnly: false,
+      priceTicks: makerMeta!.priceTicks,
+      qtyLots: Number(makerMeta!.baseAmount / lot),
+    }).state;
+    bookOwnerState.orderbookExt = {
+      books: new Map([[pairId, book]]),
+      orderPairs: new Map([[`${remoteMaker}:${makerRoute.orderId}`, [pairId]]]),
+      referrals: new Map(),
+      hubProfile: {
+        entityId: bookOwnerHub,
+        name: 'Book owner hub',
+        spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 },
+        referenceTokenId: 1,
+        minTradeSize: 0n,
+        supportedPairs: [pairId],
+      },
+    } satisfies OrderbookExtState;
+
+    const takerAccount = makeProposalAccount([], bookOwnerHub, localTaker);
+    takerAccount.swapOffers.set(takerRoute.orderId, {
+      offerId: takerRoute.orderId,
+      giveTokenId: takerRoute.source.tokenId,
+      giveAmount: takerRoute.source.amount,
+      wantTokenId: takerRoute.target.tokenId,
+      wantAmount: takerRoute.target.amount,
+      makerIsLeft: takerAccount.leftEntity.toLowerCase() === localTaker.toLowerCase(),
+      minFillRatio: 0,
+      timeInForce: 0,
+      createdHeight: 2,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: takerRoute,
+    });
+    bookOwnerState.accounts.set(localTaker, takerAccount);
+
+    const collisionOwner = `0x${'35'.repeat(32)}`;
+    const collisionState = makeEntityState(collisionOwner);
+    collisionState.config = makeSingleSignerConfigFor('collision-signer');
+    const collisionAccount = makeProposalAccount([], collisionOwner, remoteMaker);
+    collisionAccount.swapOffers.set(makerRoute.orderId, {
+      offerId: makerRoute.orderId,
+      giveTokenId: makerRoute.source.tokenId,
+      giveAmount: makerRoute.source.amount,
+      wantTokenId: makerRoute.target.tokenId,
+      wantAmount: makerRoute.target.amount,
+      makerIsLeft: collisionAccount.leftEntity.toLowerCase() === remoteMaker.toLowerCase(),
+      minFillRatio: 0,
+      timeInForce: 0,
+      createdHeight: 1,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: makerRoute,
+    });
+    collisionState.accounts.set(remoteMaker, collisionAccount);
+    env.eReplicas.set(`${collisionOwner}:collision-signer`, {
+      entityId: collisionOwner,
+      signerId: 'collision-signer',
+      mempool: [],
+      isProposer: true,
+      state: collisionState,
+    } satisfies EntityReplica);
+    env.eReplicas.set(`${sourceHub}:source-hub-signer`, {
+      entityId: sourceHub,
+      signerId: 'source-hub-signer',
+      mempool: [],
+      isProposer: true,
+      state: sourceState,
+    } satisfies EntityReplica);
+    env.eReplicas.set(`${bookOwnerHub}:book-owner-signer`, {
+      entityId: bookOwnerHub,
+      signerId: 'book-owner-signer',
+      mempool: [],
+      isProposer: true,
+      state: bookOwnerState,
+    } satisfies EntityReplica);
+
+    makerAdmission.route.sourceHubSignerId = 'stale-source-hub-signer';
+    await expect(applyEntityFrame(env, bookOwnerState, [
+      {
+        type: 'admitCrossJurisdictionBookOrder',
+        data: { route: takerRoute, receipt: receipt(takerRoute, 'source'), reason: 'source_pull_committed' },
+      },
+      {
+        type: 'admitCrossJurisdictionBookOrder',
+        data: { route: takerRoute, receipt: receipt(takerRoute, 'target'), reason: 'target_pull_committed' },
+      },
+    ])).rejects.toThrow(/CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISMATCH/);
+    makerAdmission.route.sourceHubSignerId = 'source-hub-signer';
+
+    const matched = await applyEntityFrame(env, bookOwnerState, [
+      {
+        type: 'admitCrossJurisdictionBookOrder',
+        data: { route: takerRoute, receipt: receipt(takerRoute, 'source'), reason: 'source_pull_committed' },
+      },
+      {
+        type: 'admitCrossJurisdictionBookOrder',
+        data: { route: takerRoute, receipt: receipt(takerRoute, 'target'), reason: 'target_pull_committed' },
+      },
+    ]);
+
+    const sourceNotice = matched.outputs.find(output =>
+      output.entityId.toLowerCase() === sourceHub.toLowerCase() &&
+      output.entityTxs?.[0]?.type === 'crossJurisdictionFillNotice'
+    );
+    expect(sourceNotice?.signerId).toBe('source-hub-signer');
+    expect(sourceNotice?.entityTxs?.[0]).toMatchObject({
+      type: 'crossJurisdictionFillNotice',
+      data: {
+        orderId: makerRoute.orderId,
+        pairId,
+      },
+    });
+    const collisionNotice = matched.outputs.find(output =>
+      output.entityId.toLowerCase() === collisionOwner.toLowerCase() &&
+      output.entityTxs?.[0]?.type === 'crossJurisdictionFillNotice'
+    );
+    expect(collisionNotice).toBeUndefined();
+
+    const sourceApplied = await applyEntityFrame(env, sourceState, sourceNotice!.entityTxs!);
+    const sourceAccount = sourceApplied.newState.accounts.get(remoteMaker);
+    const queuedAck = [
+      ...(sourceAccount?.mempool ?? []),
+      ...(sourceAccount?.pendingFrame?.accountTxs ?? []),
+    ].find(tx =>
+      tx.type === 'cross_swap_fill_ack' && tx.data.offerId === makerRoute.orderId
+    );
+    expect(queuedAck).toBeDefined();
+  });
+
+  test('cross-j local fill ack stays on the local source offer when an admission key collides', async () => {
+    const env = createEmptyEnv('cross-local-fill-ack-admission-collision');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const lot = SWAP_LOT_SCALE;
+    const sourceHub = `0x${'36'.repeat(32)}`;
+    const user = `0x${'37'.repeat(32)}`;
+    const targetHub = `0x${'38'.repeat(32)}`;
+    const targetUser = `0x${'39'.repeat(32)}`;
+    const wrongHub = `0x${'3a'.repeat(32)}`;
+    const orderId = 'local-offer-admission-collision';
+    const pairId = 'cross:base:2/tron:1';
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId,
+      makerEntityId: user,
+      hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      venueId: pairId,
+      sourceSignerId: 'user-signer',
+      sourceHubSignerId: 'source-hub-signer',
+      targetHubSignerId: 'target-hub-signer',
+      targetSignerId: 'target-user-signer',
+      bookHubSignerId: 'source-hub-signer',
+      source: {
+        jurisdiction: 'base',
+        entityId: user,
+        counterpartyEntityId: sourceHub,
+        tokenId: 2,
+        amount: 10n * lot,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 25_000n * lot,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: env.timestamp + 60_000,
+    }, { runtimeSeed: 'cross-local-fill-ack-admission-collision', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const restingRoute = { ...route, status: 'resting' as const, updatedAt: env.timestamp };
+    const sourceState = makeEntityState(sourceHub);
+    sourceState.config = makeSingleSignerConfigFor('source-hub-signer');
+    sourceState.crossJurisdictionSwaps = new Map([[orderId, restingRoute]]);
+    const account = makeProposalAccount([], sourceHub, user);
+    account.swapOffers.set(orderId, {
+      offerId: orderId,
+      giveTokenId: restingRoute.source.tokenId,
+      giveAmount: restingRoute.source.amount,
+      wantTokenId: restingRoute.target.tokenId,
+      wantAmount: restingRoute.target.amount,
+      makerIsLeft: account.leftEntity.toLowerCase() === user.toLowerCase(),
+      minFillRatio: 0,
+      timeInForce: 0,
+      createdHeight: 1,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: restingRoute,
+    });
+    sourceState.accounts.set(user, account);
+
+    const conflictingRoute = buildPreparedCrossJurisdictionRoute({
+      orderId,
+      makerEntityId: user,
+      hubEntityId: wrongHub,
+      bookOwnerEntityId: wrongHub,
+      venueId: pairId,
+      sourceSignerId: 'user-signer',
+      sourceHubSignerId: 'wrong-hub-signer',
+      targetHubSignerId: 'target-hub-signer',
+      targetSignerId: 'target-user-signer',
+      bookHubSignerId: 'wrong-hub-signer',
+      source: {
+        jurisdiction: 'base',
+        entityId: user,
+        counterpartyEntityId: wrongHub,
+        tokenId: 2,
+        amount: 10n * lot,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 25_000n * lot,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: env.timestamp + 60_000,
+    }, { runtimeSeed: 'cross-local-fill-ack-admission-collision-conflict', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const conflictingAdmission = mergeCrossJurisdictionBookAdmission(sourceState, conflictingRoute, env.timestamp);
+    conflictingAdmission.status = 'admitted';
+    conflictingAdmission.admittedAt = env.timestamp;
+
+    const applied = await applyEntityFrame(env, sourceState, [{
+      type: 'crossJurisdictionFillNotice',
+      data: {
+        orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: restingRoute.source.amount,
+        incrementalTargetAmount: restingRoute.target.amount,
+        cumulativeSourceAmount: restingRoute.source.amount,
+        cumulativeTargetAmount: restingRoute.target.amount,
+        cumulativeFillRatio: 65_535,
+        pairId,
+      },
+    }]);
+
+    const wrongHubNotice = applied.outputs.find(output =>
+      output.entityId.toLowerCase() === wrongHub.toLowerCase() &&
+      output.entityTxs?.[0]?.type === 'crossJurisdictionFillNotice'
+    );
+    expect(wrongHubNotice).toBeUndefined();
+    const queuedAck = [
+      ...(applied.newState.accounts.get(user)?.mempool ?? []),
+      ...(applied.newState.accounts.get(user)?.pendingFrame?.accountTxs ?? []),
+    ].find(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === orderId);
+    expect(queuedAck).toBeDefined();
+  });
+
+  test('cross-j fill notice waits for source offer instead of looping fatal errors', async () => {
+    const env = createEmptyEnv('cross-fill-notice-pending-source-offer');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const lot = SWAP_LOT_SCALE;
+    const sourceHub = `0x${'20'.repeat(32)}`;
+    const sourceUser = `0x${'31'.repeat(32)}`;
+    const targetHub = `0x${'32'.repeat(32)}`;
+    const targetUser = `0x${'33'.repeat(32)}`;
+    const orderId = 'source-offer-race';
+    const pairId = 'cross:base:2/tron:1';
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId,
+      makerEntityId: sourceUser,
+      hubEntityId: targetHub,
+      bookOwnerEntityId: targetHub,
+      venueId: pairId,
+      sourceSignerId: 'source-user-signer',
+      sourceHubSignerId: 'source-hub-signer',
+      targetHubSignerId: 'target-hub-signer',
+      targetSignerId: 'target-user-signer',
+      bookHubSignerId: 'target-hub-signer',
+      source: {
+        jurisdiction: 'base',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 2,
+        amount: 30n * lot,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 75_000n * lot,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: env.timestamp + 60_000,
+    }, { runtimeSeed: 'cross-fill-notice-pending-source-offer', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    route.status = 'resting';
+
+    const sourceState = makeEntityState(sourceHub);
+    sourceState.config = makeSingleSignerConfigFor('source-hub-signer');
+    sourceState.crossJurisdictionSwaps = new Map([[orderId, route]]);
+    sourceState.accounts.set(sourceUser, makeProposalAccount([], sourceHub, sourceUser));
+
+    const first = await applyEntityFrame(env, sourceState, [
+      {
+        type: 'crossJurisdictionFillNotice',
+        data: {
+          orderId,
+          fillSeq: 1,
+          incrementalSourceAmount: 30n * lot,
+          incrementalTargetAmount: 75_000n * lot,
+          cumulativeSourceAmount: 30n * lot,
+          cumulativeTargetAmount: 75_000n * lot,
+          cumulativeFillRatio: 65_535,
+          pairId,
+        },
+      },
+    ]);
+
+    expect(first.newState.pendingCrossJurisdictionFillAcks?.size).toBe(1);
+    const pendingAccount = first.newState.accounts.get(sourceUser);
+    const prematurelyQueued = [
+      ...(pendingAccount?.mempool ?? []),
+      ...(pendingAccount?.pendingFrame?.accountTxs ?? []),
+    ].find(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === orderId);
+    expect(prematurelyQueued).toBeUndefined();
+
+    const expiredState = structuredClone(first.newState) as typeof first.newState;
+    const expiredEnv = createEmptyEnv('cross-fill-notice-pending-source-offer-expired');
+    expiredEnv.timestamp = env.timestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
+    expiredState.timestamp = expiredEnv.timestamp;
+    await expect(applyEntityFrame(expiredEnv, expiredState, [])).rejects.toThrow(/CROSS_J_FILL_ACK_EXPIRED_FATAL/);
+
+    const stateWithOffer = first.newState;
+    const sourceAccount = stateWithOffer.accounts.get(sourceUser)!;
+    sourceAccount.swapOffers.set(orderId, {
+      offerId: orderId,
+      giveTokenId: route.source.tokenId,
+      giveAmount: route.source.amount,
+      wantTokenId: route.target.tokenId,
+      wantAmount: route.target.amount,
+      makerIsLeft: sourceAccount.leftEntity.toLowerCase() === sourceUser.toLowerCase(),
+      minFillRatio: 0,
+      timeInForce: 0,
+      createdHeight: 1,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: route,
+    });
+
+    const second = await applyEntityFrame(env, stateWithOffer, []);
+    expect(second.newState.pendingCrossJurisdictionFillAcks?.size ?? 0).toBe(0);
+    const drainedAccount = second.newState.accounts.get(sourceUser);
+    const queuedAck = [
+      ...(drainedAccount?.mempool ?? []),
+      ...(drainedAccount?.pendingFrame?.accountTxs ?? []),
+    ].find(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === orderId);
+    expect(queuedAck).toBeDefined();
+  });
+
+  test('cross-j fill ack admission lookup falls back to unique order id', () => {
+    const env = createEmptyEnv('cross-fill-ack-admission-fallback');
+    env.timestamp = 10_000;
+    const sourceHub = `0x${'20'.repeat(32)}`;
+    const sourceUser = `0x${'31'.repeat(32)}`;
+    const targetHub = `0x${'32'.repeat(32)}`;
+    const targetUser = `0x${'33'.repeat(32)}`;
+    const orderId = 'source-admission-fallback';
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId,
+      makerEntityId: sourceUser,
+      hubEntityId: targetHub,
+      bookOwnerEntityId: targetHub,
+      venueId: 'cross:base:2/tron:1',
+      sourceSignerId: 'source-user-signer',
+      sourceHubSignerId: 'source-hub-signer',
+      targetHubSignerId: 'target-hub-signer',
+      targetSignerId: 'target-user-signer',
+      bookHubSignerId: 'target-hub-signer',
+      source: {
+        jurisdiction: 'base',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 2,
+        amount: 10n * SWAP_LOT_SCALE,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 25_000n * SWAP_LOT_SCALE,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: env.timestamp + 60_000,
+    }, { runtimeSeed: 'cross-fill-ack-admission-fallback', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const state = makeEntityState(targetHub);
+    const admission = {
+      orderId,
+      routeHash: route.routeHash || 'route-hash',
+      sourceEntityId: sourceUser,
+      bookOwnerEntityId: targetHub,
+      status: 'admitted' as const,
+      route,
+      updatedAt: env.timestamp,
+    };
+    state.crossJurisdictionBookAdmissions = new Map([[`${sourceUser.toLowerCase()}:${orderId}`, admission]]);
+
+    expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId)).toBe(admission);
+  });
+
   test('target-bonus fill fails closed when target hub route is unavailable', async () => {
     const env = createEmptyEnv('cross-target-bonus-unroutable');
     env.timestamp = 10_000;
@@ -3118,13 +4365,24 @@ describe('audit fail-fast regressions', () => {
     const hubState = makeEntityState(hubId);
     hubState.config = makeSingleSignerConfigFor('hub-signer');
     hubState.accounts.set(userId, makeProposalAccount([], hubId, userId));
-    hubState.htlcRoutes.set(`0x${'44'.repeat(32)}`, {
-      hashlock: `0x${'44'.repeat(32)}`,
+    const hashlock = `0x${'44'.repeat(32)}`;
+    hubState.htlcRoutes.set(hashlock, {
+      hashlock,
       tokenId: 1,
       amount: 10n,
       inboundEntity: userId,
       inboundLockId: 'await-secret-lock',
       createdTimestamp: hubState.timestamp,
+    });
+    hubState.lockBook.set('await-secret-lock', {
+      lockId: 'await-secret-lock',
+      accountId: userId,
+      tokenId: 1,
+      amount: 10n,
+      hashlock,
+      timelock: BigInt(hubState.timestamp + 60_000),
+      direction: 'incoming',
+      createdAt: BigInt(hubState.timestamp),
     });
 
     const result = await handleDisputeStart(
@@ -3140,7 +4398,118 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret:1'))).toBe(true);
   });
 
-  test('disputeStart waits while evidence tx can still change dispute arguments', async () => {
+  test('disputeStart ignores stale HTLC routes whose live lock is already gone', async () => {
+    const env = createEmptyEnv('prepare-dispute-stale-htlc-route');
+    const hubId = `0x${'94'.repeat(32)}`;
+    const userId = `0x${'96'.repeat(32)}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    hubState.accounts.set(userId, makeProposalAccount([], hubId, userId));
+    hubState.htlcRoutes.set(`0x${'45'.repeat(32)}`, {
+      hashlock: `0x${'45'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+      inboundEntity: userId,
+      inboundLockId: 'stale-timeout-lock',
+      createdTimestamp: hubState.timestamp,
+    });
+
+    const result = await handleDisputeStart(
+      hubState,
+      {
+        type: 'disputeStart',
+        data: { counterpartyEntityId: userId },
+      },
+      env,
+    );
+
+    expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret'))).toBe(false);
+    expect(result.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+  });
+
+  test('committed HTLC forward enforces announced PPM fee, not only base fee', async () => {
+    const env = createEmptyEnv('htlc-forward-ppm-fee');
+    const hubId = `0x${'a0'.repeat(32)}`;
+    const payerId = `0x${'a1'.repeat(32)}`;
+    const nextHopId = `0x${'a2'.repeat(32)}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    hubState.accounts.set(nextHopId, makeProposalAccount([], hubId, nextHopId));
+    env.gossip = {
+      getProfiles: () => [{
+        entityId: hubId,
+        metadata: {
+          routingFeePPM: 100_000,
+          baseFee: 10n,
+        },
+        accounts: [{
+          counterpartyId: nextHopId,
+          tokenCapacities: new Map([[1, { outCapacity: 1_000_000n, inCapacity: 0n }]]),
+        }],
+      }],
+    } as Env['gossip'];
+    const crypto = new NobleCryptoProvider();
+    const keyPair = x25519.keygen();
+    hubState.entityEncPubKey = hexBytes(keyPair.publicKey);
+    hubState.entityEncPrivKey = hexBytes(keyPair.secretKey);
+    const lockId = 'ppm-fee-lock';
+    const hashlock = `0x${'a3'.repeat(32)}`;
+    const encryptedLayer = await crypto.encrypt(JSON.stringify({
+      nextHop: nextHopId,
+      innerEnvelope: 'opaque-next-hop-envelope',
+      forwardAmount: '999990',
+    }), hubState.entityEncPubKey);
+    const accountMachine = makeProposalAccount([], payerId, hubId);
+    accountMachine.locks.set(lockId, {
+      lockId,
+      hashlock,
+      timelock: BigInt(hubState.timestamp + 120_000),
+      revealBeforeHeight: 100,
+      amount: 1_000_000n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 1,
+      createdTimestamp: hubState.timestamp,
+      envelope: {
+        nextHop: hubId,
+        innerEnvelope: encryptedLayer,
+      },
+    });
+    const mempoolOps: Array<{ accountId: string; tx: AccountTx }> = [];
+
+    await applyCommittedHtlcLockFollowup({
+      env,
+      state: hubState,
+      newState: hubState,
+      input: {
+        fromEntityId: payerId,
+        toEntityId: hubId,
+      } as AccountInput,
+      accountMachine,
+      outputs: [],
+      mempoolOps,
+    }, {
+      type: 'htlc_lock',
+      data: {
+        lockId,
+        hashlock,
+        timelock: BigInt(hubState.timestamp + 120_000),
+        revealBeforeHeight: 100,
+        amount: 1_000_000n,
+        tokenId: 1,
+      },
+    }, true);
+
+    expect(mempoolOps).toHaveLength(1);
+    expect(mempoolOps[0]?.accountId).toBe(payerId);
+    expect(mempoolOps[0]?.tx).toEqual({
+      type: 'htlc_resolve',
+      data: { lockId, outcome: 'error', reason: 'fee_below_ppm' },
+    });
+    expect(hubState.htlcRoutes.has(hashlock)).toBe(false);
+  });
+
+  test('disputeStart folds evidence tx mempool into dispute arguments instead of blocking', async () => {
     const env = createEmptyEnv('prepare-dispute-evidence-mempool');
     const hubId = `0x${'96'.repeat(32)}`;
     const userId = `0x${'97'.repeat(32)}`;
@@ -3166,7 +4535,78 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
-    expect(result.newState.messages.some((msg) => msg.includes('argumentMempool:swap_resolve'))).toBe(true);
+    expect(result.newState.messages.some((msg) => msg.includes('argumentMempool:swap_resolve'))).toBe(false);
+    expect(result.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+  });
+
+  test('disputeStart allows matching pending pull_resolve when explicit starter pull args are supplied', async () => {
+    const env = createEmptyEnv('prepare-dispute-explicit-pull-evidence');
+    env.timestamp = 11_000;
+    const hubId = `0x${'9a'.repeat(32)}`;
+    const userId = `0x${'9b'.repeat(32)}`;
+    const targetHub = `0x${'9c'.repeat(32)}`;
+    const targetUser = `0x${'9d'.repeat(32)}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'explicit-pull-evidence',
+      makerEntityId: userId,
+      hubEntityId: hubId,
+      source: {
+        jurisdiction: `stack:1:0x${'a1'.repeat(20)}`,
+        entityId: userId,
+        counterpartyEntityId: hubId,
+        tokenId: 1,
+        amount: 100n,
+      },
+      target: {
+        jurisdiction: `stack:2:0x${'a2'.repeat(20)}`,
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 2,
+        amount: 200n,
+      },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+    }, {
+      runtimeSeed: 'prepare-dispute-explicit-pull-evidence',
+      sourceDisputeDelayMs: 5_000,
+      now: env.timestamp,
+    });
+    const binary = buildCrossJurisdictionPullReveal(
+      route,
+      0x1234,
+      deriveCrossJurisdictionPrivateSeed('prepare-dispute-explicit-pull-evidence', route),
+    ).binary;
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const crossPullArgs = abiCoder.encode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      [{ fillRatios: [], secrets: [], pulls: [binary] }],
+    );
+    const starterInitialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
+    hubState.accounts.set(
+      userId,
+      makeProposalAccount([
+        {
+          type: 'pull_resolve',
+          data: { pullId: route.targetPull!.pullId, binary },
+        } as AccountTx,
+      ], hubId, userId),
+    );
+
+    const result = await handleDisputeStart(
+      hubState,
+      {
+        type: 'disputeStart',
+        data: { counterpartyEntityId: userId, starterInitialArguments },
+      },
+      env,
+    );
+
+    expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
+    expect(result.newState.messages.some((msg) => msg.includes('argumentMempool:pull_resolve'))).toBe(false);
+    expect(result.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 
   test('disputeFinalize waits when incoming dispute can still collect HTLC evidence', async () => {
@@ -3188,13 +4628,24 @@ describe('audit fail-fast regressions', () => {
       finalizeQueued: false,
     };
     hubState.accounts.set(userId, account);
-    hubState.htlcRoutes.set(`0x${'55'.repeat(32)}`, {
-      hashlock: `0x${'55'.repeat(32)}`,
+    const hashlock = `0x${'55'.repeat(32)}`;
+    hubState.htlcRoutes.set(hashlock, {
+      hashlock,
       tokenId: 1,
       amount: 10n,
       inboundEntity: userId,
       inboundLockId: 'counter-await-secret-lock',
       createdTimestamp: hubState.timestamp,
+    });
+    hubState.lockBook.set('counter-await-secret-lock', {
+      lockId: 'counter-await-secret-lock',
+      accountId: userId,
+      tokenId: 1,
+      amount: 10n,
+      hashlock,
+      timelock: BigInt(hubState.timestamp + 60_000),
+      direction: 'incoming',
+      createdAt: BigInt(hubState.timestamp),
     });
 
     const result = await handleDisputeFinalize(

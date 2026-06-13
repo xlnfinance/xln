@@ -99,6 +99,28 @@ const makeReplica = (entityId: string, timestamp: number, signerId = '1'): Entit
 describe('runtime ingress timestamp', () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  test('runtime loop does not restart once runtime state is sticky-halted', async () => {
+    const env = createIsolatedEnv('sticky-halt');
+    env.runtimeState = { halted: true, loopActive: false };
+    let startCalls = 0;
+    addTestJurisdiction(env, 'Testnet', {
+      startWatching() {
+        startCalls += 1;
+      },
+      stopWatching() {},
+      isWatching() {
+        return false;
+      },
+    });
+
+    const stop = startRuntimeLoop(env);
+    stop();
+    await sleep(20);
+
+    expect(env.runtimeState?.loopActive).toBe(false);
+    expect(startCalls).toBe(0);
+  });
+
   test('restored runtime does not fire future hooks without new ingress timestamp', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;

@@ -38,6 +38,7 @@ import { crossJurisdictionBookOwnerRef } from '../../cross-jurisdiction-orderboo
 import {
   isAccountControlTx,
   isArgumentChangingAccountTx,
+  isDisputeStartedByLeft,
   isDisputeEvidenceAccountTx,
 } from '../../account-dispute-policy';
 
@@ -123,15 +124,16 @@ const canonicalizeProofBodyStruct = (
   };
 };
 
-function hasNonZeroPullArgument(starterInitialArguments?: string): boolean {
+function extractNonZeroPullArgumentBinaries(starterInitialArguments?: string): Set<string> {
+  const binaries = new Set<string>();
   const raw = String(starterInitialArguments || '0x');
-  if (!raw || raw === '0x') return false;
+  if (!raw || raw === '0x') return binaries;
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   let argArray: string[];
   try {
     [argArray] = abiCoder.decode(['bytes[]'], raw) as unknown as [string[]];
   } catch {
-    return false;
+    return binaries;
   }
   for (const arg of argArray) {
     if (!arg || arg === '0x') continue;
@@ -142,7 +144,9 @@ function hasNonZeroPullArgument(starterInitialArguments?: string): boolean {
       ) as unknown as [{ pulls?: Array<string> }];
       for (const binary of decoded.pulls || []) {
         try {
-          if (decodeHashLadderBinary(binary).fillRatio > 0) return true;
+          if (decodeHashLadderBinary(binary).fillRatio > 0) {
+            binaries.add(String(binary || '').toLowerCase());
+          }
         } catch {
           // Malformed pull evidence proves nothing. This mirrors the Solidity
           // no-op rule and avoids treating attacker garbage as target safety.
@@ -152,7 +156,11 @@ function hasNonZeroPullArgument(starterInitialArguments?: string): boolean {
       // Ignore non-DeltaTransformer argument payloads.
     }
   }
-  return false;
+  return binaries;
+}
+
+function hasNonZeroPullArgument(starterInitialArguments?: string): boolean {
+  return extractNonZeroPullArgumentBinaries(starterInitialArguments).size > 0;
 }
 
 function targetCrossPullRiskAmount(state: EntityState, counterpartyEntityId: string, account: AccountMachine): bigint {
@@ -314,32 +322,53 @@ const collectHtlcRoutesAwaitingSecrets = (state: EntityState, counterpartyEntity
       String(route.inboundEntity || '').toLowerCase() !== counterparty &&
       String(route.outboundEntity || '').toLowerCase() !== counterparty
     ) {
-      continue;
+        continue;
     }
+    const hasLiveLock = Boolean(
+      (route.inboundLockId && state.lockBook?.has(route.inboundLockId)) ||
+      (route.outboundLockId && state.lockBook?.has(route.outboundLockId)),
+    );
+    if (!hasLiveLock) continue;
     pending.push(hashlock);
   }
   return pending;
 };
+
+const accountTxCanBeFoldedIntoDisputeArguments = (txType: string): boolean =>
+  !isArgumentChangingAccountTx(txType) || isDisputeEvidenceAccountTx(txType);
+
+const pendingFrameBlocksDisputeArguments = (account: AccountMachine): boolean =>
+  Boolean(account.pendingFrame?.accountTxs?.some(
+    (tx) => !accountTxCanBeFoldedIntoDisputeArguments(tx.type),
+  ));
 
 const collectDisputeEvidenceReadinessIssues = (
   state: EntityState,
   counterpartyEntityId: string,
   account: AccountMachine,
   now: number,
+  options: { allowedPendingPullResolveBinaries?: ReadonlySet<string> } = {},
 ): string[] => {
   const issues: string[] = [];
   const readyAfter = Number(account.disputePrepare?.readyAfter ?? 0);
   if (readyAfter > now) issues.push(`cooldown:${readyAfter - now}ms`);
-  if (account.pendingFrame) issues.push(`pendingFrame:${account.pendingFrame.height}`);
+  if (pendingFrameBlocksDisputeArguments(account)) issues.push(`pendingFrame:${account.pendingFrame!.height}`);
   if (account.pendingAccountInput) issues.push('pendingAccountInput');
-  // Any business tx can change the proof/argument pair. In prepare-dispute we
-  // may still process evidence-only txs to improve calldata, but as long as
-  // they are merely queued, disputeStart/finalize must not commit arguments.
-  // Counterexample: a queued swap_resolve contains the second 50% fill; starting
-  // with the old 50% arguments would let the on-chain dispute underclaim.
+  // Evidence txs are intentionally folded into dispute arguments by the builder
+  // from both pendingFrame and mempool. Only ordinary business txs make the
+  // proof/argument pair unstable.
+  const allowedPendingPullResolveBinaries = options.allowedPendingPullResolveBinaries ?? new Set<string>();
   const argumentChangingMempool = (account.mempool ?? [])
-    .map((tx) => tx.type)
-    .filter(isArgumentChangingAccountTx);
+    .filter((tx) => {
+      if (!isArgumentChangingAccountTx(tx.type)) return false;
+      if (isDisputeEvidenceAccountTx(tx.type)) return false;
+      if (tx.type === 'pull_resolve') {
+        const binary = String(tx.data.binary || '').toLowerCase();
+        if (binary && allowedPendingPullResolveBinaries.has(binary)) return false;
+      }
+      return true;
+    })
+    .map((tx) => tx.type);
   if (argumentChangingMempool.length > 0) issues.push(`argumentMempool:${argumentChangingMempool.join(',')}`);
   const awaitingSecrets = collectHtlcRoutesAwaitingSecrets(state, counterpartyEntityId);
   if (awaitingSecrets.length > 0) issues.push(`htlcAwaitingSecret:${awaitingSecrets.length}`);
@@ -429,6 +458,7 @@ export async function handleDisputeStart(
     acceptedCrossJTargetLossAmount,
   } = entityTx.data;
   const overrideInitialArguments = overrideStarterInitialArguments;
+  const explicitStarterPullBinaries = extractNonZeroPullArgumentBinaries(overrideInitialArguments);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
@@ -469,6 +499,7 @@ export async function handleDisputeStart(
     counterpartyEntityId,
     account,
     Number(newState.timestamp ?? 0),
+    { allowedPendingPullResolveBinaries: explicitStarterPullBinaries },
   );
   if (readinessIssues.length > 0) {
     addMessage(
@@ -788,7 +819,7 @@ export async function handleDisputeStart(
   // On-chain event will overwrite this with authoritative timeout/nonce data.
   if (!account.activeDispute) {
     account.activeDispute = {
-      startedByLeft: account.leftEntity === entityState.entityId,
+      startedByLeft: isDisputeStartedByLeft(entityState.entityId, account.leftEntity, account.rightEntity),
       initialProofbodyHash: proofBodyHashToUse,
       initialNonce: signedNonce,
       disputeTimeout: currentJBlock + defaultDisputeDelayBlocks,

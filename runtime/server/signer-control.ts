@@ -1,6 +1,7 @@
 import { ethers } from 'ethers';
 import { registerSignerKey } from '../account-crypto';
 import { serializeTaggedJson } from '../serialization-utils';
+import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
 
 type SignerControlDeps = {
@@ -39,7 +40,7 @@ export const handleSignerRegistration = async (
   } catch (error) {
     return new Response(
       serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to register signer' }),
-      { status: 500, headers },
+      { status: getControlBodyErrorStatus(error, 500), headers },
     );
   }
 };

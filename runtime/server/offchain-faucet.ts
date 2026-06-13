@@ -13,12 +13,29 @@ import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-re
 
 const faucetLog = createStructuredLogger('server.faucet');
 
+const isAccountConsensusReadyForFaucet = (account: ReturnType<typeof getAccountMachine>): boolean => {
+  if (!account) return false;
+  if (!account.currentFrame) return false;
+  if (Number(account.currentHeight ?? 0) <= 0) return false;
+  if (account.pendingFrame) return false;
+  if ((account.mempool?.length ?? 0) > 0) return false;
+  return true;
+};
+
+const describeAccountConsensusState = (account: ReturnType<typeof getAccountMachine>) => ({
+  exists: !!account,
+  currentHeight: Number(account?.currentHeight ?? 0),
+  pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
+  mempool: Number(account?.mempool?.length ?? 0),
+});
+
 export const handleOffchainFaucet = async (input: {
   req: Request;
   env: Env | null;
   headers: HeadersInit;
   relayStore: RelayStore;
   enqueueRuntimeInput: (env: Env, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: Env, runtimeInput: RuntimeInput) => void;
   registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
   getCurrentRuntimeHeight: (env: Env | null) => number;
   buildRuntimeInputStatusUrl: (id: string) => string;
@@ -29,6 +46,7 @@ export const handleOffchainFaucet = async (input: {
     headers,
     relayStore,
     enqueueRuntimeInput,
+    validateRuntimeInputAdmission,
     registerReceipt,
     getCurrentRuntimeHeight,
     buildRuntimeInputStatusUrl,
@@ -267,6 +285,34 @@ export const handleOffchainFaucet = async (input: {
           { status: 409, headers },
         );
       }
+      if (!isAccountConsensusReadyForFaucet(accountMachine)) {
+        const accountState = describeAccountConsensusState(accountMachine);
+        pushDebugEvent(relayStore, {
+          event: 'debug_event',
+          status: 'rejected',
+          reason: 'FAUCET_ACCOUNT_NOT_READY',
+          details: {
+            requestId,
+            hubEntityId,
+            userEntityId: normalizedUserEntityId,
+            requestedHubEntityId: requestedHubId || null,
+            accountState,
+          },
+        });
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'Selected hub account is still settling off-chain setup. Retry after the account frame commits.',
+            code: 'FAUCET_ACCOUNT_NOT_READY',
+            requestId,
+            hubEntityId,
+            userEntityId: normalizedUserEntityId,
+            requestedHubEntityId: requestedHubId || null,
+            accountState,
+          }),
+          { status: 409, headers },
+        );
+      }
       const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
       if (currentOutCapacity < amountWei) {
         return new Response(
@@ -308,7 +354,7 @@ export const handleOffchainFaucet = async (input: {
             description: faucetDescription,
           },
         }];
-        enqueueRuntimeInput(env, {
+        const runtimeInput: RuntimeInput = {
           runtimeTxs: [],
           entityInputs: [
             {
@@ -317,7 +363,9 @@ export const handleOffchainFaucet = async (input: {
               entityTxs,
             },
           ],
-        });
+        };
+        validateRuntimeInputAdmission(env, runtimeInput);
+        enqueueRuntimeInput(env, runtimeInput);
         receipt = registerReceipt({
           id: requestId,
           kind: 'faucet-offchain',
@@ -328,8 +376,8 @@ export const handleOffchainFaucet = async (input: {
       } catch (error) {
         return new Response(
           JSON.stringify({
-            error: 'Failed to enqueue faucet payment',
-            code: 'FAUCET_PAYMENT_ENQUEUE_FAILED',
+            error: 'Failed to admit faucet payment into runtime',
+            code: 'FAUCET_PAYMENT_ADMISSION_FAILED',
             details: (error as Error).message,
           }),
           { status: 503, headers },

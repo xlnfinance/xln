@@ -71,7 +71,7 @@
 
   async function handleResetEverything() {
     if (confirm('This will clear all wallets, accounts, and runtime state. Continue?')) {
-      await resetEverything('manual-reset');
+      await resetEverything({ confirmed: true, reason: 'runtime-creation-manual-reset' });
     }
   }
   let createLoginType: 'manual' | 'demo' = 'manual';

@@ -23,6 +23,20 @@ export const isAccountBusinessTx = (txType: string): boolean =>
 export const isArgumentChangingAccountTx = (txType: string): boolean =>
   isAccountBusinessTx(txType);
 
+export const isDisputeStartedByLeft = (
+  starterEntityId: string,
+  leftEntityId: string,
+  rightEntityId: string,
+): boolean => {
+  const starter = String(starterEntityId || '').toLowerCase();
+  const left = String(leftEntityId || '').toLowerCase();
+  const right = String(rightEntityId || '').toLowerCase();
+  if (!starter || !left || !right) return false;
+  if (starter === left) return true;
+  if (starter === right) return false;
+  return starter < right;
+};
+
 export const canProcessAccountTxForDisputeStatus = (
   status: string | undefined,
   txType: string,

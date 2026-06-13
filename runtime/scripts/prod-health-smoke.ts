@@ -84,10 +84,21 @@ const main = async (): Promise<void> => {
     storage?: { ok?: boolean };
     hubMesh?: { ok?: boolean };
     marketMaker?: { ok?: boolean; startupPhase?: string | null };
+    custody?: { ok?: boolean };
   };
+  const healthSummary = JSON.stringify({
+    coreOk: health.coreOk,
+    systemOk: health.systemOk,
+    degraded: health.degraded,
+    storageOk: health.storage?.ok ?? null,
+    hubMeshOk: health.hubMesh?.ok ?? null,
+    marketMakerOk: health.marketMaker?.ok ?? null,
+    startupPhase: health.marketMaker?.startupPhase ?? null,
+    custodyOk: health.custody?.ok ?? null,
+  });
 
-  requireCondition(health.coreOk === true, 'health.coreOk is not true');
-  requireCondition(health.systemOk === true, 'health.systemOk is not true');
+  requireCondition(health.coreOk === true, `health.coreOk is not true: ${healthSummary}`);
+  requireCondition(health.systemOk === true, `health.systemOk is not true: ${healthSummary}`);
   if (!args.allowDegraded) {
     const fatalDegraded = getFatalDegradedReasons(health.degraded);
     requireCondition(

@@ -30,7 +30,7 @@ import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
 import { batchAddSettlement, createEmptyBatch } from '../j-batch';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
-import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT } from './default-tokens';
+import { DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
 import {
   decodeBrowserVmEvents,
   toBrowserVmReceiptLogs,
@@ -381,7 +381,9 @@ export class BrowserVMProvider {
       throw new Error('Depository not deployed');
     }
 
-    for (const token of DEFAULT_TOKENS) {
+    const rawChainId = (this.common as EthereumCommon & { chainId?: () => bigint | number }).chainId?.();
+    const chainId = typeof rawChainId === 'bigint' ? Number(rawChainId) : Number(rawChainId);
+    for (const token of defaultTokensForJurisdiction({ chainId })) {
       const address = await this.deployErc20Token(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
       const tokenId = await this.registerErc20Token(address);
 

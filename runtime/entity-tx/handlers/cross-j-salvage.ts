@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import {
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteTransitionAllowed,
@@ -17,6 +18,15 @@ type CrossJurisdictionSalvageResult = {
 
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
+
+const buildCrossJurisdictionStarterPullArguments = (binary: string): string => {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const args = abiCoder.encode(
+    ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+    [{ fillRatios: [], secrets: [], pulls: [binary] }],
+  );
+  return abiCoder.encode(['bytes[]'], [[args]]);
+};
 
 export const handleCrossJurisdictionSalvageEntityTx = (
   env: Env,
@@ -116,6 +126,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
         type: 'disputeStart',
         data: {
           counterpartyEntityId: targetHubEntityId,
+          starterInitialArguments: buildCrossJurisdictionStarterPullArguments(binary),
           description:
             `Cross-j salvage ${routeId} fill=${verifiedFillRatio}/65535 ` +
             `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}` +

@@ -36,6 +36,7 @@ export type EncryptedRuntimeRecoveryBundleV1 = {
   bundleHash: string;
   iv: string;
   ciphertext: string;
+  compression?: 'gzip';
 };
 
 export type TowerModeV1 =

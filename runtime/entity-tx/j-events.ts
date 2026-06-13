@@ -43,6 +43,7 @@ import {
 import type { JEventApplyResult, JEventMempoolOp } from './j-events-types';
 import { appendBatchHistory, emptyOpBreakdown } from './j-events-history';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
+import { isDisputeStartedByLeft } from '../account-dispute-policy';
 
 const jEventLog = createStructuredLogger('j.event');
 
@@ -603,7 +604,7 @@ async function applyFinalizedJEvent(
       // Unified nonce: initialNonce = the nonce used in disputeStart (from event)
       // onChainNonce defaults to the dispute nonce when no richer event payload exists.
       account.activeDispute = {
-        startedByLeft: senderStr < counterentityStr,
+        startedByLeft: isDisputeStartedByLeft(senderStr, account.leftEntity, account.rightEntity),
         initialProofbodyHash: String(proofbodyHash),  // From event (committed on-chain)
         initialNonce: Number(nonce),
         disputeTimeout,

@@ -1,7 +1,7 @@
 import type { EntityReplica } from './types';
 import { ORDERBOOK_PRICE_SCALE, getBookSideLevels, type BookState } from './orderbook';
 
-export type MarketSideLevel = { price: string; size: number; total: number };
+export type MarketSideLevel = { price: string; size: number; total: number; orderCount?: number };
 
 export type MarketSnapshotPayload = {
   format: 'exact-price-levels-v2';
@@ -40,6 +40,7 @@ const extractMarketSideLevels = (
       price: level.priceTicks.toString(),
       size: level.qtyLots,
       total: running,
+      orderCount: level.orderIds.length,
     };
   });
 };
@@ -68,7 +69,7 @@ export const normalizeMarketPairId = (value: unknown): string | null => {
   const left = crossMatch[1] || '';
   const right = crossMatch[2] || '';
   if (!left || !right || left === right) return null;
-  return left < right ? `cross:${left}/${right}` : `cross:${right}/${left}`;
+  return `cross:${left}/${right}`;
 };
 
 function formatPercent3(numerator: number, denominator: number): string {

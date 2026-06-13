@@ -23,7 +23,7 @@ import {
   gotoApp as gotoSharedApp,
   switchToRuntime,
 } from './utils/e2e-demo-users';
-import { prepareUiPayment, submitUiPayment } from './utils/e2e-pay-ui';
+import { expectUiPaymentNoRoute, prepareUiPayment, submitUiPayment } from './utils/e2e-pay-ui';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
 import { timedStep } from './utils/e2e-timing';
 
@@ -840,17 +840,12 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 }
 
 async function attemptOverspend(page: Page, to: string, route: string[], amount: bigint): Promise<void> {
-  await prepareUiPayment(page, {
+  const errorText = await expectUiPaymentNoRoute(page, {
     recipientEntityId: to,
     amount,
     routeEntityIds: route,
   });
-
-  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
-  if (await sendPaymentBtn.isEnabled().catch(() => false)) {
-    await sendPaymentBtn.click();
-    await page.waitForTimeout(300);
-  }
+  console.log(`[E2E] Overspend rejected by route preflight: ${errorText}`);
 }
 
 /** Take named screenshot and save to test-results */
@@ -1092,25 +1087,28 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] 7. Reverse HTLC: Bob → Hub → Alice`);
     console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, 18)} USDC, fee: ${ethers.formatUnits(reverseFee, 18)} USDC`);
 
-    await waitForAccountIdle(page, bob!.entityId, hubId);
-    await waitForAccountIdle(page, alice!.entityId, hubId);
-
     // Bob already received funds in step 6, so reverse payment should not depend on a second faucet call.
     const b2 = b1;
     expect(b2, 'Bob must have enough OUT capacity for reverse payment').toBeGreaterThanOrEqual(reverseSenderSpend);
     console.log(`[E2E] Bob OUT available for reverse: ${b2}`);
 
+    // Account probes read the currently active isolatedEnv. Keep each probe and
+    // persisted-event cursor in the runtime it belongs to; otherwise the full
+    // bidirectional path can falsely report that the inactive peer has no account.
+    await waitForAccountIdle(page, bob!.entityId, hubId);
+
     await switchToRuntime(page, 'alice');
     await waitForActiveRuntime(page, aliceRuntimeId, 'switch-alice-before-reverse');
     await assertP2PSingletonAndWsHealth(page, 'switch-alice-before-reverse');
+    await waitForAccountIdle(page, alice!.entityId, hubId);
     const a3 = await outCap(page, alice!.entityId, hubId);
     const aliceReverseRendered = await getRenderedOutboundForAccount(page, hubId);
     const aliceReverseCursor = await getPersistedReceiptCursor(page);
-    const bobReverseFinalizeCursor = await getPersistedReceiptCursor(page);
 
     await switchToRuntime(page, 'bob');
     await waitForActiveRuntime(page, bobRuntimeId, 'switch-bob-before-reverse');
     await assertP2PSingletonAndWsHealth(page, 'switch-bob-before-reverse');
+    const bobReverseFinalizeCursor = await getPersistedReceiptCursor(page);
     // Verify Bob still has account before paying
     const b2check = await outCap(page, bob!.entityId, hubId);
     console.log(`[E2E] Bob OUT pre-pay check: ${b2check}`);

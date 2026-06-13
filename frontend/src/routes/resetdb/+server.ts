@@ -1,4 +1,8 @@
 import type { RequestHandler } from './$types';
+import {
+  isResetDbConfirmationValid,
+  RESET_CONFIRM_COOKIE,
+} from '$lib/utils/resetDbGuard';
 
 const DEFAULT_RETURN_TO = '/app';
 
@@ -16,7 +20,17 @@ function escapeHtml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
-export const GET: RequestHandler = ({ url }) => {
+export const GET: RequestHandler = ({ url, request }) => {
+  if (!isResetDbConfirmationValid(url, request.headers.get('cookie'))) {
+    return new Response('RESET_CONFIRMATION_REQUIRED', {
+      status: 403,
+      headers: {
+        'cache-control': 'no-store, max-age=0',
+        'content-type': 'text/plain; charset=utf-8',
+      },
+    });
+  }
+
   const returnTo = normalizeReturnTo(url.searchParams.get('returnTo'));
   const safeReturnTo = escapeHtml(returnTo);
   const html = `<!doctype html>
@@ -54,6 +68,7 @@ export const GET: RequestHandler = ({ url }) => {
       'cache-control': 'no-store, max-age=0',
       'clear-site-data': '"*"',
       'content-type': 'text/html; charset=utf-8',
+      'set-cookie': `${RESET_CONFIRM_COOKIE}=; Path=/resetdb; Max-Age=0; SameSite=Strict`,
     },
   });
 };

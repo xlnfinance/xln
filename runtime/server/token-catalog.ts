@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { JAdapter } from '../jadapter';
 import type { JTokenInfo } from '../jadapter/types';
-import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
+import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from '../jadapter/default-tokens';
 import { createStructuredLogger, shortId } from '../logger';
 import { HUB_REQUIRED_TOKEN_COUNT } from './hub-health';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
@@ -48,14 +48,15 @@ export const createTokenCatalogController = (input: {
       throw new Error('Depository address not available for token deployment');
     }
 
-    serverLog.info('tokens.deploy_defaults.start');
+    const desiredTokens = defaultTokensForJurisdiction({ chainId: Number((adapter as { chainId?: number }).chainId) });
+    serverLog.info('tokens.deploy_defaults.start', { symbols: desiredTokens.map(token => token.symbol) });
     const erc20Factory = new ethers.ContractFactory(
       ERC20Mock__factory.abi,
       ERC20Mock__factory.bytecode,
       signer as ethers.ContractRunner,
     );
 
-    for (const token of DEFAULT_TOKENS) {
+    for (const token of desiredTokens) {
       if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) continue;
       const tokenContract = await erc20Factory.deploy(
         token.name,
@@ -91,6 +92,12 @@ export const createTokenCatalogController = (input: {
   const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
     const adapter = input.getAdapter();
     if (!adapter) return [];
+    const desiredTokens = defaultTokensForJurisdiction({ chainId: Number((adapter as { chainId?: number }).chainId) });
+    const desiredSymbols = desiredTokens.map(token => token.symbol.trim().toUpperCase()).filter(Boolean);
+    const hasDesiredTokens = (tokens: JTokenInfo[]): boolean => {
+      const symbols = new Set(tokens.map(token => String(token.symbol || '').trim().toUpperCase()).filter(Boolean));
+      return desiredSymbols.every(symbol => symbols.has(symbol));
+    };
     const fallbackTokens = tokenCatalogCache ?? [];
     const safeGetCode = async (address: string): Promise<string> => {
       try {
@@ -121,7 +128,7 @@ export const createTokenCatalogController = (input: {
         const firstToken = tokenCatalogCache[0];
         if (firstToken?.address) {
           const code = await safeGetCode(firstToken.address);
-          if (code !== '0x' && code.length > 10) return tokenCatalogCache;
+          if (code !== '0x' && code.length > 10 && hasDesiredTokens(tokenCatalogCache)) return tokenCatalogCache;
           serverLog.warn('token_catalog.cache_stale');
           tokenCatalogCache = null;
         }
@@ -133,7 +140,9 @@ export const createTokenCatalogController = (input: {
 
     tokenCatalogPromise = (async () => {
       const current = await safeGetRegistry();
-      const needsMoreDefaultTokens = adapter.mode !== 'browservm' && current.length < HUB_REQUIRED_TOKEN_COUNT;
+      const needsMoreDefaultTokens = adapter.mode !== 'browservm' && (
+        current.length < HUB_REQUIRED_TOKEN_COUNT || !hasDesiredTokens(current)
+      );
 
       if (current.length > 0 && adapter.mode !== 'browservm') {
         const firstToken = current[0];

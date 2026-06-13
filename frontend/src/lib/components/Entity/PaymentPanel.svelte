@@ -1366,6 +1366,7 @@
     !findingRoutes &&
     !sendingPayment &&
     !paySuccess &&
+    !preflightError &&
     (!isSelfRecipient || hasSelectedRoute());
 
   $: activeRoute = selectedRouteIndex >= 0 && routes[selectedRouteIndex]

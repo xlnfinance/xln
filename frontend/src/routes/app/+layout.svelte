@@ -84,7 +84,7 @@
     const confirmed = window.confirm('reset everything');
     if (confirmed) {
       history.replaceState(null, '', '/app');
-      await resetEverything('hash-reset');
+      await resetEverything({ confirmed: true, reason: 'hash-reset' });
       return true;
     }
     history.replaceState(null, '', '/app');
@@ -99,7 +99,7 @@
     if (!confirmed) return;
     resettingEverything = true;
     try {
-      await resetEverything('loading-screen');
+      await resetEverything({ confirmed: true, reason: 'loading-screen' });
     } finally {
       resettingEverything = false;
     }
@@ -291,7 +291,8 @@
     }
     if (storedVersion === currentVersion) return false;
 
-    await resetEverything(`deploy-version-mismatch:${storedVersion}->${currentVersion}`);
+    error.set(`Deploy version changed from ${storedVersion} to ${currentVersion}. Review recovery coverage before resetting local data.`);
+    isLoading.set(false);
     return true;
   }
 
@@ -500,6 +501,9 @@
     <h2>❌ Initialization Failed</h2>
     <p class="error-msg">{$error}</p>
     <button onclick={() => initializeXLN()}>Retry</button>
+    <button onclick={handleResetEverything} disabled={resettingEverything}>
+      {resettingEverything ? 'Resetting...' : 'Reset local data'}
+    </button>
   </div>
 {:else if !activeTabLockReady || $isLoading || !$xlnFunctions.isReady}
   <div class="loading-screen" data-testid="app-loading-screen">

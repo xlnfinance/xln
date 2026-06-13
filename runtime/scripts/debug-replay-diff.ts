@@ -79,7 +79,7 @@ const readJReplicaEntries = (value: unknown): Array<[string, JReplica]> =>
         blockNumber: readBigInt(replica.blockNumber) ?? 0n,
         stateRoot: replica.stateRoot instanceof Uint8Array && replica.stateRoot.length === 32
           ? replica.stateRoot
-          : new Uint8Array(32),
+          : null,
         mempool: Array.isArray(replica.mempool) ? replica.mempool : [],
         blockDelayMs: readNumber(replica.blockDelayMs) ?? 0,
         lastBlockTimestamp: readNumber(replica.lastBlockTimestamp) ?? 0,
@@ -236,7 +236,7 @@ async function main() {
   const jReplica: JReplica = {
     name: jurisdiction.name,
     blockNumber: 0n,
-    stateRoot: new Uint8Array(32),
+    stateRoot: null,
     mempool: [],
     blockDelayMs: 0,
     lastBlockTimestamp: env.timestamp,

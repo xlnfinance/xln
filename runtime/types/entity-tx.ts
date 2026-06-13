@@ -255,6 +255,8 @@ export type EntityTx =
       type: 'crossJurisdictionFillNotice';
       data: {
         orderId: string;
+        routeHash?: string;
+        previousFillSeq?: number;
         fillSeq: number;
         incrementalSourceAmount: bigint;
         incrementalTargetAmount: bigint;
@@ -266,6 +268,7 @@ export type EntityTx =
         priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
         priceImprovementAmount?: bigint;
         priceImprovementTokenId?: number;
+        cancelRemainder?: boolean;
         priceTicks?: bigint;
         pairId: string;
       };
@@ -319,6 +322,7 @@ export type EntityTx =
         priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
         priceImprovementAmount?: bigint;
         priceImprovementTokenId?: number;
+        cancelRemainder?: boolean;
         reason?: string;
       };
     }

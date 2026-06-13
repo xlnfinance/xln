@@ -27,6 +27,21 @@ import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccoun
 
 const accountLog = createStructuredLogger('account');
 
+const isCrossJurisdictionPullResolveTx = (
+  accountMachine: AccountMachine,
+  accountTx: AccountTx,
+): accountTx is Extract<AccountTx, { type: 'pull_resolve' }> => {
+  if (accountTx.type !== 'pull_resolve') return false;
+  const pullId = accountTx.data.pullId;
+  if (accountMachine.pulls?.get(pullId)?.crossJurisdiction) return true;
+  for (const offer of accountMachine.swapOffers?.values() ?? []) {
+    const route = offer.crossJurisdiction;
+    if (!route) continue;
+    if (route.sourcePull?.pullId === pullId || route.targetPull?.pullId === pullId) return true;
+  }
+  return false;
+};
+
 export async function proposeAccountFrame(
   env: Env,
   accountMachine: AccountMachine,
@@ -205,6 +220,12 @@ export async function proposeAccountFrame(
               `seq=${accountTx.data.fillSeq} error=${result.error || 'validation_failed'}`,
           );
         }
+        if (isCrossJurisdictionPullResolveTx(accountMachine, accountTx)) {
+          throw new Error(
+            `CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED: pull=${accountTx.data.pullId} ` +
+              `error=${result.error || 'validation_failed'}`,
+          );
+        }
         txsToRemove.push(accountTx);
         accountLog.debug('tx.skipped', { type: accountTx.type, error: result.error || 'unknown' });
 
@@ -342,7 +363,7 @@ export async function proposeAccountFrame(
     };
   }
 
-  const { buildAccountProofBody, createDisputeProofHash } = await import('../proof-builder');
+  const { buildAccountProofBody, createDisputeProofHashWithNonce } = await import('../proof-builder');
   const depositoryAddress = getAccountDepositoryAddress(env, accountMachine);
   if (!isAddress20(depositoryAddress)) {
     return {
@@ -356,7 +377,12 @@ export async function proposeAccountFrame(
   let disputeHash: string;
   try {
     proofResult = buildAccountProofBody(clonedMachine);
-    disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
+    disputeHash = createDisputeProofHashWithNonce(
+      clonedMachine,
+      proofResult.proofBodyHash,
+      depositoryAddress,
+      clonedMachine.proofHeader.nonce,
+    );
   } catch (error) {
     return {
       success: false,

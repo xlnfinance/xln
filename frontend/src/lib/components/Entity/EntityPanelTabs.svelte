@@ -1197,8 +1197,7 @@
   $: workspaceAccountIds = accountIds.filter((id) => {
     const account = replica?.state?.accounts?.get?.(id) as AccountMachine | undefined;
     if (!account) return false;
-    const isFinalizedDisputed = String(account.status || '') === 'disputed' && !account.activeDispute;
-    return !isFinalizedDisputed;
+    return String(account.status || '') !== 'disputed';
   });
   let lastAccountReplicaSignature = '';
   $: {
@@ -3662,7 +3661,7 @@
     if (!confirmed) return;
     resettingEverything = true;
     try {
-      await resetEverything('entity-empty-state');
+      await resetEverything({ confirmed: true, reason: 'entity-empty-state' });
     } finally {
       resettingEverything = false;
     }
@@ -3860,18 +3859,28 @@
     };
   })();
 
+  type DisputedAccountView = {
+    counterpartyId: string;
+    status: 'active' | 'finalized';
+  };
+
   $: disputedAccounts = (() => {
-    const out: Array<{ counterpartyId: string; status: string }> = [];
+    const out: DisputedAccountView[] = [];
     const accounts = replica?.state?.accounts;
     if (!(accounts instanceof Map)) return out;
     for (const [counterpartyId, account] of accounts.entries()) {
       const activeDispute = account.activeDispute;
       const status = String(account.status || '');
-      const isFinalizedDisputed = status === 'disputed' && !activeDispute;
-      if (!isFinalizedDisputed) continue;
-      out.push({ counterpartyId: String(counterpartyId), status: 'disputed' });
+      if (status !== 'disputed') continue;
+      out.push({
+        counterpartyId: String(counterpartyId),
+        status: activeDispute ? 'active' : 'finalized',
+      });
     }
-    return out.sort((a, b) => compareText(a.counterpartyId, b.counterpartyId));
+    return out.sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+      return compareText(a.counterpartyId, b.counterpartyId);
+    });
   })();
 
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
@@ -4430,6 +4439,13 @@
     selectedAccountId = null;
     activeTab = 'accounts';
     accountWorkspaceTab = 'open';
+  }
+
+  function openDisputedAccount(counterpartyEntityId: string) {
+    const next = String(counterpartyEntityId || '').trim();
+    if (!next) return;
+    selectedAccountId = next;
+    activeTab = 'accounts';
   }
 
   function goToLive() {
@@ -5762,23 +5778,34 @@
                 {#if disputedAccounts.length > 0}
                   <div class="open-section disputed-section">
                     <h4 class="section-head">Disputed Accounts</h4>
-                    <p class="muted" style="margin-top: 0;">Hidden from the main list. Reopen after finalize.</p>
+                    <p class="muted" style="margin-top: 0;">Hidden from the main list. Open active disputes, reopen only after finalize.</p>
                     <div class="disputed-list">
                       {#each disputedAccounts as item (item.counterpartyId)}
                         <div class="disputed-row">
                           <div class="disputed-meta">
                             <div class="disputed-id">{item.counterpartyId}</div>
                             <div class="disputed-state">
-                              Finalized disputed account (hidden from main list)
+                              {item.status === 'active'
+                                ? 'Active dispute in progress'
+                                : 'Finalized disputed account'}
                             </div>
                           </div>
-                          <button
-                            class="btn-reopen-disputed"
-                            on:click={() => reopenDisputedAccount(item.counterpartyId)}
-                            disabled={!activeIsLive}
-                          >
-                            Reopen
-                          </button>
+                          {#if item.status === 'active'}
+                            <button
+                              class="btn-reopen-disputed"
+                              on:click={() => openDisputedAccount(item.counterpartyId)}
+                            >
+                              Open
+                            </button>
+                          {:else}
+                            <button
+                              class="btn-reopen-disputed"
+                              on:click={() => reopenDisputedAccount(item.counterpartyId)}
+                              disabled={!activeIsLive}
+                            >
+                              Reopen
+                            </button>
+                          {/if}
                         </div>
                       {/each}
                     </div>

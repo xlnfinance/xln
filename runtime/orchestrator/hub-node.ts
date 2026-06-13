@@ -11,7 +11,7 @@ import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
-import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
+import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
@@ -30,6 +30,7 @@ import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { isLocalOperatorRequest, publicLocalHubHealth } from '../health-redaction';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
+import { getJReplicaByJurisdictionRef } from '../jurisdiction-runtime';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,
@@ -51,6 +52,7 @@ import {
   stopP2P,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
+  getEntityJAdapter,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   listPersistedCheckpointHeights,
@@ -67,6 +69,7 @@ import {
   DEFAULT_ACCOUNT_TOKEN_IDS,
   getAccountMachine,
   getCreditGrantedByEntity,
+  getEntityOutCapacity,
   getEntityReplicaById,
   HUB_DEFAULT_MIN_TRADE_SIZE,
   HUB_DEFAULT_SUPPORTED_PAIRS,
@@ -82,7 +85,6 @@ import {
   waitUntil,
 } from './mesh-common';
 import {
-  formatJurisdictionDisplayName,
   requireJurisdictionBlockTimeMs,
   resetMeshJurisdictionsCache,
   resolveMeshJurisdictionConfig,
@@ -124,6 +126,12 @@ type HubPairHealth = {
   ready: boolean;
 };
 
+type VisibleHubProfile = {
+  name: string;
+  entityId: string;
+  jurisdictionName: string;
+};
+
 type StageTiming = {
   startedAt: number | null;
   completedAt: number | null;
@@ -131,6 +139,44 @@ type StageTiming = {
 };
 
 type TimingMap = Record<string, StageTiming>;
+
+type BootstrapReserveTokenHealth = {
+  tokenId: number;
+  symbol: string;
+  decimals: number;
+  current: string;
+  expectedMin: string;
+  ready: boolean;
+  operational?: boolean;
+  targetMet?: boolean;
+};
+
+type BootstrapReserveEntityHealth = {
+  entityId: string;
+  jurisdictionName?: string;
+  primary?: boolean;
+  ready: boolean;
+  targetMet: boolean;
+  tokens: BootstrapReserveTokenHealth[];
+};
+
+type BootstrapReserveHealth = {
+  ok: boolean;
+  targetMet?: boolean;
+  tokens: BootstrapReserveTokenHealth[];
+  entities?: BootstrapReserveEntityHealth[];
+};
+
+type HubBootstrapEntry = {
+  entityId: string;
+  signerId: string;
+  name: string;
+  jurisdictionName: string;
+  chainId?: number;
+  depositoryAddress?: string;
+  entityProviderAddress?: string;
+  primary: boolean;
+};
 
 type LocalHealthResponse = {
   ok: boolean;
@@ -152,20 +198,7 @@ type LocalHealthResponse = {
     ready: boolean;
     pairs: HubPairHealth[];
   };
-  bootstrapReserves: {
-    ok: boolean;
-    targetMet?: boolean;
-    tokens: Array<{
-      tokenId: number;
-      symbol: string;
-      decimals: number;
-      current: string;
-      expectedMin: string;
-      ready: boolean;
-      operational?: boolean;
-      targetMet?: boolean;
-    }>;
-  };
+  bootstrapReserves: BootstrapReserveHealth;
   jurisdiction: JurisdictionImportDiagnostics | null;
   jadapter: {
     ready: boolean;
@@ -199,6 +232,22 @@ type JurisdictionsFile = {
     };
   }>;
   defaults?: Record<string, unknown>;
+};
+
+const PRIMARY_TESTNET_JURISDICTION_NAME = 'Testnet';
+
+const normalizeJurisdictionDisplayName = (value: unknown): string => {
+  const name = String(value || '').trim();
+  const normalized = name.toLowerCase();
+  if (
+    normalized === 'arrakis'
+    || normalized === 'arrakis (shared anvil)'
+    || normalized === 'shared anvil'
+    || normalized === 'wakanda'
+  ) {
+    return PRIMARY_TESTNET_JURISDICTION_NAME;
+  }
+  return name;
 };
 
 type JurisdictionImportDiagnostics = {
@@ -456,7 +505,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
     const previous = jurisdictions[targetKey] ?? {};
     jurisdictions[targetKey] = {
       ...previous,
-      name: previous.name ?? 'Arrakis (Shared Anvil)',
+      name: normalizeJurisdictionDisplayName(previous.name) || PRIMARY_TESTNET_JURISDICTION_NAME,
       chainId: Number(jadapter.chainId || 31337),
       rpc: publicRpcUrl,
       explorer: previous.explorer ?? '',
@@ -550,7 +599,7 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
       arrakis: {
-        name: String(replica.name || activeName || 'Arrakis (Shared Anvil)'),
+        name: normalizeJurisdictionDisplayName(replica.name || activeName) || PRIMARY_TESTNET_JURISDICTION_NAME,
         chainId: Number(replica.chainId || 31337),
         rpc: toPublicRpcUrl(String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc')),
         contracts: {
@@ -593,7 +642,7 @@ const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> 
   await writeJurisdictionAddresses(jadapter, resolvedArgs.rpcUrl);
 };
 
-const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
+const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = ''): Promise<void> => {
   if (jadapter.mode === 'browservm') return;
   const existing = await jadapter.getTokenRegistry().catch(() => []);
   const existingSymbols = new Set(
@@ -607,10 +656,14 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
     throw new Error('TOKEN_DEPLOY_DEPOSITORY_MISSING');
   }
 
-  console.log(`[${resolvedArgs.name}] deploying default tokens on dev chain`);
+  const desiredTokens = defaultTokensForJurisdiction({
+    name: jurisdictionName,
+    chainId: Number((jadapter as { chainId?: number }).chainId),
+  });
+  console.log(`[${resolvedArgs.name}] deploying default tokens on dev chain: ${desiredTokens.map(token => token.symbol).join(',')}`);
   const signer = jadapter.signer as unknown as JurisdictionSigner;
   const erc20Factory = new ERC20Mock__factory(signer);
-  for (const token of DEFAULT_TOKENS) {
+  for (const token of desiredTokens) {
     if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
       continue;
     }
@@ -634,11 +687,21 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
   }
 };
 
-const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean): Promise<JTokenInfo[]> => {
+const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean, jurisdictionName = ''): Promise<JTokenInfo[]> => {
   const current = await jadapter.getTokenRegistry().catch(() => []);
-  if (current.length >= HUB_REQUIRED_TOKEN_COUNT) return current;
+  const desiredTokens = defaultTokensForJurisdiction({
+    name: jurisdictionName,
+    chainId: Number((jadapter as { chainId?: number }).chainId),
+  });
+  const existingSymbols = new Set(
+    current
+      .map(token => String(token.symbol || '').trim().toUpperCase())
+      .filter(Boolean),
+  );
+  const hasDesiredTokens = desiredTokens.every(token => existingSymbols.has(token.symbol.trim().toUpperCase()));
+  if (current.length >= HUB_REQUIRED_TOKEN_COUNT && hasDesiredTokens) return current;
   if (allowDeploy) {
-    await deployDefaultTokensOnRpc(jadapter);
+    await deployDefaultTokensOnRpc(jadapter, jurisdictionName);
     return await waitForTokenCatalog(jadapter);
   }
   return [];
@@ -745,6 +808,35 @@ const waitForReserveUpdate = async (
   return null;
 };
 
+const tokenCatalogsByEntityId = new Map<string, JTokenInfo[]>();
+
+const normalizeEntityId = (entityId: string): string => String(entityId || '').trim().toLowerCase();
+
+const requireJAdapterForEntity = (env: Env, entityId: string, purpose: string): JAdapter => {
+  const adapter = getEntityJAdapter(env, entityId);
+  if (!adapter) {
+    throw new Error(`${purpose}_JADAPTER_MISSING: entity=${entityId}`);
+  }
+  return adapter;
+};
+
+const requireJAdapterForDebugReserve = (
+  env: Env,
+  entityId: string,
+  jurisdictionRef: string,
+): JAdapter => {
+  const explicitJurisdiction = String(jurisdictionRef || '').trim();
+  if (explicitJurisdiction) {
+    const jReplica = getJReplicaByJurisdictionRef(env, explicitJurisdiction);
+    const adapter = jReplica?.jadapter;
+    if (!adapter) {
+      throw new Error(`DEBUG_RESERVE_JURISDICTION_UNAVAILABLE: entity=${entityId} jurisdiction=${explicitJurisdiction}`);
+    }
+    return adapter;
+  }
+  return requireJAdapterForEntity(env, entityId, 'DEBUG_RESERVE');
+};
+
 const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
   const replica = getEntityReplicaById(env, entityId);
   const tokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT).map(token => {
@@ -775,10 +867,7 @@ const syncReserveSnapshotFromChain = async (
   entityId: string,
   tokenCatalog: JTokenInfo[],
 ): Promise<LocalHealthResponse['bootstrapReserves']> => {
-  const jadapter = getActiveJAdapter(env);
-  if (!jadapter) {
-    throw new Error('ACTIVE_JADAPTER_MISSING_FOR_RESERVE_SYNC');
-  }
+  const jadapter = requireJAdapterForEntity(env, entityId, 'RESERVE_SYNC');
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state) {
     throw new Error(`HUB_REPLICA_MISSING_FOR_RESERVE_SYNC: ${entityId}`);
@@ -798,35 +887,38 @@ const ensureBootstrapReserves = async (
   tokenCatalog: JTokenInfo[],
 ): Promise<LocalHealthResponse['bootstrapReserves']> => {
   const startedAt = startTiming('reserve_funding');
-  const jadapter = getActiveJAdapter(env);
-  if (!jadapter) {
-    throw new Error('ACTIVE_JADAPTER_MISSING');
-  }
+  const jadapter = requireJAdapterForEntity(env, entityId, 'RESERVE_FUNDING');
 
   const bootstrapTokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
+  await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
   if (!resolvedArgs.deployTokens) {
-    const reserveHealth = await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
+    const reserveHealth = getReserveHealth(env, entityId, tokenCatalog);
     finishTiming('reserve_funding', startedAt);
     return reserveHealth;
   }
+  const replica = getEntityReplicaById(env, entityId);
 
   const mints = bootstrapTokens
     .map(token => {
       const tokenId = Number(token.tokenId);
       if (!Number.isFinite(tokenId) || tokenId <= 0) return null;
       const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
+      const target = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
+      const current = replica?.state?.reserves?.get(tokenId) ?? 0n;
+      if (current >= target) return null;
       return {
         entityId,
         tokenId,
-        amount: HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals),
+        amount: target - current,
       };
     })
     .filter((mint): mint is { entityId: string; tokenId: number; amount: bigint } => mint !== null);
 
-  const events = await jadapter.debugFundReservesBatch(mints);
-  await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`);
-
-  await settleRuntimeFor(env, 30);
+  if (mints.length > 0) {
+    const events = await jadapter.debugFundReservesBatch(mints);
+    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`);
+    await settleRuntimeFor(env, 30);
+  }
   const reserveHealth = await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
 
   finishTiming('reserve_funding', startedAt);
@@ -835,34 +927,49 @@ const ensureBootstrapReserves = async (
 
 const ensurePeerBootstrapReserves = async (
   env: Env,
-  peerEntityIds: string[],
+  peerProfiles: VisibleHubProfile[],
   tokenCatalog: JTokenInfo[],
 ): Promise<void> => {
-  if (!resolvedArgs.deployTokens || peerEntityIds.length === 0) return;
-  const jadapter = getActiveJAdapter(env);
-  if (!jadapter) {
-    throw new Error('ACTIVE_JADAPTER_MISSING_FOR_PEER_RESERVES');
-  }
-  const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
-  for (const peerEntityId of peerEntityIds) {
-    for (const token of tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
-      const tokenId = Number(token.tokenId);
-      if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-      const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
-      const target = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
-      const current = await jadapter.getReserves(peerEntityId, tokenId);
-      if (current >= target) continue;
-      mints.push({
-        entityId: peerEntityId,
-        tokenId,
-        amount: target - current,
-      });
+  if (!resolvedArgs.deployTokens || peerProfiles.length === 0) return;
+  const profilesByJurisdiction = new Map<string, VisibleHubProfile[]>();
+  for (const profile of peerProfiles) {
+    const jurisdictionName = String(profile.jurisdictionName || '').trim();
+    if (!jurisdictionName) {
+      throw new Error(`PEER_RESERVE_JURISDICTION_MISSING: entity=${profile.entityId}`);
     }
+    if (!profilesByJurisdiction.has(jurisdictionName)) profilesByJurisdiction.set(jurisdictionName, []);
+    profilesByJurisdiction.get(jurisdictionName)!.push(profile);
   }
-  if (mints.length === 0) return;
-  const events = await jadapter.debugFundReservesBatch(mints);
-  await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund`);
-  await settleRuntimeFor(env, 20);
+
+  for (const [jurisdictionName, profiles] of profilesByJurisdiction) {
+    const jadapter = env.jReplicas?.get(jurisdictionName)?.jadapter;
+    if (!jadapter) {
+      throw new Error(`PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionName}`);
+    }
+    const catalog = jurisdictionName === env.activeJurisdiction
+      ? tokenCatalog
+      : await ensureTokenCatalog(jadapter, true, jurisdictionName);
+    const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
+    for (const peer of profiles) {
+      for (const token of catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
+        const tokenId = Number(token.tokenId);
+        if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
+        const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
+        const target = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
+        const current = await jadapter.getReserves(peer.entityId, tokenId);
+        if (current >= target) continue;
+        mints.push({
+          entityId: peer.entityId,
+          tokenId,
+          amount: target - current,
+        });
+      }
+    }
+    if (mints.length === 0) continue;
+    const events = await jadapter.debugFundReservesBatch(mints);
+    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund-${jurisdictionName}`);
+    await settleRuntimeFor(env, 20);
+  }
 };
 
 const getEntityJurisdictionName = (env: Env, entityId: string | null): string => {
@@ -871,7 +978,101 @@ const getEntityJurisdictionName = (env: Env, entityId: string | null): string =>
   return String(replica?.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
 };
 
-const readVisibleHubProfiles = (env: Env, jurisdictionName: string): Array<{ name: string; entityId: string }> => {
+const resolveEntityTokenCatalog = async (
+  env: Env,
+  entityId: string,
+): Promise<JTokenInfo[]> => {
+  const normalizedEntityId = normalizeEntityId(entityId);
+  const cached = tokenCatalogsByEntityId.get(normalizedEntityId);
+  if (cached && cached.length >= HUB_REQUIRED_TOKEN_COUNT) return cached;
+
+  const jadapter = requireJAdapterForEntity(env, entityId, 'TOKEN_CATALOG');
+  const jurisdictionName = getEntityJurisdictionName(env, entityId);
+  const catalog = resolvedArgs.deployTokens
+    ? await ensureTokenCatalog(jadapter, true, jurisdictionName)
+    : await waitForTokenCatalog(jadapter);
+  if (catalog.length < HUB_REQUIRED_TOKEN_COUNT) {
+    throw new Error(
+      `TOKEN_CATALOG_INCOMPLETE_FOR_ENTITY: entity=${entityId} jurisdiction=${jurisdictionName || 'unknown'} ` +
+        `count=${catalog.length} required=${HUB_REQUIRED_TOKEN_COUNT}`,
+    );
+  }
+  tokenCatalogsByEntityId.set(normalizedEntityId, catalog);
+  return catalog;
+};
+
+const buildAggregateReserveHealth = (
+  primaryHealth: BootstrapReserveHealth | null,
+  entities: BootstrapReserveEntityHealth[],
+): BootstrapReserveHealth => ({
+  ok: entities.length > 0 && entities.every(entity => entity.ready),
+  targetMet: entities.length > 0 && entities.every(entity => entity.targetMet),
+  tokens: primaryHealth?.tokens ?? entities[0]?.tokens ?? [],
+  entities,
+});
+
+const buildHubBootstrapReserveHealth = (
+  env: Env,
+  primaryEntityId: string | null,
+  fallbackCatalog: JTokenInfo[],
+  hubEntities: HubBootstrapEntry[] = [],
+): BootstrapReserveHealth => {
+  const entries = hubEntities.length > 0
+    ? hubEntities
+    : primaryEntityId
+      ? [{
+          entityId: primaryEntityId,
+          signerId: '',
+          name: resolvedArgs.name,
+          jurisdictionName: getEntityJurisdictionName(env, primaryEntityId),
+          primary: true,
+        }]
+      : [];
+  const entities = entries.map((entry) => {
+    const catalog = tokenCatalogsByEntityId.get(normalizeEntityId(entry.entityId)) ?? fallbackCatalog;
+    const health = getReserveHealth(env, entry.entityId, catalog);
+    return {
+      entityId: entry.entityId,
+      jurisdictionName: entry.jurisdictionName,
+      primary: entry.primary,
+      ready: health.ok === true,
+      targetMet: health.targetMet === true,
+      tokens: health.tokens,
+    };
+  });
+  const primary = entries.findIndex(entry => entry.primary);
+  const primaryHealth = primary >= 0 && entities[primary]
+    ? { ok: entities[primary]!.ready, targetMet: entities[primary]!.targetMet, tokens: entities[primary]!.tokens }
+    : null;
+  return buildAggregateReserveHealth(primaryHealth, entities);
+};
+
+const ensureHubBootstrapReserves = async (
+  env: Env,
+  hubEntities: HubBootstrapEntry[],
+): Promise<BootstrapReserveHealth> => {
+  const entities: BootstrapReserveEntityHealth[] = [];
+  let primaryHealth: BootstrapReserveHealth | null = null;
+
+  for (const entry of hubEntities) {
+    const catalog = await resolveEntityTokenCatalog(env, entry.entityId);
+    const health = await ensureBootstrapReserves(env, entry.entityId, catalog);
+    const entityHealth: BootstrapReserveEntityHealth = {
+      entityId: entry.entityId,
+      jurisdictionName: entry.jurisdictionName,
+      primary: entry.primary,
+      ready: health.ok === true,
+      targetMet: health.targetMet === true,
+      tokens: health.tokens,
+    };
+    entities.push(entityHealth);
+    if (entry.primary) primaryHealth = health;
+  }
+
+  return buildAggregateReserveHealth(primaryHealth, entities);
+};
+
+const readVisibleHubProfiles = (env: Env, jurisdictionName: string): VisibleHubProfile[] => {
   const normalizedJurisdiction = String(jurisdictionName || '').trim().toLowerCase();
   const profiles = env.gossip?.getProfiles?.() || [];
   return profiles
@@ -883,8 +1084,9 @@ const readVisibleHubProfiles = (env: Env, jurisdictionName: string): Array<{ nam
     .map(profile => ({
       name: String(profile.name || '').trim(),
       entityId: String(profile.entityId || '').toLowerCase(),
+      jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
     }))
-    .filter(profile => profile.name.length > 0 && profile.entityId.length > 0);
+    .filter(profile => profile.name.length > 0 && profile.entityId.length > 0 && profile.jurisdictionName.length > 0);
 };
 
 const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
@@ -908,6 +1110,7 @@ const buildLocalHealth = (
   entityId: string | null,
   tokenCatalog: JTokenInfo[],
   jadapter: JAdapter | null,
+  hubEntities: HubBootstrapEntry[] = [],
 ): LocalHealthResponse => {
   const selfJurisdictionName = getEntityJurisdictionName(env, entityId);
   const visibleHubProfiles = readVisibleHubProfiles(env, selfJurisdictionName);
@@ -939,7 +1142,7 @@ const buildLocalHealth = (
       ready: Boolean(entityId) && pairs.length === Math.max(0, requiredNames.length - 1) && pairs.every(pair => pair.ready),
       pairs,
     },
-    bootstrapReserves: entityId ? getReserveHealth(env, entityId, tokenCatalog) : { ok: false, targetMet: false, tokens: [] },
+    bootstrapReserves: buildHubBootstrapReserveHealth(env, entityId, tokenCatalog, hubEntities),
     jurisdiction: jurisdictionImportDiagnostics,
     jadapter: {
       ready: Boolean(jadapter?.addresses?.depository && jadapter?.addresses?.entityProvider),
@@ -963,16 +1166,7 @@ const run = async (): Promise<void> => {
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
   let bootstrap: { entityId: string; signerId: string } | null = null;
-  const hubBootstraps: Array<{
-    entityId: string;
-    signerId: string;
-    name: string;
-    jurisdictionName: string;
-    chainId?: number;
-    depositoryAddress?: string;
-    entityProviderAddress?: string;
-    primary: boolean;
-  }> = [];
+  const hubBootstraps: HubBootstrapEntry[] = [];
   const getImportedJurisdictionContracts = (
     jurisdictionName: string,
     fallback?: JurisdictionConfig['contracts'],
@@ -1015,6 +1209,16 @@ const run = async (): Promise<void> => {
   let activeTokenCatalog: JTokenInfo[] = [];
   let meshLoop: ReturnType<typeof setInterval> | null = null;
   let shuttingDown = false;
+  type DirectEntityInputDebug = {
+    at: number;
+    fromRuntimeId: string;
+    entityId: string;
+    signerId: string;
+    txTypes: string[];
+    error?: string;
+  };
+  let lastDirectEntityInput: DirectEntityInputDebug | null = null;
+  let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
 
   const externalWalletApi = createExternalWalletApi({
     getJAdapter: () => activeJAdapter,
@@ -1038,7 +1242,23 @@ const run = async (): Promise<void> => {
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed: resolvedArgs.seed,
     onEntityInput: async (from, input, ingressTimestamp) => {
-      handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+      const debugEntry: DirectEntityInputDebug = {
+        at: Date.now(),
+        fromRuntimeId: String(from || ''),
+        entityId: String(input.entityId || ''),
+        signerId: String(input.signerId || ''),
+        txTypes: (input.entityTxs || []).map(tx => String(tx?.type || '')),
+      };
+      lastDirectEntityInput = debugEntry;
+      try {
+        handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+      } catch (error) {
+        lastDirectEntityInputError = {
+          ...debugEntry,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        throw error;
+      }
     },
   });
   env.runtimeState = env.runtimeState ?? {};
@@ -1099,10 +1319,77 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/health') {
-        const health = buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog, activeJAdapter);
+        const health = buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog, activeJAdapter, hubBootstraps);
         return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicLocalHubHealth(health)), {
           headers,
         });
+      }
+
+      if (pathname === '/api/account/status' && request.method === 'GET') {
+        const hubEntityId = String(url.searchParams.get('hubEntityId') || bootstrap?.entityId || '').toLowerCase();
+        const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
+        if (!hubEntityId || !counterpartyEntityId) {
+          return new Response(safeStringify({
+            success: false,
+            code: 'ACCOUNT_STATUS_BAD_REQUEST',
+            error: 'hubEntityId and counterpartyEntityId are required',
+          }), { status: 400, headers });
+        }
+        const account = getAccountMachine(env, hubEntityId, counterpartyEntityId);
+        const replica = getEntityReplicaById(env, hubEntityId);
+        const runtimeState = env.runtimeState;
+        const summarizeRuntimeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
+          (inputs || []).slice(-10).map(input => ({
+            entityId: String(input.entityId || '').slice(-8),
+            txs: (input.entityTxs || []).map(tx => String(tx?.type || '')),
+          }));
+        const tokenIds = String(url.searchParams.get('tokenIds') || '')
+          .split(',')
+          .map(value => Number(value.trim()))
+          .filter(value => Number.isInteger(value) && value > 0);
+        const status = {
+          success: true,
+          hubEntityId,
+          counterpartyEntityId,
+          hasAccount: hasAccount(env, hubEntityId, counterpartyEntityId) || Boolean(account),
+          ready: Boolean(
+            account?.currentFrame &&
+            Number(account.currentHeight ?? 0) > 0 &&
+            !account.pendingFrame &&
+            Number(account.mempool?.length ?? 0) === 0
+          ),
+          currentHeight: Number(account?.currentHeight ?? 0),
+          pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
+          mempool: Number(account?.mempool?.length ?? 0),
+          tokens: tokenIds.map(tokenId => ({
+            tokenId,
+            hasDelta: Boolean(account?.deltas?.has(tokenId)),
+            hubOutCapacity: account ? getEntityOutCapacity(account, hubEntityId, tokenId).toString() : '0',
+          })),
+          runtime: {
+            height: Number(env.height ?? 0),
+            timestamp: Number(env.timestamp ?? 0),
+            halted: Boolean(runtimeState?.halted),
+            fatalDebugPayload: runtimeState?.fatalDebugPayload ?? null,
+            loopActive: Boolean(runtimeState?.loopActive),
+            runtimeInput: summarizeRuntimeInputs(env.runtimeInput?.entityInputs),
+            runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
+          },
+          replica: replica ? {
+            key: `${String(replica.entityId || '').toLowerCase()}:${String(replica.signerId || '').toLowerCase()}`,
+            entityId: replica.entityId,
+            signerId: replica.signerId,
+            mempool: (replica.mempool || []).map(tx => String(tx?.type || '')),
+            proposalTxs: (replica.proposal?.txs || []).map(tx => String(tx?.type || '')),
+            lockedFrameTxs: (replica.lockedFrame?.txs || []).map(tx => String(tx?.type || '')),
+            messages: (replica.state?.messages || []).slice(-10),
+          } : null,
+          directInput: {
+            lastSeen: lastDirectEntityInput,
+            lastError: lastDirectEntityInputError,
+          },
+        };
+        return new Response(safeStringify(status), { headers });
       }
 
       if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
@@ -1342,6 +1629,43 @@ const run = async (): Promise<void> => {
 
         const amount = String(body.amount || '100');
         const tokenId = Number(body.tokenId ?? 1);
+        const accountMachine = getAccountMachine(env, faucetHubEntityId, userEntityId);
+        const accountReady = Boolean(
+          accountMachine?.currentFrame &&
+          Number(accountMachine.currentHeight ?? 0) > 0 &&
+          !accountMachine.pendingFrame &&
+          Number(accountMachine.mempool?.length ?? 0) === 0,
+        );
+        if (!accountReady) {
+          return new Response(safeStringify({
+            success: false,
+            code: 'FAUCET_ACCOUNT_NOT_READY',
+            error: 'Bilateral account is still settling setup frames. Retry after commit.',
+            accountState: {
+              currentHeight: Number(accountMachine?.currentHeight ?? 0),
+              pendingFrameHeight: accountMachine?.pendingFrame ? Number(accountMachine.pendingFrame.height ?? 0) : null,
+              mempool: Number(accountMachine?.mempool?.length ?? 0),
+            },
+          }), {
+            status: 409,
+            headers,
+          });
+        }
+        const amountWei = ethers.parseUnits(amount, 18);
+        const outCapacity = getEntityOutCapacity(accountMachine, faucetHubEntityId, tokenId);
+        if (outCapacity < amountWei) {
+          return new Response(safeStringify({
+            success: false,
+            code: 'FAUCET_INSUFFICIENT_OUT_CAPACITY',
+            error: 'Selected hub does not have enough outbound capacity for offchain faucet.',
+            tokenId,
+            requiredAmount: amountWei.toString(),
+            senderOutCapacity: outCapacity.toString(),
+          }), {
+            status: 409,
+            headers,
+          });
+        }
         enqueueRuntimeInput(env, {
           runtimeTxs: [],
           entityInputs: [{
@@ -1352,7 +1676,7 @@ const run = async (): Promise<void> => {
               data: {
                 targetEntityId: userEntityId,
                 tokenId,
-                amount: ethers.parseUnits(amount, 18),
+                amount: amountWei,
                 route: [faucetHubEntityId, userEntityId],
                 description: 'faucet-offchain',
               },
@@ -1370,6 +1694,7 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/debug/reserve' && request.method === 'GET') {
         const entityId = String(url.searchParams.get('entityId') || '').trim();
         const tokenId = Number(url.searchParams.get('tokenId') || '1');
+        const jurisdictionRef = String(url.searchParams.get('jurisdiction') || '').trim();
         if (!entityId) {
           return new Response(safeStringify({ error: 'Missing entityId' }), { status: 400, headers });
         }
@@ -1377,8 +1702,15 @@ const run = async (): Promise<void> => {
           return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
         }
         try {
-          const reserve = await activeJAdapter.getReserves(entityId, tokenId);
-          return new Response(safeStringify({ ok: true, entityId, tokenId, reserve: reserve.toString() }), { headers });
+          const jadapter = requireJAdapterForDebugReserve(env, entityId, jurisdictionRef);
+          const reserve = await jadapter.getReserves(entityId, tokenId);
+          return new Response(safeStringify({
+            ok: true,
+            entityId,
+            tokenId,
+            ...(jurisdictionRef ? { jurisdiction: jurisdictionRef } : {}),
+            reserve: reserve.toString(),
+          }), { headers });
         } catch (error) {
           return new Response(safeStringify({ error: (error as Error).message }), { status: 500, headers });
         }
@@ -1472,7 +1804,6 @@ const run = async (): Promise<void> => {
   const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
   for (const [index, secondary] of secondaryJurisdictions.entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
-    const secondaryDisplayName = formatJurisdictionDisplayName(secondaryName) || secondaryName;
     if (!secondaryName) continue;
     const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
     if (!env.jReplicas.has(secondaryName)) {
@@ -1499,7 +1830,7 @@ const run = async (): Promise<void> => {
     const priorActiveJurisdiction = env.activeJurisdiction;
     env.activeJurisdiction = secondaryName;
     const sibling = await bootstrapHub(env, {
-      name: `${resolvedArgs.name} ${secondaryDisplayName}`,
+      name: resolvedArgs.name,
       region: resolvedArgs.region,
       signerId: `${resolvedArgs.signerLabel}:${secondaryName}`,
       seed: resolvedArgs.seed,
@@ -1524,7 +1855,7 @@ const run = async (): Promise<void> => {
     hubBootstraps.push({
       entityId: sibling.entityId,
       signerId: sibling.signerId,
-      name: `${resolvedArgs.name} ${secondaryDisplayName}`,
+      name: resolvedArgs.name,
       jurisdictionName: secondaryName,
       chainId: secondaryContracts.chainId ?? secondary.chainId,
       ...(secondaryContracts.depositoryAddress ? { depositoryAddress: secondaryContracts.depositoryAddress } : {}),
@@ -1544,9 +1875,12 @@ const run = async (): Promise<void> => {
   await ensureRpcStackReady(env, jadapter);
 
   const tokenCatalog = resolvedArgs.deployTokens
-    ? await ensureTokenCatalog(jadapter, true)
+    ? await ensureTokenCatalog(jadapter, true, primaryJurisdictionName)
     : await waitForTokenCatalog(jadapter);
   activeTokenCatalog = tokenCatalog;
+  if (bootstrap?.entityId) {
+    tokenCatalogsByEntityId.set(normalizeEntityId(bootstrap.entityId), tokenCatalog);
+  }
   if (resolvedArgs.deployTokens) {
     await externalWalletApi.provisionFaucetWallet();
   }
@@ -1576,7 +1910,7 @@ const run = async (): Promise<void> => {
       const visibleHubProfiles = readVisibleHubProfiles(env, primaryJurisdictionName);
       const requiredHubProfiles = resolvedArgs.meshHubNames
         .map(name => visibleHubProfiles.find(profile => profile.name === name) || null)
-        .filter((profile): profile is { name: string; entityId: string } => profile !== null);
+        .filter((profile): profile is VisibleHubProfile => profile !== null);
 
       if (!gossipReadyMarked && requiredHubProfiles.length === resolvedArgs.meshHubNames.length) {
         finishTiming('gossip_ready', startedAtFor('gossip_ready') ?? startTiming('gossip_ready'));
@@ -1705,10 +2039,13 @@ const run = async (): Promise<void> => {
         creditReadyMarked = true;
       }
       if (allCreditReady && !reserveReadyMarked) {
-        if (resolvedArgs.deployTokens && peers.length > 0) {
-          await ensurePeerBootstrapReserves(env, peers.map(peer => peer.entityId), tokenCatalog);
+        if (resolvedArgs.deployTokens) {
+          const localHubEntityIds = new Set(hubBootstraps.map(entry => normalizeEntityId(entry.entityId)));
+          const allPeerProfiles = readVisibleHubProfiles(env, '')
+            .filter(profile => !localHubEntityIds.has(normalizeEntityId(profile.entityId)));
+          await ensurePeerBootstrapReserves(env, allPeerProfiles, tokenCatalog);
         }
-        const reserveHealth = await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
+        const reserveHealth = await ensureHubBootstrapReserves(env, hubBootstraps);
         reserveReadyMarked = reserveHealth.targetMet === true;
       }
       if (allCreditReady && reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {

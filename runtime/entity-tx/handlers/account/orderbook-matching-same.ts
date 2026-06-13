@@ -387,7 +387,9 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
 
     book = result.state;
     bookCache.set(bookKey, book);
-    bookUpdates.push({ pairId: bookKey, book });
+    if (!debugRebuildProjectionOnly) {
+      bookUpdates.push({ pairId: bookKey, book });
+    }
 
     try {
       const rejectEvents = rejectEventsForOrder(result.events, currentNamespacedOrderId);

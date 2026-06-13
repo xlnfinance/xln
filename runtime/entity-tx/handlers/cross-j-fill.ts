@@ -2,7 +2,7 @@ import {
   requireCrossJurisdictionFillProgress,
 } from '../../cross-jurisdiction';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import type { EntityInput, EntityState, EntityTx } from '../../types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx } from '../../types';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import type { MempoolOp } from './account';
 
@@ -14,12 +14,43 @@ type CrossJurisdictionFillResult = {
   mempoolOps?: MempoolOp[];
 };
 
+const clampFillRatio = (value: unknown): number =>
+  Math.max(0, Math.min(65_535, Math.floor(Number(value) || 0)));
+
+const committedSourceAmount = (route: CrossJurisdictionSwapRoute): bigint => {
+  const ratio = clampFillRatio(route.cumulativeFillRatio ?? route.claimedRatio);
+  return route.filledSourceAmount ??
+    route.sourceClaimed ??
+    ((BigInt(route.source.amount) * BigInt(ratio)) / 65_535n);
+};
+
+const committedTargetAmount = (route: CrossJurisdictionSwapRoute): bigint => {
+  const ratio = clampFillRatio(route.cumulativeFillRatio ?? route.claimedRatio);
+  return route.filledTargetAmount ??
+    route.targetClaimed ??
+    ((BigInt(route.target.amount) * BigInt(ratio)) / 65_535n);
+};
+
+const sameCommittedFillNotice = (
+  route: CrossJurisdictionSwapRoute,
+  data: CrossJurisdictionFillNoticeTx['data'],
+): boolean => (
+  Math.floor(Number(route.fillSeq ?? 0)) === Math.floor(Number(data.fillSeq)) &&
+  clampFillRatio(route.cumulativeFillRatio ?? route.claimedRatio) === clampFillRatio(data.cumulativeFillRatio) &&
+  committedSourceAmount(route) === data.cumulativeSourceAmount &&
+  committedTargetAmount(route) === data.cumulativeTargetAmount &&
+  (route.fillNumerator ?? undefined) === (data.fillNumerator ?? undefined) &&
+  (route.fillDenominator ?? undefined) === (data.fillDenominator ?? undefined)
+);
+
 export const handleCrossJurisdictionFillNoticeEntityTx = (
   entityState: EntityState,
   entityTx: CrossJurisdictionFillNoticeTx,
 ): CrossJurisdictionFillResult => {
   const {
     orderId,
+    routeHash,
+    previousFillSeq,
     fillSeq,
     incrementalSourceAmount,
     incrementalTargetAmount,
@@ -31,6 +62,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     priceImprovementMode,
     priceImprovementAmount,
     priceImprovementTokenId,
+    cancelRemainder,
     priceTicks,
     pairId,
   } = entityTx.data;
@@ -52,6 +84,32 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   if (routeSourceHub !== currentEntityId) {
     throw new Error(
       `CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED: order=${orderId} current=${newState.entityId} owner=${routeBookOwner} sourceHub=${routeSourceHub}`,
+    );
+  }
+
+  if (
+    routeHash &&
+    route.routeHash &&
+    routeHash.toLowerCase() !== route.routeHash.toLowerCase()
+  ) {
+    throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_HASH_MISMATCH: order=${orderId} got=${routeHash} expected=${route.routeHash}`);
+  }
+
+  const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+  const noticeFillSeq = Math.floor(Number(fillSeq));
+  if (noticeFillSeq <= currentFillSeq) {
+    if (noticeFillSeq === currentFillSeq && !sameCommittedFillNotice(route, entityTx.data)) {
+      throw new Error(`CROSS_J_FILL_NOTICE_STALE_CONFLICT: order=${orderId} seq=${noticeFillSeq} current=${currentFillSeq}`);
+    }
+    addMessage(newState, `🌉 Cross-j fill notice ${orderId} duplicate seq ${noticeFillSeq}`);
+    return { newState, outputs, mempoolOps };
+  }
+  if (
+    previousFillSeq !== undefined &&
+    Math.floor(Number(previousFillSeq)) !== currentFillSeq
+  ) {
+    throw new Error(
+      `CROSS_J_FILL_NOTICE_PREV_SEQ_MISMATCH: order=${orderId} prev=${previousFillSeq} current=${currentFillSeq}`,
     );
   }
 
@@ -81,6 +139,8 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
       type: 'cross_swap_fill_ack',
       data: {
         offerId: orderId,
+        ...(route.routeHash ? { routeHash: route.routeHash } : {}),
+        previousFillSeq: currentFillSeq,
         fillSeq: fill.fillSeq,
         incrementalSourceAmount: fill.incrementalSourceAmount,
         incrementalTargetAmount: fill.incrementalTargetAmount,
@@ -98,7 +158,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
         ...(priceImprovementMode ? { priceImprovementMode } : {}),
         ...(priceImprovementAmount !== undefined ? { priceImprovementAmount } : {}),
         ...(priceImprovementTokenId !== undefined ? { priceImprovementTokenId } : {}),
-        cancelRemainder: fill.nextRatio >= 65_535,
+        cancelRemainder: Boolean(cancelRemainder) || fill.nextRatio >= 65_535,
         ...(priceTicks !== undefined ? { priceTicks } : {}),
         pairId,
         comment: `cross-j-fill-notice:${fill.nextRatio}`,

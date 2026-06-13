@@ -120,6 +120,13 @@ export const getMarketMakerHealth = (
   entityId: string | null;
   expectedOffersPerHub: number;
   expectedOffersPerPair: number;
+  cross: {
+    ok: boolean;
+    expectedRoutes: number;
+    expectedOffersPerRoute: number;
+    expectedOffersPerPair: number;
+    routes: [];
+  };
   hubs: Array<{
     hubEntityId: string;
     offers: number;
@@ -135,9 +142,16 @@ export const getMarketMakerHealth = (
     (sum, pair) => sum + getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId),
     0,
   );
+  const cross = {
+    ok: false,
+    expectedRoutes: 0,
+    expectedOffersPerRoute: 0,
+    expectedOffersPerPair: 0,
+    routes: [] as [],
+  };
 
   if (!entityId || hubs.length === 0 || expectedOffersPerHub <= 0) {
-    return { enabled: false, ok: false, entityId: entityId || null, expectedOffersPerHub: Math.max(0, expectedOffersPerHub), expectedOffersPerPair, hubs: [] };
+    return { enabled: false, ok: false, entityId: entityId || null, expectedOffersPerHub: Math.max(0, expectedOffersPerHub), expectedOffersPerPair, cross, hubs: [] };
   }
 
   if (!env) {
@@ -147,6 +161,7 @@ export const getMarketMakerHealth = (
       entityId,
       expectedOffersPerHub,
       expectedOffersPerPair,
+      cross,
       hubs: hubs.map(hubEntityId => ({
         hubEntityId,
         offers: 0,
@@ -172,5 +187,5 @@ export const getMarketMakerHealth = (
     };
   });
 
-  return { enabled: true, ok: perHub.length > 0 && perHub.every(entry => entry.ready), entityId, expectedOffersPerHub, expectedOffersPerPair, hubs: perHub };
+  return { enabled: true, ok: perHub.length > 0 && perHub.every(entry => entry.ready), entityId, expectedOffersPerHub, expectedOffersPerPair, cross, hubs: perHub };
 };

@@ -5,10 +5,11 @@ import type {
   EntityState,
   Env,
 } from '../types';
-import { addMessage, resolveEntityProposerId } from '../state-helpers';
+import { addMessage } from '../state-helpers';
 import { decodeHashLadderBinary } from '../hashladder';
 import { isCrossJurisdictionTerminalStatus } from '../cross-jurisdiction';
 import { createStructuredLogger, shortHash, shortId, shortOrder } from '../logger';
+import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import type { JEventMempoolOp } from './j-events-types';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
@@ -184,10 +185,7 @@ export function queueCrossJurisdictionSalvageFromArgumentList(
   }
 
   const best = pullBinaries.reduce((acc, item) => item.fillRatio > acc.fillRatio ? item : acc, pullBinaries[0]!);
-  outputs.push({
-    entityId: route.target.counterpartyEntityId,
-    signerId: resolveEntityProposerId(env, route.target.counterpartyEntityId, 'cross-j.salvage.target-output'),
-    entityTxs: [{
+  pushCrossJurisdictionEntityOutput(env, outputs, route.target.counterpartyEntityId, [{
       type: 'crossJurisdictionSalvage',
       data: {
         routeId: route.orderId,
@@ -197,8 +195,7 @@ export function queueCrossJurisdictionSalvageFromArgumentList(
         sourceCounterpartyEntityId: route.source.counterpartyEntityId,
         observedAt: blockNumber,
       },
-    }],
-  });
+    }], route.targetSignerId);
   addMessage(state, `🌉 Cross-j pull args observed for ${route.orderId}; target salvage queued`);
   return true;
 }
@@ -225,10 +222,7 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
   if ((sourceAccount.status ?? 'active') !== 'active' || sourceAccount.activeDispute) return false;
   if (hasQueuedDisputeStart(sourceUserState, route.source.counterpartyEntityId)) return false;
 
-  outputs.push({
-    entityId: route.source.entityId,
-    signerId: resolveEntityProposerId(env, route.source.entityId, 'cross-j.salvage.source-dispute-output'),
-    entityTxs: [
+  pushCrossJurisdictionEntityOutput(env, outputs, route.source.entityId, [
       {
         type: 'disputeStart',
         data: {
@@ -237,8 +231,7 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
         },
       },
       { type: 'j_broadcast', data: {} },
-    ],
-  });
+    ], route.sourceSignerId);
   addMessage(
     state,
     `🌉 Target dispute for ${route.orderId} has no pull args; source dispute queued to force hub reveal`,
@@ -336,10 +329,7 @@ export function applyKnownHtlcSecret(
     });
   } else if (route.crossJurisdictionRelay) {
     const relay = route.crossJurisdictionRelay;
-    outputs.push({
-      entityId: relay.targetEntityId,
-      signerId: resolveEntityProposerId(env, relay.targetEntityId, 'j-event.htlc.cross-j-relay.resolve'),
-      entityTxs: [{
+    pushCrossJurisdictionEntityOutput(env, outputs, relay.targetEntityId, [{
         type: 'resolveHtlcLock',
         data: {
           counterpartyEntityId: relay.targetCounterpartyEntityId,
@@ -347,8 +337,7 @@ export function applyKnownHtlcSecret(
           secret,
           description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/65535`,
         },
-      }],
-    });
+      }], relay.targetSignerId);
   }
 
   addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);

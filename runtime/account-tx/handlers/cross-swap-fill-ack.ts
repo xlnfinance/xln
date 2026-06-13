@@ -1,6 +1,7 @@
 import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../types';
 import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
 import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
+import { SWAP_LOT_SCALE } from '../../orderbook';
 import {
   buildCommittedCrossJurisdictionPullBinding,
   requireCrossJurisdictionFillProgress,
@@ -35,6 +36,8 @@ export async function handleCrossSwapFillAck(
 }> {
   const {
     offerId,
+    routeHash,
+    previousFillSeq,
     fillSeq,
     cumulativeFillRatio,
     incrementalSourceAmount,
@@ -66,10 +69,29 @@ export async function handleCrossSwapFillAck(
   }
 
   const route = offer.crossJurisdiction;
+  if (
+    routeHash &&
+    route.routeHash &&
+    routeHash.toLowerCase() !== route.routeHash.toLowerCase()
+  ) {
+    return { success: false, error: `Cross-j route hash mismatch: ${routeHash} != ${route.routeHash}`, events };
+  }
   const currentRatio = Math.max(
     0,
     Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
   );
+  const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+  if (
+    previousFillSeq !== undefined &&
+    Math.floor(Number(previousFillSeq)) !== currentFillSeq &&
+    !(cancelRemainder && Math.max(0, Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(cumulativeFillRatio) || 0))) === currentRatio)
+  ) {
+    return {
+      success: false,
+      error: `Cross-j previous fill seq mismatch: expected ${currentFillSeq}, got ${previousFillSeq}`,
+      events,
+    };
+  }
   if (cancelRemainder && Math.max(0, Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(cumulativeFillRatio) || 0))) === currentRatio) {
     const sourceTotal = BigInt(route.source.amount);
     const targetTotal = BigInt(route.target.amount);
@@ -152,17 +174,20 @@ export async function handleCrossSwapFillAck(
     return { success: false, error: `Cross-j target execution mismatch: expected ${expectedExecutionTarget}, got ${executionTargetAmount}`, events };
   }
   const sourceTotal = BigInt(route.source.amount);
-  const previousExactSourceAmount = fill.previousSourceAmount;
   if (fill.fillNumerator !== undefined && fill.fillDenominator !== undefined) {
     // Exact fill ratio is hash-ledger/order progress, not execution economics.
     // Source-savings price improvement may spend less source at execution time;
     // it must not reduce the committed ratio or a full improved fill would fail
-    // validation and leave the owner-side order stuck in the book.
-    const exactSourceAmount = previousExactSourceAmount + fill.incrementalSourceAmount;
-    if (fill.fillNumerator * sourceTotal !== exactSourceAmount * fill.fillDenominator) {
+    // validation and leave the owner-side order stuck in the book. The exact
+    // ratio can be target-derived, so source progress must use the same
+    // floor-aware scaling as requireCrossJurisdictionFillProgress().
+    const expectedSourceAmount = fill.fillNumerator >= fill.fillDenominator
+      ? sourceTotal
+      : (sourceTotal * fill.fillNumerator) / fill.fillDenominator;
+    if (fill.cumulativeSourceAmount !== expectedSourceAmount) {
       return {
         success: false,
-        error: `Cross-j exact fill ratio mismatch: ${fill.fillNumerator}/${fill.fillDenominator} != ${exactSourceAmount}/${sourceTotal}`,
+        error: `Cross-j exact fill ratio mismatch: ${fill.fillNumerator}/${fill.fillDenominator} != ${fill.cumulativeSourceAmount}/${sourceTotal}`,
         events,
       };
     }
@@ -183,8 +208,6 @@ export async function handleCrossSwapFillAck(
   }
   if (priceTicks !== undefined) route.priceTicks = priceTicks;
   if (pairId) route.venueId ||= pairId;
-  offer.crossJurisdiction = route;
-  syncSourcePullBinding(accountMachine, route);
 
   const targetTotal = BigInt(route.target.amount);
   const full = fill.nextRatio >= MAX_SWAP_FILL_RATIO ||
@@ -193,8 +216,22 @@ export async function handleCrossSwapFillAck(
   const shouldClose = full || cancelRemainder;
   const remainingSource = sourceTotal - fill.cumulativeSourceAmount;
   const remainingTarget = targetTotal - fill.cumulativeTargetAmount;
-  const closedByDust = !shouldClose && (remainingSource <= 0n || remainingTarget <= 0n);
+  const lotSizedRoute = sourceTotal >= SWAP_LOT_SCALE && targetTotal >= SWAP_LOT_SCALE;
+  const closedByDust = !shouldClose && (
+    remainingSource <= 0n ||
+    remainingTarget <= 0n ||
+    (lotSizedRoute && (remainingSource < SWAP_LOT_SCALE || remainingTarget < SWAP_LOT_SCALE))
+  );
   const terminalClose = shouldClose || closedByDust;
+  if (terminalClose) {
+    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', deterministicAccountTimestamp(accountMachine));
+    route.clearingPolicy =
+      cancelRemainder || closedByDust || fill.nextRatio < MAX_SWAP_FILL_RATIO
+        ? 'cancel_and_clear'
+        : 'full_fill';
+  }
+  offer.crossJurisdiction = route;
+  syncSourcePullBinding(accountMachine, route);
   let remainingOfferEvent: SwapOfferEvent | undefined;
   const resolveHistory = {
     fillRatio: fill.nextRatio,

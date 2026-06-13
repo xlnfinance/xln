@@ -43,8 +43,9 @@ const pushCrossJOutput = (
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],
+  signerIdHint?: string | null,
 ): void => {
-  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs);
+  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs, signerIdHint);
 };
 
 export const handleRequestCrossJurisdictionClearEntityTx = (
@@ -77,7 +78,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     pushCrossJOutput(env, outputs, route.source.counterpartyEntityId, [{
       type: 'requestCrossJurisdictionClear',
       data: { orderId, cancelRemainder, route: cloneCrossJurisdictionRoute(route) },
-    }]);
+    }], route.sourceHubSignerId);
     const requestedAt = deterministicEntityTimestamp(newState, env);
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', requestedAt);
     route.pendingClearRequestedAt = requestedAt;
@@ -154,7 +155,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
         pullId: canonicalRoute.targetPull.pullId,
         description: `Cross-j ${orderId} cancel target pull without fill`,
       },
-    }]);
+    }], canonicalRoute.targetSignerId);
     const requestedAt = deterministicEntityTimestamp(newState, env);
     transitionCrossJurisdictionRouteStatus(canonicalRoute, 'cancelled', requestedAt);
     canonicalRoute.pendingClearRequestedAt = requestedAt;

@@ -686,7 +686,14 @@ async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towe
     window.localStorage.setItem('xln-watchtower-urls', JSON.stringify(urls));
     (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = urls;
   }, towerUrls);
-  await nextPage.goto(`${APP_BASE_URL}/resetdb?returnTo=/app`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  const resetNonce = '0123456789abcdef0123456789abcdef';
+  await context.addCookies([{
+    name: 'xln_reset_confirm',
+    value: resetNonce,
+    url: `${APP_BASE_URL}/resetdb`,
+    sameSite: 'Strict',
+  }]);
+  await nextPage.goto(`${APP_BASE_URL}/resetdb?returnTo=/app&confirm=${resetNonce}`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   return nextPage;
 }
 

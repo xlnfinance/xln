@@ -21,7 +21,6 @@ export const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_REL
 export const CHILD_LOG_RING_MAX = 30;
 export const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
-export const UNEXPECTED_EXIT_RESTART_MS = 1_000;
 
 const getArg = (name: string, fallback = ''): string => {
   const eq = argsRaw.find(arg => arg.startsWith(`${name}=`));
@@ -74,6 +73,7 @@ export const parseArgs = (): Args => {
     dbRoot: resolve(dbRoot),
     mmEnabled: hasFlag('--mm'),
     resetAllowed: hasFlag('--allow-reset') || process.env['XLN_MESH_RESET_ALLOWED'] === '1',
+    resetToken: process.env['XLN_MESH_RESET_TOKEN'] || '',
     deferInitialReset: hasFlag('--defer-initial-reset') || process.env['XLN_MESH_DEFER_INITIAL_RESET'] === '1',
     custodyEnabled: hasFlag('--custody'),
     custodyPort: Number(getArg('--custody-port', String(port + 7))),

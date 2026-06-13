@@ -123,12 +123,22 @@ export function buildCrossJurisdictionSwapSubmission(
     ? params.sourceHubEntityId
     : params.targetHubEntityId;
   const bookHubEntityId = params.bookHubEntityId || defaultBookHubEntityId;
+  const bookHubSignerId = params.bookHubSignerId || (
+    bookHubEntityId === params.sourceHubEntityId ? sourceHubSignerId :
+    bookHubEntityId === params.targetHubEntityId ? targetHubSignerId :
+    ''
+  );
 
   const route: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash({
     orderId,
     bookOwnerEntityId: bookHubEntityId,
     makerEntityId: params.sourceUserEntityId,
     hubEntityId: bookHubEntityId,
+    sourceSignerId: sourceUserSignerId,
+    sourceHubSignerId,
+    targetHubSignerId,
+    targetSignerId: targetUserSignerId,
+    ...(bookHubSignerId ? { bookHubSignerId } : {}),
     source: {
       jurisdiction: sourceUserStackId,
       entityId: params.sourceUserEntityId,

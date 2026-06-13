@@ -135,6 +135,33 @@ const DEFAULT_CUSTODY_TOKEN_IDS = [1, 2, 3] as const;
 
 const tailLines = (lines: string[]): string => lines.slice(-LOG_TAIL_LINES).join('\n');
 
+const hasManagedChildExited = (child: ManagedChild): boolean =>
+  child.proc.exitCode !== null || child.proc.signalCode !== null;
+
+const waitForManagedChildExit = async (child: ManagedChild, timeoutMs: number): Promise<boolean> => {
+  if (hasManagedChildExited(child)) return true;
+  return await new Promise<boolean>(resolveExit => {
+    let settled = false;
+    const finish = (exited: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.proc.off('exit', onExit);
+      child.proc.off('close', onClose);
+      child.proc.off('error', onError);
+      resolveExit(exited || hasManagedChildExited(child));
+    };
+    const onExit = () => finish(true);
+    const onClose = () => finish(true);
+    const onError = () => finish(true);
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    child.proc.once('exit', onExit);
+    child.proc.once('close', onClose);
+    child.proc.once('error', onError);
+    if (hasManagedChildExited(child)) finish(true);
+  });
+};
+
 export const spawnBunChild = (
   name: string,
   args: string[],
@@ -165,17 +192,32 @@ export const spawnBunChild = (
   return { name, proc, stdoutLines, stderrLines };
 };
 
-export const stopManagedChild = async (child: ManagedChild | null): Promise<void> => {
-  if (!child || child.proc.exitCode !== null) return;
-  child.proc.kill('SIGTERM');
-  const deadline = Date.now() + 5_000;
-  while (child.proc.exitCode === null && Date.now() < deadline) {
-    await sleep(100);
+export const stopManagedChild = async (
+  child: ManagedChild | null,
+  opts: { terminateTimeoutMs?: number; killTimeoutMs?: number } = {},
+): Promise<void> => {
+  if (!child || hasManagedChildExited(child)) return;
+  const terminateTimeoutMs = opts.terminateTimeoutMs ?? 5_000;
+  const killTimeoutMs = opts.killTimeoutMs ?? 5_000;
+
+  try {
+    child.proc.kill('SIGTERM');
+  } catch {
+    return;
   }
-  if (child.proc.exitCode === null) {
+  if (await waitForManagedChildExit(child, terminateTimeoutMs)) return;
+
+  try {
     child.proc.kill('SIGKILL');
-    await sleep(200);
+  } catch {
+    return;
   }
+  if (await waitForManagedChildExit(child, killTimeoutMs)) return;
+
+  throw new Error(
+    `MANAGED_CHILD_STOP_TIMEOUT name=${child.name} pid=${child.proc.pid ?? 'unknown'}\n` +
+    `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
+  );
 };
 
 export const waitForHttpReady = async (

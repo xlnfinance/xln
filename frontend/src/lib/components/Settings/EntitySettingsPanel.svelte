@@ -811,7 +811,7 @@
   function confirmResetAllData() {
     const confirmed = confirm('Clear all local XLN data? This resets wallets, runtime state, and caches.');
     if (!confirmed) return;
-    void resetEverything();
+    void resetEverything({ confirmed: true, reason: 'settings-manual-reset' });
   }
 
   function close() {

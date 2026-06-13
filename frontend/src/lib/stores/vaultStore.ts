@@ -83,6 +83,7 @@ type CreateRuntimeOptions = {
   devicePassphrase?: string | undefined;
   mnemonic12?: string | undefined;
   recovery?: RuntimeRecoveryConfig | undefined;
+  skipRecoveryRestore?: boolean | undefined;
 };
 
 export type RecoveryTowerSetupMode = 'official' | 'backup_only' | 'local_only';
@@ -138,6 +139,7 @@ const defaultState: RuntimesState = {
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
 const BROWSER_GOSSIP_POLL_MS = 250;
+const loggedLiveJAdapterReimports = new Set<string>();
 const normalizeRuntimeId = (value: string | null | undefined): string => {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -1526,29 +1528,40 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
 async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
   try {
-    unregisterRuntimeEnvChange(runtimeId);
-    runtimeRecoveryUploadMeta.delete(normalizeRuntimeId(runtimeId));
-    const runtimeEntry = get(runtimes).get(runtimeId);
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!normalizedRuntimeId) return;
+    unregisterRuntimeEnvChange(normalizedRuntimeId);
+    runtimeRecoveryUploadMeta.delete(normalizedRuntimeId);
+    const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
     const env = runtimeEntry?.env;
-    if (!env) return;
-    const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
-
     const xln = await getXLN();
+    const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : xln.createEmptyEnv(null);
+    runtimeEnv.runtimeId = normalizedRuntimeId;
+    runtimeEnv.dbNamespace = normalizedRuntimeId;
 
-    // Stop WS/P2P first to avoid new inbound events while shutting down loop.
-    xln.stopP2P(runtimeEnv);
+    if (env) {
+      // Stop WS/P2P first to avoid new inbound events while shutting down loop.
+      xln.stopP2P(runtimeEnv);
 
-    // Stop async runtime loop if active.
-    runtimeEnv.runtimeState?.stopLoop?.();
-    if (runtimeEnv.runtimeState) {
-      runtimeEnv.runtimeState.loopActive = false;
-      runtimeEnv.runtimeState.stopLoop = null;
+      // Stop async runtime loop if active.
+      runtimeEnv.runtimeState?.stopLoop?.();
+      if (runtimeEnv.runtimeState) {
+        runtimeEnv.runtimeState.loopActive = false;
+        runtimeEnv.runtimeState.stopLoop = null;
+      }
     }
 
     try {
       await xln.clearDB(runtimeEnv);
     } catch (dbErr) {
       console.warn('[VaultStore] DB clear failed:', dbErr);
+    } finally {
+      try {
+        if (typeof xln.closeRuntimeDb === 'function') await xln.closeRuntimeDb(runtimeEnv);
+        if (typeof xln.closeInfraDb === 'function') await xln.closeInfraDb(runtimeEnv);
+      } catch (closeErr) {
+        console.warn('[VaultStore] DB close after cleanup failed:', closeErr);
+      }
     }
   } catch (err) {
     console.warn(`[VaultStore] Failed to cleanup runtime ${runtimeId.slice(0, 12)}:`, err);
@@ -1920,7 +1933,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   if (!hasLiveJAdapter(env)) {
     ensureRuntimeLoopRunning(env, xln, `repair-import-j:${runtimeIdLower.slice(0, 12)}`);
-    console.warn(`[VaultStore] ⚠️ Restored env has no live J-adapter; re-importing ${primaryJurisdictionName} jurisdiction`);
+    const logKey = `${runtimeIdLower}:${primaryJurisdictionName}:${chainId}`;
+    if (!loggedLiveJAdapterReimports.has(logKey)) {
+      loggedLiveJAdapterReimports.add(logKey);
+      console.warn(`[VaultStore] Restored env has no live J-adapter; re-importing ${primaryJurisdictionName} jurisdiction`);
+    }
     await enqueueAndAwait(
       xln,
       env,
@@ -2425,7 +2442,9 @@ export const vaultOperations = {
       activeSignerIndex: 0,
       loginType,
       requiresOnboarding,
-      recovery: options.recovery || buildDefaultRuntimeRecoveryConfig(),
+      recovery: options.recovery || (options.skipRecoveryRestore
+        ? { useDefaultTowers: false, towers: [] }
+        : buildDefaultRuntimeRecoveryConfig()),
       createdAt: Date.now()
     };
     const previousActiveRuntimeId = currentState.activeRuntimeId;
@@ -2440,7 +2459,9 @@ export const vaultOperations = {
     try {
       xln = await getXLN();
       markPerf('load_xln_runtime');
-      const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
+      const towerRestored = options.skipRecoveryRestore
+        ? null
+        : await tryRestoreRuntimeEnvFromTower(runtime, xln);
       const runtimeIdLower = runtimeId.toLowerCase();
 
       if (towerRestored) {

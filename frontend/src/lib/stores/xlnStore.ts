@@ -3,7 +3,6 @@ import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
 import { toasts } from './toastStore';
-import { resetEverything } from '$lib/utils/resetEverything';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
@@ -51,6 +50,8 @@ export interface FrontendXlnFunctions {
   deriveDelta: XLNModule['deriveDelta'];
   formatTokenAmount: (tokenId: number, amount: bigint | null | undefined) => string;
   getTokenInfo: XLNModule['getTokenInfo'];
+  getKnownTokenIds: XLNModule['getKnownTokenIds'];
+  getTokenIdsForJurisdiction: XLNModule['getTokenIdsForJurisdiction'];
   isLiquidSwapToken: XLNModule['isLiquidSwapToken'];
   getSwapPairOrientation: XLNModule['getSwapPairOrientation'];
   getDefaultSwapTradingPairs: XLNModule['getDefaultSwapTradingPairs'];
@@ -863,11 +864,10 @@ export async function initializeXLN(): Promise<Env> {
     try {
       env = await xln.main();
     } catch (restoreError) {
-      if (!isFinancialRestoreFailure(restoreError) || typeof xln.clearDB !== 'function') {
+      if (!isFinancialRestoreFailure(restoreError)) {
         throw restoreError;
       }
-      console.error('[xlnStore] Financial restore failure; clearing local client storage and reloading', restoreError);
-      await resetEverything(restoreError);
+      console.error('[xlnStore] Financial restore failure; refusing automatic local data reset', restoreError);
       throw restoreError;
     }
 
@@ -1008,10 +1008,10 @@ export async function enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[] 
       entityId: String(input?.entityId || ''),
       signerId: String(input?.signerId || ''),
       txTypes: Array.isArray(input?.entityTxs) ? input.entityTxs.map((tx) => String(tx?.type || '')) : [],
-    }))
+  }))
     .filter((entry) => entry.txTypes.some((type) => type.startsWith('j_') || type.startsWith('dispute')));
   if (interesting.length > 0) {
-    console.error(`[xlnStore.enqueueEntityInputs] ${JSON.stringify(interesting)}`);
+    console.debug(`[xlnStore.enqueueEntityInputs] ${JSON.stringify(interesting)}`);
   }
   const input: RuntimeInput = {
     runtimeTxs: [],
@@ -1061,6 +1061,8 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       deriveDelta: failFn('deriveDelta'),
       formatTokenAmount: failFn('formatTokenAmount'),
       getTokenInfo: failFn('getTokenInfo'),
+      getKnownTokenIds: failFn('getKnownTokenIds'),
+      getTokenIdsForJurisdiction: failFn('getTokenIdsForJurisdiction'),
       isLiquidSwapToken: failFn('isLiquidSwapToken'),
       getSwapPairOrientation: failFn('getSwapPairOrientation'),
       getDefaultSwapTradingPairs: failFn('getDefaultSwapTradingPairs'),
@@ -1118,6 +1120,8 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     // Signature used across UI: formatTokenAmount(tokenId, amount).
     formatTokenAmount: formatTokenAmountUi,
     getTokenInfo: $xlnInstance.getTokenInfo,
+    getKnownTokenIds: $xlnInstance.getKnownTokenIds,
+    getTokenIdsForJurisdiction: $xlnInstance.getTokenIdsForJurisdiction,
     isLiquidSwapToken: $xlnInstance.isLiquidSwapToken,
     getSwapPairOrientation: $xlnInstance.getSwapPairOrientation,
     getDefaultSwapTradingPairs: $xlnInstance.getDefaultSwapTradingPairs,

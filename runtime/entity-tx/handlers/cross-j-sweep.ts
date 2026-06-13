@@ -45,8 +45,9 @@ const pushCrossJOutput = (
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],
+  signerIdHint?: string | null,
 ): void => {
-  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs);
+  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs, signerIdHint);
 };
 
 export const handleOrderbookSweepCrossJurisdictionEntityTx = (
@@ -137,16 +138,14 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
             pullId: route.targetPull.pullId,
             description: `Cross-j ${orderId} sweep cancel target pull`,
           },
-        }]);
+        }], route.targetSignerId);
       }
       transitionCrossJurisdictionRouteStatus(route, 'expired', now);
     } else {
-      if (sourceExpired) {
-        throw new Error(`CROSS_J_FILLED_ROUTE_SOURCE_PULL_EXPIRED: route=${orderId}`);
-      }
-      transitionCrossJurisdictionRouteStatus(route, 'failed', now);
+      transitionCrossJurisdictionRouteStatus(route, 'clear_requested', now);
+      route.pendingClearRequestedAt = now;
     }
-    route.clearingPolicy = hasFilledAmount ? 'manual' : 'cancel_and_clear';
+    route.clearingPolicy = 'cancel_and_clear';
     newState.crossJurisdictionSwaps?.set(orderId, route);
   }
 

@@ -1830,7 +1830,8 @@ if (import.meta.main) {
 
   // Dynamic import to avoid bundler issues
   const runtime = await import('../runtime');
-  const env = runtime.createEmptyEnv();
+  const cliRuntimeSeed = process.env['XLN_RUNTIME_SEED'] || process.env['RUNTIME_SEED'] || null;
+  const env = runtime.createEmptyEnv(cliRuntimeSeed);
   requireRuntimeSeed(env, 'HTLC AHB CLI');
 
   if (stopAtFrame !== undefined) {

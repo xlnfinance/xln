@@ -20,6 +20,8 @@ type CreateRuntimeOptions = {
   requireOnline?: boolean;
   requiresOnboarding?: boolean;
   workFactor?: number;
+  fresh?: boolean;
+  jurisdiction?: string;
 };
 
 const DEFAULT_DEMO_MNEMONICS: Record<DemoUserName, string> = {
@@ -39,6 +41,9 @@ const DEMO_MNEMONIC_ENV: Record<DemoUserName, string> = {
 const runtimeIdsByLabel = new Map<string, string>();
 
 const normalizeMnemonic = (mnemonic: string): string => mnemonic.trim().split(/\s+/).join(' ');
+
+const normalizeJurisdictionName = (value: unknown): string =>
+  String(value || '').trim().toLowerCase();
 
 export const deriveSignerAddressFromMnemonic = (mnemonic: string, index = 0): string => {
   const normalized = normalizeMnemonic(mnemonic);
@@ -136,6 +141,34 @@ async function openRuntimeDropdown(page: Page): Promise<void> {
   }
   await trigger.click({ force: true });
   await expect(menu).toBeVisible({ timeout: 10_000 });
+}
+
+async function selectContextEntityIfAvailable(
+  page: Page,
+  entityId: string,
+): Promise<void> {
+  const normalizedEntityId = String(entityId || '').trim().toLowerCase();
+  if (!normalizedEntityId) return;
+
+  const current = await getActiveEntity(page).catch(() => null);
+  if (String(current?.entityId || '').trim().toLowerCase() === normalizedEntityId) return;
+
+  await openRuntimeDropdown(page);
+  const row = page
+    .locator(`[data-testid="context-entity-row"][data-entity-id="${normalizedEntityId}"]`)
+    .first();
+  await expect(row, `context switcher must expose entity ${normalizedEntityId}`).toBeVisible({ timeout: 10_000 });
+  await row.click({ force: true });
+  await expect
+    .poll(async () => {
+      const active = await getActiveEntity(page).catch(() => null);
+      return String(active?.entityId || '').trim().toLowerCase();
+    }, {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: `context switcher must select entity ${normalizedEntityId}`,
+    })
+    .toBe(normalizedEntityId);
 }
 
 async function ensureRuntimeCreationView(page: Page, label: string): Promise<void> {
@@ -804,11 +837,14 @@ export async function createRuntime(
     .find((demoLabel) => normalizedMnemonic === normalizeMnemonic(selectDemoMnemonic(demoLabel)));
   const isQuickLoginDemo = Boolean(quickLoginLabel);
   let runtimeId = deriveRuntimeIdFromMnemonic(mnemonic);
-  const previousRuntimeId = await getActiveEntity(page).then((entity) => entity?.runtimeId ?? null);
+  const previousRuntimeId = options.fresh
+    ? null
+    : await getActiveEntity(page).then((entity) => entity?.runtimeId ?? null);
   const canCreateDirectly = await page.evaluate(() => {
     const view = window as typeof window & {
       __xlnVaultOperations?: {
         createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+        deleteRuntime?: (id: string) => Promise<unknown>;
       };
     };
     const hostname = window.location.hostname;
@@ -817,9 +853,21 @@ export async function createRuntime(
   }).catch(() => false);
 
   if (canCreateDirectly) {
+    if (options.fresh) {
+      await page.evaluate(async ({ targetRuntimeId }) => {
+        const view = window as typeof window & {
+          __xlnVaultOperations?: {
+            deleteRuntime?: (id: string) => Promise<unknown>;
+          };
+        };
+        if (typeof view.__xlnVaultOperations?.deleteRuntime !== 'function') return;
+        await view.__xlnVaultOperations.deleteRuntime(targetRuntimeId);
+      }, { targetRuntimeId: runtimeId.toLowerCase() }).catch(() => {});
+    }
     const loginType = isQuickLoginDemo ? 'demo' : 'manual';
     const requiresOnboarding = options.requiresOnboarding === true;
-    await page.evaluate(async ({ runtimeLabel, seed, loginType, requiresOnboarding }) => {
+    const skipRecoveryRestore = options.fresh === true;
+    await page.evaluate(async ({ runtimeLabel, seed, loginType, requiresOnboarding, skipRecoveryRestore }) => {
       const view = window as typeof window & {
         __xlnVaultOperations?: {
           createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
@@ -832,8 +880,10 @@ export async function createRuntime(
       await operations.createRuntime(runtimeLabel, seed, {
         loginType,
         requiresOnboarding,
+        skipRecoveryRestore,
+        ...(skipRecoveryRestore ? { recovery: { useDefaultTowers: false, towers: [] } } : {}),
       });
-    }, { runtimeLabel: label, seed: mnemonic, loginType, requiresOnboarding });
+    }, { runtimeLabel: label, seed: mnemonic, loginType, requiresOnboarding, skipRecoveryRestore });
     await waitForRuntimeReady(page, runtimeId);
     runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
     if (requiresOnboarding) {
@@ -953,46 +1003,112 @@ export async function createRuntimeIdentity(
   options: CreateRuntimeOptions = {},
 ): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
   const expectedRuntimeId = deriveRuntimeIdFromMnemonic(mnemonic).toLowerCase();
+  const expectedJurisdiction = normalizeJurisdictionName(options.jurisdiction);
   await createRuntime(page, label, mnemonic, options);
   const deadline = Date.now() + RUNTIME_READY_TIMEOUT;
-  let entity: { entityId: string; signerId: string; runtimeId: string } | null = null;
+  let entity: { entityId: string; signerId: string; runtimeId: string; jurisdiction?: string } | null = null;
   while (Date.now() < deadline) {
-    const fromEnv = await page.evaluate(({ runtimeId }) => {
+    const activeEntity = await getActiveEntity(page).catch(() => null);
+    if (
+      activeEntity &&
+      String(activeEntity.runtimeId || '').toLowerCase() === expectedRuntimeId &&
+      String(activeEntity.signerId || '').toLowerCase() === expectedRuntimeId &&
+      (!expectedJurisdiction || normalizeJurisdictionName(activeEntity.jurisdiction) === expectedJurisdiction)
+    ) {
+      entity = activeEntity;
+      break;
+    }
+
+    const fromEnv = await page.evaluate(({ runtimeId, jurisdiction }) => {
       const env = (window as typeof window & {
         isolatedEnv?: {
           runtimeId?: string;
-          eReplicas?: Map<string, unknown>;
+          eReplicas?: Map<string, {
+            entityId?: string;
+            signerId?: string;
+            position?: { jurisdiction?: string };
+            state?: {
+              entityId?: string;
+              config?: {
+                jurisdiction?: { name?: string };
+              };
+            };
+          }>;
         };
       }).isolatedEnv;
       if (!env?.eReplicas) return null;
       const activeRuntimeId = String(env.runtimeId || '').toLowerCase();
       if (activeRuntimeId && activeRuntimeId !== String(runtimeId || '').toLowerCase()) return null;
-      for (const replicaKey of env.eReplicas.keys()) {
+      const expectedJurisdiction = String(jurisdiction || '').trim().toLowerCase();
+      const candidates: Array<{ entityId: string; signerId: string; runtimeId: string; jurisdiction: string }> = [];
+      for (const [replicaKey, replica] of env.eReplicas.entries()) {
         const [entityId, signerId] = String(replicaKey).split(':');
         if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
         if (String(signerId).toLowerCase() !== String(runtimeId || '').toLowerCase()) continue;
-        return {
+        const replicaJurisdiction = String(
+          replica?.state?.config?.jurisdiction?.name
+          || replica?.position?.jurisdiction
+          || '',
+        ).trim();
+        candidates.push({
           entityId,
           signerId,
           runtimeId: String(env.runtimeId || runtimeId || '').toLowerCase(),
-        };
+          jurisdiction: replicaJurisdiction,
+        });
       }
-      return null;
-    }, { runtimeId: expectedRuntimeId }).catch(() => null);
-    entity = fromEnv ?? await getActiveEntity(page);
+      if (expectedJurisdiction) {
+        return candidates.find((candidate) =>
+          String(candidate.jurisdiction || '').trim().toLowerCase() === expectedJurisdiction,
+        ) || null;
+      }
+      return candidates[0] || null;
+    }, { runtimeId: expectedRuntimeId, jurisdiction: expectedJurisdiction }).catch(() => null);
+    entity = fromEnv;
     if (entity) break;
     await page.waitForTimeout(250);
   }
-  expect(entity).not.toBeNull();
+  if (!entity) {
+    const diagnostics = await page.evaluate(() => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          runtimeId?: string;
+          eReplicas?: Map<string, {
+            position?: { jurisdiction?: string };
+            state?: {
+              entityId?: string;
+              config?: { jurisdiction?: { name?: string } };
+            };
+          }>;
+        };
+      }).isolatedEnv;
+      return {
+        envRuntimeId: String(env?.runtimeId || ''),
+        replicaKeys: env?.eReplicas ? Array.from(env.eReplicas.entries()).map(([key, replica]) => ({
+          key,
+          entityId: String(replica?.state?.entityId || ''),
+          jurisdiction: String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || ''),
+        })) : [],
+      };
+    }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
+    throw new Error(
+      `createRuntimeIdentity failed to resolve runtime=${expectedRuntimeId}` +
+      `${expectedJurisdiction ? ` jurisdiction=${expectedJurisdiction}` : ''}: ${JSON.stringify(diagnostics)}`,
+    );
+  }
+  if (expectedJurisdiction) {
+    await selectContextEntityIfAvailable(page, entity.entityId);
+  }
   return entity as { entityId: string; signerId: string; runtimeId: string };
 }
 
-export async function getActiveEntity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string } | null> {
+export async function getActiveEntity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string; jurisdiction?: string } | null> {
   return page.evaluate(() => {
     const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
     const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '').trim();
     const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '').trim();
     const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').trim();
+    const selectedJurisdiction = String(selectedTrigger?.dataset?.jurisdiction || '').trim();
     if (
       /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
       && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
@@ -1001,25 +1117,37 @@ export async function getActiveEntity(page: Page): Promise<{ entityId: string; s
         entityId: selectedEntityId,
         signerId: selectedSignerId,
         runtimeId: selectedRuntimeId,
+        jurisdiction: selectedJurisdiction,
       };
     }
 
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
+        eReplicas?: Map<string, {
+          position?: { jurisdiction?: string };
+          state?: {
+            config?: { jurisdiction?: { name?: string } };
+          };
+        }>;
       };
     }).isolatedEnv;
     if (!env?.eReplicas) return null;
     const runtimeId = String(env.runtimeId || '').toLowerCase();
-    const validReplicas: Array<{ entityId: string; signerId: string }> = [];
-    for (const replicaKey of env.eReplicas.keys()) {
+    const validReplicas: Array<{ entityId: string; signerId: string; jurisdiction?: string }> = [];
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
       const [entityId, signerId] = String(replicaKey).split(':');
       const normalizedSignerId = String(signerId || '').toLowerCase();
       if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-      validReplicas.push({ entityId, signerId });
+      const jurisdiction = String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || '').trim();
+      validReplicas.push({ entityId, signerId, jurisdiction });
       if (runtimeId && normalizedSignerId === runtimeId) {
-        return { entityId, signerId, runtimeId: String(env.runtimeId || '') };
+        return {
+          entityId,
+          signerId,
+          runtimeId: String(env.runtimeId || ''),
+          jurisdiction,
+        };
       }
     }
     const firstReplica = validReplicas[0];

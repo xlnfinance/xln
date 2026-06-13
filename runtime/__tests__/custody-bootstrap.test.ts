@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test';
+import { spawn } from 'node:child_process';
 
-import { waitForCustodyRouteableState, waitForHttpReady, type ManagedChild } from '../orchestrator/custody-bootstrap';
+import {
+  stopManagedChild,
+  waitForCustodyRouteableState,
+  waitForHttpReady,
+  type ManagedChild,
+} from '../orchestrator/custody-bootstrap';
 
 test('waitForHttpReady rejects when the spawned child exited behind a stale ready listener', async () => {
   const server = Bun.serve({
@@ -65,4 +71,38 @@ test('waitForCustodyRouteableState accepts hub-side custody capacity for non-rou
   } finally {
     server.stop(true);
   }
+});
+
+test('stopManagedChild escalates to SIGKILL when a child ignores SIGTERM', async () => {
+  const proc = spawn('node', [
+    '-e',
+    "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000);",
+  ], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const ready = new Promise<void>((resolveReady, rejectReady) => {
+    const timer = setTimeout(() => rejectReady(new Error('sigterm-resistant child did not become ready')), 2000);
+    proc.stdout.on('data', chunk => {
+      if (chunk.toString('utf8').includes('ready')) {
+        clearTimeout(timer);
+        resolveReady();
+      }
+    });
+    proc.once('exit', () => {
+      clearTimeout(timer);
+      rejectReady(new Error('sigterm-resistant child exited before ready'));
+    });
+  });
+  const child = {
+    name: 'sigterm-resistant-child',
+    proc,
+    stdoutLines: [],
+    stderrLines: [],
+  } as unknown as ManagedChild;
+
+  await ready;
+  await expect(
+    stopManagedChild(child, { terminateTimeoutMs: 100, killTimeoutMs: 1500 }),
+  ).resolves.toBeUndefined();
+  expect(proc.signalCode).toBe('SIGKILL');
 });

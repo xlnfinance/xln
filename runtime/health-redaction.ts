@@ -226,6 +226,15 @@ const publicMarketMakerHealth = (marketMaker: PublicHealthRecord): Record<string
   startupPhase: valueOf(marketMaker, 'startupPhase'),
   expectedOffersPerHub: valueOf(marketMaker, 'expectedOffersPerHub'),
   hubCount: arrayOf(marketMaker, 'hubs')?.length,
+  cross: (() => {
+    const cross = valueOf(marketMaker, 'cross');
+    if (!cross || typeof cross !== 'object') return undefined;
+    return {
+      ok: valueOf(cross as PublicHealthRecord, 'ok') === true,
+      expectedRoutes: valueOf(cross as PublicHealthRecord, 'expectedRoutes'),
+      routeCount: arrayOf(cross as PublicHealthRecord, 'routes')?.length,
+    };
+  })(),
 });
 
 const publicBootstrapReserveHealth = (bootstrapReserves: PublicHealthRecord): Record<string, unknown> => ({

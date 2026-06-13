@@ -28,6 +28,17 @@ const publicCrossJurisdictionBookAdmissions = (
     cloneCrossJurisdictionBookAdmission(admission),
   ])) : undefined;
 
+const publicPendingCrossJurisdictionFillAcks = (
+  pendingAcks: EntityState['pendingCrossJurisdictionFillAcks'],
+): EntityState['pendingCrossJurisdictionFillAcks'] | undefined =>
+  pendingAcks ? new Map(Array.from(pendingAcks.entries()).map(([id, pending]) => [
+    id,
+    {
+      ...pending,
+      tx: cloneCrossJurisdictionAccountTxRoute(pending.tx) as typeof pending.tx,
+    },
+  ])) : undefined;
+
 const publicSwapOffers = (offers: AccountMachine['swapOffers']): AccountMachine['swapOffers'] =>
   new Map(Array.from((offers ?? new Map()).entries()).map(([id, offer]) => [
     id,
@@ -77,6 +88,7 @@ export const projectEntityCoreDoc = (
   ...withProp('swapTradingPairs', state.swapTradingPairs),
   ...withProp('pendingSwapFillRatios', state.pendingSwapFillRatios),
   ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(state.crossJurisdictionSwaps)),
+  ...withProp('pendingCrossJurisdictionFillAcks', publicPendingCrossJurisdictionFillAcks(state.pendingCrossJurisdictionFillAcks)),
   ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(state.crossJurisdictionBookAdmissions)),
   ...withProp('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withProp('orderbookHubProfile', state.orderbookExt?.hubProfile),
@@ -308,6 +320,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withProp('swapTradingPairs', core.swapTradingPairs),
     ...withProp('pendingSwapFillRatios', core.pendingSwapFillRatios),
     ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(core.crossJurisdictionSwaps)),
+    ...withProp('pendingCrossJurisdictionFillAcks', publicPendingCrossJurisdictionFillAcks(core.pendingCrossJurisdictionFillAcks)),
     ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(core.crossJurisdictionBookAdmissions)),
     ...withProp('hubRebalanceConfig', core.hubRebalanceConfig),
   };

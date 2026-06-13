@@ -294,7 +294,7 @@ describe('relay-router gossip fanout', () => {
     expect((sentBySocket.get(fresh)?.at(-1) as { type?: string; error?: string } | undefined)?.type).not.toBe('error');
   });
 
-  test('queues delivery when the registered target socket is stale', async () => {
+  test('rejects entity_input when the registered target socket is stale', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -328,8 +328,16 @@ describe('relay-router gossip fanout', () => {
 
     expect(sentBySocket.get(staleB) ?? []).toHaveLength(0);
     expect(store.clients.has(RUNTIME_B)).toBe(false);
-    expect(store.pendingMessages.get(RUNTIME_B)).toHaveLength(1);
+    expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
+    expect((sentBySocket.get(wsA)?.at(-1) as { type?: string; error?: string } | undefined)).toMatchObject({
+      type: 'error',
+      error: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+    });
     expect(store.debugEvents.some(event => event.status === 'stale-target')).toBe(true);
+    expect(store.debugEvents.some(event =>
+      event.status === 'rejected' &&
+      event.reason === 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+    )).toBe(true);
   });
 
   test('forwards encrypted accountInput to the active target runtime socket', async () => {

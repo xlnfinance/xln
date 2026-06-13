@@ -105,6 +105,15 @@ const requirements: CoverageRequirement[] = [
       "swapRouteMode === 'cross'",
       "type: 'requestCrossJurisdictionSwap'",
       "type: 'placeSwapOffer'",
+      '<SwapOrderList',
+      '{requestCrossClear}',
+    ],
+  },
+  {
+    area: 'frontend',
+    file: 'frontend/src/lib/components/Entity/SwapOrderList.svelte',
+    patterns: [
+      'export let requestCrossClear',
       'data-testid="cross-swap-clear"',
     ],
   },

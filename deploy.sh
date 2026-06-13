@@ -53,6 +53,17 @@ ensure_main_branch_for_push() {
   fi
 }
 
+ensure_clean_worktree_for_push() {
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "Refusing --push with uncommitted tracked changes. Commit or stash them first." >&2
+    exit 1
+  fi
+  if [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    echo "Refusing --push with untracked files. Commit, ignore, or remove them first." >&2
+    exit 1
+  fi
+}
+
 wait_for_rpc_chain() {
   local rpc_url="$1"
   local expected_chain_hex="$2"
@@ -78,6 +89,8 @@ wait_for_main_stack() {
     if [ -n "$body" ] && node -e '
       const payload = JSON.parse(process.argv[1]);
       const ok =
+        payload?.coreOk === true &&
+        payload?.systemOk === true &&
         payload?.system?.runtime === true &&
         payload?.system?.relay === true &&
         payload?.hubMesh?.ok === true &&
@@ -175,7 +188,7 @@ wait_for_public_production_stack() {
   local deadline=$((SECONDS + 300))
   wait_for_http_json_field \
     "https://xln.finance/api/health" \
-    "return payload?.system?.runtime === true && payload?.system?.relay === true && payload?.hubMesh?.ok === true && payload?.marketMaker?.ok === true && payload?.bootstrapReserves?.ok === true && payload?.custody?.ok === true && Array.isArray(payload?.hubs) && payload.hubs.length >= 3;" \
+    "return payload?.coreOk === true && payload?.systemOk === true && payload?.system?.runtime === true && payload?.system?.relay === true && payload?.hubMesh?.ok === true && payload?.marketMaker?.ok === true && payload?.bootstrapReserves?.ok === true && payload?.custody?.ok === true && Array.isArray(payload?.hubs) && payload.hubs.length >= 3;" \
     "$deadline" \
     || return 1
 
@@ -755,6 +768,7 @@ run_local_deploy() {
 if [ -n "$REMOTE_HOST" ]; then
   if [ "$PUSH" = "1" ]; then
     ensure_main_branch_for_push
+    ensure_clean_worktree_for_push
     echo "[deploy] pushing main to origin"
     git push origin main
   fi
