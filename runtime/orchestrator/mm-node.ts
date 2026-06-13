@@ -185,6 +185,7 @@ type MarketMakerHealth = {
     pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
   }>;
   cross: {
+    applicable: boolean;
     ok: boolean;
     expectedRoutes: number;
     expectedOffersPerRoute: number;
@@ -1439,6 +1440,7 @@ const buildMarketMakerCrossHealth = (
   })) : 0;
 
   return {
+    applicable: expectedRouteCount > 0,
     ok: expectedRouteCount > 0 && routes.length >= expectedRouteCount && routes.every(route => route.ready),
     expectedRoutes: expectedRouteCount,
     expectedOffersPerRoute,
@@ -1594,6 +1596,7 @@ const getMarketMakerHealth = (
   const cross = crossOptions
     ? buildMarketMakerCrossHealth(env, crossOptions.contexts, crossOptions.visibleHubs, crossOptions.tokenIdsByContext)
     : {
+        applicable: false,
         ok: true,
         expectedRoutes: 0,
         expectedOffersPerRoute: 0,
@@ -1829,6 +1832,7 @@ const run = async (): Promise<void> => {
                 expectedOffersPerPair: 0,
                 hubs: [],
                 cross: {
+                  applicable: false,
                   ok: false,
                   expectedRoutes: 0,
                   expectedOffersPerRoute: 0,

@@ -16,6 +16,7 @@ test('market maker server health treats absent cross topology as neutral', () =>
 
   const health = getMarketMakerHealth({} as Env, state, () => null);
 
+  expect(health.cross.applicable).toBe(false);
   expect(health.cross.ok).toBe(true);
   expect(health.cross.expectedRoutes).toBe(0);
   expect(health.cross.routes).toEqual([]);

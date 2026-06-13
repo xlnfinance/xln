@@ -66,6 +66,66 @@ const readMetric = (metrics: string, name: string): number | null => {
   return Number.isFinite(value) ? value : null;
 };
 
+const readDiagnosticMetricLines = (metrics: string): string[] => {
+  const prefixes = [
+    'xln_core_ok',
+    'xln_system_ok',
+    'xln_relay_clients',
+    'xln_relay_external_clients',
+    'xln_child_online',
+    'xln_hub_online',
+    'xln_hub_self_relay_presence',
+    'xln_hub_mesh_ok',
+    'xln_market_maker_ok',
+    'xln_custody_ok',
+    'xln_bootstrap_reserves_ok',
+  ];
+  return metrics
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(line => prefixes.some(prefix => line === prefix || line.startsWith(`${prefix} `) || line.startsWith(`${prefix}{`)));
+};
+
+export const buildProdHealthFailureSummary = (
+  health: {
+    coreOk?: boolean;
+    systemOk?: boolean;
+    degraded?: unknown[];
+    relay?: { clientCount?: number; activeClientCount?: number };
+    storage?: { ok?: boolean };
+    hubMesh?: { ok?: boolean };
+    marketMaker?: { ok?: boolean; startupPhase?: string | null; cross?: { applicable?: boolean; ok?: boolean; expectedRoutes?: number } };
+    custody?: { ok?: boolean };
+    hubs?: Array<{ name?: string; online?: boolean; selfRelayPresence?: boolean }>;
+  },
+  metrics = '',
+): string => JSON.stringify({
+  coreOk: health.coreOk,
+  systemOk: health.systemOk,
+  degraded: health.degraded,
+  relayClientCount: health.relay?.clientCount ?? health.relay?.activeClientCount ?? null,
+  storageOk: health.storage?.ok ?? null,
+  hubMeshOk: health.hubMesh?.ok ?? null,
+  marketMakerOk: health.marketMaker?.ok ?? null,
+  startupPhase: health.marketMaker?.startupPhase ?? null,
+  cross: health.marketMaker?.cross
+    ? {
+        applicable: health.marketMaker.cross.applicable ?? null,
+        ok: health.marketMaker.cross.ok ?? null,
+        expectedRoutes: health.marketMaker.cross.expectedRoutes ?? null,
+      }
+    : null,
+  custodyOk: health.custody?.ok ?? null,
+  hubs: Array.isArray(health.hubs)
+    ? health.hubs.map(hub => ({
+        name: hub.name ?? null,
+        online: hub.online ?? null,
+        selfRelayPresence: hub.selfRelayPresence ?? null,
+      }))
+    : [],
+  diagnosticMetrics: readDiagnosticMetricLines(metrics),
+});
+
 export const getFatalDegradedReasons = (degraded: unknown): string[] => {
   if (!Array.isArray(degraded)) return [];
   return degraded
@@ -85,17 +145,20 @@ const main = async (): Promise<void> => {
     hubMesh?: { ok?: boolean };
     marketMaker?: { ok?: boolean; startupPhase?: string | null };
     custody?: { ok?: boolean };
+    hubs?: Array<{ name?: string; online?: boolean; selfRelayPresence?: boolean }>;
+    relay?: { clientCount?: number; activeClientCount?: number };
   };
-  const healthSummary = JSON.stringify({
-    coreOk: health.coreOk,
-    systemOk: health.systemOk,
-    degraded: health.degraded,
-    storageOk: health.storage?.ok ?? null,
-    hubMeshOk: health.hubMesh?.ok ?? null,
-    marketMakerOk: health.marketMaker?.ok ?? null,
-    startupPhase: health.marketMaker?.startupPhase ?? null,
-    custodyOk: health.custody?.ok ?? null,
-  });
+
+  let metrics = '';
+  let metricsHttpStatus: number | null = null;
+  try {
+    const diagnosticMetricsRes = await fetchWithTimeout(`${args.baseUrl}/api/metrics`, args.timeoutMs);
+    metricsHttpStatus = diagnosticMetricsRes.status;
+    if (diagnosticMetricsRes.ok) metrics = await diagnosticMetricsRes.text();
+  } catch (error) {
+    metrics = `metrics fetch failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  const healthSummary = buildProdHealthFailureSummary(health, metrics);
 
   requireCondition(health.coreOk === true, `health.coreOk is not true: ${healthSummary}`);
   requireCondition(health.systemOk === true, `health.systemOk is not true: ${healthSummary}`);
@@ -107,9 +170,8 @@ const main = async (): Promise<void> => {
     );
   }
 
-  const metricsRes = await fetchWithTimeout(`${args.baseUrl}/api/metrics`, args.timeoutMs);
-  requireCondition(metricsRes.ok, `/api/metrics HTTP ${metricsRes.status}`);
-  const metrics = await metricsRes.text();
+  requireCondition(metricsHttpStatus !== null, `/api/metrics did not return a response: ${healthSummary}`);
+  requireCondition(metricsHttpStatus >= 200 && metricsHttpStatus < 300, `/api/metrics HTTP ${metricsHttpStatus}: ${healthSummary}`);
   requireCondition(readMetric(metrics, 'xln_core_ok') === 1, 'xln_core_ok metric is not 1');
   requireCondition(readMetric(metrics, 'xln_system_ok') === 1, 'xln_system_ok metric is not 1');
 
