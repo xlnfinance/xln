@@ -78,6 +78,7 @@ import {
   readShardJurisdictions,
   resolvePrimaryHubJurisdictionFallback,
   seedShardJurisdictions,
+  syncCanonicalJurisdictionsFromShard,
   toPublicJurisdictionsPayload,
   type OrchestratorJurisdictionsConfig,
 } from './jurisdictions';
@@ -1416,6 +1417,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     mkdirSync(args.dbRoot, { recursive: true });
     seedShardJurisdictions(jurisdictionsConfig);
     await deployRpc2JurisdictionStack(jurisdictionsConfig);
+    syncCanonicalJurisdictionsFromShard(jurisdictionsConfig);
     finishTiming('reset_clear_state', clearStartedAt);
 
     const h1 = hubChildren[0]!;
