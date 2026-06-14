@@ -724,6 +724,19 @@ run_local_deploy() {
       pkill -KILL -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
       pkill -KILL -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
 
+      lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+      lsof -ti TCP:8088 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+      pm2 delete xln-server >/dev/null 2>&1 || true
+      pm2 delete xln-watchtower >/dev/null 2>&1 || true
+      pm2 delete xln-custody >/dev/null 2>&1 || true
+      pkill -TERM -f 'runtime/orchestrator/hub-node.ts' >/dev/null 2>&1 || true
+      pkill -TERM -f 'runtime/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
+      pkill -TERM -f 'runtime/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
+      sleep 1
+      pkill -KILL -f 'runtime/orchestrator/hub-node.ts' >/dev/null 2>&1 || true
+      pkill -KILL -f 'runtime/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
+      pkill -KILL -f 'runtime/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
+
       if [ "$FRESH" = "1" ]; then
         echo "[deploy] resetting production anvil + runtime state (--fresh)"
         rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
@@ -754,11 +767,6 @@ run_local_deploy() {
         fail_deploy_with_debug "anvil2 did not become ready on :8546"
       fi
 
-      lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
-      lsof -ti TCP:8088 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
-      pm2 delete xln-server >/dev/null 2>&1 || true
-      pm2 delete xln-watchtower >/dev/null 2>&1 || true
-      pm2 delete xln-custody >/dev/null 2>&1 || true
       run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
       run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
       if ! wait_for_watchtower; then
