@@ -128,19 +128,17 @@ export type {
   StorageSnapshotManifest,
 } from './types';
 
-const isProductionStorageRuntime = (): boolean =>
-  String(process.env['NODE_ENV'] ?? '').trim().toLowerCase() === 'production';
+const parseStorageBoolean = (value: unknown): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+};
 
 const resolveCanonicalHashPeriodFrames = (env: Env): 0 | 1 => {
-  const raw =
+  const explicitPeriod =
     env.runtimeConfig?.storage?.canonicalHashPeriodFrames ??
-    process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] ??
-    1;
-  const enabled = Number(raw) > 0;
-  if (!enabled && isProductionStorageRuntime()) {
-    throw new Error('STORAGE_CANONICAL_HASH_REQUIRED_IN_PRODUCTION');
-  }
-  return enabled ? 1 : 0;
+    process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
+  if (explicitPeriod !== undefined) return Number(explicitPeriod) > 0 ? 1 : 0;
+  return parseStorageBoolean(process.env['XLN_STORAGE_VERIFY_CANONICAL']) ? 1 : 0;
 };
 
 const runtimeConfigFromEnv = (env: Env): Required<StorageRuntimeConfig> => ({

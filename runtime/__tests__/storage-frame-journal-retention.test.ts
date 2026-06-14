@@ -160,29 +160,36 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('production refuses disabled canonical storage hashes', async () => {
+  test('production keeps canonical storage audit out of the hot path by default', async () => {
     const previousNodeEnv = process.env['NODE_ENV'];
     const previousPeriod = process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
+    const previousVerify = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
+    const env = createEmptyEnv(`storage-prod-canonical-default ${Date.now()}`);
 
     try {
       process.env['NODE_ENV'] = 'production';
-      process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = '0';
-      const envFromPeriod = createEmptyEnv(`storage-prod-canonical-period ${Date.now()}`);
-      envFromPeriod.quietRuntimeLogs = true;
-      envFromPeriod.runtimeId = deriveSignerAddressSync(envFromPeriod.runtimeSeed!, '1').toLowerCase();
-      envFromPeriod.dbNamespace = envFromPeriod.runtimeId;
-      envFromPeriod.height = 1;
-      envFromPeriod.timestamp = 1_000;
+      delete process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
+      delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
+      env.quietRuntimeLogs = true;
+      env.runtimeId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
+      env.dbNamespace = env.runtimeId;
+      env.height = 1;
+      env.timestamp = 1_000;
 
-      await expect(saveEnvToDB(envFromPeriod, { runtimeTxs: [], entityInputs: [] }, []))
-        .rejects.toThrow('STORAGE_CANONICAL_HASH_REQUIRED_IN_PRODUCTION');
-      await closeRuntimeDb(envFromPeriod);
-      await closeInfraDb(envFromPeriod);
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+      const frame = await readStorageFrameRecord(getFrameDb(env), 1);
+      expect(frame?.stateHash).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(frame?.canonicalStateHash).toBeUndefined();
+      expect(frame?.canonicalEntityHashes).toBeUndefined();
     } finally {
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
       if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
       else process.env['NODE_ENV'] = previousNodeEnv;
       if (previousPeriod === undefined) delete process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
       else process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = previousPeriod;
+      if (previousVerify === undefined) delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
+      else process.env['XLN_STORAGE_VERIFY_CANONICAL'] = previousVerify;
     }
   });
 
