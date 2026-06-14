@@ -44,6 +44,7 @@
     "soak:quick": "bun runtime/scripts/run-soak-gate.ts --profile=quick --iterations=2",
     "soak:release": "bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=240",
     "prod:health": "bun runtime/scripts/prod-health-smoke.ts",
+    "prod:diagnose": "./scripts/prod-diagnose.sh",
     "security:audit-pack": "bun runtime/scripts/check-security-audit-pack.ts",
     "gate:quick": "bun runtime/scripts/run-release-gate.ts --profile=quick",
     "gate:ci": "bun runtime/scripts/run-release-gate.ts --profile=ci",

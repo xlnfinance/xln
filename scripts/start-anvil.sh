@@ -11,6 +11,7 @@ ANVIL_STATE="${ANVIL_STATE:-$REPO_ROOT/data/anvil-state.json}"
 ANVIL_LOG="${ANVIL_LOG:-$REPO_ROOT/logs/anvil.log}"
 ANVIL_BLOCK_TIME="${ANVIL_BLOCK_TIME:-1}"
 ANVIL_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
+ANVIL_CHAIN_ID="${ANVIL_CHAIN_ID:-31337}"
 ANVIL_TMPDIR="${ANVIL_TMPDIR:-$REPO_ROOT/data/anvil-tmp}"
 ANVIL_MAX_PERSISTED_STATES="${ANVIL_MAX_PERSISTED_STATES:-2}"
 
@@ -44,7 +45,7 @@ kill_by_port "$ANVIL_PORT"
 if [ -f "$ANVIL_STATE" ]; then
     echo "📂 Loading state from $ANVIL_STATE"
     anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
-          --chain-id 31337 \
+          --chain-id "$ANVIL_CHAIN_ID" \
           --mixed-mining \
           --quiet \
           --block-time "$ANVIL_BLOCK_TIME" \
@@ -57,7 +58,7 @@ if [ -f "$ANVIL_STATE" ]; then
 else
     echo "🆕 Starting fresh anvil (no state file)"
     anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
-          --chain-id 31337 \
+          --chain-id "$ANVIL_CHAIN_ID" \
           --mixed-mining \
           --quiet \
           --block-time "$ANVIL_BLOCK_TIME" \
