@@ -120,6 +120,7 @@ export const startRuntimeP2P = (
   if (config.relayUrls !== undefined) p2pOptions.relayUrls = config.relayUrls;
   const configuredWsUrl = (config as P2PConfig & { wsUrl?: string | null }).wsUrl;
   if (configuredWsUrl !== undefined) p2pOptions.wsUrl = configuredWsUrl;
+  if (config.allowDirectClients !== undefined) p2pOptions.allowDirectClients = config.allowDirectClients;
   if (config.seedRuntimeIds !== undefined) p2pOptions.seedRuntimeIds = config.seedRuntimeIds;
   if (config.advertiseEntityIds !== undefined) p2pOptions.advertiseEntityIds = config.advertiseEntityIds;
   if (config.gossipPollMs !== undefined) p2pOptions.gossipPollMs = config.gossipPollMs;

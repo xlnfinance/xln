@@ -26,5 +26,6 @@ export const areMarketMakerHubTransportsReady = (
       .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
       .filter(runtimeId => runtimeId.length > 0),
   );
-  return Array.from(requiredRuntimeIds).every(runtimeId => openRuntimeIds.has(runtimeId));
+  if (Array.from(requiredRuntimeIds).every(runtimeId => openRuntimeIds.has(runtimeId))) return true;
+  return p2pState.connected === true;
 };

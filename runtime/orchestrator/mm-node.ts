@@ -1333,12 +1333,6 @@ const collectPendingCrossRequestOrderIds = (env: Env, entityId: string): Set<str
   return ids;
 };
 
-const hasMarketMakerCrossRequestInFlight = (env: Env, spec: MarketMakerOfferSpec): boolean => {
-  const route = spec.crossJurisdiction;
-  if (!route) return false;
-  return collectPendingCrossRequestOrderIds(env, route.source.entityId).has(route.orderId);
-};
-
 const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
@@ -1632,6 +1626,15 @@ const maintainMarketMakerCrossQuotes = async (
   }
 
   const inputsByEntity = new Map<string, EntityInput>();
+  const pendingCrossRequestOrderIdsBySourceEntity = new Map<string, Set<string>>();
+  const getPendingCrossRequestOrderIds = (entityId: string): Set<string> => {
+    const normalizedEntityId = normalizeEntityRef(entityId);
+    const cached = pendingCrossRequestOrderIdsBySourceEntity.get(normalizedEntityId);
+    if (cached) return cached;
+    const ids = collectPendingCrossRequestOrderIds(env, normalizedEntityId);
+    pendingCrossRequestOrderIdsBySourceEntity.set(normalizedEntityId, ids);
+    return ids;
+  };
   let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
   for (const [sourceHubEntityId, specs] of grouped.entries()) {
     await yieldMarketMakerApi();
@@ -1657,7 +1660,7 @@ const maintainMarketMakerCrossQuotes = async (
         const route = spec.crossJurisdiction!;
         return (
           !hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId) &&
-          !hasMarketMakerCrossRequestInFlight(env, spec) &&
+          !getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId) &&
           hasPairMutualCredit(env, sourceContext.entityId, route.source.counterpartyEntityId, route.source.tokenId, route.source.amount) &&
           hasPairMutualCredit(env, targetContext.entityId, route.target.entityId, route.target.tokenId, route.target.amount)
         );
@@ -2076,6 +2079,7 @@ const run = async (): Promise<void> => {
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
+    allowDirectClients: false,
     advertiseEntityIds: mmContexts.map(context => context.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });

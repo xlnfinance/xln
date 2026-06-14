@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { areMarketMakerHubTransportsReady } from '../orchestrator/mm-transport';
 
 describe('market maker transport readiness', () => {
-  test('does not accept relay-only delivery for financial bootstrap', () => {
+  test('accepts official relay delivery when hub profiles are visible', () => {
     expect(areMarketMakerHubTransportsReady(
       {
         connected: true,
@@ -14,7 +14,7 @@ describe('market maker transport readiness', () => {
         { runtimeId: '0x1111111111111111111111111111111111111111' },
         { runtimeId: '0x2222222222222222222222222222222222222222' },
       ],
-    )).toBe(false);
+    )).toBe(true);
   });
 
   test('accepts direct-only operation only when every visible hub direct peer is open', () => {

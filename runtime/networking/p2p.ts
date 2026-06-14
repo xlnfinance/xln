@@ -38,6 +38,7 @@ const SLOW_BROWSER_TIMER_MS = 32;
 export type P2PConfig = {
   relayUrls?: string[];
   wsUrl?: string | null;
+  allowDirectClients?: boolean;
   seedRuntimeIds?: string[];
   runtimeId?: string;
   signerId?: string;
@@ -52,6 +53,7 @@ type RuntimeP2POptions = {
   signerId?: string;
   relayUrls?: string[];
   wsUrl?: string | null;
+  allowDirectClients?: boolean;
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
   isHub?: boolean;
@@ -151,6 +153,7 @@ export class RuntimeP2P {
   private signerId: string;
   private relayUrls: string[];
   private wsUrl: string | null;
+  private allowDirectClients: boolean;
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
@@ -178,6 +181,7 @@ export class RuntimeP2P {
     this.signerId = options.signerId || '1';
     this.relayUrls = uniqueTransportValues(options.relayUrls || [DEFAULT_RELAY_URL]);
     this.wsUrl = normalizeOptionalWsUrl(options.wsUrl);
+    this.allowDirectClients = options.allowDirectClients !== false;
     this.seedRuntimeIds = uniqueTransportValues(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
@@ -199,6 +203,10 @@ export class RuntimeP2P {
   }
 
   updateConfig(config: P2PConfig) {
+    if (config.allowDirectClients !== undefined && this.allowDirectClients !== (config.allowDirectClients !== false)) {
+      this.allowDirectClients = config.allowDirectClients !== false;
+      if (!this.allowDirectClients) this.closeDirectClients();
+    }
     if (config.seedRuntimeIds) {
       this.seedRuntimeIds = uniqueTransportValues(config.seedRuntimeIds);
     }
@@ -1088,6 +1096,7 @@ export class RuntimeP2P {
   }
 
   private getDirectPeerEndpoint(runtimeId: string): string | null {
+    if (!this.allowDirectClients) return null;
     const normalizedTargetRuntimeId = normalizeRuntimeId(runtimeId);
     if (!normalizedTargetRuntimeId || normalizedTargetRuntimeId === this.runtimeId) return null;
     const profiles = this.env.gossip?.getProfiles?.() || [];
@@ -1226,6 +1235,10 @@ export class RuntimeP2P {
   }
 
   private syncDirectPeerConnections(): void {
+    if (!this.allowDirectClients) {
+      this.closeDirectClients();
+      return;
+    }
     const desired = new Map<string, string>();
     const profiles = this.env.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
