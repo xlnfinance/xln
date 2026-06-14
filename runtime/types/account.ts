@@ -666,7 +666,7 @@ export type AccountTx =
       type: 'pull_cancel';
       data: {
         pullId: string;
-        reason?: 'beneficiary_release' | 'expired' | 'cross_j_cancel_no_fill';
+        reason?: 'beneficiary_release' | 'expired' | 'cross_j_cancel_no_fill' | 'cross_j_source_remainder_release';
       };
     }
   // === SWAP TRANSACTION TYPES ===

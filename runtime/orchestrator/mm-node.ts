@@ -717,17 +717,16 @@ const isWithinPairBand = (anchorTicks: bigint, priceTicks: bigint): boolean => {
   return priceTicks >= minAllowed && priceTicks <= maxAllowed;
 };
 
-const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
-  const ids = tokenCatalog
-    .map(token => Number(token.tokenId))
-    .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
-    .sort((a, b) => a - b);
-  const unique = Array.from(new Set(ids));
+const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {
+  const unique = normalizePositiveTokenIds([...tokenIds]);
   if (unique.length >= HUB_REQUIRED_TOKEN_COUNT) {
-    return unique;
+    return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);
   }
   return [...DEFAULT_ACCOUNT_TOKEN_IDS];
 };
+
+const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] =>
+  selectMarketMakerBootstrapTokenIds(tokenCatalog.map(token => Number(token.tokenId)));
 
 const marketMakerContextKey = (context: Pick<MarketMakerEntityContext, 'entityId'>): string =>
   normalizeEntityRef(context.entityId);
@@ -746,7 +745,9 @@ const buildMarketMakerTokenIdsByContext = (
     }));
     byContext.set(
       marketMakerContextKey(context),
-      jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT ? jurisdictionTokenIds : fallback,
+      jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
+        ? selectMarketMakerBootstrapTokenIds(jurisdictionTokenIds)
+        : fallback,
     );
   }
   return byContext;
