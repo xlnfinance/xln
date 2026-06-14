@@ -171,6 +171,18 @@
     return targets;
   }
 
+  function hasAnyCounterpartyAccount(currentEnv: Env | null | undefined, targetEntityId: string): boolean {
+    const normalizedEntityId = normalizeEntityId(targetEntityId);
+    if (!normalizedEntityId || !currentEnv?.eReplicas) return false;
+    for (const [key, replica] of currentEnv.eReplicas.entries()) {
+      const [replicaEntityId] = String(key || '').split(':');
+      const stateEntityId = normalizeEntityId(replica?.state?.entityId || replicaEntityId);
+      if (stateEntityId !== normalizedEntityId) continue;
+      return (replica?.state?.accounts?.size || 0) > 0;
+    }
+    return false;
+  }
+
   const hasSavedHubJoinPreference = (): boolean =>
     typeof localStorage !== 'undefined' && localStorage.getItem(HUB_JOIN_STORAGE_KEY) !== null;
 
@@ -535,7 +547,10 @@
       await saveRecoveryConfig();
 
       const autoJoinCount = parseJoinCount(savedJoinPreference);
-      const autoJoinedCount = await queueAutoHubJoins(autoJoinCount, targets);
+      const autoJoinTargets = env && autoJoinCount > 0
+        ? targets.filter((target) => !hasAnyCounterpartyAccount(env, target.entityId))
+        : targets;
+      const autoJoinedCount = await queueAutoHubJoins(autoJoinCount, autoJoinTargets);
 
       const completedEntityIds = targets.map((target) => target.entityId);
       writeOnboardingCompleteForEntities(completedEntityIds.length > 0 ? completedEntityIds : [entityId], true);
