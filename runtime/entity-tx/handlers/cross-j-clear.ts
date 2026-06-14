@@ -192,6 +192,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
       `CROSS_J_CLEAR_REVEAL_FAILED: order=${orderId} ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  const closeRemainder = cancelRemainder || ratio < 65_535;
   mempoolOps.push({
     accountId,
     tx: {
@@ -202,6 +203,18 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
       },
     },
   });
+  if (closeRemainder && ratio < 65_535) {
+    mempoolOps.push({
+      accountId,
+      tx: {
+        type: 'pull_cancel',
+        data: {
+          pullId: canonicalRoute.sourcePull.pullId,
+          reason: 'cross_j_source_remainder_release',
+        },
+      },
+    });
+  }
 
   const sourceSavingsAmount = canonicalRoute.priceImprovementSourceAmount ?? 0n;
   if (sourceSavingsAmount > 0n) {
@@ -221,7 +234,6 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     });
   }
 
-  const closeRemainder = cancelRemainder || ratio < 65_535;
   const requestedAt = deterministicEntityTimestamp(newState, env);
   transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clearing', requestedAt);
   canonicalRoute.pendingClearRequestedAt = requestedAt;
