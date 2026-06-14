@@ -44,6 +44,8 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
+    expect(orchestrator).toContain('MARKET_MAKER_CREDIT_AMOUNT.toString()');
+    expect(orchestrator).not.toContain("creditAmount: '50000000000000000000000000'");
     expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '30'");
