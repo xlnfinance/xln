@@ -47,6 +47,17 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
   });
 
+  test('fresh deploy stops runtime processes before deleting runtime state', () => {
+    const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const stopIndex = deploy.indexOf('pm2 delete xln-server');
+    const deleteIndex = deploy.indexOf('rm -rf db/runtime/prod-main db/runtime/prod-mesh');
+    expect(stopIndex).toBeGreaterThan(0);
+    expect(deleteIndex).toBeGreaterThan(0);
+    expect(stopIndex).toBeLessThan(deleteIndex);
+    expect(deploy).toContain("pkill -KILL -f 'runtime/orchestrator/hub-node.ts'");
+    expect(deploy).toContain("pkill -KILL -f 'runtime/orchestrator/mm-node.ts'");
+  });
+
   test('secondary anvil uses a persistent Tron chain id and state file', () => {
     const anvil = readFileSync(join(repoRoot, 'scripts/start-anvil.sh'), 'utf8');
     const anvil2 = readFileSync(join(repoRoot, 'scripts/start-anvil2.sh'), 'utf8');

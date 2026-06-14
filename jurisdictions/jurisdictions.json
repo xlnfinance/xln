@@ -1,6 +1,6 @@
 {
   "version": "3",
-  "lastUpdated": "2026-03-24T04:01:05.173Z",
+  "lastUpdated": "2026-06-14T19:56:35.656Z",
   "jurisdictions": {
     "arrakis": {
       "name": "Testnet",
@@ -36,6 +36,22 @@
       "currency": "VIBRANIUM",
       "status": "pending",
       "description": "Alias on shared local anvil (single-chain demo mode)"
+    },
+    "tron": {
+      "name": "Tron",
+      "chainId": 31338,
+      "rpc": "/rpc2",
+      "blockTimeMs": 1000,
+      "explorer": "",
+      "currency": "TRX",
+      "status": "active",
+      "description": "Second local EVM chain used to simulate Tron cross-jurisdiction swaps",
+      "contracts": {
+        "account": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+        "depository": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+        "entityProvider": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "deltaTransformer": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9"
+      }
     }
   },
   "defaults": {
@@ -47,5 +63,7 @@
       "hardLimit": 10000,
       "maxFee": 15
     }
-  }
+  },
+  "deployVersion": "v3-dbe139165cd7",
+  "networkVersion": "v3-dbe139165cd7"
 }
