@@ -248,7 +248,11 @@ async function processDueHooks(
   const disputeFinalizeCounterparties = new Set<string>();
   let shouldBroadcastQueuedDisputeFinalizations = false;
 
-  const currentJBlock = getRuntimeJurisdictionHeight(env, replica.state.lastFinalizedJHeight || 0);
+  const currentJBlock = getRuntimeJurisdictionHeight(
+    env,
+    replica.state.lastFinalizedJHeight || 0,
+    replica.state.config.jurisdiction?.name,
+  );
 
   for (const hook of hooks) {
     crontabLog.debug('hook.fired', { type: hook.type, id: shortHash(hook.id) });

@@ -160,6 +160,7 @@ const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
   const runtimeId = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
   if (!signerId || !runtimeId) return true;
   if (signerId === runtimeId) return true;
+  if (getCachedSignerPrivateKey(signerId)) return true;
   console.warn(
     `⚠️ [J-SUBMIT] skipped non-local sealed batch for ${jTx.entityId.slice(-4)}: ` +
     `signer=${signerId.slice(-8)} runtime=${runtimeId.slice(-8)}`,

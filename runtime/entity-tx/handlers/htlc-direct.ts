@@ -68,7 +68,11 @@ export const handleHashlockPaymentEntityTx = (
     : BigInt(newState.timestamp + 120_000);
   const revealBeforeHeight = entityTx.data.revealBeforeHeight !== undefined
     ? Number(entityTx.data.revealBeforeHeight)
-    : getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight || 0) + 50;
+    : getRuntimeJurisdictionHeight(
+      env,
+      newState.lastFinalizedJHeight || 0,
+      newState.config.jurisdiction?.name,
+    ) + 50;
   if (timelock <= BigInt(newState.timestamp) || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= newState.lastFinalizedJHeight) {
     addMessage(newState, '❌ Hashlock payment failed: invalid deadline');
     return { newState, outputs, mempoolOps };
