@@ -21,7 +21,13 @@ describe('production startup wiring', () => {
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
     expect(orchestrator).toContain("process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '15000'");
-    expect(orchestrator).toContain('const [info, health] = await Promise.all([');
+    expect(orchestrator).toContain("process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'");
+    expect(orchestrator).toContain('const [health, info] = await Promise.all([');
+    expect(orchestrator).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)");
+    expect(orchestrator).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS)");
+    expect(orchestrator.indexOf('if (health) marketMakerChild.lastHealth = health;')).toBeLessThan(
+      orchestrator.indexOf('if (info) marketMakerChild.lastInfo = info;'),
+    );
     expect(orchestrator).toContain('if (info) marketMakerChild.lastInfo = info;');
     expect(orchestrator).toContain('if (health) marketMakerChild.lastHealth = health;');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
@@ -44,6 +50,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'");
     expect(mmNode).toContain('bootstrapCrossCursor');
     expect(mmNode).toContain('const jobCount = Math.min(MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length)');
+    expect(mmNode).not.toContain('if (!isMarketMakerConnectivityReady(env, sourceContext.entityId, sourceHubEntityIds, sourceTokenIds)) return;');
+    expect(mmNode).not.toContain('if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;');
+    expect(mmNode).toContain('const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);');
   });
 
   test('deploy starts and checks the production Tron chain', () => {
