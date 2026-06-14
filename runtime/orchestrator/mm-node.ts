@@ -227,7 +227,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '12'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'),
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -1073,6 +1073,15 @@ const countMarketMakerOffersForHub = (env: Env, mmEntityId: string, hubEntityId:
   return count;
 };
 
+const countExistingSpecOffers = (env: Env, entityId: string, counterpartyEntityId: string, specs: MarketMakerOfferSpec[]): number => {
+  const existingOfferIds = collectOfferIdsForAccount(getAccountMachine(env, entityId, counterpartyEntityId));
+  let count = 0;
+  for (const spec of specs) {
+    if (existingOfferIds.has(spec.offerId)) count += 1;
+  }
+  return count;
+};
+
 const ensureMarketMakerHubConnectivity = async (
   env: Env,
   mmEntityId: string,
@@ -1307,6 +1316,38 @@ const hasCrossRouteRegistered = (env: Env, entityId: string, orderId: string): b
   return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
 };
 
+const isMatchingCrossOfferRoute = (
+  candidate: CrossJurisdictionSwapRoute | null | undefined,
+  expected: CrossJurisdictionSwapRoute,
+): boolean => {
+  if (!candidate) return false;
+  return (
+    String(candidate.orderId || '') === String(expected.orderId || '') &&
+    normalizeEntityRef(candidate.source.entityId) === normalizeEntityRef(expected.source.entityId) &&
+    normalizeEntityRef(candidate.source.counterpartyEntityId) === normalizeEntityRef(expected.source.counterpartyEntityId) &&
+    normalizeEntityRef(candidate.target.entityId) === normalizeEntityRef(expected.target.entityId) &&
+    normalizeEntityRef(candidate.target.counterpartyEntityId) === normalizeEntityRef(expected.target.counterpartyEntityId) &&
+    Number(candidate.source.tokenId) === Number(expected.source.tokenId) &&
+    Number(candidate.target.tokenId) === Number(expected.target.tokenId)
+  );
+};
+
+const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {
+  const account = getAccountMachine(env, route.source.entityId, route.source.counterpartyEntityId);
+  if (!account) return false;
+  const committed = account.swapOffers?.get(route.orderId);
+  if (isMatchingCrossOfferRoute(committed?.crossJurisdiction, route)) return true;
+  const pendingTxs = [
+    ...(account.mempool ?? []),
+    ...(account.pendingFrame?.accountTxs ?? []),
+  ];
+  return pendingTxs.some((tx) =>
+    tx?.type === 'swap_offer' &&
+    String(tx.data?.offerId || '') === route.orderId &&
+    isMatchingCrossOfferRoute(tx.data?.crossJurisdiction, route)
+  );
+};
+
 const collectPendingCrossRequestOrderIds = (env: Env, entityId: string): Set<string> => {
   const normalizedEntityId = normalizeEntityRef(entityId);
   const ids = new Set<string>();
@@ -1340,6 +1381,7 @@ const collectPendingCrossRequestOrderIds = (env: Env, entityId: string): Set<str
 const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
+  if (hasSourceAccountCrossOffer(env, route)) return true;
   const bookOwnerEntityId = crossJurisdictionBookOwnerRef(route);
   const bookOwner = bookOwnerEntityId ? getEntityReplicaById(env, bookOwnerEntityId)?.state : null;
   return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
@@ -1637,7 +1679,14 @@ const maintainMarketMakerCrossQuotes = async (
     return ids;
   };
   let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
-  for (const [sourceHubEntityId, specs] of grouped.entries()) {
+  const groupedEntries = Array.from(grouped.entries())
+    .sort((left, right) =>
+      countExistingSpecOffers(env, sourceContext.entityId, left[0], left[1]) -
+      countExistingSpecOffers(env, sourceContext.entityId, right[0], right[1]) ||
+      compareStableText(left[0], right[0]),
+    );
+
+  for (const [sourceHubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return;
     const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
