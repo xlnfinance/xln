@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
@@ -19,6 +19,7 @@ type SoakArgs = {
   minutes: number | null;
   intervalMs: number;
   outputPath: string;
+  keepE2eRuns: number;
 };
 
 type SoakResult = {
@@ -32,6 +33,7 @@ type SoakResult = {
 };
 
 const DEFAULT_OUTPUT = join('.logs', 'soak', `soak-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+const DEFAULT_KEEP_E2E_RUNS = 64;
 
 const profileCommands: Record<SoakProfile, SoakCommand[]> = {
   quick: [
@@ -83,12 +85,16 @@ const parseArgs = (): SoakArgs => {
 
   const intervalMs = Math.max(0, Math.floor(Number(flags.get('--interval-ms') || 0)));
   const outputPath = String(flags.get('--out') || DEFAULT_OUTPUT);
+  const keepE2eRunsRaw = Number(flags.get('--keep-e2e-runs') || process.env['SOAK_KEEP_E2E_RUNS'] || DEFAULT_KEEP_E2E_RUNS);
   return {
     profile: rawProfile,
     iterations: iterations === null ? null : Math.floor(iterations),
     minutes: minutes === null ? null : Math.floor(minutes),
     intervalMs,
     outputPath,
+    keepE2eRuns: Number.isFinite(keepE2eRunsRaw) && keepE2eRunsRaw >= 0
+      ? Math.floor(keepE2eRunsRaw)
+      : DEFAULT_KEEP_E2E_RUNS,
   };
 };
 
@@ -139,6 +145,45 @@ const writeSummary = (path: string, payload: unknown): void => {
   writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`);
 };
 
+type E2eRunForPrune = {
+  path: string;
+  runId: string;
+  completedAtMs: number;
+};
+
+const readPassedE2eRunForPrune = (path: string, runId: string): E2eRunForPrune | null => {
+  const manifestPath = join(path, 'manifest.json');
+  if (!existsSync(manifestPath)) return null;
+  try {
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { status?: unknown; completedAt?: unknown };
+    if (manifest.status !== 'passed') return null;
+    const completedAtMs =
+      typeof manifest.completedAt === 'number' && Number.isFinite(manifest.completedAt)
+        ? manifest.completedAt
+        : statSync(path).mtimeMs;
+    return { path, runId, completedAtMs };
+  } catch {
+    return null;
+  }
+};
+
+const pruneSuccessfulE2eRuns = (keepRuns: number): void => {
+  const root = resolve(process.cwd(), '.logs', 'e2e-parallel');
+  if (keepRuns < 0 || !existsSync(root)) return;
+  const passedRuns = readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map(entry => readPassedE2eRunForPrune(join(root, entry.name), entry.name))
+    .filter((entry): entry is E2eRunForPrune => entry !== null)
+    .sort((a, b) => b.completedAtMs - a.completedAtMs || b.runId.localeCompare(a.runId));
+
+  const removable = passedRuns.slice(keepRuns);
+  if (removable.length === 0) return;
+  for (const run of removable) {
+    rmSync(run.path, { recursive: true, force: true });
+  }
+  console.log(`[soak] pruned ${removable.length} successful E2E run(s); kept ${Math.min(keepRuns, passedRuns.length)}`);
+};
+
 const main = async (): Promise<void> => {
   const args = parseArgs();
   const commands = profileCommands[args.profile];
@@ -151,7 +196,10 @@ const main = async (): Promise<void> => {
   console.log(`XLN soak gate: ${args.profile}`);
   console.log(`mode=${args.iterations !== null ? `${args.iterations} iteration(s)` : `${args.minutes} minute(s)`}`);
   console.log(`summary=${args.outputPath}`);
+  console.log(`keepE2eRuns=${args.keepE2eRuns}`);
   console.log('='.repeat(76));
+
+  pruneSuccessfulE2eRuns(args.keepE2eRuns);
 
   let iteration = 1;
   while (true) {
@@ -172,6 +220,7 @@ const main = async (): Promise<void> => {
         console.error(`[soak] failed: ${command.name} code=${result.code ?? 'signal'}`);
         process.exit(result.code ?? 1);
       }
+      pruneSuccessfulE2eRuns(args.keepE2eRuns);
       if (deadline !== null && Date.now() >= deadline) break;
     }
 
