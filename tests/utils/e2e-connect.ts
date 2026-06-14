@@ -198,8 +198,36 @@ async function isAccountReady(
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const startUsingButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
-  if (!await startUsingButton.isVisible().catch(() => false)) return;
+  const onboarding = page.locator('.onboarding').first();
+  if (!await onboarding.isVisible().catch(() => false)) return;
+  const startUsingButton = onboarding.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
+
+  const setupError = onboarding.locator('.error-msg').first();
+  const readSetupError = async (): Promise<string> => {
+    if (!await setupError.isVisible().catch(() => false)) return '';
+    return String(await setupError.innerText({ timeout: 1_000 }).catch(() => '')).trim();
+  };
+  const waitForSetupToFinish = async (context: string): Promise<void> => {
+    const deadline = Date.now() + DEFAULT_OPEN_TIMEOUT_MS;
+    let lastText = '';
+    while (Date.now() < deadline) {
+      if (!await onboarding.isVisible().catch(() => false)) return;
+      const errorText = await readSetupError();
+      if (errorText) throw new Error(`${context}: ${errorText}`);
+      lastText = String(await onboarding.innerText({ timeout: 1_000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 500);
+      await page.waitForTimeout(500);
+    }
+    throw new Error(`${context}: onboarding did not complete. Last visible state: ${lastText || 'empty'}`);
+  };
+
+  const initialError = await readSetupError();
+  if (initialError) {
+    throw new Error(`onboarding setup failed before workspace open: ${initialError}`);
+  }
+  if (!await startUsingButton.isVisible().catch(() => false)) {
+    await waitForSetupToFinish('onboarding setup already in progress');
+    return;
+  }
 
   const riskCheckbox = page.getByRole('checkbox', {
     name: /I understand.*testnet software|I understand and accept the risks/i,
@@ -215,20 +243,12 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
       .find((button) => /^Start$/i.test(String(button.textContent || '').trim()));
     start?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
   }).catch(() => null);
-  if (await startUsingButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    const entityIds = await page.evaluate(() => Array.from(document.querySelectorAll('code'))
-      .map((node) => String(node.textContent || '').trim())
-      .filter((text) => /^0x[a-fA-F0-9]{64}$/.test(text)));
-    if (entityIds.length > 0) {
-      await page.evaluate((ids) => {
-        for (const id of ids) {
-          localStorage.setItem(`xln-onboarding-complete:${String(id).trim().toLowerCase()}`, 'true');
-        }
-      }, entityIds);
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
-    }
+
+  const postClickError = await readSetupError();
+  if (postClickError) {
+    throw new Error(`onboarding setup failed after Start: ${postClickError}`);
   }
-  await expect(startUsingButton).not.toBeVisible({ timeout: 20_000 });
+  await waitForSetupToFinish('onboarding setup after Start');
 }
 
 async function openAccountsWorkspace(page: Page): Promise<void> {
@@ -396,21 +416,25 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
           }
 
           const dataState = String(await hubCard.getAttribute('data-connection-state').catch(() => '') || '').toLowerCase();
-          if (dataState === 'open' || dataState === 'opening') {
-            lastUiState = dataState;
-            return true;
+          if (dataState === 'open') {
+            lastUiState = 'open-awaiting-committed-card';
+            return false;
+          }
+          if (dataState === 'opening') {
+            lastUiState = 'opening-awaiting-committed-card';
+            return false;
           }
 
           const openState = hubCard.locator('.connection-state').filter({ hasText: /^Open$/i }).first();
           if (await openState.isVisible().catch(() => false)) {
-            lastUiState = 'open-legacy';
-            return true;
+            lastUiState = 'open-legacy-awaiting-committed-card';
+            return false;
           }
 
           const openingState = hubCard.locator('.connection-state').filter({ hasText: /^Opening$/i }).first();
           if (await openingState.isVisible().catch(() => false)) {
-            lastUiState = 'opening-legacy';
-            return true;
+            lastUiState = 'opening-legacy-awaiting-committed-card';
+            return false;
           }
 
           const connectByTestId = hubCard.getByTestId('hub-connect-button').first();
@@ -423,7 +447,7 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
           ) {
             await connectButton.click({ timeout: 5_000 });
             lastUiState = 'connect-clicked';
-            return true;
+            return false;
           }
 
           const text = await hubCard.innerText({ timeout: 1_000 }).catch(() => '');
@@ -431,9 +455,9 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
           return false;
         },
         {
-          timeout: 20_000,
+          timeout: DEFAULT_OPEN_TIMEOUT_MS,
           intervals: [100, 250, 500],
-          message: `hub ${hubId} must expose Connect, Opening, or already be Open`,
+          message: `hub ${hubId} must render a committed account card after Connect`,
         },
       )
       .toBe(true);
@@ -443,6 +467,21 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
       `lastHubConnectUiState=${lastUiState}`,
     );
   }
+}
+
+async function waitForRenderedCommittedAccountCard(
+  page: Page,
+  hubId: string,
+  context: string,
+): Promise<void> {
+  await openAccountsWorkspace(page);
+  await expect
+    .poll(async () => await hasRenderedCommittedAccountCard(page, hubId), {
+      timeout: DEFAULT_OPEN_TIMEOUT_MS,
+      intervals: [250, 500, 750],
+      message: `${context}: rendered account ${hubId.slice(0, 10)} must be committed`,
+    })
+    .toBe(true);
 }
 
 async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
@@ -1190,6 +1229,7 @@ export async function connectRuntimeToHubWithCredit(
       }),
     );
     if (hubReady) {
+      await waitForRenderedCommittedAccountCard(page, hubId, 'connectRuntimeToHub already-ready path');
       return;
     }
   }
@@ -1266,6 +1306,7 @@ export async function connectRuntimeToHubWithCredit(
   ).toBe(true);
 
   await waitForHubAccountReady(page, identity.entityId, hubId, tokenIds);
+  await waitForRenderedCommittedAccountCard(page, hubId, 'connectRuntimeToHub final UI path');
 }
 
 export async function connectHub(page: Page, hubId: string): Promise<void> {
