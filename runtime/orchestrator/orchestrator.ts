@@ -109,13 +109,7 @@ const marketMakerReadyRestartLimit = Math.max(
   0,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
 );
-const relayUrl = (() => {
-  const url = new URL(args.publicWsBaseUrl);
-  url.pathname = '/relay';
-  url.search = '';
-  url.hash = '';
-  return url.toString();
-})();
+const relayUrl = args.relayUrl;
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
 const managedRuntimeLeases = createManagedRuntimeLeaseManager({
