@@ -137,10 +137,14 @@ check_jurisdictions() {
     const file = process.argv[1];
     const payload = JSON.parse(fs.readFileSync(file, "utf8"));
     const jurisdictions = payload.jurisdictions || payload;
-    const testnet = jurisdictions.testnet || jurisdictions.Testnet;
-    const tron = jurisdictions.tron || jurisdictions.Tron;
-    const testnetOk = !!testnet && Number(testnet.chainId ?? testnet.chainID ?? 31337) === 31337;
-    const tronOk = !!tron && Number(tron.chainId ?? tron.chainID) === 31338;
+    const entries = Object.entries(jurisdictions);
+    const hasChain = (chainId, namePattern) => entries.some(([key, value]) => {
+      const item = value || {};
+      const name = String(item.name || key || "").toLowerCase();
+      return Number(item.chainId ?? item.chainID) === chainId && namePattern.test(name);
+    });
+    const testnetOk = hasChain(31337, /testnet|arrakis|wakanda/);
+    const tronOk = hasChain(31338, /tron|rpc2/);
     process.exit(testnetOk && tronOk ? 0 : 1);
   ' "$file"; then
     ok "jurisdictions contain Testnet and Tron"
@@ -274,10 +278,10 @@ check_watchtower "http://127.0.0.1:9100/api/tower/healthz"
 check_health "$PUBLIC_URL/api/health" "public"
 
 section "public direct mesh"
-check_public_ws "wss://xln.finance:8090/ws" "orchestrator"
-check_public_ws "wss://xln.finance:8091/ws" "H1"
-check_public_ws "wss://xln.finance:8092/ws" "H2"
-check_public_ws "wss://xln.finance:8093/ws" "H3"
+check_public_ws "wss://xln.finance:8090/ws" "H1"
+check_public_ws "wss://xln.finance:8091/ws" "H2"
+check_public_ws "wss://xln.finance:8092/ws" "H3"
+check_public_ws "wss://xln.finance:8093/ws" "MM"
 
 if [ "$failures" -gt 0 ]; then
   section "recent logs"
