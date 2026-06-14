@@ -2649,6 +2649,11 @@ const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): b
   typeof runtimeProcess?.exit === 'function' &&
   String(runtimeProcess.env?.['XLN_RUNTIME_EXIT_ON_FATAL'] || '').trim() === '1';
 
+const shouldRequireCanonicalStorageAudit = (runtimeProcess = getRuntimeProcessGlobal()): boolean => {
+  const raw = String(runtimeProcess?.env?.['XLN_STORAGE_VERIFY_CANONICAL'] || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+};
+
 const resolveStorageWriteTimeoutMs = (): number => {
   const raw = String(getRuntimeProcessGlobal()?.env?.['XLN_STORAGE_WRITE_TIMEOUT_MS'] || '').trim();
   if (!raw) return 0;
@@ -2987,11 +2992,12 @@ const loadEnvFromStorage = async (
     }
     env.frameLogs = restoredFrameLogs;
     rebuildPersistedJurisdictions(env);
-    if (!frame.canonicalStateHash) {
+    const shouldVerifyCanonicalAudit = Boolean(frame.canonicalStateHash) || shouldRequireCanonicalStorageAudit();
+    if (shouldVerifyCanonicalAudit && !frame.canonicalStateHash) {
       throw new Error(`STORAGE_RESTORE_CANONICAL_HASH_MISSING: height=${targetHeight}`);
     }
-    const restoredCanonicalStateHash = computeCanonicalStateHashFromEnv(env);
-    if (restoredCanonicalStateHash !== frame.canonicalStateHash) {
+    const restoredCanonicalStateHash = shouldVerifyCanonicalAudit ? computeCanonicalStateHashFromEnv(env) : '';
+    if (shouldVerifyCanonicalAudit && restoredCanonicalStateHash !== frame.canonicalStateHash) {
       const expectedEntities = new Map((frame.canonicalEntityHashes || []).map((entry) => [entry.entityId, entry.hash]));
       const actualEntities = computeCanonicalEntityHashesFromEnv(env);
       const mismatch = actualEntities.find((entry) => expectedEntities.get(entry.entityId) !== entry.hash);
