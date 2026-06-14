@@ -38,6 +38,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'");
+    expect(mmNode).not.toContain('bootstrapCrossCursor');
+    expect(mmNode).not.toContain('selectedCrossQuoteJobs = selectedJob ? [selectedJob] : []');
   });
 
   test('deploy starts and checks the production Tron chain', () => {

@@ -2101,7 +2101,6 @@ const run = async (): Promise<void> => {
 
   let shuttingDown = false;
   let loopInFlight = false;
-  let bootstrapCrossCursor = 0;
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<void> => {
     if (shuttingDown) return;
     if (loopInFlight) return;
@@ -2209,14 +2208,7 @@ const run = async (): Promise<void> => {
           });
         }
       }
-      let selectedCrossQuoteJobs: CrossQuoteJob[] = crossQuoteJobs;
-      if (mode === 'bootstrap' && crossQuoteJobs.length > 0) {
-        const selectedIndex = bootstrapCrossCursor % crossQuoteJobs.length;
-        const selectedJob = crossQuoteJobs[selectedIndex];
-        selectedCrossQuoteJobs = selectedJob ? [selectedJob] : [];
-        bootstrapCrossCursor = (selectedIndex + 1) % crossQuoteJobs.length;
-      }
-      for (const job of selectedCrossQuoteJobs) {
+      for (const job of crossQuoteJobs) {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
         await maintainMarketMakerCrossQuotes(
