@@ -1695,7 +1695,7 @@ describe('cross-jurisdiction hashledger swap', () => {
   });
 
   test('clear request reveals one source pull binary and can cancel remainder', async () => {
-    const env = createEmptyEnv('cross-clear-request');
+    const env = createEmptyEnv('cross-clear-delayed-seed');
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
@@ -1716,7 +1716,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
       expiresAt: 70_000,
-    }, { runtimeSeed: 'cross-clear-delayed-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    }, { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.timestamp });
     const route = {
       ...prepared,
       status: 'partially_filled' as const,
@@ -1730,6 +1730,14 @@ describe('cross-jurisdiction hashledger swap', () => {
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const account = state.accounts.get(sourceUser)!;
+    const sourcePullAbsAmount = route.sourcePull!.signedAmount >= 0n
+      ? route.sourcePull!.signedAmount
+      : -route.sourcePull!.signedAmount;
+    const sourcePullPayerIsLeft = route.sourcePull!.signedAmount < 0n;
+    const sourceDelta = account.deltas.get(route.sourcePull!.tokenId) ?? createDefaultDelta(route.sourcePull!.tokenId);
+    account.deltas.set(route.sourcePull!.tokenId, sourceDelta);
+    if (sourcePullPayerIsLeft) sourceDelta.leftHold = sourcePullAbsAmount;
+    else sourceDelta.rightHold = sourcePullAbsAmount;
     account.pulls = new Map([[route.sourcePull!.pullId, {
       pullId: route.sourcePull!.pullId,
       tokenId: 1,
@@ -1748,10 +1756,21 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { orderId: route.orderId, cancelRemainder: true },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_resolve']);
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_resolve', 'pull_cancel']);
     expect(result.mempoolOps?.[0]?.accountId).toBe(sourceUser);
     expect((result.mempoolOps?.[0]?.tx as any).data.binary).toMatch(/^0x/);
+    expect((result.mempoolOps?.[1]?.tx as any).data.reason).toBe('cross_j_source_remainder_release');
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
+
+    const accountAfterClear = result.newState.accounts.get(sourceUser)!;
+    const bySourceHub = sourceHub.toLowerCase() < sourceUser.toLowerCase();
+    const resolveResult = await processAccountTx(accountAfterClear, result.mempoolOps![0]!.tx, bySourceHub, env.timestamp, 1);
+    expect(resolveResult.success, resolveResult.error).toBe(true);
+    const cancelResult = await processAccountTx(accountAfterClear, result.mempoolOps![1]!.tx, bySourceHub, env.timestamp, 2);
+    expect(cancelResult.success, cancelResult.error).toBe(true);
+    expect(accountAfterClear.pulls?.has(route.sourcePull!.pullId)).toBe(false);
+    const releasedDelta = accountAfterClear.deltas.get(route.sourcePull!.tokenId)!;
+    expect(sourcePullPayerIsLeft ? releasedDelta.leftHold : releasedDelta.rightHold).toBe(0n);
   });
 
   test('direct cancelPull cannot release a committed cross-j partial fill', async () => {

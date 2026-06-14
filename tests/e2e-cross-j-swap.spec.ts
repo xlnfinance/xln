@@ -3164,9 +3164,14 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob second partial counter-order', { orderId: bobPartialSecondOrderId }),
       );
 
-      await timedStep('cross_j_swap.partial.alice_cancel_clear', () =>
-        requestCrossClear(alicePage, alice, aliceSecondPartial.routeId, { cancelRemainder: true }),
-      );
+      await timedStep('cross_j_swap.partial.alice_cancel_clear_button', async () => {
+        const beforeClear = await readCrossState(alicePage, alice, hubId);
+        expect(beforeClear.pulls, 'Alice partial source pull must be locked before Clear + Close').toBeGreaterThan(0);
+        const clearButton = alicePage.getByTestId('cross-swap-clear').first();
+        await expect(clearButton).toBeVisible({ timeout: 20_000 });
+        await clearButton.click({ force: true });
+        await flushRuntime(alicePage, 5);
+      });
 
       await Promise.all([
         timedStep('cross_j_swap.partial.alice_source_claimed', () =>
@@ -3178,6 +3183,21 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       ]);
       await timedStep('cross_j_swap.partial.alice_remainder_removed', () =>
         waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice partial cancel-clear', { orderId: aliceSecondPartial.routeId }),
+      );
+      await timedStep('cross_j_swap.partial.alice_source_remainder_released', () =>
+        expect.poll(async () => {
+          await flushRuntime(alicePage, 3);
+          const state = await readCrossState(alicePage, alice, hubId);
+          return {
+            pulls: state.pulls,
+            hasPendingFrame: state.hasPendingFrame,
+            mempoolTxs: state.mempoolTxs,
+          };
+        }, {
+          timeout: 45_000,
+          intervals: [250, 500, 1000],
+          message: 'Alice partial Clear + Close must release the source pull remainder',
+        }).toMatchObject({ pulls: 0, hasPendingFrame: false, mempoolTxs: [] }),
       );
 
       const aliceDisputeOrderId = await timedStep('cross_j_swap.dispute.alice_offer', () => placeCrossOrder(alicePage, {
