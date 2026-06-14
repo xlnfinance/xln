@@ -213,6 +213,14 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '12'),
 );
+const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
+  MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '36'),
+);
+const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
+  2,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '24'),
+);
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
   Math.min(8, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '4')),
@@ -2070,7 +2078,7 @@ const run = async (): Promise<void> => {
             ? Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)
             : MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
           mode === 'bootstrap'
-            ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredOfferCount)
+            ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK
             : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
           shouldContinue,
         );
@@ -2090,15 +2098,6 @@ const run = async (): Promise<void> => {
           const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
           if (targetHubs.length === 0) continue;
           const targetTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, targetContext);
-          const desiredCrossOfferCount = buildMarketMakerCrossOfferSpecs(
-            env,
-            sourceContext,
-            targetContext,
-            sourceHubs,
-            targetHubs,
-            sourceTokenIds,
-            targetTokenIds,
-          ).length;
           await maintainMarketMakerCrossQuotes(
             env,
             sourceContext,
@@ -2109,10 +2108,10 @@ const run = async (): Promise<void> => {
             sourceTokenIds,
             targetTokenIds,
             mode === 'bootstrap'
-              ? Math.max(MARKET_MAKER_CROSS_LEVELS_PER_PAIR * buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds).length, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK)
+              ? MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK
               : Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
             mode === 'bootstrap'
-              ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredCrossOfferCount)
+              ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK
               : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
             shouldContinue,
           );
@@ -2138,6 +2137,7 @@ const run = async (): Promise<void> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
     while (!shuttingDown && Date.now() < deadline) {
       await driveQuotes('bootstrap');
+      await yieldMarketMakerApi();
       const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
       const allVisibleHubs = readVisibleHubProfiles(env, true);
       const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
