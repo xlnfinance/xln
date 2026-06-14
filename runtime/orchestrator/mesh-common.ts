@@ -5,6 +5,7 @@ export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
 
 export const HUB_MESH_TOKEN_ID = 1;
 export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
+export const MARKET_MAKER_CREDIT_AMOUNT = 1_000_000_000n * 10n ** 18n;
 export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;

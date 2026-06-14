@@ -85,6 +85,7 @@ import {
 } from './jurisdictions';
 import { createOrchestratorProxyHandlers } from './proxy';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
+import { MARKET_MAKER_CREDIT_AMOUNT } from './mesh-common';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -513,7 +514,7 @@ const getMarketMakerIdentity = (): { name: string; entityId: string; signerId: s
     name: marketMakerChild.name,
     entityId,
     signerId,
-    creditAmount: '50000000000000000000000000',
+    creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString(),
   };
 };
 

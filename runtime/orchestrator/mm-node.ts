@@ -43,6 +43,7 @@ import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
   HUB_DEFAULT_MIN_TRADE_SIZE,
+  MARKET_MAKER_CREDIT_AMOUNT,
   HUB_REQUIRED_TOKEN_COUNT,
   getAccountMachine,
   getCreditGrantedByEntity,
@@ -202,7 +203,6 @@ type MarketMakerHealth = {
   };
 };
 
-const MARKET_MAKER_CREDIT_AMOUNT = 1_000_000_000n * 10n ** 18n;
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
 const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(250, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1000'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
