@@ -43,9 +43,11 @@ describe('production startup wiring', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     expect(hubNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(hubNode).toContain('visibleDirectSupportPeers');
+    expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '24'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '30'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '12'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '2'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'");
     expect(mmNode).toContain('bootstrapCrossCursor');
