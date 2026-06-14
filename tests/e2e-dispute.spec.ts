@@ -23,6 +23,7 @@ import {
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
 const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
+const MAX_BATCH_MINE_BLOCKS = 100;
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -255,6 +256,19 @@ async function mineBlocks(page: Page, count: number): Promise<void> {
     return;
   }
 
+  let remaining = blocks;
+  while (remaining > 0) {
+    const chunk = Math.min(remaining, MAX_BATCH_MINE_BLOCKS);
+    await mineBlockChunk(page, chunk);
+    remaining -= chunk;
+  }
+}
+
+async function mineBlockChunk(page: Page, blocks: number): Promise<void> {
+  if (blocks <= 1) {
+    await mineOneBlock(page);
+    return;
+  }
   const quantity = `0x${blocks.toString(16)}`;
   const errors: string[] = [];
   for (const method of ['anvil_mine', 'hardhat_mine']) {
