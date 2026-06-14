@@ -235,7 +235,7 @@ const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '24'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
@@ -2121,6 +2121,26 @@ const run = async (): Promise<void> => {
       const hubSignerIdsByEntityId = new Map(configuredHubSignerIdsByEntityId);
       for (const profile of visibleHubs) {
         if (profile.signerId) hubSignerIdsByEntityId.set(profile.entityId.toLowerCase(), profile.signerId.toLowerCase());
+      }
+
+      if (mode === 'bootstrap') {
+        for (const context of mmContexts) {
+          await yieldMarketMakerApi();
+          if (!shouldContinue()) return;
+          const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
+          const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
+          if (hubEntityIds.length === 0) continue;
+          await ensureMarketMakerHubConnectivity(
+            env,
+            context.entityId,
+            context.signerId,
+            hubEntityIds,
+            hubSignerIdsByEntityId,
+            getMarketMakerTokenIds(mmTokenIdsByContext, context),
+            connectivityBudget,
+          );
+          if (!shouldContinue()) return;
+        }
       }
 
       const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<void> => {
