@@ -69,6 +69,22 @@ export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
   return shard;
 };
 
+export const hasShardRpc2Jurisdiction = (config: OrchestratorJurisdictionsConfig): boolean => {
+  if (!existsSync(config.shardJurisdictionsPath)) return false;
+  try {
+    const payload = JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
+    return Object.entries(payload.jurisdictions ?? {}).some(([key, jurisdiction]) =>
+      Boolean(
+        jurisdiction?.contracts?.depository &&
+        jurisdiction?.contracts?.entityProvider &&
+        isRpc2Jurisdiction(config, key, jurisdiction),
+      ),
+    );
+  } catch {
+    return false;
+  }
+};
+
 export const resolvePrimaryHubJurisdictionFallback = (config: OrchestratorJurisdictionsConfig): {
   name: string;
   chainId?: number;

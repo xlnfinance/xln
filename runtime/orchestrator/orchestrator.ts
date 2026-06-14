@@ -75,6 +75,7 @@ import {
 } from './reset-guard';
 import {
   deployRpc2JurisdictionStack,
+  hasShardRpc2Jurisdiction,
   readShardJurisdictions,
   resolvePrimaryHubJurisdictionFallback,
   seedShardJurisdictions,
@@ -1385,13 +1386,13 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
 const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
-    if (existsSync(shardJurisdictionsPath)) {
+    if (hasShardRpc2Jurisdiction(jurisdictionsConfig)) {
       return;
     }
     const payload = await fetchText(`http://${args.host}:${child.apiPort}/api/jurisdictions`);
     if (payload) {
       writeFileSync(shardJurisdictionsPath, payload, 'utf8');
-      return;
+      if (hasShardRpc2Jurisdiction(jurisdictionsConfig)) return;
     }
     if (child.proc?.exitCode !== null) {
       throw new Error(`${child.name}_EXITED_BEFORE_JURISDICTIONS code=${String(child.proc?.exitCode)}`);
