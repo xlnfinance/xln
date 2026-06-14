@@ -53,6 +53,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 | [implementation/payment-spec.md](implementation/payment-spec.md) | direct payments, HTLCs, onion routing |
 | [custody.md](custody.md) | custody balance for prepaid fees |
 | [rebalance.md](rebalance.md) | hub auto-rebalance |
+| [lend.md](lend.md) | Lend/Borrow product and runtime design |
 | [recovery-watchtower-protocol.md](recovery-watchtower-protocol.md) | recovery, peer refresh, watchtower storage |
 | [fintech-type-safety-protocol.md](fintech-type-safety-protocol.md) | type-safety rules for money-moving code |
 
@@ -79,4 +80,4 @@ more L2", but a consequence of the scaling and enforcement constraints.
 
 - [archive/](archive/) — historical planning, research, philosophy, and logs
 
-**Last updated:** 2026-05-29
+**Last updated:** 2026-06-14

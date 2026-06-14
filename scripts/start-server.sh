@@ -12,10 +12,13 @@ source "$REPO_ROOT/scripts/lib/start-common.sh"
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
 
 RPC_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
+RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"
 API_PORT="${XLN_SERVER_PORT:-$(xln_web_port)}"
 
 export USE_ANVIL=true
 export ANVIL_RPC="http://127.0.0.1:${RPC_PORT}"
+export ANVIL_RPC2="${ANVIL_RPC2:-http://127.0.0.1:${RPC2_PORT}}"
+export RPC_TRON="${RPC_TRON:-$ANVIL_RPC2}"
 export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
 export INTERNAL_RELAY_URL=${INTERNAL_RELAY_URL:-ws://127.0.0.1:${API_PORT}/relay}
 export PUBLIC_RELAY_URL=${PUBLIC_RELAY_URL:-wss://xln.finance/relay}
@@ -60,6 +63,7 @@ exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --node-api-port-base "$XLN_MESH_API_PORT_BASE" \
   --node-public-port-base "$XLN_MESH_PUBLIC_PORT_BASE" \
   --rpc-url "$ANVIL_RPC" \
+  --rpc2-url "$ANVIL_RPC2" \
   --db-root "$XLN_MESH_DB_ROOT" \
   --allow-reset \
   --mm \
