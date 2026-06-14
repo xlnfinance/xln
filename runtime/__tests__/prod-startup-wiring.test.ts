@@ -77,6 +77,12 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('local deadline=$((SECONDS + 900))');
   });
 
+  test('prod diagnose accepts the market maker terminal startup phase', () => {
+    const diagnose = readFileSync(join(repoRoot, 'scripts/prod-diagnose.sh'), 'utf8');
+    expect(diagnose).toContain('payload.marketMaker.startupPhase !== "offers-ready"');
+    expect(diagnose).not.toContain('payload.marketMaker.startupPhase !== "ready"');
+  });
+
   test('fresh deploy stops runtime processes before deleting runtime state', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const stopIndex = deploy.indexOf('pm2 delete xln-server');
