@@ -90,6 +90,7 @@ export type JurisdictionEvent =
         proofbodyHash: string;
         starterInitialArguments: string;
         starterIncrementedArguments: string;
+        batchNonce?: number;
       };
     })
   | (JEventMetadata & {
@@ -100,6 +101,7 @@ export type JurisdictionEvent =
         initialNonce: string;
         initialProofbodyHash: string;
         finalProofbodyHash: string;
+        batchNonce?: number;
       };
     })
   | (JEventMetadata & {

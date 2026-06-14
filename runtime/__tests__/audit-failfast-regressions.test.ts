@@ -1941,8 +1941,10 @@ describe('audit fail-fast regressions', () => {
 
   test('submitRuntimeJOutbox stops on transient submit failure without poisoning sentBatch', async () => {
     const entityId = `0x${'ab'.repeat(32)}`;
+    const signerId = `0x${'cd'.repeat(20)}`;
     const batchHash = `0x${'11'.repeat(32)}`;
     const env = createEmptyEnv('j-submit-fail-fast');
+    env.runtimeId = signerId;
     env.timestamp = 123;
     env.scenarioMode = false;
     const state = makeEntityState(entityId);
@@ -1972,7 +1974,7 @@ describe('audit fail-fast regressions', () => {
     };
     env.eReplicas.set(`${entityId}:1`, {
       entityId,
-      signerId: '1',
+      signerId,
       mempool: [],
       isProposer: true,
       state,
@@ -2013,7 +2015,7 @@ describe('audit fail-fast regressions', () => {
                 entityNonce: 1,
                 hankoSignature: '0x1234',
                 batchSize: 1,
-                signerId: `0x${'cd'.repeat(20)}`,
+                signerId,
               },
               timestamp: env.timestamp,
             } as any,
@@ -2036,8 +2038,10 @@ describe('audit fail-fast regressions', () => {
 
   test('submitRuntimeJOutbox marks staticCall revert as terminal before halting', async () => {
     const entityId = `0x${'ad'.repeat(32)}`;
+    const signerId = `0x${'cd'.repeat(20)}`;
     const batchHash = `0x${'12'.repeat(32)}`;
     const env = createEmptyEnv('j-submit-staticcall-fail-fast');
+    env.runtimeId = signerId;
     env.timestamp = 124;
     env.scenarioMode = false;
     const state = makeEntityState(entityId);
@@ -2067,7 +2071,7 @@ describe('audit fail-fast regressions', () => {
     };
     env.eReplicas.set(`${entityId}:1`, {
       entityId,
-      signerId: '1',
+      signerId,
       mempool: [],
       isProposer: true,
       state,
@@ -2107,7 +2111,7 @@ describe('audit fail-fast regressions', () => {
                 entityNonce: 1,
                 hankoSignature: '0x1234',
                 batchSize: 1,
-                signerId: `0x${'cd'.repeat(20)}`,
+                signerId,
               },
               timestamp: env.timestamp,
             } as any,
@@ -2123,6 +2127,65 @@ describe('audit fail-fast regressions', () => {
       message: 'staticCall revert: E3()',
       failedAt: 124,
     });
+  });
+
+  test('submitRuntimeJOutbox skips sealed batches owned by another runtime signer', async () => {
+    const entityId = `0x${'ae'.repeat(32)}`;
+    const localRuntimeId = `0x${'11'.repeat(20)}`;
+    const remoteSignerId = `0x${'22'.repeat(20)}`;
+    const env = createEmptyEnv('j-submit-non-local-signer-skip');
+    env.runtimeId = localRuntimeId;
+    env.timestamp = 125;
+    let adapterCalls = 0;
+    env.jReplicas = new Map([
+      [
+        'Testnet',
+        {
+          jadapter: {
+            submitTx: async () => {
+              adapterCalls += 1;
+              return { success: true };
+            },
+            pollNow: async () => {},
+          },
+        } as any,
+      ],
+    ]);
+
+    await submitRuntimeJOutbox(
+      env,
+      [
+        {
+          jurisdictionName: 'Testnet',
+          jTxs: [
+            {
+              type: 'batch',
+              entityId,
+              data: {
+                batch: {
+                  ...createEmptyBatch(),
+                  reserveToReserve: [{
+                    receivingEntity: `0x${'ef'.repeat(32)}`,
+                    tokenId: 1,
+                    amount: 10n,
+                  }],
+                },
+                batchHash: `0x${'13'.repeat(32)}`,
+                encodedBatch: '0x1234',
+                entityNonce: 1,
+                hankoSignature: '0x1234',
+                batchSize: 1,
+                signerId: remoteSignerId,
+              },
+              timestamp: env.timestamp,
+            } as any,
+          ],
+        },
+      ],
+      { enqueueRuntimeInputs: () => {} },
+    );
+
+    expect(adapterCalls).toBe(0);
   });
 
   test('submitRuntimeJOutbox rejects non-empty consensus batch before adapter when hanko is missing', async () => {
@@ -3044,6 +3107,45 @@ describe('audit fail-fast regressions', () => {
     expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
   });
 
+  test('disputeFinalize waits for on-chain DisputeStarted before drafting a finalization', async () => {
+    const starterId = `0x${'41'.repeat(32)}`;
+    const finalizerId = `0x${'42'.repeat(32)}`;
+    const state = makeEntityState(finalizerId);
+    const account = makeProposalAccount([], starterId, finalizerId);
+    const initialProof = buildAccountProofBody(account);
+    account.disputeProofBodiesByHash = {
+      [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
+    };
+    account.activeDispute = {
+      startedByLeft: true,
+      initialProofbodyHash: initialProof.proofBodyHash,
+      initialNonce: 1,
+      disputeTimeout: 100,
+      onChainNonce: 0,
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+      observedOnChain: false,
+      finalizeQueued: false,
+    };
+    state.accounts.set(starterId, account);
+
+    const env = createEmptyEnv('placeholder-dispute-finalize-runtime');
+    env.quietRuntimeLogs = true;
+
+    const { newState } = await handleDisputeFinalize(
+      state,
+      {
+        type: 'disputeFinalize',
+        data: { counterpartyEntityId: starterId },
+      },
+      env,
+    );
+
+    expect(newState.jBatchState?.batch.disputeFinalizations ?? []).toEqual([]);
+    expect(newState.accounts.get(starterId)?.activeDispute?.finalizeQueued).toBe(false);
+    expect(newState.messages.join('\n')).toContain('blocked until DisputeStarted is observed on-chain');
+  });
+
   test('disputeFinalize uses signed counter-proof and incremented starter arguments when a newer proof is available', async () => {
     const starterId = `0x${'21'.repeat(32)}`;
     const finalizerId = `0x${'22'.repeat(32)}`;
@@ -3095,6 +3197,7 @@ describe('audit fail-fast regressions', () => {
       onChainNonce: 0,
       starterInitialArguments: '0x1111',
       starterIncrementedArguments: '0x2222',
+      observedOnChain: true,
       finalizeQueued: false,
     };
     state.accounts.set(starterId, account);
@@ -4830,6 +4933,7 @@ describe('audit fail-fast regressions', () => {
       onChainNonce: 1,
       starterInitialArguments: '0x',
       starterIncrementedArguments: '0x',
+      observedOnChain: true,
       finalizeQueued: false,
     };
     hubState.accounts.set(userId, account);

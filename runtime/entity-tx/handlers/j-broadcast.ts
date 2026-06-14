@@ -96,9 +96,12 @@ export async function handleJBroadcast(
   }
 
   // ── Compute batch hash (deterministic: uses tracked confirmed nonce) ──
-  // Entity nonce must only advance from finalized HankoBatchProcessed events.
-  // Contract expects currentNonce + 1 for a new submission.
+  // Entity nonce advances from finalized HankoBatchProcessed events. Dispute
+  // events also carry the sibling Hanko nonce as exact watcher metadata so
+  // replicas that observe a dispute outcome without their local sentBatch still
+  // stay aligned before the next broadcast.
   const currentEntityNonce = BigInt(newState.jBatchState.entityNonce ?? 0);
+  // Contract expects currentNonce + 1 for a new submission.
   const nextNonce = currentEntityNonce + 1n;
 
   // Set entityProvider on settlements before encoding

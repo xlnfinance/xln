@@ -826,6 +826,7 @@ export async function handleDisputeStart(
       onChainNonce,
       starterInitialArguments,
       starterIncrementedArguments,
+      observedOnChain: false,
       finalizeQueued: false,
     };
   }
@@ -886,6 +887,13 @@ export async function handleDisputeFinalize(
   // Verify activeDispute exists (set by DisputeStarted j-event)
   if (!account.activeDispute) {
     addMessage(newState, `❌ No active dispute with ${counterpartyEntityId.slice(-4)} - must call disputeStart first`);
+    return { newState, outputs };
+  }
+  if (account.activeDispute.observedOnChain !== true) {
+    addMessage(
+      newState,
+      `⏳ disputeFinalize blocked until DisputeStarted is observed on-chain for ${counterpartyEntityId.slice(-4)}`,
+    );
     return { newState, outputs };
   }
   if (account.activeDispute.finalizeQueued) {

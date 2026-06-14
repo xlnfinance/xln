@@ -333,6 +333,7 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
           proofbodyHash: String(args['proofbodyHash'] ?? ''),
           starterInitialArguments: String(args['starterInitialArguments'] ?? '0x'),
           starterIncrementedArguments: String(args['starterIncrementedArguments'] ?? '0x'),
+          ...(args['batchNonce'] !== undefined ? { batchNonce: Number(args['batchNonce']) } : {}),
         },
       }];
 
@@ -345,6 +346,7 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
           initialNonce: String(args['initialNonce'] ?? ''),
           initialProofbodyHash: String(args['initialProofbodyHash'] ?? ''),
           finalProofbodyHash: String(args['finalProofbodyHash'] ?? ''),
+          ...(args['batchNonce'] !== undefined ? { batchNonce: Number(args['batchNonce']) } : {}),
         },
       }];
 
@@ -440,6 +442,33 @@ function enqueueRawJEventsToRuntime(
     console.log(`📡 [JAdapter:${adapterLabel}] ${rawEvents.length} canonical events from block ${blockNumber}`);
   }
 
+  const hankoNonceByTxAndEntity = new Map<string, string>();
+  for (const event of rawEvents) {
+    if (event.name !== 'HankoBatchProcessed') continue;
+    const txHash = String(event.transactionHash || '').toLowerCase();
+    const eventEntity = String(event.args['entityId'] ?? '').toLowerCase();
+    const nonce = event.args['nonce'];
+    if (!txHash || !eventEntity || nonce === undefined || nonce === null) continue;
+    hankoNonceByTxAndEntity.set(`${txHash}:${eventEntity}`, String(nonce));
+  }
+
+  const enrichedRawEvents = rawEvents.map((event) => {
+    if (event.name !== 'DisputeStarted' && event.name !== 'DisputeStartedV2' && event.name !== 'DisputeFinalized') {
+      return event;
+    }
+    const txHash = String(event.transactionHash || '').toLowerCase();
+    const sender = String(event.args['sender'] ?? '').toLowerCase();
+    const batchNonce = txHash && sender ? hankoNonceByTxAndEntity.get(`${txHash}:${sender}`) : undefined;
+    if (batchNonce === undefined) return event;
+    return {
+      ...event,
+      args: {
+        ...event.args,
+        batchNonce,
+      },
+    };
+  });
+
   const eventsByReplica = new Map<string, { entityId: string; signerId: string; events: RawJEvent[] }>();
 
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
@@ -448,7 +477,7 @@ function enqueueRawJEventsToRuntime(
     const signerId = String(replica.signerId || signerIdFromKey || '');
     if (!entityId || !signerId) continue;
 
-    const relevant = rawEvents.filter((event) => isEventRelevantToEntity(event, entityId));
+    const relevant = enrichedRawEvents.filter((event) => isEventRelevantToEntity(event, entityId));
     if (relevant.length === 0) continue;
 
     const existing = eventsByReplica.get(replicaKey);
