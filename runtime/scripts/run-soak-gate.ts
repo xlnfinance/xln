@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
@@ -20,6 +20,8 @@ type SoakArgs = {
   intervalMs: number;
   outputPath: string;
   keepE2eRuns: number;
+  minKeepE2eRuns: number;
+  minFreeBytes: number;
 };
 
 type SoakResult = {
@@ -34,6 +36,8 @@ type SoakResult = {
 
 const DEFAULT_OUTPUT = join('.logs', 'soak', `soak-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
 const DEFAULT_KEEP_E2E_RUNS = 64;
+const DEFAULT_MIN_KEEP_E2E_RUNS = 4;
+const DEFAULT_MIN_FREE_BYTES = 8 * 1024 ** 3;
 
 const profileCommands: Record<SoakProfile, SoakCommand[]> = {
   quick: [
@@ -86,6 +90,13 @@ const parseArgs = (): SoakArgs => {
   const intervalMs = Math.max(0, Math.floor(Number(flags.get('--interval-ms') || 0)));
   const outputPath = String(flags.get('--out') || DEFAULT_OUTPUT);
   const keepE2eRunsRaw = Number(flags.get('--keep-e2e-runs') || process.env['SOAK_KEEP_E2E_RUNS'] || DEFAULT_KEEP_E2E_RUNS);
+  const minKeepE2eRunsRaw = Number(flags.get('--min-keep-e2e-runs') || process.env['SOAK_MIN_KEEP_E2E_RUNS'] || DEFAULT_MIN_KEEP_E2E_RUNS);
+  const minFreeBytesRaw = Number(
+    flags.get('--min-free-bytes')
+      || process.env['SOAK_MIN_FREE_BYTES']
+      || process.env['XLN_MIN_DISK_FREE_BYTES']
+      || DEFAULT_MIN_FREE_BYTES,
+  );
   return {
     profile: rawProfile,
     iterations: iterations === null ? null : Math.floor(iterations),
@@ -95,6 +106,12 @@ const parseArgs = (): SoakArgs => {
     keepE2eRuns: Number.isFinite(keepE2eRunsRaw) && keepE2eRunsRaw >= 0
       ? Math.floor(keepE2eRunsRaw)
       : DEFAULT_KEEP_E2E_RUNS,
+    minKeepE2eRuns: Number.isFinite(minKeepE2eRunsRaw) && minKeepE2eRunsRaw >= 0
+      ? Math.floor(minKeepE2eRunsRaw)
+      : DEFAULT_MIN_KEEP_E2E_RUNS,
+    minFreeBytes: Number.isFinite(minFreeBytesRaw) && minFreeBytesRaw > 0
+      ? Math.max(Math.floor(minFreeBytesRaw), DEFAULT_MIN_FREE_BYTES)
+      : DEFAULT_MIN_FREE_BYTES,
   };
 };
 
@@ -151,6 +168,11 @@ type E2eRunForPrune = {
   completedAtMs: number;
 };
 
+const readDiskFreeBytes = (): number => {
+  const stat = statfsSync(process.cwd());
+  return Number(stat.bavail) * Number(stat.bsize);
+};
+
 const readPassedE2eRunForPrune = (path: string, runId: string): E2eRunForPrune | null => {
   const manifestPath = join(path, 'manifest.json');
   if (!existsSync(manifestPath)) return null;
@@ -167,21 +189,51 @@ const readPassedE2eRunForPrune = (path: string, runId: string): E2eRunForPrune |
   }
 };
 
-const pruneSuccessfulE2eRuns = (keepRuns: number): void => {
+const pruneSuccessfulE2eRuns = (keepRuns: number, minFreeBytes: number, minKeepRuns: number): void => {
   const root = resolve(process.cwd(), '.logs', 'e2e-parallel');
-  if (keepRuns < 0 || !existsSync(root)) return;
+  if (keepRuns < 0 || !existsSync(root)) {
+    const freeBytes = readDiskFreeBytes();
+    if (freeBytes < minFreeBytes) {
+      throw new Error(`SOAK_INSUFFICIENT_DISK_FREE: free=${String(freeBytes)} required=${String(minFreeBytes)}`);
+    }
+    return;
+  }
   const passedRuns = readdirSync(root, { withFileTypes: true })
     .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
     .map(entry => readPassedE2eRunForPrune(join(root, entry.name), entry.name))
     .filter((entry): entry is E2eRunForPrune => entry !== null)
     .sort((a, b) => b.completedAtMs - a.completedAtMs || b.runId.localeCompare(a.runId));
 
-  const removable = passedRuns.slice(keepRuns);
-  if (removable.length === 0) return;
-  for (const run of removable) {
+  const protectedRunCount = Math.max(0, Math.min(minKeepRuns, passedRuns.length));
+  const effectiveKeepRuns = Math.max(keepRuns, protectedRunCount);
+  const removableByCount = passedRuns.slice(effectiveKeepRuns);
+  const removableForDisk = passedRuns.slice(protectedRunCount, effectiveKeepRuns);
+  const removable: E2eRunForPrune[] = [...removableByCount];
+  let freeBytes = readDiskFreeBytes();
+  for (const run of removableForDisk.reverse()) {
+    if (freeBytes >= minFreeBytes) break;
+    if (removable.some(candidate => candidate.runId === run.runId)) continue;
+    removable.push(run);
     rmSync(run.path, { recursive: true, force: true });
+    freeBytes = readDiskFreeBytes();
   }
-  console.log(`[soak] pruned ${removable.length} successful E2E run(s); kept ${Math.min(keepRuns, passedRuns.length)}`);
+  let removed = 0;
+  for (const run of removableByCount) {
+    rmSync(run.path, { recursive: true, force: true });
+    removed += 1;
+  }
+  removed += removable.length - removableByCount.length;
+  freeBytes = readDiskFreeBytes();
+  if (removed > 0) {
+    const retained = Math.max(0, passedRuns.length - removed);
+    console.log(`[soak] pruned ${removed} successful E2E run(s); retained=${retained} free=${freeBytes} minFree=${minFreeBytes}`);
+  }
+  if (freeBytes < minFreeBytes) {
+    throw new Error(
+      `SOAK_INSUFFICIENT_DISK_FREE_AFTER_PRUNE: free=${String(freeBytes)} required=${String(minFreeBytes)} ` +
+      `successfulRuns=${String(passedRuns.length)} minKeep=${String(protectedRunCount)}`,
+    );
+  }
 };
 
 const main = async (): Promise<void> => {
@@ -197,9 +249,11 @@ const main = async (): Promise<void> => {
   console.log(`mode=${args.iterations !== null ? `${args.iterations} iteration(s)` : `${args.minutes} minute(s)`}`);
   console.log(`summary=${args.outputPath}`);
   console.log(`keepE2eRuns=${args.keepE2eRuns}`);
+  console.log(`minKeepE2eRuns=${args.minKeepE2eRuns}`);
+  console.log(`minFreeBytes=${args.minFreeBytes}`);
   console.log('='.repeat(76));
 
-  pruneSuccessfulE2eRuns(args.keepE2eRuns);
+  pruneSuccessfulE2eRuns(args.keepE2eRuns, args.minFreeBytes, args.minKeepE2eRuns);
 
   let iteration = 1;
   while (true) {
@@ -207,6 +261,7 @@ const main = async (): Promise<void> => {
     if (deadline !== null && Date.now() >= deadline) break;
 
     for (const command of commands) {
+      pruneSuccessfulE2eRuns(args.keepE2eRuns, args.minFreeBytes, args.minKeepE2eRuns);
       const result = await runCommand(command, iteration);
       results.push(result);
       writeSummary(args.outputPath, {
@@ -220,7 +275,7 @@ const main = async (): Promise<void> => {
         console.error(`[soak] failed: ${command.name} code=${result.code ?? 'signal'}`);
         process.exit(result.code ?? 1);
       }
-      pruneSuccessfulE2eRuns(args.keepE2eRuns);
+      pruneSuccessfulE2eRuns(args.keepE2eRuns, args.minFreeBytes, args.minKeepE2eRuns);
       if (deadline !== null && Date.now() >= deadline) break;
     }
 
