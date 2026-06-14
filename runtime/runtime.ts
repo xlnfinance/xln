@@ -928,6 +928,10 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
               ...(stack ? { stack } : {}),
             },
           );
+          const runtimeProcess = getRuntimeProcessGlobal();
+          if (shouldExitOnRuntimeFatal(runtimeProcess) && runtimeProcess?.exit) {
+            setTimeout(() => runtimeProcess.exit?.(1), 0);
+          }
           // Fail-fast: stop runtime loop on any unhandled runtime error.
           haltedMessage = message;
           running = false;
@@ -2631,6 +2635,50 @@ export const waitForRuntimeProcessingIdle = async (env: Env, timeoutMs = 5_000):
   }
 };
 
+type RuntimeProcessGlobal = {
+  env?: Record<string, string | undefined>;
+  exit?: (code?: number) => never;
+};
+
+const getRuntimeProcessGlobal = (): RuntimeProcessGlobal | null => {
+  const candidate = (globalThis as typeof globalThis & { process?: RuntimeProcessGlobal }).process;
+  return candidate && typeof candidate === 'object' ? candidate : null;
+};
+
+const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>
+  typeof runtimeProcess?.exit === 'function' &&
+  String(runtimeProcess.env?.['XLN_RUNTIME_EXIT_ON_FATAL'] || '').trim() === '1';
+
+const resolveStorageWriteTimeoutMs = (): number => {
+  const raw = String(getRuntimeProcessGlobal()?.env?.['XLN_STORAGE_WRITE_TIMEOUT_MS'] || '').trim();
+  if (!raw) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+};
+
+const withStorageWriteTimeout = async <T>(
+  env: Env,
+  promise: Promise<T>,
+): Promise<T> => {
+  const timeoutMs = resolveStorageWriteTimeoutMs();
+  if (timeoutMs <= 0) return await promise;
+
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          const message = `STORAGE_WRITE_TIMEOUT frame=${env.height} runtime=${String(env.runtimeId || '')} timeoutMs=${timeoutMs}`;
+          reject(new Error(message));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
+
 // === LEVELDB PERSISTENCE ===
 export const saveEnvToDB = async (
   env: Env,
@@ -2641,18 +2689,18 @@ export const saveEnvToDB = async (
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
   const pendingFrameDbRecords = peekPendingFrameDbRecords(env, env.height, env.timestamp);
-  const saveResult = await saveRuntimeFrameToStorage({
+  const saveResult = await withStorageWriteTimeout(env, saveRuntimeFrameToStorage({
     env,
     tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
     getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
     tryOpenFrameDb,
     getFrameDb,
-    rotateEpochDb: rotateStorageEpochDb,
-    getPerfMs,
+      rotateEpochDb: rotateStorageEpochDb,
+      getPerfMs,
     formatPerfMs,
     frameDbRecords: pendingFrameDbRecords,
     ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
-  });
+  }));
   if (saveResult.frameDbCommitted) {
     dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
   }
