@@ -809,14 +809,14 @@ const waitForProcessExit = async (proc: ManagedChildProcess, timeoutMs: number):
   });
 };
 
-const stopProcess = async (proc: ManagedChildProcess | null): Promise<void> => {
+const stopProcess = async (proc: ManagedChildProcess | null, termTimeoutMs = 1200): Promise<void> => {
   if (!proc || proc.exitCode !== null) return;
   try {
     proc.kill('SIGTERM');
   } catch {
     return;
   }
-  const exitedAfterTerm = await waitForProcessExit(proc, 1200);
+  const exitedAfterTerm = await waitForProcessExit(proc, termTimeoutMs);
   if (exitedAfterTerm || proc.exitCode !== null) return;
   try {
     proc.kill('SIGKILL');
@@ -1591,11 +1591,10 @@ const runShard = async (
       log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${normalizedReason}\n`);
     }
     if (!teardownReason && api && api.exitCode === null) {
-      log.write('[runner] playwright passed; draining runtime side-effects before teardown\n');
-      await delay(1500);
+      log.write('[runner] playwright passed; stopping api with runtime quiesce before teardown\n');
     }
+    await stopProcess(api, 120_000);
     await stopProcess(vite);
-    await stopProcess(api);
     await Promise.all([stopProcess(anvil), stopProcess(anvil2)]);
     log.end();
   }
