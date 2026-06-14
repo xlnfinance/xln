@@ -227,7 +227,11 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '24'),
+);
+const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '2'),
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
@@ -2101,6 +2105,7 @@ const run = async (): Promise<void> => {
 
   let shuttingDown = false;
   let loopInFlight = false;
+  let bootstrapCrossCursor = 0;
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<void> => {
     if (shuttingDown) return;
     if (loopInFlight) return;
@@ -2208,7 +2213,18 @@ const run = async (): Promise<void> => {
           });
         }
       }
-      for (const job of crossQuoteJobs) {
+      const selectedCrossQuoteJobs: CrossQuoteJob[] = [];
+      if (mode === 'bootstrap' && crossQuoteJobs.length > 0) {
+        const jobCount = Math.min(MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length);
+        for (let offset = 0; offset < jobCount; offset += 1) {
+          const selectedJob = crossQuoteJobs[(bootstrapCrossCursor + offset) % crossQuoteJobs.length];
+          if (selectedJob) selectedCrossQuoteJobs.push(selectedJob);
+        }
+        bootstrapCrossCursor = (bootstrapCrossCursor + jobCount) % crossQuoteJobs.length;
+      } else {
+        selectedCrossQuoteJobs.push(...crossQuoteJobs);
+      }
+      for (const job of selectedCrossQuoteJobs) {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
         await maintainMarketMakerCrossQuotes(
