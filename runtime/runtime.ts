@@ -930,7 +930,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
           );
           const runtimeProcess = getRuntimeProcessGlobal();
           if (shouldExitOnRuntimeFatal(runtimeProcess) && runtimeProcess?.exit) {
-            setTimeout(() => runtimeProcess.exit?.(1), 0);
+            runtimeProcess.exit(1);
           }
           // Fail-fast: stop runtime loop on any unhandled runtime error.
           haltedMessage = message;
