@@ -2151,9 +2151,8 @@ const run = async (): Promise<void> => {
         await yieldMarketMakerApi();
       };
 
-      const primarySameContexts = mode === 'bootstrap' ? mmContexts.slice(0, 1) : mmContexts;
-      const deferredSameContexts = mode === 'bootstrap' ? mmContexts.slice(1) : [];
-      for (const context of primarySameContexts) {
+      const sameQuoteContexts = mode === 'bootstrap' ? mmContexts.slice(0, 1) : mmContexts;
+      for (const context of sameQuoteContexts) {
         await maintainSameContextQuotes(context);
         if (!shouldContinue()) return;
       }
@@ -2219,10 +2218,6 @@ const run = async (): Promise<void> => {
           shouldContinue,
         );
         await yieldMarketMakerApi();
-      }
-      for (const context of deferredSameContexts) {
-        await maintainSameContextQuotes(context);
-        if (!shouldContinue()) return;
       }
       if (!shouldContinue()) return;
       await settleRuntimeFor(env, 45);
