@@ -105,6 +105,10 @@ const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
+const marketMakerReadyRestartLimit = Math.max(
+  0,
+  Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
+);
 const relayUrl = (() => {
   const url = new URL(args.publicWsBaseUrl);
   url.pathname = '/relay';
@@ -636,6 +640,8 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
+      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
+      XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '15000',
     }),
   });
   child.proc = proc;
@@ -710,6 +716,8 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
+      XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
+      XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '15000',
     }),
   });
   marketMakerChild.proc = proc;
@@ -1318,6 +1326,7 @@ const waitForHubProfilesReady = async (): Promise<void> => {
 
 const waitForMarketMakerReady = async (): Promise<void> => {
   const deadline = Date.now() + MARKET_MAKER_READY_TIMEOUT_MS;
+  let restartAttempts = 0;
   while (Date.now() < deadline) {
     await pollMarketMakerHealth();
     const health = await buildAggregatedHealthResponse();
@@ -1328,6 +1337,17 @@ const waitForMarketMakerReady = async (): Promise<void> => {
       return;
     }
     if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
+      if (restartAttempts < marketMakerReadyRestartLimit) {
+        restartAttempts += 1;
+        console.warn(
+          `[MESH] restarting MM during readiness attempt=${restartAttempts}/${marketMakerReadyRestartLimit} ` +
+          `code=${String(marketMakerChild.exitCode)} signal=${String(marketMakerChild.exitSignal)} ` +
+          `phase=${String(marketMakerChild.lastStartupPhase)}`,
+        );
+        await spawnMarketMaker();
+        await delay(500);
+        continue;
+      }
       throw new Error(
         `MM_EXITED_EARLY code=${String(marketMakerChild.exitCode)} signal=${String(marketMakerChild.exitSignal)} phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify(health.marketMaker)}`,
       );
