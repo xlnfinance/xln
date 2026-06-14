@@ -47,6 +47,18 @@ const normalizeWsBaseUrl = (raw: string, fallbackHost: string, fallbackPort: num
   return parsed.toString().replace(/\/+$/, '');
 };
 
+const normalizeWsUrl = (raw: string, fallback: string, label: string): string => {
+  const value = String(raw || '').trim() || fallback;
+  const parsed = new URL(value);
+  if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+  if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+    throw new Error(`Invalid ${label}: ${value}`);
+  }
+  parsed.hash = '';
+  return parsed.toString();
+};
+
 export const parseArgs = (): Args => {
   const port = Number(getArg('--port', '20002'));
   if (!Number.isFinite(port) || port <= 0) {
@@ -62,10 +74,16 @@ export const parseArgs = (): Args => {
     throw new Error(`Invalid --node-public-port-base: ${String(nodePublicPortBase)}`);
   }
   const dbRoot = getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'));
+  const publicWsBaseUrl = normalizeWsBaseUrl(getArg('--public-ws-base-url', ''), host, port);
+  const fallbackRelayUrl = new URL(publicWsBaseUrl);
+  fallbackRelayUrl.pathname = '/relay';
+  fallbackRelayUrl.search = '';
+  fallbackRelayUrl.hash = '';
   return {
     host,
     port,
-    publicWsBaseUrl: normalizeWsBaseUrl(getArg('--public-ws-base-url', ''), host, port),
+    relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || ''), fallbackRelayUrl.toString(), '--relay-url'),
+    publicWsBaseUrl,
     nodeApiPortBase,
     nodePublicPortBase,
     rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env['ANVIL_RPC'] || 'http://localhost:8545')),

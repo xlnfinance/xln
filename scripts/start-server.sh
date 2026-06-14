@@ -64,6 +64,7 @@ exec "${HOME}/.bun/bin/bun" runtime/orchestrator/orchestrator.ts \
   --public-ws-base-url "$PUBLIC_WS_BASE_URL" \
   --node-api-port-base "$XLN_MESH_API_PORT_BASE" \
   --node-public-port-base "$XLN_MESH_PUBLIC_PORT_BASE" \
+  --relay-url "$RELAY_URL" \
   --rpc-url "$ANVIL_RPC" \
   --rpc2-url "$ANVIL_RPC2" \
   --db-root "$XLN_MESH_DB_ROOT" \

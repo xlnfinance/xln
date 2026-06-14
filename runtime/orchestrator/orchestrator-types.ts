@@ -6,6 +6,7 @@ import type { StorageHealth } from './storage-monitor';
 export type Args = {
   host: string;
   port: number;
+  relayUrl: string;
   publicWsBaseUrl: string;
   nodeApiPortBase: number;
   nodePublicPortBase: number;
