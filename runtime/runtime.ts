@@ -1005,6 +1005,43 @@ export const stopRuntimeLoopAndWait = async (env: Env, timeoutMs = 10_000): Prom
   return waitForRuntimeProcessingIdle(env, remaining);
 };
 
+export const waitForRuntimeWorkDrained = async (
+  env: Env,
+  timeoutMs = 10_000,
+  quietMs = 250,
+): Promise<boolean> => {
+  const startedAt = Date.now();
+  let idleSince: number | null = null;
+  requestRuntimeLoopWake(env);
+  while (true) {
+    const now = Date.now();
+    const remaining = timeoutMs - (now - startedAt);
+    if (remaining <= 0) return false;
+
+    const processing = env.runtimeState?.processingPromise ?? null;
+    if (processing) {
+      const completed = await Promise.race([
+        processing.then(() => true, () => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), Math.min(remaining, 250))),
+      ]);
+      if (!completed) continue;
+    }
+
+    const hasWork = hasRuntimeWork(env) || Boolean(env.runtimeState?.processingPromise);
+    if (!hasWork) {
+      const idleAt = Date.now();
+      idleSince ??= idleAt;
+      if (idleAt - idleSince >= quietMs) return true;
+      await sleep(Math.min(25, quietMs - (idleAt - idleSince)));
+      continue;
+    }
+
+    idleSince = null;
+    requestRuntimeLoopWake(env);
+    await sleep(10);
+  }
+};
+
 export const startJurisdictionWatchers = (env: Env): void => {
   if (!env.jReplicas || env.jReplicas.size === 0) return;
   const watcherOwners = new Map<string, JAdapter>();

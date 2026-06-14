@@ -65,6 +65,7 @@ import {
   stopP2P,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
+  waitForRuntimeWorkDrained,
   getEntityJAdapter,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
@@ -1383,6 +1384,7 @@ const run = async (): Promise<void> => {
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
+    idleTimeout: 120,
     async fetch(request, serverRef) {
       const releaseHttp = httpDrain.begin();
       try {
@@ -1488,8 +1490,23 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
         shuttingDown = true;
         if (meshLoop) clearInterval(meshLoop);
+        const drained = await waitForRuntimeWorkDrained(env, 10_000);
+        if (!drained) {
+          console.warn(`[${resolvedArgs.name}] p2p stop timed out waiting for runtime work to drain`);
+        }
+        const idle = await stopRuntimeLoopAndWait(env, 5_000);
         stopP2P(env);
-        return new Response(safeStringify({ ok: true }), { headers });
+        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), { headers });
+      }
+
+      if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
+        shuttingDown = true;
+        if (meshLoop) clearInterval(meshLoop);
+        const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
+        if (!drained) {
+          console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
+        }
+        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: true }), { headers });
       }
 
       if (pathname === '/api/jurisdictions') {

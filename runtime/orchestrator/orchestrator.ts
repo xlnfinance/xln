@@ -746,13 +746,13 @@ const stopAllChildren = async (): Promise<void> => {
   clearChildRestartTimer(marketMakerChild);
   const ownedLiveChildren = hubChildren.filter((child) => child.proc && child.proc.exitCode === null);
   const ownedLiveMarketMaker = marketMakerChild.proc && marketMakerChild.proc.exitCode === null ? marketMakerChild : null;
-  const p2pStops = [
-    ...ownedLiveChildren.map((child) => postJson(`http://${args.host}:${child.apiPort}/api/control/p2p/stop`)),
-    ...(ownedLiveMarketMaker ? [postJson(`http://${args.host}:${ownedLiveMarketMaker.apiPort}/api/control/p2p/stop`)] : []),
+  const quiesceUrls = [
+    ...ownedLiveChildren.map((child) => `http://${args.host}:${child.apiPort}/api/control/runtime/quiesce`),
+    ...(ownedLiveMarketMaker ? [`http://${args.host}:${ownedLiveMarketMaker.apiPort}/api/control/runtime/quiesce`] : []),
   ];
   // Initial reset often has no owned children yet. Do not probe random old listeners on the same ports.
-  if (p2pStops.length > 0) {
-    await Promise.all(p2pStops);
+  for (let round = 0; round < 2 && quiesceUrls.length > 0; round += 1) {
+    await Promise.all(quiesceUrls.map((url) => postJson(url, 45_000)));
     await delay(150);
   }
 
@@ -1512,6 +1512,7 @@ const httpDrain = createHttpDrainTracker();
 const server = Bun.serve({
   hostname: args.host,
   port: args.port,
+  idleTimeout: 120,
   async fetch(request, serverRef) {
     const releaseHttp = httpDrain.begin();
     try {

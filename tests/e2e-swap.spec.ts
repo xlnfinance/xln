@@ -881,6 +881,12 @@ async function readSwapState(
   accountHasSwapOfferInPendingFrame: boolean;
   accountHasSwapCancelRequestInMempool: boolean;
   accountHasSwapCancelRequestInPendingFrame: boolean;
+  accountConsensusReady: boolean;
+  accountCurrentHeight: number;
+  accountMempoolSize: number;
+  accountProposalSize: number;
+  accountLockedFrameSize: number;
+  accountPendingFrameSize: number;
 }> {
   return await page.evaluate(({ entityId, signerId, counterpartyId }) => {
     const findAccount = (accounts: any, ownerId: string, cpId: string) => {
@@ -914,6 +920,12 @@ async function readSwapState(
         accountHasSwapOfferInPendingFrame: false,
         accountHasSwapCancelRequestInMempool: false,
         accountHasSwapCancelRequestInPendingFrame: false,
+        accountConsensusReady: false,
+        accountCurrentHeight: 0,
+        accountMempoolSize: 0,
+        accountProposalSize: 0,
+        accountLockedFrameSize: 0,
+        accountPendingFrameSize: 0,
       };
     }
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
@@ -958,8 +970,73 @@ async function readSwapState(
       accountHasSwapCancelRequestInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find(
         (tx: any) => tx?.type === 'swap_cancel_request'
       ),
+      accountConsensusReady: Boolean(
+        account?.currentFrame &&
+        Number(account?.currentHeight ?? 0) > 0 &&
+        !account?.pendingFrame &&
+        Number(account?.mempool?.length ?? 0) === 0 &&
+        Number(account?.proposal?.accountTxs?.length ?? account?.proposal?.txs?.length ?? 0) === 0 &&
+        Number(account?.lockedFrame?.accountTxs?.length ?? account?.lockedFrame?.txs?.length ?? 0) === 0
+      ),
+      accountCurrentHeight: Number(account?.currentHeight ?? 0),
+      accountMempoolSize: Number(account?.mempool?.length ?? 0),
+      accountProposalSize: Number(account?.proposal?.accountTxs?.length ?? account?.proposal?.txs?.length ?? 0),
+      accountLockedFrameSize: Number(account?.lockedFrame?.accountTxs?.length ?? account?.lockedFrame?.txs?.length ?? 0),
+      accountPendingFrameSize: Number(account?.pendingFrame?.accountTxs?.length ?? account?.pendingFrame?.txs?.length ?? 0),
     };
   }, { entityId, signerId, counterpartyId });
+}
+
+async function waitForSwapBilateralSettlementIdle(
+  page: Page,
+  accountRef: { entityId: string; signerId: string },
+  counterpartyId: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const local = await readSwapState(page, accountRef.entityId, accountRef.signerId, counterpartyId);
+        const response = await page.request.get(`${API_BASE_URL}/api/hub/account-status`, {
+          params: {
+            hubEntityId: counterpartyId,
+            counterpartyEntityId: accountRef.entityId,
+            tokenIds: '1,2,3',
+          },
+        });
+        const remote = await response.json().catch(() => null) as any;
+        return {
+          localReady: local.accountConsensusReady,
+          localMempool: local.accountMempoolSize,
+          localProposal: local.accountProposalSize,
+          localLocked: local.accountLockedFrameSize,
+          localPending: local.accountPendingFrameSize,
+          remoteOk: Boolean(response.ok() && remote?.success),
+          remoteReady: Boolean(remote?.ready),
+          remoteMempool: Number(remote?.mempool ?? -1),
+          remoteRuntimeInput: Number(remote?.runtime?.runtimeInput?.length ?? -1),
+          remoteRuntimeMempool: Number(remote?.runtime?.runtimeMempool?.length ?? -1),
+          remoteReplicaMempool: Number(remote?.replica?.mempool?.length ?? -1),
+          remoteReplicaProposal: Number(remote?.replica?.proposalTxs?.length ?? -1),
+          remoteReplicaLocked: Number(remote?.replica?.lockedFrameTxs?.length ?? -1),
+        };
+      },
+      { timeout: 45_000, intervals: [250, 500, 1000] },
+    )
+    .toEqual({
+      localReady: true,
+      localMempool: 0,
+      localProposal: 0,
+      localLocked: 0,
+      localPending: 0,
+      remoteOk: true,
+      remoteReady: true,
+      remoteMempool: 0,
+      remoteRuntimeInput: 0,
+      remoteRuntimeMempool: 0,
+      remoteReplicaMempool: 0,
+      remoteReplicaProposal: 0,
+      remoteReplicaLocked: 0,
+    });
 }
 
 async function readSwapResolveCount(
@@ -1526,6 +1603,7 @@ async function executeOrderbookClickFill(
     await expect(firstClosedRow).toBeVisible({ timeout: 10_000 });
     await expect(firstClosedRow.locator('td').first()).toContainText(/Filled/i, { timeout: 10_000 });
     await expect(firstClosedRow.locator('td').first()).not.toContainText(/Partial/i, { timeout: 10_000 });
+    await waitForSwapBilateralSettlementIdle(page, accountRef, routedCounterpartyId);
     return { routedCounterpartyId };
   } catch (error) {
     const debugState = await readOrderbookDebug().catch(() => null);

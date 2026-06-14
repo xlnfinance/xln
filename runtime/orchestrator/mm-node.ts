@@ -27,6 +27,7 @@ import {
   stopP2P,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
+  waitForRuntimeWorkDrained,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   listPersistedCheckpointHeights,
@@ -1172,9 +1173,12 @@ const maintainMarketMakerQuotes = async (
   tokenIds: number[],
   maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
   maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+  shouldContinue: () => boolean = () => true,
 ): Promise<void> => {
   if (hubEntityIds.length === 0 || tokenIds.length < 3) return;
+  if (!shouldContinue()) return;
   await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, hubSignerIdsByEntityId, tokenIds);
+  if (!shouldContinue()) return;
   if (!isMarketMakerConnectivityReady(env, mmEntityId, hubEntityIds, tokenIds)) {
     return;
   }
@@ -1227,6 +1231,7 @@ const maintainMarketMakerQuotes = async (
   }
 
   if (entityTxs.length > 0) {
+    if (!shouldContinue()) return;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{
@@ -1512,6 +1517,7 @@ const maintainMarketMakerCrossQuotes = async (
   targetTokenIds: number[],
   maxOffersPerAccount = Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
+  shouldContinue: () => boolean = () => true,
 ): Promise<void> => {
   if (
     sourceHubs.length === 0 ||
@@ -1523,6 +1529,7 @@ const maintainMarketMakerCrossQuotes = async (
   ) {
     return;
   }
+  if (!shouldContinue()) return;
 
   const sourceHubEntityIds = sourceHubs.map(profile => profile.entityId);
   const targetHubEntityIds = targetHubs.map(profile => profile.entityId);
@@ -1534,6 +1541,7 @@ const maintainMarketMakerCrossQuotes = async (
     hubSignerIdsByEntityId,
     sourceTokenIds,
   );
+  if (!shouldContinue()) return;
   await ensureMarketMakerHubConnectivity(
     env,
     targetContext.entityId,
@@ -1542,6 +1550,7 @@ const maintainMarketMakerCrossQuotes = async (
     hubSignerIdsByEntityId,
     targetTokenIds,
   );
+  if (!shouldContinue()) return;
 
   if (!isMarketMakerConnectivityReady(env, sourceContext.entityId, sourceHubEntityIds, sourceTokenIds)) return;
   if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;
@@ -1608,6 +1617,7 @@ const maintainMarketMakerCrossQuotes = async (
 
   const entityInputs = Array.from(inputsByEntity.values()).filter(input => (input.entityTxs?.length || 0) > 0);
   if (entityInputs.length > 0) {
+    if (!shouldContinue()) return;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs,
@@ -1795,6 +1805,7 @@ const run = async (): Promise<void> => {
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
+    idleTimeout: 120,
     async fetch(request, serverRef) {
       const releaseHttp = httpDrain.begin();
       try {
@@ -1880,8 +1891,27 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
+        shuttingDown = true;
+        if (loop) clearInterval(loop);
+        const drained = await waitForRuntimeWorkDrained(env, 10_000);
+        if (!drained) {
+          console.warn(`[${resolvedArgs.name}] p2p stop timed out waiting for runtime work to drain`);
+        }
+        const idle = await stopRuntimeLoopAndWait(env, 5_000);
         stopP2P(env);
-        return new Response(safeStringify({ ok: true }), {
+        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), {
+          headers: JSON_HEADERS,
+        });
+      }
+
+      if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
+        shuttingDown = true;
+        if (loop) clearInterval(loop);
+        const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
+        if (!drained) {
+          console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
+        }
+        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: true }), {
           headers: JSON_HEADERS,
         });
       }
@@ -1993,11 +2023,14 @@ const run = async (): Promise<void> => {
   let shuttingDown = false;
   let loopInFlight = false;
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<void> => {
+    if (shuttingDown) return;
     if (loopInFlight) return;
     loopInFlight = true;
+    const shouldContinue = () => !shuttingDown;
     try {
       const visibleHubs = readVisibleHubProfiles(env, true);
       if (visibleHubs.length === 0) return;
+      if (!shouldContinue()) return;
       if (!directHubPeersReady(env, visibleHubs)) return;
       const hubSignerIdsByEntityId = new Map(configuredHubSignerIdsByEntityId);
       for (const profile of visibleHubs) {
@@ -2005,6 +2038,7 @@ const run = async (): Promise<void> => {
       }
 
       for (const context of mmContexts) {
+        if (!shouldContinue()) return;
         const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
         const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
         if (hubEntityIds.length === 0) continue;
@@ -2024,14 +2058,17 @@ const run = async (): Promise<void> => {
           mode === 'bootstrap'
             ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredOfferCount)
             : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+          shouldContinue,
         );
       }
 
       for (const sourceContext of mmContexts) {
+        if (!shouldContinue()) return;
         const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
         if (sourceHubs.length === 0) continue;
         const sourceTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, sourceContext);
         for (const targetContext of mmContexts) {
+          if (!shouldContinue()) return;
           if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
           const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
           if (targetHubs.length === 0) continue;
@@ -2060,9 +2097,11 @@ const run = async (): Promise<void> => {
             mode === 'bootstrap'
               ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredCrossOfferCount)
               : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
+            shouldContinue,
           );
         }
       }
+      if (!shouldContinue()) return;
       await settleRuntimeFor(env, 45);
     } finally {
       loopInFlight = false;
@@ -2092,6 +2131,7 @@ const run = async (): Promise<void> => {
       if (health.ok) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
+    if (shuttingDown) return false;
     const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
     const allVisibleHubs = readVisibleHubProfiles(env, true);
     const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
