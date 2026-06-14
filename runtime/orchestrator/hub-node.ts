@@ -149,6 +149,10 @@ type VisibleHubProfile = {
   jurisdictionName: string;
 };
 
+type VisibleSupportPeer = SupportPeerIdentity & {
+  runtimeId: string;
+};
+
 type StageTiming = {
   startedAt: number | null;
   completedAt: number | null;
@@ -1175,15 +1179,43 @@ const readVisibleHubProfiles = (env: Env, jurisdictionName: string): VisibleHubP
     );
 };
 
-const directHubPeersReady = (env: Env, peers: VisibleHubProfile[]): boolean => {
+const openDirectRuntimeIds = (env: Env): Set<string> => new Set(
+  (getP2PState(env).directPeers || [])
+    .filter(peer => peer.open === true)
+    .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
+    .filter(runtimeId => runtimeId.length > 0),
+);
+
+const directRuntimePeersReady = (env: Env, peers: Array<{ runtimeId: string }>): boolean => {
   if (peers.length === 0) return true;
-  const openRuntimeIds = new Set(
-    (getP2PState(env).directPeers || [])
-      .filter(peer => peer.open === true)
-      .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
-      .filter(runtimeId => runtimeId.length > 0),
-  );
+  const openRuntimeIds = openDirectRuntimeIds(env);
   return peers.every(peer => openRuntimeIds.has(peer.runtimeId));
+};
+
+const directHubPeersReady = (env: Env, peers: VisibleHubProfile[]): boolean => directRuntimePeersReady(env, peers);
+
+const visibleDirectSupportPeers = (
+  env: Env,
+  identities: SupportPeerIdentity[],
+  profiles: ReturnType<NonNullable<Env['gossip']>['getProfiles']>,
+  selfEntityId: string,
+): VisibleSupportPeer[] => {
+  const openRuntimeIds = new Set(
+    Array.from(openDirectRuntimeIds(env)),
+  );
+  const profilesByEntityId = new Map(
+    profiles.map(profile => [String(profile.entityId || '').toLowerCase(), profile] as const),
+  );
+  return identities
+    .map((identity) => {
+      const entityId = identity.entityId.toLowerCase();
+      if (entityId === selfEntityId.toLowerCase()) return null;
+      const profile = profilesByEntityId.get(entityId);
+      const runtimeId = normalizeRuntimeId(profile?.runtimeId || '');
+      if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;
+      return { ...identity, runtimeId };
+    })
+    .filter((peer): peer is VisibleSupportPeer => peer !== null);
 };
 
 const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
@@ -2070,9 +2102,11 @@ const run = async (): Promise<void> => {
         return;
       }
       const visibleProfiles = env.gossip?.getProfiles?.() || [];
-      const visibleSupportPeers = supportPeerIdentities.filter((identity) =>
-        identity.entityId !== bootstrap.entityId.toLowerCase() &&
-        visibleProfiles.some((profile) => profile.entityId.toLowerCase() === identity.entityId),
+      const visibleSupportPeers = visibleDirectSupportPeers(
+        env,
+        supportPeerIdentities,
+        visibleProfiles,
+        bootstrap.entityId,
       );
 
       const openInputs: EntityInput[] = [];

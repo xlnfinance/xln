@@ -29,6 +29,7 @@ describe('production startup wiring', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     expect(hubNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
+    expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
   });
