@@ -153,6 +153,13 @@ export async function createRpcAdapter(
         : err.cause,
     };
   };
+  const safeJsonish = (value: unknown): string => {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  };
   const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
     runner as Parameters<typeof Account__factory.connect>[1];
   const makeAccountFactory = (runner: unknown): Account__factory =>
@@ -169,6 +176,15 @@ export async function createRpcAdapter(
     contracts.map((contract) => ({ interface: contract.interface as ethers.Interface }));
   const asRpcTxResponse = (tx: unknown): RpcTxResponse => tx as RpcTxResponse;
   const asRpcReceipt = (receipt: unknown): RpcReceipt => receipt as RpcReceipt;
+
+  const isLocalLatestStateStaticCallRace = (error: unknown): boolean => {
+    if (!DEV_CHAIN_IDS.has(config.chainId)) return false;
+    const detail = safeJsonish({
+      message: watcherErrorMessage(error),
+      details: watcherErrorDetails(error),
+    });
+    return /missing revert data|CALL_EXCEPTION|BlockOutOfRangeError|Failed to load state snapshot|No such file/i.test(detail);
+  };
 
   trace('provider.getNetwork:start');
   const rpcChainId = Number((await provider.getNetwork()).chainId);
@@ -274,13 +290,23 @@ export async function createRpcAdapter(
     });
   };
 
-  const estimateGasWithHeadroom = async (estimate: () => Promise<bigint>, fallback: bigint): Promise<bigint> => {
+  type GasEstimateResult = {
+    gasLimit: bigint;
+    usedFallback: boolean;
+    error?: unknown;
+  };
+  const estimateGasWithHeadroomResult = async (
+    estimate: () => Promise<bigint>,
+    fallback: bigint,
+  ): Promise<GasEstimateResult> => {
     try {
-      return applyGasHeadroom(await estimate());
-    } catch {
-      return fallback;
+      return { gasLimit: applyGasHeadroom(await estimate()), usedFallback: false };
+    } catch (error) {
+      return { gasLimit: fallback, usedFallback: true, error };
     }
   };
+  const estimateGasWithHeadroom = async (estimate: () => Promise<bigint>, fallback: bigint): Promise<bigint> =>
+    (await estimateGasWithHeadroomResult(estimate, fallback)).gasLimit;
 
   type SendTxOptions = {
     gasFallback: bigint;
@@ -1428,10 +1454,11 @@ export async function createRpcAdapter(
             console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(batch)} ops) nonce=${nextNonce}`);
             // ERC20 approvals are explicit user actions handled before batching.
             // submitTx must not mutate external allowances as a hidden side effect.
-            const gasLimit = await estimateGasWithHeadroom(
+            const gasEstimate = await estimateGasWithHeadroomResult(
               () => submitterDepository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
               DEFAULT_PROCESS_BATCH_GAS,
             );
+            const gasLimit = gasEstimate.gasLimit;
             const resolvedFeeOverrides = await buildFeeOverrides();
             const requestedFeeOverrides = batchData.feeOverrides;
             if (requestedFeeOverrides?.maxFeePerGasWei) {
@@ -1471,6 +1498,7 @@ export async function createRpcAdapter(
                   : null;
               const revertData = revertSource?.data ?? revertSource?.error?.data ?? revertSource?.info?.error?.data;
               let errDetail = '';
+              let localSnapshotRaceAfterGasEstimate = false;
               if (revertData && revertData !== '0x') {
                 const sig = typeof revertData === 'string' ? revertData.slice(0, 10) : '';
                 let errName = `unknown(${sig})`;
@@ -1505,12 +1533,21 @@ export async function createRpcAdapter(
               } else {
                 errDetail = String(revertSource?.reason ?? revertSource?.message ?? simErr);
                 console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail}`);
+                localSnapshotRaceAfterGasEstimate =
+                  !gasEstimate.usedFallback && isLocalLatestStateStaticCallRace(simErr);
               }
               if (disputeStartDebug.length > 0) {
                 console.error(`🧾 [JAdapter:rpc] disputeStart.batch.revert ${JSON.stringify(disputeStartDebug)}`);
               }
-              // Bail — do NOT submit a known-bad batch on-chain
-              return { success: false, error: `staticCall revert: ${errDetail}` };
+              if (localSnapshotRaceAfterGasEstimate) {
+                console.warn(
+                  '⚠️ [JAdapter:rpc] staticCall preflight hit local dev-chain latest-state snapshot race ' +
+                  'after successful gas estimate; continuing to submit the already-estimated batch',
+                );
+              } else {
+                // Bail — do NOT submit a known-bad batch on-chain
+                return { success: false, error: `staticCall revert: ${errDetail}` };
+              }
             }
 
             for (let attempt = 1; attempt <= 2; attempt++) {
