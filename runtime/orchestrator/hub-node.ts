@@ -1195,14 +1195,10 @@ const directRuntimePeersReady = (env: Env, peers: Array<{ runtimeId: string }>):
 const directHubPeersReady = (env: Env, peers: VisibleHubProfile[]): boolean => directRuntimePeersReady(env, peers);
 
 const visibleDirectSupportPeers = (
-  env: Env,
   identities: SupportPeerIdentity[],
   profiles: ReturnType<NonNullable<Env['gossip']>['getProfiles']>,
   selfEntityId: string,
 ): VisibleSupportPeer[] => {
-  const openRuntimeIds = new Set(
-    Array.from(openDirectRuntimeIds(env)),
-  );
   const profilesByEntityId = new Map(
     profiles.map(profile => [String(profile.entityId || '').toLowerCase(), profile] as const),
   );
@@ -1212,7 +1208,7 @@ const visibleDirectSupportPeers = (
       if (entityId === selfEntityId.toLowerCase()) return null;
       const profile = profilesByEntityId.get(entityId);
       const runtimeId = normalizeRuntimeId(profile?.runtimeId || '');
-      if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;
+      if (!runtimeId) return null;
       return { ...identity, runtimeId };
     })
     .filter((peer): peer is VisibleSupportPeer => peer !== null);
@@ -2103,7 +2099,6 @@ const run = async (): Promise<void> => {
       }
       const visibleProfiles = env.gossip?.getProfiles?.() || [];
       const visibleSupportPeers = visibleDirectSupportPeers(
-        env,
         supportPeerIdentities,
         visibleProfiles,
         bootstrap.entityId,
