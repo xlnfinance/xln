@@ -9,6 +9,7 @@ import type {
 } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
+import { createXlnJsonRpcProvider } from '../jadapter';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
@@ -476,7 +477,7 @@ const findMissingRpcContractCode = async (
   contracts: JurisdictionConfig['contracts'],
 ): Promise<string[]> => {
   if (!contracts) return ['contracts'];
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createXlnJsonRpcProvider(rpcUrl);
   const missing: string[] = [];
   for (const key of REQUIRED_RPC_CONTRACT_KEYS) {
     const address = String(contracts[key] || '').trim();

@@ -1,5 +1,6 @@
 import { Contract, Interface, JsonRpcProvider, Wallet, ethers } from 'ethers';
 import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { createXlnJsonRpcProvider } from '../jadapter';
 import type {
   TowerCounterDisputeRemedyV2,
   TowerFinalDisputeProofV2,
@@ -340,7 +341,7 @@ export const runWatchtowerSweep = async (
   let skipped = 0;
   let errors = 0;
   const customProviderFactory = options?.providerFactory;
-  const providerFactory = customProviderFactory || ((rpcUrl: string, chainId: number) => new JsonRpcProvider(rpcUrl, chainId));
+  const providerFactory = customProviderFactory || ((rpcUrl: string, chainId: number) => createXlnJsonRpcProvider(rpcUrl, chainId));
   const contractFactory = options?.contractFactory || ((remedy, wallet, provider) =>
     new Contract(remedy.depositoryAddress, DEPOSITORY_MINIMAL_ABI, wallet.connect(provider as unknown as JsonRpcProvider)));
 

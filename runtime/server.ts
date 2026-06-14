@@ -26,7 +26,7 @@ import { safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { DeliverableEntityInput, Env } from './types';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
-import { createJAdapter, type JAdapter } from './jadapter';
+import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from './jadapter';
 import type { JAdapterConfig } from './jadapter/types';
 import {
   createMarketMakerServerState,
@@ -1003,7 +1003,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     let anvilReady = false;
     for (let i = 0; i < maxRetries; i++) {
       try {
-        const probe = new ethers.JsonRpcProvider(anvilRpc);
+        const probe = createXlnJsonRpcProvider(anvilRpc);
         const network = await probe.getNetwork();
         if (network?.chainId) detectedChainId = Number(network.chainId);
         anvilReady = true;

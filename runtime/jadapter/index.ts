@@ -36,6 +36,20 @@ export {
  */
 export const DEV_CHAIN_IDS = new Set<number>([31337, 31338]);
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 1_000;
+const XLN_JSON_RPC_PROVIDER_OPTIONS = {
+  // Ethers caches low-level perform calls for 250ms by default and batches
+  // same-tick JSON-RPC requests. Fast local chains can mine thousands of
+  // blocks synchronously inside that window, which makes later eth_call
+  // preflights run against stale historical state. XLN needs latest-state
+  // reads for submit safety, so disable both behaviours at the adapter edge.
+  cacheTimeout: -1,
+  batchMaxCount: 1,
+} as const;
+
+export const createXlnJsonRpcProvider = (
+  rpcUrl: string,
+  network?: ethers.Networkish,
+): ethers.JsonRpcProvider => new ethers.JsonRpcProvider(rpcUrl, network, XLN_JSON_RPC_PROVIDER_OPTIONS);
 
 const configureRpcPolling = (provider: ethers.JsonRpcProvider): void => {
   const configuredInterval =
@@ -126,7 +140,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
     throw new Error('rpcUrl required for anvil/rpc mode');
   }
   const rpcUrl = normalizeLoopbackUrl(config.rpcUrl);
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createXlnJsonRpcProvider(rpcUrl);
   configureRpcPolling(provider);
   // Use NonceTrackingWallet for rapid sequential txs (anvil deploys many contracts)
   const signer = new NonceTrackingWallet(privateKey, provider);

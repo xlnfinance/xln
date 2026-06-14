@@ -3,7 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { ethers } from 'ethers';
 
-import { DEFAULT_PRIVATE_KEY, createJAdapter } from '../jadapter';
+import { DEFAULT_PRIVATE_KEY, createJAdapter, createXlnJsonRpcProvider } from '../jadapter';
 import { createEmptyBatch } from '../j-batch';
 import { prepareSignedBatch } from '../hanko/batch';
 import { generateLazyEntityId } from '../entity-factory';
@@ -57,7 +57,7 @@ const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitForRpcReady = async (rpcUrl: string, timeoutMs = 20_000): Promise<void> => {
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createXlnJsonRpcProvider(rpcUrl);
   const deadline = Date.now() + timeoutMs;
   let lastError = 'unknown';
   while (Date.now() < deadline) {
@@ -135,7 +135,7 @@ const main = async (): Promise<void> => {
   });
 
   await waitForRpcReady(args.rpcUrl);
-  const provider = new ethers.JsonRpcProvider(args.rpcUrl);
+  const provider = createXlnJsonRpcProvider(args.rpcUrl);
   const adapter = await createJAdapter({
     mode: 'rpc',
     chainId: args.chainId,
