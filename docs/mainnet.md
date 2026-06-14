@@ -8,14 +8,17 @@ be true before mainnet is acceptable.
 
 ## Current Position
 
-**Date:** 2026-05-29
-**State:** `0.1.5` is not mainnet-ready.
+**Date:** 2026-06-14
+**State:** current `main` is not mainnet-ready.
 
-`0.1.5` materially raised the floor: watchtower recovery is live, encrypted,
-scheduled, covered by browser E2E, and production health/payment smoke passed.
-That is enough for a serious public demo and testnet-grade iteration. It is not
-enough for real funds because release-duration soak, real mainnet ops, and
-external audit are still open.
+The current branch materially raised the floor: watchtower recovery is live,
+encrypted, scheduled, covered by browser E2E, direct same-chain/cross-j swaps
+and lending are in the fast E2E gate, `bun run gate:release` passed, production
+health smoke passed, and a release soak completed 13 full gate/benchmark
+iterations before being stopped manually. That is enough for serious
+public-testnet hardening. It is not enough for real funds because the full
+uninterrupted release soak, real mainnet ops, Peer State Refresh, and external
+audit are still open.
 
 ## Public Testnet / Demo Scope
 
@@ -27,6 +30,7 @@ The current public-testnet/demo surface includes:
 - J-layer `processBatch` contract integration on local Anvil/RPC;
 - user-facing payments, swaps, cross-j flows, disputes, and recovery through
   the shared app UI;
+- hub lending offer/borrow/repay through the shared app UI;
 - official same-origin watchtower backup restore and delayed-last-resort
   counter-dispute infrastructure;
 - browser E2E for wiped-browser watchtower restore and post-restore channel
@@ -93,6 +97,10 @@ bun run gate:release
 bun run soak:release
 ```
 
+Current evidence: `bun run gate:release` passed on `d328c43a`; the long
+`bun run soak:release` command was manually stopped after 13 complete successful
+iterations, so it is useful evidence but not a completed gate.
+
 ### 4. Operational readiness
 
 Required:
@@ -115,6 +123,9 @@ bun run prod:health
 Required:
 
 - supported token surface is explicit;
+- direct same-chain and direct cross-j swaps are the executable swap surface;
+- multihop is only a manual route recommendation unless a future executable
+  runner is explicitly reintroduced and tested;
 - custody/fee paths are coherent;
 - destructive/reset/debug actions are strongly gated;
 - normal user UX does not accidentally route through dev-only surfaces;

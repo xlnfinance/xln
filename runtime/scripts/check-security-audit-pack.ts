@@ -11,6 +11,12 @@ const assertIncludes = (text: string, needle: string, path: string): void => {
   }
 };
 
+const assertNotIncludes = (text: string, needle: string, path: string): void => {
+  if (text.includes(needle)) {
+    throw new Error(`${path} contains stale forbidden text: ${needle}`);
+  }
+};
+
 const packageJson = JSON.parse(readText('package.json')) as { scripts?: Record<string, string> };
 const scripts = packageJson.scripts ?? {};
 for (const name of ['gate:ci', 'gate:release', 'test:e2e:coverage', 'test:rpc-settlement', 'soak:quick', 'soak:release', 'prod:health']) {
@@ -40,6 +46,13 @@ for (const command of [
 ]) {
   assertIncludes(auditBrief, command, auditBriefPath);
 }
+for (const marker of [
+  'Hub lending pools',
+  'User-facing Lending coverage',
+  'Multihop is a manual route recommendation only',
+]) {
+  assertIncludes(auditBrief, marker, auditBriefPath);
+}
 
 const mainnetPath = 'docs/mainnet.md';
 const mainnet = readText(mainnetPath);
@@ -49,8 +62,27 @@ for (const marker of [
   'bun run soak:release',
   'docs/security/external-audit-brief.md',
   'bun run prod:health',
+  'direct same-chain and direct cross-j swaps are the executable swap surface',
 ]) {
   assertIncludes(mainnet, marker, mainnetPath);
+}
+
+const gptContextPath = 'scripts/debug/gpt.cjs';
+const gptContext = readText(gptContextPath);
+for (const marker of [
+  'src/lib/components/Entity/LendingPanel.svelte',
+  'runtime/__tests__/lending.test.ts',
+  'tests/e2e-lending.spec.ts',
+  'Multihop execution is intentionally deferred',
+]) {
+  assertIncludes(gptContext, marker, gptContextPath);
+}
+for (const stale of [
+  'routed-swap-execution.ts',
+  'RoutedRouteControls.svelte',
+  'tests/unit/routed-swap-planner.test.ts',
+]) {
+  assertNotIncludes(gptContext, stale, gptContextPath);
 }
 
 const flowCoveragePath = 'docs/testnet-flow-coverage.md';
