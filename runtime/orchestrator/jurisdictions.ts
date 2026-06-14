@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { createJAdapter } from '../jadapter';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../jurisdictions-version';
@@ -185,4 +186,12 @@ export const seedShardJurisdictions = (config: OrchestratorJurisdictionsConfig):
     throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
   }
   writeFileSync(config.shardJurisdictionsPath, readFileSync(canonicalPath, 'utf8'), 'utf8');
+};
+
+export const syncCanonicalJurisdictionsFromShard = (config: OrchestratorJurisdictionsConfig): void => {
+  const canonicalPath = resolveJurisdictionsJsonPath();
+  if (resolve(canonicalPath) === resolve(config.shardJurisdictionsPath)) return;
+  const payload = readShardJurisdictions(config);
+  mkdirSync(dirname(canonicalPath), { recursive: true });
+  writeFileSync(canonicalPath, payload, 'utf8');
 };
