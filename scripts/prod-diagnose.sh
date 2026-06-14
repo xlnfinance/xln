@@ -182,7 +182,7 @@ check_health() {
       if (hub.online !== true) failures.push(`${hub.name || hub.runtimeId || "hub"}.online=false`);
       if (hub.selfRelayPresence !== true) failures.push(`${hub.name || hub.runtimeId || "hub"}.selfRelayPresence=false`);
     }
-    if (payload.marketMaker?.startupPhase && payload.marketMaker.startupPhase !== "ready") {
+    if (payload.marketMaker?.startupPhase && payload.marketMaker.startupPhase !== "offers-ready") {
       failures.push(`marketMaker.phase=${payload.marketMaker.startupPhase}`);
     }
     if (cross.applicable === false) failures.push("cross.applicable=false");
