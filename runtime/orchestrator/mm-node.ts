@@ -228,6 +228,9 @@ const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   60_000,
   Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
 );
+const yieldMarketMakerApi = async (): Promise<void> => {
+  await sleep(0);
+};
 const ORDERBOOK_MAX_BASE_AMOUNT = MAX_ORDERBOOK_QTY_LOTS * SWAP_LOT_SCALE;
 const MARKET_MAKER_DEPTH_MULTIPLIER = (() => {
   try {
@@ -1197,6 +1200,8 @@ const maintainMarketMakerQuotes = async (
   const entityTxs: EntityInput['entityTxs'] = [];
   let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
   for (const [hubEntityId, specs] of grouped.entries()) {
+    await yieldMarketMakerApi();
+    if (!shouldContinue()) return;
     if (remainingNewOffers <= 0) break;
     const account = getAccountMachine(env, mmEntityId, hubEntityId);
     if (!account) continue;
@@ -1580,6 +1585,8 @@ const maintainMarketMakerCrossQuotes = async (
   const inputsByEntity = new Map<string, EntityInput>();
   let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
   for (const [sourceHubEntityId, specs] of grouped.entries()) {
+    await yieldMarketMakerApi();
+    if (!shouldContinue()) return;
     const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
     if (!account) continue;
     if (String(account.status || 'active') !== 'active') continue;
@@ -2037,12 +2044,14 @@ const run = async (): Promise<void> => {
       if (visibleHubs.length === 0) return;
       if (!shouldContinue()) return;
       if (!areMarketMakerHubTransportsReady(getP2PState(env), visibleHubs)) return;
+      await yieldMarketMakerApi();
       const hubSignerIdsByEntityId = new Map(configuredHubSignerIdsByEntityId);
       for (const profile of visibleHubs) {
         if (profile.signerId) hubSignerIdsByEntityId.set(profile.entityId.toLowerCase(), profile.signerId.toLowerCase());
       }
 
       for (const context of mmContexts) {
+        await yieldMarketMakerApi();
         if (!shouldContinue()) return;
         const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
         const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
@@ -2065,14 +2074,17 @@ const run = async (): Promise<void> => {
             : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
           shouldContinue,
         );
+        await yieldMarketMakerApi();
       }
 
       for (const sourceContext of mmContexts) {
+        await yieldMarketMakerApi();
         if (!shouldContinue()) return;
         const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
         if (sourceHubs.length === 0) continue;
         const sourceTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, sourceContext);
         for (const targetContext of mmContexts) {
+          await yieldMarketMakerApi();
           if (!shouldContinue()) return;
           if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
           const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
@@ -2104,6 +2116,7 @@ const run = async (): Promise<void> => {
               : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
             shouldContinue,
           );
+          await yieldMarketMakerApi();
         }
       }
       if (!shouldContinue()) return;

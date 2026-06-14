@@ -105,6 +105,10 @@ const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
+const CHILD_HEALTH_TIMEOUT_MS = Math.max(
+  1_500,
+  Math.floor(Number(process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '10000')),
+);
 const marketMakerReadyRestartLimit = Math.max(
   0,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
@@ -447,8 +451,8 @@ const cleanupRpcMarketSubscription = (ws: OrchestratorWebSocket): void => market
 const pollHubHealth = async (child: HubChild): Promise<void> => {
   const apiBase = `http://${args.host}:${child.apiPort}`;
   const [info, health] = await Promise.all([
-    fetchJson<HubInfoPayload>(`${apiBase}/api/info`, 1_500),
-    fetchJson<HubHealthPayload>(`${apiBase}/api/health`, 1_500),
+    fetchJson<HubInfoPayload>(`${apiBase}/api/info`, CHILD_HEALTH_TIMEOUT_MS),
+    fetchJson<HubHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS),
   ]);
   if (info) child.lastInfo = info;
   if (health) child.lastHealth = health;
@@ -476,8 +480,8 @@ const pollMarketMakerHealth = async (): Promise<void> => {
     return;
   }
   const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  marketMakerChild.lastInfo = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, 1_500);
-  marketMakerChild.lastHealth = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, 1_500);
+  marketMakerChild.lastInfo = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, CHILD_HEALTH_TIMEOUT_MS);
+  marketMakerChild.lastHealth = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS);
   marketMakerChild.lastStartupPhase = String(
     marketMakerChild.lastHealth?.startupPhase ||
     marketMakerChild.lastInfo?.startupPhase ||
