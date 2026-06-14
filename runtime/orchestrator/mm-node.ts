@@ -1608,9 +1608,6 @@ const maintainMarketMakerCrossQuotes = async (
   );
   if (!shouldContinue()) return;
 
-  if (!isMarketMakerConnectivityReady(env, sourceContext.entityId, sourceHubEntityIds, sourceTokenIds)) return;
-  if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;
-
   const desiredOffers = buildMarketMakerCrossOfferSpecs(
     env,
     sourceContext,
@@ -1662,6 +1659,10 @@ const maintainMarketMakerCrossQuotes = async (
       .filter(spec => spec.crossJurisdiction && !existingOfferIds.has(spec.offerId))
       .filter(spec => {
         const route = spec.crossJurisdiction!;
+        const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);
+        if (!targetAccount) return false;
+        if (String(targetAccount.status || 'active') !== 'active') return false;
+        if (!isAccountConsensusReady(targetAccount)) return false;
         return (
           !hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId) &&
           !getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId) &&

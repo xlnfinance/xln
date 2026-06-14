@@ -111,6 +111,10 @@ const CHILD_HEALTH_TIMEOUT_MS = Math.max(
   1_500,
   Math.floor(Number(process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '15000')),
 );
+const MARKET_MAKER_INFO_TIMEOUT_MS = Math.max(
+  500,
+  Math.min(CHILD_HEALTH_TIMEOUT_MS, Math.floor(Number(process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'))),
+);
 const marketMakerReadyRestartLimit = Math.max(
   0,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
@@ -482,12 +486,12 @@ const pollMarketMakerHealth = async (): Promise<void> => {
     return;
   }
   const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  const [info, health] = await Promise.all([
-    fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, CHILD_HEALTH_TIMEOUT_MS),
+  const [health, info] = await Promise.all([
     fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS),
+    fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS),
   ]);
-  if (info) marketMakerChild.lastInfo = info;
   if (health) marketMakerChild.lastHealth = health;
+  if (info) marketMakerChild.lastInfo = info;
   marketMakerChild.lastStartupPhase = String(
     marketMakerChild.lastHealth?.startupPhase ||
     marketMakerChild.lastInfo?.startupPhase ||
