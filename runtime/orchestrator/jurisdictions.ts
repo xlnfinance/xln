@@ -26,6 +26,11 @@ type ShardJurisdictionsFile = Record<string, unknown> & {
   defaults?: Record<string, unknown>;
 };
 
+const resolveRepoJurisdictionsJsonPath = (): string => {
+  const repoUrl = new URL('../../jurisdictions/jurisdictions.json', import.meta.url);
+  return resolve(decodeURIComponent(repoUrl.pathname));
+};
+
 const isRpc2Jurisdiction = (
   config: OrchestratorJurisdictionsConfig,
   key: string,
@@ -41,17 +46,16 @@ const isRpc2Jurisdiction = (
 
 export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig): string => {
   const canonicalPath = resolveJurisdictionsJsonPath();
-  if (!existsSync(canonicalPath)) {
-    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
-  }
   if (!existsSync(config.shardJurisdictionsPath)) {
     throw new Error(`JURISDICTIONS_JSON_MISSING path=${config.shardJurisdictionsPath}`);
   }
-  const canonical = readFileSync(canonicalPath, 'utf8');
+  const canonical = existsSync(canonicalPath) ? readFileSync(canonicalPath, 'utf8') : '';
   const shard = readFileSync(config.shardJurisdictionsPath, 'utf8');
   try {
-    const canonicalVersion = String((JSON.parse(canonical) as { version?: unknown }).version || '').trim() || '1';
     const shardPayload = JSON.parse(shard) as { version?: unknown };
+    const canonicalVersion = canonical
+      ? String((JSON.parse(canonical) as { version?: unknown }).version || '').trim() || '1'
+      : String(shardPayload.version || '').trim() || '1';
     const shardVersion = String(shardPayload.version || '').trim();
     if (shardVersion !== canonicalVersion) {
       shardPayload.version = canonicalVersion;
@@ -182,10 +186,12 @@ export const toPublicJurisdictionsPayload = (
 
 export const seedShardJurisdictions = (config: OrchestratorJurisdictionsConfig): void => {
   const canonicalPath = resolveJurisdictionsJsonPath();
-  if (!existsSync(canonicalPath)) {
-    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
+  const seedPath = existsSync(canonicalPath) ? canonicalPath : resolveRepoJurisdictionsJsonPath();
+  if (!existsSync(seedPath)) {
+    throw new Error(`JURISDICTIONS_SEED_MISSING canonical=${canonicalPath} repo=${resolveRepoJurisdictionsJsonPath()}`);
   }
-  writeFileSync(config.shardJurisdictionsPath, readFileSync(canonicalPath, 'utf8'), 'utf8');
+  mkdirSync(dirname(config.shardJurisdictionsPath), { recursive: true });
+  writeFileSync(config.shardJurisdictionsPath, readFileSync(seedPath, 'utf8'), 'utf8');
 };
 
 export const syncCanonicalJurisdictionsFromShard = (config: OrchestratorJurisdictionsConfig): void => {
