@@ -1,6 +1,6 @@
 # XLN TODO
 
-Last updated: 2026-06-14
+Last updated: 2026-06-15
 
 This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
@@ -90,10 +90,17 @@ file and older docs disagree, prefer code and tests first, then this file.
      per runtime/account.
    - Surface last successful tower upload height and failure reason.
 
-3. **Runtime exception disposition.**
-   - Classify hot runtime exceptions as `drop`, `defer`, `debug-assert`, or
-     `fatal`.
-   - Remove ambiguous exception paths from account/entity consensus code.
+3. **Typed failure taxonomy across runtime and ops.**
+   - Split failures into explicit categories instead of treating every loud
+     error as the same kind of stop.
+   - Baseline categories: `Contradiction` is fatal and halts,
+     `ExpectedEmpty` is normal empty state, `TransientRace` retries with a
+     bounded TTL and only becomes fatal after expiry.
+   - Apply first to transport, bootstrap, faucet/seed funding, market maker,
+     settlement batching, and health readiness before touching consensus hot
+     paths.
+   - Exit: orchestrator/health can explain why a component is degraded without
+     guessing from logs or swallowing real contradictions.
 
 4. **Consensus and Hanko production review.**
    - Re-check current account commit semantics, settlement hankos,
@@ -103,6 +110,57 @@ file and older docs disagree, prefer code and tests first, then this file.
 5. **Contract governance/access-control scan.**
    - Re-run a current pass over `EntityProvider`/`Depository` for permission
      checks, gas bounds, and public debug surfaces before external audit.
+
+6. **One delivery abstraction.**
+   - Collapse direct-vs-relay send logic, pending queues, TTLs, retries, and
+     ACK interpretation into one transport boundary.
+   - Relay is the official baseline; direct delivery is an opportunistic fast
+     path with the same bounded queue semantics.
+   - Exit: callers receive one typed delivery result and no longer reimplement
+     retry/defer/fatal decisions per call site.
+
+7. **Canonical identity refs.**
+   - Treat jurisdiction/entity/account refs as protocol identity and display
+     names as cosmetic only.
+   - Delete alias allowlists and name-based matching from runtime, market maker,
+     health, and tests.
+   - Exit: adding a new testnet label cannot break hub/MM matching.
+
+8. **Canonical fill and amount representation.**
+   - Exact bigint amounts are the source of truth.
+   - `uint16` fill ratios are a one-way lossy projection for on-chain
+     hash-ladder proofs only; never round-trip ratio data back into exact
+     settlement amounts.
+   - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
+     precision boundary and one set of dust/rounding invariants.
+
+9. **Bootstrap lifecycle as an explicit state machine.**
+   - Model startup phases and barriers the same way protocol state is modeled:
+     P2P, relay, hubs, custody, MM same-chain offers, MM cross offers,
+     watchtower, health.
+   - A send/seed/quote action should be impossible before its barrier is met.
+   - Exit: production health can show the exact blocked phase and dependency.
+
+10. **Orchestrator blast-radius boundaries.**
+    - Decouple child process supervision from whole-tree failure.
+    - Ancillary feature failure degrades that feature and keeps diagnostics
+      queryable; protocol contradiction remains a loud fatal stop.
+    - Exit: faucet/demo/MM/watchtower failure cannot take down the health
+      endpoint needed to debug the node.
+
+11. **Settlement conservation proof.**
+    - Prove fund conservation across `pull_lock -> resolve -> on-chain release`
+      on both legs, including debt/collateral and dispute finalization.
+    - Cover `_disputeFinalizeInternal` line-by-line with adversarial fixtures.
+    - Exit: external audit gets executable invariants, not just E2E success.
+
+12. **Economics and scale validation.**
+    - Document fee design, collateral ratios, market-maker incentives, and
+      griefing costs for swaps and disputes.
+    - Profile runtime/orderbook/MM under contention before raising real-money
+      limits.
+    - Exit: mainnet limits are backed by measured capacity and explicit
+      incentive assumptions.
 
 ## P2 - Product And UI
 
