@@ -130,6 +130,13 @@
     }))
     .sort((a, b) => compareStableText(a.name, b.name));
 
+  function hubConnectionState(hub: Hub & { isConnected?: boolean; isOpening?: boolean }): 'open' | 'opening' | 'closed' {
+    const hubId = normalizeEntityId(hub.entityId);
+    if (hub.isConnected) return 'open';
+    if (hub.isOpening || connectingHubIds.has(hubId)) return 'opening';
+    return 'closed';
+  }
+
   function formatFee(ppm?: number): string {
     if (!ppm && ppm !== 0) return '-';
     return (ppm / 100).toFixed(2) + ' bps';
@@ -418,6 +425,7 @@
           class:connected={hub.isConnected}
           data-testid="hub-discovery-card"
           data-hub-entity-id={normalizeEntityId(hub.entityId)}
+          data-connection-state={hubConnectionState(hub)}
         >
           <div class="hub-strip" aria-hidden="true"></div>
 
@@ -436,6 +444,7 @@
               {:else if entityId}
                 <button
                   class="btn-connect"
+                  data-testid="hub-connect-button"
                   on:click={() => connectToHub(hub)}
                   disabled={connectingHubIds.has(normalizeEntityId(hub.entityId))}
                 >

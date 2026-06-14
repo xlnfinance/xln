@@ -373,28 +373,76 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await waitForHubRuntimeTransportReady(page, hubId);
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
 
-  const panel = page.locator('.hub-panel').first();
-  await expect(panel).toBeVisible({ timeout: 20_000 });
-  const hubCard = await resolveHubCardLocator(page, hubId, panel);
-  const connectButton = hubCard.getByRole('button', { name: /Connect/i }).first();
-  if (await connectButton.isVisible().catch(() => false)) {
-    await connectButton.click({ timeout: 5_000 });
-    return;
+  let lastUiState = 'not-read';
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (await hasRenderedCommittedAccountCard(page, hubId)) {
+            lastUiState = 'committed-account-card';
+            return true;
+          }
+
+          const panel = page.locator('.hub-panel').first();
+          if (!await panel.isVisible().catch(() => false)) {
+            lastUiState = 'hub-panel-missing';
+            return false;
+          }
+
+          const hubCard = await resolveHubCardLocator(page, hubId, panel);
+          if (!await hubCard.isVisible().catch(() => false)) {
+            lastUiState = 'hub-card-missing';
+            return false;
+          }
+
+          const dataState = String(await hubCard.getAttribute('data-connection-state').catch(() => '') || '').toLowerCase();
+          if (dataState === 'open' || dataState === 'opening') {
+            lastUiState = dataState;
+            return true;
+          }
+
+          const openState = hubCard.locator('.connection-state').filter({ hasText: /^Open$/i }).first();
+          if (await openState.isVisible().catch(() => false)) {
+            lastUiState = 'open-legacy';
+            return true;
+          }
+
+          const openingState = hubCard.locator('.connection-state').filter({ hasText: /^Opening$/i }).first();
+          if (await openingState.isVisible().catch(() => false)) {
+            lastUiState = 'opening-legacy';
+            return true;
+          }
+
+          const connectByTestId = hubCard.getByTestId('hub-connect-button').first();
+          const connectButton = await connectByTestId.isVisible().catch(() => false)
+            ? connectByTestId
+            : hubCard.getByRole('button', { name: /Connect/i }).first();
+          if (
+            await connectButton.isVisible().catch(() => false)
+            && await connectButton.isEnabled().catch(() => false)
+          ) {
+            await connectButton.click({ timeout: 5_000 });
+            lastUiState = 'connect-clicked';
+            return true;
+          }
+
+          const text = await hubCard.innerText({ timeout: 1_000 }).catch(() => '');
+          lastUiState = `state=${dataState || 'unknown'} text=${text.replace(/\s+/g, ' ').slice(0, 180)}`;
+          return false;
+        },
+        {
+          timeout: 20_000,
+          intervals: [100, 250, 500],
+          message: `hub ${hubId} must expose Connect, Opening, or already be Open`,
+        },
+      )
+      .toBe(true);
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `lastHubConnectUiState=${lastUiState}`,
+    );
   }
-  if (await hasRenderedCommittedAccountCard(page, hubId)) return;
-
-  const openState = hubCard.locator('.connection-state').filter({ hasText: /^Open$/i }).first();
-  if (await openState.isVisible().catch(() => false)) return;
-
-  const openingState = hubCard.locator('.connection-state').filter({ hasText: /^Opening$/i }).first();
-  if (await openingState.isVisible().catch(() => false)) {
-    return;
-  }
-
-  const visibleStatus = hubCard.getByText(/^(Open|Opening)$/i).first();
-  if (await visibleStatus.isVisible().catch(() => false)) return;
-
-  await expect(openState, `hub ${hubId} must expose Connect, Opening, or already be Open`).toBeVisible({ timeout: 5_000 });
 }
 
 async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
