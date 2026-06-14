@@ -227,7 +227,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '15'),
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -1073,13 +1073,43 @@ const countMarketMakerOffersForHub = (env: Env, mmEntityId: string, hubEntityId:
   return count;
 };
 
-const countExistingSpecOffers = (env: Env, entityId: string, counterpartyEntityId: string, specs: MarketMakerOfferSpec[]): number => {
-  const existingOfferIds = collectOfferIdsForAccount(getAccountMachine(env, entityId, counterpartyEntityId));
+type PendingCrossRequestReader = (entityId: string) => Set<string>;
+
+const hasCrossSpecBootstrapProgress = (
+  env: Env,
+  spec: MarketMakerOfferSpec,
+  getPendingCrossRequestOrderIds: PendingCrossRequestReader,
+): boolean => {
+  const route = spec.crossJurisdiction;
+  if (!route) return false;
+  if (hasSourceAccountCrossOffer(env, route)) return true;
+  if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) return true;
+  return getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
+};
+
+const countCrossSpecBootstrapProgress = (
+  env: Env,
+  specs: MarketMakerOfferSpec[],
+  getPendingCrossRequestOrderIds: PendingCrossRequestReader,
+): number => {
   let count = 0;
   for (const spec of specs) {
-    if (existingOfferIds.has(spec.offerId)) count += 1;
+    if (hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) count += 1;
   }
   return count;
+};
+
+const countCrossSpecBootstrapProgressByPair = (
+  env: Env,
+  specs: MarketMakerOfferSpec[],
+  getPendingCrossRequestOrderIds: PendingCrossRequestReader,
+): Map<string, number> => {
+  const counts = new Map<string, number>();
+  for (const spec of specs) {
+    if (!hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds)) continue;
+    counts.set(spec.pairId, (counts.get(spec.pairId) || 0) + 1);
+  }
+  return counts;
 };
 
 const ensureMarketMakerHubConnectivity = async (
@@ -1681,8 +1711,8 @@ const maintainMarketMakerCrossQuotes = async (
   let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
   const groupedEntries = Array.from(grouped.entries())
     .sort((left, right) =>
-      countExistingSpecOffers(env, sourceContext.entityId, left[0], left[1]) -
-      countExistingSpecOffers(env, sourceContext.entityId, right[0], right[1]) ||
+      countCrossSpecBootstrapProgress(env, left[1], getPendingCrossRequestOrderIds) -
+      countCrossSpecBootstrapProgress(env, right[1], getPendingCrossRequestOrderIds) ||
       compareStableText(left[0], right[0]),
     );
 
@@ -1704,8 +1734,12 @@ const maintainMarketMakerCrossQuotes = async (
     );
     if (allowedNewOffers <= 0) continue;
 
+    const progressByPair = countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds);
     const missing = specs
-      .filter(spec => spec.crossJurisdiction && !existingOfferIds.has(spec.offerId))
+      .filter(spec =>
+        spec.crossJurisdiction &&
+        !hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds),
+      )
       .filter(spec => {
         const route = spec.crossJurisdiction!;
         const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);
@@ -1719,6 +1753,11 @@ const maintainMarketMakerCrossQuotes = async (
           hasPairMutualCredit(env, targetContext.entityId, route.target.entityId, route.target.tokenId, route.target.amount)
         );
       })
+      .sort((left, right) =>
+        (progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0) ||
+        compareStableText(left.pairId, right.pairId) ||
+        compareStableText(left.offerId, right.offerId),
+      )
       .slice(0, allowedNewOffers);
     if (missing.length === 0) continue;
 
