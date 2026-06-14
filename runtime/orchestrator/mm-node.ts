@@ -129,6 +129,10 @@ type MarketMakerOfferSpec = {
   crossJurisdiction?: CrossJurisdictionSwapRoute;
 };
 
+type MarketMakerConnectivityBudget = {
+  remainingTxs: number;
+};
+
 type MarketMakerEntityContext = {
   entityId: string;
   signerId: string;
@@ -215,11 +219,19 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
   MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '36'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '12'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '24'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '8'),
+);
+const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '4'),
+);
+const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
+  MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '6'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
@@ -1060,12 +1072,14 @@ const ensureMarketMakerHubConnectivity = async (
   hubEntityIds: string[],
   hubSignerIdsByEntityId: ReadonlyMap<string, string>,
   tokenIds: number[],
+  budget: MarketMakerConnectivityBudget,
 ): Promise<void> => {
   const accountOpenInputs: EntityInput[] = [];
   const localCreditInputsByEntity = new Map<string, EntityInput>();
   const remoteCreditInputsByEntity = new Map<string, RoutedEntityInput>();
 
   for (const hubEntityId of hubEntityIds) {
+    if (budget.remainingTxs <= 0) break;
     const hubSignerId = String(hubSignerIdsByEntityId.get(hubEntityId.toLowerCase()) || '');
     if (!hubSignerId) continue;
     const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
@@ -1085,14 +1099,18 @@ const ensureMarketMakerHubConnectivity = async (
           },
         }],
       });
+      budget.remainingTxs -= 1;
     }
   }
 
   if (accountOpenInputs.length > 0) {
     enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: accountOpenInputs });
     await settleRuntimeFor(env, 35);
+    await yieldMarketMakerApi();
+    return;
   }
 
+  collectCreditInputs:
   for (const hubEntityId of hubEntityIds) {
     const hubSignerId = String(hubSignerIdsByEntityId.get(hubEntityId.toLowerCase()) || '');
     if (!hubSignerId) continue;
@@ -1104,6 +1122,7 @@ const ensureMarketMakerHubConnectivity = async (
     if (!mmAccount) continue;
 
     for (const tokenId of tokenIds) {
+      if (budget.remainingTxs <= 0) break collectCreditInputs;
       if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
       const mmOutCapacity = getEntityOutCapacity(mmAccount, mmEntityId, tokenId);
       const hubOutCapacity = getEntityOutCapacity(mmAccount, hubEntityId, tokenId);
@@ -1124,8 +1143,10 @@ const ensureMarketMakerHubConnectivity = async (
           },
         });
         remoteCreditInputsByEntity.set(hubEntityId, input);
+        budget.remainingTxs -= 1;
       }
 
+      if (budget.remainingTxs <= 0) break collectCreditInputs;
       if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
         const input = localCreditInputsByEntity.get(mmEntityId) ?? {
           entityId: mmEntityId,
@@ -1142,6 +1163,7 @@ const ensureMarketMakerHubConnectivity = async (
           },
         });
         localCreditInputsByEntity.set(mmEntityId, input);
+        budget.remainingTxs -= 1;
       }
     }
   }
@@ -1150,6 +1172,8 @@ const ensureMarketMakerHubConnectivity = async (
   if (localCreditInputs.length > 0) {
     enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });
     await settleRuntimeFor(env, 45);
+    await yieldMarketMakerApi();
+    return;
   }
 
   const remoteCreditInputs = Array.from(remoteCreditInputsByEntity.values());
@@ -1163,6 +1187,7 @@ const ensureMarketMakerHubConnectivity = async (
   }
   if (remoteCreditInputs.length > 0) {
     await settleRuntimeFor(env, 45);
+    await yieldMarketMakerApi();
   }
 };
 
@@ -1188,11 +1213,20 @@ const maintainMarketMakerQuotes = async (
   tokenIds: number[],
   maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
   maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+  connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   shouldContinue: () => boolean = () => true,
 ): Promise<void> => {
   if (hubEntityIds.length === 0 || tokenIds.length < 3) return;
   if (!shouldContinue()) return;
-  await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, hubSignerIdsByEntityId, tokenIds);
+  await ensureMarketMakerHubConnectivity(
+    env,
+    mmEntityId,
+    mmSignerId,
+    hubEntityIds,
+    hubSignerIdsByEntityId,
+    tokenIds,
+    connectivityBudget,
+  );
   if (!shouldContinue()) return;
   if (!isMarketMakerConnectivityReady(env, mmEntityId, hubEntityIds, tokenIds)) {
     return;
@@ -1534,6 +1568,7 @@ const maintainMarketMakerCrossQuotes = async (
   targetTokenIds: number[],
   maxOffersPerAccount = Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
+  connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   shouldContinue: () => boolean = () => true,
 ): Promise<void> => {
   if (
@@ -1557,6 +1592,7 @@ const maintainMarketMakerCrossQuotes = async (
     sourceHubEntityIds,
     hubSignerIdsByEntityId,
     sourceTokenIds,
+    connectivityBudget,
   );
   if (!shouldContinue()) return;
   await ensureMarketMakerHubConnectivity(
@@ -1566,6 +1602,7 @@ const maintainMarketMakerCrossQuotes = async (
     targetHubEntityIds,
     hubSignerIdsByEntityId,
     targetTokenIds,
+    connectivityBudget,
   );
   if (!shouldContinue()) return;
 
@@ -2048,6 +2085,11 @@ const run = async (): Promise<void> => {
     loopInFlight = true;
     const shouldContinue = () => !shuttingDown;
     try {
+      const connectivityBudget: MarketMakerConnectivityBudget = {
+        remainingTxs: mode === 'bootstrap'
+          ? MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK
+          : MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
+      };
       const visibleHubs = readVisibleHubProfiles(env, true);
       if (visibleHubs.length === 0) return;
       if (!shouldContinue()) return;
@@ -2080,6 +2122,7 @@ const run = async (): Promise<void> => {
           mode === 'bootstrap'
             ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK
             : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+          connectivityBudget,
           shouldContinue,
         );
         await yieldMarketMakerApi();
@@ -2113,6 +2156,7 @@ const run = async (): Promise<void> => {
             mode === 'bootstrap'
               ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK
               : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
+            connectivityBudget,
             shouldContinue,
           );
           await yieldMarketMakerApi();
