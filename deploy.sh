@@ -426,6 +426,7 @@ debug_dump_ports() {
   echo "[deploy][debug] listening ports"
   lsof -nP \
     -iTCP:8545 \
+    -iTCP:8546 \
     -iTCP:8080 \
     -iTCP:9100 \
     -iTCP:8087 \
@@ -448,6 +449,8 @@ debug_dump_pm2() {
   pm2 describe xln-server || true
   echo "[deploy][debug] pm2 describe anvil"
   pm2 describe anvil || true
+  echo "[deploy][debug] pm2 describe anvil2"
+  pm2 describe anvil2 || true
 }
 
 debug_dump_runtime_logs() {
@@ -459,6 +462,8 @@ debug_dump_runtime_logs() {
   pm2 logs xln-server --lines 200 --nostream || true
   echo "[deploy][debug] pm2 logs anvil"
   pm2 logs anvil --lines 120 --nostream || true
+  echo "[deploy][debug] pm2 logs anvil2"
+  pm2 logs anvil2 --lines 120 --nostream || true
 }
 
 debug_dump_nginx() {
@@ -722,10 +727,13 @@ run_local_deploy() {
       if [ "$FRESH" = "1" ]; then
         echo "[deploy] resetting production anvil + runtime state (--fresh)"
         rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
-        rm -f data/anvil-state.json
+        rm -f data/anvil-state.json data/anvil2-state.json
         lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+        lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil >/dev/null 2>&1 || true
+        pm2 delete anvil2 >/dev/null 2>&1 || true
         run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
+        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/dev/run-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M
       elif ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         echo "[deploy] production anvil is not healthy; restarting without deleting persisted state"
         pm2 delete anvil >/dev/null 2>&1 || true
@@ -733,8 +741,17 @@ run_local_deploy() {
       else
         echo "[deploy] preserving production anvil + runtime state"
       fi
+      if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
+        echo "[deploy] production anvil2 is not healthy; restarting without deleting persisted state"
+        lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+        pm2 delete anvil2 >/dev/null 2>&1 || true
+        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/dev/run-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M
+      fi
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         fail_deploy_with_debug "anvil did not become ready on :8545"
+      fi
+      if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
+        fail_deploy_with_debug "anvil2 did not become ready on :8546"
       fi
 
       lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true

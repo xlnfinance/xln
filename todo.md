@@ -106,18 +106,24 @@ file and older docs disagree, prefer code and tests first, then this file.
 
 ## P2 - Product And UI
 
-1. **Token support boundary.**
+1. **Lending tab.**
+   - Product/runtime design lives in `docs/lend.md`.
+   - Do not mix this with the current production swap/health gate.
+   - Exit: hub lending pools, fixed-term lend/borrow/repay lifecycle, and
+     browser E2E are green on Testnet and Tron.
+
+2. **Token support boundary.**
    - Either prove multi-token collateral E2E or keep the product explicitly
      USDC/single-token for the current release line.
 
-2. **Custody and fee UX.**
+3. **Custody and fee UX.**
    - Make custody balance and auto-fee behavior read as one coherent flow.
 
-3. **SettlementPanel consistency.**
+4. **SettlementPanel consistency.**
    - Keep direct on-chain flows and entity/quorum flows visually and logically
      distinct.
 
-4. **Activity/account-card context.**
+5. **Activity/account-card context.**
    - Show routing, HTLC, swap, J-event, dispute, and recovery events clearly
      enough for demo and support/debug use.
 

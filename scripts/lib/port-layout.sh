@@ -31,6 +31,10 @@ xln_rpc_port() {
   xln_derived_port 8545 0
 }
 
+xln_rpc2_port() {
+  xln_derived_port 8546 1
+}
+
 xln_api_port() {
   xln_derived_port 8082 2
 }
