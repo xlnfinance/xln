@@ -2165,42 +2165,52 @@ const run = async (): Promise<void> => {
   };
 
   let loop: ReturnType<typeof setInterval> | null = null;
+  const runQuoteMaintenance = async (): Promise<void> => {
+    await driveQuotes();
+    if (startupPhase !== 'offers-ready') {
+      const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
+      const allVisibleHubs = readVisibleHubProfiles(env, true);
+      const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
+      const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
+        contexts: mmContexts,
+        visibleHubs: allVisibleHubs,
+        tokenIdsByContext: mmTokenIdsByContext,
+      });
+      if (health.ok) {
+        markOffersReady();
+      }
+    }
+  };
+  const failQuoteLoop = (error: unknown): void => {
+    if (shuttingDown) return;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[MM] quote loop failed; shutting down:`, message);
+    if (loop) clearInterval(loop);
+    process.exit(1);
+  };
+  const startQuoteLoop = (): void => {
+    if (loop) return;
+    loop = setInterval(() => {
+      if (shuttingDown) return;
+      void runQuoteMaintenance().catch(failQuoteLoop);
+    }, MARKET_MAKER_QUOTE_LOOP_MS);
+  };
   startupPhase = 'runtime-ready';
   console.log(
     `[MESH-MM] RUNTIME_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
 
-  startupPhase = 'bootstrap-offers';
-  if (await waitForBootstrapOffers()) {
-    markOffersReady();
-  } else {
-    startupPhase = 'bootstrap-degraded';
-  }
-  loop = setInterval(() => {
+  void (async () => {
+    await sleep(1);
     if (shuttingDown) return;
-    void (async () => {
-      await driveQuotes();
-      if (startupPhase !== 'offers-ready') {
-        const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
-        const allVisibleHubs = readVisibleHubProfiles(env, true);
-        const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
-        const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
-          contexts: mmContexts,
-          visibleHubs: allVisibleHubs,
-          tokenIdsByContext: mmTokenIdsByContext,
-        });
-        if (health.ok) {
-          markOffersReady();
-        }
-      }
-    })().catch(error => {
-      if (shuttingDown) return;
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[MM] quote loop failed; shutting down:`, message);
-      if (loop) clearInterval(loop);
-      process.exit(1);
-    });
-  }, MARKET_MAKER_QUOTE_LOOP_MS);
+    startupPhase = 'bootstrap-offers';
+    if (await waitForBootstrapOffers()) {
+      markOffersReady();
+    } else {
+      startupPhase = 'bootstrap-degraded';
+    }
+    startQuoteLoop();
+  })().catch(failQuoteLoop);
 
   let shutdownStarted = false;
   const shutdown = async (code: number = 0): Promise<void> => {
