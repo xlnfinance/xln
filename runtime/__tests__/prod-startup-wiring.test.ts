@@ -20,7 +20,7 @@ describe('production startup wiring', () => {
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
-    expect(orchestrator).toContain("process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '15000'");
+    expect(orchestrator).toContain("process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '30000'");
     expect(orchestrator).toContain("process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'");
     expect(orchestrator).toContain('const [health, info] = await Promise.all([');
     expect(orchestrator).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)");
