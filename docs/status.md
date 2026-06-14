@@ -9,8 +9,8 @@ summarizes why those items matter and how they fit the protocol.
 
 ## Current Snapshot
 
-**Date:** 2026-05-29
-**State:** `0.1.5` is production-demo/public-testnet grade, not mainnet-ready.
+**Date:** 2026-06-14
+**State:** current `main` is production-demo/public-testnet grade, not mainnet-ready.
 
 What is true now:
 
@@ -20,9 +20,13 @@ What is true now:
   no longer exposes public sweep;
 - wiped-browser watchtower recovery and post-restore channel payments are
   covered by browser E2E;
-- prod health and prod payment smoke passed during the `0.1.5` release pass;
-- remaining mainnet risk is concentrated in release-duration soak, external
-  audit, real mainnet ops, PSR/peer recovery, observability, and cleanup of
+- direct same-chain swaps, direct cross-j swaps, and lending are included in the
+  fast E2E gate;
+- `bun run gate:release` passed on current `main`;
+- a release soak passed 13 complete `gate:ci + hub10k` iterations before manual
+  stop, but the full 240-minute soak remains open;
+- remaining mainnet risk is concentrated in uninterrupted release-duration soak,
+  external audit, real mainnet ops, PSR/peer recovery, observability, and
   explicit product boundaries.
 
 ## Precedence
@@ -74,14 +78,30 @@ When docs disagree, use this order:
   effects continue.
 - Browser restart after tower restore keeps recovered runtime/channel state.
 
+## Recently Closed On Current `main`
+
+- `bun run gate:release` passed, including source checks, runtime core unit
+  tests, soundcheck, frontend check, contract full suite, RPC settlement parity,
+  security audit pack, persistence, watchtower, fast E2E, bounded soak, core
+  E2E, RPC system scenarios, hub10k benchmark, and production health smoke.
+- The RPC/JAdapter Anvil latest-state snapshot race that produced repeated
+  `staticCall`/`J_SUBMIT_FATAL` failures is fixed without relaxing real ABI
+  reverts or non-dev-chain failures.
+- Fast E2E now includes hub lending: funding a pool, borrowing, and repaying
+  from the Lending tab.
+- Direct runtime websocket policy is covered: hub direct sockets are allowed,
+  non-hub direct endpoints are ignored, plaintext direct entity input is
+  rejected, and duplicate hellos do not displace a live socket.
+
 ## Active Blocker Order
 
 ### P0 - release and mainnet readiness
 
 1. Publish the GitHub Release object for `v0.1.5`; the tag is pushed, but the
    release object is blocked by missing `gh` auth or `GH_TOKEN`.
-2. Run `bun run gate:release` and the multi-hour `bun run soak:release` before
-   calling any build a mainnet candidate.
+2. Complete the multi-hour `bun run soak:release` before calling any build a
+   mainnet candidate. `bun run gate:release` already passed on current `main`;
+   the long soak has only partial evidence so far.
 3. Document real mainnet chain/RPC, operator keys, tower gas policy,
    backup/restore drills, and monitoring thresholds.
 4. Refresh the external audit pack and treat external audit as required for
@@ -97,17 +117,13 @@ When docs disagree, use this order:
    code, not old audit snapshots.
 9. Re-run a current contract governance/access-control scan before external
    audit.
-10. Replace placeholder RPC `stateRoot` output with useful J-state commitment
-   data or fail explicitly until it exists.
-11. Add persistence inspect/repair tooling for frame DB, snapshots, WAL, tower
-   receipts, and bundle coverage.
-12. Keep destructive reset/clearDB/dev actions strongly gated.
+10. Keep destructive reset/clearDB/dev actions strongly gated.
 
 ### P2 - product clarity
 
-13. Make the token support boundary explicit: prove multi-token E2E or keep
+11. Make the token support boundary explicit: prove multi-token E2E or keep
     the current release line visibly single-token/USDC-first.
-14. Clean up custody/fee UX, settlement flow consistency, and activity/account
+12. Clean up custody/fee UX, settlement flow consistency, and activity/account
     cards enough for support/debug use.
 
 ## Workstreams

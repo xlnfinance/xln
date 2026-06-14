@@ -72,6 +72,10 @@ const CORE_FILES = {
     'entity-tx/handlers/account/orderbook-matching-cross.ts', // Cross-j order matching
     'entity-tx/handlers/account/orderbook-matching-helpers.ts', // Shared matching helpers
     'entity-tx/handlers/account/orderbook-cancels.ts', // Orderbook cancellation path
+    'lending.ts',                              // Hub lending pool math, terms, ids, memos
+    'types/lending.ts',                        // Lending pool/loan state model
+    'entity-tx/handlers/lending.ts',           // Lending offer/borrow/repay entity tx handlers
+    'server/lending.ts',                       // Hub lending API handlers
     'account-tx/handlers/swap-offer.ts',     // Account-level swap offer placement
     'account-tx/handlers/swap-resolve.ts',   // Swap settlement / hashladder resolution
     'account-tx/handlers/swap-cancel.ts',    // Swap cancellation
@@ -125,11 +129,10 @@ const CORE_FILES = {
   ],
   swapUi: [
     // Included in default llms.txt because swap UX bugs often come from UI/runtime mismatch
-    'src/lib/components/Entity/SwapPanel.svelte', // Main swap form, same/cross/routed UI
+    'src/lib/components/Entity/SwapPanel.svelte', // Direct same-chain/cross-j swap form and manual route recommendations
     'src/lib/components/Trading/OrderbookPanel.svelte', // Orderbook stream/render/click behavior
-    'src/lib/components/Entity/RoutedRouteControls.svelte', // Routed route option and hop controls
-    'src/lib/components/Entity/routed-swap-planner.ts', // Route candidate planner and hop quotes
-    'src/lib/components/Entity/routed-swap-execution.ts', // Best-effort sequential route runner
+    'src/lib/components/Entity/routed-swap-planner.ts', // Manual route candidate planner and hop quote estimates
+    'src/lib/components/Entity/LendingPanel.svelte', // Hub lending UI: offer, borrow, repay
   ],
   tests: [
     // Behavior contracts: if code and prose disagree, these tests show intended user flow
@@ -140,9 +143,10 @@ const CORE_FILES = {
     'runtime/__tests__/orderbook-lifecycle.test.ts',
     'runtime/__tests__/orderbook-matching-fallback.test.ts',
     'runtime/__tests__/swap-order-preparation.test.ts',
-    'tests/unit/routed-swap-planner.test.ts',
+    'runtime/__tests__/lending.test.ts',
     'tests/e2e-swap.spec.ts',
     'tests/e2e-cross-j-swap.spec.ts',
+    'tests/e2e-lending.spec.ts',
   ],
   frontend: [
     // Optional UI/UX architecture (use --frontend flag)
@@ -398,9 +402,9 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 
 ## Swap + Cross-Jurisdiction Runtime Flow
 
-The current product-critical path is not just payments. It includes same-chain
-swaps, cross-jurisdiction swaps, public orderbooks, market-maker bootstrapping,
-route candidates, and best-effort routed execution.
+The current product-critical path is not just payments. It includes direct
+same-chain swaps, direct cross-jurisdiction swaps, public orderbooks,
+market-maker bootstrapping, manual route recommendations, and hub lending.
 
 ### Same-chain swap
 
@@ -457,23 +461,34 @@ Unexpected protocol divergence, impossible ownership, invalid signer binding, or
 state-machine contradiction must fail fast and stop the loop with a debuggable
 payload rather than retrying silently.
 
-### Routed swap
+### Manual route recommendation
 
-Atomic routed settlement is intentionally not assumed. A route is best-effort:
-hop 2 starts only after hop 1 is fully settled; hop 3 starts only after hop 2 is
-fully settled. If a hop loses liquidity, the route stops, cancels open work where
-possible, and exposes a debug trail. The UI should show hop tabs/orderbooks, not
-pretend a multi-hop path is one merged executable orderbook unless a real
-synthetic book with compounded depth/slippage is explicitly implemented and
-clearly labeled.
+Multihop execution is intentionally deferred. The product should not pretend
+that several orderbooks are one executable route or one merged synthetic book.
+When no direct same-chain or cross-j orderbook exists, the UI may show a manual
+"swap in this order" recommendation with approximate hop estimates. Direct
+same-chain and direct cross-j swaps are the executable surface for this release.
 
 Relevant files:
 - \`frontend/src/lib/components/Entity/routed-swap-planner.ts\`
-- \`frontend/src/lib/components/Entity/routed-swap-execution.ts\`
-- \`frontend/src/lib/components/Entity/RoutedRouteControls.svelte\`
 - \`frontend/src/lib/components/Entity/SwapPanel.svelte\`
-- \`tests/unit/routed-swap-planner.test.ts\`
 - \`tests/e2e-cross-j-swap.spec.ts\`
+
+### Hub lending
+
+Lending is hub-local consensus state. A lender funds a pool for a fixed term
+and interest rate; a borrower takes a loan through ordinary bilateral credit;
+repayment is a direct payment back to the hub, then pool/loan state closes.
+No-liquidity is an expected terminal product state, not a protocol fatal.
+
+Read these together:
+- \`runtime/lending.ts\`
+- \`runtime/types/lending.ts\`
+- \`runtime/entity-tx/handlers/lending.ts\`
+- \`runtime/server/lending.ts\`
+- \`frontend/src/lib/components/Entity/LendingPanel.svelte\`
+- \`runtime/__tests__/lending.test.ts\`
+- \`tests/e2e-lending.spec.ts\`
 
 ### Market maker and orderbook readiness
 
@@ -563,6 +578,10 @@ xln/
       relay/market-subscriptions.ts ${fileSizes['runtime/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
       server/market-maker-health.ts ${fileSizes['runtime/server/market-maker-health.ts'] || '?'} lines - MM readiness health
+      lending.ts                  ${fileSizes['runtime/lending.ts'] || '?'} lines - Lending math and ids
+      types/lending.ts            ${fileSizes['runtime/types/lending.ts'] || '?'} lines - Lending state types
+      entity-tx/handlers/lending.ts ${fileSizes['runtime/entity-tx/handlers/lending.ts'] || '?'} lines - Lending tx handlers
+      server/lending.ts           ${fileSizes['runtime/server/lending.ts'] || '?'} lines - Lending API handlers
 
     entity-tx/
       index.ts                   ${fileSizes['runtime/entity-tx/index.ts'] || '?'} lines - Entity transaction types
@@ -610,14 +629,14 @@ xln/
   frontend swap core/
     src/lib/components/Entity/SwapPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/SwapPanel.svelte'] || '?'} lines - Swap UI/state machine
     src/lib/components/Trading/OrderbookPanel.svelte ${fileSizes['frontend/src/lib/components/Trading/OrderbookPanel.svelte'] || '?'} lines - Orderbook stream/render/clicks
-    src/lib/components/Entity/RoutedRouteControls.svelte ${fileSizes['frontend/src/lib/components/Entity/RoutedRouteControls.svelte'] || '?'} lines - Route option/hop controls
-    src/lib/components/Entity/routed-swap-planner.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-planner.ts'] || '?'} lines - Routed planner
-    src/lib/components/Entity/routed-swap-execution.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-execution.ts'] || '?'} lines - Routed runner
+    src/lib/components/Entity/routed-swap-planner.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-planner.ts'] || '?'} lines - Manual route recommendation planner
+    src/lib/components/Entity/LendingPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/LendingPanel.svelte'] || '?'} lines - Lending offer/borrow/repay UI
 
   behavior tests/
     tests/e2e-swap.spec.ts              ${fileSizes['tests/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract
-    tests/e2e-cross-j-swap.spec.ts      ${fileSizes['tests/e2e-cross-j-swap.spec.ts'] || '?'} lines - Cross-j/routed UX contract
-    tests/unit/routed-swap-planner.test.ts ${fileSizes['tests/unit/routed-swap-planner.test.ts'] || '?'} lines - Routed planner contract
+    tests/e2e-cross-j-swap.spec.ts      ${fileSizes['tests/e2e-cross-j-swap.spec.ts'] || '?'} lines - Cross-j swap/manual recommendation UX contract
+    tests/e2e-lending.spec.ts           ${fileSizes['tests/e2e-lending.spec.ts'] || '?'} lines - Lending UI contract
+    runtime/__tests__/lending.test.ts   ${fileSizes['runtime/__tests__/lending.test.ts'] || '?'} lines - Lending state-machine contract
 
 ${includeFrontend ? `
   frontend/
@@ -843,7 +862,8 @@ Recommended audit protocol:
 3. If context limits force triage, say exactly which chunks were omitted and do
    not assign P0/P1 severity to paths you did not read.
 4. Separate expected market failures from unexpected protocol failures.
-5. Do not assume routed swaps are atomic; they are sequential best-effort.
+5. Do not assume multihop swap execution exists; current UI only recommends
+   manual direct-hop sequences when no direct orderbook exists.
 
 Chunks:
 ${chunkRows}

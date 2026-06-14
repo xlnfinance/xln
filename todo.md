@@ -1,6 +1,6 @@
 # XLN TODO
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
@@ -39,6 +39,14 @@ file and older docs disagree, prefer code and tests first, then this file.
   `--strict` turns warnings/critical findings into non-zero exit codes, and the
   command is inspect-only with explicit repair guidance instead of automatic
   persistence mutation.
+- Closed the current RPC/JAdapter release blocker: ethers provider cache/batch
+  behavior is disabled for XLN RPC providers, local Anvil latest-state
+  `staticCall` snapshot races are tolerated only after successful gas estimate
+  on dev chains, and fatal-log scanning no longer treats that handled dev race
+  as a protocol failure.
+- Confirmed on current `main` (`d328c43a`): `bun run gate:release` passed,
+  production health smoke returned healthy, and a release soak was manually
+  stopped after 13 complete `gate:ci + hub10k` iterations with exit code `0`.
 
 ## P0 - Release And Mainnet Readiness
 
@@ -47,10 +55,14 @@ file and older docs disagree, prefer code and tests first, then this file.
    - `gh release create` is blocked until `gh auth login` or `GH_TOKEN` is
      available in this workspace.
 
-2. **Run the release-duration gates before any mainnet-candidate claim.**
+2. **Finish release-duration soak before any mainnet-candidate claim.**
    - Already passed for `0.1.5`: `gate:ci`, full browser E2E, prod payment E2E,
      prod health.
-   - Still needed for a mainnet candidate: `bun run gate:release` and the
+   - Passed on current `main`: `bun run gate:release`.
+   - Partial evidence on current `main`: 13 full `bun run soak:release`
+     iterations (`gate:ci` plus `hub10k`) passed before the run was stopped
+     manually for time.
+   - Still needed for a mainnet candidate: a complete uninterrupted
      multi-hour `bun run soak:release`.
 
 3. **Make real mainnet ops explicit.**

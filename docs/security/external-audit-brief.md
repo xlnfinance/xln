@@ -13,9 +13,13 @@ Review these surfaces first:
 - JAdapter RPC path from `processBatch` submission to event normalization and runtime ingestion.
 - Cross-jurisdiction delayed-clearing route lifecycle and orderbook cleanup.
 - Relay/direct transport trust boundaries, including encrypted-only ingress and hub-only direct endpoints.
+- Hub lending pools, loan credit-limit effects, repayment followups, and
+  no-liquidity terminal behavior.
 - Production deploy, health, and release-gate scripts.
 - User-facing Pay, same-account Swap, and Cross-j Swap coverage through the
   shared frontend surfaces and their E2E tests.
+- User-facing Lending coverage through the shared frontend surface and E2E
+  tests.
 
 Out of scope unless a scoped issue depends on it:
 
@@ -34,6 +38,12 @@ Out of scope unless a scoped issue depends on it:
 - J-events are authenticated validator observations over the canonical event set, and real RPC settlement logs normalize to the same event hash consumed by runtime.
 - Jurisdiction identity is stack identity (`chainId` plus depository address), never a text alias.
 - Cross-j routes are written by the route lifecycle only; direct account tx helpers cannot bypass filled-route clearing rules.
+- Direct same-chain and direct cross-j swaps are the executable swap surface.
+  Multihop is a manual route recommendation only unless a future executable
+  runner is explicitly reintroduced and tested.
+- Lending no-liquidity is an expected terminal product state, not a protocol
+  fatal; lending balance divergence or impossible pool/loan accounting is a
+  fatal invariant violation.
 - Production storage bypass flags and repair shortcuts are unavailable without explicit dev/test intent.
 
 ## Required Commands
@@ -75,6 +85,10 @@ The soak release command is deliberately long. It is the operational evidence fo
 - `runtime/storage/canonical-hash.ts`
 - `runtime/jadapter/rpc.ts`
 - `runtime/jadapter/helpers.ts`
+- `runtime/lending.ts`
+- `runtime/types/lending.ts`
+- `runtime/entity-tx/handlers/lending.ts`
+- `runtime/server/lending.ts`
 - `runtime/relay-router.ts`
 - `runtime/networking/p2p.ts`
 - `runtime/networking/direct-runtime-bun.ts`
@@ -88,6 +102,9 @@ The soak release command is deliberately long. It is the operational evidence fo
 - Do not propose repair-on-restore or quarantine behavior for production storage corruption. Production should fail closed.
 - Do not route cross-jurisdiction control messages through generic public P2P unless a new signed inter-runtime protocol is explicitly designed and reviewed.
 - Do not treat "queued" HTTP responses as committed payments.
+- Do not report missing executable multihop swaps as a current implementation
+  bug without also noting the current product decision: direct swaps execute;
+  multihop is advisory/manual only.
 - Do not accept BrowserVM-only evidence for J-layer correctness. BrowserVM is a
   dev/demo simulator for now; the public-testnet gate is RPC/anvil only.
 
@@ -104,4 +121,5 @@ The final report must include:
 - False positives checked.
 - Exact commands run and pass/fail status.
 
-The report is not complete if it does not cover storage restore, J-event authentication, cross-j route lifecycle, and network ingress.
+The report is not complete if it does not cover storage restore, J-event
+authentication, cross-j route lifecycle, network ingress, and Lending.
