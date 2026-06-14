@@ -235,7 +235,7 @@ const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '6'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
@@ -2101,6 +2101,7 @@ const run = async (): Promise<void> => {
 
   let shuttingDown = false;
   let loopInFlight = false;
+  let bootstrapCrossCursor = 0;
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<void> => {
     if (shuttingDown) return;
     if (loopInFlight) return;
@@ -2150,6 +2151,15 @@ const run = async (): Promise<void> => {
         await yieldMarketMakerApi();
       }
 
+      type CrossQuoteJob = {
+        sourceContext: MarketMakerEntityContext;
+        targetContext: MarketMakerEntityContext;
+        sourceHubs: HubProfile[];
+        targetHubs: HubProfile[];
+        sourceTokenIds: number[];
+        targetTokenIds: number[];
+      };
+      const crossQuoteJobs: CrossQuoteJob[] = [];
       for (const sourceContext of mmContexts) {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
@@ -2163,26 +2173,45 @@ const run = async (): Promise<void> => {
           const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
           if (targetHubs.length === 0) continue;
           const targetTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, targetContext);
-          await maintainMarketMakerCrossQuotes(
-            env,
+          crossQuoteJobs.push({
             sourceContext,
             targetContext,
             sourceHubs,
             targetHubs,
-            hubSignerIdsByEntityId,
             sourceTokenIds,
             targetTokenIds,
-            mode === 'bootstrap'
-              ? MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK
-              : Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
-            mode === 'bootstrap'
-              ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK
-              : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
-            connectivityBudget,
-            shouldContinue,
-          );
-          await yieldMarketMakerApi();
+          });
         }
+      }
+      let selectedCrossQuoteJobs: CrossQuoteJob[] = crossQuoteJobs;
+      if (mode === 'bootstrap' && crossQuoteJobs.length > 0) {
+        const selectedIndex = bootstrapCrossCursor % crossQuoteJobs.length;
+        const selectedJob = crossQuoteJobs[selectedIndex];
+        selectedCrossQuoteJobs = selectedJob ? [selectedJob] : [];
+        bootstrapCrossCursor = (selectedIndex + 1) % crossQuoteJobs.length;
+      }
+      for (const job of selectedCrossQuoteJobs) {
+        await yieldMarketMakerApi();
+        if (!shouldContinue()) return;
+        await maintainMarketMakerCrossQuotes(
+          env,
+          job.sourceContext,
+          job.targetContext,
+          job.sourceHubs,
+          job.targetHubs,
+          hubSignerIdsByEntityId,
+          job.sourceTokenIds,
+          job.targetTokenIds,
+          mode === 'bootstrap'
+            ? MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK
+            : Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
+          mode === 'bootstrap'
+            ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK
+            : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
+          connectivityBudget,
+          shouldContinue,
+        );
+        await yieldMarketMakerApi();
       }
       if (!shouldContinue()) return;
       await settleRuntimeFor(env, 45);
