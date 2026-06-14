@@ -135,6 +135,7 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     const starterIncrementedArguments = typeof data['starterIncrementedArguments'] === 'string'
       ? data['starterIncrementedArguments']
       : '0x';
+    const batchNonce = normalizeInt(data['batchNonce']);
     return {
       ...meta,
       type: 'DisputeStarted',
@@ -145,6 +146,7 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
         proofbodyHash: data['proofbodyHash'],
         starterInitialArguments,
         starterIncrementedArguments,
+        ...(batchNonce !== null ? { batchNonce } : {}),
       },
     };
   }
@@ -162,6 +164,7 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     ) {
       return null;
     }
+    const batchNonce = normalizeInt(data['batchNonce']);
     return {
       ...meta,
       type,
@@ -171,6 +174,7 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
         initialNonce,
         initialProofbodyHash: data['initialProofbodyHash'],
         finalProofbodyHash: data['finalProofbodyHash'],
+        ...(batchNonce !== null ? { batchNonce } : {}),
       },
     };
   }

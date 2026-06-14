@@ -107,6 +107,23 @@ const getTokenDecimals = (tokenId: number): number => {
   return getTokenInfo(tokenId).decimals;
 };
 
+const syncJBatchEntityNonceFromEvent = (
+  state: EntityState,
+  eventEntityId: string,
+  localEntityId: string,
+  batchNonce: unknown,
+): void => {
+  if (String(eventEntityId || '').toLowerCase() !== String(localEntityId || '').toLowerCase()) return;
+  const nonce = Number(batchNonce);
+  if (!Number.isFinite(nonce) || nonce <= 0) return;
+  if (!state.jBatchState) return;
+  const current = Number(state.jBatchState.entityNonce || 0);
+  if (nonce > current) {
+    state.jBatchState.entityNonce = nonce;
+    addMessage(state, `↻ Synced J batch nonce from event (${current} → ${nonce})`);
+  }
+};
+
 export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<JEventApplyResult> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
   if (!isValidatorSigner(entityState, signerId)) {
@@ -566,11 +583,13 @@ async function applyFinalizedJEvent(
       proofbodyHash: string;
       starterInitialArguments: string;
       starterIncrementedArguments: string;
+      batchNonce?: number;
     };
     const normalizeId = (id: string) => String(id).toLowerCase();
     const senderStr = normalizeId(sender as string);
     const counterentityStr = normalizeId(counterentity as string);
     const entityIdNorm = normalizeId(newState.entityId);
+    syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, event.data.batchNonce);
 
     const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
     let counterpartyId = candidateCounterpartyId;
@@ -611,6 +630,9 @@ async function applyFinalizedJEvent(
         onChainNonce,
         starterInitialArguments: event.data.starterInitialArguments || '0x',
         starterIncrementedArguments: event.data.starterIncrementedArguments || '0x',
+        observedOnChain: true,
+        observedBlockNumber: Number(blockNumber || 0),
+        ...(event.data.batchNonce !== undefined ? { batchNonce: Number(event.data.batchNonce) } : {}),
         finalizeQueued: false,
       };
       account.onChainSettlementNonce = Math.max(Number(account.onChainSettlementNonce ?? 0), onChainNonce);
@@ -704,11 +726,12 @@ async function applyFinalizedJEvent(
     }
 
   } else if (event.type === 'DisputeFinalized') {
-    const { sender, counterentity, initialNonce, initialProofbodyHash } = event.data as { sender: string; counterentity: string; initialNonce: string; initialProofbodyHash: string; finalProofbodyHash: string };
+    const { sender, counterentity, initialNonce, initialProofbodyHash } = event.data as { sender: string; counterentity: string; initialNonce: string; initialProofbodyHash: string; finalProofbodyHash: string; batchNonce?: number };
     const normalizeId = (id: string) => String(id).toLowerCase();
     const senderStr = normalizeId(sender as string);
     const counterentityStr = normalizeId(counterentity as string);
     const entityIdNorm = normalizeId(newState.entityId);
+    syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, event.data.batchNonce);
 
     const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
     let counterpartyId = candidateCounterpartyId;

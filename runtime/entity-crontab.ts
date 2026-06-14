@@ -279,6 +279,23 @@ async function processDueHooks(
           const weAreStarter = weAreLeft === account.activeDispute.startedByLeft;
 
           const timeoutBlock = Number(account.activeDispute.disputeTimeout || 0);
+          if (account.activeDispute.observedOnChain !== true) {
+            const retryMs = 5000;
+            if (replica.state.crontabState) {
+              scheduleHook(replica.state.crontabState, {
+                id: hook.id,
+                triggerAt: replica.state.timestamp + retryMs,
+                type: 'dispute_deadline',
+                data: { accountId },
+              });
+              markEntityCrontabDirty(env, replica);
+            }
+            crontabLog.debug('dispute.wait_onchain_start', {
+              account: shortId(accountId),
+              retryMs,
+            });
+            break;
+          }
 
           if (weAreStarter && (!timeoutBlock || currentJBlock < timeoutBlock)) {
             const retryMs = 1000;

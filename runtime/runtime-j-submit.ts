@@ -108,6 +108,65 @@ const markSentBatchTransientFailure = (env: Env, jTx: JTx): void => {
   jBatchState.status = 'sent';
 };
 
+const markSentBatchStaleNonceSkipped = (env: Env, jTx: JTx, chainNonce: bigint): boolean => {
+  if (jTx.type !== 'batch') return false;
+  const replica = getEntityReplicaById(env, jTx.entityId);
+  const jBatchState = replica?.state?.jBatchState;
+  const sentBatch = jBatchState?.sentBatch;
+  if (!jBatchState || !sentBatch) return false;
+  const submittedNonce = typeof jTx.data?.entityNonce === 'number' ? jTx.data.entityNonce : null;
+  const submittedHash = String(jTx.data?.batchHash || '');
+  if (submittedNonce === null) return false;
+  if (Number(sentBatch.entityNonce) !== submittedNonce) return false;
+  if (submittedHash && sentBatch.batchHash && submittedHash !== sentBatch.batchHash) return false;
+
+  jBatchState.entityNonce = Math.max(Number(jBatchState.entityNonce || 0), Number(chainNonce));
+  delete jBatchState.sentBatch;
+  jBatchState.status = isBatchEmpty(jBatchState.batch) ? 'empty' : 'accumulating';
+  return true;
+};
+
+const skipAlreadyConsumedSealedBatch = async (
+  env: Env,
+  jAdapter: { getEntityNonce?: (entityId: string) => Promise<bigint> },
+  jTx: JTx,
+): Promise<boolean> => {
+  if (jTx.type !== 'batch') return false;
+  if (typeof jTx.data?.entityNonce !== 'number') return false;
+  if (typeof jAdapter.getEntityNonce !== 'function') return false;
+  let chainNonce: bigint;
+  try {
+    chainNonce = await jAdapter.getEntityNonce(jTx.entityId);
+  } catch (error) {
+    console.warn(
+      `⚠️ [J-SUBMIT] nonce preflight unavailable for ${jTx.entityId.slice(-4)}: ` +
+      `${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+  const submittedNonce = BigInt(jTx.data.entityNonce);
+  if (chainNonce < submittedNonce) return false;
+  const skipped = markSentBatchStaleNonceSkipped(env, jTx, chainNonce);
+  console.warn(
+    `⚠️ [J-SUBMIT] skipped stale sealed batch for ${jTx.entityId.slice(-4)}: ` +
+    `submittedNonce=${submittedNonce} chainNonce=${chainNonce} clearedSentBatch=${skipped}`,
+  );
+  return true;
+};
+
+const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
+  if (jTx.type !== 'batch') return true;
+  const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId.toLowerCase() : '';
+  const runtimeId = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
+  if (!signerId || !runtimeId) return true;
+  if (signerId === runtimeId) return true;
+  console.warn(
+    `⚠️ [J-SUBMIT] skipped non-local sealed batch for ${jTx.entityId.slice(-4)}: ` +
+    `signer=${signerId.slice(-8)} runtime=${runtimeId.slice(-8)}`,
+  );
+  return false;
+};
+
 /**
  * Submit post-commit J batches after the R-frame is durable.
  *
@@ -140,6 +199,12 @@ export async function submitRuntimeJOutbox(
     for (const jTx of jInput.jTxs) {
       console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
       validateSealedBatchJTx(jTx);
+      if (!shouldSubmitFromThisRuntime(env, jTx)) {
+        continue;
+      }
+      if (await skipAlreadyConsumedSealedBatch(env, jAdapter, jTx)) {
+        continue;
+      }
 
       const submitData = jTx.data as { signerId?: unknown } | undefined;
       const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;

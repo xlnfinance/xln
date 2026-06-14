@@ -317,6 +317,41 @@ const tail = (path: string, lines = 60): string => {
   }
 };
 
+const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
+  /J_SUBMIT_FATAL/,
+  /RUNTIME_LOOP_HALTED/,
+  /RUNTIME_LOOP_ERROR/,
+  /staticCall revert/,
+  /processBatch failed/,
+  /batch from .* FAILED/,
+  /Runtime loop error/,
+  /ENTITY_FRAME_TX_FAILED/,
+];
+
+const findRuntimeFatalLogLines = (path: string, maxLines = 12): string[] => {
+  let text = '';
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] || '';
+    if (!RUNTIME_FATAL_LOG_PATTERNS.some(pattern => pattern.test(line))) continue;
+    out.push(`${i + 1}: ${line.slice(0, 500)}`);
+    if (out.length >= maxLines) break;
+  }
+  return out;
+};
+
+const flushLog = async (log: ReturnType<typeof createWriteStream>, marker: string): Promise<void> => {
+  await new Promise<void>(resolve => {
+    log.write(marker, () => resolve());
+  });
+};
+
 const assertRunnerPreflight = async (): Promise<void> => {
   const typechainIndex = resolve(process.cwd(), 'jurisdictions', 'typechain-types', 'index.ts');
   if (!existsSync(typechainIndex)) {
@@ -1532,6 +1567,30 @@ const runShard = async (
 
     if (code !== 0) {
       teardownReason = `playwright_exit_${code}`;
+      await captureShardFailureForensics({
+        logsDir,
+        shard,
+        apiUrl,
+        log,
+      });
+      return {
+        shard,
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        logPath,
+        target: task.pwTargets[0] || `shard-${task.shard}`,
+        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
+        requireMarketMaker: task.requireMarketMaker,
+        phaseMs,
+        error: teardownReason,
+      };
+    }
+
+    await delay(250);
+    await flushLog(log, '[runner] playwright passed; scanning runtime fatal markers\n');
+    const runtimeFatalLines = findRuntimeFatalLogLines(logPath);
+    if (runtimeFatalLines.length > 0) {
+      teardownReason = `E2E_FATAL_RUNTIME_LOG:\n${runtimeFatalLines.join('\n')}`;
       await captureShardFailureForensics({
         logsDir,
         shard,

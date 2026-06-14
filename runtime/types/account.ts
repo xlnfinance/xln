@@ -288,6 +288,9 @@ export interface AccountMachine {
     onChainNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
     starterInitialArguments: string;  // Starter-side args for initial proof
     starterIncrementedArguments: string;  // Starter-side args for the one known newer proof, or 0x
+    observedOnChain?: boolean;        // false for local placeholder, true after DisputeStarted J-event
+    observedBlockNumber?: number;     // J block where DisputeStarted was observed
+    batchNonce?: number;              // Hanko batch nonce observed with DisputeStarted when available
     finalizeQueued?: boolean;         // Finalize op already queued locally (single-source lifecycle guard)
   };
 
