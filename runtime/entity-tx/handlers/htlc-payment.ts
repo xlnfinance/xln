@@ -314,7 +314,11 @@ export async function handleHtlcPayment(
     const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
     // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
     const expiryMs = Math.max(120_000, minExpiryMs);
-    const runtimeJHeight = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight || 0);
+    const runtimeJHeight = getRuntimeJurisdictionHeight(
+      env,
+      newState.lastFinalizedJHeight || 0,
+      newState.config.jurisdiction?.name,
+    );
     const baseTimelock = BigInt(newState.timestamp + expiryMs);
     const baseHeight = runtimeJHeight + 50;
 

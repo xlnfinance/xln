@@ -623,7 +623,11 @@ export async function handleDisputeStart(
   }
 
   const onChainNonce = Number(account.onChainSettlementNonce ?? 0);
-  let currentJBlock = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight ?? 0);
+  let currentJBlock = getRuntimeJurisdictionHeight(
+    env,
+    newState.lastFinalizedJHeight ?? 0,
+    entityState.config.jurisdiction?.name,
+  );
   const defaultDisputeDelayBlocks = getRuntimeJurisdictionDefaultDisputeDelayBlocks(
     env,
     entityState.config.jurisdiction?.name,
@@ -1094,7 +1098,11 @@ export async function handleDisputeFinalize(
   // - counterparty may finalize immediately (same-proof path) without waiting
   const callerIsStarter = callerIsLeft === account.activeDispute.startedByLeft;
   if (!shouldUseCounterProof && callerIsStarter) {
-    const currentJBlock = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight ?? 0);
+    const currentJBlock = getRuntimeJurisdictionHeight(
+      env,
+      newState.lastFinalizedJHeight ?? 0,
+      entityState.config.jurisdiction?.name,
+    );
     if (currentJBlock < account.activeDispute.disputeTimeout) {
       addMessage(
         newState,

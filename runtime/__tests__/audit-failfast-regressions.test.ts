@@ -48,6 +48,7 @@ import {
   buildJEventObservationDigest,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
+import { getRuntimeJurisdictionHeight } from '../j-height';
 import { createEmptyBatch } from '../j-batch';
 import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
@@ -255,6 +256,19 @@ const makeEntityState = (entityId: string): EntityState => ({
 });
 
 describe('audit fail-fast regressions', () => {
+  test('jurisdiction-specific runtime height ignores higher sibling chain tip', () => {
+    const env = createEmptyEnv('jurisdiction-height-specificity');
+    env.activeJurisdiction = 'Tron';
+    env.jReplicas = new Map([
+      ['Testnet', { name: 'Testnet', blockNumber: 3145n }],
+      ['Tron', { name: 'Tron', blockNumber: 5794n }],
+    ] as any);
+
+    expect(getRuntimeJurisdictionHeight(env, 0, 'Testnet')).toBe(3145);
+    expect(getRuntimeJurisdictionHeight(env, 0, 'Tron')).toBe(5794);
+    expect(getRuntimeJurisdictionHeight(env, 0)).toBe(5794);
+  });
+
   test('cross-j system entity txs reject remote hops outside the two-runtime route topology', async () => {
     const env = createEmptyEnv('cross-j-intra-runtime-boundary');
     env.scenarioMode = true;
@@ -2186,6 +2200,72 @@ describe('audit fail-fast regressions', () => {
     );
 
     expect(adapterCalls).toBe(0);
+  });
+
+  test('submitRuntimeJOutbox submits cached local multi-signer batches even when runtimeId differs', async () => {
+    const entityId = `0x${'af'.repeat(32)}`;
+    const runtimeId = `0x${'33'.repeat(20)}`;
+    const localScenarioSignerId = '97';
+    registerSignerKey(
+      localScenarioSignerId,
+      deriveSignerKeySync('j-submit-local-multi-signer', localScenarioSignerId),
+    );
+
+    const env = createEmptyEnv('j-submit-local-multi-signer');
+    env.runtimeId = runtimeId;
+    env.timestamp = 126;
+    let adapterCalls = 0;
+    env.jReplicas = new Map([
+      [
+        'Testnet',
+        {
+          jadapter: {
+            submitTx: async (_tx: unknown, options: { signerId?: string; signerPrivateKey?: Uint8Array }) => {
+              adapterCalls += 1;
+              expect(options.signerId).toBe(localScenarioSignerId);
+              expect(options.signerPrivateKey).toBeInstanceOf(Uint8Array);
+              return { success: true };
+            },
+            pollNow: async () => {},
+          },
+        } as any,
+      ],
+    ]);
+
+    await submitRuntimeJOutbox(
+      env,
+      [
+        {
+          jurisdictionName: 'Testnet',
+          jTxs: [
+            {
+              type: 'batch',
+              entityId,
+              data: {
+                batch: {
+                  ...createEmptyBatch(),
+                  reserveToReserve: [{
+                    receivingEntity: `0x${'ef'.repeat(32)}`,
+                    tokenId: 1,
+                    amount: 10n,
+                  }],
+                },
+                batchHash: `0x${'14'.repeat(32)}`,
+                encodedBatch: '0x1234',
+                entityNonce: 1,
+                hankoSignature: '0x1234',
+                batchSize: 1,
+                signerId: localScenarioSignerId,
+              },
+              timestamp: env.timestamp,
+            } as any,
+          ],
+        },
+      ],
+      { enqueueRuntimeInputs: () => {} },
+    );
+
+    expect(adapterCalls).toBe(1);
   });
 
   test('submitRuntimeJOutbox rejects non-empty consensus batch before adapter when hanko is missing', async () => {
