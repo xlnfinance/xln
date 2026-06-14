@@ -1803,6 +1803,7 @@ const run = async (): Promise<void> => {
   let activeMmEntityId: string | null = null;
   let mmContexts: MarketMakerEntityContext[] = [];
   let mmTokenIdsByContext: Map<string, number[]> = new Map();
+  let cachedMarketMakerHealth: MarketMakerHealth | null = null;
   type DirectEntityInputDebug = {
     at: number;
     fromRuntimeId: string;
@@ -1904,9 +1905,6 @@ const run = async (): Promise<void> => {
         );
         const allVisibleHubs = readVisibleHubProfiles(env, true);
         const activeEntityId = activeMmEntityId;
-        const primaryTokenIds = primaryContext
-          ? getMarketMakerTokenIds(mmTokenIdsByContext, primaryContext, normalizeTokenIdsForMm([]))
-          : normalizeTokenIdsForMm([]);
         const health = {
           ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
           name: resolvedArgs.name,
@@ -1929,10 +1927,26 @@ const run = async (): Promise<void> => {
             ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
           },
           marketMaker: activeEntityId
-            ? getMarketMakerHealth(env, activeEntityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
-                contexts: mmContexts,
-                visibleHubs: allVisibleHubs,
-                tokenIdsByContext: mmTokenIdsByContext,
+            ? (cachedMarketMakerHealth ?? {
+                enabled: true,
+                ok: false,
+                entityId: activeEntityId,
+                expectedOffersPerHub: 0,
+                expectedOffersPerPair: 0,
+                hubs: visibleHubs.map(profile => ({
+                  hubEntityId: profile.entityId,
+                  offers: 0,
+                  ready: false,
+                  pairs: [],
+                })),
+                cross: {
+                  applicable: allVisibleHubs.length > 0 && mmContexts.length > 1,
+                  ok: false,
+                  expectedRoutes: buildExpectedMarketMakerCrossRouteGroups(mmContexts, allVisibleHubs, mmTokenIdsByContext).size,
+                  expectedOffersPerRoute: 0,
+                  expectedOffersPerPair: 0,
+                  routes: [],
+                },
               })
             : {
                 enabled: true,
@@ -2198,6 +2212,7 @@ const run = async (): Promise<void> => {
         visibleHubs: allVisibleHubs,
         tokenIdsByContext: mmTokenIdsByContext,
       });
+      cachedMarketMakerHealth = health;
       if (health.ok) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
@@ -2210,6 +2225,7 @@ const run = async (): Promise<void> => {
       visibleHubs: allVisibleHubs,
       tokenIdsByContext: mmTokenIdsByContext,
     });
+    cachedMarketMakerHealth = health;
     console.warn(
       `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify(health.hubs.map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))} cross=${safeStringify({ expectedRoutes: health.cross.expectedRoutes, routes: health.cross.routes.map(route => ({ sourceHubEntityId: route.sourceHubEntityId, targetHubEntityId: route.targetHubEntityId, offers: route.offers, ready: route.ready })) })}`,
     );
@@ -2228,6 +2244,7 @@ const run = async (): Promise<void> => {
         visibleHubs: allVisibleHubs,
         tokenIdsByContext: mmTokenIdsByContext,
       });
+      cachedMarketMakerHealth = health;
       if (health.ok) {
         markOffersReady();
       }
