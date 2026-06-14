@@ -20,7 +20,10 @@ describe('production startup wiring', () => {
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
-    expect(orchestrator).toContain("process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '10000'");
+    expect(orchestrator).toContain("process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '15000'");
+    expect(orchestrator).toContain('const [info, health] = await Promise.all([');
+    expect(orchestrator).toContain('if (info) marketMakerChild.lastInfo = info;');
+    expect(orchestrator).toContain('if (health) marketMakerChild.lastHealth = health;');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdictions.ts'), 'utf8'))
       .toContain('const seedPath = existsSync(canonicalPath) ? canonicalPath : resolveRepoJurisdictionsJsonPath();');
