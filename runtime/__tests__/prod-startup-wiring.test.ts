@@ -50,6 +50,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '30'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '15'");
+    expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
+    expect(mmNode).toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
     expect(mmNode).toContain('const hasCrossSpecBootstrapProgress = (');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)');
     expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds)');
