@@ -2123,12 +2123,12 @@ const run = async (): Promise<void> => {
         if (profile.signerId) hubSignerIdsByEntityId.set(profile.entityId.toLowerCase(), profile.signerId.toLowerCase());
       }
 
-      for (const context of mmContexts) {
+      const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<void> => {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
         const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
         const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
-        if (hubEntityIds.length === 0) continue;
+        if (hubEntityIds.length === 0) return;
         const contextTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, context);
         const desiredOfferCount = buildMarketMakerOfferSpecs(hubEntityIds, contextTokenIds).length;
         const expectedOffersPerHub = Math.max(1, Math.ceil(desiredOfferCount / Math.max(1, hubEntityIds.length)));
@@ -2149,6 +2149,13 @@ const run = async (): Promise<void> => {
           shouldContinue,
         );
         await yieldMarketMakerApi();
+      };
+
+      const primarySameContexts = mode === 'bootstrap' ? mmContexts.slice(0, 1) : mmContexts;
+      const deferredSameContexts = mode === 'bootstrap' ? mmContexts.slice(1) : [];
+      for (const context of primarySameContexts) {
+        await maintainSameContextQuotes(context);
+        if (!shouldContinue()) return;
       }
 
       type CrossQuoteJob = {
@@ -2212,6 +2219,10 @@ const run = async (): Promise<void> => {
           shouldContinue,
         );
         await yieldMarketMakerApi();
+      }
+      for (const context of deferredSameContexts) {
+        await maintainSameContextQuotes(context);
+        if (!shouldContinue()) return;
       }
       if (!shouldContinue()) return;
       await settleRuntimeFor(env, 45);
