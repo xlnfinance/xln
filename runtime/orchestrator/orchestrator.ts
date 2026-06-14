@@ -1137,7 +1137,14 @@ const fetchRouteMarketSnapshots = async (
 ): Promise<Map<string, number>> => {
   const child = getHubChildByEntityId(hubEntityId);
   if (!child || pairIds.length === 0) return new Map();
-  const snapshots = await fetchHubMarketSnapshots(child, hubEntityId, pairIds, 20);
+  if (child.proc?.exitCode !== null || !child.lastHealth) return new Map();
+  let snapshots: MarketSnapshotPayload[];
+  try {
+    snapshots = await fetchHubMarketSnapshots(child, hubEntityId, pairIds, 20);
+  } catch (error) {
+    console.warn(`[MESH] market snapshot enrichment unavailable hub=${hubEntityId}: ${serializeError(error)}`);
+    return new Map();
+  }
   return new Map(snapshots.map((snapshot) => [snapshot.pairId, countSnapshotOrders(snapshot)]));
 };
 
