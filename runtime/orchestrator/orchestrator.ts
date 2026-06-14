@@ -109,7 +109,7 @@ const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
 const CHILD_HEALTH_TIMEOUT_MS = Math.max(
   1_500,
-  Math.floor(Number(process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '15000')),
+  Math.floor(Number(process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '30000')),
 );
 const MARKET_MAKER_INFO_TIMEOUT_MS = Math.max(
   500,
