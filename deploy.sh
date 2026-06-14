@@ -733,7 +733,7 @@ run_local_deploy() {
         pm2 delete anvil >/dev/null 2>&1 || true
         pm2 delete anvil2 >/dev/null 2>&1 || true
         run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
-        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/dev/run-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M
+        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset
       elif ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         echo "[deploy] production anvil is not healthy; restarting without deleting persisted state"
         pm2 delete anvil >/dev/null 2>&1 || true
@@ -745,7 +745,7 @@ run_local_deploy() {
         echo "[deploy] production anvil2 is not healthy; restarting without deleting persisted state"
         lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil2 >/dev/null 2>&1 || true
-        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/dev/run-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M
+        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M
       fi
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         fail_deploy_with_debug "anvil did not become ready on :8545"
