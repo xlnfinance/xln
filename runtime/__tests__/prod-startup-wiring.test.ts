@@ -36,7 +36,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '24'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'");
   });
 
@@ -45,6 +45,7 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2');
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
+    expect(deploy).toContain('local deadline=$((SECONDS + 900))');
   });
 
   test('fresh deploy stops runtime processes before deleting runtime state', () => {

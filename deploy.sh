@@ -82,7 +82,7 @@ wait_for_rpc_chain() {
 }
 
 wait_for_main_stack() {
-  local deadline=$((SECONDS + 600))
+  local deadline=$((SECONDS + 900))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
     body="$(curl -fsS http://127.0.0.1:8080/api/health || true)"
