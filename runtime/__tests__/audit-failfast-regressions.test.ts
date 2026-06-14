@@ -265,6 +265,7 @@ describe('audit fail-fast regressions', () => {
     ] as any);
 
     expect(getRuntimeJurisdictionHeight(env, 0, 'Testnet')).toBe(3145);
+    expect(getRuntimeJurisdictionHeight(env, 5794, 'Testnet')).toBe(3145);
     expect(getRuntimeJurisdictionHeight(env, 0, 'Tron')).toBe(5794);
     expect(getRuntimeJurisdictionHeight(env, 0)).toBe(5794);
   });

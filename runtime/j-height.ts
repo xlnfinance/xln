@@ -9,7 +9,7 @@ export function getRuntimeJurisdictionHeight(env: Env, fallbackHeight = 0, juris
     const requested = getJReplicaByJurisdictionRef(env, jurisdictionName);
     if (!requested) return fallback;
     const blockNumber = Number(requested?.blockNumber ?? 0n);
-    return Number.isFinite(blockNumber) ? Math.max(fallback, Math.floor(blockNumber)) : fallback;
+    return Number.isFinite(blockNumber) ? Math.max(0, Math.floor(blockNumber)) : fallback;
   }
 
   const active = env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined;
