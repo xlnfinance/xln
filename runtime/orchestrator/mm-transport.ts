@@ -13,8 +13,6 @@ export const areMarketMakerHubTransportsReady = (
   p2pState: MarketMakerTransportState,
   hubs: readonly MarketMakerTransportHub[],
 ): boolean => {
-  if (p2pState.connected === true) return true;
-
   const requiredRuntimeIds = new Set(
     hubs
       .map(hub => normalizeRuntimeId(hub.runtimeId || ''))
