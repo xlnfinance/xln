@@ -570,13 +570,20 @@ export class RuntimeP2P {
     client: RuntimeWsClient | null;
     transport: 'direct' | 'relay';
   } {
-    const requireDirect = this.hasDirectPeerEndpoint(runtimeId);
-    if (requireDirect) {
+    const hasDirectEndpoint = this.hasDirectPeerEndpoint(runtimeId);
+    if (hasDirectEndpoint) {
       this.ensureDirectClientForRuntime(runtimeId);
+      const directClient = this.getDirectClientForRuntime(runtimeId);
+      if (directClient) {
+        return {
+          client: directClient,
+          transport: 'direct',
+        };
+      }
     }
     return {
-      client: requireDirect ? this.getDirectClientForRuntime(runtimeId) : this.getActiveClient(),
-      transport: requireDirect ? 'direct' : 'relay',
+      client: this.getActiveClient(),
+      transport: 'relay',
     };
   }
 

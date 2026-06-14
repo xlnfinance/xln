@@ -93,7 +93,7 @@ const markSentBatchTerminalFailure = (env: Env, jTx: JTx, message: string): void
   if (submittedHash && sentBatch.batchHash && submittedHash !== sentBatch.batchHash) return;
   sentBatch.terminalFailure = {
     message,
-    failedAt: Number(env.timestamp || Date.now()),
+    failedAt: env.timestamp,
   };
   jBatchState.status = 'failed';
   jBatchState.failedAttempts = (jBatchState.failedAttempts || 0) + 1;

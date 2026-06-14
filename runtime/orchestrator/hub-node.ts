@@ -119,6 +119,7 @@ type Args = {
   apiPort: number;
   directWsUrl: string;
   rpcUrl: string;
+  rpc2Url: string;
   meshHubNames: string[];
   supportPeerIdentitiesJson: string;
   dbPath: string;
@@ -332,6 +333,7 @@ const parseArgs = (): Args => {
     apiPort,
     directWsUrl: getArg('--direct-ws-url', ''),
     rpcUrl: getArg('--rpc-url', ''),
+    rpc2Url: getArg('--rpc2-url', ''),
     meshHubNames: getArg('--mesh-hub-names', 'H1,H2,H3')
       .split(',')
       .map(part => part.trim())
@@ -384,7 +386,7 @@ const resolveLocalApiUrl = (value: string): string => {
   const raw = String(value || '').trim();
   if (!raw.startsWith('/')) return raw;
   if (raw === '/rpc2' || raw.startsWith('/rpc2?') || raw.startsWith('/api/rpc2')) {
-    const rpc2 = String(process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || '').trim();
+    const rpc2 = String(resolvedArgs.rpc2Url || process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || '').trim();
     if (rpc2) return rpc2;
   }
   if (raw === '/rpc' || raw.startsWith('/rpc?') || raw.startsWith('/api/rpc')) {

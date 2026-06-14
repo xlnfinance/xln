@@ -77,6 +77,7 @@ import {
   resolveSecondaryJurisdictions,
   type MeshJurisdictionConfig,
 } from './mesh-jurisdictions';
+import { areMarketMakerHubTransportsReady } from './mm-transport';
 
 type Args = {
   name: string;
@@ -87,6 +88,7 @@ type Args = {
   apiPort: number;
   directWsUrl: string;
   rpcUrl: string;
+  rpc2Url: string;
   meshHubNames: string[];
   meshHubIdentitiesJson: string;
   dbPath: string;
@@ -305,6 +307,7 @@ const parseArgs = (): Args => {
     apiPort,
     directWsUrl: getArg('--direct-ws-url', ''),
     rpcUrl: getArg('--rpc-url', ''),
+    rpc2Url: getArg('--rpc2-url', ''),
     meshHubNames: getArg('--mesh-hub-names', 'H1,H2,H3')
       .split(',')
       .map(part => part.trim())
@@ -320,7 +323,7 @@ const resolveLocalApiUrl = (value: string): string => {
   const raw = String(value || '').trim();
   if (!raw.startsWith('/')) return raw;
   if (raw === '/rpc2' || raw.startsWith('/rpc2?') || raw.startsWith('/api/rpc2')) {
-    const rpc2 = String(process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || '').trim();
+    const rpc2 = String(resolvedArgs.rpc2Url || process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || '').trim();
     if (rpc2) return rpc2;
   }
   if (raw === '/rpc' || raw.startsWith('/rpc?') || raw.startsWith('/api/rpc')) {
@@ -517,22 +520,6 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       (Number(left.chainId || 0) - Number(right.chainId || 0)) ||
       compareStableText(left.entityId, right.entityId),
     );
-};
-
-const directHubPeersReady = (env: Env, hubs: HubProfile[]): boolean => {
-  const requiredRuntimeIds = new Set(
-    hubs
-      .map(hub => normalizeRuntimeId(hub.runtimeId || ''))
-      .filter(runtimeId => runtimeId.length > 0),
-  );
-  if (requiredRuntimeIds.size === 0) return false;
-  const openRuntimeIds = new Set(
-    (getP2PState(env).directPeers || [])
-      .filter(peer => peer.open === true)
-      .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
-      .filter(runtimeId => runtimeId.length > 0),
-  );
-  return Array.from(requiredRuntimeIds).every(runtimeId => openRuntimeIds.has(runtimeId));
 };
 
 const parseMeshHubIdentities = (raw: string): MeshHubIdentity[] => {
@@ -2031,7 +2018,7 @@ const run = async (): Promise<void> => {
       const visibleHubs = readVisibleHubProfiles(env, true);
       if (visibleHubs.length === 0) return;
       if (!shouldContinue()) return;
-      if (!directHubPeersReady(env, visibleHubs)) return;
+      if (!areMarketMakerHubTransportsReady(getP2PState(env), visibleHubs)) return;
       const hubSignerIdsByEntityId = new Map(configuredHubSignerIdsByEntityId);
       for (const profile of visibleHubs) {
         if (profile.signerId) hubSignerIdsByEntityId.set(profile.entityId.toLowerCase(), profile.signerId.toLowerCase());

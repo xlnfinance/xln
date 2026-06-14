@@ -11,6 +11,14 @@ describe('production startup wiring', () => {
     expect(script).toContain('export ANVIL_RPC2="${ANVIL_RPC2:-http://127.0.0.1:${RPC2_PORT}}"');
     expect(script).toContain('export RPC_TRON="${RPC_TRON:-$ANVIL_RPC2}"');
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
+
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    expect(orchestrator).toContain("...(args.rpc2Url ? ['--rpc2-url', args.rpc2Url] : [])");
+
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    expect(hubNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
+    expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
   });
 
   test('deploy starts and checks the production Tron chain', () => {
