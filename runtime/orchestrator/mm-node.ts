@@ -2155,8 +2155,6 @@ const run = async (): Promise<void> => {
         const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
         if (hubEntityIds.length === 0) return;
         const contextTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, context);
-        const desiredOfferCount = buildMarketMakerOfferSpecs(hubEntityIds, contextTokenIds).length;
-        const expectedOffersPerHub = Math.max(1, Math.ceil(desiredOfferCount / Math.max(1, hubEntityIds.length)));
         await maintainMarketMakerQuotes(
           env,
           context.entityId,
@@ -2164,9 +2162,7 @@ const run = async (): Promise<void> => {
           hubEntityIds,
           hubSignerIdsByEntityId,
           contextTokenIds,
-          mode === 'bootstrap'
-            ? Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)
-            : MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
+          MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
           mode === 'bootstrap'
             ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK
             : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
