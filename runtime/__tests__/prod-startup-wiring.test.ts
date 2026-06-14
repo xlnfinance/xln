@@ -36,6 +36,8 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '24'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'");
   });
 
   test('deploy starts and checks the production Tron chain', () => {
