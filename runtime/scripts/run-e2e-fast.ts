@@ -28,6 +28,10 @@ const FAST_E2E_TARGETS = [
     title: 'separate custody daemon credits deposits and withdraws only from credited offchain balance',
   },
   {
+    file: 'tests/e2e-lending.spec.ts',
+    title: 'funds hub pool, borrows from it, and repays from the Lending tab',
+  },
+  {
     file: 'tests/e2e-dispute.spec.ts',
     title: 'entity workspace dispute lifecycle returns reserve',
   },
