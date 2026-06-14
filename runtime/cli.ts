@@ -9,6 +9,7 @@
 
 import * as readline from 'readline';
 import type { JAdapter } from './jadapter';
+import { createXlnJsonRpcProvider } from './jadapter';
 import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-utils';
 import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './j-batch';
@@ -42,7 +43,7 @@ async function init(remote: boolean) {
   console.log(`Connecting to ${rpcUrl}...`);
 
   // Create provider and signer directly for connecting to existing contracts
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createXlnJsonRpcProvider(rpcUrl);
   const signer = new ethers.Wallet(
     '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', // default anvil key
     provider

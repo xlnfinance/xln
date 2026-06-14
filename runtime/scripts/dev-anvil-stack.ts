@@ -1,7 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { ethers } from 'ethers';
 
-import { createJAdapter } from '../jadapter';
+import { createJAdapter, createXlnJsonRpcProvider } from '../jadapter';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 
 type Args = {
@@ -60,7 +59,7 @@ const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 const waitForRpcReady = async (rpcUrl: string, timeoutMs = 20_000): Promise<void> => {
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createXlnJsonRpcProvider(rpcUrl);
   const deadline = Date.now() + timeoutMs;
   let lastError = 'unknown';
   while (Date.now() < deadline) {

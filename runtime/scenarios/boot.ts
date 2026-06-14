@@ -6,6 +6,7 @@
 import type { Env, JReplica, JTx, JurisdictionConfig } from '../types';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
+import { createXlnJsonRpcProvider } from '../jadapter';
 import { getCachedSignerPrivateKey } from '../account-crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 import { isLoopbackUrl } from '../loopback-url';
@@ -34,7 +35,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const readRpcChainId = async (rpcUrl: string): Promise<number | null> => {
   try {
-    const probe = new ethers.JsonRpcProvider(rpcUrl);
+    const probe = createXlnJsonRpcProvider(rpcUrl);
     return Number((await probe.getNetwork()).chainId);
   } catch {
     return null;
