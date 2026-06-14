@@ -339,6 +339,23 @@ if (!directWsUrl) {
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 const nodeLog = createStructuredLogger('mesh.marketMaker', { name: resolvedArgs.name });
 
+const envFlagEnabled = (value: unknown): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+};
+
+const configureMarketMakerStorage = (env: Env): void => {
+  if (!envFlagEnabled(process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'])) return;
+  env.runtimeConfig = {
+    ...(env.runtimeConfig || {}),
+    storage: {
+      ...(env.runtimeConfig?.storage || {}),
+      enabled: false,
+    },
+  };
+  console.log('[MESH-MM] Runtime storage disabled for rebuildable market-maker state');
+};
+
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
   resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
 
@@ -1721,6 +1738,7 @@ const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
   const env = await main(resolvedArgs.seed);
+  configureMarketMakerStorage(env);
   startRuntimeLoop(env);
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
