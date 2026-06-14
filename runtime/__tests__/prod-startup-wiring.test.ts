@@ -19,11 +19,13 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '15000'");
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0'");
+    expect(orchestrator).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1'");
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     expect(hubNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
     expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
+    expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
   });
 
   test('deploy starts and checks the production Tron chain', () => {
