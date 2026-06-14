@@ -53,6 +53,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
     expect(mmNode).toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
     expect(mmNode).toContain('const hasCrossSpecBootstrapProgress = (');
+    expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.entityId, route.orderId)');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)');
     expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds)');
     expect(mmNode).toContain('(progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0)');

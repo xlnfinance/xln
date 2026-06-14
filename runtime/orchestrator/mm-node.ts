@@ -1084,6 +1084,7 @@ const hasCrossSpecBootstrapProgress = (
   const route = spec.crossJurisdiction;
   if (!route) return false;
   if (hasSourceAccountCrossOffer(env, route)) return true;
+  if (hasCrossRouteRegistered(env, route.source.entityId, route.orderId)) return true;
   if (hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)) return true;
   return getPendingCrossRequestOrderIds(route.source.entityId).has(route.orderId);
 };
@@ -1413,6 +1414,7 @@ const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean
   const route = spec.crossJurisdiction;
   if (!route) return false;
   if (hasSourceAccountCrossOffer(env, route)) return true;
+  if (hasCrossRouteRegistered(env, route.source.entityId, route.orderId)) return true;
   const bookOwnerEntityId = crossJurisdictionBookOwnerRef(route);
   const bookOwner = bookOwnerEntityId ? getEntityReplicaById(env, bookOwnerEntityId)?.state : null;
   return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
