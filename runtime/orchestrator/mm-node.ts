@@ -209,6 +209,10 @@ const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '300000'),
 );
+const MARKET_MAKER_BOOTSTRAP_START_DELAY_MS = Math.max(
+  0,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '2000'),
+);
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
   Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '30'),
@@ -227,11 +231,11 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '4'),
+  Number(process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1'),
 );
 const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
-  MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '6'),
+  1,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
@@ -2245,7 +2249,7 @@ const run = async (): Promise<void> => {
   );
 
   void (async () => {
-    await sleep(1);
+    await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);
     if (shuttingDown) return;
     startupPhase = 'bootstrap-offers';
     if (await waitForBootstrapOffers()) {
