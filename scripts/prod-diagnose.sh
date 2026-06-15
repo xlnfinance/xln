@@ -106,6 +106,41 @@ check_rpc_chain() {
   fi
 }
 
+check_public_rpc_chain() {
+  local path="$1"
+  local expected="$2"
+  local label="$3"
+  local body
+  body="$(curl -ksS -X POST -H 'Content-Type: application/json' \
+    --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+    "${PUBLIC_URL}${path}" 2>/dev/null || true)"
+  if printf '%s' "$body" | grep -q "\"result\":\"$expected\""; then
+    ok "$label public ${path} chainId $expected"
+  else
+    fail "$label public ${path} mismatch or unavailable; got: ${body:-<empty>}"
+    remember_process "xln-server"
+  fi
+}
+
+check_public_rpc_placeholder() {
+  local path="$1"
+  local body
+  local status
+  body="$(curl -ksS -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
+    --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+    "${PUBLIC_URL}${path}" 2>/dev/null || true)"
+  status="$(printf '%s' "$body" | tail -1)"
+  body="$(printf '%s' "$body" | sed '$d')"
+  if [ "$status" = "503" ] && printf '%s' "$body" | grep -q 'RPC upstream is not configured'; then
+    ok "public ${path} placeholder fails closed"
+  elif [ "$status" = "200" ] && printf '%s' "$body" | grep -q '"result"'; then
+    ok "public ${path} configured RPC responds"
+  else
+    fail "public ${path} is not a JSON RPC placeholder; status=${status:-<empty>} body=${body:-<empty>}"
+    remember_process "xln-server"
+  fi
+}
+
 check_watchtower() {
   local url="$1"
   local body
@@ -268,6 +303,11 @@ check_port 8088 "custody daemon" "xln-server"
 section "rpc"
 check_rpc_chain "http://127.0.0.1:8545" "0x7a69" "Testnet RPC" "anvil"
 check_rpc_chain "http://127.0.0.1:8546" "0x7a6a" "Tron RPC" "anvil2"
+check_public_rpc_chain "/rpc" "0x7a69" "Testnet RPC"
+check_public_rpc_chain "/rpc2" "0x7a6a" "Tron RPC"
+for rpc_index in 3 4 5 6 7 8; do
+  check_public_rpc_placeholder "/rpc${rpc_index}"
+done
 
 section "state"
 check_jurisdictions

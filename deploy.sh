@@ -81,6 +81,45 @@ wait_for_rpc_chain() {
   return 1
 }
 
+wait_for_public_rpc_chain() {
+  local path="$1"
+  local expected_chain_hex="$2"
+  local deadline="$3"
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local body
+    body="$(curl -ksS -X POST -H 'Content-Type: application/json' \
+      --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+      "https://xln.finance${path}" || true)"
+    if printf '%s' "$body" | grep -q "\"result\":\"$expected_chain_hex\""; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_public_rpc_placeholder() {
+  local path="$1"
+  local deadline="$2"
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local body
+    local status
+    body="$(curl -ksS -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
+      --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+      "https://xln.finance${path}" || true)"
+    status="$(printf '%s' "$body" | tail -1)"
+    body="$(printf '%s' "$body" | sed '$d')"
+    if [ "$status" = "503" ] && printf '%s' "$body" | grep -q 'RPC upstream is not configured'; then
+      return 0
+    fi
+    if [ "$status" = "200" ] && printf '%s' "$body" | grep -q '"result"'; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 wait_for_main_stack() {
   local deadline=$((SECONDS + 900))
   while [ "$SECONDS" -lt "$deadline" ]; do
@@ -198,7 +237,14 @@ wait_for_public_production_stack() {
   wait_for_http_json_field \
     "https://xln.finance/api/tower/healthz" \
     "return payload?.ok === true && payload?.service === 'xln-watchtower' && typeof payload?.towerId === 'string' && payload.towerId.length > 0;" \
-    "$deadline"
+    "$deadline" \
+    || return 1
+  wait_for_public_rpc_chain "/rpc" "0x7a69" "$deadline" || return 1
+  wait_for_public_rpc_chain "/rpc2" "0x7a6a" "$deadline" || return 1
+  for rpc_index in 3 4 5 6 7 8; do
+    wait_for_public_rpc_placeholder "/rpc${rpc_index}" "$deadline" || return 1
+  done
+  return 0
 }
 
 wait_for_watchtower() {
@@ -335,6 +381,45 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
+common_headers = """        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+"""
+primary = f"""    location = /rpc {{
+        proxy_pass http://127.0.0.1:8080;
+{common_headers}    }}
+"""
+extra = f"""
+    location ~ ^/rpc[2-8]$ {{
+        proxy_pass http://127.0.0.1:8080;
+{common_headers}    }}
+"""
+if re.search(r"\n    location = /rpc \{\n(?:        .*\n)*?    \}\n", text):
+    text = re.sub(r"\n    location = /rpc \{\n(?:        .*\n)*?    \}\n", "\n" + primary, text, count=1)
+elif "    location /api/ {\n" in text:
+    text = text.replace("    location /api/ {\n", primary + "\n    location /api/ {\n", 1)
+
+if "location ~ ^/rpc[2-8]$" not in text:
+    marker = primary
+    if marker in text:
+        text = text.replace(marker, marker + extra, 1)
+    elif "    location /api/ {\n" in text:
+        text = text.replace("    location /api/ {\n", extra + "\n    location /api/ {\n", 1)
+
+path.write_text(text)
+PY
+
+  python3 - "$available" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
 text = re.sub(r"\n    location /api/watchtower/ \{\n(?:        .*\n)*?    \}\n", "\n", text)
 path.write_text(text)
 PY
@@ -346,6 +431,16 @@ PY
 
   if ! grep -q 'proxy_pass http://127.0.0.1:8087;' "$available"; then
     echo "[deploy] custody upstream missing from nginx config" >&2
+    return 1
+  fi
+
+  if grep -q 'proxy_pass http://127.0.0.1:8545' "$available"; then
+    echo "[deploy] public /rpc must proxy through orchestrator safety filter, not directly to anvil" >&2
+    return 1
+  fi
+
+  if ! grep -q 'location ~ \^/rpc\[2-8\]\$' "$available"; then
+    echo "[deploy] /rpc2-/rpc8 public proxy block missing from nginx config" >&2
     return 1
   fi
 

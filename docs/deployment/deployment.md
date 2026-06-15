@@ -51,7 +51,7 @@ Required capabilities:
 1. Serve the built frontend over HTTPS.
 2. Proxy `/api/` to the runtime server.
 3. Proxy `/ws` with WebSocket upgrade headers.
-4. Proxy `/rpc` to local anvil/RPC with enough read timeout.
+4. Proxy `/rpc` and `/rpc2`...`/rpc8` to the orchestrator RPC safety filter.
 5. Serve `/c` and `/c.txt` with permissive CORS and aggressive no-cache.
 6. Preserve the frame-ancestor policy expected by app and custody surfaces.
 
@@ -77,8 +77,19 @@ location /ws {
     proxy_set_header Host $host;
 }
 
-location /rpc {
-    proxy_pass http://localhost:8545;
+location = /rpc {
+    proxy_pass http://localhost:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 300s;
+    proxy_connect_timeout 75s;
+}
+
+location ~ ^/rpc[2-8]$ {
+    proxy_pass http://localhost:8080;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
