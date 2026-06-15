@@ -21,6 +21,7 @@ export const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_REL
 export const CHILD_LOG_RING_MAX = 30;
 export const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
+const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 const getArg = (name: string, fallback = ''): string => {
   const eq = argsRaw.find(arg => arg.startsWith(`${name}=`));
@@ -79,6 +80,16 @@ export const parseArgs = (): Args => {
   fallbackRelayUrl.pathname = '/relay';
   fallbackRelayUrl.search = '';
   fallbackRelayUrl.hash = '';
+  const rpcUrls: Record<number, string> = {};
+  for (const index of RPC_PROXY_INDEXES) {
+    const flag = index === 1 ? '--rpc-url' : `--rpc${index}-url`;
+    const envName = index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`;
+    const fallback = index === 1
+      ? process.env['ANVIL_RPC'] || 'http://localhost:8545'
+      : process.env[envName] || process.env[`RPC${index}`] || process.env[`XLN_RPC${index}_URL`] || '';
+    const raw = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || fallback) : fallback);
+    rpcUrls[index] = raw ? normalizeLoopbackUrl(raw) : '';
+  }
   return {
     host,
     port,
@@ -86,8 +97,9 @@ export const parseArgs = (): Args => {
     publicWsBaseUrl,
     nodeApiPortBase,
     nodePublicPortBase,
-    rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env['ANVIL_RPC'] || 'http://localhost:8545')),
-    rpc2Url: normalizeLoopbackUrl(getArg('--rpc2-url', process.env['ANVIL_RPC2'] || '')),
+    rpcUrl: rpcUrls[1] || normalizeLoopbackUrl(getArg('--rpc-url', process.env['ANVIL_RPC'] || 'http://localhost:8545')),
+    rpc2Url: rpcUrls[2] || '',
+    rpcUrls,
     dbRoot: resolve(dbRoot),
     mmEnabled: hasFlag('--mm'),
     resetAllowed: hasFlag('--allow-reset') || process.env['XLN_MESH_RESET_ALLOWED'] === '1',

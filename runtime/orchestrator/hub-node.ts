@@ -120,6 +120,7 @@ type Args = {
   directWsUrl: string;
   rpcUrl: string;
   rpc2Url: string;
+  rpcUrls: Record<number, string>;
   meshHubNames: string[];
   supportPeerIdentitiesJson: string;
   dbPath: string;
@@ -321,11 +322,25 @@ const getArg = (name: string, fallback = ''): string => {
 
 const hasFlag = (name: string): boolean => argsRaw.includes(name);
 
+const readRpcUrls = (): Record<number, string> => {
+  const urls: Record<number, string> = {};
+  for (let index = 1; index <= 8; index += 1) {
+    const flag = index === 1 ? '--rpc-url' : `--rpc${index}-url`;
+    const envName = index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`;
+    const fallback = index === 1
+      ? process.env['ANVIL_RPC'] || ''
+      : process.env[envName] || process.env[`RPC${index}`] || process.env[`XLN_RPC${index}_URL`] || '';
+    urls[index] = getArg(flag, index === 2 ? (process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || fallback) : fallback);
+  }
+  return urls;
+};
+
 const parseArgs = (): Args => {
   const apiPort = Number(getArg('--api-port', '0'));
   if (!Number.isFinite(apiPort) || apiPort <= 0) {
     throw new Error(`Invalid --api-port: ${String(apiPort)}`);
   }
+  const rpcUrls = readRpcUrls();
 
   return {
     name: getArg('--name', 'H1'),
@@ -336,8 +351,9 @@ const parseArgs = (): Args => {
     apiHost: getArg('--api-host', '127.0.0.1'),
     apiPort,
     directWsUrl: getArg('--direct-ws-url', ''),
-    rpcUrl: getArg('--rpc-url', ''),
-    rpc2Url: getArg('--rpc2-url', ''),
+    rpcUrl: rpcUrls[1] || '',
+    rpc2Url: rpcUrls[2] || '',
+    rpcUrls,
     meshHubNames: getArg('--mesh-hub-names', 'H1,H2,H3')
       .split(',')
       .map(part => part.trim())
@@ -389,12 +405,10 @@ const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
 const resolveLocalApiUrl = (value: string): string => {
   const raw = String(value || '').trim();
   if (!raw.startsWith('/')) return raw;
-  if (raw === '/rpc2' || raw.startsWith('/rpc2?') || raw.startsWith('/api/rpc2')) {
-    const rpc2 = String(resolvedArgs.rpc2Url || process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || '').trim();
-    if (rpc2) return rpc2;
-  }
-  if (raw === '/rpc' || raw.startsWith('/rpc?') || raw.startsWith('/api/rpc')) {
-    const rpc = String(process.env['ANVIL_RPC'] || resolvedArgs.rpcUrl || '').trim();
+  const match = raw.match(/^\/(?:api\/)?rpc([2-8])?(?:\?.*)?$/);
+  if (match) {
+    const index = match[1] ? Number(match[1]) : 1;
+    const rpc = String(resolvedArgs.rpcUrls[index] || '').trim();
     if (rpc) return rpc;
   }
   return new URL(raw, apiUrl).toString();

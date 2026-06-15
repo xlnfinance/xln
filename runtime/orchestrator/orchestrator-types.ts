@@ -12,6 +12,7 @@ export type Args = {
   nodePublicPortBase: number;
   rpcUrl: string;
   rpc2Url: string;
+  rpcUrls: Record<number, string>;
   dbRoot: string;
   mmEnabled: boolean;
   resetAllowed: boolean;

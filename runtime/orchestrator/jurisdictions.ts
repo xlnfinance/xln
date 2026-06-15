@@ -8,6 +8,7 @@ import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 export type OrchestratorJurisdictionsConfig = {
   shardJurisdictionsPath: string;
   rpc2Url: string;
+  rpcUrls?: Record<number, string>;
 };
 
 type ShardJurisdictionEntry = Record<string, unknown> & {
@@ -42,6 +43,40 @@ const isRpc2Jurisdiction = (
   if (name.includes('tron')) return true;
   const rpc = String(jurisdiction.rpc || '').trim();
   return Boolean(config.rpc2Url && normalizeLoopbackUrl(rpc) === normalizeLoopbackUrl(config.rpc2Url));
+};
+
+const rpcPublicPath = (index: number): string => index <= 1 ? '/rpc' : `/rpc${index}`;
+
+const parseRpcIndex = (value: string): number | null => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'tron' || normalized === 'localhost2') return 2;
+  const match = normalized.match(/^rpc([2-8])$/);
+  if (!match) return null;
+  return Number(match[1]);
+};
+
+const resolvePublicRpcPath = (
+  config: OrchestratorJurisdictionsConfig,
+  key: string,
+  jurisdiction: ShardJurisdictionEntry,
+): string => {
+  const rpc = String(jurisdiction.rpc || '').trim();
+  const normalizedRpc = normalizeLoopbackUrl(rpc);
+  const rpcUrls = config.rpcUrls ?? {
+    1: '',
+    2: config.rpc2Url,
+  };
+  for (const [rawIndex, rawUrl] of Object.entries(rpcUrls)) {
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index) || index < 1 || index > 8 || !rawUrl) continue;
+    if (normalizedRpc === normalizeLoopbackUrl(rawUrl)) {
+      return rpcPublicPath(index);
+    }
+  }
+
+  const namedIndex = parseRpcIndex(key) ?? parseRpcIndex(String(jurisdiction.name || ''));
+  if (namedIndex !== null) return rpcPublicPath(namedIndex);
+  return '/rpc';
 };
 
 export const readShardJurisdictions = (config: OrchestratorJurisdictionsConfig): string => {
@@ -191,7 +226,7 @@ export const toPublicJurisdictionsPayload = (
     parsed['networkVersion'] = networkVersion;
     for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
       if (!jurisdiction || typeof jurisdiction !== 'object') continue;
-      const fallback = isRpc2Jurisdiction(config, key, jurisdiction) ? '/rpc2' : '/rpc';
+      const fallback = resolvePublicRpcPath(config, key, jurisdiction);
       jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || fallback), fallback);
     }
     return `${JSON.stringify(parsed, null, 2)}\n`;

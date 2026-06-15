@@ -83,7 +83,7 @@ import {
   toPublicJurisdictionsPayload,
   type OrchestratorJurisdictionsConfig,
 } from './jurisdictions';
-import { createOrchestratorProxyHandlers } from './proxy';
+import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
 import { MARKET_MAKER_CREDIT_AMOUNT } from './mesh-common';
 
@@ -130,6 +130,7 @@ const managedRuntimeLeases = createManagedRuntimeLeaseManager({
 const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
   shardJurisdictionsPath,
   rpc2Url: args.rpc2Url,
+  rpcUrls: args.rpcUrls,
 };
 
 const relayStore: RelayStore = createRelayStore('mesh-relay');
@@ -605,6 +606,25 @@ const failFastUnexpectedChildExit = (message: string): void => {
   })();
 };
 
+const buildSecondaryRpcArgs = (): string[] => {
+  const result: string[] = [];
+  for (let index = 2; index <= 8; index += 1) {
+    const url = args.rpcUrls[index];
+    if (url) result.push(`--rpc${index}-url`, url);
+  }
+  return result;
+};
+
+const buildRpcChildEnv = (): Record<string, string> => {
+  const result: Record<string, string> = {};
+  for (let index = 1; index <= 8; index += 1) {
+    const url = args.rpcUrls[index];
+    if (!url) continue;
+    result[index === 1 ? 'ANVIL_RPC' : `ANVIL_RPC${index}`] = url;
+  }
+  return result;
+};
+
 const spawnHub = async (child: HubChild): Promise<void> => {
   await reapStaleHubProcess(child);
   mkdirSync(child.dbPath, { recursive: true });
@@ -621,7 +641,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     '--api-port', String(child.apiPort),
     '--direct-ws-url', buildPublicDirectWsUrl(child.publicPort),
     '--rpc-url', args.rpcUrl,
-    ...(args.rpc2Url ? ['--rpc2-url', args.rpc2Url] : []),
+    ...buildSecondaryRpcArgs(),
     '--mesh-hub-names', getHubSpecsArg(),
     '--support-peer-identities-json', JSON.stringify([getMarketMakerIdentity()]),
     '--db-path', child.dbPath,
@@ -642,8 +662,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       ...process.env,
       XLN_DB_PATH: child.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
-      ANVIL_RPC: args.rpcUrl,
-      ANVIL_RPC2: args.rpc2Url,
+      ...buildRpcChildEnv(),
       USE_ANVIL: 'true',
       XLN_RADAPTER_AUTH_SEED: child.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
@@ -696,7 +715,7 @@ const spawnMarketMaker = async (): Promise<void> => {
     '--api-port', String(marketMakerChild.apiPort),
     '--direct-ws-url', buildPublicDirectWsUrl(marketMakerChild.publicPort),
     '--rpc-url', args.rpcUrl,
-    ...(args.rpc2Url ? ['--rpc2-url', args.rpc2Url] : []),
+    ...buildSecondaryRpcArgs(),
     '--mesh-hub-names', getHubSpecsArg(),
     '--mesh-hub-identities-json', getMeshHubIdentitiesArg(),
     '--db-path', marketMakerChild.dbPath,
@@ -718,8 +737,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       ...process.env,
       XLN_DB_PATH: marketMakerChild.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
-      ANVIL_RPC: args.rpcUrl,
-      ANVIL_RPC2: args.rpc2Url,
+      ...buildRpcChildEnv(),
       USE_ANVIL: 'true',
       XLN_RADAPTER_AUTH_SEED: marketMakerChild.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
@@ -1576,12 +1594,9 @@ const server = Bun.serve({
       return new Response('WebSocket upgrade failed', { status: 400 });
     }
 
-    if ((pathname === '/rpc' || pathname === '/api/rpc') && request.method === 'POST') {
-      return await proxyRpc(request);
-    }
-
-    if ((pathname === '/rpc2' || pathname === '/api/rpc2') && request.method === 'POST') {
-      return await proxyRpc(request, args.rpc2Url);
+    const rpcProxyIndex = resolveRpcProxyIndex(pathname);
+    if (rpcProxyIndex !== null && request.method === 'POST') {
+      return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '');
     }
 
     if (pathname === '/api/faucet/offchain' && request.method === 'POST') {

@@ -45,7 +45,17 @@ const FORBIDDEN_RPC_PROXY_PREFIXES = [
   'wallet_',
 ];
 
+const MAX_RPC_PROXY_INDEX = 8;
+
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+export const resolveRpcProxyIndex = (pathname: string): number | null => {
+  const match = String(pathname || '').match(/^\/(?:api\/)?rpc([2-8])?$/);
+  if (!match) return null;
+  if (!match[1]) return 1;
+  const index = Number(match[1]);
+  return Number.isInteger(index) && index >= 2 && index <= MAX_RPC_PROXY_INDEX ? index : null;
+};
 
 const findForbiddenRpcProxyMethod = (bodyText: string): string | null => {
   let parsed: unknown;

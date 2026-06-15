@@ -19,6 +19,7 @@ describe('production startup wiring', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
+    expect(orchestratorConfig).toContain("const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
     expect(orchestrator).toContain("process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '30000'");
     expect(orchestrator).toContain("process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'");
@@ -33,7 +34,10 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdictions.ts'), 'utf8'))
       .toContain('const seedPath = existsSync(canonicalPath) ? canonicalPath : resolveRepoJurisdictionsJsonPath();');
-    expect(orchestrator).toContain("...(args.rpc2Url ? ['--rpc2-url', args.rpc2Url] : [])");
+    expect(orchestrator).toContain('const buildSecondaryRpcArgs = (): string[] => {');
+    expect(orchestrator).toContain('const buildRpcChildEnv = (): Record<string, string> => {');
+    expect(orchestrator).toContain('const rpcProxyIndex = resolveRpcProxyIndex(pathname);');
+    expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '');");
     expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '15000'");
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0'");
@@ -41,12 +45,14 @@ describe('production startup wiring', () => {
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
-    expect(hubNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
+    expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
+    expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(orchestrator).toContain('MARKET_MAKER_CREDIT_AMOUNT.toString()');
     expect(orchestrator).not.toContain("creditAmount: '50000000000000000000000000'");
-    expect(mmNode).toContain("rpc2Url: getArg('--rpc2-url', '')");
+    expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
+    expect(mmNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '90'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '15'");
@@ -73,6 +79,9 @@ describe('production startup wiring', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2');
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
+    expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
+    expect(deploy).toContain('location ~ ^/rpc[2-8]$');
+    expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
     expect(deploy).toContain('local deadline=$((SECONDS + 900))');
   });
