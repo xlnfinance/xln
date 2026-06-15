@@ -59,7 +59,7 @@ export type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
-  TowerActivePayloadV1,
+  TowerLastResortPayloadV1,
   TowerActionKindV1,
   TowerAppointmentOwnerProofV1,
   TowerAppointmentV1,
@@ -145,7 +145,7 @@ import type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
-  TowerActivePayloadV1,
+  TowerLastResortPayloadV1,
   TowerModeV1,
 } from './recovery/types';
 import type { JAdapter } from './jadapter/types';
@@ -493,7 +493,7 @@ export interface XLNModule {
     bundleHash: string,
     height: number,
     signedAt: number,
-    activePayload?: TowerActivePayloadV1 | null,
+    lastResortPayload?: TowerLastResortPayloadV1 | null,
   ) => string;
   computeWatchtowerCounterDisputeAuthorizationHash: (
     chainId: number,

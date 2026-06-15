@@ -41,8 +41,14 @@ export type EncryptedRuntimeRecoveryBundleV1 = {
 
 export type TowerModeV1 =
   | 'blind_backup'
-  | 'active_watchtower'
   | 'delayed_last_resort';
+
+export const normalizeTowerModeV1 = (mode: unknown): TowerModeV1 => {
+  const rawMode = String(mode || '').trim();
+  if (!rawMode || rawMode === 'blind_backup') return 'blind_backup';
+  if (rawMode === 'delayed_last_resort') return 'delayed_last_resort';
+  throw new Error(`TOWER_MODE_INVALID:${rawMode}`);
+};
 
 export type TowerActionKindV1 = 'counter_dispute_only';
 
@@ -80,7 +86,7 @@ export type TowerEncryptedPayloadV1 = {
   plaintextHash: string;
 };
 
-export type TowerActivePayloadV1 = {
+export type TowerLastResortPayloadV1 = {
   triggerHint: string;
   encryptedRemedy: string;
   actionKind: TowerActionKindV1;
@@ -107,7 +113,7 @@ export type TowerAppointmentV1 = {
   lookupKey: string;
   slot?: number;
   bundle: EncryptedRuntimeRecoveryBundleV1;
-  activePayload?: TowerActivePayloadV1;
+  lastResortPayload?: TowerLastResortPayloadV1;
   ownerProof: TowerAppointmentOwnerProofV1;
 };
 

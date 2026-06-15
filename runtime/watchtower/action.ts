@@ -6,7 +6,7 @@ import type {
   TowerFinalDisputeProofV2,
 } from '../recovery/types';
 import { decryptTowerPayloadWithPrivateKey } from '../recovery/crypto';
-import type { ActiveTowerAppointment, WatchtowerStore, StoredTowerActionReceipt } from './store';
+import type { LastResortTowerAppointment, WatchtowerStore, StoredTowerActionReceipt } from './store';
 
 const DEPOSITORY_MINIMAL_ABI = [
   'function accountKey(bytes32 e1, bytes32 e2) view returns (bytes)',
@@ -304,28 +304,28 @@ const findActiveDisputeContext = async (
 };
 
 const assertAppointmentMatchesRemedy = (
-  appointment: ActiveTowerAppointment,
+  appointment: LastResortTowerAppointment,
   remedy: TowerCounterDisputeRemedyV2,
 ): void => {
-  if (appointment.activePayload.actionKind !== 'counter_dispute_only') {
+  if (appointment.lastResortPayload.actionKind !== 'counter_dispute_only') {
     throw new Error('WATCHTOWER_ACTION_KIND_UNSUPPORTED');
   }
-  if (appointment.activePayload.responseMode !== 'last_resort') {
+  if (appointment.lastResortPayload.responseMode !== 'last_resort') {
     throw new Error('WATCHTOWER_RESPONSE_MODE_UNSUPPORTED');
   }
-  if (appointment.activePayload.appointmentSequence !== remedy.appointmentSequence) {
+  if (appointment.lastResortPayload.appointmentSequence !== remedy.appointmentSequence) {
     throw new Error(
-      `WATCHTOWER_APPOINTMENT_SEQUENCE_MISMATCH:${appointment.activePayload.appointmentSequence}:${remedy.appointmentSequence}`,
+      `WATCHTOWER_APPOINTMENT_SEQUENCE_MISMATCH:${appointment.lastResortPayload.appointmentSequence}:${remedy.appointmentSequence}`,
     );
   }
-  if (appointment.activePayload.proofNonce !== remedy.latestProof.finalNonce) {
+  if (appointment.lastResortPayload.proofNonce !== remedy.latestProof.finalNonce) {
     throw new Error(
-      `WATCHTOWER_PROOF_NONCE_MISMATCH:${appointment.activePayload.proofNonce}:${remedy.latestProof.finalNonce}`,
+      `WATCHTOWER_PROOF_NONCE_MISMATCH:${appointment.lastResortPayload.proofNonce}:${remedy.latestProof.finalNonce}`,
     );
   }
-  if (appointment.activePayload.lastResortWindowBlocks !== remedy.lastResortWindowBlocks) {
+  if (appointment.lastResortPayload.lastResortWindowBlocks !== remedy.lastResortWindowBlocks) {
     throw new Error(
-      `WATCHTOWER_LAST_RESORT_WINDOW_MISMATCH:${appointment.activePayload.lastResortWindowBlocks}:${remedy.lastResortWindowBlocks}`,
+      `WATCHTOWER_LAST_RESORT_WINDOW_MISMATCH:${appointment.lastResortPayload.lastResortWindowBlocks}:${remedy.lastResortWindowBlocks}`,
     );
   }
 };
@@ -370,7 +370,7 @@ export const runWatchtowerSweep = async (
   const towerWallet = new Wallet(towerPrivateKey);
   const now = options?.now || (() => Date.now());
   const txWaitTimeoutMs = Math.max(0, Math.floor(Number(options?.txWaitTimeoutMs ?? 15_000)));
-  const activeAppointments = (await store.listLatestActiveAppointments())
+  const lastResortAppointments = (await store.listLatestLastResortAppointments())
     .filter((appointment) => appointment.towerMode === 'delayed_last_resort')
     .filter((appointment) => !options?.lookupKey || appointment.lookupKey === options.lookupKey);
 
@@ -382,18 +382,18 @@ export const runWatchtowerSweep = async (
   const contractFactory = options?.contractFactory || ((remedy, wallet, provider) =>
     new Contract(remedy.depositoryAddress, DEPOSITORY_MINIMAL_ABI, wallet.connect(provider as unknown as JsonRpcProvider)));
 
-  for (const appointment of activeAppointments) {
+  for (const appointment of lastResortAppointments) {
     const createdAt = now();
     try {
-      const remedy = await decodeTowerCounterDisputeRemedy(appointment.activePayload.encryptedRemedy, towerPrivateKey);
+      const remedy = await decodeTowerCounterDisputeRemedy(appointment.lastResortPayload.encryptedRemedy, towerPrivateKey);
       assertAppointmentMatchesRemedy(appointment, remedy);
       if (remedy.towerAddress.toLowerCase() !== towerWallet.address.toLowerCase()) {
         await store.appendActionReceipt(
           buildActionReceipt(
             appointment.lookupKey,
             appointment.runtimeId,
-            appointment.activePayload.triggerHint,
-            appointment.activePayload.appointmentSequence,
+            appointment.lastResortPayload.triggerHint,
+            appointment.lastResortPayload.appointmentSequence,
             'error',
             createdAt,
             `WATCHTOWER_ADDRESS_MISMATCH:${remedy.towerAddress}:${towerWallet.address.toLowerCase()}`,
@@ -424,8 +424,8 @@ export const runWatchtowerSweep = async (
           buildActionReceipt(
             appointment.lookupKey,
             appointment.runtimeId,
-            appointment.activePayload.triggerHint,
-            appointment.activePayload.appointmentSequence,
+            appointment.lastResortPayload.triggerHint,
+            appointment.lastResortPayload.appointmentSequence,
             'skipped',
             createdAt,
           ),
@@ -491,8 +491,8 @@ export const runWatchtowerSweep = async (
         buildActionReceipt(
           appointment.lookupKey,
           appointment.runtimeId,
-          appointment.activePayload.triggerHint,
-          appointment.activePayload.appointmentSequence,
+          appointment.lastResortPayload.triggerHint,
+          appointment.lastResortPayload.appointmentSequence,
           'submitted',
           createdAt,
           undefined,
@@ -506,8 +506,8 @@ export const runWatchtowerSweep = async (
         buildActionReceipt(
           appointment.lookupKey,
           appointment.runtimeId,
-          appointment.activePayload.triggerHint,
-          appointment.activePayload.appointmentSequence,
+          appointment.lastResortPayload.triggerHint,
+          appointment.lastResortPayload.appointmentSequence,
           'error',
           createdAt,
           error instanceof Error ? error.message : String(error),
@@ -518,7 +518,7 @@ export const runWatchtowerSweep = async (
   }
 
   return {
-    scanned: activeAppointments.length,
+    scanned: lastResortAppointments.length,
     submitted,
     skipped,
     errors,

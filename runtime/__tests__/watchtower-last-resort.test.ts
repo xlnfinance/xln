@@ -114,7 +114,7 @@ describe('watchtower delayed last-resort sweep', () => {
         iv: '0x1234',
         ciphertext: '0xabcd',
       },
-      activePayload: {
+      lastResortPayload: {
         triggerHint: 'chain:31337:acct:test',
         encryptedRemedy,
         actionKind: 'counter_dispute_only',
@@ -219,7 +219,7 @@ describe('watchtower delayed last-resort sweep', () => {
         iv: '0x1234',
         ciphertext: '0xabcd',
       },
-      activePayload: {
+      lastResortPayload: {
         triggerHint: 'chain:31337:acct:skip',
         encryptedRemedy: encodeTowerCounterDisputeRemedy({
           version: 2,
@@ -318,7 +318,7 @@ describe('watchtower delayed last-resort sweep', () => {
         iv: '0x1234',
         ciphertext: '0xabcd',
       },
-      activePayload: {
+      lastResortPayload: {
         triggerHint: 'chain:31337:acct:ssrf',
         encryptedRemedy: encodeTowerCounterDisputeRemedy({
           version: 2,
@@ -372,7 +372,7 @@ describe('watchtower delayed last-resort sweep', () => {
     expect(receipts[0]?.error).toContain('WATCHTOWER_RPC_URL_NOT_ALLOWED');
   });
 
-  test('rejects stale active appointment metadata before touching RPC', async () => {
+  test('rejects stale last-resort appointment metadata before touching RPC', async () => {
     const runtimeWallet = Wallet.createRandom();
     const towerWallet = Wallet.createRandom();
     const lookupKey = makeLookupKey('tower:last-resort:mismatch');
@@ -427,7 +427,7 @@ describe('watchtower delayed last-resort sweep', () => {
         iv: '0x1234',
         ciphertext: '0xabcd',
       },
-      activePayload: {
+      lastResortPayload: {
         triggerHint: 'chain:31337:acct:mismatch',
         encryptedRemedy,
         actionKind: 'counter_dispute_only',
@@ -463,7 +463,7 @@ describe('watchtower delayed last-resort sweep', () => {
     expect(receipts[0]?.error).toContain('WATCHTOWER_APPOINTMENT_SEQUENCE_MISMATCH');
   });
 
-  test('selects latest active appointment by appointment sequence before bundle height', async () => {
+  test('selects latest last-resort appointment by appointment sequence before bundle height', async () => {
     const runtimeWallet = Wallet.createRandom();
     const lookupKey = makeLookupKey('tower:last-resort:sequence-order');
     const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-sequence-${Date.now()}`);
@@ -491,7 +491,7 @@ describe('watchtower delayed last-resort sweep', () => {
         iv: '0x1234',
         ciphertext: '0xabcd',
       },
-      activePayload: {
+      lastResortPayload: {
         triggerHint: 'chain:31337:acct:sequence',
         encryptedRemedy: '{}',
         actionKind: 'counter_dispute_only' as const,
@@ -516,8 +516,8 @@ describe('watchtower delayed last-resort sweep', () => {
         height: 999,
         bundleHash: keccak256(toUtf8Bytes('bundle:sequence:old-high-height')),
       },
-      activePayload: {
-        ...baseAppointment.activePayload,
+      lastResortPayload: {
+        ...baseAppointment.lastResortPayload,
         appointmentSequence: 3,
         proofNonce: 3,
       },
@@ -529,15 +529,15 @@ describe('watchtower delayed last-resort sweep', () => {
         height: 11,
         bundleHash: keccak256(toUtf8Bytes('bundle:sequence:new-sequence')),
       },
-      activePayload: {
-        ...baseAppointment.activePayload,
+      lastResortPayload: {
+        ...baseAppointment.lastResortPayload,
         appointmentSequence: 5,
         proofNonce: 5,
       },
     });
 
-    const [latest] = await store.listLatestActiveAppointments();
-    expect(latest?.activePayload.appointmentSequence).toBe(5);
+    const [latest] = await store.listLatestLastResortAppointments();
+    expect(latest?.lastResortPayload.appointmentSequence).toBe(5);
     expect(latest?.bundle.height).toBe(11);
   });
 });

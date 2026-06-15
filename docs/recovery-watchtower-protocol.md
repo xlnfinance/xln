@@ -44,8 +44,8 @@ Implemented in the current repo:
 - same-origin official tower endpoint under `/api/tower/*`;
 - standalone watchtower daemon with scheduled sweep;
 - blind encrypted backup uploads and restore;
-- encrypted delayed-last-resort active remedies sent to the tower action public key;
-- HTTP rejection of plaintext active remedies;
+- encrypted delayed-last-resort remedies sent to the tower action public key;
+- HTTP rejection of plaintext last-resort remedies;
 - public nginx exposure of `/api/watchtower/*` removed;
 - guarded `watchtowerCounterDispute(...)` path that rejects early tower action,
   wrong tower action, missing newer proof, and same-proof delegated finalize;
@@ -223,7 +223,7 @@ The Watchtower Vault stores compact recovery bundles. There are two modes.
 - Tower returns bundles after a BrainVault-derived signed restore request.
 - This solves new-device recovery and local disk loss.
 
-**Active watchtower mode**
+**Last-resort disputer mode**
 
 - Tower also receives a narrowly scoped dispute action payload.
 - Tower monitors J-layer account/dispute events.
@@ -326,13 +326,13 @@ Tower upload envelope:
 type TowerAppointmentV1 = {
   type: "tower_appointment";
   version: 1;
-  towerMode: "blind_backup" | "active_watchtower" | "delayed_last_resort";
+  towerMode: "blind_backup" | "delayed_last_resort";
   lookupKey: string;              // blinded accountRecoveryKey or slotKey
   slot: number;
   height: number;
   bundleHash: string;
   encryptedBundle: string;        // encrypted to BrainVault recovery key
-  activePayload?: {
+  lastResortPayload?: {
     triggerHint: string;          // truncated accountId/proofBodyHash/J event hint
     encryptedRemedy: string;      // encrypted to tower action key
     actionKind: "counter_dispute_only";
@@ -387,13 +387,13 @@ Blind backup:
 - tower sees lookup key, height, size, timestamps, and bundle hash;
 - tower cannot inspect balances or counterparties if account ids are blinded.
 
-Active watchtower:
+Last-resort disputer:
 
-- `activePayload.encryptedRemedy` is readable by the tower action key;
+- `lastResortPayload.encryptedRemedy` is readable by the tower action key;
 - remedy includes only the contract call data needed to update/finalize a dispute;
 - no user spend key is shared;
 - permission is revocable by rotating tower session and publishing a newer appointment set;
-- backup bundles and active remedies are separate in both payload and lookup namespace: the `K` historical backup slots stay encrypted only to the user, while the tower-action payload is a single latest-only appointment under its own blinded lookup key.
+- backup bundles and last-resort remedies are separate in both payload and lookup namespace: the `K` historical backup slots stay encrypted only to the user, while the tower-action payload is a single latest-only appointment under its own blinded lookup key.
 
 Delayed last-resort mode:
 
@@ -508,7 +508,7 @@ Detailed steps:
 
 ## Delayed Last-resort Watchtower Flow
 
-The active tower should be a last-resort responder, not an immediate dispute bot. This reduces the risk that a hub and a tower collude to force a premature on-chain close or choose a stale-but-valid proof while the user is merely offline for a short time.
+The last-resort tower should be a last-resort responder, not an immediate dispute bot. This reduces the risk that a hub and a tower collude to force a premature on-chain close or choose a stale-but-valid proof while the user is merely offline for a short time.
 
 The tower monitors J-layer events:
 
@@ -553,7 +553,7 @@ The tower action must be **counter-dispute only**:
 - allowed: submit a newer signed proof with `finalNonce > activeDispute.initialNonce`;
 - disallowed: start a dispute for the user;
 - disallowed: finalize/accept the same proof that the hub started with;
-- disallowed: use any backup-ring bundle whose active payload has been superseded;
+- disallowed: use any backup-ring bundle whose last-resort payload has been superseded;
 - disallowed: act before the last-resort window.
 
 This still gives the user the first chance to respond. The tower only acts when the alternative is that the hub's stale dispute may become final.
@@ -574,18 +574,18 @@ Required controls:
    - The tower cannot submit the same-proof finalize path.
    - If the hub started a dispute with the true latest proof, the tower does nothing; the latest state can finalize normally.
 
-3. **Latest active remedy only**
+3. **Latest last-resort remedy only**
    - Historical `K` recovery bundles are encrypted only to the user.
    - The tower-action payload is a single latest slot, overwritten on every new committed frame.
    - Old action payloads should expire by `appointmentSequence`, session id, and receipt policy.
 
 4. **Public signed receipts**
-   - Every active appointment has a signed tower receipt: account, height, proof nonce, proofBodyHash, sequence, and expiry.
+   - Every last-resort appointment has a signed tower receipt: account, height, proof nonce, proofBodyHash, sequence, and expiry.
    - If a tower submits a lower nonce than a newer receipt it signed, the user can prove misbehavior to relays, Hub Matrix, and any staking/slashing layer.
 
 5. **Independent towers**
    - Default consumer policy should use at least two non-hub towers for high-value accounts.
-   - A hub may subsidize tower fees, but the hub's own tower must not be the only active responder.
+   - A hub may subsidize tower fees, but the hub's own tower must not be the only last-resort responder.
 
 6. **User-first notification ladder**
    - On dispute start: push notification, desktop notification, relay message.
@@ -595,7 +595,7 @@ Required controls:
 
 7. **No blind trust in "latest"**
    - No contract can know the latest off-chain state unless the protocol publishes a latest commitment on-chain or adds Lightning-style revocation.
-   - Therefore old active remedies are a real risk if a malicious tower retained them.
+   - Therefore old last-resort remedies are a real risk if a malicious tower retained them.
    - Mitigation for v1 is separation of backup/action payloads, receipts, reputation/slashing, delayed validity, and multiple towers.
    - A future stronger design can add revocation secrets or an on-chain latest-appointment registry, but that increases complexity and/or on-chain writes.
 
@@ -603,7 +603,7 @@ Required contract/runtime assumption:
 
 - J-layer must support a dispute window where a newer valid proof can replace or defeat an older proof.
 - The rescue path must enforce `lastResortWindowBlocks` on-chain.
-- If this is not currently true, `jurisdictions` contracts need a guarded `watchtowerCounterDispute` or equivalent before active watchtowers can be considered collusion-resistant.
+- If this is not currently true, `jurisdictions` contracts need a guarded `watchtowerCounterDispute` or equivalent before last-resort towers can be considered collusion-resistant.
 
 Current repo note:
 
@@ -620,7 +620,7 @@ Current repo note:
 
 The user should see:
 
-- **Recovery coverage**: Local, Peer, Tower, Active Tower.
+- **Recovery coverage**: Local, Peer, Tower, Last-Resort Tower.
 - **Account state**:
   - `Verified`: local, peer, and/or tower agree on latest height.
   - `Peer restored`: restored from hub/counterparty, tower not available.
@@ -724,8 +724,8 @@ Current repo status:
 - standalone watchtower sweep engine exists in `runtime/watchtower/action.ts`;
 - standalone daemon schedules sweeps and exposes health without requiring public
   `/api/watchtower/*` access;
-- active remedies are encrypted to the tower action key and plaintext active
-  remedies are rejected by tower HTTP;
+- last-resort remedies are encrypted to the tower action key and plaintext
+  last-resort remedies are rejected by tower HTTP;
 - browser/runtime upload paths exist for configured recovery towers;
 - PSR, recovery relay, and recovery coverage UI remain separate open work.
 
@@ -735,7 +735,7 @@ Features:
 
 - multiple towers per account;
 - erasure-coded bundle replicas;
-- paid active watchtower plans;
+- paid last-resort tower plans;
 - hub-subsidized consumer plan;
 - relay reputation scoring;
 - tower SLA receipts.

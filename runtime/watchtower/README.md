@@ -8,7 +8,7 @@ This folder owns the standalone recovery/watchtower API service.
 - enforces per-lookup retention and byte quotas
 - signs tower receipts
 - serves restore/discovery APIs
-- stores delayed last-resort active appointments
+- stores delayed last-resort appointments
 - executes delayed counter-dispute sweeps from a standalone service boundary
 - records tower action receipts for audit/debug
 
@@ -19,14 +19,14 @@ This folder owns the standalone recovery/watchtower API service.
 - `http.ts`
   HTTP handlers for appointment, restore, receipt, complaint, sweep, and action receipt endpoints.
 - `action.ts`
-  Delayed last-resort sweep engine. Reads active appointments, watches dispute
+  Delayed last-resort sweep engine. Reads last-resort appointments, watches dispute
   state, and submits tower-only counter-disputes in the final rescue window.
 - `standalone-server.ts`
   Bun server entrypoint. Equivalent in spirit to `runtime/relay/standalone-server.ts`.
   Publishes `towerId`, `signerAddress`, `actionPublicKey`, and quota limits on
   `/` and `/healthz` so wallets can bind delayed authorizations to the exact
   tower address and encrypt last-resort remedy payloads to the tower. Health also
-  exposes persisted lookup / active-appointment / action-receipt counts so
+  exposes persisted lookup / last-resort appointment / action-receipt counts so
   operators can verify restart persistence cheaply.
 
 ## Called by
