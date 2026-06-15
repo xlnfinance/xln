@@ -1,4 +1,5 @@
 import {
+  buildCrossJurisdictionCloseProof,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,
@@ -19,7 +20,6 @@ import {
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
 } from '../cross-jurisdiction-helpers';
-import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import type { MempoolOp } from './account';
 
 type CrossJurisdictionSweepTx = Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>;
@@ -39,16 +39,6 @@ const cancelOrderbookOfferIfPresent = (
   accountId: string,
   offerId: string,
 ): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
-
-const pushCrossJOutput = (
-  env: Env,
-  outputs: EntityInput[],
-  entityId: string,
-  entityTxs: EntityTx[],
-  signerIdHint?: string | null,
-): void => {
-  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs, signerIdHint);
-};
 
 export const handleOrderbookSweepCrossJurisdictionEntityTx = (
   env: Env,
@@ -117,28 +107,21 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
     }
 
     if (!hasFilledAmount) {
+      const proof = buildCrossJurisdictionCloseProof(route, '0x');
+      route.sourceCloseProof = proof;
       if (accountId && account?.pulls?.has(route.sourcePull?.pullId || '')) {
         const sourcePullId = route.sourcePull!.pullId;
         mempoolOps.push({
           accountId,
           tx: {
-            type: 'pull_cancel',
+            type: 'cross_pull_close',
             data: {
               pullId: sourcePullId,
-              reason: 'expired',
+              binary: '0x',
+              proof,
             },
           },
         });
-      }
-      if (route.targetPull && route.target?.counterpartyEntityId && route.target?.entityId) {
-        pushCrossJOutput(env, outputs, route.target.counterpartyEntityId, [{
-          type: 'cancelPull',
-          data: {
-            counterpartyEntityId: route.target.entityId,
-            pullId: route.targetPull.pullId,
-            description: `Cross-j ${orderId} sweep cancel target pull`,
-          },
-        }], route.targetSignerId);
       }
       transitionCrossJurisdictionRouteStatus(route, 'expired', now);
     } else {
