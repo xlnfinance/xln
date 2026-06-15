@@ -68,8 +68,54 @@ const normalizeLookupKey = (lookupKey: unknown): string => {
   return value;
 };
 
+const normalizeBytes32 = (value: unknown, label: string): string => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`TOWER_${label}_INVALID: ${String(value)}`);
+  }
+  return normalized;
+};
+
+const normalizeHexBytes = (value: unknown, label: string): string => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!/^0x([0-9a-f]{2})*$/.test(normalized)) {
+    throw new Error(`TOWER_${label}_INVALID`);
+  }
+  return normalized;
+};
+
+const normalizeNonNegativeInt = (value: unknown, label: string): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`TOWER_${label}_INVALID`);
+  }
+  return Math.floor(parsed);
+};
+
 const quotaExceededStatus = (message: string): number =>
   message.startsWith('TOWER_QUOTA_EXCEEDED') || message.startsWith('TOWER_BODY_TOO_LARGE') ? 413 : 400;
+
+const verifyEncryptedBundleShape = (appointment: TowerAppointmentV1): void => {
+  if (!appointment.bundle || appointment.bundle.version !== 1) {
+    throw new Error('TOWER_BUNDLE_VERSION_UNSUPPORTED');
+  }
+  const runtimeId = String(appointment.bundle.runtimeId || '').trim().toLowerCase();
+  if (!runtimeId) {
+    throw new Error('TOWER_BUNDLE_RUNTIME_ID_REQUIRED');
+  }
+  normalizeLookupKey(appointment.bundle.lookupKey);
+  normalizeNonNegativeInt(appointment.bundle.height, 'BUNDLE_HEIGHT');
+  normalizeNonNegativeInt(appointment.bundle.createdAt, 'BUNDLE_CREATED_AT');
+  normalizeBytes32(appointment.bundle.bundleHash, 'BUNDLE_HASH');
+  normalizeHexBytes(appointment.bundle.iv, 'BUNDLE_IV');
+  const ciphertext = normalizeHexBytes(appointment.bundle.ciphertext, 'BUNDLE_CIPHERTEXT');
+  if (ciphertext.length <= 2) {
+    throw new Error('TOWER_BUNDLE_CIPHERTEXT_EMPTY');
+  }
+  if (appointment.bundle.compression !== undefined && appointment.bundle.compression !== 'gzip') {
+    throw new Error(`TOWER_BUNDLE_COMPRESSION_UNSUPPORTED: ${String(appointment.bundle.compression)}`);
+  }
+};
 
 const assertEncryptedActivePayload = (activePayload: TowerAppointmentV1['activePayload']): void => {
   const raw = String(activePayload?.encryptedRemedy || '').trim();
@@ -95,10 +141,39 @@ const assertEncryptedActivePayload = (activePayload: TowerAppointmentV1['activeP
   }
 };
 
+const verifyLastResortPayload = (activePayload: TowerAppointmentV1['activePayload']): void => {
+  if (!activePayload) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_MISSING');
+  }
+  if (activePayload.actionKind !== 'counter_dispute_only') {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_ACTION_KIND_UNSUPPORTED');
+  }
+  if (activePayload.responseMode !== 'last_resort') {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_RESPONSE_MODE_UNSUPPORTED');
+  }
+  const triggerHint = String(activePayload.triggerHint || '').trim();
+  if (!triggerHint || triggerHint.length > 256) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_TRIGGER_HINT_INVALID');
+  }
+  if (normalizeNonNegativeInt(activePayload.appointmentSequence, 'ACTIVE_PAYLOAD_APPOINTMENT_SEQUENCE') <= 0) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_APPOINTMENT_SEQUENCE_INVALID');
+  }
+  if (normalizeNonNegativeInt(activePayload.proofNonce, 'ACTIVE_PAYLOAD_PROOF_NONCE') <= 0) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_PROOF_NONCE_INVALID');
+  }
+  normalizeBytes32(activePayload.proofBodyHash, 'ACTIVE_PAYLOAD_PROOF_BODY_HASH');
+  if (normalizeNonNegativeInt(activePayload.lastResortWindowBlocks, 'ACTIVE_PAYLOAD_LAST_RESORT_WINDOW') <= 0) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_LAST_RESORT_WINDOW_INVALID');
+  }
+  normalizeNonNegativeInt(activePayload.safetyMarginBlocks, 'ACTIVE_PAYLOAD_SAFETY_MARGIN');
+  assertEncryptedActivePayload(activePayload);
+};
+
 const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointmentV1 => {
   if (!appointment || appointment.type !== 'tower_appointment' || appointment.version !== 1) {
     throw new Error('TOWER_APPOINTMENT_INVALID');
   }
+  verifyEncryptedBundleShape(appointment);
   const lookupKey = normalizeLookupKey(appointment.lookupKey);
   if (appointment.bundle.lookupKey !== lookupKey) {
     throw new Error('TOWER_APPOINTMENT_LOOKUP_MISMATCH');
@@ -109,15 +184,17 @@ const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointme
   }
   const signedAt = Math.max(0, Math.floor(Number(appointment.ownerProof?.signedAt || 0)));
   const slot = Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
-  const towerMode =
-    appointment.towerMode === 'active_watchtower' || appointment.towerMode === 'delayed_last_resort'
-      ? appointment.towerMode
-      : 'blind_backup';
-  if (towerMode !== 'blind_backup' && !appointment.activePayload) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_MISSING');
+  if (appointment.towerMode === 'active_watchtower') {
+    throw new Error('TOWER_ACTIVE_WATCHTOWER_DISABLED');
   }
-  if (appointment.activePayload) {
-    assertEncryptedActivePayload(appointment.activePayload);
+  const towerMode = appointment.towerMode === 'delayed_last_resort'
+    ? appointment.towerMode
+    : 'blind_backup';
+  if (towerMode === 'blind_backup' && appointment.activePayload) {
+    throw new Error('TOWER_BACKUP_ACTIVE_PAYLOAD_FORBIDDEN');
+  }
+  if (towerMode === 'delayed_last_resort') {
+    verifyLastResortPayload(appointment.activePayload);
   }
   const message = buildTowerAppointmentOwnerMessage(
     runtimeId,

@@ -342,6 +342,7 @@ describe('watchtower rpc last-resort integration', () => {
       dbPath: join(tempRoot, 'tower.level'),
       towerPrivateKey: tower.privateKey,
       maxStoredBytesPerLookupKey: 64 * 1024,
+      enableOperatorApi: true,
     });
     servers.push(towerServer);
 
@@ -620,6 +621,7 @@ describe('watchtower rpc last-resort integration', () => {
       dbPath: join(tempRoot, 'tower.level'),
       towerPrivateKey: tower.privateKey,
       maxStoredBytesPerLookupKey: 64 * 1024,
+      enableOperatorApi: true,
     });
     servers.push(towerServer);
 

@@ -268,6 +268,35 @@ describe('standalone watchtower service', () => {
     expect(String(payload.error || '')).toContain('TOWER_ACTIVE_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   });
 
+  test('rejects deprecated active-watchtower mode over HTTP', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-active-mode-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-active-mode-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+    });
+    servers.push(server);
+
+    const { appointment } = await createRuntimeAppointment();
+    const response = await fetch(`http://127.0.0.1:${server.server.port}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...appointment,
+        towerMode: 'active_watchtower',
+      }),
+    });
+    expect(response.status).toBe(400);
+    const payload = await response.json() as { ok: boolean; error?: string };
+    expect(payload.ok).toBe(false);
+    expect(String(payload.error || '')).toContain('TOWER_ACTIVE_WATCHTOWER_DISABLED');
+  });
+
   test('rejects oversized JSON bodies before request handling', async () => {
     const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-body-cap-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });
@@ -330,6 +359,7 @@ describe('standalone watchtower service', () => {
       dbPath: join(tempRoot, 'tower.level'),
       maxStoredBytesPerLookupKey: 64 * 1024,
       towerPrivateKey: Wallet.createRandom().privateKey,
+      enableLastResortAgent: true,
       sweepIntervalMs: 60_000,
     });
     servers.push(server);
@@ -339,5 +369,43 @@ describe('standalone watchtower service', () => {
     const payload = await health.json() as { sweep?: { enabled?: boolean; intervalMs?: number } };
     expect(payload.sweep?.enabled).toBe(true);
     expect(payload.sweep?.intervalMs).toBe(60_000);
+  });
+
+  test('keeps operator endpoints disabled by default', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-operator-disabled-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-operator-disabled-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+      towerPrivateKey: Wallet.createRandom().privateKey,
+      enableLastResortAgent: true,
+    });
+    servers.push(server);
+
+    const base = `http://127.0.0.1:${server.server.port}`;
+    const sweep = await fetch(`${base}/api/watchtower/sweep`, { method: 'POST' });
+    expect(sweep.status).toBe(404);
+    const actions = await fetch(`${base}/api/watchtower/actions/${keccak256(toUtf8Bytes('none'))}`);
+    expect(actions.status).toBe(404);
+  });
+
+  test('requires operator token when operator API binds publicly', () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-public-operator-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    expect(() => startStandaloneWatchtowerServer({
+      host: '0.0.0.0',
+      port: 0,
+      towerId: 'tower-public-operator-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+      enableOperatorApi: true,
+    })).toThrow('WATCHTOWER_OPERATOR_TOKEN_REQUIRED_FOR_PUBLIC_BIND');
   });
 });
