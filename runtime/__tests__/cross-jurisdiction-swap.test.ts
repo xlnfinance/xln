@@ -415,6 +415,9 @@ describe('cross-jurisdiction hashledger swap', () => {
         tx.data.binary === binary,
       ),
     )).toBe(true);
+    const targetOutput = outputs.find(output => output.entityId === targetUser);
+    expect(targetOutput?.entityTxs?.map((tx: any) => tx.type)).toEqual(['resolvePull', 'cancelPull']);
+    expect((targetOutput?.entityTxs?.[1] as any)?.data.pullId).toBe(filledRoute.targetPull!.pullId);
   });
 
   test('committed pull resolve rejects stale cross-j claim ratios', () => {
