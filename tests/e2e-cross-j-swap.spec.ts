@@ -3199,6 +3199,21 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           message: 'Alice partial Clear + Close must release the source pull remainder',
         }).toMatchObject({ pulls: 0, hasPendingFrame: false, mempoolTxs: [] }),
       );
+      await timedStep('cross_j_swap.partial.alice_target_remainder_released', () =>
+        expect.poll(async () => {
+          await flushRuntime(alicePage, 3);
+          const state = await readCrossState(alicePage, aliceRpc2, targetHubId);
+          return {
+            pulls: state.pulls,
+            hasPendingFrame: state.hasPendingFrame,
+            mempoolTxs: state.mempoolTxs,
+          };
+        }, {
+          timeout: 45_000,
+          intervals: [250, 500, 1000],
+          message: 'Alice partial Clear + Close must release the target pull remainder',
+        }).toMatchObject({ pulls: 0, hasPendingFrame: false, mempoolTxs: [] }),
+      );
 
       const aliceDisputeOrderId = await timedStep('cross_j_swap.dispute.alice_offer', () => placeCrossOrder(alicePage, {
         source: alice,
