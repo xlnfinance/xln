@@ -6,6 +6,7 @@ import type {
   AccountTx,
   CrossJurisdictionBookAdmission,
   CrossJurisdictionBookAdmissionReceipt,
+  CrossJurisdictionCloseProof,
   CrossJurisdictionPendingFill,
   CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
@@ -417,6 +418,72 @@ const cloneCrossJurisdictionPullLeg = (value: CrossJurisdictionPullLeg | undefin
   };
 };
 
+export function hashCrossJurisdictionCloseBinary(binary: string): string {
+  return ethers.keccak256(String(binary || '0x') as `0x${string}`);
+}
+
+export function cloneCrossJurisdictionCloseProof(
+  proof: CrossJurisdictionCloseProof,
+): CrossJurisdictionCloseProof {
+  return {
+    orderId: String(proof.orderId || ''),
+    routeHash: String(proof.routeHash || ''),
+    sourcePullId: String(proof.sourcePullId || ''),
+    targetPullId: String(proof.targetPullId || ''),
+    fillRatio: Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(proof.fillRatio) || 0))),
+    cumulativeSourceAmount: BigInt(proof.cumulativeSourceAmount ?? 0n),
+    cumulativeTargetAmount: BigInt(proof.cumulativeTargetAmount ?? 0n),
+    binaryHash: String(proof.binaryHash || ''),
+    closeMode: proof.closeMode === 'full'
+      ? 'full'
+      : proof.closeMode === 'pure_cancel'
+        ? 'pure_cancel'
+        : 'partial_cancel_remainder',
+  };
+}
+
+export function buildCrossJurisdictionCloseProof(
+  route: CrossJurisdictionSwapRoute,
+  binary: string,
+): CrossJurisdictionCloseProof {
+  const canonical = withCanonicalCrossJurisdictionRouteHash(route);
+  if (!canonical.sourcePull || !canonical.targetPull) {
+    throw new Error(`CROSS_J_CLOSE_PROOF_PULLS_MISSING:${canonical.orderId}`);
+  }
+  const fillRatio = Math.max(
+    0,
+    Math.min(
+      CROSS_J_MAX_FILL_RATIO,
+      Math.floor(Number(canonical.cumulativeFillRatio ?? canonical.claimedRatio ?? 0) || 0),
+    ),
+  );
+  const sourceTotal = BigInt(canonical.source.amount);
+  const targetTotal = BigInt(canonical.target.amount);
+  const cumulativeSourceAmount =
+    canonical.filledSourceAmount ??
+    canonical.sourceClaimed ??
+    ((sourceTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const cumulativeTargetAmount =
+    canonical.filledTargetAmount ??
+    canonical.targetClaimed ??
+    ((targetTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  return cloneCrossJurisdictionCloseProof({
+    orderId: canonical.orderId,
+    routeHash: canonical.routeHash || deriveCrossJurisdictionRouteHash(canonical),
+    sourcePullId: canonical.sourcePull.pullId,
+    targetPullId: canonical.targetPull.pullId,
+    fillRatio,
+    cumulativeSourceAmount,
+    cumulativeTargetAmount,
+    binaryHash: hashCrossJurisdictionCloseBinary(binary),
+    closeMode: fillRatio >= CROSS_J_MAX_FILL_RATIO
+      ? 'full'
+      : fillRatio <= 0
+        ? 'pure_cancel'
+        : 'partial_cancel_remainder',
+  });
+}
+
 export function getCrossJurisdictionPrivateSeed(
   env: Pick<Env, 'runtimeSeed'>,
   route: CrossJurisdictionSwapRoute,
@@ -448,6 +515,12 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const targetReceipt = route.targetReceipt
     ? cloneCrossJurisdictionBookAdmissionReceipt(route.targetReceipt)
     : undefined;
+  const sourceCloseProof = route.sourceCloseProof
+    ? cloneCrossJurisdictionCloseProof(route.sourceCloseProof)
+    : undefined;
+  const targetCloseProof = route.targetCloseProof
+    ? cloneCrossJurisdictionCloseProof(route.targetCloseProof)
+    : undefined;
   const priceTicks = optionalBigInt(route.priceTicks);
   const fillSeq = optionalNumber(route.fillSeq);
   const cumulativeFillRatio = optionalNumber(route.cumulativeFillRatio);
@@ -477,6 +550,8 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (sourcePull) clone.sourcePull = sourcePull;
   if (targetPull) clone.targetPull = targetPull;
   if (targetReceipt) clone.targetReceipt = targetReceipt;
+  if (sourceCloseProof) clone.sourceCloseProof = sourceCloseProof;
+  if (targetCloseProof) clone.targetCloseProof = targetCloseProof;
   if (priceTicks !== undefined) clone.priceTicks = priceTicks;
   if (fillSeq !== undefined) clone.fillSeq = fillSeq;
   if (cumulativeFillRatio !== undefined) clone.cumulativeFillRatio = cumulativeFillRatio;
@@ -550,6 +625,9 @@ export function cloneCrossJurisdictionPullBinding(
   if (binding.targetReceipt) {
     clone.targetReceipt = cloneCrossJurisdictionBookAdmissionReceipt(binding.targetReceipt);
   }
+  if (binding.sourceCloseProof) {
+    clone.sourceCloseProof = cloneCrossJurisdictionCloseProof(binding.sourceCloseProof);
+  }
   if (binding.status) clone.status = binding.status;
   const cumulativeFillRatio = optionalNumber(binding.cumulativeFillRatio);
   const claimedRatio = optionalNumber(binding.claimedRatio);
@@ -577,6 +655,7 @@ export function buildCrossJurisdictionPullBinding(
     routeHash: canonical.routeHash || deriveCrossJurisdictionRouteHash(canonical),
     leg,
     ...(canonical.targetReceipt ? { targetReceipt: canonical.targetReceipt } : {}),
+    ...(canonical.sourceCloseProof ? { sourceCloseProof: canonical.sourceCloseProof } : {}),
     status: canonical.status,
     ...(canonical.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: canonical.cumulativeFillRatio } : {}),
     ...(canonical.claimedRatio !== undefined ? { claimedRatio: canonical.claimedRatio } : {}),
@@ -602,6 +681,7 @@ export function buildCommittedCrossJurisdictionPullBinding(
     routeHash,
     leg,
     ...(route.targetReceipt ? { targetReceipt: route.targetReceipt } : {}),
+    ...(route.sourceCloseProof ? { sourceCloseProof: route.sourceCloseProof } : {}),
     status: route.status,
     ...(route.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: route.cumulativeFillRatio } : {}),
     ...(route.claimedRatio !== undefined ? { claimedRatio: route.claimedRatio } : {}),

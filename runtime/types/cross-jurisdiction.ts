@@ -70,11 +70,24 @@ export interface CrossJurisdictionBookAdmissionReceipt {
   committedAt: number;
 }
 
+export interface CrossJurisdictionCloseProof {
+  orderId: string;
+  routeHash: string;
+  sourcePullId: string;
+  targetPullId: string;
+  fillRatio: number;
+  cumulativeSourceAmount: bigint;
+  cumulativeTargetAmount: bigint;
+  binaryHash: string;
+  closeMode: 'full' | 'partial_cancel_remainder' | 'pure_cancel';
+}
+
 export interface CrossJurisdictionPullBinding {
   orderId: string;
   routeHash: string;
   leg: CrossJurisdictionBookLeg;
   targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
+  sourceCloseProof?: CrossJurisdictionCloseProof;
   status?: CrossJurisdictionSwapStatus;
   cumulativeFillRatio?: number;
   claimedRatio?: number;
@@ -119,6 +132,8 @@ export interface CrossJurisdictionSwapRoute {
   sourcePull?: CrossJurisdictionPullLeg;
   targetPull?: CrossJurisdictionPullLeg;
   targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
+  sourceCloseProof?: CrossJurisdictionCloseProof;
+  targetCloseProof?: CrossJurisdictionCloseProof;
   priceTicks?: bigint;
   fillSeq?: number;
   cumulativeFillRatio?: number; // Coarse 0-65535 compatibility/dispute ratio.

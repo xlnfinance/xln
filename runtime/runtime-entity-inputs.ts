@@ -1,4 +1,4 @@
-import { applyEntityInput } from './entity-consensus';
+import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
@@ -179,6 +179,50 @@ export const applyMergedEntityInputs = async (
     }
   }
 
+  const immediateCrossJOutputs = entityOutbox.filter(output => isImmediateLocalCrossJurisdictionOutput(env, output));
+  if (immediateCrossJOutputs.length > 0) {
+    const deferredOutputs = entityOutbox.filter(output => !isImmediateLocalCrossJurisdictionOutput(env, output));
+    entityOutbox.length = 0;
+    entityOutbox.push(...deferredOutputs);
+
+    for (const entityInput of mergeEntityInputs(immediateCrossJOutputs)) {
+      const actualSignerId = entityInput.signerId.trim();
+      const replicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
+      assertRuntimeIngress(
+        replicaKey,
+        'RUNTIME_CROSS_J_LOCAL_REPLICA_NOT_FOUND',
+        'Immediate cross-j local output target replica disappeared',
+        {
+          entityId: entityInput.entityId,
+          signerId: actualSignerId,
+          txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
+        },
+      );
+      const entityReplica = env.eReplicas.get(replicaKey);
+      assertRuntimeIngress(
+        entityReplica,
+        'RUNTIME_CROSS_J_LOCAL_REPLICA_EMPTY',
+        'Immediate cross-j local output target replica missing state',
+        { replicaKey },
+      );
+      const result = await applyEntityInputToReplica(
+        env,
+        entityReplica,
+        replicaKey,
+        entityInput,
+        actualSignerId,
+        isReplay,
+      );
+      appliedEntityInputs.push(result.appliedInput);
+      env.eReplicas.set(replicaKey, result.nextReplica);
+      entityOutbox.push(...result.outputs);
+      if (result.jOutputs.length > 0) {
+        console.log(`📦 [2/6] Collecting ${result.jOutputs.length} jOutputs from ${replicaKey.slice(-10)}`);
+        jOutbox.push(...result.jOutputs);
+      }
+    }
+  }
+
   return { entityOutbox, appliedEntityInputs, jOutbox };
 };
 
@@ -278,4 +322,18 @@ const findReplicaKeysForEntityInsensitive = (env: Env, entityId: string): string
     const [repEntityId] = String(key).split(':');
     return Boolean(repEntityId && String(repEntityId).toLowerCase() === entityNorm);
   });
+};
+
+const normalizeRuntimeRef = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const isImmediateLocalCrossJurisdictionOutput = (env: Env, output: RoutedEntityInput): boolean => {
+  if (!entityInputHasCrossJurisdictionIntraRuntimeTx(output)) return false;
+  const localRuntimeId = normalizeRuntimeRef(env.runtimeId);
+  const outputRuntimeId = normalizeRuntimeRef(output.runtimeId);
+  if (outputRuntimeId && localRuntimeId && outputRuntimeId !== localRuntimeId) return false;
+  const fromRuntimeId = normalizeRuntimeRef(output.from);
+  if (fromRuntimeId && localRuntimeId && fromRuntimeId !== localRuntimeId) return false;
+  const signerId = String(output.signerId || '').trim();
+  if (!signerId) return false;
+  return Boolean(findReplicaKeyInsensitive(env, output.entityId, signerId));
 };

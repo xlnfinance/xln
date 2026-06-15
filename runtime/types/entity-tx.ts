@@ -1,6 +1,6 @@
 import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
 import type { AccountInput, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
-import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { LendingTermId } from './lending';
 import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
@@ -162,6 +162,17 @@ export type EntityTx =
       data: {
         counterpartyEntityId: string;
         pullId: string;
+        description?: string;
+      };
+    }
+  | {
+      type: 'crossPullClose';
+      data: {
+        counterpartyEntityId: string;
+        pullId: string;
+        binary: string;
+        proof: CrossJurisdictionCloseProof;
+        route?: CrossJurisdictionSwapRoute;
         description?: string;
       };
     }

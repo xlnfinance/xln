@@ -21,6 +21,7 @@ export const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
   'registerCrossJurisdictionSwap',
   'crossJurisdictionFillNotice',
   'requestCrossJurisdictionClear',
+  'crossPullClose',
   'crossJurisdictionSalvage',
   'orderbookSweepCrossJurisdiction',
   'admitCrossJurisdictionBookOrder',
@@ -133,6 +134,7 @@ export const isCrossJurisdictionEntityInputRemoteHopAllowed = (
   for (const tx of input.entityTxs || []) {
     if (!isCrossJurisdictionIntraRuntimeTx(tx)) continue;
     sawCrossJ = true;
+    if (tx.type === 'crossPullClose') return false;
     const route = extractCrossJurisdictionRouteFromTx(tx);
     if (!route) return false;
     if (!isCrossJurisdictionRouteRemoteHopAllowed(route, localRuntimeId, remoteRuntimeId, resolveRuntimeId)) {

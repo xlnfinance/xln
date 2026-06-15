@@ -1,3 +1,5 @@
+import type { AccountTx } from './types';
+
 /**
  * Account dispute freeze policy.
  *
@@ -14,8 +16,18 @@
 export const isAccountControlTx = (txType: string): boolean =>
   txType === 'j_event_claim' || txType === 'reopen_disputed';
 
-export const isDisputeEvidenceAccountTx = (txType: string): boolean =>
-  txType === 'pull_resolve' || txType === 'swap_resolve';
+const isEvidenceBearingAccountTx = (tx: AccountTx): boolean => {
+  if (tx.type === 'pull_resolve') return typeof tx.data.binary === 'string';
+  if (tx.type === 'cross_pull_close') return typeof tx.data.binary === 'string' && Boolean(tx.data.proof);
+  return false;
+};
+
+export const isDisputeEvidenceAccountTx = (txOrType: AccountTx | string): boolean => {
+  if (typeof txOrType === 'string') {
+    return txOrType === 'pull_resolve' || txOrType === 'cross_pull_close' || txOrType === 'swap_resolve';
+  }
+  return txOrType.type === 'swap_resolve' || isEvidenceBearingAccountTx(txOrType);
+};
 
 export const isAccountBusinessTx = (txType: string): boolean =>
   !isAccountControlTx(txType);

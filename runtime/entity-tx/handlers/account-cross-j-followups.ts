@@ -445,6 +445,96 @@ const applyPullResolveFollowup = (
   return true;
 };
 
+const applyCrossPullCloseFollowup = (
+  env: Env,
+  newState: EntityState,
+  counterpartyId: string,
+  accountTx: Extract<AccountTx, { type: 'cross_pull_close' }>,
+  outputs: EntityInput[],
+): boolean => {
+  if (!newState.crossJurisdictionSwaps?.size) return true;
+  const fillRatio = Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(accountTx.data.proof.fillRatio) || 0)));
+  const decoded = decodeHashLadderBinary(accountTx.data.binary);
+  if (decoded.fillRatio !== fillRatio) {
+    throw new Error(
+      `CROSS_J_CLOSE_BINARY_RATIO_MISMATCH: pull=${accountTx.data.pullId} binary=${decoded.fillRatio} proof=${fillRatio}`,
+    );
+  }
+  const currentEntityId = normalizeEntityRef(newState.entityId);
+  const counterpartyEntityId = normalizeEntityRef(counterpartyId);
+
+  for (const route of newState.crossJurisdictionSwaps.values()) {
+    const sourceUserId = normalizeEntityRef(route.source.entityId);
+    const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
+    const targetHubId = normalizeEntityRef(route.target.entityId);
+    const targetUserId = normalizeEntityRef(route.target.counterpartyEntityId);
+    const isSourceHubClose =
+      route.sourcePull?.pullId === accountTx.data.pullId &&
+      route.targetPull?.pullId !== undefined &&
+      currentEntityId === sourceHubId &&
+      counterpartyEntityId === sourceUserId;
+    const isSourceUserClose =
+      route.sourcePull?.pullId === accountTx.data.pullId &&
+      currentEntityId === sourceUserId &&
+      counterpartyEntityId === sourceHubId;
+
+    if (isSourceHubClose || isSourceUserClose) {
+      assertPullResolveAllowed(route, fillRatio, 'source');
+      backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
+      Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
+      route.sourceCloseProof = accountTx.data.proof;
+      transitionCrossJurisdictionRouteStatus(route, 'source_claimed', newState.timestamp);
+
+      const targetPull = route.targetPull;
+      if (isSourceUserClose && targetPull) {
+        outputs.push(buildCrossJurisdictionEntityOutput(
+          env,
+          route.target.counterpartyEntityId,
+          [{
+            type: 'crossPullClose',
+            data: {
+              counterpartyEntityId: route.target.entityId,
+              pullId: targetPull.pullId,
+              binary: accountTx.data.binary,
+              proof: accountTx.data.proof,
+              route: cloneCrossJurisdictionRoute(route),
+              description: `Cross-j ${route.orderId} target close ${fillRatio}/65535`,
+            },
+          }],
+          route.targetSignerId,
+        ));
+      }
+      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
+      crossJFollowupLog.debug('pull.close.relay_target', {
+        route: shortOrder(route.orderId, 12),
+        target: shortId(route.target.counterpartyEntityId),
+        ratio: fillRatio,
+      });
+      continue;
+    }
+
+    if (
+      route.targetPull?.pullId === accountTx.data.pullId &&
+      currentEntityId === targetUserId &&
+      counterpartyEntityId === targetHubId
+    ) {
+      assertPullResolveAllowed(route, fillRatio, 'target');
+      backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
+      Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
+      route.sourceCloseProof = accountTx.data.proof;
+      route.targetCloseProof = accountTx.data.proof;
+      transitionCrossJurisdictionRouteStatus(route, 'settled', newState.timestamp);
+      route.settledAt = newState.timestamp;
+      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled');
+      crossJFollowupLog.debug('pull.close.settled', {
+        route: shortOrder(route.orderId, 12),
+        ratio: fillRatio,
+      });
+    }
+  }
+  return true;
+};
+
 const applyFillAckFollowup = (
   env: Env,
   newState: EntityState,
@@ -545,6 +635,9 @@ export function applyCommittedCrossJurisdictionAccountTxFollowup(
   }
   if (accountTx.type === 'pull_resolve') {
     return applyPullResolveFollowup(env, newState, counterpartyId, accountTx, outputs);
+  }
+  if (accountTx.type === 'cross_pull_close') {
+    return applyCrossPullCloseFollowup(env, newState, counterpartyId, accountTx, outputs);
   }
   if (accountTx.type === 'cross_swap_fill_ack') {
     return applyFillAckFollowup(env, newState, accountTx, outputs);

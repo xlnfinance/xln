@@ -1,4 +1,6 @@
 import {
+  buildCrossJurisdictionCloseProof,
+  buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
   cloneCrossJurisdictionRoute,
   getCrossJurisdictionPrivateSeed,
@@ -8,7 +10,7 @@ import {
 import { buildCrossJurisdictionCancelAck } from '../../cross-jurisdiction-orderbook';
 import { removeBookOrderById } from '../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
+import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { formatEntityId } from '../../utils';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import {
@@ -37,6 +39,21 @@ const cancelOrderbookOfferIfPresent = (
   accountId: string,
   offerId: string,
 ): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
+
+const syncSourcePullBinding = (
+  account: AccountMachine,
+  route: CrossJurisdictionSwapRoute,
+): void => {
+  const offer = account.swapOffers?.get(route.orderId);
+  if (offer?.crossJurisdiction) {
+    offer.crossJurisdiction = cloneCrossJurisdictionRoute(route);
+  }
+  const pullId = route.sourcePull?.pullId;
+  if (!pullId) return;
+  const pull = account.pulls?.get(pullId);
+  if (!pull) return;
+  pull.crossJurisdiction = buildCrossJurisdictionPullBinding(route, 'source');
+};
 
 const pushCrossJOutput = (
   env: Env,
@@ -136,34 +153,32 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
       addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
       return { newState, outputs, mempoolOps };
     }
+    const proof = buildCrossJurisdictionCloseProof(canonicalRoute, '0x');
     if (accountId && account?.pulls?.has(canonicalRoute.sourcePull.pullId)) {
+      syncSourcePullBinding(account, canonicalRoute);
       mempoolOps.push({
         accountId,
         tx: {
-          type: 'pull_cancel',
+          type: 'cross_pull_close',
           data: {
             pullId: canonicalRoute.sourcePull.pullId,
-            reason: 'cross_j_cancel_no_fill',
+            binary: '0x',
+            proof,
           },
         },
       });
+    } else {
+      addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for source close proof`);
+      return { newState, outputs, mempoolOps };
     }
-    pushCrossJOutput(env, outputs, canonicalRoute.target.counterpartyEntityId, [{
-      type: 'cancelPull',
-      data: {
-        counterpartyEntityId: canonicalRoute.target.entityId,
-        pullId: canonicalRoute.targetPull.pullId,
-        description: `Cross-j ${orderId} cancel target pull without fill`,
-      },
-    }], canonicalRoute.targetSignerId);
     const requestedAt = deterministicEntityTimestamp(newState, env);
-    transitionCrossJurisdictionRouteStatus(canonicalRoute, 'cancelled', requestedAt);
+    transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clearing', requestedAt);
     canonicalRoute.pendingClearRequestedAt = requestedAt;
     canonicalRoute.clearingPolicy = 'cancel_and_clear';
     newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
     const firstValidator = entityState.config.validators[0];
     if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-    addMessage(newState, `🌉 Cross-j clear ${orderId} cancelled without fill`);
+    addMessage(newState, `🌉 Cross-j clear ${orderId} queued pure cancel close`);
     return { newState, outputs, mempoolOps };
   }
 
@@ -193,28 +208,19 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     );
   }
   const closeRemainder = cancelRemainder || ratio < 65_535;
+  const proof = buildCrossJurisdictionCloseProof(canonicalRoute, reveal.binary);
+  syncSourcePullBinding(account, canonicalRoute);
   mempoolOps.push({
     accountId,
     tx: {
-      type: 'pull_resolve',
+      type: 'cross_pull_close',
       data: {
         pullId: canonicalRoute.sourcePull.pullId,
         binary: reveal.binary,
+        proof,
       },
     },
   });
-  if (closeRemainder && ratio < 65_535) {
-    mempoolOps.push({
-      accountId,
-      tx: {
-        type: 'pull_cancel',
-        data: {
-          pullId: canonicalRoute.sourcePull.pullId,
-          reason: 'cross_j_source_remainder_release',
-        },
-      },
-    });
-  }
 
   const sourceSavingsAmount = canonicalRoute.priceImprovementSourceAmount ?? 0n;
   if (sourceSavingsAmount > 0n) {
