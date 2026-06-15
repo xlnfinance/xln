@@ -14,7 +14,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, SwapOffer } from '../../types';
+import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, AccountTx, SwapOffer } from '../../types';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
@@ -334,12 +334,12 @@ const collectHtlcRoutesAwaitingSecrets = (state: EntityState, counterpartyEntity
   return pending;
 };
 
-const accountTxCanBeFoldedIntoDisputeArguments = (txType: string): boolean =>
-  !isArgumentChangingAccountTx(txType) || isDisputeEvidenceAccountTx(txType);
+const accountTxCanBeFoldedIntoDisputeArguments = (tx: AccountTx): boolean =>
+  !isArgumentChangingAccountTx(tx.type) || isDisputeEvidenceAccountTx(tx);
 
 const pendingFrameBlocksDisputeArguments = (account: AccountMachine): boolean =>
   Boolean(account.pendingFrame?.accountTxs?.some(
-    (tx) => !accountTxCanBeFoldedIntoDisputeArguments(tx.type),
+    (tx) => !accountTxCanBeFoldedIntoDisputeArguments(tx),
   ));
 
 const collectDisputeEvidenceReadinessIssues = (
@@ -361,7 +361,7 @@ const collectDisputeEvidenceReadinessIssues = (
   const argumentChangingMempool = (account.mempool ?? [])
     .filter((tx) => {
       if (!isArgumentChangingAccountTx(tx.type)) return false;
-      if (isDisputeEvidenceAccountTx(tx.type)) return false;
+      if (isDisputeEvidenceAccountTx(tx)) return false;
       if (tx.type === 'pull_resolve') {
         const binary = String(tx.data.binary || '').toLowerCase();
         if (binary && allowedPendingPullResolveBinaries.has(binary)) return false;
@@ -394,7 +394,7 @@ const markAccountDisputePreparing = (
   // bilateral proposals must not keep changing the proof/argument pair while
   // we are preparing an adversarial on-chain path.
   account.mempool = (account.mempool || []).filter(
-    (tx) => isAccountControlTx(tx.type) || isDisputeEvidenceAccountTx(tx.type),
+    (tx) => isAccountControlTx(tx.type) || isDisputeEvidenceAccountTx(tx),
   );
   delete account.pendingFrame;
   delete account.pendingAccountInput;

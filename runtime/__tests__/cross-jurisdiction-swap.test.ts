@@ -19,6 +19,7 @@ import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections'
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import {
   CROSS_J_TARGET_REVEAL_SAFETY_MS,
+  buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
@@ -344,8 +345,9 @@ describe('cross-jurisdiction hashledger swap', () => {
       type: 'requestCrossJurisdictionClear',
       data: { orderId: clearingRoute.orderId, cancelRemainder: true },
     });
-    const resolveTx = clearResult.mempoolOps?.find(op => op.tx.type === 'pull_resolve')?.tx as any;
+    const resolveTx = clearResult.mempoolOps?.find(op => op.tx.type === 'cross_pull_close')?.tx as any;
     expect(resolveTx?.data.pullId).toBe(clearingRoute.sourcePull.pullId);
+    expect(resolveTx?.data.proof.routeHash).toBe(clearingRoute.routeHash);
     expect(() => verifyHashLadderBinary({
       fullHash: clearingRoute.sourcePull.fullHash,
       partialRoot: clearingRoute.sourcePull.partialRoot,
@@ -1750,6 +1752,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
       fullHash: route.sourcePull!.fullHash,
       partialRoot: route.sourcePull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding({ ...route, status: 'clearing', clearingPolicy: 'cancel_and_clear' }, 'source'),
       createdHeight: 0,
       createdTimestamp: env.timestamp,
     }]]);
@@ -1759,21 +1762,108 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { orderId: route.orderId, cancelRemainder: true },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_resolve', 'pull_cancel']);
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_pull_close']);
     expect(result.mempoolOps?.[0]?.accountId).toBe(sourceUser);
     expect((result.mempoolOps?.[0]?.tx as any).data.binary).toMatch(/^0x/);
-    expect((result.mempoolOps?.[1]?.tx as any).data.reason).toBe('cross_j_source_remainder_release');
+    expect((result.mempoolOps?.[0]?.tx as any).data.proof.fillRatio).toBe(32_768);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
 
     const accountAfterClear = result.newState.accounts.get(sourceUser)!;
     const bySourceHub = sourceHub.toLowerCase() < sourceUser.toLowerCase();
     const resolveResult = await processAccountTx(accountAfterClear, result.mempoolOps![0]!.tx, bySourceHub, env.timestamp, 1);
     expect(resolveResult.success, resolveResult.error).toBe(true);
-    const cancelResult = await processAccountTx(accountAfterClear, result.mempoolOps![1]!.tx, bySourceHub, env.timestamp, 2);
-    expect(cancelResult.success, cancelResult.error).toBe(true);
     expect(accountAfterClear.pulls?.has(route.sourcePull!.pullId)).toBe(false);
     const releasedDelta = accountAfterClear.deltas.get(route.sourcePull!.tokenId)!;
     expect(sourcePullPayerIsLeft ? releasedDelta.leftHold : releasedDelta.rightHold).toBe(0n);
+  });
+
+  test('target cross_pull_close rejects lower valid reveal than source close proof', async () => {
+    const env = createEmptyEnv('cross-close-lower-ratio-reject');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('86');
+    const sourceHub = entity('87');
+    const targetHub = entity('88');
+    const targetUser = entity('89');
+    const prepared = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-close-lower-ratio-reject',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const highRatio = 0x8000;
+    const lowRatio = 0x4000;
+    const highRoute = {
+      ...prepared,
+      status: 'source_claimed' as const,
+      fillSeq: 1,
+      cumulativeFillRatio: highRatio,
+      claimedRatio: highRatio,
+      filledSourceAmount: (BigInt(prepared.source.amount) * BigInt(highRatio)) / 65_535n,
+      filledTargetAmount: (BigInt(prepared.target.amount) * BigInt(highRatio)) / 65_535n,
+      sourceClaimed: (BigInt(prepared.source.amount) * BigInt(highRatio)) / 65_535n,
+      targetClaimed: (BigInt(prepared.target.amount) * BigInt(highRatio)) / 65_535n,
+      clearingPolicy: 'cancel_and_clear' as const,
+    };
+    const lowRoute = {
+      ...highRoute,
+      cumulativeFillRatio: lowRatio,
+      claimedRatio: lowRatio,
+      filledSourceAmount: (BigInt(prepared.source.amount) * BigInt(lowRatio)) / 65_535n,
+      filledTargetAmount: (BigInt(prepared.target.amount) * BigInt(lowRatio)) / 65_535n,
+      sourceClaimed: (BigInt(prepared.source.amount) * BigInt(lowRatio)) / 65_535n,
+      targetClaimed: (BigInt(prepared.target.amount) * BigInt(lowRatio)) / 65_535n,
+    };
+    const privateSeed = deriveCrossJurisdictionPrivateSeed(env.runtimeSeed!, highRoute);
+    const highBinary = buildCrossJurisdictionPullReveal(highRoute, highRatio, privateSeed).binary;
+    const lowBinary = buildCrossJurisdictionPullReveal(lowRoute, lowRatio, privateSeed).binary;
+    const highProof = buildCrossJurisdictionCloseProof(highRoute, highBinary);
+    const lowProof = buildCrossJurisdictionCloseProof(lowRoute, lowBinary);
+    const account = makeAccount(targetUser, targetHub);
+    const targetDelta = account.deltas.get(highRoute.targetPull!.tokenId) ?? createDefaultDelta(highRoute.targetPull!.tokenId);
+    account.deltas.set(highRoute.targetPull!.tokenId, targetDelta);
+    const targetAbsAmount = highRoute.targetPull!.signedAmount >= 0n
+      ? highRoute.targetPull!.signedAmount
+      : -highRoute.targetPull!.signedAmount;
+    if (highRoute.targetPull!.signedAmount > 0n) targetDelta.rightHold = targetAbsAmount;
+    else targetDelta.leftHold = targetAbsAmount;
+    account.pulls = new Map([[highRoute.targetPull!.pullId, {
+      pullId: highRoute.targetPull!.pullId,
+      tokenId: highRoute.targetPull!.tokenId,
+      amount: highRoute.targetPull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: highRoute.targetPull!.revealedUntilTimestamp,
+      fullHash: highRoute.targetPull!.fullHash,
+      partialRoot: highRoute.targetPull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding({ ...highRoute, sourceCloseProof: highProof }, 'target'),
+      createdHeight: 0,
+      createdTimestamp: env.timestamp,
+    }]]);
+    const byTargetUser = targetUser.toLowerCase() < targetHub.toLowerCase();
+
+    const lowerProofResult = await processAccountTx(account, {
+      type: 'cross_pull_close',
+      data: { pullId: highRoute.targetPull!.pullId, binary: lowBinary, proof: lowProof },
+    }, byTargetUser, env.timestamp, 1);
+    expect(lowerProofResult.success).toBe(false);
+    expect(lowerProofResult.error).toContain('ratio');
+    expect(account.pulls?.has(highRoute.targetPull!.pullId)).toBe(true);
+
+    const lowerBinaryResult = await processAccountTx(account, {
+      type: 'cross_pull_close',
+      data: { pullId: highRoute.targetPull!.pullId, binary: lowBinary, proof: highProof },
+    }, byTargetUser, env.timestamp, 2);
+    expect(lowerBinaryResult.success).toBe(false);
+    expect(lowerBinaryResult.error).toContain('binary');
+    expect(account.pulls?.has(highRoute.targetPull!.pullId)).toBe(true);
   });
 
   test('direct cancelPull cannot release a committed cross-j partial fill', async () => {

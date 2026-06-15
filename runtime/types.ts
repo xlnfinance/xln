@@ -28,6 +28,7 @@ export type {
   CrossJurisdictionBookAdmissionReceipt,
   CrossJurisdictionBookLeg,
   CrossJurisdictionBookStatus,
+  CrossJurisdictionCloseProof,
   CrossJurisdictionPendingFill,
   CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,

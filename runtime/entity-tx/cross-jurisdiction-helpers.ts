@@ -236,7 +236,7 @@ export const accountHasPullResolveQueued = (
   pullId: string,
 ): boolean => {
   const isResolve = (tx: AccountTx): boolean =>
-    tx.type === 'pull_resolve' && tx.data.pullId === pullId;
+    (tx.type === 'pull_resolve' || tx.type === 'cross_pull_close') && tx.data.pullId === pullId;
   return account.mempool.some(isResolve) ||
     Boolean(account.pendingFrame?.accountTxs?.some(isResolve));
 };

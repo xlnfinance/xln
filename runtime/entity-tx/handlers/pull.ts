@@ -1,5 +1,7 @@
 import {
+  buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
+  hashCrossJurisdictionCloseBinary,
   isCrossJurisdictionRouteTransitionAllowed,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
@@ -14,6 +16,7 @@ import type { MempoolOp } from './account';
 
 type PullLockTx = Extract<EntityTx, { type: 'pullLock' }>;
 type ResolvePullTx = Extract<EntityTx, { type: 'resolvePull' }>;
+type CrossPullCloseTx = Extract<EntityTx, { type: 'crossPullClose' }>;
 type CancelPullTx = Extract<EntityTx, { type: 'cancelPull' | 'pullCancelExpired' }>;
 type PullResult = { newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] };
 
@@ -83,9 +86,80 @@ const syncTargetPullBinding = (
   if (!pull) return;
   pull.crossJurisdiction = buildCrossJurisdictionPullBinding({
     ...route,
+    ...(route.sourceCloseProof ? { sourceCloseProof: route.sourceCloseProof } : {}),
     cumulativeFillRatio: Math.max(Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0), fillRatio),
     claimedRatio: Math.max(Math.floor(Number(route.claimedRatio ?? 0) || 0), fillRatio),
   }, 'target');
+};
+
+const closeProofsMatch = (
+  left: CrossPullCloseTx['data']['proof'] | undefined,
+  right: CrossPullCloseTx['data']['proof'] | undefined,
+): boolean => {
+  if (!left || !right) return false;
+  return left.orderId === right.orderId &&
+    (left.routeHash || '').toLowerCase() === (right.routeHash || '').toLowerCase() &&
+    left.sourcePullId === right.sourcePullId &&
+    left.targetPullId === right.targetPullId &&
+    left.fillRatio === right.fillRatio &&
+    left.cumulativeSourceAmount === right.cumulativeSourceAmount &&
+    left.cumulativeTargetAmount === right.cumulativeTargetAmount &&
+    (left.binaryHash || '').toLowerCase() === (right.binaryHash || '').toLowerCase() &&
+    left.closeMode === right.closeMode;
+};
+
+const proofRouteError = (
+  route: NonNullable<ReturnType<typeof findCrossSourceRoute>> | NonNullable<ReturnType<typeof findCrossTargetRoute>>,
+  proof: CrossPullCloseTx['data']['proof'],
+  binary: string,
+  leg: 'source' | 'target',
+  commandRoute?: CrossPullCloseTx['data']['route'],
+): string | null => {
+  const routeHash = String(route.routeHash || '').toLowerCase();
+  if (!routeHash) return 'route hash missing';
+  if ((proof.routeHash || '').toLowerCase() !== routeHash) return `route hash ${proof.routeHash} != ${routeHash}`;
+  if (commandRoute) {
+    if (commandRoute.orderId !== proof.orderId) return `command route order ${commandRoute.orderId} != ${proof.orderId}`;
+    if ((commandRoute.routeHash || '').toLowerCase() !== (proof.routeHash || '').toLowerCase()) {
+      return `command route hash ${commandRoute.routeHash} != ${proof.routeHash}`;
+    }
+    if (commandRoute.sourcePull?.pullId !== proof.sourcePullId) {
+      return `command source pull ${commandRoute.sourcePull?.pullId} != ${proof.sourcePullId}`;
+    }
+    if (commandRoute.targetPull?.pullId !== proof.targetPullId) {
+      return `command target pull ${commandRoute.targetPull?.pullId} != ${proof.targetPullId}`;
+    }
+  }
+  if (proof.orderId !== route.orderId) return `order ${proof.orderId} != ${route.orderId}`;
+  if (!route.sourcePull || !route.targetPull) return 'pull commitments missing';
+  if (proof.sourcePullId !== route.sourcePull.pullId) return `source pull ${proof.sourcePullId} != ${route.sourcePull.pullId}`;
+  if (proof.targetPullId !== route.targetPull.pullId) return `target pull ${proof.targetPullId} != ${route.targetPull.pullId}`;
+  const expectedPullId = leg === 'source' ? route.sourcePull.pullId : route.targetPull.pullId;
+  if ((leg === 'source' ? proof.sourcePullId : proof.targetPullId) !== expectedPullId) return `${leg} pull mismatch`;
+  if ((proof.binaryHash || '').toLowerCase() !== hashCrossJurisdictionCloseBinary(binary).toLowerCase()) {
+    return 'binary hash mismatch';
+  }
+  const commitment = leg === 'source' ? route.sourcePull : route.targetPull;
+  const decoded = verifyHashLadderBinary({ fullHash: commitment.fullHash, partialRoot: commitment.partialRoot }, binary);
+  if (decoded.fillRatio !== proof.fillRatio) return `binary ratio ${decoded.fillRatio} != proof ${proof.fillRatio}`;
+  if (leg === 'target') {
+    const sourceProof = route.sourceCloseProof ?? commandRoute?.sourceCloseProof;
+    if (!sourceProof) return 'source close proof missing';
+    if (!closeProofsMatch(sourceProof, proof)) return 'source close proof mismatch';
+  }
+  const routeRatio = Math.max(Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0), Math.floor(Number(route.claimedRatio ?? 0) || 0));
+  if (leg === 'source' || routeRatio > 0) {
+    const expectedProof = buildCrossJurisdictionCloseProof(route, binary);
+    if (proof.fillRatio !== expectedProof.fillRatio) return `ratio ${proof.fillRatio} != ${expectedProof.fillRatio}`;
+    if (proof.cumulativeSourceAmount !== expectedProof.cumulativeSourceAmount) {
+      return `source amount ${proof.cumulativeSourceAmount} != ${expectedProof.cumulativeSourceAmount}`;
+    }
+    if (proof.cumulativeTargetAmount !== expectedProof.cumulativeTargetAmount) {
+      return `target amount ${proof.cumulativeTargetAmount} != ${expectedProof.cumulativeTargetAmount}`;
+    }
+    if (proof.closeMode !== expectedProof.closeMode) return `mode ${proof.closeMode} != ${expectedProof.closeMode}`;
+  }
+  return null;
 };
 
 const validateCrossTargetResolve = (
@@ -140,6 +214,46 @@ export const handleResolvePullEntityTx = (env: Env, state: EntityState, tx: Reso
   const blocked = validateCrossTargetResolve(result, env, accountId, pullId, counterpartyEntityId, binary);
   if (blocked) return blocked;
   result.mempoolOps.push({ accountId, tx: { type: 'pull_resolve', data: { pullId, binary } } });
+  requestFrame(state, result.outputs);
+  return result;
+};
+
+export const handleCrossPullCloseEntityTx = (env: Env, state: EntityState, tx: CrossPullCloseTx): PullResult => {
+  const result = createResult(state);
+  const { counterpartyEntityId, pullId, binary, proof, route: commandRoute } = tx.data;
+  const accountId = resolveCounterparty(result, counterpartyEntityId, 'resolve');
+  if (!accountId) return result;
+  const sourceRoute = findCrossSourceRoute(result.newState, pullId, counterpartyEntityId);
+  const targetRoute = findCrossTargetRoute(result.newState, pullId, counterpartyEntityId);
+  const route = sourceRoute ?? targetRoute;
+  if (!route) return fail(result, `❌ Cross-j pull close ${pullId.slice(0, 8)} blocked: route missing`);
+  const leg = sourceRoute ? 'source' : 'target';
+  if (isCrossJurisdictionTerminalStatus(route.status)) {
+    return fail(result, `❌ Cross-j ${leg} pull close ${pullId.slice(0, 8)} blocked: route ${route.status}`);
+  }
+  if (leg === 'source' && route.status !== 'clearing' && route.status !== 'clear_requested') {
+    return fail(result, `❌ Cross-j source pull close ${pullId.slice(0, 8)} blocked: route ${route.status}`);
+  }
+  const proofError = proofRouteError(route, proof, binary, leg, commandRoute);
+  if (proofError) return fail(result, `❌ Cross-j ${leg} pull close ${pullId.slice(0, 8)} blocked: ${proofError}`);
+  route.sourceCloseProof = proof;
+  if (leg === 'target') {
+    route.cumulativeFillRatio = proof.fillRatio;
+    route.claimedRatio = proof.fillRatio;
+    route.filledSourceAmount = proof.cumulativeSourceAmount;
+    route.filledTargetAmount = proof.cumulativeTargetAmount;
+    route.sourceClaimed = proof.cumulativeSourceAmount;
+    route.targetClaimed = proof.cumulativeTargetAmount;
+    route.clearingPolicy = 'cancel_and_clear';
+    route.pendingClearRequestedAt ||= now(result.newState, env);
+    if (!isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
+      return fail(result, `❌ Cross-j target pull close ${pullId.slice(0, 8)} blocked: route ${route.status}->clearing`);
+    }
+    transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.timestamp);
+    syncTargetPullBinding(result, accountId, pullId, route, proof.fillRatio);
+  }
+  result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
+  result.mempoolOps.push({ accountId, tx: { type: 'cross_pull_close', data: { pullId, binary, proof } } });
   requestFrame(state, result.outputs);
   return result;
 };

@@ -1,4 +1,4 @@
-import type { CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { HankoString } from './hanko';
 import type { JurisdictionEvent } from './jurisdiction-events';
 import type { DisputeArgumentSnapshot } from '../dispute-arguments';
@@ -667,6 +667,14 @@ export type AccountTx =
       data: {
         pullId: string;
         reason?: 'beneficiary_release' | 'expired' | 'cross_j_cancel_no_fill' | 'cross_j_source_remainder_release';
+      };
+    }
+  | {
+      type: 'cross_pull_close';
+      data: {
+        pullId: string;
+        binary: string;
+        proof: CrossJurisdictionCloseProof;
       };
     }
   // === SWAP TRANSACTION TYPES ===

@@ -30,6 +30,7 @@ import {
 } from '../cross-jurisdiction-orderbook';
 import {
   buildCrossJurisdictionPullBinding,
+  buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
@@ -4995,6 +4996,101 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
     expect(result.newState.messages.some((msg) => msg.includes('argumentMempool:pull_resolve'))).toBe(false);
+    expect(result.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
+  });
+
+  test('disputeStart treats pending cross_pull_close as foldable dispute evidence', async () => {
+    const env = createEmptyEnv('prepare-dispute-cross-close-evidence');
+    env.timestamp = 12_000;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as any;
+    const hubSigner = registerLazySigner('prepare-dispute-cross-close-evidence', 'hub');
+    const hubId = hubSigner.entityId;
+    const userId = `0x${'ab'.repeat(32)}`;
+    const targetHub = `0x${'ac'.repeat(32)}`;
+    const targetUser = `0x${'ad'.repeat(32)}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor(hubSigner.signerId);
+    attachSigningReplica(env, hubId, hubSigner.signerId);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-close-evidence',
+      makerEntityId: userId,
+      hubEntityId: hubId,
+      source: {
+        jurisdiction: `stack:1:0x${'b1'.repeat(20)}`,
+        entityId: userId,
+        counterpartyEntityId: hubId,
+        tokenId: 1,
+        amount: 100n,
+      },
+      target: {
+        jurisdiction: `stack:2:0x${'b2'.repeat(20)}`,
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 2,
+        amount: 200n,
+      },
+      cumulativeFillRatio: 0x4000,
+      filledSourceAmount: 25n,
+      filledTargetAmount: 50n,
+      status: 'clearing',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+    }, {
+      runtimeSeed: 'prepare-dispute-cross-close-evidence',
+      sourceDisputeDelayMs: 5_000,
+      now: env.timestamp,
+    });
+    const binary = buildCrossJurisdictionPullReveal(
+      route,
+      0x4000,
+      deriveCrossJurisdictionPrivateSeed('prepare-dispute-cross-close-evidence', route),
+    ).binary;
+    const closeTx: AccountTx = {
+      type: 'cross_pull_close',
+      data: {
+        pullId: route.sourcePull!.pullId,
+        binary,
+        proof: buildCrossJurisdictionCloseProof(route, binary),
+      },
+    };
+    const account = makeProposalAccount([closeTx], hubId, userId);
+    account.pulls = new Map([[
+      route.sourcePull!.pullId,
+      {
+        pullId: route.sourcePull!.pullId,
+        tokenId: route.sourcePull!.tokenId,
+        amount: route.sourcePull!.signedAmount,
+        claimedRatio: 0,
+        claimedAmount: 0n,
+        revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+        fullHash: route.sourcePull!.fullHash,
+        partialRoot: route.sourcePull!.partialRoot,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+        createdHeight: 0,
+        createdTimestamp: env.timestamp,
+      },
+    ]]);
+    const delta = createDefaultDelta(route.sourcePull!.tokenId);
+    delta.rightHold = BigInt(route.sourcePull!.amount);
+    account.deltas.set(route.sourcePull!.tokenId, delta);
+    const proposed = await proposeAccountFrame(env, account);
+    expect(proposed.success).toBe(true);
+    const pendingHeight = proposed.accountInput!.newAccountFrame!.height;
+    delete account.pendingAccountInput;
+    hubState.accounts.set(userId, account);
+
+    const result = await handleDisputeStart(
+      hubState,
+      {
+        type: 'disputeStart',
+        data: { counterpartyEntityId: userId },
+      },
+      env,
+    );
+
+    expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
+    expect(result.newState.messages.some((msg) => msg.includes(`pendingFrame:${pendingHeight}`))).toBe(false);
+    expect(result.newState.messages.some((msg) => msg.includes('argumentMempool:cross_pull_close'))).toBe(false);
     expect(result.newState.messages.some((msg) => msg.includes('Missing counterparty dispute hanko'))).toBe(true);
   });
 

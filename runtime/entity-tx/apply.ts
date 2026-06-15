@@ -18,6 +18,7 @@ import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
 import {
   handleCancelPullEntityTx,
+  handleCrossPullCloseEntityTx,
   handlePullLockEntityTx,
   handleResolvePullEntityTx,
 } from './handlers/pull';
@@ -218,6 +219,7 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   reopenDisputedAccount: (_env, state, tx) => handleReopenDisputedAccountEntityTx(state, tx as Extract<EntityTx, { type: 'reopenDisputedAccount' }>),
   pullLock: (env, state, tx) => handlePullLockEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullLock' }>),
   resolvePull: (env, state, tx) => handleResolvePullEntityTx(env, state, tx as Extract<EntityTx, { type: 'resolvePull' }>),
+  crossPullClose: (env, state, tx) => handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>),
   cancelPull: (env, state, tx) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'cancelPull' }>),
   pullCancelExpired: (env, state, tx) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullCancelExpired' }>),
   requestCrossJurisdictionSwap: (env, state, tx) => handleRequestCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionSwap' }>),

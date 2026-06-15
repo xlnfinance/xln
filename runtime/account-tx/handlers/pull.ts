@@ -5,6 +5,7 @@ import { FINANCIAL, LIMITS } from '../../constants';
 import {
   buildCommittedCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
+  hashCrossJurisdictionCloseBinary,
 } from '../../cross-jurisdiction';
 import {
   HASHLADDER_MAX_FILL_RATIO,
@@ -14,6 +15,7 @@ import {
 type PullLockTx = Extract<AccountTx, { type: 'pull_lock' }>;
 type PullResolveTx = Extract<AccountTx, { type: 'pull_resolve' }>;
 type PullCancelTx = Extract<AccountTx, { type: 'pull_cancel' }>;
+type CrossPullCloseTx = Extract<AccountTx, { type: 'cross_pull_close' }>;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -61,9 +63,55 @@ const findCrossJurisdictionPullBinding = (
   accountMachine: AccountMachine,
   pullId: string,
 ): CrossJurisdictionPullBinding | undefined => {
+  // Pull close/resolve validates the pull transformer, so the pull-local
+  // binding is canonical. The account offer mirror can lag by one entity frame
+  // while fill acks and clear requests are merged in the same runtime tick.
+  const pullBinding = accountMachine.pulls?.get(pullId)?.crossJurisdiction;
+  if (pullBinding) return pullBinding;
   const routeMatch = findCrossJurisdictionRouteForPull(accountMachine, pullId);
   if (routeMatch) return buildCommittedCrossJurisdictionPullBinding(routeMatch.route, routeMatch.leg);
-  return accountMachine.pulls?.get(pullId)?.crossJurisdiction;
+  return undefined;
+};
+
+const crossProofMatchesBinding = (
+  binding: CrossJurisdictionPullBinding,
+  proof: CrossPullCloseTx['data']['proof'],
+  pullId: string,
+): string | null => {
+  if (proof.orderId !== binding.orderId) return `order ${proof.orderId} != ${binding.orderId}`;
+  if ((proof.routeHash || '').toLowerCase() !== (binding.routeHash || '').toLowerCase()) {
+    return `routeHash ${proof.routeHash} != ${binding.routeHash}`;
+  }
+  const expectedPullId = binding.leg === 'source' ? proof.sourcePullId : proof.targetPullId;
+  if (expectedPullId !== pullId) return `${binding.leg} pull ${expectedPullId} != ${pullId}`;
+  const bindingRatio = committedCrossJurisdictionRatio(binding);
+  if (bindingRatio > 0 && proof.fillRatio !== bindingRatio) {
+    return `ratio ${proof.fillRatio} != committed ${bindingRatio}`;
+  }
+  const bindingSourceAmount = binding.filledSourceAmount ?? binding.sourceClaimed;
+  const bindingTargetAmount = binding.filledTargetAmount ?? binding.targetClaimed;
+  if (bindingSourceAmount !== undefined && proof.cumulativeSourceAmount !== bindingSourceAmount) {
+    return `source amount ${proof.cumulativeSourceAmount} != ${bindingSourceAmount}`;
+  }
+  if (bindingTargetAmount !== undefined && proof.cumulativeTargetAmount !== bindingTargetAmount) {
+    return `target amount ${proof.cumulativeTargetAmount} != ${bindingTargetAmount}`;
+  }
+  if (binding.sourceCloseProof) {
+    const sourceProof = binding.sourceCloseProof;
+    if (
+      sourceProof.orderId !== proof.orderId ||
+      (sourceProof.routeHash || '').toLowerCase() !== (proof.routeHash || '').toLowerCase() ||
+      sourceProof.sourcePullId !== proof.sourcePullId ||
+      sourceProof.targetPullId !== proof.targetPullId ||
+      sourceProof.fillRatio !== proof.fillRatio ||
+      sourceProof.cumulativeSourceAmount !== proof.cumulativeSourceAmount ||
+      sourceProof.cumulativeTargetAmount !== proof.cumulativeTargetAmount ||
+      (sourceProof.binaryHash || '').toLowerCase() !== (proof.binaryHash || '').toLowerCase()
+    ) {
+      return `source close proof mismatch`;
+    }
+  }
+  return null;
 };
 
 const validateCrossJurisdictionPullResolve = (
@@ -262,6 +310,107 @@ export async function handlePullResolve(
   }
   events.push(`🪝 Pull resolved: ${pullId.slice(0, 8)}... fill ${ratio}/65535 amount ${applied}`);
   return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
+}
+
+export async function handleCrossPullClose(
+  accountMachine: AccountMachine,
+  accountTx: CrossPullCloseTx,
+  byLeft: boolean,
+  currentTimestamp: number,
+): Promise<{
+  success: boolean;
+  events: string[];
+  error?: string;
+  pullResolved?: { pullId: string; fillRatio: number };
+  pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
+}> {
+  const { pullId, binary, proof } = accountTx.data;
+  const events: string[] = [];
+  const pull = accountMachine.pulls?.get(pullId);
+  if (!pull) {
+    return {
+      success: true,
+      events: [`🪝 Cross-j pull close ignored: ${pullId.slice(0, 8)}... already closed`],
+      pullCancelled: { pullId, status: 'already-closed' },
+    };
+  }
+  const binding = findCrossJurisdictionPullBinding(accountMachine, pullId);
+  if (!binding) return { success: false, error: `Cross-j close requires pull binding`, events };
+  const proofError = crossProofMatchesBinding(binding, proof, pullId);
+  if (proofError) return { success: false, error: `Cross-j close proof mismatch: ${proofError}`, events };
+  const binaryHash = hashCrossJurisdictionCloseBinary(binary);
+  if ((binaryHash || '').toLowerCase() !== (proof.binaryHash || '').toLowerCase()) {
+    return { success: false, error: `Cross-j close binary hash mismatch`, events };
+  }
+
+  let decoded: { fillRatio: number };
+  try {
+    decoded = verifyHashLadderBinary({ fullHash: pull.fullHash, partialRoot: pull.partialRoot }, binary);
+  } catch (error) {
+    return { success: false, error: `Invalid cross-j close binary: ${error instanceof Error ? error.message : String(error)}`, events };
+  }
+  const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(proof.fillRatio) || 0)));
+  if (decoded.fillRatio !== ratio) {
+    return { success: false, error: `Cross-j close ratio mismatch: binary ${decoded.fillRatio} != proof ${ratio}`, events };
+  }
+  if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
+    return { success: false, error: `Pull reveal deadline expired`, events };
+  }
+
+  const beneficiaryIsLeft = pull.amount > 0n;
+  if (byLeft !== beneficiaryIsLeft) {
+    return { success: false, error: `Only the pull beneficiary can close cross-j pull`, events };
+  }
+
+  let delta = accountMachine.deltas.get(pull.tokenId);
+  if (!delta) {
+    delta = createDefaultDelta(pull.tokenId);
+    accountMachine.deltas.set(pull.tokenId, delta);
+  }
+  delta.leftHold ??= 0n;
+  delta.rightHold ??= 0n;
+
+  const absAmount = absBigInt(pull.amount);
+  const previousRatio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0) || 0)));
+  if (ratio < previousRatio) {
+    return { success: false, error: `Cross-j close ratio regression: ${ratio} < ${previousRatio}`, events };
+  }
+  const previousClaimed = pull.claimedAmount ?? ((absAmount * BigInt(previousRatio)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
+  const cumulativeClaimed = binding.leg === 'source'
+    ? proof.cumulativeSourceAmount
+    : proof.cumulativeTargetAmount;
+  if (cumulativeClaimed < previousClaimed) {
+    return { success: false, error: `Cross-j close amount regression: ${cumulativeClaimed} < ${previousClaimed}`, events };
+  }
+  if (cumulativeClaimed > absAmount) {
+    return { success: false, error: `Cross-j close amount overflow: ${cumulativeClaimed} > ${absAmount}`, events };
+  }
+  const applied = cumulativeClaimed - previousClaimed;
+  const remainingHold = absAmount > cumulativeClaimed ? absAmount - cumulativeClaimed : 0n;
+  const payerIsLeft = !beneficiaryIsLeft;
+  const debitHold = applied + remainingHold;
+  if (debitHold > 0n) {
+    if (payerIsLeft) {
+      if ((delta.leftHold || 0n) < debitHold) return { success: false, error: `Pull left hold underflow`, events };
+      delta.leftHold -= debitHold;
+    } else {
+      if ((delta.rightHold || 0n) < debitHold) return { success: false, error: `Pull right hold underflow`, events };
+      delta.rightHold -= debitHold;
+    }
+  }
+  if (applied > 0n) {
+    if (pull.amount > 0n) delta.offdelta += applied;
+    else delta.offdelta -= applied;
+  }
+
+  accountMachine.pulls?.delete(pullId);
+  events.push(`🪝 Cross-j pull closed: ${pullId.slice(0, 8)}... ratio ${ratio}/65535 claimed ${applied} released ${remainingHold}`);
+  return {
+    success: true,
+    events,
+    pullResolved: { pullId, fillRatio: ratio },
+    pullCancelled: { pullId, status: 'cancelled' },
+  };
 }
 
 export async function handlePullCancel(
