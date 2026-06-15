@@ -10,7 +10,7 @@ import {
   deriveRuntimeRecoveryActionLookupKey,
   encryptRuntimeRecoveryBundle,
 } from '../recovery/crypto';
-import type { JReplica, JurisdictionConfig, TowerActivePayloadV1, TowerAppointmentV1 } from '../xln-api';
+import type { JReplica, JurisdictionConfig, TowerLastResortPayloadV1, TowerAppointmentV1 } from '../xln-api';
 import {
   encodeTowerCounterDisputeRemedy,
   runWatchtowerSweep,
@@ -123,7 +123,7 @@ const createBackupAppointment = async () => {
 };
 
 describe('watchtower restart resilience', () => {
-  test('persists blind backup, active appointments, and action receipts across standalone server restart', async () => {
+  test('persists blind backup, last-resort appointments, and action receipts across standalone server restart', async () => {
     const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-restart-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });
     mkdirSync(tempRoot, { recursive: true });
@@ -143,15 +143,15 @@ describe('watchtower restart resilience', () => {
     servers.push(server);
 
     const towerWallet = new Wallet(towerPrivateKey);
-    const activeLookupKey = deriveRuntimeRecoveryActionLookupKey(
+    const lastResortLookupKey = deriveRuntimeRecoveryActionLookupKey(
       runtimeId,
       'restart-action-seed',
       `0x${'12'.repeat(32)}`,
       `0x${'34'.repeat(32)}`,
     );
-    const activeOwner = Wallet.createRandom();
-    const activeRuntimeId = activeOwner.address.toLowerCase();
-    const activePayload: TowerActivePayloadV1 = {
+    const lastResortOwner = Wallet.createRandom();
+    const lastResortRuntimeId = lastResortOwner.address.toLowerCase();
+    const lastResortPayload: TowerLastResortPayloadV1 = {
       triggerHint: 'restart-test',
       encryptedRemedy: encodeTowerCounterDisputeRemedy({
         version: 2,
@@ -182,45 +182,45 @@ describe('watchtower restart resilience', () => {
       lastResortWindowBlocks: 8,
       safetyMarginBlocks: 0,
     };
-    const activeSignedAt = 999_001;
-    const activeAppointment: TowerAppointmentV1 = {
+    const lastResortSignedAt = 999_001;
+    const lastResortAppointment: TowerAppointmentV1 = {
       type: 'tower_appointment',
       version: 1,
       towerMode: 'delayed_last_resort',
-      lookupKey: activeLookupKey,
+      lookupKey: lastResortLookupKey,
       slot: 0,
       bundle: {
         ...encrypted,
-        runtimeId: activeRuntimeId,
-        lookupKey: activeLookupKey,
+        runtimeId: lastResortRuntimeId,
+        lookupKey: lastResortLookupKey,
         bundleHash: ethers.keccak256(ethers.toUtf8Bytes('restart-active-bundle')),
       },
-      activePayload,
+      lastResortPayload,
       ownerProof: {
-        runtimeId: activeRuntimeId,
-        signedAt: activeSignedAt,
+        runtimeId: lastResortRuntimeId,
+        signedAt: lastResortSignedAt,
         signature: '',
       },
     };
-    activeAppointment.ownerProof.signature = await activeOwner.signMessage(
+    lastResortAppointment.ownerProof.signature = await lastResortOwner.signMessage(
       buildTowerAppointmentOwnerMessage(
-        activeRuntimeId,
+        lastResortRuntimeId,
         'delayed_last_resort',
-        activeLookupKey,
+        lastResortLookupKey,
         0,
-        activeAppointment.bundle.bundleHash,
-        activeAppointment.bundle.height,
-        activeSignedAt,
-        activePayload,
+        lastResortAppointment.bundle.bundleHash,
+        lastResortAppointment.bundle.height,
+        lastResortSignedAt,
+        lastResortPayload,
       ),
     );
 
     await server.store.upsertAppointment(backupAppointment);
-    await server.store.upsertAppointment(activeAppointment);
+    await server.store.upsertAppointment(lastResortAppointment);
     await server.store.appendActionReceipt({
-      id: `${activeLookupKey}:seeded`,
-      lookupKey: activeLookupKey,
-      runtimeId: activeRuntimeId,
+      id: `${lastResortLookupKey}:seeded`,
+      lookupKey: lastResortLookupKey,
+      runtimeId: lastResortRuntimeId,
       towerMode: 'delayed_last_resort',
       actionKind: 'counter_dispute_only',
       triggerHint: 'restart-test',
@@ -234,12 +234,12 @@ describe('watchtower restart resilience', () => {
     const firstHealthPayload = await firstHealth.json() as {
       ok: boolean;
       signerAddress?: string;
-      stats?: { lookupCount?: number; activeAppointmentCount?: number; actionReceiptCount?: number };
+      stats?: { lookupCount?: number; lastResortAppointmentCount?: number; actionReceiptCount?: number };
     };
     expect(firstHealthPayload.signerAddress).toBe(server.store.signerAddress);
     expect(firstHealthPayload.stats).toMatchObject({
       lookupCount: 2,
-      activeAppointmentCount: 1,
+      lastResortAppointmentCount: 1,
       actionReceiptCount: 1,
     });
 
@@ -261,12 +261,12 @@ describe('watchtower restart resilience', () => {
     const secondHealthPayload = await secondHealth.json() as {
       ok: boolean;
       signerAddress?: string;
-      stats?: { lookupCount?: number; activeAppointmentCount?: number; actionReceiptCount?: number };
+      stats?: { lookupCount?: number; lastResortAppointmentCount?: number; actionReceiptCount?: number };
     };
     expect(secondHealthPayload.signerAddress).toBe(server.store.signerAddress);
     expect(secondHealthPayload.stats).toMatchObject({
       lookupCount: 2,
-      activeAppointmentCount: 1,
+      lastResortAppointmentCount: 1,
       actionReceiptCount: 1,
     });
 
@@ -280,13 +280,13 @@ describe('watchtower restart resilience', () => {
     expect(restorePayload.ok).toBe(true);
     expect(restorePayload.bundle?.lookupKey).toBe(encrypted.lookupKey);
 
-    const publicActions = await fetch(`http://127.0.0.1:${server.server.port}/api/watchtower/actions/${activeLookupKey}`);
+    const publicActions = await fetch(`http://127.0.0.1:${server.server.port}/api/watchtower/actions/${lastResortLookupKey}`);
     expect(publicActions.status).toBe(404);
-    const storedActions = await server.store.listActionReceipts(activeLookupKey);
+    const storedActions = await server.store.listActionReceipts(lastResortLookupKey);
     expect(storedActions[0]?.status).toBe('skipped');
 
     const sweep = await runWatchtowerSweep(server.store, {
-      lookupKey: activeLookupKey,
+      lookupKey: lastResortLookupKey,
       towerPrivateKey,
       providerFactory: () => ({
         getBlockNumber: async () => 1,

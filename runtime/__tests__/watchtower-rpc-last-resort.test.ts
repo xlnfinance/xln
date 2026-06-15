@@ -14,7 +14,7 @@ import {
   encryptTowerPayloadForPublicKey,
   getTowerPayloadEncryptionPublicKey,
 } from '../recovery/crypto';
-import type { TowerActivePayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedyV2 } from '../recovery/types';
+import type { TowerLastResortPayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedyV2 } from '../recovery/types';
 import { generateLazyEntityId } from '../entity-factory';
 import { encodeTowerCounterDisputeRemedy, runWatchtowerSweep } from '../watchtower/action';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
@@ -284,7 +284,7 @@ describe('watchtower rpc last-resort integration', () => {
         sig: finalSig,
       },
     };
-    const activePayload: TowerActivePayloadV1 = {
+    const lastResortPayload: TowerLastResortPayloadV1 = {
       triggerHint: `${watched.entityId}:${counterparty.entityId}`,
       encryptedRemedy: await encryptTowerPayloadForPublicKey(
         encodeTowerCounterDisputeRemedy(remedy),
@@ -316,7 +316,7 @@ describe('watchtower rpc last-resort integration', () => {
       lookupKey,
       slot: 0,
       bundle,
-      activePayload,
+      lastResortPayload,
       ownerProof: {
         runtimeId,
         signedAt,
@@ -329,7 +329,7 @@ describe('watchtower rpc last-resort integration', () => {
             bundle.bundleHash,
             bundle.height,
             signedAt,
-            activePayload,
+            lastResortPayload,
           ),
         ),
       },
@@ -563,7 +563,7 @@ describe('watchtower rpc last-resort integration', () => {
         sig: towerFinalSig,
       },
     };
-    const activePayload: TowerActivePayloadV1 = {
+    const lastResortPayload: TowerLastResortPayloadV1 = {
       triggerHint: `${watched.entityId}:${counterparty.entityId}`,
       encryptedRemedy: await encryptTowerPayloadForPublicKey(
         encodeTowerCounterDisputeRemedy(towerRemedy),
@@ -595,7 +595,7 @@ describe('watchtower rpc last-resort integration', () => {
       lookupKey,
       slot: 0,
       bundle,
-      activePayload,
+      lastResortPayload,
       ownerProof: {
         runtimeId,
         signedAt,
@@ -608,7 +608,7 @@ describe('watchtower rpc last-resort integration', () => {
             bundle.bundleHash,
             bundle.height,
             signedAt,
-            activePayload,
+            lastResortPayload,
           ),
         ),
       },

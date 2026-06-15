@@ -33,9 +33,7 @@ export function normalizeRecoveryUrl(value: string): string {
 }
 
 export function normalizeTowerMode(mode: unknown): RecoveryServiceMode {
-  return mode === 'delayed_last_resort' || mode === 'active_watchtower'
-    ? 'delayed_last_resort'
-    : 'blind_backup';
+  return mode === 'delayed_last_resort' ? 'delayed_last_resort' : 'blind_backup';
 }
 
 export function normalizeRecoveryDraft(towers: RecoveryTowerConfig[] | undefined): RecoveryTowerConfig[] {

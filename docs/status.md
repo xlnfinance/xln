@@ -72,8 +72,8 @@ When docs disagree, use this order:
 - Official tower moved to same-origin `/api/tower/*`.
 - Watchtower sweep is scheduled inside the daemon and public
   `/api/watchtower/*` is not exposed through nginx.
-- Active tower remedies are encrypted to the tower action public key and
-  plaintext active remedies are rejected by the tower HTTP layer.
+- Last-resort tower remedies are encrypted to the tower action public key and
+  plaintext last-resort remedies are rejected by the tower HTTP layer.
 - Tower uploads are gated by reliable local backup barriers before remote side
   effects continue.
 - Browser restart after tower restore keeps recovered runtime/channel state.

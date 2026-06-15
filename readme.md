@@ -218,7 +218,7 @@ Root:
 ## 🔥 Recent Updates (`0.1.5` - May 2026)
 
 - ✅ **Official watchtower** - Same-origin `/api/tower/*`, standalone daemon, scheduled sweep, and no public `/api/watchtower/*` sweep exposure
-- ✅ **Encrypted recovery** - Tower backup bundles and delayed-last-resort active remedies are encrypted; plaintext active remedies are rejected
+- ✅ **Encrypted recovery** - Tower backup bundles and delayed-last-resort remedies are encrypted; plaintext last-resort remedies are rejected
 - ✅ **Recovery E2E** - Wiped-browser tower restore and post-restore channel payments are covered by browser tests
 - ✅ **Prod health** - Market maker/reset recovery and prod payment smoke passed in the `0.1.5` release pass
 - ✅ **Planning cleanup** - Live TODO/NEXT work is consolidated into [todo.md](todo.md)

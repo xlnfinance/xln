@@ -19,9 +19,9 @@ gates.
   `/api/tower/*`, while sweep remains internal.
 - Hardened watchtower RPC handling with an allowlist to prevent SSRF through
   appointment-provided RPC URLs.
-- Required encrypted active remedies for last-resort appointments; plaintext
-  active payloads are rejected.
-- Bound active remedy encryption to the tower action public key.
+- Required encrypted last-resort remedies for last-resort appointments; plaintext
+  last-resort payloads are rejected.
+- Bound last-resort remedy encryption to the tower action public key.
 - Added body-size caps, disabled the unauthenticated complaint sink by default,
   and added pruning/stat caching for watchtower storage.
 - Made watchtower health constant-time by avoiding full action-receipt scans on

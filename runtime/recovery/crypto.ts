@@ -8,7 +8,7 @@ import {
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,
-  TowerActivePayloadV1,
+  TowerLastResortPayloadV1,
   TowerEncryptedPayloadV1,
   TowerModeV1,
 } from './types';
@@ -174,7 +174,7 @@ export const deriveRuntimeRecoveryActionLookupKey = (
   ),
 );
 
-export const computeTowerActivePayloadDigest = (payload: TowerActivePayloadV1 | null | undefined): string => {
+export const computeTowerLastResortPayloadDigest = (payload: TowerLastResortPayloadV1 | null | undefined): string => {
   if (!payload) return ethers.ZeroHash;
   return ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(payload)));
 };
@@ -187,9 +187,9 @@ export const buildTowerAppointmentOwnerMessage = (
   bundleHash: string,
   height: number,
   signedAt: number,
-  activePayload?: TowerActivePayloadV1 | null,
+  lastResortPayload?: TowerLastResortPayloadV1 | null,
 ): string =>
-  `${TOWER_APPOINTMENT_DOMAIN}|${String(runtimeId).toLowerCase()}|${towerMode}|${lookupKey}|${Math.max(0, Math.floor(Number(slot || 0)))}|${bundleHash}|${Math.max(0, Math.floor(Number(height || 0)))}|${Math.max(0, Math.floor(Number(signedAt || 0)))}|${computeTowerActivePayloadDigest(activePayload)}`;
+  `${TOWER_APPOINTMENT_DOMAIN}|${String(runtimeId).toLowerCase()}|${towerMode}|${lookupKey}|${Math.max(0, Math.floor(Number(slot || 0)))}|${bundleHash}|${Math.max(0, Math.floor(Number(height || 0)))}|${Math.max(0, Math.floor(Number(signedAt || 0)))}|${computeTowerLastResortPayloadDigest(lastResortPayload)}`;
 
 export const computeWatchtowerCounterDisputeAuthorizationHash = (
   chainId: number,

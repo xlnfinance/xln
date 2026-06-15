@@ -191,7 +191,7 @@ describe('standalone watchtower service', () => {
     expect(String(payload.error || '')).toContain('TOWER_QUOTA_EXCEEDED');
   });
 
-  test('rejects plaintext active remedies over HTTP', async () => {
+  test('rejects plaintext last-resort remedies over HTTP', async () => {
     const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-active-plaintext-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });
     mkdirSync(tempRoot, { recursive: true });
@@ -199,7 +199,7 @@ describe('standalone watchtower service', () => {
     const server = startStandaloneWatchtowerServer({
       host: '127.0.0.1',
       port: 0,
-      towerId: 'tower-active-plaintext-test',
+      towerId: 'tower-last-resort-plaintext-test',
       dbPath: join(tempRoot, 'tower.level'),
       maxStoredBytesPerLookupKey: 64 * 1024,
     });
@@ -208,7 +208,7 @@ describe('standalone watchtower service', () => {
     const runtimeWallet = Wallet.createRandom();
     const runtimeId = runtimeWallet.address.toLowerCase();
     const lookupKey = keccak256(toUtf8Bytes('tower:plaintext-active'));
-    const activePayload = {
+    const lastResortPayload = {
       triggerHint: 'chain:31337:acct:plaintext',
       encryptedRemedy: JSON.stringify({ type: 'counter_dispute_remedy' }),
       actionKind: 'counter_dispute_only' as const,
@@ -239,7 +239,7 @@ describe('standalone watchtower service', () => {
         bundle.bundleHash,
         bundle.height,
         signedAt,
-        activePayload,
+        lastResortPayload,
       ),
     );
 
@@ -253,7 +253,7 @@ describe('standalone watchtower service', () => {
         lookupKey,
         slot: 0,
         bundle,
-        activePayload,
+        lastResortPayload,
         ownerProof: {
           runtimeId,
           signedAt,
@@ -265,18 +265,18 @@ describe('standalone watchtower service', () => {
     expect(response.status).toBe(400);
     const payload = await response.json() as { ok: boolean; error?: string };
     expect(payload.ok).toBe(false);
-    expect(String(payload.error || '')).toContain('TOWER_ACTIVE_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+    expect(String(payload.error || '')).toContain('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   });
 
-  test('rejects deprecated active-watchtower mode over HTTP', async () => {
-    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-active-mode-${Date.now()}`);
+  test('rejects unknown tower mode over HTTP', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-invalid-mode-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });
     mkdirSync(tempRoot, { recursive: true });
 
     const server = startStandaloneWatchtowerServer({
       host: '127.0.0.1',
       port: 0,
-      towerId: 'tower-active-mode-test',
+      towerId: 'tower-invalid-mode-test',
       dbPath: join(tempRoot, 'tower.level'),
       maxStoredBytesPerLookupKey: 64 * 1024,
     });
@@ -288,13 +288,32 @@ describe('standalone watchtower service', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         ...appointment,
-        towerMode: 'active_watchtower',
+        towerMode: 'legacy_mode',
       }),
     });
     expect(response.status).toBe(400);
     const payload = await response.json() as { ok: boolean; error?: string };
     expect(payload.ok).toBe(false);
-    expect(String(payload.error || '')).toContain('TOWER_ACTIVE_WATCHTOWER_DISABLED');
+    expect(String(payload.error || '')).toContain('TOWER_MODE_INVALID:legacy_mode');
+  });
+
+  test('rejects unknown tower mode in the store path', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-invalid-store-mode-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      dbPath: join(tempRoot, 'tower.level'),
+      host: '127.0.0.1',
+      port: 0,
+    });
+    servers.push(server);
+
+    const { appointment } = await createRuntimeAppointment();
+    await expect(server.store.upsertAppointment({
+      ...appointment,
+      towerMode: 'legacy_mode',
+    } as TowerAppointmentV1)).rejects.toThrow('TOWER_MODE_INVALID:legacy_mode');
   });
 
   test('rejects oversized JSON bodies before request handling', async () => {

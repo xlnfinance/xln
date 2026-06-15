@@ -371,10 +371,10 @@ describe('watchtower recovery full flow', () => {
     const upload = uploads[0]!;
     expect(upload.lookupKey).not.toBe(encryptedBundle.lookupKey);
     expect(upload.appointment.towerMode).toBe('delayed_last_resort');
-    expect(upload.appointment.activePayload?.proofNonce).toBe(9);
-    expect(upload.appointment.activePayload?.proofBodyHash).toBe(proofBodyHash);
-    expect(upload.appointment.activePayload?.lastResortWindowBlocks).toBe(1152);
-    const encryptedRemedy = String(upload.appointment.activePayload?.encryptedRemedy || '');
+    expect(upload.appointment.lastResortPayload?.proofNonce).toBe(9);
+    expect(upload.appointment.lastResortPayload?.proofBodyHash).toBe(proofBodyHash);
+    expect(upload.appointment.lastResortPayload?.lastResortWindowBlocks).toBe(1152);
+    const encryptedRemedy = String(upload.appointment.lastResortPayload?.encryptedRemedy || '');
     expect(encryptedRemedy).not.toContain('counter_dispute_remedy');
     const remedy = JSON.parse(await decryptTowerPayloadWithPrivateKey(encryptedRemedy, towerWallet.privateKey));
     expect(remedy.watchedEntityId).toBe(entityId);
@@ -486,6 +486,7 @@ describe('watchtower recovery full flow', () => {
       dbPath: join(towerRoot, 'tower.level'),
       towerPrivateKey: towerWallet.privateKey,
       maxStoredBytesPerLookupKey: 64 * 1024,
+      enableOperatorApi: true,
     });
     servers.push(towerServer);
 

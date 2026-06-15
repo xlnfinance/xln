@@ -6,6 +6,7 @@ import type {
   TowerRestoreRequestV1,
   TowerRestoreResponseV1,
 } from '../recovery/types';
+import { normalizeTowerModeV1 } from '../recovery/types';
 import {
   buildTowerAppointmentOwnerMessage,
 } from '../recovery/crypto';
@@ -117,16 +118,16 @@ const verifyEncryptedBundleShape = (appointment: TowerAppointmentV1): void => {
   }
 };
 
-const assertEncryptedActivePayload = (activePayload: TowerAppointmentV1['activePayload']): void => {
-  const raw = String(activePayload?.encryptedRemedy || '').trim();
+const assertEncryptedLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastResortPayload']): void => {
+  const raw = String(lastResortPayload?.encryptedRemedy || '').trim();
   if (!raw) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_REMEDY_MISSING');
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_MISSING');
   }
   let parsed: Record<string, unknown>;
   try {
     parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
   } catch {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   }
   if (
     parsed['type'] !== 'tower_encrypted_payload' ||
@@ -137,36 +138,36 @@ const assertEncryptedActivePayload = (activePayload: TowerAppointmentV1['activeP
     typeof parsed['ciphertext'] !== 'string' ||
     typeof parsed['plaintextHash'] !== 'string'
   ) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   }
 };
 
-const verifyLastResortPayload = (activePayload: TowerAppointmentV1['activePayload']): void => {
-  if (!activePayload) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_MISSING');
+const verifyLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastResortPayload']): void => {
+  if (!lastResortPayload) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_MISSING');
   }
-  if (activePayload.actionKind !== 'counter_dispute_only') {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_ACTION_KIND_UNSUPPORTED');
+  if (lastResortPayload.actionKind !== 'counter_dispute_only') {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_ACTION_KIND_UNSUPPORTED');
   }
-  if (activePayload.responseMode !== 'last_resort') {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_RESPONSE_MODE_UNSUPPORTED');
+  if (lastResortPayload.responseMode !== 'last_resort') {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_RESPONSE_MODE_UNSUPPORTED');
   }
-  const triggerHint = String(activePayload.triggerHint || '').trim();
+  const triggerHint = String(lastResortPayload.triggerHint || '').trim();
   if (!triggerHint || triggerHint.length > 256) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_TRIGGER_HINT_INVALID');
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_TRIGGER_HINT_INVALID');
   }
-  if (normalizeNonNegativeInt(activePayload.appointmentSequence, 'ACTIVE_PAYLOAD_APPOINTMENT_SEQUENCE') <= 0) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_APPOINTMENT_SEQUENCE_INVALID');
+  if (normalizeNonNegativeInt(lastResortPayload.appointmentSequence, 'LAST_RESORT_PAYLOAD_APPOINTMENT_SEQUENCE') <= 0) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_APPOINTMENT_SEQUENCE_INVALID');
   }
-  if (normalizeNonNegativeInt(activePayload.proofNonce, 'ACTIVE_PAYLOAD_PROOF_NONCE') <= 0) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_PROOF_NONCE_INVALID');
+  if (normalizeNonNegativeInt(lastResortPayload.proofNonce, 'LAST_RESORT_PAYLOAD_PROOF_NONCE') <= 0) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_PROOF_NONCE_INVALID');
   }
-  normalizeBytes32(activePayload.proofBodyHash, 'ACTIVE_PAYLOAD_PROOF_BODY_HASH');
-  if (normalizeNonNegativeInt(activePayload.lastResortWindowBlocks, 'ACTIVE_PAYLOAD_LAST_RESORT_WINDOW') <= 0) {
-    throw new Error('TOWER_ACTIVE_PAYLOAD_LAST_RESORT_WINDOW_INVALID');
+  normalizeBytes32(lastResortPayload.proofBodyHash, 'LAST_RESORT_PAYLOAD_PROOF_BODY_HASH');
+  if (normalizeNonNegativeInt(lastResortPayload.lastResortWindowBlocks, 'LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW') <= 0) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_LAST_RESORT_WINDOW_INVALID');
   }
-  normalizeNonNegativeInt(activePayload.safetyMarginBlocks, 'ACTIVE_PAYLOAD_SAFETY_MARGIN');
-  assertEncryptedActivePayload(activePayload);
+  normalizeNonNegativeInt(lastResortPayload.safetyMarginBlocks, 'LAST_RESORT_PAYLOAD_SAFETY_MARGIN');
+  assertEncryptedLastResortPayload(lastResortPayload);
 };
 
 const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointmentV1 => {
@@ -184,17 +185,12 @@ const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointme
   }
   const signedAt = Math.max(0, Math.floor(Number(appointment.ownerProof?.signedAt || 0)));
   const slot = Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
-  if (appointment.towerMode === 'active_watchtower') {
-    throw new Error('TOWER_ACTIVE_WATCHTOWER_DISABLED');
-  }
-  const towerMode = appointment.towerMode === 'delayed_last_resort'
-    ? appointment.towerMode
-    : 'blind_backup';
-  if (towerMode === 'blind_backup' && appointment.activePayload) {
-    throw new Error('TOWER_BACKUP_ACTIVE_PAYLOAD_FORBIDDEN');
+  const towerMode = normalizeTowerModeV1(appointment.towerMode);
+  if (towerMode === 'blind_backup' && appointment.lastResortPayload) {
+    throw new Error('TOWER_BACKUP_LAST_RESORT_PAYLOAD_FORBIDDEN');
   }
   if (towerMode === 'delayed_last_resort') {
-    verifyLastResortPayload(appointment.activePayload);
+    verifyLastResortPayload(appointment.lastResortPayload);
   }
   const message = buildTowerAppointmentOwnerMessage(
     runtimeId,
@@ -204,7 +200,7 @@ const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointme
     appointment.bundle.bundleHash,
     appointment.bundle.height,
     signedAt,
-    appointment.activePayload,
+    appointment.lastResortPayload,
   );
   const recovered = ethers.verifyMessage(message, String(appointment.ownerProof?.signature || '')).toLowerCase();
   if (recovered !== runtimeId) {

@@ -29,7 +29,7 @@ This folder owns recovery bundle primitives and watchtower authorization helpers
 - `deriveRuntimeRecoveryLookupKey(...)`
   Blind backup namespace used for full encrypted runtime restore.
 - `deriveRuntimeRecoveryActionLookupKey(...)`
-  Per-account active watchtower namespace used for delayed last-resort dispute
+  Per-account last-resort tower namespace used for delayed last-resort dispute
   appointments.
 
 Those two lookup families must stay separate. The tower should not learn backup

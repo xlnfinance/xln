@@ -8,7 +8,7 @@ import type {
   PersistedFrameJournal,
   RoutedEntityInput,
   RuntimeInput,
-  TowerActivePayloadV1,
+  TowerLastResortPayloadV1,
   TowerCounterDisputeRemedyV2,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
@@ -430,9 +430,7 @@ const defaultRecoveryTowerUrls = (): string[] => {
 const normalizeTowerBaseUrl = (url: string): string => String(url || '').trim().replace(/\/+$/, '');
 
 const normalizeRecoveryTowerMode = (mode: unknown): TowerModeV1 =>
-  mode === 'active_watchtower' || mode === 'delayed_last_resort'
-    ? mode
-    : 'blind_backup';
+  mode === 'delayed_last_resort' ? mode : 'blind_backup';
 
 const normalizeRecoveryTowerConfigs = (towers: RecoveryTowerConfig[] | undefined): RecoveryTowerConfig[] => {
   const deduped = new Map<string, RecoveryTowerConfig>();
@@ -859,7 +857,7 @@ async function uploadRuntimeRecoverySnapshot(
       if (!towerSignerAddress) {
         throw new Error('TOWER_SIGNER_ADDRESS_MISSING');
       }
-      const activeAppointments = await buildDelayedLastResortAppointmentsForTower(
+      const lastResortAppointments = await buildDelayedLastResortAppointmentsForTower(
         runtime,
         env,
         xln,
@@ -868,7 +866,7 @@ async function uploadRuntimeRecoverySnapshot(
         encrypted,
         typeof info.actionPublicKey === 'string' ? info.actionPublicKey : undefined,
       );
-      for (const upload of activeAppointments) {
+      for (const upload of lastResortAppointments) {
         const appointmentUrl = buildTowerRequestUrl(tower.url, '/api/tower/appointment');
         const response = await fetch(appointmentUrl, {
           method: 'PUT',
@@ -1199,12 +1197,12 @@ const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
 };
 
 // Tower remedies carry dispute proof bodies, which still contain bigint deltas.
-// JSON.stringify would throw here and silently break active watchtower coverage,
+// JSON.stringify would throw here and silently break last-resort tower coverage,
 // so we normalize bigint leaves into decimal strings before upload.
 const stringifyTowerPayload = (value: unknown): string =>
   JSON.stringify(value, (_key, candidate) => typeof candidate === 'bigint' ? candidate.toString() : candidate);
 
-type ActiveTowerAppointmentUpload = {
+type LastResortTowerAppointmentUpload = {
   tower: RecoveryTowerConfig;
   appointment: TowerAppointmentV1;
   lookupKey: string;
@@ -1219,7 +1217,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
   towerSignerAddress: string,
   encryptedBundle: EncryptedRuntimeRecoveryBundleV1,
   towerActionPublicKey?: string,
-): Promise<ActiveTowerAppointmentUpload[]> {
+): Promise<LastResortTowerAppointmentUpload[]> {
   if (
     typeof xln.deriveRuntimeRecoveryActionLookupKey !== 'function' ||
     typeof xln.computeWatchtowerCounterDisputeAuthorizationHash !== 'function' ||
@@ -1233,7 +1231,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
   if (!normalizedRuntimeId || !runtime.seed) return [];
 
   const rootWallet = new Wallet(derivePrivateKey(runtime.seed, 0));
-  const uploads = new Map<string, ActiveTowerAppointmentUpload>();
+  const uploads = new Map<string, LastResortTowerAppointmentUpload>();
 
   // We publish one last-resort appointment per concrete bilateral account.
   // The tower never gets spend authority. It only receives the latest
@@ -1362,7 +1360,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
       }
       const encryptedRemedy = await xln.encryptTowerPayloadForPublicKey(serializedRemedy, towerActionPublicKey);
       const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
-      const activePayload: TowerActivePayloadV1 = {
+      const lastResortPayload: TowerLastResortPayloadV1 = {
         triggerHint,
         encryptedRemedy,
         actionKind: 'counter_dispute_only',
@@ -1383,10 +1381,10 @@ export async function buildDelayedLastResortAppointmentsForTower(
           encryptedBundle.bundleHash,
           encryptedBundle.height,
           signedAt,
-          activePayload,
+          lastResortPayload,
         ),
       );
-      const nextUpload: ActiveTowerAppointmentUpload = {
+      const nextUpload: LastResortTowerAppointmentUpload = {
         tower,
         lookupKey,
         triggerHint,
@@ -1396,14 +1394,14 @@ export async function buildDelayedLastResortAppointmentsForTower(
           towerMode: 'delayed_last_resort',
           lookupKey,
           slot: 0,
-          // Active appointments use a separate blind lookup namespace so towers
+          // Last-resort appointments use a separate blind lookup namespace so towers
           // cannot infer backup availability from the action channel and vice
           // versa. The ciphertext stays opaque to the tower either way.
           bundle: {
             ...encryptedBundle,
             lookupKey,
           },
-          activePayload,
+          lastResortPayload,
           ownerProof: {
             runtimeId: normalizedRuntimeId,
             signedAt,
@@ -1412,7 +1410,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
         },
       };
       const previous = uploads.get(lookupKey);
-      if (!previous || (previous.appointment.activePayload?.proofNonce || 0) < proofNonce) {
+      if (!previous || (previous.appointment.lastResortPayload?.proofNonce || 0) < proofNonce) {
         uploads.set(lookupKey, nextUpload);
       }
     }

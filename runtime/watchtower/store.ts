@@ -6,12 +6,13 @@ import { Wallet, ethers } from 'ethers';
 import { serializeTaggedJson } from '../serialization-utils';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
-  TowerActivePayloadV1,
+  TowerLastResortPayloadV1,
   TowerAppointmentV1,
   TowerModeV1,
   TowerReceiptV1,
 } from '../recovery/types';
-import { computeTowerActivePayloadDigest, getTowerPayloadEncryptionPublicKey } from '../recovery/crypto';
+import { normalizeTowerModeV1 } from '../recovery/types';
+import { computeTowerLastResortPayloadDigest, getTowerPayloadEncryptionPublicKey } from '../recovery/crypto';
 
 type StoredLookupDoc = {
   lookupKey: string;
@@ -22,8 +23,8 @@ type StoredLookupDoc = {
     slot: number;
     towerMode: TowerModeV1;
     bundle: EncryptedRuntimeRecoveryBundleV1;
-    activePayloadDigest: string;
-    activePayload?: TowerActivePayloadV1;
+    lastResortPayloadDigest: string;
+    lastResortPayload?: TowerLastResortPayloadV1;
   }>;
 };
 
@@ -46,18 +47,18 @@ export type StoredTowerActionReceipt = {
   createdAt: number;
 };
 
-export type ActiveTowerAppointment = {
+export type LastResortTowerAppointment = {
   lookupKey: string;
   runtimeId: string;
   towerMode: TowerModeV1;
   slot: number;
   bundle: EncryptedRuntimeRecoveryBundleV1;
-  activePayload: TowerActivePayloadV1;
+  lastResortPayload: TowerLastResortPayloadV1;
 };
 
 export type WatchtowerStoreStats = {
   lookupCount: number;
-  activeAppointmentCount: number;
+  lastResortAppointmentCount: number;
   actionReceiptCount: number;
 };
 
@@ -75,12 +76,8 @@ const normalizeLookupKey = (lookupKey: string): string => {
   return normalized;
 };
 
-const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 => {
-  if (appointment.towerMode === 'active_watchtower') {
-    throw new Error('TOWER_ACTIVE_WATCHTOWER_DISABLED');
-  }
-  return appointment.towerMode === 'delayed_last_resort' ? appointment.towerMode : 'blind_backup';
-};
+const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 =>
+  normalizeTowerModeV1(appointment.towerMode);
 
 const slotOf = (appointment: TowerAppointmentV1): number =>
   Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
@@ -188,24 +185,24 @@ export const createWatchtowerStore = (options?: {
     const lookupKey = normalizeLookupKey(appointment.lookupKey);
     const towerMode = towerModeOf(appointment);
     const slot = slotOf(appointment);
-    if (towerMode === 'blind_backup' && appointment.activePayload) {
-      throw new Error('TOWER_BACKUP_ACTIVE_PAYLOAD_FORBIDDEN');
+    if (towerMode === 'blind_backup' && appointment.lastResortPayload) {
+      throw new Error('TOWER_BACKUP_LAST_RESORT_PAYLOAD_FORBIDDEN');
     }
-    if (towerMode === 'delayed_last_resort' && !appointment.activePayload) {
-      throw new Error('TOWER_ACTIVE_PAYLOAD_MISSING');
+    if (towerMode === 'delayed_last_resort' && !appointment.lastResortPayload) {
+      throw new Error('TOWER_LAST_RESORT_PAYLOAD_MISSING');
     }
     const existing = normalizeStoredDoc(lookupKey, await readLookup(lookupKey));
     const runtimeId = String(appointment.bundle.runtimeId || '').trim().toLowerCase();
     const sequence = Math.max(0, ...existing.receipts.map((receipt) => receipt.sequence || 0)) + 1;
-    const activePayloadDigest = computeTowerActivePayloadDigest(appointment.activePayload);
+    const lastResortPayloadDigest = computeTowerLastResortPayloadDigest(appointment.lastResortPayload);
 
     const nextBundles = [
       {
         slot,
         towerMode,
         bundle: appointment.bundle,
-        activePayloadDigest,
-        ...(appointment.activePayload ? { activePayload: structuredClone(appointment.activePayload) } : {}),
+        lastResortPayloadDigest,
+        ...(appointment.lastResortPayload ? { lastResortPayload: structuredClone(appointment.lastResortPayload) } : {}),
       },
       ...existing.bundles.filter((entry) =>
         !(entry.slot === slot && entry.towerMode === towerMode && entry.bundle.bundleHash === appointment.bundle.bundleHash),
@@ -249,8 +246,8 @@ export const createWatchtowerStore = (options?: {
       storedBytes,
       maxStoredBytes: maxStoredBytesPerLookupKey,
       quotaOk: true,
-      appointmentSequence: Number.isFinite(Number(appointment.activePayload?.appointmentSequence))
-        ? Math.max(0, Math.floor(Number(appointment.activePayload?.appointmentSequence || 0)))
+      appointmentSequence: Number.isFinite(Number(appointment.lastResortPayload?.appointmentSequence))
+        ? Math.max(0, Math.floor(Number(appointment.lastResortPayload?.appointmentSequence || 0)))
         : null,
     };
     const receipt = await signReceipt(unsignedReceipt);
@@ -279,36 +276,36 @@ export const createWatchtowerStore = (options?: {
     invalidateStats();
   };
 
-  const listLatestActiveAppointments = async (): Promise<ActiveTowerAppointment[]> => {
+  const listLatestLastResortAppointments = async (): Promise<LastResortTowerAppointment[]> => {
     await ensureOpen();
-    const appointments: ActiveTowerAppointment[] = [];
+    const appointments: LastResortTowerAppointment[] = [];
     for await (const [, raw] of db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
       const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
       const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
-      const activeEntry = doc.bundles
+      const lastResortEntry = doc.bundles
         .filter((entry) =>
           entry.towerMode === 'delayed_last_resort'
-          && !!entry.activePayload,
+          && !!entry.lastResortPayload,
         )
         .sort((left, right) => {
-          const leftSequence = Math.max(0, Math.floor(Number(left.activePayload?.appointmentSequence || 0)));
-          const rightSequence = Math.max(0, Math.floor(Number(right.activePayload?.appointmentSequence || 0)));
+          const leftSequence = Math.max(0, Math.floor(Number(left.lastResortPayload?.appointmentSequence || 0)));
+          const rightSequence = Math.max(0, Math.floor(Number(right.lastResortPayload?.appointmentSequence || 0)));
           if (rightSequence !== leftSequence) return rightSequence - leftSequence;
-          const leftNonce = Math.max(0, Math.floor(Number(left.activePayload?.proofNonce || 0)));
-          const rightNonce = Math.max(0, Math.floor(Number(right.activePayload?.proofNonce || 0)));
+          const leftNonce = Math.max(0, Math.floor(Number(left.lastResortPayload?.proofNonce || 0)));
+          const rightNonce = Math.max(0, Math.floor(Number(right.lastResortPayload?.proofNonce || 0)));
           if (rightNonce !== leftNonce) return rightNonce - leftNonce;
           if (right.bundle.height !== left.bundle.height) return right.bundle.height - left.bundle.height;
           if (right.bundle.createdAt !== left.bundle.createdAt) return right.bundle.createdAt - left.bundle.createdAt;
           return right.slot - left.slot;
         })[0];
-      if (!activeEntry?.activePayload) continue;
+      if (!lastResortEntry?.lastResortPayload) continue;
       appointments.push({
         lookupKey: doc.lookupKey,
         runtimeId: doc.runtimeId,
-        towerMode: activeEntry.towerMode,
-        slot: activeEntry.slot,
-        bundle: activeEntry.bundle,
-        activePayload: structuredClone(activeEntry.activePayload),
+        towerMode: lastResortEntry.towerMode,
+        slot: lastResortEntry.slot,
+        bundle: lastResortEntry.bundle,
+        lastResortPayload: structuredClone(lastResortEntry.lastResortPayload),
       });
     }
     return appointments;
@@ -354,19 +351,19 @@ export const createWatchtowerStore = (options?: {
       return cachedStats.value;
     }
     let lookupCount = 0;
-    let activeAppointmentCount = 0;
+    let lastResortAppointmentCount = 0;
     for await (const [, raw] of db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
       lookupCount += 1;
       const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
       const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
-      if (doc.bundles.some((entry) => entry.towerMode === 'delayed_last_resort' && !!entry.activePayload)) {
-        activeAppointmentCount += 1;
+      if (doc.bundles.some((entry) => entry.towerMode === 'delayed_last_resort' && !!entry.lastResortPayload)) {
+        lastResortAppointmentCount += 1;
       }
     }
     const metaStats = await readMetaStats();
     const value = {
       lookupCount,
-      activeAppointmentCount,
+      lastResortAppointmentCount,
       actionReceiptCount: metaStats.actionReceiptCount,
     };
     cachedStats = { cachedAt: currentTime, value };
@@ -421,7 +418,7 @@ export const createWatchtowerStore = (options?: {
     upsertAppointment,
     getLatest,
     getLatestReceipt,
-    listLatestActiveAppointments,
+    listLatestLastResortAppointments,
     appendActionReceipt,
     listActionReceipts,
     appendComplaint,

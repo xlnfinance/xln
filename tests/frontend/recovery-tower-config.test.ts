@@ -177,7 +177,7 @@ test('delayed last-resort appointments require encrypted tower action payloads',
   );
 
   expect(uploads.length).toBe(1);
-  const encryptedRemedy = uploads[0]!.appointment.activePayload?.encryptedRemedy || '';
+  const encryptedRemedy = uploads[0]!.appointment.lastResortPayload?.encryptedRemedy || '';
   const encryptedPayload = deserializeTaggedJson<Record<string, unknown>>(encryptedRemedy);
   expect(encryptedPayload.type).toBe('tower_encrypted_payload');
   expect(encryptedRemedy).not.toContain('counter_dispute_remedy');
