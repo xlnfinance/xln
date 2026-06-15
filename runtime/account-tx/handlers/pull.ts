@@ -22,13 +22,6 @@ const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const absBigInt = (value: bigint): bigint => value >= 0n ? value : -value;
 const isPullRevealExpired = (deadline: number, currentTimestamp: number): boolean =>
   Number.isFinite(deadline) && deadline > 0 && currentTimestamp >= deadline;
-const hasCommittedCrossJurisdictionFill = (route: CrossJurisdictionSwapRoute): boolean => (
-  Math.max(Number(route.cumulativeFillRatio ?? 0), Number(route.claimedRatio ?? 0)) > 0 ||
-  (route.filledSourceAmount ?? 0n) > 0n ||
-  (route.filledTargetAmount ?? 0n) > 0n ||
-  (route.sourceClaimed ?? 0n) > 0n ||
-  (route.targetClaimed ?? 0n) > 0n
-);
 const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRoute): boolean => (
   route.status === 'clearing' ||
   route.status === 'source_claimed' ||
@@ -117,6 +110,7 @@ const crossProofMatchesBinding = (
 const validateCrossJurisdictionPullResolve = (
   binding: CrossJurisdictionPullBinding | undefined,
   ratio: number,
+  binary: string,
 ): string | null => {
   if (!binding || ratio <= 0) return null;
   const status = binding.status || 'intent';
@@ -131,19 +125,17 @@ const validateCrossJurisdictionPullResolve = (
       return `CROSS_J_SOURCE_PULL_RESOLVE_OVER_COMMITTED:${binding.orderId}:ratio=${ratio}:committed=${committedRatio}`;
     }
   } else {
-    const targetStatusAllowed =
-      status === 'target_prepared' ||
-      status === 'target_locked' ||
-      status === 'resting' ||
-      status === 'clearing' ||
-      status === 'source_claimed';
-    if (!targetStatusAllowed) {
-      return `CROSS_J_TARGET_PULL_RESOLVE_BEFORE_SOURCE_CLAIM:${binding.orderId}:status=${status}`;
+    const sourceProof = binding.sourceCloseProof;
+    if (!sourceProof) {
+      return `CROSS_J_TARGET_PULL_RESOLVE_BEFORE_SOURCE_CLAIM:${binding.orderId}:sourceProof=missing:status=${status}`;
     }
-    // Target resolve pays the target beneficiary. It may arrive at the hub-side
-    // account before that entity has mirrored source-claim metadata; the binary
-    // itself is still verified against the committed target pull hash. Source
-    // pull resolves remain strict above because those move user source funds.
+    if (sourceProof.fillRatio !== ratio) {
+      return `CROSS_J_TARGET_PULL_RESOLVE_SOURCE_PROOF_RATIO_MISMATCH:${binding.orderId}:ratio=${ratio}:proof=${sourceProof.fillRatio}`;
+    }
+    const binaryHash = hashCrossJurisdictionCloseBinary(binary);
+    if ((binaryHash || '').toLowerCase() !== (sourceProof.binaryHash || '').toLowerCase()) {
+      return `CROSS_J_TARGET_PULL_RESOLVE_SOURCE_PROOF_BINARY_MISMATCH:${binding.orderId}`;
+    }
     if (committedRatio > 0 && ratio > committedRatio) {
       return `CROSS_J_TARGET_PULL_RESOLVE_OVER_COMMITTED:${binding.orderId}:ratio=${ratio}:committed=${committedRatio}`;
     }
@@ -268,6 +260,7 @@ export async function handlePullResolve(
   const crossResolveError = validateCrossJurisdictionPullResolve(
     findCrossJurisdictionPullBinding(accountMachine, pullId),
     ratio,
+    binary,
   );
   if (crossResolveError) return { success: false, error: crossResolveError, events };
 
@@ -438,11 +431,7 @@ export async function handlePullCancel(
     return { success: false, error: `Only beneficiary can release an active pull, payer can cancel only after expiry`, events };
   }
   const crossRoute = findCrossJurisdictionRouteForPull(accountMachine, pullId);
-  if (
-    crossRoute &&
-    hasCommittedCrossJurisdictionFill(crossRoute.route) &&
-    !isCrossJurisdictionPullCancelWithinClear(crossRoute.route)
-  ) {
+  if (crossRoute && !isCrossJurisdictionPullCancelWithinClear(crossRoute.route)) {
     return {
       success: false,
       error: `Cross-j ${crossRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: route ${crossRoute.route.orderId} must clear through requestCrossJurisdictionClear`,

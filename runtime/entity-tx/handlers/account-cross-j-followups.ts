@@ -1,5 +1,6 @@
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import {
+  buildCrossJurisdictionCloseProof,
   cloneCrossJurisdictionRoute,
   CROSS_J_MAX_FILL_RATIO,
   applyCrossJurisdictionFillProgress,
@@ -376,6 +377,8 @@ const applyPullResolveFollowup = (
       assertPullResolveAllowed(route, fillRatio, 'source');
       backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
+      const proof = buildCrossJurisdictionCloseProof(route, accountTx.data.binary);
+      route.sourceCloseProof = proof;
       transitionCrossJurisdictionRouteStatus(route, 'source_claimed', newState.timestamp);
 
       // The same account frame commits on both source participants. Only the hub
@@ -388,28 +391,16 @@ const applyPullResolveFollowup = (
       const targetPull = route.targetPull;
       if (!targetPull) continue;
       const targetEntityTxs: EntityTx[] = [{
-        type: 'resolvePull',
+        type: 'crossPullClose',
         data: {
           counterpartyEntityId: route.target.entityId,
           pullId: targetPull.pullId,
           binary: accountTx.data.binary,
-          description: `Cross-j ${route.orderId} target pull ${fillRatio}/65535`,
+          proof,
+          route: cloneCrossJurisdictionRoute(route),
+          description: `Cross-j ${route.orderId} target close ${fillRatio}/65535`,
         },
       }];
-      if (
-        fillRatio >= CROSS_J_MAX_FILL_RATIO ||
-        route.clearingPolicy === 'cancel_and_clear' ||
-        route.clearingPolicy === 'full_fill'
-      ) {
-        targetEntityTxs.push({
-          type: 'cancelPull',
-          data: {
-            counterpartyEntityId: route.target.entityId,
-            pullId: targetPull.pullId,
-            description: `Cross-j ${route.orderId} release target remainder`,
-          },
-        });
-      }
       outputs.push(buildCrossJurisdictionEntityOutput(
         env,
         route.target.counterpartyEntityId,

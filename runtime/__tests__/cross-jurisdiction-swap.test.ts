@@ -411,15 +411,15 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(outputs.some(output =>
       output.entityId === targetUser &&
       output.entityTxs?.some((tx: any) =>
-        tx.type === 'resolvePull' &&
+        tx.type === 'crossPullClose' &&
         tx.data.counterpartyEntityId === targetHub &&
         tx.data.pullId === filledRoute.targetPull!.pullId &&
         tx.data.binary === binary,
       ),
     )).toBe(true);
     const targetOutput = outputs.find(output => output.entityId === targetUser);
-    expect(targetOutput?.entityTxs?.map((tx: any) => tx.type)).toEqual(['resolvePull', 'cancelPull']);
-    expect((targetOutput?.entityTxs?.[1] as any)?.data.pullId).toBe(filledRoute.targetPull!.pullId);
+    expect(targetOutput?.entityTxs?.map((tx: any) => tx.type)).toEqual(['crossPullClose']);
+    expect((targetOutput?.entityTxs?.[0] as any)?.data.proof.fillRatio).toBe(0x8000);
   });
 
   test('committed pull resolve rejects stale cross-j claim ratios', () => {
@@ -1982,6 +1982,100 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.pulls?.has(route.sourcePull!.pullId)).toBe(true);
   });
 
+  test('direct cancelPull cannot release an unfilled cross-j target pull', async () => {
+    const env = createEmptyEnv('cross-target-direct-cancel-blocked');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('78');
+    const sourceHub = entity('79');
+    const targetHub = entity('7a');
+    const targetUser = entity('7b');
+    const state = makeState(targetUser, addr('7c'), base, targetHub);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-target-direct-cancel-blocked',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'target_locked',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: 'cross-target-direct-cancel-blocked-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+
+    const result = await applyEntityTx(env, state, {
+      type: 'cancelPull',
+      data: {
+        counterpartyEntityId: targetHub,
+        pullId: route.targetPull!.pullId,
+        description: 'malicious unfilled target release',
+      },
+    });
+
+    expect(result.mempoolOps ?? []).toHaveLength(0);
+    expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe(route.status);
+    expect(result.newState.messages.some(message => message.includes('must clear through requestCrossJurisdictionClear'))).toBe(true);
+  });
+
+  test('account-layer pull_cancel cannot release an unfilled cross-j target pull', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('7c');
+    const sourceHub = entity('7d');
+    const targetHub = entity('7e');
+    const targetUser = entity('7f');
+    const account = makeAccount(targetUser, targetHub);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-account-target-cancel-blocked',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'target_locked',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 70_000,
+    }, { runtimeSeed: 'cross-account-target-cancel-blocked-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: route.target.tokenId,
+      giveAmount: route.target.amount,
+      wantTokenId: route.source.tokenId,
+      wantAmount: route.source.amount,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === targetUser,
+      createdHeight: 0,
+      crossJurisdiction: route,
+    });
+    account.pulls = new Map([[route.targetPull!.pullId, {
+      pullId: route.targetPull!.pullId,
+      tokenId: route.targetPull!.tokenId,
+      amount: route.targetPull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
+      fullHash: route.targetPull!.fullHash,
+      partialRoot: route.targetPull!.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: 1_000,
+    }]]);
+
+    const beneficiaryIsLeft = route.targetPull!.signedAmount > 0n;
+    const result = await handlePullCancel(account, {
+      type: 'pull_cancel',
+      data: { pullId: route.targetPull!.pullId, reason: 'beneficiary_release' },
+    }, beneficiaryIsLeft, 10_000);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('must clear through requestCrossJurisdictionClear');
+    expect(account.pulls?.has(route.targetPull!.pullId)).toBe(true);
+  });
+
   test('pull_cancel reports already-closed pull status explicitly', async () => {
     const account = makeAccount(entity('76'), entity('77'));
     const result = await handlePullCancel(account, {
@@ -1993,7 +2087,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.pullCancelled).toEqual({ pullId: 'missing-pull-id', status: 'already-closed' });
   });
 
-  test('target pull resolve verifies relay binary and enters clearing before account commit', async () => {
+  test('target pull resolve verifies relay binary and enters clearing before account commit only with source proof', async () => {
     const env = createEmptyEnv('cross-target-resolve-guard');
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;
@@ -2046,11 +2140,31 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: {
         counterpartyEntityId: targetHub,
         pullId: route.targetPull!.pullId,
-        binary: partialBinary(0x4567),
+        binary,
       },
     });
     expect(blocked.mempoolOps ?? []).toHaveLength(0);
     expect(blocked.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
+    expect(blocked.newState.messages.some(message => message.includes('source close proof missing'))).toBe(true);
+
+    const ratio = 0x4567;
+    const claimedRoute = {
+      ...route,
+      status: 'resting' as const,
+      cumulativeFillRatio: ratio,
+      claimedRatio: ratio,
+      filledSourceAmount: (BigInt(route.source.amount) * BigInt(ratio)) / 65_535n,
+      filledTargetAmount: (BigInt(route.target.amount) * BigInt(ratio)) / 65_535n,
+      sourceClaimed: (BigInt(route.source.amount) * BigInt(ratio)) / 65_535n,
+      targetClaimed: (BigInt(route.target.amount) * BigInt(ratio)) / 65_535n,
+      clearingPolicy: 'cancel_and_clear' as const,
+    };
+    const proof = buildCrossJurisdictionCloseProof(claimedRoute, binary);
+    targetState.crossJurisdictionSwaps?.set(route.orderId, { ...claimedRoute, sourceCloseProof: proof });
+    targetAccount!.pulls!.set(route.targetPull!.pullId, {
+      ...targetAccount!.pulls!.get(route.targetPull!.pullId)!,
+      crossJurisdiction: buildCrossJurisdictionPullBinding({ ...claimedRoute, sourceCloseProof: proof }, 'target'),
+    });
 
     const result = await applyEntityTx(env, targetState, {
       type: 'resolvePull',
@@ -2728,11 +2842,13 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { reason: 'test-expired' },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack', 'pull_cancel']);
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack', 'cross_pull_close']);
+    expect((result.mempoolOps?.[1]?.tx as any).data.binary).toBe('0x');
+    expect((result.mempoolOps?.[1]?.tx as any).data.proof.fillRatio).toBe(0);
     expect(result.outputs.some(output =>
       output.entityId === targetUser &&
       output.entityTxs?.some(tx => tx.type === 'cancelPull'),
-    )).toBe(true);
+    )).toBe(false);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('expired');
   });
 

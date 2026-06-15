@@ -11,7 +11,7 @@ import { addMessage, cloneEntityState } from '../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { formatEntityId } from '../../utils';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
-import { findCrossJurisdictionPullRoute, hasCommittedCrossJurisdictionFill, isCrossJurisdictionPullCancelWithinClear } from '../cross-jurisdiction-helpers';
+import { findCrossJurisdictionPullRoute, isCrossJurisdictionPullCancelWithinClear } from '../cross-jurisdiction-helpers';
 import type { MempoolOp } from './account';
 
 type PullLockTx = Extract<EntityTx, { type: 'pullLock' }>;
@@ -186,6 +186,20 @@ const validateCrossTargetResolve = (
   }
   const committedRatio = Math.max(Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0), Math.floor(Number(route.claimedRatio ?? 0) || 0));
   if (decodedRatio <= 0) return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: empty reveal`);
+  const sourceProof = route.sourceCloseProof;
+  if (!sourceProof) {
+    return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: source close proof missing`);
+  }
+  if (decodedRatio !== sourceProof.fillRatio) {
+    return fail(
+      result,
+      `❌ Cross-j target pull ${shortPull} resolve blocked: ratio ${decodedRatio}/65535 != source proof ${sourceProof.fillRatio}/65535`,
+    );
+  }
+  const binaryHash = hashCrossJurisdictionCloseBinary(binary);
+  if ((binaryHash || '').toLowerCase() !== (sourceProof.binaryHash || '').toLowerCase()) {
+    return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: binary hash != source proof`);
+  }
   if (committedRatio > 0 && decodedRatio > committedRatio) {
     return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: ratio ${decodedRatio}/65535 exceeds committed ${committedRatio}/65535`);
   }
@@ -264,7 +278,11 @@ export const handleCancelPullEntityTx = (_env: Env, state: EntityState, tx: Canc
   const accountId = resolveCounterparty(result, counterpartyEntityId, 'cancel');
   if (!accountId) return result;
   const crossPullRoute = findCrossJurisdictionPullRoute(result.newState, pullId);
-  if (crossPullRoute && hasCommittedCrossJurisdictionFill(crossPullRoute.route) && !isCrossJurisdictionPullCancelWithinClear(crossPullRoute.route)) {
+  if (
+    crossPullRoute &&
+    !isCrossJurisdictionTerminalStatus(crossPullRoute.route.status) &&
+    !isCrossJurisdictionPullCancelWithinClear(crossPullRoute.route)
+  ) {
     return fail(
       result,
       `❌ Cross-j ${crossPullRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: route ${crossPullRoute.route.orderId} must clear through requestCrossJurisdictionClear`,
