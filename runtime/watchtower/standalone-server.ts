@@ -26,6 +26,9 @@ export type StandaloneWatchtowerOptions = {
   maxBundlesPerLookupKey?: number;
   receiptTtlMs?: number;
   towerPrivateKey?: string;
+  enableLastResortAgent?: boolean;
+  enableOperatorApi?: boolean;
+  operatorToken?: string;
   sweepIntervalMs?: number;
   allowedRpcUrls?: string[];
 };
@@ -48,14 +51,18 @@ const startSweepScheduler = (
   store: WatchtowerStore,
   options: {
     towerPrivateKey?: string;
+    enabled?: boolean;
     intervalMs?: number;
     allowedRpcUrls?: string[];
   },
 ): SweepScheduler => {
   const towerPrivateKey = String(options.towerPrivateKey || '').trim();
   const intervalMs = Math.max(1_000, Math.floor(Number(options.intervalMs ?? 30_000)));
-  if (!towerPrivateKey) {
+  if (!options.enabled) {
     return { enabled: false, intervalMs, close: () => {} };
+  }
+  if (!towerPrivateKey) {
+    throw new Error('WATCHTOWER_LAST_RESORT_AGENT_PRIVATE_KEY_REQUIRED');
   }
 
   let closed = false;
@@ -119,12 +126,35 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
   });
   const scheduler = startSweepScheduler(store, {
     ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
+    enabled: options.enableLastResortAgent === true,
     ...(options.sweepIntervalMs !== undefined ? { intervalMs: options.sweepIntervalMs } : {}),
     ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
   });
+  const operatorApiEnabled = options.enableOperatorApi === true;
+  const operatorToken = String(options.operatorToken || '').trim();
+  const bindHost = options.host || '0.0.0.0';
+  const localOperatorHost = bindHost === '127.0.0.1' || bindHost === 'localhost' || bindHost === '::1';
+  if (operatorApiEnabled && !operatorToken && !localOperatorHost) {
+    throw new Error('WATCHTOWER_OPERATOR_TOKEN_REQUIRED_FOR_PUBLIC_BIND');
+  }
+
+  const operatorAllowed = (req: Request): boolean => {
+    if (!operatorApiEnabled) return false;
+    if (!operatorToken) return true;
+    return req.headers.get('authorization') === `Bearer ${operatorToken}`
+      || req.headers.get('x-watchtower-operator-token') === operatorToken;
+  };
+
+  const operatorDenied = (): Response => new Response(JSON.stringify({
+    ok: false,
+    error: operatorApiEnabled ? 'WATCHTOWER_OPERATOR_AUTH_REQUIRED' : 'WATCHTOWER_OPERATOR_API_DISABLED',
+  }), {
+    status: operatorApiEnabled ? 401 : 404,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store, max-age=0' },
+  });
 
   const server = Bun.serve({
-    hostname: options.host || '0.0.0.0',
+    hostname: bindHost,
     port: options.port,
     async fetch(req) {
       const url = new URL(req.url);
@@ -143,6 +173,10 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
           sweep: {
             enabled: scheduler.enabled,
             intervalMs: scheduler.intervalMs,
+          },
+          operatorApi: {
+            enabled: operatorApiEnabled,
+            auth: operatorToken ? 'bearer' : 'local-only',
           },
           stats,
         }), {
@@ -170,12 +204,14 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
         return handleRecoveryComplaint(req, store);
       }
       if (pathname === '/api/watchtower/sweep' && req.method === 'POST') {
+        if (!operatorAllowed(req)) return operatorDenied();
         return handleWatchtowerSweep(req, store, {
           ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
         });
       }
       const actionReceiptMatch = pathname.match(/^\/api\/watchtower\/actions\/([^/]+)$/);
       if (actionReceiptMatch && req.method === 'GET') {
+        if (!operatorAllowed(req)) return operatorDenied();
         return handleWatchtowerActions(decodeURIComponent(actionReceiptMatch[1] || ''), store);
       }
 
@@ -184,7 +220,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
   });
 
   console.log(
-    `[WATCHTOWER] "${store.towerId}" listening on ${options.host || '0.0.0.0'}:${server.port} (quota=${store.maxStoredBytesPerLookupKey}B)`,
+    `[WATCHTOWER] "${store.towerId}" listening on ${bindHost}:${server.port} (quota=${store.maxStoredBytesPerLookupKey}B)`,
   );
 
   return {
@@ -226,6 +262,11 @@ if (import.meta.main) {
   const sweepIntervalMs = sweepIntervalArgIdx !== -1 && args[sweepIntervalArgIdx + 1]
     ? Number(args[sweepIntervalArgIdx + 1])
     : Number(process.env['XLN_WATCHTOWER_SWEEP_INTERVAL_MS'] || 30_000);
+  const enableLastResortAgent = args.includes('--enable-last-resort-agent')
+    || process.env['XLN_WATCHTOWER_ENABLE_LAST_RESORT'] === '1';
+  const enableOperatorApi = args.includes('--enable-operator-api')
+    || process.env['XLN_WATCHTOWER_OPERATOR_API'] === '1';
+  const operatorToken = process.env['XLN_WATCHTOWER_OPERATOR_TOKEN'];
   const allowedRpcUrls = String(process.env['XLN_WATCHTOWER_ALLOWED_RPC_URLS'] || '')
     .split(',')
     .map(value => value.trim())
@@ -238,7 +279,10 @@ if (import.meta.main) {
     towerId,
     maxStoredBytesPerLookupKey,
     maxBundlesPerLookupKey,
+    enableLastResortAgent,
+    enableOperatorApi,
     sweepIntervalMs,
+    ...(operatorToken ? { operatorToken } : {}),
     ...(allowedRpcUrls.length > 0 ? { allowedRpcUrls } : {}),
     ...(process.env['XLN_WATCHTOWER_PRIVATE_KEY'] ? { towerPrivateKey: process.env['XLN_WATCHTOWER_PRIVATE_KEY'] } : {}),
   });

@@ -280,11 +280,10 @@ describe('watchtower restart resilience', () => {
     expect(restorePayload.ok).toBe(true);
     expect(restorePayload.bundle?.lookupKey).toBe(encrypted.lookupKey);
 
-    const actions = await fetch(`http://127.0.0.1:${server.server.port}/api/watchtower/actions/${activeLookupKey}`);
-    expect(actions.ok).toBe(true);
-    const actionsPayload = await actions.json() as { ok: boolean; receipts?: Array<{ status?: string }> };
-    expect(actionsPayload.ok).toBe(true);
-    expect(actionsPayload.receipts?.[0]?.status).toBe('skipped');
+    const publicActions = await fetch(`http://127.0.0.1:${server.server.port}/api/watchtower/actions/${activeLookupKey}`);
+    expect(publicActions.status).toBe(404);
+    const storedActions = await server.store.listActionReceipts(activeLookupKey);
+    expect(storedActions[0]?.status).toBe('skipped');
 
     const sweep = await runWatchtowerSweep(server.store, {
       lookupKey: activeLookupKey,

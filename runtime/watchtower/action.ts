@@ -6,7 +6,7 @@ import type {
   TowerFinalDisputeProofV2,
 } from '../recovery/types';
 import { decryptTowerPayloadWithPrivateKey } from '../recovery/crypto';
-import type { WatchtowerStore, StoredTowerActionReceipt } from './store';
+import type { ActiveTowerAppointment, WatchtowerStore, StoredTowerActionReceipt } from './store';
 
 const DEPOSITORY_MINIMAL_ABI = [
   'function accountKey(bytes32 e1, bytes32 e2) view returns (bytes)',
@@ -145,8 +145,17 @@ type WatchtowerSweepOptions = {
 
 const DEFAULT_ALLOWED_RPC_URLS = [
   'http://127.0.0.1:8545/',
+  'http://127.0.0.1:8546/',
   'http://localhost:8545/',
+  'http://localhost:8546/',
   'https://xln.finance/rpc',
+  'https://xln.finance/rpc2',
+  'https://xln.finance/rpc3',
+  'https://xln.finance/rpc4',
+  'https://xln.finance/rpc5',
+  'https://xln.finance/rpc6',
+  'https://xln.finance/rpc7',
+  'https://xln.finance/rpc8',
 ];
 
 const normalizeRpcUrl = (value: string): string => {
@@ -226,13 +235,14 @@ const findActiveDisputeContext = async (
   provider: Pick<WatchtowerSweepProvider, 'getLogs'>,
   remedy: TowerCounterDisputeRemedyV2,
   disputeHash: string,
+  currentBlock: bigint,
   disputeTimeout: bigint,
   fromBlockHint?: bigint,
 ): Promise<ActiveDisputeContext> => {
   if (typeof provider.getLogs !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
   }
-  const latestBlock = Math.max(0, Number(disputeTimeout));
+  const latestBlock = Math.max(0, Math.min(Number(currentBlock), Number(disputeTimeout)));
   const hintedFromBlock = Number(fromBlockHint || 0n);
   const fromBlock = Number.isFinite(hintedFromBlock) && hintedFromBlock > 0
     ? Math.max(0, Math.floor(hintedFromBlock))
@@ -293,6 +303,33 @@ const findActiveDisputeContext = async (
   return latest;
 };
 
+const assertAppointmentMatchesRemedy = (
+  appointment: ActiveTowerAppointment,
+  remedy: TowerCounterDisputeRemedyV2,
+): void => {
+  if (appointment.activePayload.actionKind !== 'counter_dispute_only') {
+    throw new Error('WATCHTOWER_ACTION_KIND_UNSUPPORTED');
+  }
+  if (appointment.activePayload.responseMode !== 'last_resort') {
+    throw new Error('WATCHTOWER_RESPONSE_MODE_UNSUPPORTED');
+  }
+  if (appointment.activePayload.appointmentSequence !== remedy.appointmentSequence) {
+    throw new Error(
+      `WATCHTOWER_APPOINTMENT_SEQUENCE_MISMATCH:${appointment.activePayload.appointmentSequence}:${remedy.appointmentSequence}`,
+    );
+  }
+  if (appointment.activePayload.proofNonce !== remedy.latestProof.finalNonce) {
+    throw new Error(
+      `WATCHTOWER_PROOF_NONCE_MISMATCH:${appointment.activePayload.proofNonce}:${remedy.latestProof.finalNonce}`,
+    );
+  }
+  if (appointment.activePayload.lastResortWindowBlocks !== remedy.lastResortWindowBlocks) {
+    throw new Error(
+      `WATCHTOWER_LAST_RESORT_WINDOW_MISMATCH:${appointment.activePayload.lastResortWindowBlocks}:${remedy.lastResortWindowBlocks}`,
+    );
+  }
+};
+
 const buildActionReceipt = (
   lookupKey: string,
   runtimeId: string,
@@ -349,6 +386,7 @@ export const runWatchtowerSweep = async (
     const createdAt = now();
     try {
       const remedy = await decodeTowerCounterDisputeRemedy(appointment.activePayload.encryptedRemedy, towerPrivateKey);
+      assertAppointmentMatchesRemedy(appointment, remedy);
       if (remedy.towerAddress.toLowerCase() !== towerWallet.address.toLowerCase()) {
         await store.appendActionReceipt(
           buildActionReceipt(
@@ -410,6 +448,7 @@ export const runWatchtowerSweep = async (
         provider,
         remedy,
         String(account.disputeHash || '0x'),
+        currentBlock,
         disputeTimeout,
         disputeStartBlock,
       );

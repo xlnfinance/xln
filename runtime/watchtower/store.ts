@@ -75,10 +75,12 @@ const normalizeLookupKey = (lookupKey: string): string => {
   return normalized;
 };
 
-const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 =>
-  appointment.towerMode === 'active_watchtower' || appointment.towerMode === 'delayed_last_resort'
-    ? appointment.towerMode
-    : 'blind_backup';
+const towerModeOf = (appointment: TowerAppointmentV1): TowerModeV1 => {
+  if (appointment.towerMode === 'active_watchtower') {
+    throw new Error('TOWER_ACTIVE_WATCHTOWER_DISABLED');
+  }
+  return appointment.towerMode === 'delayed_last_resort' ? appointment.towerMode : 'blind_backup';
+};
 
 const slotOf = (appointment: TowerAppointmentV1): number =>
   Math.max(0, Math.floor(Number(appointment.slot ?? 0)));
@@ -186,6 +188,12 @@ export const createWatchtowerStore = (options?: {
     const lookupKey = normalizeLookupKey(appointment.lookupKey);
     const towerMode = towerModeOf(appointment);
     const slot = slotOf(appointment);
+    if (towerMode === 'blind_backup' && appointment.activePayload) {
+      throw new Error('TOWER_BACKUP_ACTIVE_PAYLOAD_FORBIDDEN');
+    }
+    if (towerMode === 'delayed_last_resort' && !appointment.activePayload) {
+      throw new Error('TOWER_ACTIVE_PAYLOAD_MISSING');
+    }
     const existing = normalizeStoredDoc(lookupKey, await readLookup(lookupKey));
     const runtimeId = String(appointment.bundle.runtimeId || '').trim().toLowerCase();
     const sequence = Math.max(0, ...existing.receipts.map((receipt) => receipt.sequence || 0)) + 1;
@@ -279,10 +287,16 @@ export const createWatchtowerStore = (options?: {
       const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
       const activeEntry = doc.bundles
         .filter((entry) =>
-          (entry.towerMode === 'active_watchtower' || entry.towerMode === 'delayed_last_resort')
+          entry.towerMode === 'delayed_last_resort'
           && !!entry.activePayload,
         )
         .sort((left, right) => {
+          const leftSequence = Math.max(0, Math.floor(Number(left.activePayload?.appointmentSequence || 0)));
+          const rightSequence = Math.max(0, Math.floor(Number(right.activePayload?.appointmentSequence || 0)));
+          if (rightSequence !== leftSequence) return rightSequence - leftSequence;
+          const leftNonce = Math.max(0, Math.floor(Number(left.activePayload?.proofNonce || 0)));
+          const rightNonce = Math.max(0, Math.floor(Number(right.activePayload?.proofNonce || 0)));
+          if (rightNonce !== leftNonce) return rightNonce - leftNonce;
           if (right.bundle.height !== left.bundle.height) return right.bundle.height - left.bundle.height;
           if (right.bundle.createdAt !== left.bundle.createdAt) return right.bundle.createdAt - left.bundle.createdAt;
           return right.slot - left.slot;
@@ -345,10 +359,7 @@ export const createWatchtowerStore = (options?: {
       lookupCount += 1;
       const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
       const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
-      if (doc.bundles.some((entry) =>
-        (entry.towerMode === 'active_watchtower' || entry.towerMode === 'delayed_last_resort')
-        && !!entry.activePayload,
-      )) {
+      if (doc.bundles.some((entry) => entry.towerMode === 'delayed_last_resort' && !!entry.activePayload)) {
         activeAppointmentCount += 1;
       }
     }
