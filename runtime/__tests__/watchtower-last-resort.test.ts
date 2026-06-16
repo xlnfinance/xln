@@ -61,6 +61,82 @@ describe('watchtower delayed last-resort sweep', () => {
     expect(assertWatchtowerRpcUrlAllowed('https://xln.finance/rpc8')).toBe('https://xln.finance/rpc8');
   });
 
+  test('rejects plaintext last-resort remedies before storage', async () => {
+    const runtimeWallet = Wallet.createRandom();
+    const towerWallet = Wallet.createRandom();
+    const lookupKey = makeLookupKey('tower:last-resort:plaintext-store-reject');
+    const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-plaintext-${Date.now()}`);
+    tempRoots.push(tempRoot);
+    await mkdir(tempRoot, { recursive: true });
+
+    const store = createWatchtowerStore({
+      towerId: 'tower-last-resort-plaintext',
+      dbPath: join(tempRoot, 'tower.level'),
+      towerPrivateKey: towerWallet.privateKey,
+    });
+
+    await expect(store.upsertAppointment({
+      type: 'tower_appointment',
+      version: 1,
+      towerMode: 'delayed_last_resort',
+      lookupKey,
+      slot: 0,
+      bundle: {
+        version: 1,
+        runtimeId: runtimeWallet.address.toLowerCase(),
+        lookupKey,
+        height: 1,
+        createdAt: 1_717_171_716_000,
+        bundleHash: keccak256(toUtf8Bytes('bundle:plaintext-reject')),
+        iv: '0x1234',
+        ciphertext: '0xabcd',
+      },
+      lastResortPayload: {
+        triggerHint: 'chain:31337:acct:plaintext',
+        encryptedRemedy: encodeTowerCounterDisputeRemedy({
+          version: 1,
+          type: 'counter_dispute_remedy',
+          rpcUrl: 'http://127.0.0.1:8545',
+          chainId: 31337,
+          depositoryAddress: '0x1111111111111111111111111111111111111111',
+          watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          towerAddress: towerWallet.address.toLowerCase(),
+          lastResortWindowBlocks: 8,
+          appointmentSequence: 1,
+          ownerAuthorizationHanko: '0xbeef',
+          latestProof: {
+            counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            finalNonce: 2,
+            finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
+            leftArguments: '0x',
+            rightArguments: '0x',
+            starterIncrementedArguments: '0x',
+            sig: '0xcafe',
+          },
+        }),
+        watch: {
+          rpcUrl: 'http://127.0.0.1:8545',
+          chainId: 31337,
+          depositoryAddress: '0x1111111111111111111111111111111111111111',
+          watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        },
+        actionKind: 'counter_dispute_only',
+        appointmentSequence: 1,
+        proofNonce: 2,
+        proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        responseMode: 'last_resort',
+        lastResortWindowBlocks: 8,
+        safetyMarginBlocks: 2,
+      },
+      ownerProof: {
+        runtimeId: runtimeWallet.address.toLowerCase(),
+        signedAt: Date.now(),
+        signature: '0xdead',
+      },
+    })).rejects.toThrow('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+  });
+
   test('submits a delayed counter-dispute and records an action receipt', async () => {
     const runtimeWallet = Wallet.createRandom();
     const towerWallet = Wallet.createRandom();
@@ -225,6 +301,31 @@ describe('watchtower delayed last-resort sweep', () => {
       dbPath: join(tempRoot, 'tower.level'),
       towerPrivateKey: towerWallet.privateKey,
     });
+    const watchSeed = `0x${'ee'.repeat(32)}`;
+    const encryptedRemedy = await encryptTowerPayloadForWatchSeed(
+      encodeTowerCounterDisputeRemedy({
+        version: 1,
+        type: 'counter_dispute_remedy',
+        rpcUrl: 'http://127.0.0.1:8545',
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+        watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        towerAddress: towerWallet.address.toLowerCase(),
+        lastResortWindowBlocks: 8,
+        appointmentSequence: 9,
+        ownerAuthorizationHanko: '0xbeef',
+        latestProof: {
+          counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          finalNonce: 2,
+          finalProofbody: makeProofBody(watchSeed),
+          leftArguments: '0x',
+          rightArguments: '0x',
+          starterIncrementedArguments: '0x',
+          sig: '0xcafe',
+        },
+      }),
+      watchSeed,
+    );
 
     await store.upsertAppointment({
       type: 'tower_appointment',
@@ -244,27 +345,7 @@ describe('watchtower delayed last-resort sweep', () => {
       },
       lastResortPayload: {
         triggerHint: 'chain:31337:acct:skip',
-        encryptedRemedy: encodeTowerCounterDisputeRemedy({
-          version: 1,
-          type: 'counter_dispute_remedy',
-          rpcUrl: 'http://127.0.0.1:8545',
-          chainId: 31337,
-          depositoryAddress: '0x1111111111111111111111111111111111111111',
-          watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          towerAddress: towerWallet.address.toLowerCase(),
-          lastResortWindowBlocks: 8,
-          appointmentSequence: 9,
-          ownerAuthorizationHanko: '0xbeef',
-          latestProof: {
-            counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            finalNonce: 2,
-            finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
-            leftArguments: '0x',
-            rightArguments: '0x',
-            starterIncrementedArguments: '0x',
-            sig: '0xcafe',
-          },
-        }),
+        encryptedRemedy,
         watch: {
           rpcUrl: 'http://127.0.0.1:8545',
           chainId: 31337,
@@ -331,6 +412,31 @@ describe('watchtower delayed last-resort sweep', () => {
       dbPath: join(tempRoot, 'tower.level'),
       towerPrivateKey: towerWallet.privateKey,
     });
+    const watchSeed = `0x${'ee'.repeat(32)}`;
+    const encryptedRemedy = await encryptTowerPayloadForWatchSeed(
+      encodeTowerCounterDisputeRemedy({
+        version: 1,
+        type: 'counter_dispute_remedy',
+        rpcUrl: 'http://169.254.169.254/latest/meta-data',
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+        watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        towerAddress: towerWallet.address.toLowerCase(),
+        lastResortWindowBlocks: 8,
+        appointmentSequence: 10,
+        ownerAuthorizationHanko: '0xbeef',
+        latestProof: {
+          counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          finalNonce: 2,
+          finalProofbody: makeProofBody(watchSeed),
+          leftArguments: '0x',
+          rightArguments: '0x',
+          starterIncrementedArguments: '0x',
+          sig: '0xcafe',
+        },
+      }),
+      watchSeed,
+    );
 
     await store.upsertAppointment({
       type: 'tower_appointment',
@@ -350,27 +456,7 @@ describe('watchtower delayed last-resort sweep', () => {
       },
       lastResortPayload: {
         triggerHint: 'chain:31337:acct:ssrf',
-        encryptedRemedy: encodeTowerCounterDisputeRemedy({
-          version: 1,
-          type: 'counter_dispute_remedy',
-          rpcUrl: 'http://169.254.169.254/latest/meta-data',
-          chainId: 31337,
-          depositoryAddress: '0x1111111111111111111111111111111111111111',
-          watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          towerAddress: towerWallet.address.toLowerCase(),
-          lastResortWindowBlocks: 8,
-          appointmentSequence: 10,
-          ownerAuthorizationHanko: '0xbeef',
-          latestProof: {
-            counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-            finalNonce: 2,
-            finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
-            leftArguments: '0x',
-            rightArguments: '0x',
-            starterIncrementedArguments: '0x',
-            sig: '0xcafe',
-          },
-        }),
+        encryptedRemedy,
         watch: {
           rpcUrl: 'http://169.254.169.254/latest/meta-data',
           chainId: 31337,
@@ -548,6 +634,30 @@ describe('watchtower delayed last-resort sweep', () => {
       towerId: 'tower-last-resort-sequence',
       dbPath: join(tempRoot, 'tower.level'),
     });
+    const encryptedRemedy = await encryptTowerPayloadForWatchSeed(
+      encodeTowerCounterDisputeRemedy({
+        version: 1,
+        type: 'counter_dispute_remedy',
+        rpcUrl: 'http://127.0.0.1:8545',
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+        watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        towerAddress: Wallet.createRandom().address.toLowerCase(),
+        lastResortWindowBlocks: 8,
+        appointmentSequence: 4,
+        ownerAuthorizationHanko: '0xbeef',
+        latestProof: {
+          counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          finalNonce: 4,
+          finalProofbody: makeProofBody(`0x${'ee'.repeat(32)}`),
+          leftArguments: '0x',
+          rightArguments: '0x',
+          starterIncrementedArguments: '0x',
+          sig: '0xcafe',
+        },
+      }),
+      `0x${'ee'.repeat(32)}`,
+    );
 
     const baseAppointment = {
       type: 'tower_appointment' as const,
@@ -567,7 +677,7 @@ describe('watchtower delayed last-resort sweep', () => {
       },
       lastResortPayload: {
         triggerHint: 'chain:31337:acct:sequence',
-        encryptedRemedy: '{}',
+        encryptedRemedy,
         watch: {
           rpcUrl: 'http://127.0.0.1:8545',
           chainId: 31337,
