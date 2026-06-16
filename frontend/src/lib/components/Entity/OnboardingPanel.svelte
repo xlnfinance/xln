@@ -72,6 +72,8 @@
   let recoveryManualKind: RecoveryServiceMode = 'blind_backup';
   let recoveryMessage = '';
   let recoveryMessageTone: 'neutral' | 'error' = 'neutral';
+  let selectedJurisdictions: Record<string, boolean> = {};
+  let jurisdictionSelectionLoadedFor = '';
 
   const HUB_JOIN_OPTIONS: Array<{ value: HubJoinPreference; label: string }> = [
     { value: 'manual', label: 'Join hubs manually' },
@@ -104,7 +106,7 @@
     }>;
   };
 
-  type OnboardingTarget = { entityId: string; signerId: string };
+  type OnboardingTarget = { entityId: string; signerId: string; jurisdiction: string };
 
   function hasEntityReplica(currentEnv: Env | null | undefined, target: OnboardingTarget): boolean {
     const normalizedEntityId = normalizeEntityId(target.entityId);
@@ -125,13 +127,18 @@
   function getRuntimeOnboardingTargets(currentEnv: Env | null | undefined = getEnv()): OnboardingTarget[] {
     const targets: OnboardingTarget[] = [];
     const seen = new Set<string>();
-    const add = (rawEntityId: unknown, rawSignerId: unknown) => {
+    const add = (rawEntityId: unknown, rawSignerId: unknown, rawJurisdiction: unknown = '') => {
       const nextEntityId = normalizeEntityId(String(rawEntityId || ''));
       const nextSignerId = String(rawSignerId || '').trim().toLowerCase();
       if (!nextEntityId || !nextSignerId) return;
       const key = `${nextEntityId}:${nextSignerId}`;
       if (seen.has(key)) return;
-      const target = { entityId: nextEntityId, signerId: nextSignerId };
+      const runtimeSigner = ($activeRuntime?.signers || []).find((signer) =>
+        normalizeEntityId(signer.entityId || '') === nextEntityId
+        || String(signer.address || '').trim().toLowerCase() === nextSignerId
+      );
+      const jurisdiction = String(rawJurisdiction || runtimeSigner?.jurisdiction || 'Primary').trim() || 'Primary';
+      const target = { entityId: nextEntityId, signerId: nextSignerId, jurisdiction };
       if (currentEnv && !hasEntityReplica(currentEnv, target)) return;
       seen.add(key);
       targets.push(target);
@@ -139,7 +146,7 @@
 
     add(entityId, signerId);
     for (const runtimeSigner of $activeRuntime?.signers || []) {
-      add(runtimeSigner.entityId, runtimeSigner.address);
+      add(runtimeSigner.entityId, runtimeSigner.address, runtimeSigner.jurisdiction);
     }
     return targets;
   }
@@ -183,6 +190,30 @@
   $: hasBrainVaultRecovery = Boolean(brainVaultSeed || brainVaultMnemonic12);
   $: recoveryOfficialUrl = resolveOfficialRecoveryTowerUrl();
   $: recoveryRuntimeSyncKey = `${$activeRuntime?.id || 'none'}:${JSON.stringify($activeRuntime?.recovery?.towers || [])}:${$activeRuntime?.recovery?.useDefaultTowers === true}`;
+  $: jurisdictionOptions = ($activeRuntime?.signers || [])
+    .map((signer, index) => {
+      const name = String(signer.jurisdiction || (index === 0 ? 'Primary' : `Jurisdiction ${index + 1}`)).trim();
+      const key = name.toLowerCase() || `jurisdiction-${index}`;
+      return {
+        key,
+        name,
+        entityId: String(signer.entityId || '').trim(),
+        signerId: String(signer.address || '').trim().toLowerCase(),
+      };
+    })
+    .filter((option) => option.entityId && option.signerId);
+  $: {
+    const key = jurisdictionOptions.map((option) => `${option.key}:${option.entityId}:${option.signerId}`).join('|');
+    if (key && jurisdictionSelectionLoadedFor !== key) {
+      const next: Record<string, boolean> = {};
+      for (const option of jurisdictionOptions) {
+        next[option.key] = selectedJurisdictions[option.key] !== false;
+      }
+      selectedJurisdictions = next;
+      jurisdictionSelectionLoadedFor = key;
+    }
+  }
+  $: selectedJurisdictionCount = jurisdictionOptions.filter((option) => selectedJurisdictions[option.key] !== false).length;
 
   const shortValue = (value: string): string => {
     const text = String(value || '').trim();
@@ -300,6 +331,19 @@
     recoveryTowerDraft = recoveryTowerDraft.filter((tower) => tower.url !== url);
   }
 
+  function setJurisdictionEnabled(key: string, enabled: boolean): void {
+    selectedJurisdictions = {
+      ...selectedJurisdictions,
+      [key]: enabled,
+    };
+  }
+
+  function isTargetJurisdictionEnabled(target: OnboardingTarget): boolean {
+    const key = String(target.jurisdiction || '').trim().toLowerCase();
+    if (!key) return true;
+    return selectedJurisdictions[key] !== false;
+  }
+
   async function saveRecoveryConfig(): Promise<void> {
     const runtime = $activeRuntime;
     if (!runtime?.id) throw new Error('Runtime is required before configuring recovery services');
@@ -325,7 +369,8 @@
     displayName.trim().length >= 2 &&
     softLimitUsd > 0 &&
     hardLimitUsd >= softLimitUsd &&
-    maxFeeUsd >= 0;
+    maxFeeUsd >= 0 &&
+    selectedJurisdictionCount > 0;
 
   {
     const savedPolicy = readSavedCollateralPolicy();
@@ -499,7 +544,11 @@
     try {
       const cleanDisplayName = displayName.trim();
       const env = getEnv();
-      const targets = getRuntimeOnboardingTargets(env);
+      const allTargets = getRuntimeOnboardingTargets(env);
+      const targets = allTargets.filter(isTargetJurisdictionEnabled);
+      if (targets.length === 0) {
+        throw new Error('Select at least one jurisdiction to register automatically');
+      }
 
       const policyData = writeSavedCollateralPolicy({
         mode: 'autopilot',
@@ -538,7 +587,7 @@
         : targets;
       const autoJoinedCount = await queueAutoHubJoins(autoJoinCount, autoJoinTargets);
 
-      const completedEntityIds = targets.map((target) => target.entityId);
+      const completedEntityIds = allTargets.map((target) => target.entityId);
       writeOnboardingCompleteForEntities(completedEntityIds.length > 0 ? completedEntityIds : [entityId], true);
       localStorage.setItem('xln-display-name', cleanDisplayName);
 
@@ -581,13 +630,124 @@
     <p>Set the public profile, default limits, and first hub account.</p>
   </div>
   <div class="setup-card">
+    <section class="setup-section">
+      <label class="form-label" for="display-name">Display name</label>
+      <input
+        id="display-name"
+        type="text"
+        class="form-input"
+        placeholder="e.g. Alice, CryptoShop, MyExchange"
+        bind:value={displayName}
+        maxlength="32"
+      />
+      <p class="form-hint compact">Visible in gossip, account lists, and routing flows.</p>
+      <div class="profile-preview-card">
+        {#if avatar}
+          <img src={avatar} alt="Entity avatar" class="profile-preview-avatar" />
+        {:else}
+          <div class="profile-preview-avatar placeholder">?</div>
+        {/if}
+        <div class="profile-preview-copy">
+          <strong>{displayName.trim() || 'Your public name'}</strong>
+          <code>{entityId}</code>
+        </div>
+      </div>
+    </section>
+
+    <section class="setup-section jurisdiction-section">
+      <div class="section-headline">
+        <h3>Jurisdictions</h3>
+        <p>Choose where profile registration and first hub setup run automatically.</p>
+      </div>
+      {#if jurisdictionOptions.length === 0}
+        <div class="empty-recovery-card">Runtime lanes are still loading.</div>
+      {:else}
+        <div class="jurisdiction-toggle-grid">
+          {#each jurisdictionOptions as option (option.key)}
+            <label class="jurisdiction-toggle" class:selected={selectedJurisdictions[option.key] !== false}>
+              <input
+                type="checkbox"
+                checked={selectedJurisdictions[option.key] !== false}
+                on:change={(event) => setJurisdictionEnabled(option.key, event.currentTarget.checked)}
+              />
+              <span class="jurisdiction-toggle-copy">
+                <strong>{option.name}</strong>
+                <code>{shortValue(option.entityId)}</code>
+              </span>
+            </label>
+          {/each}
+        </div>
+        <p class="form-hint compact">
+          All jurisdictions are enabled by default. Disabled lanes stay in the runtime, but onboarding will not auto-publish a profile or open hub accounts there.
+        </p>
+      {/if}
+    </section>
+
+    <section class="setup-section">
+      <div class="section-headline">
+        <h3>Default limits</h3>
+        <p>These values are used when new hub accounts are opened.</p>
+      </div>
+      <div class="policy-grid">
+        <label class="policy-field">
+          <span class="form-label">Soft limit (USD)</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="form-input policy-input"
+            bind:value={softLimitUsd}
+            on:input={() => softLimitUsd = toUsdInt(softLimitUsd, defaultSoftLimitUsd)}
+          />
+        </label>
+
+        <label class="policy-field">
+          <span class="form-label">Hard limit (USD)</span>
+          <input
+            type="number"
+            min="1"
+            step="1"
+            class="form-input policy-input"
+            bind:value={hardLimitUsd}
+            on:input={() => hardLimitUsd = toUsdInt(hardLimitUsd, defaultHardLimitUsd)}
+          />
+        </label>
+
+        <label class="policy-field">
+          <span class="form-label">Max fee (USD)</span>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            class="form-input policy-input"
+            bind:value={maxFeeUsd}
+            on:input={() => maxFeeUsd = toUsdInt(maxFeeUsd, defaultMaxFeeUsd)}
+          />
+        </label>
+      </div>
+      <p class="form-hint">
+        Default for this jurisdiction: soft <strong>{defaultSoftLimitUsd.toLocaleString()}</strong>,
+        hard <strong>{defaultHardLimitUsd.toLocaleString()}</strong>,
+        fee <strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
+      </p>
+      <div class="hub-join-inline">
+        <label class="form-label" for="hub-join-select">Initial hub join</label>
+        <select id="hub-join-select" class="hub-join-select" bind:value={autoJoinHubs}>
+          {#each HUB_JOIN_OPTIONS as option}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+        <p class="form-hint compact">Open your first bilateral account automatically right after setup.</p>
+      </div>
+    </section>
+
     {#if hasBrainVaultRecovery}
       <section class="setup-section brainvault-section">
         <details class="brainvault-details" data-testid="brainvault-onboarding-recovery">
           <summary data-testid="brainvault-onboarding-recovery-toggle">
             <span class="brainvault-summary-copy">
-              <strong>BrainVault recovery</strong>
-              <small>Save the seed sheet before account setup.</small>
+              <strong>Seed safety</strong>
+              <small>Save the offline recovery sheet before relying on the account.</small>
             </span>
             <span class="brainvault-summary-meta">
               <span>{brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed ready'}</span>
@@ -642,16 +802,13 @@
             {/if}
           </div>
         </details>
-        <p class="brainvault-continue" data-testid="brainvault-continue-copy">
-          Continue with the account settings below.
-        </p>
       </section>
     {/if}
 
     <section class="setup-section recovery-section">
       <div class="section-headline">
-        <h3>Recovery services</h3>
-        <p>Encrypted watchtower backups and last-resort dispute response.</p>
+        <h3>Encrypted backup and last-resort dispute protection</h3>
+        <p>Choose which tower services store encrypted runtime backups and delayed dispute rescue appointments.</p>
       </div>
 
       <div class="recovery-mode-grid" role="radiogroup" aria-label="Runtime recovery mode">
@@ -662,10 +819,10 @@
           disabled={!recoveryOfficialUrl}
           on:click={() => applyRecoveryModeDraft('official')}
         >
-          <span class="recovery-mode-title">Official tower</span>
+          <span class="recovery-mode-title">Backup + disputer</span>
           <span class="recovery-mode-copy">
             {recoveryOfficialUrl
-              ? 'Backup plus delayed last-resort response.'
+              ? 'Official tower stores encrypted backups and last-resort appointments.'
               : 'No official tower for this local runtime.'}
           </span>
         </button>
@@ -678,7 +835,7 @@
           on:click={() => applyRecoveryModeDraft('backup_only')}
         >
           <span class="recovery-mode-title">Backup only</span>
-          <span class="recovery-mode-copy">Encrypted backup, no rescue appointments.</span>
+          <span class="recovery-mode-copy">Encrypted runtime backup, no dispute rescue.</span>
         </button>
 
         <button
@@ -688,7 +845,7 @@
           on:click={() => applyRecoveryModeDraft('local_only')}
         >
           <span class="recovery-mode-title">Local only</span>
-          <span class="recovery-mode-copy">No remote recovery unless you add a URL.</span>
+          <span class="recovery-mode-copy">No remote backup unless you add a service URL.</span>
         </button>
       </div>
 
@@ -759,88 +916,6 @@
           {recoveryMessage}
         </div>
       {/if}
-    </section>
-
-    <section class="setup-section">
-      <label class="form-label" for="display-name">Display name</label>
-      <input
-        id="display-name"
-        type="text"
-        class="form-input"
-        placeholder="e.g. Alice, CryptoShop, MyExchange"
-        bind:value={displayName}
-        maxlength="32"
-      />
-      <p class="form-hint compact">Visible in gossip, account lists, and routing flows.</p>
-      <div class="profile-preview-card">
-        {#if avatar}
-          <img src={avatar} alt="Entity avatar" class="profile-preview-avatar" />
-        {:else}
-          <div class="profile-preview-avatar placeholder">?</div>
-        {/if}
-        <div class="profile-preview-copy">
-          <strong>{displayName.trim() || 'Your public name'}</strong>
-          <code>{entityId}</code>
-        </div>
-      </div>
-    </section>
-
-    <section class="setup-section">
-      <div class="section-headline">
-        <h3>Default limits</h3>
-        <p>These values are used when new hub accounts are opened.</p>
-      </div>
-      <div class="policy-grid">
-        <label class="policy-field">
-          <span class="form-label">Soft limit (USD)</span>
-          <input
-            type="number"
-            min="1"
-            step="1"
-            class="form-input policy-input"
-            bind:value={softLimitUsd}
-            on:input={() => softLimitUsd = toUsdInt(softLimitUsd, defaultSoftLimitUsd)}
-          />
-        </label>
-
-        <label class="policy-field">
-          <span class="form-label">Hard limit (USD)</span>
-          <input
-            type="number"
-            min="1"
-            step="1"
-            class="form-input policy-input"
-            bind:value={hardLimitUsd}
-            on:input={() => hardLimitUsd = toUsdInt(hardLimitUsd, defaultHardLimitUsd)}
-          />
-        </label>
-
-        <label class="policy-field">
-          <span class="form-label">Max fee (USD)</span>
-          <input
-            type="number"
-            min="0"
-            step="1"
-            class="form-input policy-input"
-            bind:value={maxFeeUsd}
-            on:input={() => maxFeeUsd = toUsdInt(maxFeeUsd, defaultMaxFeeUsd)}
-          />
-        </label>
-      </div>
-      <p class="form-hint">
-        Default for this jurisdiction: soft <strong>{defaultSoftLimitUsd.toLocaleString()}</strong>,
-        hard <strong>{defaultHardLimitUsd.toLocaleString()}</strong>,
-        fee <strong>{defaultMaxFeeUsd.toLocaleString()}</strong>.
-      </p>
-      <div class="hub-join-inline">
-        <label class="form-label" for="hub-join-select">Initial hub join</label>
-        <select id="hub-join-select" class="hub-join-select" bind:value={autoJoinHubs}>
-          {#each HUB_JOIN_OPTIONS as option}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-        <p class="form-hint compact">Open your first bilateral account automatically right after setup.</p>
-      </div>
     </section>
 
     <section class="setup-section confirm-section">
@@ -1044,15 +1119,6 @@
   .seed-box b {
     color: #78716c;
     font-size: 10px;
-  }
-
-  .brainvault-continue {
-    margin: 0;
-    padding: 11px 16px 14px;
-    border-top: 1px solid #27211c;
-    color: #a8a29e;
-    font-size: 13px;
-    line-height: 1.45;
   }
 
   .recovery-section {
@@ -1292,6 +1358,56 @@
     color: #fafaf9;
   }
 
+  .jurisdiction-toggle-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .jurisdiction-toggle {
+    min-height: 72px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+
+  .jurisdiction-toggle.selected {
+    border-color: rgba(76, 175, 80, 0.34);
+    background: rgba(76, 175, 80, 0.08);
+  }
+
+  .jurisdiction-toggle input {
+    margin: 2px 0 0;
+    width: 16px;
+    height: 16px;
+    accent-color: #4caf50;
+  }
+
+  .jurisdiction-toggle-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .jurisdiction-toggle-copy strong {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+  }
+
+  .jurisdiction-toggle-copy code {
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
   .policy-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1310,6 +1426,7 @@
     }
 
     .brainvault-actions,
+    .jurisdiction-toggle-grid,
     .policy-grid,
     .recovery-mode-grid,
     .manual-recovery-grid {

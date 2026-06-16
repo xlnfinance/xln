@@ -492,10 +492,25 @@ async function createRuntimeViaUi(
     await factorOneButton.click({ force: true });
   }
 
-  const createButton = page.getByRole('button', { name: /Create XLN wallet|Open XLN wallet/i }).first();
+  const createButton = page.getByRole('button', { name: /Create XLN wallet|Open XLN wallet|Open \/ restore wallet/i }).first();
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click({ force: true });
   await page.waitForTimeout(400);
+
+  const restoreButton = page.getByRole('button', { name: /Restore selected backup/i }).first();
+  const freshButton = page.getByRole('button', { name: /Create new wallet/i }).first();
+  const decision = await Promise.race([
+    restoreButton.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'restore').catch(() => 'none'),
+    freshButton.waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'fresh').catch(() => 'none'),
+    page.getByRole('checkbox', {
+      name: /I understand this is testnet software and I accept the associated risks/i,
+    }).first().waitFor({ state: 'visible', timeout: 30_000 }).then(() => 'ready').catch(() => 'none'),
+  ]);
+  if (decision === 'restore') {
+    await restoreButton.click({ force: true });
+  } else if (decision === 'fresh') {
+    await freshButton.click({ force: true });
+  }
 
   const termsCheckbox = page.getByRole('checkbox', {
     name: /I understand this is testnet software and I accept the associated risks/i,
