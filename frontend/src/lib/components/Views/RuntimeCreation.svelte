@@ -5,8 +5,11 @@
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { appStateOperations } from '$lib/stores/appStateStore';
   import {
+    discoverRuntimeRecoveryCandidates,
+    parseRuntimeRecoveryCandidateFile,
     vaultOperations,
     allRuntimes,
+    type RuntimeRecoveryCandidate,
   } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { resetEverything } from '$lib/utils/resetEverything';
@@ -61,7 +64,7 @@
   // STATE
   // ============================================================================
 
-  type Phase = 'input' | 'deriving';
+  type Phase = 'input' | 'deriving' | 'recovery';
   type InputMode = 'brainvault' | 'mnemonic';
 
   let inputMode: InputMode = 'brainvault';
@@ -195,6 +198,15 @@
   let ethereumAddress = '';
   let entityId = ''; // bytes32 entity ID derived from address
   let creatingRuntime = false;
+  let recoveryChecking = false;
+  let recoveryRuntimeId = '';
+  let recoveryLabel = '';
+  let recoveryCandidates: RuntimeRecoveryCandidate[] = [];
+  let recoveryErrors: string[] = [];
+  let recoveryCheckedTowers = 0;
+  let selectedRecoveryCandidateId = '';
+  let localRuntimeAvailable = false;
+  let backupFileInput: HTMLInputElement | null = null;
 
   // ============================================================================
   // LIFECYCLE - Load vault on mount
@@ -214,7 +226,71 @@
 
   $: savedVaults = $allRuntimes;
 
-  async function createXlnWalletFromCurrentSeed(labelOverride?: string): Promise<boolean> {
+  $: selectedRecoveryCandidate = recoveryCandidates.find((candidate) => candidate.id === selectedRecoveryCandidateId) || recoveryCandidates[0] || null;
+
+  const shortRuntimeId = (value: string): string => {
+    const text = String(value || '').trim();
+    if (text.length <= 18) return text || '-';
+    return `${text.slice(0, 10)}...${text.slice(-6)}`;
+  };
+
+  const formatRecoveryTime = (createdAt: number): string => {
+    if (!Number.isFinite(createdAt) || createdAt <= 0) return 'unknown time';
+    try {
+      return new Date(createdAt).toLocaleString();
+    } catch {
+      return String(createdAt);
+    }
+  };
+
+  function resetRecoveryDecision(): void {
+    recoveryChecking = false;
+    recoveryRuntimeId = '';
+    recoveryLabel = '';
+    recoveryCandidates = [];
+    recoveryErrors = [];
+    recoveryCheckedTowers = 0;
+    selectedRecoveryCandidateId = '';
+    localRuntimeAvailable = false;
+  }
+
+  async function prepareRecoveryDecisionFromCurrentSeed(labelOverride?: string): Promise<boolean> {
+    if (!mnemonic24 || !ethereumAddress) return false;
+
+    phase = 'recovery';
+    derivationError = '';
+    recoveryChecking = true;
+    recoveryRuntimeId = ethereumAddress.toLowerCase();
+    recoveryLabel = (labelOverride || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
+    recoveryCandidates = [];
+    recoveryErrors = [];
+    recoveryCheckedTowers = 0;
+    selectedRecoveryCandidateId = '';
+    localRuntimeAvailable = vaultOperations.runtimeExists(recoveryRuntimeId);
+
+    try {
+      const discovery = await discoverRuntimeRecoveryCandidates(mnemonic24);
+      recoveryCandidates = discovery.candidates;
+      recoveryErrors = discovery.errors;
+      recoveryCheckedTowers = discovery.checkedTowers;
+      selectedRecoveryCandidateId = recoveryCandidates[0]?.id || '';
+      return true;
+    } catch (err) {
+      recoveryErrors = [err instanceof Error ? err.message : String(err)];
+      return false;
+    } finally {
+      recoveryChecking = false;
+    }
+  }
+
+  async function createXlnWalletFromCurrentSeed(
+    labelOverride?: string,
+    options: {
+      recoveryCandidate?: RuntimeRecoveryCandidate;
+      forceFresh?: boolean;
+      openLocal?: boolean;
+    } = {},
+  ): Promise<boolean> {
     if (!mnemonic24 || !ethereumAddress || creatingRuntime) return false;
 
     creatingRuntime = true;
@@ -223,16 +299,18 @@
       const runtimeId = ethereumAddress;
       const label = (labelOverride || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
 
-      if (!vaultOperations.runtimeExists(runtimeId)) {
+      if (options.openLocal || (!options.forceFresh && !options.recoveryCandidate && vaultOperations.runtimeExists(runtimeId))) {
+        await vaultOperations.selectRuntime(runtimeId);
+      } else {
         const runtime = await vaultOperations.createRuntime(label, mnemonic24, {
           loginType: createLoginType,
           requiresOnboarding: createLoginType !== 'demo',
           mnemonic12: mnemonic12.trim().split(/\s+/).join(' ') || undefined,
           devicePassphrase: devicePassphrase || undefined,
+          recoveryCandidate: options.recoveryCandidate,
+          skipRecoveryRestore: !options.recoveryCandidate,
         });
         entityId = runtime.signers[0]?.entityId || entityId;
-      } else {
-        await vaultOperations.selectRuntime(runtimeId);
       }
       createLoginType = 'manual';
       vaultUiOperations.hideVault();
@@ -248,6 +326,48 @@
       return false;
     } finally {
       creatingRuntime = false;
+    }
+  }
+
+  async function restoreSelectedRecoveryCandidate(): Promise<void> {
+    const candidate = selectedRecoveryCandidate;
+    if (!candidate) return;
+    await createXlnWalletFromCurrentSeed(recoveryLabel, { recoveryCandidate: candidate });
+  }
+
+  async function openLocalRuntime(): Promise<void> {
+    await createXlnWalletFromCurrentSeed(recoveryLabel, { openLocal: true });
+  }
+
+  async function createFreshRuntime(): Promise<void> {
+    await createXlnWalletFromCurrentSeed(recoveryLabel, { forceFresh: true });
+  }
+
+  function triggerBackupFilePicker(): void {
+    backupFileInput?.click();
+  }
+
+  async function handleBackupFileSelected(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    derivationError = '';
+    try {
+      const candidate = await parseRuntimeRecoveryCandidateFile(mnemonic24, await file.text(), {
+        sourceLabel: file.name || 'Local backup file',
+      });
+      recoveryCandidates = [
+        candidate,
+        ...recoveryCandidates.filter((existing) => existing.id !== candidate.id),
+      ].sort((left, right) => {
+        if (right.runtimeHeight !== left.runtimeHeight) return right.runtimeHeight - left.runtimeHeight;
+        return right.createdAt - left.createdAt;
+      });
+      selectedRecoveryCandidateId = candidate.id;
+    } catch (err) {
+      derivationError = err instanceof Error ? err.message : String(err);
+    } finally {
+      input.value = '';
     }
   }
 
@@ -439,7 +559,7 @@
 
         ethereumAddress = await deriveEthereumAddress(mnemonic24);
         createLoginType = 'manual';
-        await createXlnWalletFromCurrentSeed(`Mnemonic ${ethereumAddress.slice(0, 6)}`);
+        await prepareRecoveryDecisionFromCurrentSeed(`Mnemonic ${ethereumAddress.slice(0, 6)}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to import mnemonic';
         console.error('[RuntimeCreation] Mnemonic import failed:', err);
@@ -644,7 +764,7 @@
     // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
     entityId = generateLazyEntityIdPreview([ethereumAddress], 1n);
 
-    await createXlnWalletFromCurrentSeed(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
+    await prepareRecoveryDecisionFromCurrentSeed(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
   }
 
   function terminateWorkers() {
@@ -698,6 +818,7 @@
   function reset() {
     phase = 'input';
     terminateWorkers();
+    resetRecoveryDecision();
     workerLimitNotice = '';
     createLoginType = 'manual';
     // Keep name and passphrase for convenience
@@ -982,7 +1103,7 @@
             disabled={!canDerive}
             on:click={startDerivation}
           >
-	            Create XLN wallet
+	            Open / restore wallet
           </button>
           {#if derivationError}
             <div class="matrix-status error">{derivationError}</div>
@@ -1078,6 +1199,115 @@
         {/if}
       </div>
     {/if}
+
+    {#if phase === 'recovery'}
+      <div class="glass-card input-section recovery-decision-card">
+        <div class="wallet-create-title">
+          <div>
+            <h2>Restore wallet</h2>
+            <p>Seed resolved for {shortRuntimeId(recoveryRuntimeId)}. Checking encrypted backups before any new runtime is created.</p>
+          </div>
+          <button type="button" class="back-to-create compact" on:click={reset}>
+            Back
+          </button>
+        </div>
+
+        <div class="recovery-status-strip">
+          <div>
+            <span class="recovery-label">Runtime</span>
+            <strong>{shortRuntimeId(recoveryRuntimeId)}</strong>
+          </div>
+          <div>
+            <span class="recovery-label">Towers checked</span>
+            <strong>{recoveryChecking ? 'checking...' : recoveryCheckedTowers}</strong>
+          </div>
+          <div>
+            <span class="recovery-label">Backups found</span>
+            <strong>{recoveryCandidates.length}</strong>
+          </div>
+        </div>
+
+        {#if recoveryChecking}
+          <div class="recovery-loading">
+            <div class="recovery-spinner"></div>
+            <span>Asking every configured tower for encrypted backups...</span>
+          </div>
+        {:else}
+          {#if recoveryCandidates.length > 0}
+            <div class="recovery-candidate-list" role="radiogroup" aria-label="Recovery backup versions">
+              {#each recoveryCandidates as candidate, index (candidate.id)}
+                <button
+                  type="button"
+                  class="recovery-candidate"
+                  class:selected={selectedRecoveryCandidateId === candidate.id || (!selectedRecoveryCandidateId && index === 0)}
+                  on:click={() => selectedRecoveryCandidateId = candidate.id}
+                >
+                  <span class="candidate-main">
+                    <strong>{index === 0 ? 'Latest backup' : 'Backup version'}</strong>
+                    <span>{candidate.source === 'tower' ? candidate.towerUrl : candidate.sourceLabel}</span>
+                  </span>
+                  <span class="candidate-meta">
+                    <span>height {candidate.runtimeHeight.toLocaleString()}</span>
+                    <span>{candidate.signerCount} signer{candidate.signerCount === 1 ? '' : 's'}</span>
+                    <span>{formatRecoveryTime(candidate.createdAt)}</span>
+                  </span>
+                </button>
+              {/each}
+            </div>
+
+            <div class="recovery-actions">
+              <button
+                type="button"
+                class="derive-btn"
+                disabled={!selectedRecoveryCandidate || creatingRuntime}
+                on:click={restoreSelectedRecoveryCandidate}
+              >
+                {creatingRuntime ? 'Restoring...' : 'Restore selected backup'}
+              </button>
+              <button type="button" class="backup-upload-btn" on:click={triggerBackupFilePicker}>
+                I have a runtime backup file
+              </button>
+            </div>
+          {:else}
+            <div class="no-recovery-found">
+              <strong>No tower backup found for this seed.</strong>
+              <span>You can upload an encrypted runtime backup from a drive, or explicitly create a new wallet.</span>
+            </div>
+            <div class="recovery-actions">
+              <button type="button" class="backup-upload-btn" on:click={triggerBackupFilePicker}>
+                I have a runtime backup file
+              </button>
+              {#if localRuntimeAvailable}
+                <button type="button" class="derive-btn secondary" disabled={creatingRuntime} on:click={openLocalRuntime}>
+                  {creatingRuntime ? 'Opening...' : 'Open local wallet'}
+                </button>
+              {:else}
+                <button type="button" class="derive-btn secondary" disabled={creatingRuntime} on:click={createFreshRuntime}>
+                  {creatingRuntime ? 'Creating...' : recoveryErrors.length > 0 ? 'Create new wallet anyway' : 'Create new wallet'}
+                </button>
+              {/if}
+            </div>
+          {/if}
+
+          {#if recoveryErrors.length > 0}
+            <div class="matrix-status error">
+              Recovery check warnings: {recoveryErrors.slice(0, 3).join(' | ')}
+            </div>
+          {/if}
+          {#if derivationError}
+            <div class="matrix-status error">{derivationError}</div>
+          {/if}
+        {/if}
+
+        <input
+          bind:this={backupFileInput}
+          class="backup-file-input"
+          type="file"
+          accept="application/json,.json"
+          on:change={handleBackupFileSelected}
+        />
+      </div>
+    {/if}
   </div>
   <!-- Close main-content -->
 </div>
@@ -1137,6 +1367,169 @@
   .back-to-create {
     width: 100%;
     margin-bottom: 14px;
+  }
+
+  .back-to-create.compact {
+    width: auto;
+    min-width: 88px;
+    margin-bottom: 0;
+  }
+
+  .recovery-decision-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .recovery-status-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .recovery-status-strip > div {
+    min-height: 62px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    box-sizing: border-box;
+  }
+
+  .recovery-label {
+    display: block;
+    margin-bottom: 6px;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .recovery-status-strip strong {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .recovery-loading,
+  .no-recovery-found {
+    min-height: 76px;
+    padding: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: rgba(255, 255, 255, 0.72);
+    box-sizing: border-box;
+  }
+
+  .no-recovery-found {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .no-recovery-found strong {
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .recovery-spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: rgba(255, 200, 100, 0.9);
+    animation: spin 0.9s linear infinite;
+    flex: 0 0 auto;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .recovery-candidate-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .recovery-candidate {
+    width: 100%;
+    min-height: 78px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(255, 255, 255, 0.78);
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: 12px;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+
+  .recovery-candidate.selected {
+    border-color: rgba(255, 200, 100, 0.42);
+    background: rgba(255, 200, 100, 0.08);
+  }
+
+  .candidate-main,
+  .candidate-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .candidate-main strong {
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 13px;
+  }
+
+  .candidate-main span,
+  .candidate-meta span {
+    color: rgba(255, 255, 255, 0.56);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .recovery-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 0.45fr);
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .backup-upload-btn {
+    min-height: 46px;
+    padding: 11px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.84);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .backup-upload-btn:hover {
+    border-color: rgba(255, 200, 100, 0.28);
+    color: rgba(255, 200, 100, 0.95);
+  }
+
+  .derive-btn.secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .backup-file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
   }
 
   .input-mode-tabs {
@@ -2060,6 +2453,16 @@
 
     .factor-tier {
       font-size: 8px;
+    }
+
+    .recovery-status-strip,
+    .recovery-candidate,
+    .recovery-actions {
+      grid-template-columns: 1fr;
+    }
+
+    .recovery-actions {
+      gap: 8px;
     }
   }
 </style>

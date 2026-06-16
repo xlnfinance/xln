@@ -4,6 +4,8 @@ import { AbiCoder, HDNodeWallet, Mnemonic, ParamType, Wallet, getIndexedAccountP
 import {
   buildDelayedLastResortAppointmentsForTower,
   buildRuntimeRecoveryConfigForMode,
+  discoverRuntimeRecoveryCandidates,
+  parseRuntimeRecoveryCandidateFile,
   resolveDefaultRecoveryTowerUrls,
   tryRestoreRuntimeEnvFromTower,
 } from '../../frontend/src/lib/stores/vaultStore';
@@ -241,4 +243,123 @@ test('tower restore checks discovery before restore to avoid expected missing-ba
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('runtime recovery discovery asks every tower and sorts candidates by runtime height', async () => {
+  const originalFetch = globalThis.fetch;
+  const runtimeId = deriveTestAddress(0);
+  const lookupKey = keccak256(toUtf8Bytes('discovery-lookup'));
+  const calls: string[] = [];
+  const encryptedBundle = (height: number, createdAt: number): EncryptedRuntimeRecoveryBundleV1 => ({
+    version: 1,
+    runtimeId,
+    lookupKey,
+    height,
+    createdAt,
+    bundleHash: keccak256(toUtf8Bytes(`bundle-${height}`)),
+    iv: `0x${String(height).padStart(4, '0')}`,
+    ciphertext: `0x${String(createdAt).padStart(4, '0')}`,
+  });
+  const bundleByTower: Record<string, EncryptedRuntimeRecoveryBundleV1> = {
+    'http://127.0.0.1:9101': encryptedBundle(7, 700),
+    'http://127.0.0.1:9102': encryptedBundle(30, 3000),
+  };
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    const towerUrl = Object.keys(bundleByTower).find((tower) => url.includes(tower));
+    if (!towerUrl) return new Response('not found', { status: 404 });
+    if (url.includes('/api/recovery/discover')) {
+      return new Response(JSON.stringify({
+        ok: true,
+        lookupKey,
+        available: true,
+        latestReceipt: null,
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response(JSON.stringify({
+      ok: true,
+      bundle: bundleByTower[towerUrl],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await discoverRuntimeRecoveryCandidates(testMnemonic, {
+      towers: [
+        { url: 'http://127.0.0.1:9101', towerMode: 'blind_backup' },
+        { url: 'http://127.0.0.1:9102', towerMode: 'blind_backup' },
+      ],
+      xln: {
+        deriveRuntimeRecoveryLookupKey: () => lookupKey,
+        decryptRuntimeRecoveryBundle: async (encrypted: EncryptedRuntimeRecoveryBundleV1) => ({
+          version: 1,
+          kind: 'snapshot',
+          runtimeId,
+          runtimeHeight: encrypted.height,
+          runtimeTimestamp: 0,
+          createdAt: encrypted.createdAt,
+          signers: [{ index: 0, address: runtimeId, name: 'Signer 1' }],
+          checkpoint: { runtimeId, height: encrypted.height },
+          checkpointHash: keccak256(toUtf8Bytes(`checkpoint-${encrypted.height}`)),
+        }),
+      } as unknown as XLNModule,
+    });
+
+    expect(result.checkedTowers).toBe(2);
+    expect(calls.filter((call) => call.includes('/api/recovery/discover'))).toHaveLength(2);
+    expect(calls.filter((call) => call.includes('/api/tower/restore'))).toHaveLength(2);
+    expect(result.candidates).toHaveLength(2);
+    expect(result.candidates[0]?.runtimeHeight).toBe(30);
+    expect(result.candidates[1]?.runtimeHeight).toBe(7);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('local runtime backup file is parsed as an explicit recovery candidate', async () => {
+  const runtimeId = deriveTestAddress(0);
+  const lookupKey = keccak256(toUtf8Bytes('file-lookup'));
+  const encrypted: EncryptedRuntimeRecoveryBundleV1 = {
+    version: 1,
+    runtimeId,
+    lookupKey,
+    height: 44,
+    createdAt: 4_400,
+    bundleHash: keccak256(toUtf8Bytes('file-bundle')),
+    iv: '0x1111',
+    ciphertext: '0x2222',
+  };
+
+  const candidate = await parseRuntimeRecoveryCandidateFile(
+    testMnemonic,
+    JSON.stringify({ version: 1, bundles: [encrypted] }),
+    {
+      sourceLabel: 'flash-drive-backup.json',
+      xln: {
+        decryptRuntimeRecoveryBundle: async () => ({
+          version: 1,
+          kind: 'snapshot',
+          runtimeId,
+          runtimeHeight: 44,
+          runtimeTimestamp: 0,
+          createdAt: 4_400,
+          signers: [{ index: 0, address: runtimeId, name: 'Signer 1' }],
+          checkpoint: { runtimeId, height: 44 },
+          checkpointHash: keccak256(toUtf8Bytes('file-checkpoint')),
+        }),
+      } as unknown as XLNModule,
+    },
+  );
+
+  expect(candidate.source).toBe('file');
+  expect(candidate.sourceLabel).toBe('flash-drive-backup.json');
+  expect(candidate.runtimeHeight).toBe(44);
+  expect(candidate.signerCount).toBe(1);
 });

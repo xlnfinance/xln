@@ -84,6 +84,7 @@ type CreateRuntimeOptions = {
   mnemonic12?: string | undefined;
   recovery?: RuntimeRecoveryConfig | undefined;
   skipRecoveryRestore?: boolean | undefined;
+  recoveryCandidate?: RuntimeRecoveryCandidate | undefined;
 };
 
 export type RecoveryTowerSetupMode = 'official' | 'backup_only' | 'local_only';
@@ -229,6 +230,34 @@ type TowerDiscoverPayload = {
   available?: boolean;
   latestReceipt?: TowerReceiptV1 | null;
   error?: string;
+};
+
+export type RuntimeRecoveryCandidateSource = 'tower' | 'file';
+
+export type RuntimeRecoveryCandidate = {
+  id: string;
+  source: RuntimeRecoveryCandidateSource;
+  sourceLabel: string;
+  towerUrl?: string;
+  receipt?: TowerReceiptV1;
+  encryptedBundles: EncryptedRuntimeRecoveryBundleV1[];
+  bundles: RuntimeRecoveryBundleV1[];
+  tipBundle: RuntimeRecoveryBundleV1;
+  metadataBundle: RuntimeRecoveryBundleV1;
+  runtimeId: string;
+  runtimeHeight: number;
+  createdAt: number;
+  signerCount: number;
+  checkpointHash: string;
+  bundleCount: number;
+};
+
+export type RuntimeRecoveryDiscoveryResult = {
+  runtimeId: string;
+  lookupKey: string;
+  candidates: RuntimeRecoveryCandidate[];
+  errors: string[];
+  checkedTowers: number;
 };
 
 type TowerServerInfo = {
@@ -596,6 +625,238 @@ async function towerHasRecoveryBundle(tower: RecoveryTowerConfig, lookupKey: str
   return payload.available === true;
 }
 
+const isEncryptedRuntimeRecoveryBundle = (value: unknown): value is EncryptedRuntimeRecoveryBundleV1 => {
+  if (!isRecord(value)) return false;
+  return value['version'] === 1
+    && typeof value['runtimeId'] === 'string'
+    && typeof value['lookupKey'] === 'string'
+    && typeof value['bundleHash'] === 'string'
+    && typeof value['iv'] === 'string'
+    && typeof value['ciphertext'] === 'string';
+};
+
+const extractEncryptedRecoveryBundles = (payload: unknown): EncryptedRuntimeRecoveryBundleV1[] => {
+  if (isEncryptedRuntimeRecoveryBundle(payload)) return [payload];
+  if (!isRecord(payload)) return [];
+  const rawBundles = Array.isArray(payload['bundles'])
+    ? payload['bundles']
+    : payload['bundle']
+      ? [payload['bundle']]
+      : [];
+  return rawBundles.filter(isEncryptedRuntimeRecoveryBundle);
+};
+
+const getBundleReferenceHash = (bundle: RuntimeRecoveryBundleV1): string =>
+  String(bundle.checkpointHash || bundle.baseCheckpointHash || '').trim().toLowerCase();
+
+const sortRecoveryBundlesByTip = (
+  left: RuntimeRecoveryBundleV1,
+  right: RuntimeRecoveryBundleV1,
+): number => {
+  if (right.runtimeHeight !== left.runtimeHeight) return right.runtimeHeight - left.runtimeHeight;
+  return right.createdAt - left.createdAt;
+};
+
+const sortRecoveryCandidatesByTip = (
+  left: RuntimeRecoveryCandidate,
+  right: RuntimeRecoveryCandidate,
+): number => {
+  if (right.runtimeHeight !== left.runtimeHeight) return right.runtimeHeight - left.runtimeHeight;
+  if (right.createdAt !== left.createdAt) return right.createdAt - left.createdAt;
+  return (right.receipt?.sequence || 0) - (left.receipt?.sequence || 0);
+};
+
+const buildRuntimeRecoveryCandidate = async (
+  input: {
+    source: RuntimeRecoveryCandidateSource;
+    sourceLabel: string;
+    seed: string;
+    expectedRuntimeId: string;
+    encryptedBundles: EncryptedRuntimeRecoveryBundleV1[];
+    xln: XLNModule;
+    towerUrl?: string;
+    receipt?: TowerReceiptV1;
+  },
+): Promise<RuntimeRecoveryCandidate> => {
+  if (input.encryptedBundles.length === 0) {
+    throw new Error('RECOVERY_CANDIDATE_EMPTY');
+  }
+  const bundles: RuntimeRecoveryBundleV1[] = [];
+  for (const encryptedBundle of input.encryptedBundles) {
+    bundles.push(await input.xln.decryptRuntimeRecoveryBundle(encryptedBundle, input.seed));
+  }
+  if (bundles.length === 0) throw new Error('RECOVERY_CANDIDATE_EMPTY');
+  for (const bundle of bundles) {
+    const runtimeId = normalizeRuntimeId(bundle.runtimeId);
+    if (!runtimeId || runtimeId !== input.expectedRuntimeId) {
+      throw new Error(`RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH: expected=${input.expectedRuntimeId} actual=${String(bundle.runtimeId || 'none')}`);
+    }
+  }
+
+  const tipBundle = [...bundles].sort(sortRecoveryBundlesByTip)[0]!;
+  const metadataBundle = bundles.find((bundle) => (bundle.kind ?? 'snapshot') === 'snapshot') ?? tipBundle;
+  const checkpointHash = getBundleReferenceHash(metadataBundle) || getBundleReferenceHash(tipBundle);
+  const sourceKey = input.towerUrl || input.sourceLabel;
+  const id = [
+    input.source,
+    sourceKey,
+    tipBundle.runtimeHeight,
+    tipBundle.createdAt,
+    checkpointHash || input.encryptedBundles[0]?.bundleHash || 'no-hash',
+  ].join(':');
+
+  return {
+    id,
+    source: input.source,
+    sourceLabel: input.sourceLabel,
+    ...(input.towerUrl ? { towerUrl: input.towerUrl } : {}),
+    ...(input.receipt ? { receipt: input.receipt } : {}),
+    encryptedBundles: input.encryptedBundles,
+    bundles,
+    tipBundle,
+    metadataBundle,
+    runtimeId: input.expectedRuntimeId,
+    runtimeHeight: tipBundle.runtimeHeight,
+    createdAt: Math.max(tipBundle.createdAt, metadataBundle.createdAt),
+    signerCount: metadataBundle.signers.length,
+    checkpointHash,
+    bundleCount: bundles.length,
+  };
+};
+
+export async function parseRuntimeRecoveryCandidateFile(
+  seed: string,
+  fileContents: string,
+  options: { sourceLabel?: string; xln?: XLNModule } = {},
+): Promise<RuntimeRecoveryCandidate> {
+  const xln = options.xln || await getXLN();
+  if (typeof xln.decryptRuntimeRecoveryBundle !== 'function') {
+    throw new Error('RECOVERY_DECRYPT_UNAVAILABLE');
+  }
+  const runtimeId = normalizeRuntimeId(deriveAddress(seed, 0));
+  if (!runtimeId) throw new Error('RECOVERY_RUNTIME_ID_INVALID');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fileContents);
+  } catch {
+    throw new Error('RECOVERY_BACKUP_FILE_JSON_INVALID');
+  }
+  const encryptedBundles = extractEncryptedRecoveryBundles(parsed);
+  if (encryptedBundles.length === 0) {
+    throw new Error('RECOVERY_BACKUP_FILE_EMPTY');
+  }
+  return buildRuntimeRecoveryCandidate({
+    source: 'file',
+    sourceLabel: options.sourceLabel || 'Local backup file',
+    seed,
+    expectedRuntimeId: runtimeId,
+    encryptedBundles,
+    xln,
+  });
+}
+
+export async function discoverRuntimeRecoveryCandidates(
+  seed: string,
+  options: {
+    recovery?: RuntimeRecoveryConfig;
+    towers?: RecoveryTowerConfig[];
+    xln?: XLNModule;
+  } = {},
+): Promise<RuntimeRecoveryDiscoveryResult> {
+  const xln = options.xln || await getXLN();
+  if (
+    typeof xln.decryptRuntimeRecoveryBundle !== 'function' ||
+    typeof xln.deriveRuntimeRecoveryLookupKey !== 'function'
+  ) {
+    throw new Error('RECOVERY_DISCOVERY_UNAVAILABLE');
+  }
+  const runtimeId = normalizeRuntimeId(deriveAddress(seed, 0));
+  if (!runtimeId) throw new Error('RECOVERY_RUNTIME_ID_INVALID');
+  const lookupKey = xln.deriveRuntimeRecoveryLookupKey(runtimeId, seed);
+  const runtimeProbe: Runtime = {
+    id: runtimeId,
+    label: 'Recovery probe',
+    seed,
+    signers: [],
+    activeSignerIndex: 0,
+    recovery: options.recovery || (options.towers
+      ? { useDefaultTowers: false, towers: options.towers }
+      : buildDefaultRuntimeRecoveryConfig()),
+    createdAt: Date.now(),
+  };
+  const towers = getConfiguredRecoveryTowers(runtimeProbe);
+  const candidates: RuntimeRecoveryCandidate[] = [];
+  const errors: string[] = [];
+
+  for (const tower of towers) {
+    try {
+      if (!await towerHasRecoveryBundle(tower, lookupKey)) {
+        continue;
+      }
+      const restoreUrl = buildTowerRequestUrl(tower.url, '/api/tower/restore');
+      const response = await fetch(restoreUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ lookupKey }),
+      });
+      if (response.status === 404) continue;
+      if (!response.ok) {
+        errors.push(`${tower.url}:HTTP_${response.status}`);
+        continue;
+      }
+      const payload = await response.json() as TowerRestorePayload;
+      const encryptedBundles = extractEncryptedRecoveryBundles(payload);
+      if (!payload.ok || encryptedBundles.length === 0) {
+        if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') continue;
+        errors.push(`${tower.url}:${String(payload.error || 'unknown')}`);
+        continue;
+      }
+      candidates.push(await buildRuntimeRecoveryCandidate({
+        source: 'tower',
+        sourceLabel: tower.url,
+        towerUrl: tower.url,
+        ...(payload.receipt ? { receipt: payload.receipt } : {}),
+        seed,
+        expectedRuntimeId: runtimeId,
+        encryptedBundles,
+        xln,
+      }));
+    } catch (error) {
+      errors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  candidates.sort(sortRecoveryCandidatesByTip);
+  return {
+    runtimeId,
+    lookupKey,
+    candidates,
+    errors,
+    checkedTowers: towers.length,
+  };
+}
+
+export async function restoreRuntimeEnvFromRecoveryCandidate(
+  runtime: Runtime,
+  xln: XLNModule,
+  candidate: RuntimeRecoveryCandidate,
+): Promise<{ env: Env; bundle: RuntimeRecoveryBundleV1 }> {
+  const runtimeId = normalizeRuntimeId(runtime.id);
+  if (!runtimeId) throw new Error('RECOVERY_RESTORE_RUNTIME_ID_INVALID');
+  if (normalizeRuntimeId(candidate.runtimeId) !== runtimeId) {
+    throw new Error(`RECOVERY_RESTORE_CANDIDATE_RUNTIME_ID_MISMATCH: runtime=${runtimeId} candidate=${candidate.runtimeId}`);
+  }
+  applyRecoveryBundleMetadata(runtime, candidate.metadataBundle);
+  await registerRuntimeSignerKeys(runtime, xln);
+  const restoredEnv = await xln.restoreEnvFromRecoveryBundles(candidate.bundles, {
+    runtimeSeed: runtime.seed,
+    runtimeId,
+  });
+  applyRuntimeLogPreference(restoredEnv);
+  await xln.persistRestoredEnvToDB(restoredEnv);
+  return { env: restoredEnv, bundle: candidate.tipBundle };
+}
+
 const buildRuntimeRecoverySigners = (runtime: Runtime): RuntimeRecoverySignerV1[] =>
   (runtime.signers || [])
     .map((signer, index) => ({
@@ -703,103 +964,28 @@ export async function tryRestoreRuntimeEnvFromTower(
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId || !runtime.seed) return null;
 
-  const lookupKey = xln.deriveRuntimeRecoveryLookupKey(runtimeId, runtime.seed);
-  const towers = getConfiguredRecoveryTowers(runtime);
-  const candidates: Array<{
-    bundles: RuntimeRecoveryBundleV1[];
-    tipBundle: RuntimeRecoveryBundleV1;
-    metadataBundle: RuntimeRecoveryBundleV1;
-    receipt?: TowerReceiptV1;
-    towerUrl: string;
-  }> = [];
-  const errors: string[] = [];
-
-  for (const tower of towers) {
-    try {
-      if (!await towerHasRecoveryBundle(tower, lookupKey)) {
-        continue;
-      }
-      const restoreUrl = buildTowerRequestUrl(tower.url, '/api/tower/restore');
-      const response = await fetch(restoreUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ lookupKey }),
-      });
-      if (response.status === 404) continue;
-      if (!response.ok) {
-        errors.push(`${tower.url}:HTTP_${response.status}`);
-        continue;
-      }
-      const payload = await response.json() as TowerRestorePayload;
-      const encryptedBundles = Array.isArray(payload.bundles) && payload.bundles.length > 0
-        ? payload.bundles
-        : payload.bundle
-          ? [payload.bundle]
-          : [];
-      if (!payload.ok || encryptedBundles.length === 0) {
-        if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') continue;
-        errors.push(`${tower.url}:${String(payload.error || 'unknown')}`);
-        continue;
-      }
-      const bundles = [];
-      for (const encryptedBundle of encryptedBundles) {
-        bundles.push(await xln.decryptRuntimeRecoveryBundle(encryptedBundle, runtime.seed));
-      }
-      const tipBundle = [...bundles].sort((left, right) => right.runtimeHeight - left.runtimeHeight)[0]!;
-      const metadataBundle = bundles.find((bundle) => (bundle.kind ?? 'snapshot') === 'snapshot') ?? tipBundle;
-      candidates.push({
-        bundles,
-        tipBundle,
-        metadataBundle,
-        ...(payload.receipt ? { receipt: payload.receipt } : {}),
-        towerUrl: tower.url,
-      });
-    } catch (error) {
-      errors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  if (candidates.length === 0) {
-    if (errors.length > 0) {
-      throw new Error(`[VaultStore] Tower restore failed for ${runtimeId.slice(0, 12)}: ${errors.join(' | ')}`);
+  const discovery = await discoverRuntimeRecoveryCandidates(runtime.seed, runtime.recovery
+    ? { recovery: runtime.recovery, xln }
+    : { xln });
+  if (discovery.candidates.length === 0) {
+    if (discovery.errors.length > 0) {
+      throw new Error(`[VaultStore] Tower restore failed for ${runtimeId.slice(0, 12)}: ${discovery.errors.join(' | ')}`);
     }
     return null;
   }
 
-  candidates.sort((left, right) => {
-    if (right.tipBundle.runtimeHeight !== left.tipBundle.runtimeHeight) {
-      return right.tipBundle.runtimeHeight - left.tipBundle.runtimeHeight;
-    }
-    if (right.tipBundle.createdAt !== left.tipBundle.createdAt) {
-      return right.tipBundle.createdAt - left.tipBundle.createdAt;
-    }
-    return (right.receipt?.sequence || 0) - (left.receipt?.sequence || 0);
-  });
-
-  const best = candidates[0]!;
-  const bundle = best.tipBundle;
-  if (candidates.length > 1) {
-    const conflictingSameHeight = candidates.some((candidate) =>
+  const best = discovery.candidates[0]!;
+  if (discovery.candidates.length > 1) {
+    const conflictingSameHeight = discovery.candidates.some((candidate) =>
       candidate !== best
-      && candidate.tipBundle.runtimeHeight === best.tipBundle.runtimeHeight
-      && candidate.metadataBundle.checkpointHash !== best.metadataBundle.checkpointHash,
+      && candidate.runtimeHeight === best.runtimeHeight
+      && candidate.checkpointHash !== best.checkpointHash,
     );
     if (conflictingSameHeight) {
-      console.warn(`[VaultStore] Tower restore conflict detected for ${runtimeId.slice(0, 12)}; choosing highest valid bundle from ${best.towerUrl}`);
+      console.warn(`[VaultStore] Tower restore conflict detected for ${runtimeId.slice(0, 12)}; choosing highest valid bundle from ${best.sourceLabel}`);
     }
   }
-  applyRecoveryBundleMetadata(runtime, best.metadataBundle);
-  // Tower bundles restore signer metadata before restoring env. Register the
-  // HD-derived local keys immediately; restored replicas may already exist, so
-  // no later import path will necessarily touch registerSignerKey again.
-  await registerRuntimeSignerKeys(runtime, xln);
-  const restoredEnv = await xln.restoreEnvFromRecoveryBundles(best.bundles, {
-    runtimeSeed: runtime.seed,
-    runtimeId,
-  });
-  applyRuntimeLogPreference(restoredEnv);
-  await xln.persistRestoredEnvToDB(restoredEnv);
-  return { env: restoredEnv, bundle };
+  return restoreRuntimeEnvFromRecoveryCandidate(runtime, xln, best);
 }
 
 async function uploadRuntimeRecoverySnapshot(
@@ -2556,15 +2742,13 @@ export const vaultOperations = {
     try {
       xln = await getXLN();
       markPerf('load_xln_runtime');
-      const towerRestored = options.skipRecoveryRestore
-        ? null
-        : await tryRestoreRuntimeEnvFromTower(runtime, xln);
       const runtimeIdLower = runtimeId.toLowerCase();
 
-      if (towerRestored) {
+      if (options.recoveryCandidate) {
+        await restoreRuntimeEnvFromRecoveryCandidate(runtime, xln, options.recoveryCandidate);
         newEnv = await buildOrRestoreRuntimeEnv(runtime, xln, false);
         applyRuntimeLogPreference(newEnv);
-        markPerf('restore_runtime_from_tower');
+        markPerf('restore_runtime_from_recovery_candidate');
         toasts.info('Runtime restored from recovery backup', 6_000);
       } else {
         newEnv = xln.createEmptyEnv(seed);

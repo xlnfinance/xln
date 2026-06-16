@@ -952,7 +952,7 @@ export async function createRuntime(
     await ensureVisibleInputValue(resolveDisplayNameInput, label);
     await selectBrainvaultWorkFactor(page, options.workFactor ?? 1);
     const openVaultButton = await firstVisibleLocator([
-      page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false }).first(),
+      page.getByRole('button', { name: /(Create XLN wallet|Open \/ restore wallet|Open (Wallet|Vault))/, exact: false }).first(),
       page.locator('button.derive-btn').first(),
     ], 15_000);
     if (!openVaultButton) {
