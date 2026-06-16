@@ -1163,6 +1163,8 @@
     routeValue: string;
     sourceJurisdiction: string;
     targetJurisdiction: string;
+    sourceJurisdictionRef: string;
+    targetJurisdictionRef: string;
   };
 
   function resolvePairOrientation(tokenA: number, tokenB: number): { baseTokenId: number; quoteTokenId: number; pairId: string } {
@@ -1301,6 +1303,7 @@
   function buildSameOrderbookPairOptions(hubId: string): OrderbookPairOption[] {
     const hub = String(hubId || '').trim().toLowerCase();
     if (!hub) return [];
+    const jurisdictionRef = getReplicaJurisdictionRef(currentReplica) || sourceJurisdictionLabel;
     return tradingPairsForHub(hub).map((pair) => ({
       value: `same:${pair.pairId}`,
       label: sameOrderbookPairLabel(pair.baseTokenId, pair.quoteTokenId, sourceJurisdictionLabel),
@@ -1313,6 +1316,8 @@
       routeValue: 'same',
       sourceJurisdiction: sourceJurisdictionLabel,
       targetJurisdiction: sourceJurisdictionLabel,
+      sourceJurisdictionRef: jurisdictionRef,
+      targetJurisdictionRef: jurisdictionRef,
     }));
   }
 
@@ -1336,7 +1341,7 @@
           if (!market.sourceKey || !market.targetKey || market.sourceKey === market.targetKey) continue;
           const baseJurisdiction = crossAssetLabelForRoute(market.baseKey, route);
           const quoteJurisdiction = crossAssetLabelForRoute(market.quoteKey, route);
-          const value = `cross:${route.value}:${sourceTokenId}:${targetTokenId}`;
+          const value = `cross:${route.value}:${route.sourceJurisdictionRef}:${sourceTokenId}:${route.targetJurisdictionRef}:${targetTokenId}`;
           options.push({
             value,
             label: crossOrderbookPairLabel(
@@ -1354,6 +1359,8 @@
             routeValue: route.value,
             sourceJurisdiction: route.sourceJurisdiction,
             targetJurisdiction: route.targetJurisdiction,
+            sourceJurisdictionRef: route.sourceJurisdictionRef,
+            targetJurisdictionRef: route.targetJurisdictionRef,
           });
         }
       }
@@ -1456,6 +1463,79 @@
     submitError = '';
   }
 
+  function buildReverseCrossRouteSelection(): {
+    route: SwapRouteOption;
+    target: CrossTargetOption;
+    sourceEntityId: string;
+    sourceHubEntityId: string;
+  } | null {
+    const route = selectedRouteOption;
+    const target = selectedCrossTarget;
+    if (swapRouteMode !== 'cross' || !route || route.mode !== 'cross' || !target) return null;
+    const sourceEntityId = String(target.targetEntityId || '').trim().toLowerCase();
+    const sourceHubEntityId = String(target.targetHubEntityId || '').trim().toLowerCase();
+    const targetEntityId = String(route.sourceEntityId || sourceEntityIdValue || '').trim().toLowerCase();
+    const targetHubEntityId = String(route.sourceHubEntityId || activeOrderAccountId || '').trim().toLowerCase();
+    if (!sourceEntityId || !sourceHubEntityId || !targetEntityId || !targetHubEntityId) {
+      submitError = 'Cannot reverse cross route: source or target hub is missing.';
+      return null;
+    }
+    const sourceReplica = findReplicaByEntityId(sourceEntityId);
+    const targetReplica = findReplicaByEntityId(targetEntityId);
+    if (!sourceReplica || !targetReplica) {
+      submitError = 'Cannot reverse cross route: both jurisdiction replicas must be loaded.';
+      return null;
+    }
+    if (!hasReplicaAccount(sourceReplica, sourceHubEntityId)) {
+      submitError = `Cannot reverse cross route: open a ${target.targetJurisdiction} hub account first.`;
+      return null;
+    }
+    if (!hubRouteCompatible(sourceHubEntityId, targetHubEntityId)) {
+      submitError = 'Cannot reverse cross route: selected hubs are not connected across jurisdictions.';
+      return null;
+    }
+    const sourceJurisdiction = getReplicaJurisdictionName(sourceReplica);
+    const targetJurisdiction = getReplicaJurisdictionName(targetReplica);
+    const sourceJurisdictionRef = getReplicaJurisdictionRef(sourceReplica);
+    const targetJurisdictionRef = getReplicaJurisdictionRef(targetReplica);
+    const targetSignerId = String(targetReplica.signerId || '').trim().toLowerCase();
+    if (!sourceJurisdiction || !targetJurisdiction || !sourceJurisdictionRef || !targetJurisdictionRef || !targetSignerId) {
+      submitError = 'Cannot reverse cross route: jurisdiction metadata is incomplete.';
+      return null;
+    }
+    const hasTargetAccount = hasReplicaAccount(targetReplica, targetHubEntityId);
+    const reverseTarget: CrossTargetOption = {
+      value: `${targetEntityId}:${targetHubEntityId}`,
+      label: `${targetJurisdiction} · ${accountLabel(targetHubEntityId)}${hasTargetAccount ? '' : ' · setup required'}`,
+      targetEntityId,
+      targetSignerId,
+      targetHubEntityId,
+      targetJurisdiction,
+      targetJurisdictionRef,
+      hasTargetAccount,
+    };
+    return {
+      sourceEntityId,
+      sourceHubEntityId,
+      target: reverseTarget,
+      route: {
+        value: reverseTarget.value,
+        label: formatEntityNetworkLabel(accountLabel(targetEntityId), targetJurisdiction),
+        mode: 'cross',
+        sourceJurisdiction,
+        targetJurisdiction,
+        sourceEntityId,
+        sourceHubEntityId,
+        targetEntityId,
+        targetHubEntityId,
+        sourceJurisdictionRef,
+        targetJurisdictionRef,
+        targetLabel: reverseTarget.label,
+        disabledReason: '',
+      },
+    };
+  }
+
   function computeCurrentReceiveAmountForFlip(): bigint {
     const fallbackAmount = canonicalWantAmount > 0n ? canonicalWantAmount : wantAmount;
     if (!parsedOrderbookPair) return fallbackAmount;
@@ -1489,13 +1569,28 @@
     const nextAmountInput = nextGiveAmount > 0n
       ? formatAmountForInput(nextGiveAmount, nextGiveToken)
       : '';
+    const isCrossReverse = swapRouteMode === 'cross';
     const currentPriceTicks = selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
       ? selectedOrderLevel.inputPriceTicks
       : (selectedOrderLevel?.priceTicks && selectedOrderLevel.priceTicks > 0n ? selectedOrderLevel.priceTicks : limitPriceTicks);
     const nextPriceInput = currentPriceTicks && currentPriceTicks > 0n ? formatPriceTicks(currentPriceTicks) : priceRatioInput;
-    preservePriceOnNextContextChange = true;
-    setSwapTokens(nextGiveToken, nextWantToken);
-    if (nextPriceInput) {
+    if (isCrossReverse) {
+      const reverseSelection = buildReverseCrossRouteSelection();
+      if (!reverseSelection) return;
+      selectedSourceEntityValue = reverseSelection.sourceEntityId;
+      selectedBookAccountId = reverseSelection.sourceHubEntityId;
+      createOrderAccountId = reverseSelection.sourceHubEntityId;
+      commitRouteSelection({ route: reverseSelection.route, target: reverseSelection.target });
+      preservePriceOnNextContextChange = false;
+      setSwapTokens(nextGiveToken, nextWantToken, true);
+      priceRatioInput = '';
+      hasUserEditedPriceInput = false;
+      hasAutoSuggestedInitialPrice = false;
+    } else {
+      preservePriceOnNextContextChange = true;
+      setSwapTokens(nextGiveToken, nextWantToken);
+    }
+    if (!isCrossReverse && nextPriceInput) {
       priceRatioInput = nextPriceInput;
       hasUserEditedPriceInput = true;
       hasAutoSuggestedInitialPrice = true;
@@ -2456,6 +2551,14 @@
       lastOrderbookPairSelectCommit = 'route-unavailable';
       return false;
     }
+    if (
+      String(option.sourceJurisdictionRef || '').trim().toLowerCase() !== String(route.sourceJurisdictionRef || '').trim().toLowerCase()
+      || String(option.targetJurisdictionRef || '').trim().toLowerCase() !== String(route.targetJurisdictionRef || '').trim().toLowerCase()
+    ) {
+      submitError = 'Selected cross pair belongs to a different jurisdiction route.';
+      lastOrderbookPairSelectCommit = 'route-mismatch';
+      return false;
+    }
     commitRouteSelection({ route, target });
     lastOrderbookPairSelectCommit = 'cross-committed';
     return true;
@@ -2605,9 +2708,7 @@
 
     const nextGiveToken = side === 'ask' ? pair.quoteTokenId : pair.baseTokenId;
     const nextWantToken = side === 'ask' ? pair.baseTokenId : pair.quoteTokenId;
-    if (swapRouteMode !== 'cross') {
-      setSwapTokens(nextGiveToken, nextWantToken);
-    }
+    setSwapTokens(nextGiveToken, nextWantToken, swapRouteMode === 'cross');
 
     const priceTicks = parsedPriceTicks;
     const sizeBaseWei = lotsToBaseWei(rawSize);
@@ -2785,7 +2886,9 @@
   );
   $: orderbookPairSelectValue = (() => {
     if (swapRouteMode === 'cross') {
-      const exactCrossValue = `cross:${liveSelectedRouteValue}:${giveToken}:${wantToken}`;
+      const exactCrossValue = selectedRouteOption
+        ? `cross:${liveSelectedRouteValue}:${selectedRouteOption.sourceJurisdictionRef}:${giveToken}:${selectedRouteOption.targetJurisdictionRef}:${wantToken}`
+        : '';
       return orderbookPairOptions.find((option) => option.value === exactCrossValue)?.value
         || orderbookPairOptions.find((option) => option.mode === 'cross' && option.pairId === orderbookPairId)?.value
         || '';
