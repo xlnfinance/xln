@@ -12,6 +12,7 @@
   import {
     activeRuntime,
     buildRuntimeRecoveryConfigForMode,
+    parseRuntimeRecoveryCandidateFile,
     vaultOperations,
     type RecoveryTowerConfig,
     type RecoveryTowerSetupMode,
@@ -44,6 +45,11 @@
     resolveOfficialRecoveryTowerUrl,
     type RecoveryServiceMode,
   } from '../../utils/recoverySettings';
+  import {
+    clearRuntimeRecoveryDiscoveryStatus,
+    readRuntimeRecoveryDiscoveryStatus,
+    type RuntimeRecoveryDiscoveryStatus,
+  } from '../../utils/recoveryDiscoveryStatus';
 
   export let entityId: string = '';
   export let signerId: string = '';
@@ -72,6 +78,12 @@
   let recoveryManualKind: RecoveryServiceMode = 'blind_backup';
   let recoveryMessage = '';
   let recoveryMessageTone: 'neutral' | 'error' = 'neutral';
+  let recoveryDiscoveryStatus: RuntimeRecoveryDiscoveryStatus | null = null;
+  let recoveryDiscoveryLoadedFor = '';
+  let recoveryBackupFileInput: HTMLInputElement | null = null;
+  let recoveryUploadMessage = '';
+  let recoveryUploadTone: 'neutral' | 'error' = 'neutral';
+  let recoveryUploadBusy = false;
   let selectedJurisdictions: Record<string, boolean> = {};
   let jurisdictionSelectionLoadedFor = '';
 
@@ -190,6 +202,15 @@
   $: hasBrainVaultRecovery = Boolean(brainVaultSeed || brainVaultMnemonic12);
   $: recoveryOfficialUrl = resolveOfficialRecoveryTowerUrl();
   $: recoveryRuntimeSyncKey = `${$activeRuntime?.id || 'none'}:${JSON.stringify($activeRuntime?.recovery?.towers || [])}:${$activeRuntime?.recovery?.useDefaultTowers === true}`;
+  $: {
+    const runtimeId = String($activeRuntime?.id || '').trim().toLowerCase();
+    if (recoveryDiscoveryLoadedFor !== runtimeId) {
+      recoveryDiscoveryStatus = readRuntimeRecoveryDiscoveryStatus(runtimeId);
+      recoveryDiscoveryLoadedFor = runtimeId;
+      recoveryUploadMessage = '';
+      recoveryUploadTone = 'neutral';
+    }
+  }
   $: jurisdictionOptions = ($activeRuntime?.signers || [])
     .map((signer, index) => {
       const name = String(signer.jurisdiction || (index === 0 ? 'Primary' : `Jurisdiction ${index + 1}`)).trim();
@@ -357,6 +378,38 @@
     recoveryTowerDraft = normalizeRecoveryDraft(updatedRuntime.recovery?.towers);
     recoveryDraftLoadedFor = '';
     syncRecoveryDraftFromRuntime(true);
+  }
+
+  function triggerRecoveryBackupFilePicker(): void {
+    recoveryBackupFileInput?.click();
+  }
+
+  async function handleRecoveryBackupFileSelected(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const runtime = $activeRuntime;
+    recoveryUploadMessage = '';
+    recoveryUploadTone = 'neutral';
+    recoveryUploadBusy = true;
+    try {
+      if (!runtime?.id || !runtime.seed) throw new Error('Runtime seed is required before restoring a backup file');
+      const candidate = await parseRuntimeRecoveryCandidateFile(runtime.seed, await file.text(), {
+        sourceLabel: file.name || 'Local backup file',
+      });
+      await vaultOperations.restoreRuntimeFromRecoveryCandidate(runtime.id, candidate);
+      clearRuntimeRecoveryDiscoveryStatus(runtime.id);
+      recoveryDiscoveryStatus = null;
+      recoveryDiscoveryLoadedFor = String(runtime.id || '').trim().toLowerCase();
+      recoveryUploadMessage = 'Runtime restored from uploaded backup.';
+      recoveryUploadTone = 'neutral';
+    } catch (err) {
+      recoveryUploadMessage = err instanceof Error ? err.message : String(err);
+      recoveryUploadTone = 'error';
+    } finally {
+      recoveryUploadBusy = false;
+      input.value = '';
+    }
   }
 
   $: {
@@ -630,6 +683,40 @@
     <p>Set the public profile, default limits, and first hub account.</p>
   </div>
   <div class="setup-card">
+    {#if recoveryDiscoveryStatus}
+      <section class="setup-section recovery-check-compact" data-testid="runtime-recovery-check-status">
+        <div class="recovery-check-copy">
+          <span>
+            Checked {recoveryDiscoveryStatus.checkedTowers} watchtower{recoveryDiscoveryStatus.checkedTowers === 1 ? '' : 's'},
+            found {recoveryDiscoveryStatus.backupCount} backup{recoveryDiscoveryStatus.backupCount === 1 ? '' : 's'} for this seed.
+          </span>
+          {#if recoveryDiscoveryStatus.errors.length > 0}
+            <small>{recoveryDiscoveryStatus.errors.length} warning{recoveryDiscoveryStatus.errors.length === 1 ? '' : 's'} during check</small>
+          {/if}
+        </div>
+        <button
+          type="button"
+          class="mini-action"
+          disabled={recoveryUploadBusy}
+          on:click={triggerRecoveryBackupFilePicker}
+        >
+          {recoveryUploadBusy ? 'Loading backup...' : 'I have a runtime backup file'}
+        </button>
+        <input
+          bind:this={recoveryBackupFileInput}
+          class="backup-file-input"
+          type="file"
+          accept=".json,application/json,text/plain"
+          on:change={handleRecoveryBackupFileSelected}
+        />
+        {#if recoveryUploadMessage}
+          <div class={recoveryUploadTone === 'error' ? 'error-msg compact' : 'recovery-note compact'}>
+            {recoveryUploadMessage}
+          </div>
+        {/if}
+      </section>
+    {/if}
+
     <section class="setup-section">
       <label class="form-label" for="display-name">Display name</label>
       <input
@@ -979,6 +1066,35 @@
     padding: 16px;
   }
 
+  .recovery-check-compact {
+    min-height: 0;
+    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    background: rgba(120, 113, 108, 0.08);
+  }
+
+  .recovery-check-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: #d6d3d1;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .recovery-check-copy small {
+    color: #a8a29e;
+    font-size: 11px;
+  }
+
+  .backup-file-input {
+    display: none;
+  }
+
   .brainvault-section {
     padding: 0;
     overflow: hidden;
@@ -1260,6 +1376,13 @@
     color: #fbbf24;
     background: rgba(251, 191, 36, 0.06);
     font-size: 12px;
+  }
+
+  .recovery-note.compact,
+  .error-msg.compact {
+    grid-column: 1 / -1;
+    padding: 8px 10px;
+    font-size: 11px;
   }
 
   .profile-preview-avatar {

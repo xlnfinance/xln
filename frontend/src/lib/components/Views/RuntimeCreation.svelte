@@ -13,6 +13,7 @@
   } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { resetEverything } from '$lib/utils/resetEverything';
+  import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recoveryDiscoveryStatus';
   import {
     BRAINVAULT_V1,
     bytesToHex,
@@ -257,7 +258,6 @@
   async function prepareRecoveryDecisionFromCurrentSeed(labelOverride?: string): Promise<boolean> {
     if (!mnemonic24 || !ethereumAddress) return false;
 
-    phase = 'recovery';
     derivationError = '';
     recoveryChecking = true;
     recoveryRuntimeId = ethereumAddress.toLowerCase();
@@ -274,12 +274,38 @@
       recoveryErrors = discovery.errors;
       recoveryCheckedTowers = discovery.checkedTowers;
       selectedRecoveryCandidateId = recoveryCandidates[0]?.id || '';
+      if (recoveryCandidates.length > 0) {
+        phase = 'recovery';
+      }
       return true;
     } catch (err) {
       recoveryErrors = [err instanceof Error ? err.message : String(err)];
       return false;
     } finally {
       recoveryChecking = false;
+    }
+  }
+
+  function writeCurrentRecoveryDiscoveryStatus(): void {
+    writeRuntimeRecoveryDiscoveryStatus({
+      runtimeId: recoveryRuntimeId || ethereumAddress,
+      checkedTowers: recoveryCheckedTowers,
+      backupCount: recoveryCandidates.length,
+      errors: recoveryErrors,
+      checkedAt: Date.now(),
+    });
+  }
+
+  async function continueAfterRecoveryDiscovery(): Promise<void> {
+    if (recoveryCandidates.length > 0) {
+      phase = 'recovery';
+      return;
+    }
+    writeCurrentRecoveryDiscoveryStatus();
+    if (localRuntimeAvailable) {
+      await openLocalRuntime();
+    } else {
+      await createFreshRuntime();
     }
   }
 
@@ -560,6 +586,7 @@
         ethereumAddress = await deriveEthereumAddress(mnemonic24);
         createLoginType = 'manual';
         await prepareRecoveryDecisionFromCurrentSeed(`Mnemonic ${ethereumAddress.slice(0, 6)}`);
+        await continueAfterRecoveryDiscovery();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to import mnemonic';
         console.error('[RuntimeCreation] Mnemonic import failed:', err);
@@ -765,6 +792,7 @@
     entityId = generateLazyEntityIdPreview([ethereumAddress], 1n);
 
     await prepareRecoveryDecisionFromCurrentSeed(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
+    await continueAfterRecoveryDiscovery();
   }
 
   function terminateWorkers() {
@@ -1129,7 +1157,7 @@
                 <div class="pyramid-stats">
                   <div class="stat-row">
                     <span class="stat-label">STATUS</span>
-                    <span class="stat-value">{creatingRuntime ? 'CREATING RUNTIME' : 'DERIVING SEED'}</span>
+                    <span class="stat-value">{creatingRuntime ? 'CREATING RUNTIME' : recoveryChecking ? 'CHECKING BACKUPS' : 'DERIVING SEED'}</span>
                   </div>
                   <div class="stat-row">
                     <span class="stat-label">SHARDS</span>
@@ -1268,25 +1296,6 @@
                 I have a runtime backup file
               </button>
             </div>
-          {:else}
-            <div class="no-recovery-found">
-              <strong>No tower backup found for this seed.</strong>
-              <span>You can upload an encrypted runtime backup from a drive, or explicitly create a new wallet.</span>
-            </div>
-            <div class="recovery-actions">
-              <button type="button" class="backup-upload-btn" on:click={triggerBackupFilePicker}>
-                I have a runtime backup file
-              </button>
-              {#if localRuntimeAvailable}
-                <button type="button" class="derive-btn secondary" disabled={creatingRuntime} on:click={openLocalRuntime}>
-                  {creatingRuntime ? 'Opening...' : 'Open local wallet'}
-                </button>
-              {:else}
-                <button type="button" class="derive-btn secondary" disabled={creatingRuntime} on:click={createFreshRuntime}>
-                  {creatingRuntime ? 'Creating...' : recoveryErrors.length > 0 ? 'Create new wallet anyway' : 'Create new wallet'}
-                </button>
-              {/if}
-            </div>
           {/if}
 
           {#if recoveryErrors.length > 0}
@@ -1412,8 +1421,7 @@
     overflow-wrap: anywhere;
   }
 
-  .recovery-loading,
-  .no-recovery-found {
+  .recovery-loading {
     min-height: 76px;
     padding: 14px;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1424,15 +1432,6 @@
     gap: 12px;
     color: rgba(255, 255, 255, 0.72);
     box-sizing: border-box;
-  }
-
-  .no-recovery-found {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .no-recovery-found strong {
-    color: rgba(255, 255, 255, 0.92);
   }
 
   .recovery-spinner {
@@ -1517,11 +1516,6 @@
   .backup-upload-btn:hover {
     border-color: rgba(255, 200, 100, 0.28);
     color: rgba(255, 200, 100, 0.95);
-  }
-
-  .derive-btn.secondary {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.9);
   }
 
   .backup-file-input {
