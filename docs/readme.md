@@ -64,6 +64,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 |----------|-------------|
 | [status.md](status.md) | canonical current blockers and workstreams |
 | [mainnet.md](mainnet.md) | release bar for real-user-fund launch |
+| [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md) | strict capped-testnet / pre-mainnet acceptance loop |
 | [roadmap.md](roadmap.md) | phased rollout and strategic direction |
 | [../todo.md](../todo.md) | active TODO/NEXT backlog |
 
@@ -81,4 +82,4 @@ more L2", but a consequence of the scaling and enforcement constraints.
 
 - [archive/](archive/) — historical planning, research, philosophy, and logs
 
-**Last updated:** 2026-06-14
+**Last updated:** 2026-06-16

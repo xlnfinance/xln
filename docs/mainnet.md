@@ -6,6 +6,10 @@ This file defines the release bar for real user funds. It is narrower than
 `status.md`: status explains what is active now; this file explains what must
 be true before mainnet is acceptable.
 
+For the current capped public-testnet / pre-mainnet launch loop, use the strict
+acceptance prompt and evidence loop in
+[mainnet-acceptance-gate.md](mainnet-acceptance-gate.md).
+
 ## Current Position
 
 **Date:** 2026-06-14
@@ -164,6 +168,7 @@ Keep these files aligned before launch:
 - [deployment/ops-runbook.md](deployment/ops-runbook.md)
 - [deployment/deployment.md](deployment/deployment.md)
 - [docs/security/external-audit-brief.md](security/external-audit-brief.md)
+- [mainnet-acceptance-gate.md](mainnet-acceptance-gate.md)
 
 ## Historical Reference
 
