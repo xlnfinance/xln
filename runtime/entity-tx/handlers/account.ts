@@ -7,6 +7,7 @@ import { isLeftEntity } from '../../entity-id-utils';
 import { scheduleHook as scheduleCrontabHook } from '../../entity-crontab';
 import { upsertSortedStringMapEntry } from '../../sorted-index';
 import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
+import { normalizeAccountWatchSeed } from '../../account-watch-seed';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
 import { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 import {
@@ -94,9 +95,16 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
   let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
   assertSameJurisdictionAccount(env, newState.entityId, newState.config?.jurisdiction, counterpartyId);
+  const inputWatchSeed = input.watchSeed === undefined
+    ? undefined
+    : normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
+  if (accountMachine && inputWatchSeed && accountMachine.watchSeed.toLowerCase() !== inputWatchSeed) {
+    throw new Error(`ACCOUNT_WATCH_SEED_MISMATCH:${counterpartyId}`);
+  }
   let isNewAccount = false;
   if (!accountMachine) {
     isNewAccount = true;
+    const watchSeed = normalizeAccountWatchSeed(inputWatchSeed, 'ACCOUNT_INPUT_GENESIS');
     accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
 
     // CONSENSUS FIX: Start with empty deltas (Channel.ts pattern)
@@ -109,6 +117,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     accountMachine = {
       leftEntity,
       rightEntity,
+      watchSeed,
       status: 'active',
       mempool: [],
       currentFrame: {

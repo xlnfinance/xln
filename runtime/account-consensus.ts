@@ -30,6 +30,7 @@ import {
   createFrameHash,
   getAccountFrameValidationError,
 } from './account-consensus-frame';
+import { normalizeAccountWatchSeed } from './account-watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
@@ -157,6 +158,12 @@ export async function handleAccountInput(
   accountMachine: AccountMachine,
   input: AccountInput,
 ): Promise<HandleAccountInputResult> {
+  if (input.watchSeed !== undefined) {
+    const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
+    if (accountMachine.watchSeed.toLowerCase() !== inputWatchSeed) {
+      return { success: false, error: `ACCOUNT_WATCH_SEED_MISMATCH:${input.fromEntityId}`, events: [] };
+    }
+  }
   const normalizedInputHeight =
     input.height === undefined || input.height === null ? undefined : Number(input.height as number | string);
   if (normalizedInputHeight !== undefined && !Number.isFinite(normalizedInputHeight)) {
@@ -1090,6 +1097,7 @@ export async function handleAccountInput(
       kind: 'ack',
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
+      watchSeed: accountMachine.watchSeed,
       height: receivedFrame.height,
       prevHanko: confirmationHanko, // Hanko ACK on their frame
       ...(ackDisputeHanko && { newDisputeHanko: ackDisputeHanko }), // My dispute proof hanko (current state)

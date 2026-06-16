@@ -116,6 +116,7 @@ export type StorageEntityCoreDoc = {
 export type StorageAccountDoc = {
   leftEntity: string;
   rightEntity: string;
+  watchSeed: string;
   status: AccountStatus;
   mempool: AccountMachine['mempool'];
   currentFrame: AccountMachine['currentFrame'];

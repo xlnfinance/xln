@@ -213,16 +213,17 @@ Contract behavior:
 - Verify `params.sig` against `(nonce, proofbodyHash)` as today.
 - Store `disputeHashV2(initialNonce, startedByLeft, timeout, initialProofbodyHash,
   starterInitialArguments, starterIncrementedArguments)`.
-- Emit both argument blobs in `DisputeStartedV2`.
+- Emit `watchSeed` and both argument blobs in `DisputeStarted`.
 
 Event:
 
 ```solidity
-event DisputeStartedV2(
+event DisputeStarted(
   bytes32 indexed sender,
   bytes32 indexed counterentity,
   uint indexed nonce,
   bytes32 proofbodyHash,
+  bytes32 watchSeed,
   bytes starterInitialArguments,
   bytes starterIncrementedArguments
 );
@@ -419,10 +420,9 @@ Rules:
 ### J-events
 
 - `runtime/entity-tx/j-events.ts`
-  - Parse `DisputeStartedV2`.
+  - Parse `DisputeStarted`.
   - Store both starter argument blobs in `activeDispute`.
-  - For legacy `DisputeStarted`, normalize `starterIncrementedArguments` to `0x` only for
-    already-deployed legacy chains.
+  - Store the revealed `watchSeed` for last-resort dispute protection.
   - Do not treat `starterIncrementedArguments` as active source-pull evidence until a counter
     finalization path actually uses the newer proof.
 
@@ -431,14 +431,14 @@ Rules:
 - `runtime/watchtower/action.ts`
   - Update `DEPOSITORY_MINIMAL_ABI`.
   - Update `encodeDisputeHash`.
-  - Parse `DisputeStartedV2`.
+  - Parse `DisputeStarted`.
   - Include both starter argument blobs in `ActiveDisputeContext`.
   - Submit `leftArguments/rightArguments/starterInitialArguments/starterIncrementedArguments`.
 
 - `runtime/recovery/types.ts`
   - Version the tower remedy payload.
-  - Add V2 fields.
-  - Reject V1 counter-dispute remedies against V2 contracts.
+  - Add current dispute fields.
+  - Reject counter-dispute remedies that do not bind the revealed `watchSeed`.
 
 - `docs/recovery-watchtower-protocol.md`
   - Update the tower payload and hash formula.
@@ -494,14 +494,14 @@ that is local safety metadata, not on-chain consensus data.
     pull argument slot.
 
 - `runtime/__tests__/watchtower-rpc-last-resort.test.ts`
-  - Tower parses `DisputeStartedV2`.
+  - Tower parses `DisputeStarted`.
   - Tower hash check includes both starter argument blobs.
   - Tower counter-dispute submits the V2 final proof shape.
 
 ### E2E tests
 
 - `tests/e2e-dispute.spec.ts`
-  - UI dispute lifecycle still queues, broadcasts, and finalizes a V2 dispute.
+  - UI dispute lifecycle still queues, broadcasts, and finalizes the current dispute shape.
 
 - `tests/e2e-cross-j-swap.spec.ts`
   - Create a cross-j partial fill.

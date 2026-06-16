@@ -136,12 +136,11 @@ describe('standalone watchtower service', () => {
       const healthPayload = await health.json() as {
         ok: boolean;
         signerAddress?: string;
-        actionPublicKey?: string;
         sweep?: { enabled?: boolean };
       };
       expect(healthPayload.ok).toBe(true);
       expect(healthPayload.signerAddress).toBe(server.store.signerAddress);
-      expect(healthPayload.actionPublicKey).toBe(server.store.actionPublicKey);
+      expect('actionPublicKey' in healthPayload).toBe(false);
       expect(healthPayload.sweep?.enabled).toBe(false);
     }
 
@@ -212,6 +211,13 @@ describe('standalone watchtower service', () => {
       triggerHint: 'chain:31337:acct:plaintext',
       encryptedRemedy: JSON.stringify({ type: 'counter_dispute_remedy' }),
       actionKind: 'counter_dispute_only' as const,
+      watch: {
+        rpcUrl: 'http://127.0.0.1:8545',
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+        watchedEntityId: `0x${'aa'.repeat(32)}`,
+        counterentity: `0x${'bb'.repeat(32)}`,
+      },
       appointmentSequence: 1,
       proofNonce: 1,
       proofBodyHash: keccak256(toUtf8Bytes('proof-body')),

@@ -112,11 +112,12 @@ contract Depository is ReentrancyGuardLite {
   // Hub tracking removed for size reduction
 
   // Events related to disputes and cooperative closures
-  event DisputeStartedV2(
+  event DisputeStarted(
     bytes32 indexed sender,
     bytes32 indexed counterentity,
     uint indexed nonce,
     bytes32 proofbodyHash,
+    bytes32 watchSeed,
     bytes starterInitialArguments,
     bytes starterIncrementedArguments
   );
@@ -886,7 +887,7 @@ contract Depository is ReentrancyGuardLite {
         if (params.finalNonce <= params.initialNonce) revert E2();
 
         bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
-        if (!Account.verifyDisputeProofHanko(entityProvider, address(this), acct_key, params.finalNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
+        if (!Account.verifyDisputeProofHanko(entityProvider, address(this), acct_key, params.finalNonce, finalProofbodyHash, params.finalProofbody.watchSeed, params.sig, params.counterentity)) revert E4();
         Account.requireStarterArguments(
           params.startedByLeft,
           params.leftArguments,

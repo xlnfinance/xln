@@ -157,6 +157,7 @@ export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
   rightEntity: string;  // Higher entity ID (canonical right)
+  watchSeed: string;    // 32-byte shared account seed revealed only when a dispute starts
   status: AccountStatus; // Manual lifecycle gate for dispute freeze/reopen
 
   mempool: AccountTx[]; // Unprocessed account transactions
@@ -380,6 +381,7 @@ export type AccountSettleAction = {
 type AccountInputBase = {
   fromEntityId: string;
   toEntityId: string;
+  watchSeed?: string;
 
   // Frame-level consensus (matches Channel.ts FlushMessage structure)
   height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)

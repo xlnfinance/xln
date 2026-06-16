@@ -31,6 +31,7 @@ import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts
  * Converted to ProofBodyStruct for ABI encoding
  */
 export interface RuntimeProofBody {
+  watchSeed: string;             // bytes32 - bilateral account seed revealed by dispute start
   offdeltas: bigint[];           // int256[] - bilateral offdelta per token
   tokenIds: number[];            // uint256[] - sorted ascending
   transformers: RuntimeTransformerClause[];
@@ -129,6 +130,7 @@ export interface DisputeConfig {
  */
 export const PROOF_BODY_ABI = {
   components: [
+    { name: 'watchSeed', type: 'bytes32' },
     { name: 'offdeltas', type: 'int256[]' },
     { name: 'tokenIds', type: 'uint256[]' },
     {

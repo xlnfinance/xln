@@ -151,29 +151,39 @@ describe('watchtower restart resilience', () => {
     );
     const lastResortOwner = Wallet.createRandom();
     const lastResortRuntimeId = lastResortOwner.address.toLowerCase();
+    const watchSeed = `0x${'12'.repeat(32)}`;
+    const watchedEntityId = `0x${'12'.repeat(32)}`;
+    const counterentity = `0x${'34'.repeat(32)}`;
     const lastResortPayload: TowerLastResortPayloadV1 = {
       triggerHint: 'restart-test',
       encryptedRemedy: encodeTowerCounterDisputeRemedy({
-        version: 2,
+        version: 1,
         type: 'counter_dispute_remedy',
         rpcUrl: 'http://127.0.0.1:1',
         chainId: 31337,
         depositoryAddress: addr('55'),
-        watchedEntityId: `0x${'12'.repeat(32)}`,
+        watchedEntityId,
         towerAddress: towerWallet.address.toLowerCase(),
         lastResortWindowBlocks: 8,
         appointmentSequence: 3,
         ownerAuthorizationHanko: '0x1234',
         latestProof: {
-          counterentity: `0x${'34'.repeat(32)}`,
+          counterentity,
           finalNonce: 7,
-          finalProofbody: { tokenIds: [1], offdeltas: [-5n], transformers: [] },
+          finalProofbody: { watchSeed, tokenIds: [1], offdeltas: [-5n], transformers: [] },
           leftArguments: '0x',
           rightArguments: '0x',
           starterIncrementedArguments: '0x',
           sig: '0x5678',
         },
       }),
+      watch: {
+        rpcUrl: 'http://127.0.0.1:1',
+        chainId: 31337,
+        depositoryAddress: addr('55'),
+        watchedEntityId,
+        counterentity,
+      },
       actionKind: 'counter_dispute_only',
       appointmentSequence: 3,
       proofNonce: 7,

@@ -132,14 +132,31 @@ const assertEncryptedLastResortPayload = (lastResortPayload: TowerAppointmentV1[
   if (
     parsed['type'] !== 'tower_encrypted_payload' ||
     parsed['version'] !== 1 ||
-    parsed['alg'] !== 'secp256k1-aes-256-gcm' ||
-    typeof parsed['epk'] !== 'string' ||
+    parsed['alg'] !== 'watch-seed-aes-256-gcm' ||
     typeof parsed['iv'] !== 'string' ||
-    typeof parsed['ciphertext'] !== 'string' ||
-    typeof parsed['plaintextHash'] !== 'string'
+    typeof parsed['ciphertext'] !== 'string'
   ) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   }
+};
+
+const verifyLastResortWatch = (watch: unknown): void => {
+  if (!watch || typeof watch !== 'object') {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_MISSING');
+  }
+  const candidate = watch as Record<string, unknown>;
+  const rpcUrl = String(candidate['rpcUrl'] || '').trim();
+  if (!rpcUrl || rpcUrl.length > 512 || !/^https?:\/\//i.test(rpcUrl)) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_RPC_INVALID');
+  }
+  if (normalizeNonNegativeInt(candidate['chainId'], 'LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID') <= 0) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_CHAIN_ID_INVALID');
+  }
+  if (!ethers.isAddress(String(candidate['depositoryAddress'] || ''))) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_WATCH_DEPOSITORY_INVALID');
+  }
+  normalizeBytes32(candidate['watchedEntityId'], 'LAST_RESORT_PAYLOAD_WATCH_ENTITY');
+  normalizeBytes32(candidate['counterentity'], 'LAST_RESORT_PAYLOAD_WATCH_COUNTERENTITY');
 };
 
 const verifyLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastResortPayload']): void => {
@@ -152,6 +169,7 @@ const verifyLastResortPayload = (lastResortPayload: TowerAppointmentV1['lastReso
   if (lastResortPayload.responseMode !== 'last_resort') {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_RESPONSE_MODE_UNSUPPORTED');
   }
+  verifyLastResortWatch(lastResortPayload.watch);
   const triggerHint = String(lastResortPayload.triggerHint || '').trim();
   if (!triggerHint || triggerHint.length > 256) {
     throw new Error('TOWER_LAST_RESORT_PAYLOAD_TRIGGER_HINT_INVALID');
@@ -261,7 +279,12 @@ export const handleTowerRestore = async (req: Request, store: WatchtowerStore): 
         headers: { 'content-type': 'application/json' },
       });
     }
-    const response: TowerRestoreResponseV1 = { ok: true, receipt: restored.receipt, bundle: restored.bundle };
+    const response: TowerRestoreResponseV1 = {
+      ok: true,
+      receipt: restored.receipt,
+      bundle: restored.bundle,
+      bundles: restored.bundles,
+    };
     return new Response(serializeTaggedJson(response), {
       headers: { 'content-type': 'application/json' },
     });

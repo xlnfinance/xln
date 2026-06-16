@@ -7,8 +7,10 @@ import type {
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
 } from './types';
+import type { PersistedFrameJournal } from '../wal/store';
 
 const RECOVERY_BUNDLE_VERSION = 1;
+const MAX_RECOVERY_JOURNAL_FRAMES = 10_000;
 
 const normalizeRuntimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -35,26 +37,43 @@ export const buildRuntimeRecoveryBundle = (
     signers: RuntimeRecoverySignerV1[];
     meta?: RuntimeRecoveryMetaV1;
     createdAt?: number;
+    kind?: 'snapshot' | 'journal_tail';
+    baseCheckpoint?: { height: number; hash: string };
+    frames?: PersistedFrameJournal[];
   },
 ): RuntimeRecoveryBundleV1 => {
   const runtimeId = normalizeRuntimeId(env.runtimeId);
   if (!runtimeId) {
     throw new Error('RECOVERY_BUNDLE_RUNTIME_ID_REQUIRED');
   }
-  const checkpoint = buildRuntimeRecoveryCheckpointSnapshot(env);
-  const checkpointHash = computeRuntimeRecoveryCheckpointHash(checkpoint);
   const signers = options.signers.map(normalizeSigner);
-  return {
-    version: RECOVERY_BUNDLE_VERSION,
+  const base = {
+    version: RECOVERY_BUNDLE_VERSION as 1,
+    kind: options.kind ?? 'snapshot',
     runtimeId,
     runtimeHeight: Math.max(0, Math.floor(Number(env.height || 0))),
     runtimeTimestamp: Math.max(0, Math.floor(Number(env.timestamp || 0))),
     createdAt: Math.max(0, Math.floor(Number(options.createdAt ?? Date.now()))),
     signers,
-    checkpoint,
-    checkpointHash,
     ...(options.meta ? { meta: structuredClone(options.meta) } : {}),
   };
+
+  if (base.kind === 'journal_tail') {
+    return validateRuntimeRecoveryBundle({
+      ...base,
+      baseRuntimeHeight: Math.max(0, Math.floor(Number(options.baseCheckpoint?.height || 0))),
+      baseCheckpointHash: String(options.baseCheckpoint?.hash || '').trim().toLowerCase(),
+      frames: [...(options.frames || [])].map((frame) => structuredClone(frame)),
+    });
+  }
+
+  const checkpoint = buildRuntimeRecoveryCheckpointSnapshot(env);
+  return validateRuntimeRecoveryBundle({
+    ...base,
+    kind: 'snapshot',
+    checkpoint,
+    checkpointHash: computeRuntimeRecoveryCheckpointHash(checkpoint),
+  });
 };
 
 export const validateRuntimeRecoveryBundle = (bundle: RuntimeRecoveryBundleV1): RuntimeRecoveryBundleV1 => {
@@ -68,25 +87,59 @@ export const validateRuntimeRecoveryBundle = (bundle: RuntimeRecoveryBundleV1): 
   if (!Array.isArray(bundle.signers) || bundle.signers.length === 0) {
     throw new Error('RECOVERY_BUNDLE_SIGNERS_REQUIRED');
   }
-  const checkpoint = bundle.checkpoint;
-  if (!checkpoint || typeof checkpoint !== 'object') {
-    throw new Error('RECOVERY_BUNDLE_CHECKPOINT_REQUIRED');
+  const kind = bundle.kind ?? 'snapshot';
+  if (kind !== 'snapshot' && kind !== 'journal_tail') {
+    throw new Error(`RECOVERY_BUNDLE_KIND_UNSUPPORTED: ${String(kind)}`);
   }
-  const actualCheckpointHash = computeRuntimeRecoveryCheckpointHash(checkpoint);
-  if (actualCheckpointHash !== bundle.checkpointHash) {
-    throw new Error(
-      `RECOVERY_BUNDLE_CHECKPOINT_HASH_MISMATCH: expected=${bundle.checkpointHash} actual=${actualCheckpointHash}`,
-    );
-  }
-  const checkpointRuntimeId = normalizeRuntimeId((checkpoint as Record<string, unknown>)['runtimeId']);
-  if (checkpointRuntimeId && checkpointRuntimeId !== runtimeId) {
-    throw new Error(
-      `RECOVERY_BUNDLE_RUNTIME_ID_MISMATCH: bundle=${runtimeId} checkpoint=${checkpointRuntimeId}`,
-    );
+  const runtimeHeight = Math.max(0, Math.floor(Number(bundle.runtimeHeight || 0)));
+  if (kind === 'snapshot') {
+    const checkpoint = bundle.checkpoint;
+    if (!checkpoint || typeof checkpoint !== 'object') {
+      throw new Error('RECOVERY_BUNDLE_CHECKPOINT_REQUIRED');
+    }
+    const actualCheckpointHash = computeRuntimeRecoveryCheckpointHash(checkpoint);
+    if (actualCheckpointHash !== bundle.checkpointHash) {
+      throw new Error(
+        `RECOVERY_BUNDLE_CHECKPOINT_HASH_MISMATCH: expected=${bundle.checkpointHash} actual=${actualCheckpointHash}`,
+      );
+    }
+    const checkpointRuntimeId = normalizeRuntimeId((checkpoint as Record<string, unknown>)['runtimeId']);
+    if (checkpointRuntimeId && checkpointRuntimeId !== runtimeId) {
+      throw new Error(
+        `RECOVERY_BUNDLE_RUNTIME_ID_MISMATCH: bundle=${runtimeId} checkpoint=${checkpointRuntimeId}`,
+      );
+    }
+  } else {
+    const baseRuntimeHeight = Math.max(0, Math.floor(Number(bundle.baseRuntimeHeight || 0)));
+    const baseCheckpointHash = String(bundle.baseCheckpointHash || '').trim().toLowerCase();
+    if (baseRuntimeHeight <= 0 || !/^0x[0-9a-f]{64}$/.test(baseCheckpointHash)) {
+      throw new Error('RECOVERY_BUNDLE_JOURNAL_BASE_INVALID');
+    }
+    if (runtimeHeight <= baseRuntimeHeight) {
+      throw new Error(`RECOVERY_BUNDLE_JOURNAL_HEIGHT_INVALID: base=${baseRuntimeHeight} runtime=${runtimeHeight}`);
+    }
+    const frames = Array.isArray(bundle.frames) ? bundle.frames : [];
+    if (frames.length <= 0 || frames.length > MAX_RECOVERY_JOURNAL_FRAMES) {
+      throw new Error(`RECOVERY_BUNDLE_JOURNAL_FRAME_COUNT_INVALID:${frames.length}`);
+    }
+    let expectedHeight = baseRuntimeHeight + 1;
+    for (const frame of frames) {
+      if (!frame || typeof frame !== 'object') throw new Error('RECOVERY_BUNDLE_JOURNAL_FRAME_INVALID');
+      const frameHeight = Math.max(0, Math.floor(Number(frame.height || 0)));
+      if (frameHeight !== expectedHeight) {
+        throw new Error(`RECOVERY_BUNDLE_JOURNAL_FRAME_GAP: expected=${expectedHeight} actual=${frameHeight}`);
+      }
+      expectedHeight += 1;
+    }
+    if (frames.at(-1)?.height !== runtimeHeight) {
+      throw new Error(`RECOVERY_BUNDLE_JOURNAL_TIP_MISMATCH: tip=${frames.at(-1)?.height ?? 0} runtime=${runtimeHeight}`);
+    }
   }
   return {
     ...bundle,
+    kind,
     runtimeId,
+    runtimeHeight,
     signers: bundle.signers.map(normalizeSigner),
   };
 };

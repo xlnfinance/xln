@@ -88,6 +88,7 @@ export type JurisdictionEvent =
         counterentity: string;
         nonce: string;
         proofbodyHash: string;
+        watchSeed: string;
         starterInitialArguments: string;
         starterIncrementedArguments: string;
         batchNonce?: number;

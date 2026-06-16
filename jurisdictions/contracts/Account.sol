@@ -35,11 +35,12 @@ library Account {
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
   // ========== OTHER EVENTS ==========
-  event DisputeStartedV2(
+  event DisputeStarted(
     bytes32 indexed sender,
     bytes32 indexed counterentity,
     uint indexed nonce,
     bytes32 proofbodyHash,
+    bytes32 watchSeed,
     bytes starterInitialArguments,
     bytes starterIncrementedArguments
   );
@@ -94,7 +95,7 @@ library Account {
     bytes memory starterInitialArguments,
     bytes memory starterIncrementedArguments
   ) internal pure returns (bytes32) {
-    // V2 dispute binding:
+    // Current dispute binding:
     // - proofbodyHash binds the signed state at nonce N.
     // - starterInitialArguments binds the starter's calldata for N.
     // - starterIncrementedArguments binds the starter's calldata for one
@@ -157,10 +158,11 @@ library Account {
     bytes memory acct_key,
     uint nonce,
     bytes32 proofbodyHash,
+    bytes32 watchSeed,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, acct_key, nonce, proofbodyHash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, acct_key, nonce, proofbodyHash, watchSeed);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
@@ -458,7 +460,7 @@ library Account {
 
     require(params.sig.length > 0, "Signature required for dispute");
 
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), acct_key, params.nonce, params.proofbodyHash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), acct_key, params.nonce, params.proofbodyHash, params.watchSeed);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();
@@ -466,7 +468,7 @@ library Account {
     if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
 
     uint256 timeout = block.number + defaultDelay;
-    // Store only the V2 hash, not raw proof bodies. Both starter argument
+    // Store only the dispute hash, not raw proof bodies. Both starter argument
     // blobs are emitted for observers and repeated at finalize for hash check.
     _accounts[acct_key].disputeHash = _encodeDisputeHash(
       params.nonce, entityId < params.counterentity,
@@ -481,11 +483,12 @@ library Account {
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
     _accounts[acct_key].nonce = params.nonce;
 
-    emit DisputeStartedV2(
+    emit DisputeStarted(
       entityId,
       params.counterentity,
       params.nonce,
       params.proofbodyHash,
+      params.watchSeed,
       params.starterInitialArguments,
       params.starterIncrementedArguments
     );

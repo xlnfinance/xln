@@ -9,7 +9,7 @@ import type {
   RoutedEntityInput,
   RuntimeInput,
   TowerLastResortPayloadV1,
-  TowerCounterDisputeRemedyV2,
+  TowerCounterDisputeRemedy,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
@@ -180,10 +180,16 @@ let runtimeResumeTrigger: (() => void) | null = null;
 const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
 const runtimeRecoveryBarrierUnsubscribers = new Map<string, () => void>();
 const runtimeRecoveryUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const runtimeRecoveryUploadMeta = new Map<string, { lastUploadedHeight: number; lastBundleHash: string | null }>();
+const runtimeRecoveryUploadMeta = new Map<string, {
+  lastUploadedHeight: number;
+  lastBundleHash: string | null;
+  lastSnapshotHeight: number;
+  lastSnapshotHash: string | null;
+}>();
 const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerServerInfo }>();
 
 const RECOVERY_UPLOAD_DEBOUNCE_MS = 1_500;
+const RECOVERY_SNAPSHOT_INTERVAL_FRAMES = 10_000;
 const RECOVERY_TOWER_INFO_TTL_MS = 60_000;
 // Keep this aligned with Depository.defaultDisputeDelay. Towers are not meant to
 // intervene for most of the dispute window; they only become eligible in the final
@@ -213,6 +219,7 @@ type TowerRestorePayload = {
   ok: boolean;
   receipt?: TowerReceiptV1;
   bundle?: EncryptedRuntimeRecoveryBundleV1;
+  bundles?: EncryptedRuntimeRecoveryBundleV1[];
   error?: string;
 };
 
@@ -221,7 +228,6 @@ type TowerServerInfo = {
   service?: string;
   towerId?: string;
   signerAddress?: string;
-  actionPublicKey?: string;
   maxStoredBytesPerLookupKey?: number;
   maxBundlesPerLookupKey?: number;
 };
@@ -660,7 +666,7 @@ export async function tryRestoreRuntimeEnvFromTower(
   xln: XLNModule,
 ): Promise<{ env: Env; bundle: RuntimeRecoveryBundleV1 } | null> {
   if (
-    typeof xln.restoreEnvFromCheckpointSnapshot !== 'function' ||
+    typeof xln.restoreEnvFromRecoveryBundles !== 'function' ||
     typeof xln.decryptRuntimeRecoveryBundle !== 'function' ||
     typeof xln.deriveRuntimeRecoveryLookupKey !== 'function' ||
     typeof xln.persistRestoredEnvToDB !== 'function'
@@ -674,7 +680,9 @@ export async function tryRestoreRuntimeEnvFromTower(
   const lookupKey = xln.deriveRuntimeRecoveryLookupKey(runtimeId, runtime.seed);
   const towers = getConfiguredRecoveryTowers(runtime);
   const candidates: Array<{
-    bundle: RuntimeRecoveryBundleV1;
+    bundles: RuntimeRecoveryBundleV1[];
+    tipBundle: RuntimeRecoveryBundleV1;
+    metadataBundle: RuntimeRecoveryBundleV1;
     receipt?: TowerReceiptV1;
     towerUrl: string;
   }> = [];
@@ -694,14 +702,26 @@ export async function tryRestoreRuntimeEnvFromTower(
         continue;
       }
       const payload = await response.json() as TowerRestorePayload;
-      if (!payload.ok || !payload.bundle) {
+      const encryptedBundles = Array.isArray(payload.bundles) && payload.bundles.length > 0
+        ? payload.bundles
+        : payload.bundle
+          ? [payload.bundle]
+          : [];
+      if (!payload.ok || encryptedBundles.length === 0) {
         if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') continue;
         errors.push(`${tower.url}:${String(payload.error || 'unknown')}`);
         continue;
       }
-      const bundle = await xln.decryptRuntimeRecoveryBundle(payload.bundle, runtime.seed);
+      const bundles = [];
+      for (const encryptedBundle of encryptedBundles) {
+        bundles.push(await xln.decryptRuntimeRecoveryBundle(encryptedBundle, runtime.seed));
+      }
+      const tipBundle = [...bundles].sort((left, right) => right.runtimeHeight - left.runtimeHeight)[0]!;
+      const metadataBundle = bundles.find((bundle) => (bundle.kind ?? 'snapshot') === 'snapshot') ?? tipBundle;
       candidates.push({
-        bundle,
+        bundles,
+        tipBundle,
+        metadataBundle,
         ...(payload.receipt ? { receipt: payload.receipt } : {}),
         towerUrl: tower.url,
       });
@@ -718,33 +738,33 @@ export async function tryRestoreRuntimeEnvFromTower(
   }
 
   candidates.sort((left, right) => {
-    if (right.bundle.runtimeHeight !== left.bundle.runtimeHeight) {
-      return right.bundle.runtimeHeight - left.bundle.runtimeHeight;
+    if (right.tipBundle.runtimeHeight !== left.tipBundle.runtimeHeight) {
+      return right.tipBundle.runtimeHeight - left.tipBundle.runtimeHeight;
     }
-    if (right.bundle.createdAt !== left.bundle.createdAt) {
-      return right.bundle.createdAt - left.bundle.createdAt;
+    if (right.tipBundle.createdAt !== left.tipBundle.createdAt) {
+      return right.tipBundle.createdAt - left.tipBundle.createdAt;
     }
     return (right.receipt?.sequence || 0) - (left.receipt?.sequence || 0);
   });
 
   const best = candidates[0]!;
-  const bundle = best.bundle;
+  const bundle = best.tipBundle;
   if (candidates.length > 1) {
     const conflictingSameHeight = candidates.some((candidate) =>
       candidate !== best
-      && candidate.bundle.runtimeHeight === best.bundle.runtimeHeight
-      && candidate.bundle.checkpointHash !== best.bundle.checkpointHash,
+      && candidate.tipBundle.runtimeHeight === best.tipBundle.runtimeHeight
+      && candidate.metadataBundle.checkpointHash !== best.metadataBundle.checkpointHash,
     );
     if (conflictingSameHeight) {
       console.warn(`[VaultStore] Tower restore conflict detected for ${runtimeId.slice(0, 12)}; choosing highest valid bundle from ${best.towerUrl}`);
     }
   }
-  applyRecoveryBundleMetadata(runtime, bundle);
+  applyRecoveryBundleMetadata(runtime, best.metadataBundle);
   // Tower bundles restore signer metadata before restoring env. Register the
   // HD-derived local keys immediately; restored replicas may already exist, so
   // no later import path will necessarily touch registerSignerKey again.
   await registerRuntimeSignerKeys(runtime, xln);
-  const restoredEnv = await xln.restoreEnvFromCheckpointSnapshot(bundle.checkpoint, {
+  const restoredEnv = await xln.restoreEnvFromRecoveryBundles(best.bundles, {
     runtimeSeed: runtime.seed,
     runtimeId,
   });
@@ -777,12 +797,49 @@ async function uploadRuntimeRecoverySnapshot(
   const previous = runtimeRecoveryUploadMeta.get(normalizedRuntimeId);
   if (previous && Number(env.height || 0) < previous.lastUploadedHeight) return;
 
-  // Blind tower mode stores opaque ciphertext only. The browser still validates the
-  // restored checkpoint locally after decrypting it with the same BrainVault seed.
-  const bundle = xln.buildRuntimeRecoveryBundle(env, {
-    signers: buildRuntimeRecoverySigners(runtime),
-    meta: buildRuntimeRecoveryMeta(runtime),
-  });
+  const height = Math.max(0, Math.floor(Number(env.height || 0)));
+  const signers = buildRuntimeRecoverySigners(runtime);
+  const meta = buildRuntimeRecoveryMeta(runtime);
+  const shouldUploadSnapshot =
+    !previous ||
+    !previous.lastSnapshotHash ||
+    previous.lastSnapshotHeight <= 0 ||
+    height - previous.lastSnapshotHeight >= RECOVERY_SNAPSHOT_INTERVAL_FRAMES ||
+    typeof xln.readPersistedFrameJournals !== 'function';
+
+  let backupSlot = 0;
+  let bundle: RuntimeRecoveryBundleV1;
+  if (shouldUploadSnapshot) {
+    bundle = xln.buildRuntimeRecoveryBundle(env, { signers, meta, kind: 'snapshot' });
+  } else {
+    const baseSnapshotHeight = previous.lastSnapshotHeight;
+    const baseSnapshotHash = previous.lastSnapshotHash;
+    if (!baseSnapshotHash) throw new Error('RECOVERY_UPLOAD_SNAPSHOT_HASH_MISSING');
+    const fromHeight = baseSnapshotHeight + 1;
+    const frames = await xln.readPersistedFrameJournals(env, {
+      fromHeight,
+      toHeight: height,
+      limit: RECOVERY_SNAPSHOT_INTERVAL_FRAMES,
+    });
+    const expectedFrames = height - baseSnapshotHeight;
+    const contiguous = frames.length === expectedFrames
+      && frames.every((frame, index) => Math.max(0, Math.floor(Number(frame.height || 0))) === fromHeight + index);
+    if (contiguous) {
+      backupSlot = 1;
+      bundle = xln.buildRuntimeRecoveryBundle(env, {
+        signers,
+        meta,
+        kind: 'journal_tail',
+        baseCheckpoint: {
+          height: baseSnapshotHeight,
+          hash: baseSnapshotHash,
+        },
+        frames,
+      });
+    } else {
+      bundle = xln.buildRuntimeRecoveryBundle(env, { signers, meta, kind: 'snapshot' });
+    }
+  }
   const encrypted = await xln.encryptRuntimeRecoveryBundle(bundle, runtime.seed);
   if (previous && previous.lastBundleHash === encrypted.bundleHash && previous.lastUploadedHeight === encrypted.height) {
     return;
@@ -793,7 +850,7 @@ async function uploadRuntimeRecoverySnapshot(
     normalizedRuntimeId,
     'blind_backup',
     encrypted.lookupKey,
-    0,
+    backupSlot,
     encrypted.bundleHash,
     encrypted.height,
     signedAt,
@@ -805,7 +862,7 @@ async function uploadRuntimeRecoverySnapshot(
     version: 1,
     towerMode: 'blind_backup',
     lookupKey: encrypted.lookupKey,
-    slot: 0,
+    slot: backupSlot,
     bundle: encrypted,
     ownerProof: {
       runtimeId: normalizedRuntimeId,
@@ -864,7 +921,6 @@ async function uploadRuntimeRecoverySnapshot(
         tower,
         towerSignerAddress,
         encrypted,
-        typeof info.actionPublicKey === 'string' ? info.actionPublicKey : undefined,
       );
       for (const upload of lastResortAppointments) {
         const appointmentUrl = buildTowerRequestUrl(tower.url, '/api/tower/appointment');
@@ -906,6 +962,12 @@ async function uploadRuntimeRecoverySnapshot(
   runtimeRecoveryUploadMeta.set(normalizedRuntimeId, {
     lastUploadedHeight: encrypted.height,
     lastBundleHash: encrypted.bundleHash,
+    lastSnapshotHeight: (bundle.kind ?? 'snapshot') === 'snapshot'
+      ? encrypted.height
+      : previous?.lastSnapshotHeight ?? 0,
+    lastSnapshotHash: (bundle.kind ?? 'snapshot') === 'snapshot'
+      ? String(bundle.checkpointHash || '').toLowerCase()
+      : previous?.lastSnapshotHash ?? null,
   });
   persistRuntimeMetadataSnapshot();
 }
@@ -1216,13 +1278,13 @@ export async function buildDelayedLastResortAppointmentsForTower(
   tower: RecoveryTowerConfig,
   towerSignerAddress: string,
   encryptedBundle: EncryptedRuntimeRecoveryBundleV1,
-  towerActionPublicKey?: string,
 ): Promise<LastResortTowerAppointmentUpload[]> {
   if (
     typeof xln.deriveRuntimeRecoveryActionLookupKey !== 'function' ||
     typeof xln.computeWatchtowerCounterDisputeAuthorizationHash !== 'function' ||
     typeof xln.buildTowerAppointmentOwnerMessage !== 'function' ||
-    typeof xln.buildSingleSignerHanko !== 'function'
+    typeof xln.buildSingleSignerHanko !== 'function' ||
+    typeof xln.encryptTowerPayloadForWatchSeed !== 'function'
   ) {
     return [];
   }
@@ -1272,7 +1334,8 @@ export async function buildDelayedLastResortAppointmentsForTower(
       const proofBodyHash = String(account?.counterpartyDisputeProofBodyHash || '').trim().toLowerCase();
       const proofHanko = String(account?.counterpartyDisputeProofHanko || '').trim();
       const proofBody = proofBodyHash ? account?.disputeProofBodiesByHash?.[proofBodyHash] : null;
-      if (!counterpartyId || proofNonce <= 0 || !proofBodyHash || !proofHanko || !proofBody || typeof proofBody !== 'object') {
+      const watchSeed = String(account?.watchSeed || '').trim().toLowerCase();
+      if (!counterpartyId || proofNonce <= 0 || !proofBodyHash || !proofHanko || !proofBody || typeof proofBody !== 'object' || !/^0x[0-9a-f]{64}$/.test(watchSeed)) {
         continue;
       }
 
@@ -1306,7 +1369,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
       let rightArguments = '0x';
       if (Array.isArray(transformers) && transformers.length > 0) {
         if (typeof xln.buildDisputeArgumentsForSnapshot !== 'function') {
-          throw new Error('WATCHTOWER_V2_ARGUMENT_BUILDER_UNAVAILABLE');
+          throw new Error('WATCHTOWER_ARGUMENT_BUILDER_UNAVAILABLE');
         }
         const leftEntityId = normalizeEntityId(account.leftEntity);
         const rightEntityId = normalizeEntityId(account.rightEntity);
@@ -1316,11 +1379,11 @@ export async function buildDelayedLastResortAppointmentsForTower(
             ? 'right'
             : null;
         if (!watchedSide) {
-          throw new Error(`WATCHTOWER_V2_ACCOUNT_SIDE_UNKNOWN:${entityId}:${counterpartyId}`);
+          throw new Error(`WATCHTOWER_ACCOUNT_SIDE_UNKNOWN:${entityId}:${counterpartyId}`);
         }
         // The remedy is a counter-dispute payload for the watched entity. Store
         // only the watched side arguments here. The dispute starter's side is
-        // bound by DisputeStartedV2 and must be injected by tower action from the
+        // bound by DisputeStarted and must be injected by tower action from the
         // on-chain event, otherwise a stale/local guess can fail the hash check or
         // reveal the wrong transformer evidence.
         const builtArguments = xln.buildDisputeArgumentsForSnapshot(
@@ -1333,8 +1396,11 @@ export async function buildDelayedLastResortAppointmentsForTower(
         if (watchedSide === 'left') leftArguments = builtArguments.leftArguments;
         else rightArguments = builtArguments.rightArguments;
       }
-      const remedy: TowerCounterDisputeRemedyV2 = {
-        version: 2,
+      if (String(finalProofbody['watchSeed'] || '').trim().toLowerCase() !== watchSeed) {
+        throw new Error(`WATCHTOWER_PROOF_BODY_WATCH_SEED_MISMATCH:${entityId}:${counterpartyId}`);
+      }
+      const remedy: TowerCounterDisputeRemedy = {
+        version: 1,
         type: 'counter_dispute_remedy',
         rpcUrl,
         chainId,
@@ -1355,13 +1421,17 @@ export async function buildDelayedLastResortAppointmentsForTower(
         },
       };
       const serializedRemedy = stringifyTowerPayload(remedy);
-      if (!towerActionPublicKey || typeof xln.encryptTowerPayloadForPublicKey !== 'function') {
-        throw new Error('TOWER_ACTION_PUBLIC_KEY_REQUIRED');
-      }
-      const encryptedRemedy = await xln.encryptTowerPayloadForPublicKey(serializedRemedy, towerActionPublicKey);
+      const encryptedRemedy = await xln.encryptTowerPayloadForWatchSeed(serializedRemedy, watchSeed);
       const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
       const lastResortPayload: TowerLastResortPayloadV1 = {
         triggerHint,
+        watch: {
+          rpcUrl,
+          chainId,
+          depositoryAddress,
+          watchedEntityId: entityId,
+          counterentity: counterpartyId,
+        },
         encryptedRemedy,
         actionKind: 'counter_dispute_only',
         appointmentSequence,

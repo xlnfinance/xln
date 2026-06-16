@@ -78,7 +78,7 @@ export interface AccountInterface extends Interface {
       | "AccountSettled"
       | "DebtCreated"
       | "DebtForgiven"
-      | "DisputeStartedV2"
+      | "DisputeStarted"
       | "ReserveUpdated"
   ): EventFragment;
 
@@ -189,12 +189,13 @@ export namespace DebtForgivenEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace DisputeStartedV2Event {
+export namespace DisputeStartedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
     nonce: BigNumberish,
     proofbodyHash: BytesLike,
+    watchSeed: BytesLike,
     starterInitialArguments: BytesLike,
     starterIncrementedArguments: BytesLike
   ];
@@ -203,6 +204,7 @@ export namespace DisputeStartedV2Event {
     counterentity: string,
     nonce: bigint,
     proofbodyHash: string,
+    watchSeed: string,
     starterInitialArguments: string,
     starterIncrementedArguments: string
   ];
@@ -211,6 +213,7 @@ export namespace DisputeStartedV2Event {
     counterentity: string;
     nonce: bigint;
     proofbodyHash: string;
+    watchSeed: string;
     starterInitialArguments: string;
     starterIncrementedArguments: string;
   }
@@ -396,11 +399,11 @@ export interface Account extends BaseContract {
     DebtForgivenEvent.OutputObject
   >;
   getEvent(
-    key: "DisputeStartedV2"
+    key: "DisputeStarted"
   ): TypedContractEvent<
-    DisputeStartedV2Event.InputTuple,
-    DisputeStartedV2Event.OutputTuple,
-    DisputeStartedV2Event.OutputObject
+    DisputeStartedEvent.InputTuple,
+    DisputeStartedEvent.OutputTuple,
+    DisputeStartedEvent.OutputObject
   >;
   getEvent(
     key: "ReserveUpdated"
@@ -444,15 +447,15 @@ export interface Account extends BaseContract {
       DebtForgivenEvent.OutputObject
     >;
 
-    "DisputeStartedV2(bytes32,bytes32,uint256,bytes32,bytes,bytes)": TypedContractEvent<
-      DisputeStartedV2Event.InputTuple,
-      DisputeStartedV2Event.OutputTuple,
-      DisputeStartedV2Event.OutputObject
+    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes)": TypedContractEvent<
+      DisputeStartedEvent.InputTuple,
+      DisputeStartedEvent.OutputTuple,
+      DisputeStartedEvent.OutputObject
     >;
-    DisputeStartedV2: TypedContractEvent<
-      DisputeStartedV2Event.InputTuple,
-      DisputeStartedV2Event.OutputTuple,
-      DisputeStartedV2Event.OutputObject
+    DisputeStarted: TypedContractEvent<
+      DisputeStartedEvent.InputTuple,
+      DisputeStartedEvent.OutputTuple,
+      DisputeStartedEvent.OutputObject
     >;
 
     "ReserveUpdated(bytes32,uint256,uint256)": TypedContractEvent<

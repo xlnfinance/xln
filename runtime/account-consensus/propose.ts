@@ -453,6 +453,7 @@ export async function proposeAccountFrame(
     kind: 'frame_ack',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
+    watchSeed: accountMachine.watchSeed,
     height: reusableAck.height,
     prevHanko: reusableAck.prevHanko,
     newAccountFrame: outboundFrame,
@@ -465,6 +466,7 @@ export async function proposeAccountFrame(
     kind: 'frame',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
+    watchSeed: accountMachine.watchSeed,
     height: newFrame.height,
     newAccountFrame: outboundFrame,
     newHanko: frameHanko, // Hanko on frame stateHash

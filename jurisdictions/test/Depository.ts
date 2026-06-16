@@ -23,7 +23,8 @@ const MAX_FILL_RATIO = 65535n;
 
 const SETTLEMENT_DIFFS_ABI = "tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]";
 const PROOF_BODY_ABI =
-  "tuple(int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)";
+  "tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)";
+const TEST_WATCH_SEED = ethers.keccak256(ethers.toUtf8Bytes("xln:test-watch-seed"));
 
 type TestActor = {
   signer: HardhatEthersSigner;
@@ -86,10 +87,11 @@ async function disputeProofHash(
   accountKey: string,
   nonce: bigint,
   proofbodyHash: string,
+  watchSeed: string = TEST_WATCH_SEED,
 ): Promise<string> {
   return ethers.keccak256(abi.encode(
-    ["uint8", "address", "bytes", "uint256", "bytes32"],
-    [DISPUTE_PROOF, await depository.getAddress(), accountKey, nonce, proofbodyHash],
+    ["uint8", "address", "bytes", "uint256", "bytes32", "bytes32"],
+    [DISPUTE_PROOF, await depository.getAddress(), accountKey, nonce, proofbodyHash, watchSeed],
   ));
 }
 
@@ -140,6 +142,7 @@ function proofBodyHash(proofbody: Record<string, unknown>): string {
 
 function proofBody(offdeltas: bigint[], tokenIds: bigint[], transformers: unknown[] = []): Record<string, unknown> {
   return {
+    watchSeed: TEST_WATCH_SEED,
     offdeltas,
     tokenIds,
     transformers,
@@ -643,6 +646,7 @@ describe("Depository", function () {
         counterentity: right.entityId,
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
+        watchSeed: TEST_WATCH_SEED,
         sig: startSig,
         starterInitialArguments: "0x",
         starterIncrementedArguments: "0x",
@@ -855,17 +859,18 @@ describe("Depository", function () {
       counterentity: right.entityId,
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
+      watchSeed: TEST_WATCH_SEED,
       sig: startSig,
-      starterInitialArguments: starterInitialArguments,
-        starterIncrementedArguments: "0x",
+      starterInitialArguments,
+      starterIncrementedArguments: "0x",
     };
     const startBatch = emptyBatch({ disputeStarts: [disputeStart] });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
 
     await expect(
       depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce)
-    ).to.emit(depository, "DisputeStartedV2")
-      .withArgs(left.entityId, right.entityId, disputeNonce, initialProofbodyHash, starterInitialArguments, "0x");
+    ).to.emit(depository, "DisputeStarted")
+      .withArgs(left.entityId, right.entityId, disputeNonce, initialProofbodyHash, TEST_WATCH_SEED, starterInitialArguments, "0x");
 
     const startedAccount = await depository._accounts(acctKey);
     expect(startedAccount.nonce).to.equal(disputeNonce);
@@ -930,6 +935,7 @@ describe("Depository", function () {
           counterentity: right.entityId,
           nonce: initialNonce,
           proofbodyHash: initialProofbodyHash,
+          watchSeed: TEST_WATCH_SEED,
           sig: startSig,
           starterInitialArguments,
           starterIncrementedArguments,
@@ -1155,6 +1161,7 @@ describe("Depository", function () {
         counterentity: right.entityId,
         nonce: disputeNonce,
         proofbodyHash,
+        watchSeed: TEST_WATCH_SEED,
         sig: startSig,
         starterInitialArguments,
         starterIncrementedArguments: "0x",
@@ -1229,8 +1236,9 @@ describe("Depository", function () {
         counterentity: right.entityId,
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
+        watchSeed: TEST_WATCH_SEED,
         sig: startSig,
-        starterInitialArguments: starterInitialArguments,
+        starterInitialArguments,
         starterIncrementedArguments: "0x",
       }],
     });
@@ -1402,8 +1410,9 @@ describe("Depository", function () {
         counterentity: right.entityId,
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
+        watchSeed: TEST_WATCH_SEED,
         sig: startSig,
-        starterInitialArguments: starterInitialArguments,
+        starterInitialArguments,
         starterIncrementedArguments: "0x",
       }],
     });
@@ -1545,8 +1554,9 @@ describe("Depository", function () {
         counterentity: left.entityId,
         nonce: disputeNonce,
         proofbodyHash,
+        watchSeed: TEST_WATCH_SEED,
         sig: startSig,
-        starterInitialArguments: starterInitialArguments,
+        starterInitialArguments,
         starterIncrementedArguments: "0x",
       }],
     });
@@ -1615,8 +1625,9 @@ describe("Depository", function () {
         counterentity: right.entityId,
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
+        watchSeed: TEST_WATCH_SEED,
         sig: startSig,
-        starterInitialArguments: starterInitialArguments,
+        starterInitialArguments,
         starterIncrementedArguments: "0x",
       }],
     });
@@ -1759,8 +1770,9 @@ describe("Depository", function () {
         counterentity: right.entityId,
         nonce: disputeNonce,
         proofbodyHash: finalProofbodyHash,
+        watchSeed: TEST_WATCH_SEED,
         sig: startSig,
-        starterInitialArguments: starterInitialArguments,
+        starterInitialArguments,
         starterIncrementedArguments: "0x",
       }],
     });

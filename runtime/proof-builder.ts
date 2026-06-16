@@ -27,8 +27,9 @@ import type { ProofBodyStruct, TransformerClauseStruct } from '../jurisdictions/
 import type { DeltaTransformer } from '../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.ts';
 import { sortTransformerEntries } from './transformer-ordering.ts';
+import { normalizeAccountWatchSeed } from './account-watch-seed';
 
-type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader'>;
+type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
@@ -108,6 +109,8 @@ export function getDeltaTransformerAddress(): string {
  * @returns ProofBodyResult with runtime, struct, encoded, and hash forms
  */
 export function buildAccountProofBody(accountMachine: AccountMachine): ProofBodyResult {
+  const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'PROOF_BODY');
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Step 1: Extract and sort deltas (DETERMINISTIC ordering by tokenId)
   // ═══════════════════════════════════════════════════════════════════════════
@@ -229,6 +232,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   }
 
   const runtimeProofBody: RuntimeProofBody = {
+    watchSeed,
     offdeltas,
     tokenIds,
     transformers,
@@ -305,6 +309,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
   });
 
   return {
+    watchSeed: runtime.watchSeed,
     offdeltas: runtime.offdeltas,
     tokenIds: runtime.tokenIds.map(id => BigInt(id)),
     transformers,
@@ -328,6 +333,7 @@ export function buildInitialDisputeProof(
   counterentity: string;
   nonce: number;
   proofbodyHash: string;
+  watchSeed: string;
   sig: string;
   starterInitialArguments: string;
   starterIncrementedArguments: string;
@@ -338,6 +344,7 @@ export function buildInitialDisputeProof(
     counterentity: accountMachine.proofHeader.toEntity,
     nonce: accountMachine.proofHeader.nonce,
     proofbodyHash: proofBodyHash,
+    watchSeed: accountMachine.watchSeed,
     sig: counterpartySignature,
     starterInitialArguments,
     starterIncrementedArguments,
@@ -358,7 +365,7 @@ function getCanonicalAccountKey(accountMachine: DisputeHashAccount): string {
  * Encode dispute message for signing (matches Account.sol verifyDisputeProofHanko)
  *
  * MessageType.DisputeProof = 1
- * Format: abi.encode(MessageType.DisputeProof, depository, account_key, nonce, proofbodyHash)
+ * Format: abi.encode(MessageType.DisputeProof, depository, account_key, nonce, proofbodyHash, watchSeed)
  *
  * The depository address binds the proof to a specific chain+depository for replay protection.
  */
@@ -368,18 +375,20 @@ export function encodeDisputeMessage(
   depositoryAddress: string
 ): string {
   const chKey = getCanonicalAccountKey(accountMachine);
+  const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE');
 
   // MessageType.DisputeProof = 1
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
 
   return ABI_CODER.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
+    ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
       depositoryAddress,
       chKey,
       accountMachine.proofHeader.nonce,
       proofBodyHash,
+      watchSeed,
     ]
   );
 }
@@ -419,15 +428,17 @@ export function createDisputeProofHashWithNonce(
   nonce: number,
 ): string {
   const chKey = getCanonicalAccountKey(accountMachine);
+  const watchSeed = normalizeAccountWatchSeed(accountMachine.watchSeed, 'DISPUTE_MESSAGE');
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
   const encodedMessage = ABI_CODER.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
+    ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
       requireContractAddress('depository', depositoryAddress),
       chKey,
       nonce,
       proofBodyHash,
+      watchSeed,
     ]
   );
   return ethers.keccak256(encodedMessage);
