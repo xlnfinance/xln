@@ -1,3 +1,5 @@
+import type { PersistedFrameJournal } from '../wal/store';
+
 export type RuntimeRecoverySignerV1 = {
   index: number;
   derivationIndex?: number;
@@ -17,23 +19,30 @@ export type RuntimeRecoveryMetaV1 = {
 
 export type RuntimeRecoveryBundleV1 = {
   version: 1;
+  kind?: 'snapshot' | 'journal_tail';
   runtimeId: string;
   runtimeHeight: number;
   runtimeTimestamp: number;
   createdAt: number;
   signers: RuntimeRecoverySignerV1[];
-  checkpoint: Record<string, unknown>;
-  checkpointHash: string;
+  checkpoint?: Record<string, unknown>;
+  checkpointHash?: string;
+  baseRuntimeHeight?: number;
+  baseCheckpointHash?: string;
+  frames?: PersistedFrameJournal[];
   meta?: RuntimeRecoveryMetaV1;
 };
 
 export type EncryptedRuntimeRecoveryBundleV1 = {
   version: 1;
+  kind?: 'snapshot' | 'journal_tail';
   runtimeId: string;
   lookupKey: string;
   height: number;
   createdAt: number;
   bundleHash: string;
+  baseRuntimeHeight?: number;
+  baseCheckpointHash?: string;
   iv: string;
   ciphertext: string;
   compression?: 'gzip';
@@ -52,7 +61,7 @@ export const normalizeTowerModeV1 = (mode: unknown): TowerModeV1 => {
 
 export type TowerActionKindV1 = 'counter_dispute_only';
 
-export type TowerFinalDisputeProofV2 = {
+export type TowerFinalDisputeProof = {
   counterentity: string;
   finalNonce: number;
   finalProofbody: Record<string, unknown>;
@@ -62,8 +71,8 @@ export type TowerFinalDisputeProofV2 = {
   sig: string;
 };
 
-export type TowerCounterDisputeRemedyV2 = {
-  version: 2;
+export type TowerCounterDisputeRemedy = {
+  version: 1;
   type: 'counter_dispute_remedy';
   rpcUrl: string;
   chainId: number;
@@ -73,21 +82,28 @@ export type TowerCounterDisputeRemedyV2 = {
   lastResortWindowBlocks: number;
   appointmentSequence: number;
   ownerAuthorizationHanko: string;
-  latestProof: TowerFinalDisputeProofV2;
+  latestProof: TowerFinalDisputeProof;
 };
 
 export type TowerEncryptedPayloadV1 = {
   version: 1;
   type: 'tower_encrypted_payload';
-  alg: 'secp256k1-aes-256-gcm';
-  epk: string;
+  alg: 'watch-seed-aes-256-gcm';
   iv: string;
   ciphertext: string;
-  plaintextHash: string;
+};
+
+export type TowerLastResortWatchV1 = {
+  rpcUrl: string;
+  chainId: number;
+  depositoryAddress: string;
+  watchedEntityId: string;
+  counterentity: string;
 };
 
 export type TowerLastResortPayloadV1 = {
   triggerHint: string;
+  watch: TowerLastResortWatchV1;
   encryptedRemedy: string;
   actionKind: TowerActionKindV1;
   appointmentSequence: number;
@@ -147,6 +163,7 @@ export type TowerRestoreResponseV1 = {
   ok: true;
   receipt: TowerReceiptV1;
   bundle: EncryptedRuntimeRecoveryBundleV1;
+  bundles?: EncryptedRuntimeRecoveryBundleV1[];
 };
 
 export type TowerDiscoverResponseV1 = {

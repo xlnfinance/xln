@@ -12,7 +12,7 @@ import type {
   TowerReceiptV1,
 } from '../recovery/types';
 import { normalizeTowerModeV1 } from '../recovery/types';
-import { computeTowerLastResortPayloadDigest, getTowerPayloadEncryptionPublicKey } from '../recovery/crypto';
+import { computeTowerLastResortPayloadDigest } from '../recovery/crypto';
 
 type StoredLookupDoc = {
   lookupKey: string;
@@ -111,7 +111,7 @@ export const createWatchtowerStore = (options?: {
 }) => {
   const towerId = String(options?.towerId || 'xln-watchtower').trim() || 'xln-watchtower';
   const dbPath = options?.dbPath || defaultDbPath();
-  const maxBundlesPerLookupKey = Math.max(1, Math.min(8, Math.floor(Number(options?.maxBundlesPerLookupKey ?? DEFAULT_MAX_BUNDLES))));
+  const maxBundlesPerLookupKey = Math.max(2, Math.min(8, Math.floor(Number(options?.maxBundlesPerLookupKey ?? DEFAULT_MAX_BUNDLES))));
   const maxStoredBytesPerLookupKey = Math.max(1024, Math.floor(Number(options?.maxStoredBytesPerLookupKey ?? DEFAULT_MAX_STORED_BYTES)));
   const receiptTtlMs = Math.max(60_000, Math.floor(Number(options?.receiptTtlMs ?? DEFAULT_RECEIPT_TTL_MS)));
   const now = options?.now || (() => Date.now());
@@ -121,7 +121,6 @@ export const createWatchtowerStore = (options?: {
     || ethers.keccak256(ethers.toUtf8Bytes(`xln:watchtower:${towerId}`)),
   );
   const signer = new Wallet(towerPrivateKey);
-  const actionPublicKey = getTowerPayloadEncryptionPublicKey(towerPrivateKey);
 
   const db = new Level<string, string>(dbPath, { valueEncoding: 'utf8' });
   let opened = false;
@@ -196,7 +195,7 @@ export const createWatchtowerStore = (options?: {
     const sequence = Math.max(0, ...existing.receipts.map((receipt) => receipt.sequence || 0)) + 1;
     const lastResortPayloadDigest = computeTowerLastResortPayloadDigest(appointment.lastResortPayload);
 
-    const nextBundles = [
+    const sortedBundles = [
       {
         slot,
         towerMode,
@@ -212,8 +211,19 @@ export const createWatchtowerStore = (options?: {
         if (right.bundle.height !== left.bundle.height) return right.bundle.height - left.bundle.height;
         if (right.bundle.createdAt !== left.bundle.createdAt) return right.bundle.createdAt - left.bundle.createdAt;
         return right.slot - left.slot;
-      })
-      .slice(0, maxBundlesPerLookupKey);
+      });
+    const pinned: typeof sortedBundles = [];
+    const pin = (entry: (typeof sortedBundles)[number] | undefined): void => {
+      if (entry && !pinned.some((candidate) => candidate === entry)) pinned.push(entry);
+    };
+    if (towerMode === 'blind_backup') {
+      pin(sortedBundles.find((entry) => entry.towerMode === 'blind_backup' && entry.bundle.kind !== 'journal_tail'));
+      pin(sortedBundles.find((entry) => entry.towerMode === 'blind_backup' && entry.bundle.kind === 'journal_tail'));
+    }
+    const nextBundles = [
+      ...pinned,
+      ...sortedBundles.filter((entry) => !pinned.includes(entry)),
+    ].slice(0, maxBundlesPerLookupKey);
 
     const nextDoc: StoredLookupDoc = {
       lookupKey,
@@ -256,12 +266,45 @@ export const createWatchtowerStore = (options?: {
     return receipt;
   };
 
-  const getLatest = async (lookupKey: string): Promise<{ receipt: TowerReceiptV1; bundle: EncryptedRuntimeRecoveryBundleV1 } | null> => {
+  const getLatest = async (lookupKey: string): Promise<{ receipt: TowerReceiptV1; bundle: EncryptedRuntimeRecoveryBundleV1; bundles: EncryptedRuntimeRecoveryBundleV1[] } | null> => {
     const existing = await readLookup(lookupKey);
     if (!existing || existing.receipts.length === 0 || existing.bundles.length === 0) return null;
+    const sorted = [...existing.bundles].sort((left, right) => {
+      if (right.bundle.height !== left.bundle.height) return right.bundle.height - left.bundle.height;
+      if (right.bundle.createdAt !== left.bundle.createdAt) return right.bundle.createdAt - left.bundle.createdAt;
+      return right.slot - left.slot;
+    });
+    const snapshots = sorted.filter((entry) => entry.towerMode === 'blind_backup' && entry.bundle.kind !== 'journal_tail');
+    const journalTails = sorted.filter((entry) => entry.towerMode === 'blind_backup' && entry.bundle.kind === 'journal_tail');
+    const candidates = snapshots.map((snapshot) => {
+      const tail = journalTails.find((entry) =>
+        entry.bundle.baseRuntimeHeight === snapshot.bundle.height
+        && entry.bundle.height >= snapshot.bundle.height,
+      );
+      return {
+        snapshot,
+        tail,
+        height: tail?.bundle.height ?? snapshot.bundle.height,
+      };
+    }).sort((left, right) => {
+      if (right.height !== left.height) return right.height - left.height;
+      return right.snapshot.bundle.height - left.snapshot.bundle.height;
+    });
+    const best = candidates[0];
+    if (best) {
+      const bundles = best.tail
+        ? [best.snapshot.bundle, best.tail.bundle]
+        : [best.snapshot.bundle];
+      return {
+        receipt: existing.receipts[0]!,
+        bundle: bundles[bundles.length - 1]!,
+        bundles,
+      };
+    }
     return {
       receipt: existing.receipts[0]!,
       bundle: existing.bundles[0]!.bundle,
+      bundles: [existing.bundles[0]!.bundle],
     };
   };
 
@@ -414,7 +457,6 @@ export const createWatchtowerStore = (options?: {
     maxBundlesPerLookupKey,
     maxStoredBytesPerLookupKey,
     signerAddress: signer.address.toLowerCase(),
-    actionPublicKey,
     upsertAppointment,
     getLatest,
     getLatestReceipt,

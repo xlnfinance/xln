@@ -288,6 +288,8 @@ import {
 } from './utils';
 import { createStructuredLogger, logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
+import { validateRuntimeRecoveryBundle as validateRecoveryBundle } from './recovery/bundle';
+import type { RuntimeRecoveryBundleV1 } from './recovery/types';
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
 import {
   clearInfraGossipProfiles,
@@ -2020,6 +2022,77 @@ export const restoreEnvFromCheckpointSnapshot = async (
   return env;
 };
 
+const replayRecoveryFrameJournals = async (
+  env: Env,
+  frames: PersistedFrameJournal[],
+): Promise<void> => {
+  const previousReplayMode = envRecord(env)[ENV_REPLAY_MODE_KEY];
+  envRecord(env)[ENV_REPLAY_MODE_KEY] = true;
+  try {
+    let expectedHeight = Math.max(0, Math.floor(Number(env.height || 0))) + 1;
+    for (const frame of frames) {
+      const frameHeight = Math.max(0, Math.floor(Number(frame.height || 0)));
+      if (frameHeight !== expectedHeight) {
+        throw new Error(`RECOVERY_JOURNAL_REPLAY_GAP: expected=${expectedHeight} actual=${frameHeight}`);
+      }
+      env.timestamp = Math.max(0, Math.floor(Number(frame.timestamp || 0)));
+      envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
+      try {
+        await applyRuntimeInput(env, frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
+      } finally {
+        envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
+      }
+      if (env.height !== frameHeight) {
+        throw new Error(`RECOVERY_JOURNAL_REPLAY_HEIGHT_MISMATCH: expected=${frameHeight} actual=${env.height}`);
+      }
+      expectedHeight += 1;
+    }
+  } finally {
+    if (previousReplayMode === undefined) delete envRecord(env)[ENV_REPLAY_MODE_KEY];
+    else envRecord(env)[ENV_REPLAY_MODE_KEY] = previousReplayMode;
+    envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
+  }
+};
+
+export const restoreEnvFromRecoveryBundles = async (
+  bundles: RuntimeRecoveryBundleV1[],
+  options?: {
+    runtimeSeed?: string | null;
+    runtimeId?: string | null;
+  },
+): Promise<Env> => {
+  const validated = (bundles || []).map(validateRecoveryBundle);
+  const snapshots = validated.filter((bundle) => (bundle.kind ?? 'snapshot') === 'snapshot');
+  if (snapshots.length === 0) {
+    throw new Error('RECOVERY_BUNDLE_SNAPSHOT_REQUIRED');
+  }
+  const candidates = snapshots.map((snapshot) => {
+    const snapshotHash = String(snapshot.checkpointHash || '').toLowerCase();
+    const tail = validated
+      .filter((bundle) =>
+        bundle.kind === 'journal_tail'
+        && bundle.baseRuntimeHeight === snapshot.runtimeHeight
+        && String(bundle.baseCheckpointHash || '').toLowerCase() === snapshotHash
+        && bundle.runtimeHeight > snapshot.runtimeHeight,
+      )
+      .sort((left, right) => right.runtimeHeight - left.runtimeHeight)[0];
+    return {
+      snapshot,
+      tail,
+      height: tail?.runtimeHeight ?? snapshot.runtimeHeight,
+    };
+  }).sort((left, right) => {
+    if (right.height !== left.height) return right.height - left.height;
+    return right.snapshot.runtimeHeight - left.snapshot.runtimeHeight;
+  });
+  const best = candidates[0]!;
+  const env = await restoreEnvFromCheckpointSnapshot(best.snapshot.checkpoint!, options);
+  if (best.tail) {
+    await replayRecoveryFrameJournals(env, best.tail.frames || []);
+  }
+  return env;
+};
+
 const collectAllStorageDocsFromEnv = (env: Env): StorageDoc[] => {
   const docs: StorageDoc[] = [];
   const seenEntities = new Set<string>();
@@ -3383,7 +3456,7 @@ export const readPersistedFrameJournals = async (
   const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
   const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
   const toHeight = Math.min(latestHeight, boundedToHeight);
-  const limit = Math.max(1, Math.min(1000, Math.floor(opts?.limit ?? 200)));
+  const limit = Math.max(1, Math.min(10_000, Math.floor(opts?.limit ?? 200)));
   const pageToHeight = Math.min(toHeight, fromHeight + limit - 1);
   const receipts: PersistedFrameJournal[] = [];
   for (let height = fromHeight; height <= pageToHeight; height += 1) {
@@ -3536,11 +3609,11 @@ export {
   buildTowerAppointmentOwnerMessage,
   computeWatchtowerCounterDisputeAuthorizationHash,
   decryptRuntimeRecoveryBundle,
+  decryptTowerPayloadWithWatchSeed,
   deriveRuntimeRecoveryActionLookupKey,
   deriveRuntimeRecoveryLookupKey,
-  encryptTowerPayloadForPublicKey,
+  encryptTowerPayloadForWatchSeed,
   encryptRuntimeRecoveryBundle,
-  getTowerPayloadEncryptionPublicKey,
 } from './recovery/crypto';
 export { buildSingleSignerHanko } from './hanko/batch';
 export {

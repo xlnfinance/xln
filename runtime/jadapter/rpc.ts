@@ -1412,8 +1412,8 @@ export async function createRpcAdapter(
               const accountKey = computeAccountKey(normalizedId, start.counterentity);
               const disputeHash = ethers.keccak256(
                 ethers.AbiCoder.defaultAbiCoder().encode(
-                  ['uint8', 'address', 'bytes', 'uint256', 'bytes32'],
-                  [1, depositoryAddr, accountKey, BigInt(start.nonce), start.proofbodyHash],
+                  ['uint8', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+                  [1, depositoryAddr, accountKey, BigInt(start.nonce), start.proofbodyHash, start.watchSeed],
                 ),
               );
               const hankoDebug = await inspectHankoForHash(start.sig, disputeHash);
@@ -1657,7 +1657,7 @@ export async function createRpcAdapter(
         'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
         'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
         'event AccountSettled(tuple(bytes32 left, bytes32 right, tuple(uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[] tokens, uint256 nonce)[] settled)',
-        'event DisputeStartedV2(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes starterInitialArguments, bytes starterIncrementedArguments)',
+        'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
         'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
         'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
         'event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex)',

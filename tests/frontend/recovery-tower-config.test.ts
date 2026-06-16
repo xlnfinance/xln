@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { HDNodeWallet, Mnemonic, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
+import { AbiCoder, HDNodeWallet, Mnemonic, ParamType, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 
 import {
   buildDelayedLastResortAppointmentsForTower,
@@ -7,7 +7,7 @@ import {
   resolveDefaultRecoveryTowerUrls,
 } from '../../frontend/src/lib/stores/vaultStore';
 import * as xln from '../../runtime/runtime';
-import { decryptTowerPayloadWithPrivateKey, getTowerPayloadEncryptionPublicKey } from '../../runtime/recovery/crypto';
+import { decryptTowerPayloadWithWatchSeed } from '../../runtime/recovery/crypto';
 import { deserializeTaggedJson } from '../../runtime/serialization-utils';
 import type { EncryptedRuntimeRecoveryBundleV1, Env, XLNModule } from '../../runtime/xln-api';
 
@@ -61,6 +61,13 @@ test('runtime recovery modes keep tower setup out of seed creation defaults', ()
 });
 
 const testMnemonic = 'test test test test test test test test test test test junk';
+const testWatchSeed = `0x${'42'.repeat(32)}`;
+const abiCoder = AbiCoder.defaultAbiCoder();
+const proofBodyParam = ParamType.from(
+  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
+);
+const proofBodyHashOf = (proofBody: Record<string, unknown>): string =>
+  keccak256(abiCoder.encode([proofBodyParam], [proofBody]));
 
 const deriveTestAddress = (index = 0): string =>
   HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(testMnemonic), getIndexedAccountPath(index)).address.toLowerCase();
@@ -84,7 +91,13 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
     },
   } as Env['jReplicas'] extends Map<string, infer T> ? T : never);
 
-  const proofBodyHash = keccak256(toUtf8Bytes('tower-active-proof-body'));
+  const proofBody = {
+    watchSeed: testWatchSeed,
+    offdeltas: ['0'],
+    tokenIds: [1],
+    transformers: [],
+  };
+  const proofBodyHash = proofBodyHashOf(proofBody);
   env.eReplicas.set(`${entityId}:${runtimeId}`, {
     entityId,
     signerId: runtimeId,
@@ -104,15 +117,12 @@ const makeTestRecoveryEnv = (runtimeId: string, entityId: string, counterpartyId
         },
       },
       accounts: new Map([[counterpartyId, {
+        watchSeed: testWatchSeed,
         counterpartyDisputeProofNonce: 7,
         counterpartyDisputeProofBodyHash: proofBodyHash,
         counterpartyDisputeProofHanko: '0xcafe',
         disputeProofBodiesByHash: {
-          [proofBodyHash]: {
-            offdeltas: ['0'],
-            tokenIds: [1],
-            transformers: [],
-          },
+          [proofBodyHash]: proofBody,
         },
       }]]),
     },
@@ -156,16 +166,6 @@ test('delayed last-resort appointments require encrypted tower action payloads',
     },
   };
 
-  await expect(buildDelayedLastResortAppointmentsForTower(
-    runtime,
-    env,
-    xln as unknown as XLNModule,
-    { url: 'http://127.0.0.1:9100', towerMode: 'delayed_last_resort' },
-    towerWallet.address.toLowerCase(),
-    encryptedBundle,
-    undefined,
-  )).rejects.toThrow('TOWER_ACTION_PUBLIC_KEY_REQUIRED');
-
   const uploads = await buildDelayedLastResortAppointmentsForTower(
     runtime,
     env,
@@ -173,16 +173,16 @@ test('delayed last-resort appointments require encrypted tower action payloads',
     { url: 'http://127.0.0.1:9100', towerMode: 'delayed_last_resort' },
     towerWallet.address.toLowerCase(),
     encryptedBundle,
-    getTowerPayloadEncryptionPublicKey(towerWallet.privateKey),
   );
 
   expect(uploads.length).toBe(1);
   const encryptedRemedy = uploads[0]!.appointment.lastResortPayload?.encryptedRemedy || '';
   const encryptedPayload = deserializeTaggedJson<Record<string, unknown>>(encryptedRemedy);
   expect(encryptedPayload.type).toBe('tower_encrypted_payload');
+  expect(encryptedPayload.alg).toBe('watch-seed-aes-256-gcm');
   expect(encryptedRemedy).not.toContain('counter_dispute_remedy');
 
-  const plaintext = await decryptTowerPayloadWithPrivateKey(encryptedRemedy, towerWallet.privateKey);
+  const plaintext = await decryptTowerPayloadWithWatchSeed(encryptedRemedy, testWatchSeed);
   const remedy = JSON.parse(plaintext) as { type?: string; towerAddress?: string; watchedEntityId?: string };
   expect(remedy.type).toBe('counter_dispute_remedy');
   expect(remedy.towerAddress).toBe(towerWallet.address.toLowerCase());

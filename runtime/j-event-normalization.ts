@@ -122,13 +122,14 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     };
   }
 
-  if (type === 'DisputeStarted' || type === 'DisputeStartedV2') {
+  if (type === 'DisputeStarted') {
     const sender = normalizeEntity(data['sender']);
     const counterentity = normalizeEntity(data['counterentity']);
     const nonce = normalizeBigNumberish(data['nonce']);
     if (!sender || !counterentity || nonce === null || typeof data['proofbodyHash'] !== 'string') {
       return null;
     }
+    const watchSeed = typeof data['watchSeed'] === 'string' ? data['watchSeed'] : '0x';
     const starterInitialArguments = typeof data['starterInitialArguments'] === 'string'
       ? data['starterInitialArguments']
       : '0x';
@@ -144,6 +145,7 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
         counterentity,
         nonce,
         proofbodyHash: data['proofbodyHash'],
+        watchSeed,
         starterInitialArguments,
         starterIncrementedArguments,
         ...(batchNonce !== null ? { batchNonce } : {}),

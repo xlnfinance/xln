@@ -63,10 +63,10 @@ export type {
   TowerActionKindV1,
   TowerAppointmentOwnerProofV1,
   TowerAppointmentV1,
-  TowerCounterDisputeRemedyV2,
+  TowerCounterDisputeRemedy,
   TowerDiscoverResponseV1,
   TowerEncryptedPayloadV1,
-  TowerFinalDisputeProofV2,
+  TowerFinalDisputeProof,
   TowerModeV1,
   TowerReceiptV1,
   TowerRestoreRequestV1,
@@ -223,6 +223,8 @@ export type CrossJurisdictionSwapSubmitParams = {
   expiresInMs?: number;
   priceTicks?: bigint;
   priceImprovementMode?: CrossJurisdictionSwapRoute['priceImprovementMode'];
+  riskMode?: CrossJurisdictionSwapRoute['riskMode'];
+  settlementPolicy?: CrossJurisdictionSwapRoute['settlementPolicy'];
   memo?: string;
 };
 
@@ -428,6 +430,10 @@ export interface XLNModule {
     snapshot: Record<string, unknown>,
     options?: { runtimeSeed?: string | null; runtimeId?: string | null },
   ) => Promise<Env>;
+  restoreEnvFromRecoveryBundles: (
+    bundles: RuntimeRecoveryBundleV1[],
+    options?: { runtimeSeed?: string | null; runtimeId?: string | null },
+  ) => Promise<Env>;
   loadEnvFromDB: (
     runtimeId?: string | null,
     runtimeSeed?: string | null,
@@ -468,7 +474,14 @@ export interface XLNModule {
   readPersistedCheckpointSnapshot: (env: Env, height: number) => Promise<Record<string, unknown> | null>;
   buildRuntimeRecoveryBundle: (
     env: Env,
-    options: { signers: RuntimeRecoverySignerV1[]; meta?: RuntimeRecoveryMetaV1; createdAt?: number },
+    options: {
+      signers: RuntimeRecoverySignerV1[];
+      meta?: RuntimeRecoveryMetaV1;
+      createdAt?: number;
+      kind?: 'snapshot' | 'journal_tail';
+      baseCheckpoint?: { height: number; hash: string };
+      frames?: PersistedFrameJournal[];
+    },
   ) => RuntimeRecoveryBundleV1;
   encryptRuntimeRecoveryBundle: (
     bundle: RuntimeRecoveryBundleV1,
@@ -506,11 +519,14 @@ export interface XLNModule {
     lastResortWindowBlocks: number,
     appointmentSequence: number,
   ) => string;
-  encryptTowerPayloadForPublicKey: (
+  encryptTowerPayloadForWatchSeed: (
     plaintext: string,
-    towerPublicKey: string,
+    watchSeed: string,
   ) => Promise<string>;
-  getTowerPayloadEncryptionPublicKey: (towerPrivateKey: string) => string;
+  decryptTowerPayloadWithWatchSeed: (
+    payloadJson: string,
+    watchSeed: string,
+  ) => Promise<string>;
   buildSingleSignerHanko: (
     entityId: string,
     hash: string,

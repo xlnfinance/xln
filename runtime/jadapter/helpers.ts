@@ -21,7 +21,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 export const CANONICAL_J_EVENTS = [
   'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
-  'DisputeStarted', 'DisputeStartedV2', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
+  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 const CANONICAL_J_EVENT_SET = new Set<string>(CANONICAL_J_EVENTS);
@@ -227,7 +227,6 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
     }
 
     case 'DisputeStarted':
-    case 'DisputeStartedV2':
       return normalize(args['sender']) === normalizedEntity || normalize(args['counterentity']) === normalizedEntity;
 
     case 'DisputeFinalized':
@@ -323,7 +322,6 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
       }];
 
     case 'DisputeStarted':
-    case 'DisputeStartedV2':
       return [{
         type: 'DisputeStarted',
         data: {
@@ -331,6 +329,7 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
           counterentity: String(args['counterentity'] ?? ''),
           nonce: String(args['nonce'] ?? ''),
           proofbodyHash: String(args['proofbodyHash'] ?? ''),
+          watchSeed: String(args['watchSeed'] ?? '0x'),
           starterInitialArguments: String(args['starterInitialArguments'] ?? '0x'),
           starterIncrementedArguments: String(args['starterIncrementedArguments'] ?? '0x'),
           ...(args['batchNonce'] !== undefined ? { batchNonce: Number(args['batchNonce']) } : {}),
@@ -453,7 +452,7 @@ function enqueueRawJEventsToRuntime(
   }
 
   const enrichedRawEvents = rawEvents.map((event) => {
-    if (event.name !== 'DisputeStarted' && event.name !== 'DisputeStartedV2' && event.name !== 'DisputeFinalized') {
+    if (event.name !== 'DisputeStarted' && event.name !== 'DisputeFinalized') {
       return event;
     }
     const txHash = String(event.transactionHash || '').toLowerCase();

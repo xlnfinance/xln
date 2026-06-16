@@ -95,6 +95,7 @@ const canonicalizeProofBodyStruct = (
 ): ProofBodyStruct => {
   const proofBody = requireProofBodyStruct(value, entityId, counterpartyEntityId, source);
   return {
+    watchSeed: requireBytesLike(proofBody.watchSeed, `${source}.watchSeed`),
     offdeltas: proofBody.offdeltas.map((entry, index) => toBigIntStrict(entry, `${source}.offdeltas[${index}]`)),
     tokenIds: proofBody.tokenIds.map((entry, index) => toBigIntStrict(entry, `${source}.tokenIds[${index}]`)),
     transformers: proofBody.transformers.map((transformer, transformerIndex) => ({
@@ -786,6 +787,7 @@ export async function handleDisputeStart(
     counterentity: counterpartyEntityId,
     nonce: signedNonce,
     proofbodyHash: proofBodyHashToUse,
+    watchSeed: account.watchSeed,
     sig: counterpartyDisputeHanko,
     starterInitialArguments,
     starterIncrementedArguments,
@@ -1041,7 +1043,7 @@ export async function handleDisputeFinalize(
   // Finalization arguments are built for the exact proof body being revealed,
   // not from whichever live account maps exist now. In counter-dispute mode the
   // starter side is immutable and must equal the starterIncrementedArguments
-  // committed by DisputeStartedV2; the finalizer only supplies its own side.
+  // committed by DisputeStarted; the finalizer only supplies its own side.
   // Counterexample: if the starter opened with proof N and had already sent N+1
   // with 75% fill progress, using starterInitialArguments for the counter proof
   // would reveal only the N-side evidence and underclaim the committed N+1 state.

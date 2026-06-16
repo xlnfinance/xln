@@ -55,6 +55,7 @@ export type EntityTx =
       type: 'openAccount';
       data: {
         targetEntityId: string;
+        watchSeed?: string;    // Generated at runtime ingress; fixed for this bilateral account
         creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
         tokenId?: number;       // Token for credit (default: 1 = USDC)
         rebalancePolicy?: {

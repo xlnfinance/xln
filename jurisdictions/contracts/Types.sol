@@ -69,6 +69,7 @@ struct TransformerClause {
 }
 
 struct ProofBody {
+  bytes32 watchSeed;
   int[] offdeltas;
   uint[] tokenIds;
   TransformerClause[] transformers;
@@ -80,6 +81,7 @@ struct InitialDisputeProof {
   bytes32 counterentity;
   uint nonce;              // Unified nonce at time of signing
   bytes32 proofbodyHash;
+  bytes32 watchSeed;       // Shared bilateral account seed revealed when dispute starts
   bytes sig;
   // Starter-side transformer args for the proof body at `nonce`.
   // Used when the dispute finalizes on the initial proof after timeout.

@@ -118,16 +118,19 @@ export type TransformerClauseStructOutput = [
 };
 
 export type ProofBodyStruct = {
+  watchSeed: BytesLike;
   offdeltas: BigNumberish[];
   tokenIds: BigNumberish[];
   transformers: TransformerClauseStruct[];
 };
 
 export type ProofBodyStructOutput = [
+  watchSeed: string,
   offdeltas: bigint[],
   tokenIds: bigint[],
   transformers: TransformerClauseStructOutput[]
 ] & {
+  watchSeed: string;
   offdeltas: bigint[];
   tokenIds: bigint[];
   transformers: TransformerClauseStructOutput[];
@@ -220,7 +223,7 @@ export interface DepositoryInterface extends Interface {
       | "DebtEnforced"
       | "DebtForgiven"
       | "DisputeFinalized"
-      | "DisputeStartedV2"
+      | "DisputeStarted"
       | "HankoBatchProcessed"
       | "ReserveUpdated"
       | "SecretRevealed"
@@ -596,12 +599,13 @@ export namespace DisputeFinalizedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace DisputeStartedV2Event {
+export namespace DisputeStartedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
     nonce: BigNumberish,
     proofbodyHash: BytesLike,
+    watchSeed: BytesLike,
     starterInitialArguments: BytesLike,
     starterIncrementedArguments: BytesLike
   ];
@@ -610,6 +614,7 @@ export namespace DisputeStartedV2Event {
     counterentity: string,
     nonce: bigint,
     proofbodyHash: string,
+    watchSeed: string,
     starterInitialArguments: string,
     starterIncrementedArguments: string
   ];
@@ -618,6 +623,7 @@ export namespace DisputeStartedV2Event {
     counterentity: string;
     nonce: bigint;
     proofbodyHash: string;
+    watchSeed: string;
     starterInitialArguments: string;
     starterIncrementedArguments: string;
   }
@@ -1181,11 +1187,11 @@ export interface Depository extends BaseContract {
     DisputeFinalizedEvent.OutputObject
   >;
   getEvent(
-    key: "DisputeStartedV2"
+    key: "DisputeStarted"
   ): TypedContractEvent<
-    DisputeStartedV2Event.InputTuple,
-    DisputeStartedV2Event.OutputTuple,
-    DisputeStartedV2Event.OutputObject
+    DisputeStartedEvent.InputTuple,
+    DisputeStartedEvent.OutputTuple,
+    DisputeStartedEvent.OutputObject
   >;
   getEvent(
     key: "HankoBatchProcessed"
@@ -1283,15 +1289,15 @@ export interface Depository extends BaseContract {
       DisputeFinalizedEvent.OutputObject
     >;
 
-    "DisputeStartedV2(bytes32,bytes32,uint256,bytes32,bytes,bytes)": TypedContractEvent<
-      DisputeStartedV2Event.InputTuple,
-      DisputeStartedV2Event.OutputTuple,
-      DisputeStartedV2Event.OutputObject
+    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes32,bytes,bytes)": TypedContractEvent<
+      DisputeStartedEvent.InputTuple,
+      DisputeStartedEvent.OutputTuple,
+      DisputeStartedEvent.OutputObject
     >;
-    DisputeStartedV2: TypedContractEvent<
-      DisputeStartedV2Event.InputTuple,
-      DisputeStartedV2Event.OutputTuple,
-      DisputeStartedV2Event.OutputObject
+    DisputeStarted: TypedContractEvent<
+      DisputeStartedEvent.InputTuple,
+      DisputeStartedEvent.OutputTuple,
+      DisputeStartedEvent.OutputObject
     >;
 
     "HankoBatchProcessed(bytes32,bytes32,uint256,bool)": TypedContractEvent<

@@ -9,6 +9,8 @@ import {
   enqueueRuntimeInput,
   process as processRuntime,
   restoreEnvFromCheckpointSnapshot,
+  restoreEnvFromRecoveryBundles,
+  readPersistedFrameJournal,
 } from '../runtime.ts';
 import {
   buildRuntimeRecoveryBundle,
@@ -132,7 +134,7 @@ describe('runtime recovery tower', () => {
 
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
     const decrypted = await decryptRuntimeRecoveryBundle(encrypted, runtimeSeed);
-    const restoredEnv = await restoreEnvFromCheckpointSnapshot(decrypted.checkpoint, {
+    const restoredEnv = await restoreEnvFromCheckpointSnapshot(decrypted.checkpoint!, {
       runtimeSeed,
       runtimeId,
     });
@@ -187,7 +189,7 @@ describe('runtime recovery tower', () => {
       }],
       createdAt: 5678,
     });
-    const checkpointReplica = (bundle.checkpoint['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
+    const checkpointReplica = (bundle.checkpoint!['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
     expect(checkpointReplica?.proposal).toBeUndefined();
     expect(checkpointReplica?.lockedFrame).toBeUndefined();
     expect(checkpointReplica?.validatorComputedState).toBeUndefined();
@@ -225,7 +227,72 @@ describe('runtime recovery tower', () => {
 
     const decrypted = await decryptRuntimeRecoveryBundle(encrypted, runtimeSeed);
     expect(decrypted.checkpointHash).toBe(bundle.checkpointHash);
-    expect(decrypted.checkpoint['runtimeId']).toBe(runtimeId);
+    expect(decrypted.checkpoint!['runtimeId']).toBe(runtimeId);
+  });
+
+  test('snapshot plus journal tail restores the latest runtime height', async () => {
+    const { env, runtimeSeed, runtimeId, entityId, jurisdiction } = await buildRuntimeEnv();
+    const signers = [{
+      index: 0,
+      derivationIndex: 0,
+      address: runtimeId,
+      name: 'Signer 1',
+      entityId,
+      jurisdiction: jurisdiction.name,
+    }];
+    const snapshotBundle = buildRuntimeRecoveryBundle(env, {
+      signers,
+      createdAt: 10_000,
+    });
+    const baseHeight = snapshotBundle.runtimeHeight;
+    const baseHash = snapshotBundle.checkpointHash!;
+    const secondEntityId = `0x${'ef'.repeat(32)}`;
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId: secondEntityId,
+        signerId: runtimeId,
+        data: {
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [runtimeId],
+            shares: { [runtimeId]: 1n },
+            jurisdiction,
+          },
+          isProposer: true,
+          profileName: 'Recovery Tail',
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env);
+
+    const frame = await readPersistedFrameJournal(env, env.height);
+    expect(frame, 'journal frame must be persisted before building tail bundle').toBeTruthy();
+    const tailBundle = buildRuntimeRecoveryBundle(env, {
+      signers,
+      kind: 'journal_tail',
+      baseCheckpoint: { height: baseHeight, hash: baseHash },
+      frames: [frame!],
+      createdAt: 10_001,
+    });
+
+    const restoredEnv = await restoreEnvFromRecoveryBundles([snapshotBundle, tailBundle], {
+      runtimeSeed,
+      runtimeId,
+    });
+
+    const originalPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
+    const restoredPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(restoredEnv));
+
+    expect(tailBundle.baseRuntimeHeight).toBe(baseHeight);
+    expect(tailBundle.baseCheckpointHash).toBe(baseHash);
+    expect(tailBundle.runtimeHeight).toBe(env.height);
+    expect(restoredPersistedHash).toBe(originalPersistedHash);
+    expect(restoredEnv.height).toBe(env.height);
+    expect(restoredEnv.eReplicas.size).toBe(env.eReplicas.size);
   });
 
   test('tower stores blind backup appointments and serves restore payloads', async () => {

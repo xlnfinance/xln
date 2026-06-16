@@ -1,15 +1,14 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { HDNodeWallet, Interface, Mnemonic, Wallet, getIndexedAccountPath, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
+import { AbiCoder, HDNodeWallet, Interface, Mnemonic, ParamType, Wallet, getIndexedAccountPath, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 
 import * as xln from '../../runtime/runtime.ts';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../runtime/watchtower/standalone-server';
 import {
   buildTowerAppointmentOwnerMessage,
-  decryptTowerPayloadWithPrivateKey,
+  decryptTowerPayloadWithWatchSeed,
   encryptRuntimeRecoveryBundle,
-  getTowerPayloadEncryptionPublicKey,
 } from '../../runtime/recovery/crypto';
 import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../../runtime/xln-api';
 import {
@@ -26,8 +25,20 @@ const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
 const tempRoots: string[] = [];
 const disputeStartedInterface = new Interface([
-  'event DisputeStartedV2(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes starterInitialArguments, bytes starterIncrementedArguments)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes32 watchSeed, bytes starterInitialArguments, bytes starterIncrementedArguments)',
 ]);
+const abiCoder = AbiCoder.defaultAbiCoder();
+const proofBodyParam = ParamType.from(
+  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)',
+);
+const makeProofBody = (watchSeed: string, offdelta: bigint): Record<string, unknown> => ({
+  watchSeed,
+  tokenIds: [1],
+  offdeltas: [offdelta],
+  transformers: [],
+});
+const proofBodyHashOf = (proofBody: Record<string, unknown>): string =>
+  keccak256(abiCoder.encode([proofBodyParam], [proofBody]));
 
 const deriveFrontendWallet = (seed: string, index: number): HDNodeWallet =>
   HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(seed), getIndexedAccountPath(index));
@@ -72,7 +83,7 @@ const installJurisdiction = (env: ReturnType<typeof xln.createEmptyEnv>, name = 
   return jurisdiction;
 };
 
-const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => {
+const makeAccount = (selfId: string, counterpartyId: string, watchSeed: string): AccountMachine => {
   const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
     ? [selfId, counterpartyId]
     : [counterpartyId, selfId];
@@ -82,6 +93,7 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => 
   return {
     leftEntity,
     rightEntity,
+    watchSeed,
     status: 'active',
     mempool: [],
     currentFrame: {
@@ -286,7 +298,9 @@ describe('watchtower recovery full flow', () => {
     const signerAddress = rootWallet.address.toLowerCase();
     const entityId = `0x${'44'.repeat(32)}`;
     const counterpartyId = `0x${'55'.repeat(32)}`;
-    const proofBodyHash = `0x${'66'.repeat(32)}`;
+    const watchSeed = `0x${'46'.repeat(32)}`;
+    const proofBody = makeProofBody(watchSeed, -123n);
+    const proofBodyHash = proofBodyHashOf(proofBody);
     const proofHanko = `0x${'77'.repeat(80)}`;
     const towerWallet = Wallet.createRandom();
     const env = xln.createEmptyEnv(runtimeSeed);
@@ -318,12 +332,12 @@ describe('watchtower recovery full flow', () => {
 
     const replica = [...env.eReplicas.values()][0];
     expect(replica).toBeTruthy();
-    const account = makeAccount(entityId, counterpartyId);
+    const account = makeAccount(entityId, counterpartyId, watchSeed);
     account.counterpartyDisputeProofNonce = 9;
     account.counterpartyDisputeProofBodyHash = proofBodyHash;
     account.counterpartyDisputeProofHanko = proofHanko;
     account.disputeProofBodiesByHash = {
-      [proofBodyHash]: { tokenIds: [1], offdeltas: [-123n], transformers: [] },
+      [proofBodyHash]: proofBody,
     };
     replica!.state.accounts.set(counterpartyId, account);
 
@@ -364,7 +378,6 @@ describe('watchtower recovery full flow', () => {
       { url: 'http://tower.test', towerMode: 'delayed_last_resort', enabled: true },
       towerWallet.address.toLowerCase(),
       encryptedBundle,
-      getTowerPayloadEncryptionPublicKey(towerWallet.privateKey),
     );
 
     expect(uploads.length).toBe(1);
@@ -376,7 +389,7 @@ describe('watchtower recovery full flow', () => {
     expect(upload.appointment.lastResortPayload?.lastResortWindowBlocks).toBe(1152);
     const encryptedRemedy = String(upload.appointment.lastResortPayload?.encryptedRemedy || '');
     expect(encryptedRemedy).not.toContain('counter_dispute_remedy');
-    const remedy = JSON.parse(await decryptTowerPayloadWithPrivateKey(encryptedRemedy, towerWallet.privateKey));
+    const remedy = JSON.parse(await decryptTowerPayloadWithWatchSeed(encryptedRemedy, watchSeed));
     expect(remedy.watchedEntityId).toBe(entityId);
     expect(remedy.latestProof.counterentity).toBe(counterpartyId);
     expect(remedy.latestProof.finalNonce).toBe(9);
@@ -396,7 +409,9 @@ describe('watchtower recovery full flow', () => {
     const signerAddress = rootWallet.address.toLowerCase();
     const entityId = `0x${'88'.repeat(32)}`;
     const counterpartyId = `0x${'99'.repeat(32)}`;
-    const proofBodyHash = `0x${'aa'.repeat(32)}`;
+    const watchSeed = `0x${'89'.repeat(32)}`;
+    const proofBody = makeProofBody(watchSeed, -123n);
+    const proofBodyHash = proofBodyHashOf(proofBody);
     const proofHanko = `0x${'bb'.repeat(80)}`;
     const towerWallet = Wallet.createRandom();
     const env = xln.createEmptyEnv(runtimeSeed);
@@ -428,12 +443,12 @@ describe('watchtower recovery full flow', () => {
 
     const replica = [...env.eReplicas.values()][0];
     expect(replica).toBeTruthy();
-    const account = makeAccount(entityId, counterpartyId);
+    const account = makeAccount(entityId, counterpartyId, watchSeed);
     account.counterpartyDisputeProofNonce = 9;
     account.counterpartyDisputeProofBodyHash = proofBodyHash;
     account.counterpartyDisputeProofHanko = proofHanko;
     account.disputeProofBodiesByHash = {
-      [proofBodyHash]: { tokenIds: [1], offdeltas: [-123n], transformers: [] },
+      [proofBodyHash]: proofBody,
     };
     replica!.state.accounts.set(counterpartyId, account);
 
@@ -474,7 +489,6 @@ describe('watchtower recovery full flow', () => {
       { url: 'http://tower.flow', towerMode: 'delayed_last_resort', enabled: true },
       towerWallet.address.toLowerCase(),
       encryptedBundle,
-      getTowerPayloadEncryptionPublicKey(towerWallet.privateKey),
     );
     expect(uploads.length).toBe(1);
     const upload = uploads[0]!;
@@ -508,12 +522,13 @@ describe('watchtower recovery full flow', () => {
         getBlockNumber: async () => 95,
         getLogs: async () => {
           const event = disputeStartedInterface.encodeEventLog(
-            disputeStartedInterface.getEvent('DisputeStartedV2'),
+            disputeStartedInterface.getEvent('DisputeStarted'),
             [
               entityId,
               counterpartyId,
               7n,
               initialProofbodyHash,
+              watchSeed,
               initialArguments,
               incrementedArguments,
             ],

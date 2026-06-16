@@ -1047,7 +1047,8 @@ export class BrowserVMProvider {
     entityId: string,
     counterpartyEntityId: string,
     nonce: bigint,
-    proofbodyHash: string
+    proofbodyHash: string,
+    watchSeed: string,
   ): Promise<string> {
     const accountKey = this.getAccountKey(entityId, counterpartyEntityId);
 
@@ -1056,8 +1057,8 @@ export class BrowserVMProvider {
     // Unified nonce: single nonce replaces cooperativeNonce + disputeNonce
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const encodedMsg = abiCoder.encode(
-      ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
-      [BrowserVMProvider.MessageType.DisputeProof, this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000', accountKey, nonce, proofbodyHash]
+      ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+      [BrowserVMProvider.MessageType.DisputeProof, this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000', accountKey, nonce, proofbodyHash, watchSeed]
     );
 
     const hash = ethers.keccak256(encodedMsg);

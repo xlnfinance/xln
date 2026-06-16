@@ -231,7 +231,7 @@ export const inspectRecoveryBundleFile = (path?: string): PersistenceBundleSumma
         encrypted: false,
         runtimeId: bundle.runtimeId,
         height: bundle.runtimeHeight,
-        checkpointHash: bundle.checkpointHash,
+        checkpointHash: bundle.checkpointHash!,
       };
     }
     if (parsed && typeof parsed === 'object' && typeof parsed.bundleHash === 'string' && typeof parsed.ciphertext === 'string') {

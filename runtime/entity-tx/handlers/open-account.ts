@@ -9,6 +9,7 @@ import { cloneEntityState, addMessage } from '../../state-helpers';
 import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../default-account-tokens';
+import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../account-watch-seed';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -61,6 +62,15 @@ export const handleOpenAccountEntityTx = (
 
   const counterpartyId = normalizeEntityRef(targetEntityId);
   const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
+  const watchSeed = entityTx.data.watchSeed !== undefined
+    ? normalizeAccountWatchSeed(entityTx.data.watchSeed, 'OPEN_ACCOUNT')
+    : deriveAccountWatchSeed({
+        runtimeSeed: env.runtimeSeed ?? '',
+        runtimeId: env.runtimeId ?? null,
+        entityId: entityState.entityId,
+        counterpartyId,
+        timestamp: env.timestamp,
+      });
   assertSameJurisdictionAccount(env, entityState.entityId, entityState.config?.jurisdiction, targetEntityId);
 
   if (findAccountKey(entityState, counterpartyId)) {
@@ -92,6 +102,7 @@ export const handleOpenAccountEntityTx = (
     upsertSortedStringMapEntry(newState.accounts, accountKey, {
       leftEntity,
       rightEntity,
+      watchSeed,
       status: 'active',
       mempool: [],
       currentFrame: {

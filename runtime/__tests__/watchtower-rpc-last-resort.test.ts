@@ -11,10 +11,9 @@ import { linkArtifactBytecode } from '../jadapter/rpc-utils';
 import {
   buildTowerAppointmentOwnerMessage,
   deriveRuntimeRecoveryActionLookupKey,
-  encryptTowerPayloadForPublicKey,
-  getTowerPayloadEncryptionPublicKey,
+  encryptTowerPayloadForWatchSeed,
 } from '../recovery/crypto';
-import type { TowerLastResortPayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedyV2 } from '../recovery/types';
+import type { TowerLastResortPayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedy } from '../recovery/types';
 import { generateLazyEntityId } from '../entity-factory';
 import { encodeTowerCounterDisputeRemedy, runWatchtowerSweep } from '../watchtower/action';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
@@ -23,7 +22,7 @@ import type { StoredTowerActionReceipt } from '../watchtower/store';
 const DEFAULT_HARDHAT_MNEMONIC = 'test test test test test test test test test test test junk';
 const DISPUTE_PROOF = 1;
 const PROOF_BODY_ABI =
-  'tuple(int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
+  'tuple(bytes32 watchSeed,int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)';
 
 const tempRoots: string[] = [];
 const servers: StandaloneWatchtowerServer[] = [];
@@ -54,7 +53,8 @@ const derivePrivateKey = (index: number): string =>
 const proofBodyHash = (proofbody: Record<string, unknown>): string =>
   ethers.keccak256(abiCoder.encode([PROOF_BODY_ABI], [proofbody]));
 
-const proofBody = (offdeltas: bigint[], tokenIds: bigint[], transformers: unknown[] = []): Record<string, unknown> => ({
+const proofBody = (watchSeed: string, offdeltas: bigint[], tokenIds: bigint[], transformers: unknown[] = []): Record<string, unknown> => ({
+  watchSeed,
   offdeltas,
   tokenIds,
   transformers,
@@ -147,9 +147,10 @@ const disputeProofHash = async (
   accountKey: string,
   nonce: bigint,
   proofbodyHashValue: string,
+  watchSeed: string,
 ): Promise<string> => ethers.keccak256(abiCoder.encode(
-  ['uint8', 'address', 'bytes', 'uint256', 'bytes32'],
-  [DISPUTE_PROOF, await depository.getAddress(), accountKey, nonce, proofbodyHashValue],
+  ['uint8', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+  [DISPUTE_PROOF, await depository.getAddress(), accountKey, nonce, proofbodyHashValue, watchSeed],
 ));
 
 describe('watchtower rpc last-resort integration', () => {
@@ -204,6 +205,7 @@ describe('watchtower rpc last-resort integration', () => {
     const lastResortWindowBlocks = 16;
     const starterInitialArguments = '0x';
     const starterIncrementedArguments = '0x';
+    const watchSeed = `0x${'e1'.repeat(32)}`;
 
     await (await depository.mintToReserve(watched.entityId, tokenId, 1_000n, {
       nonce: await nextNonce(left),
@@ -224,15 +226,16 @@ describe('watchtower rpc last-resort integration', () => {
     )).wait();
 
     const accountKey = await depository.accountKey(watched.entityId, counterparty.entityId);
-    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbody = proofBody(watchSeed, [0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
-    const startHash = await disputeProofHash(depository, accountKey, disputeNonce, initialProofbodyHash);
+    const startHash = await disputeProofHash(depository, accountKey, disputeNonce, initialProofbodyHash, watchSeed);
     const startSig = signEntityHash(counterparty.entityId, startHash, counterparty.privateKey);
     const disputeStartBatch = createEmptyBatch();
     disputeStartBatch.disputeStarts.push({
       counterentity: counterparty.entityId,
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
+      watchSeed,
       sig: startSig,
       starterInitialArguments,
       starterIncrementedArguments,
@@ -245,9 +248,9 @@ describe('watchtower rpc last-resort integration', () => {
       { nonce: await nextNonce(watched.wallet) },
     )).wait();
 
-    const finalProofbody = proofBody([-200n], [tokenId]);
+    const finalProofbody = proofBody(watchSeed, [-200n], [tokenId]);
     const finalProofbodyHash = proofBodyHash(finalProofbody);
-    const finalHash = await disputeProofHash(depository, accountKey, finalNonce, finalProofbodyHash);
+    const finalHash = await disputeProofHash(depository, accountKey, finalNonce, finalProofbodyHash, watchSeed);
     const finalSig = signEntityHash(counterparty.entityId, finalHash, counterparty.privateKey);
     const ownerAuthHash = await depository.computeWatchtowerCounterDisputeHash(
       tower.address,
@@ -263,8 +266,8 @@ describe('watchtower rpc last-resort integration', () => {
     const runtimeId = watched.wallet.address.toLowerCase();
     const runtimeSeed = 'watchtower-rpc-last-resort-test';
     const lookupKey = deriveRuntimeRecoveryActionLookupKey(runtimeId, runtimeSeed, watched.entityId, counterparty.entityId);
-    const remedy: TowerCounterDisputeRemedyV2 = {
-      version: 2,
+    const remedy: TowerCounterDisputeRemedy = {
+      version: 1,
       type: 'counter_dispute_remedy',
       rpcUrl,
       chainId: 31337,
@@ -286,10 +289,17 @@ describe('watchtower rpc last-resort integration', () => {
     };
     const lastResortPayload: TowerLastResortPayloadV1 = {
       triggerHint: `${watched.entityId}:${counterparty.entityId}`,
-      encryptedRemedy: await encryptTowerPayloadForPublicKey(
+      encryptedRemedy: await encryptTowerPayloadForWatchSeed(
         encodeTowerCounterDisputeRemedy(remedy),
-        getTowerPayloadEncryptionPublicKey(tower.privateKey),
+        watchSeed,
       ),
+      watch: {
+        rpcUrl,
+        chainId: 31337,
+        depositoryAddress: await depository.getAddress(),
+        watchedEntityId: watched.entityId,
+        counterentity: counterparty.entityId,
+      },
       actionKind: 'counter_dispute_only',
       appointmentSequence,
       proofNonce: Number(finalNonce),
@@ -483,6 +493,7 @@ describe('watchtower rpc last-resort integration', () => {
     const lastResortWindowBlocks = 16;
     const starterInitialArguments = '0x';
     const starterIncrementedArguments = '0x';
+    const watchSeed = `0x${'e2'.repeat(32)}`;
 
     await (await depository.mintToReserve(watched.entityId, tokenId, 1_000n, {
       nonce: await nextNonce(left),
@@ -503,15 +514,16 @@ describe('watchtower rpc last-resort integration', () => {
     )).wait();
 
     const accountKey = await depository.accountKey(watched.entityId, counterparty.entityId);
-    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbody = proofBody(watchSeed, [0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
-    const startHash = await disputeProofHash(depository, accountKey, disputeNonce, initialProofbodyHash);
+    const startHash = await disputeProofHash(depository, accountKey, disputeNonce, initialProofbodyHash, watchSeed);
     const startSig = signEntityHash(counterparty.entityId, startHash, counterparty.privateKey);
     const disputeStartBatch = createEmptyBatch();
     disputeStartBatch.disputeStarts.push({
       counterentity: counterparty.entityId,
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
+      watchSeed,
       sig: startSig,
       starterInitialArguments,
       starterIncrementedArguments,
@@ -524,9 +536,9 @@ describe('watchtower rpc last-resort integration', () => {
       { nonce: await nextNonce(watched.wallet) },
     )).wait();
 
-    const towerProofbody = proofBody([-200n], [tokenId]);
+    const towerProofbody = proofBody(watchSeed, [-200n], [tokenId]);
     const towerProofbodyHash = proofBodyHash(towerProofbody);
-    const towerFinalHash = await disputeProofHash(depository, accountKey, towerFinalNonce, towerProofbodyHash);
+    const towerFinalHash = await disputeProofHash(depository, accountKey, towerFinalNonce, towerProofbodyHash, watchSeed);
     const towerFinalSig = signEntityHash(counterparty.entityId, towerFinalHash, counterparty.privateKey);
     const ownerAuthHash = await depository.computeWatchtowerCounterDisputeHash(
       tower.address,
@@ -542,8 +554,8 @@ describe('watchtower rpc last-resort integration', () => {
     const runtimeId = watched.wallet.address.toLowerCase();
     const runtimeSeed = 'watchtower-rpc-stale-last-resort-test';
     const lookupKey = deriveRuntimeRecoveryActionLookupKey(runtimeId, runtimeSeed, watched.entityId, counterparty.entityId);
-    const towerRemedy: TowerCounterDisputeRemedyV2 = {
-      version: 2,
+    const towerRemedy: TowerCounterDisputeRemedy = {
+      version: 1,
       type: 'counter_dispute_remedy',
       rpcUrl,
       chainId: 31337,
@@ -565,10 +577,17 @@ describe('watchtower rpc last-resort integration', () => {
     };
     const lastResortPayload: TowerLastResortPayloadV1 = {
       triggerHint: `${watched.entityId}:${counterparty.entityId}`,
-      encryptedRemedy: await encryptTowerPayloadForPublicKey(
+      encryptedRemedy: await encryptTowerPayloadForWatchSeed(
         encodeTowerCounterDisputeRemedy(towerRemedy),
-        getTowerPayloadEncryptionPublicKey(tower.privateKey),
+        watchSeed,
       ),
+      watch: {
+        rpcUrl,
+        chainId: 31337,
+        depositoryAddress: await depository.getAddress(),
+        watchedEntityId: watched.entityId,
+        counterentity: counterparty.entityId,
+      },
       actionKind: 'counter_dispute_only',
       appointmentSequence,
       proofNonce: Number(towerFinalNonce),
@@ -632,9 +651,9 @@ describe('watchtower rpc last-resort integration', () => {
     });
     expect(upload.ok).toBe(true);
 
-    const userProofbody = proofBody([-150n], [tokenId]);
+    const userProofbody = proofBody(watchSeed, [-150n], [tokenId]);
     const userProofbodyHash = proofBodyHash(userProofbody);
-    const userFinalHash = await disputeProofHash(depository, accountKey, userFinalNonce, userProofbodyHash);
+    const userFinalHash = await disputeProofHash(depository, accountKey, userFinalNonce, userProofbodyHash, watchSeed);
     const userFinalSig = signEntityHash(counterparty.entityId, userFinalHash, counterparty.privateKey);
     const userFinalizeBatch = createEmptyBatch();
     userFinalizeBatch.disputeFinalizations.push({

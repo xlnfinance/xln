@@ -123,6 +123,7 @@ export const projectReplicaMeta = (replica: EntityReplica): StorageReplicaMeta =
 const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
+  watchSeed: account.watchSeed,
   status: account.status,
   mempool: account.mempool.map(cloneCrossJurisdictionAccountTxRoute),
   currentFrame: cloneCrossJurisdictionAccountFrameRoute(account.currentFrame),
@@ -211,6 +212,7 @@ export const buildAccountMerkleFromState = (
 const hydrateAccountDoc = (doc: StorageAccountDoc): AccountMachine => ({
   leftEntity: doc.leftEntity,
   rightEntity: doc.rightEntity,
+  watchSeed: doc.watchSeed,
   status: doc.status,
   mempool: doc.mempool,
   currentFrame: doc.currentFrame,

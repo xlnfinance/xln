@@ -690,6 +690,7 @@ async function applyFinalizedJEvent(
               counterentity: counterpartyId,
               nonce: Number(nonce || 0),
               proofbodyHash: String(proofbodyHash || '0x'),
+              watchSeed: String(event.data.watchSeed || '0x'),
               sig: '0x',
               starterInitialArguments: String(starterInitialArguments || '0x'),
               starterIncrementedArguments: String(event.data.starterIncrementedArguments || '0x'),
@@ -802,6 +803,7 @@ async function applyFinalizedJEvent(
               finalNonce: Number(initialNonce || 0),
               initialProofbodyHash: String(initialProofbodyHash || '0x'),
               finalProofbody: {
+                watchSeed: account.watchSeed,
                 offdeltas: [],
                 tokenIds: [],
                 transformers: [],
