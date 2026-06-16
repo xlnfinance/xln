@@ -223,6 +223,14 @@ type TowerRestorePayload = {
   error?: string;
 };
 
+type TowerDiscoverPayload = {
+  ok: boolean;
+  lookupKey?: string;
+  available?: boolean;
+  latestReceipt?: TowerReceiptV1 | null;
+  error?: string;
+};
+
 type TowerServerInfo = {
   ok: boolean;
   service?: string;
@@ -570,6 +578,24 @@ export async function fetchTowerServerInfo(towerUrl: string): Promise<TowerServe
   return payload;
 }
 
+async function towerHasRecoveryBundle(tower: RecoveryTowerConfig, lookupKey: string): Promise<boolean> {
+  const discoverUrl = buildTowerRequestUrl(tower.url, '/api/recovery/discover');
+  const response = await fetch(discoverUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ lookupKey }),
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP_${response.status}`);
+  }
+  const payload = await response.json() as TowerDiscoverPayload;
+  if (!payload.ok) {
+    if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') return false;
+    throw new Error(String(payload.error || 'unknown'));
+  }
+  return payload.available === true;
+}
+
 const buildRuntimeRecoverySigners = (runtime: Runtime): RuntimeRecoverySignerV1[] =>
   (runtime.signers || [])
     .map((signer, index) => ({
@@ -690,6 +716,9 @@ export async function tryRestoreRuntimeEnvFromTower(
 
   for (const tower of towers) {
     try {
+      if (!await towerHasRecoveryBundle(tower, lookupKey)) {
+        continue;
+      }
       const restoreUrl = buildTowerRequestUrl(tower.url, '/api/tower/restore');
       const response = await fetch(restoreUrl, {
         method: 'POST',

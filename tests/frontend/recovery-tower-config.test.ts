@@ -5,6 +5,7 @@ import {
   buildDelayedLastResortAppointmentsForTower,
   buildRuntimeRecoveryConfigForMode,
   resolveDefaultRecoveryTowerUrls,
+  tryRestoreRuntimeEnvFromTower,
 } from '../../frontend/src/lib/stores/vaultStore';
 import * as xln from '../../runtime/runtime';
 import { decryptTowerPayloadWithWatchSeed } from '../../runtime/recovery/crypto';
@@ -187,4 +188,57 @@ test('delayed last-resort appointments require encrypted tower action payloads',
   expect(remedy.type).toBe('counter_dispute_remedy');
   expect(remedy.towerAddress).toBe(towerWallet.address.toLowerCase());
   expect(remedy.watchedEntityId).toBe(entityId);
+});
+
+test('tower restore checks discovery before restore to avoid expected missing-backup 404s', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  const lookupKey = `0x${'99'.repeat(32)}`;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push(String(input));
+    expect(init?.method).toBe('POST');
+    expect(String(input)).toContain('/api/recovery/discover');
+    return new Response(JSON.stringify({
+      ok: true,
+      lookupKey,
+      available: false,
+      latestReceipt: null,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const restored = await tryRestoreRuntimeEnvFromTower({
+      id: deriveTestAddress(0),
+      label: 'No Backup Yet',
+      seed: testMnemonic,
+      signers: [],
+      activeSignerIndex: 0,
+      createdAt: 1,
+      recovery: {
+        useDefaultTowers: false,
+        towers: [{ url: 'http://127.0.0.1:9100', towerMode: 'blind_backup' }],
+      },
+    }, {
+      deriveRuntimeRecoveryLookupKey: () => lookupKey,
+      decryptRuntimeRecoveryBundle: async () => {
+        throw new Error('decrypt should not run without discovery availability');
+      },
+      restoreEnvFromRecoveryBundles: async () => {
+        throw new Error('restore should not run without discovery availability');
+      },
+      persistRestoredEnvToDB: async () => {
+        throw new Error('persist should not run without discovery availability');
+      },
+    } as unknown as XLNModule);
+
+    expect(restored).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('/api/recovery/discover');
+    expect(calls[0]).not.toContain('/api/tower/restore');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
