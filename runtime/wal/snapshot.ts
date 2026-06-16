@@ -153,7 +153,12 @@ export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown
 };
 
 export const buildRuntimeRecoveryCheckpointSnapshot = (env: Env): Record<string, unknown> => {
-  return buildCanonicalRuntimeStateSnapshot(env, { compactTransient: true });
+  const snapshot = buildCanonicalRuntimeStateSnapshot(env, { compactTransient: true });
+  const gossipProfiles = cloneProfiles(env.gossip?.getProfiles?.());
+  return {
+    ...snapshot,
+    ...(gossipProfiles ? { gossip: { profiles: gossipProfiles } } : {}),
+  };
 };
 
 export const buildCanonicalEnvSnapshot = (

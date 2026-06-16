@@ -19,7 +19,7 @@
     isCommittedAccount,
     isOpeningAccount,
   } from '$lib/utils/entityReplica';
-  import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
+  import { waitForCounterpartyRuntimeRoutes } from '$lib/utils/p2pPrefetch';
   import { compareStableText } from '$lib/utils/stableSort';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
@@ -199,23 +199,9 @@
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  function hubRuntimeIdFromGossip(currentEnv: Env, hubId: string): string {
-    const target = normalizeEntityId(hubId);
-    const profiles = currentEnv.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((candidate: { entityId?: string; runtimeId?: string }) =>
-      normalizeEntityId(candidate?.entityId || '') === target,
-    );
-    return String(profile?.runtimeId || '').trim();
-  }
-
   async function requireHubRuntimeRoute(currentEnv: Env, hubId: string): Promise<void> {
-    await prewarmCounterpartyProfiles(currentEnv, [hubId], 5_000);
-    const deadline = Date.now() + 5_000;
-    while (Date.now() < deadline) {
-      if (hubRuntimeIdFromGossip(currentEnv, hubId)) return;
-      await sleep(100);
-    }
-    throw new Error('Hub routing profile is not ready. Refresh hubs and try again.');
+    const ready = await waitForCounterpartyRuntimeRoutes(currentEnv, [hubId], 5_000);
+    if (!ready) throw new Error('Hub routing profile is not ready. Refresh hubs and try again.');
   }
 
   async function fetchPublicHubs(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Hub[]> {
