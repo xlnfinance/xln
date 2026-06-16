@@ -1,0 +1,21 @@
+{
+  "$schema": "xln:capped-testnet-policy:v1",
+  "name": "capped-public-testnet",
+  "scope": [
+    "landing",
+    "all-current-user-facing-flows"
+  ],
+  "riskCapUsd": 10000,
+  "riskCapEnforcement": "operator_config",
+  "expectedTowers": 1,
+  "expectedHubs": 3,
+  "recoverySlaSeconds": 60,
+  "exceptionPolicy": {
+    "p0": "forbidden",
+    "p1": "forbidden",
+    "p2": "owner_signoff_required",
+    "p3": "issue_required"
+  },
+  "externalAuditRequired": false,
+  "soakMinutes": 1440
+}

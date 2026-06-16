@@ -103,3 +103,16 @@ Before a public-net release candidate, also run:
 bun run gate:release
 bun run soak:release
 ```
+
+For the capped public-testnet launch envelope with all user-facing flows,
+landing, one tower, three hubs, and a USD 10,000 aggregate risk cap:
+
+```bash
+export XLN_CAPPED_TESTNET_TOWER_URLS=https://tower.example.com
+bun run gate:capped-testnet:preflight
+bun run gate:capped-testnet
+```
+
+`gate:capped-testnet` writes a JSON report under `.logs/gates/` and runs the
+24-hour soak. If any step fails, fix the root cause, commit the fix, and start
+the capped gate again from a fresh release-candidate commit.
