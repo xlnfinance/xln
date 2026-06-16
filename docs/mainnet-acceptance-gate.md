@@ -26,6 +26,8 @@ Date: 2026-06-16
 | Default exception rule | P0/P1 exceptions forbidden; P2 only with explicit owner sign-off |
 | Default recovery SLA | Restore path must complete in less than 60 seconds after seed entry or local backup upload |
 
+Executable policy file: [../ops/capped-testnet-policy.json](../ops/capped-testnet-policy.json).
+
 Soak means a long-running release candidate run under realistic load and
 restarts. It is meant to catch memory leaks, timing drift, flaky persistence,
 RPC instability, reconnect bugs, tower upload gaps, and health-monitoring lies.
@@ -56,11 +58,14 @@ Concrete examples:
 - `bun run gate:release` is an integrated release gate: runtime tests,
   contracts, RPC settlement, persistence, watchtower smoke, fast e2e, system
   tests, storage benchmark, and prod health.
+- `bun run gate:capped-testnet:preflight` is the capped launch preflight: it
+  validates policy, dirty-worktree status, release evidence, full e2e,
+  watchtower smoke, and one-tower / three-hub health without the 24-hour soak.
+- `bun run gate:capped-testnet` is the full capped launch gate, including soak.
 - Browser/F12 drill is a product gate: the actual app must work without uncaught
   console errors in the flows users touch.
-- `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=1440` is
-  the 24-hour soak: repeated release-profile checks for a full day without
-  manual repair.
+- `bun run soak:capped-testnet` is the 24-hour soak: repeated release-profile
+  checks for a full day without manual repair.
 
 ## xln Mental Model For The Gatekeeper
 
@@ -206,7 +211,7 @@ Report format:
    - The 24-hour gate command is:
 
      ```bash
-     bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=1440
+     bun run soak:capped-testnet
      ```
 
    - No manual repair is allowed during soak.

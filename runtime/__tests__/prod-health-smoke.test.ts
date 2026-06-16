@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 
-import { buildProdHealthFailureSummary, getFatalDegradedReasons } from '../scripts/prod-health-smoke';
+import {
+  buildProdHealthFailureSummary,
+  buildTowerHealthUrl,
+  getFatalDegradedReasons,
+  validateHubTopology,
+} from '../scripts/prod-health-smoke';
 
 test('prod health smoke ignores advisory bootstrap reserve target drift', () => {
   expect(getFatalDegradedReasons(['bootstrapReserveTargets'])).toEqual([]);
@@ -39,4 +44,25 @@ test('prod health smoke reports hub relay-presence diagnostics', () => {
   expect(summary.hubs[0]).toEqual({ name: 'H1', online: true, selfRelayPresence: false });
   expect(summary.diagnosticMetrics).toContain('xln_child_online{role="hub",name="H1"} 1');
   expect(summary.diagnosticMetrics).not.toContain('irrelevant_metric 123');
+});
+
+test('prod health smoke validates exact capped-testnet hub topology', () => {
+  const health = {
+    hubs: [
+      { name: 'H1', online: true, selfRelayPresence: true },
+      { name: 'H2', online: true, selfRelayPresence: true },
+      { name: 'H3', online: true, selfRelayPresence: true },
+    ],
+  };
+
+  expect(validateHubTopology(health, { expectedHubs: 3, requireHubSelfRelay: true })).toEqual([]);
+  expect(validateHubTopology(health, { expectedHubs: 2, requireHubSelfRelay: true }))
+    .toContain('EXPECTED_HUB_COUNT_MISMATCH: expected=2 actual=3');
+});
+
+test('prod health smoke builds tower health URLs without guessing proxy query shape', () => {
+  expect(buildTowerHealthUrl('https://tower.example.com')).toBe('https://tower.example.com/api/tower/healthz');
+  expect(buildTowerHealthUrl('https://tower.example.com/api/tower/healthz')).toBe('https://tower.example.com/api/tower/healthz');
+  expect(buildTowerHealthUrl('https://xln.finance/api/watchtower-proxy?target=http://127.0.0.1:9100&path=/api/tower/healthz'))
+    .toBe('https://xln.finance/api/watchtower-proxy?target=http://127.0.0.1:9100&path=/api/tower/healthz');
 });
