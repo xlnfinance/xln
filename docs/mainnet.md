@@ -68,6 +68,8 @@ Required:
 
 - encrypted tower backup/restore remains green;
 - delayed-last-resort tower action remains green;
+- tower backup and last-resort disputer roles stay independently configurable
+  even when served by one daemon;
 - Peer State Refresh exists for honest-peer recovery when towers are absent;
 - persistence repair/recovery tooling is documented and usable;
 - restore drills cover wiped browser, restart, and offline user cases.
@@ -158,6 +160,7 @@ Keep these files aligned before launch:
 - [consensus-invariants.md](consensus-invariants.md)
 - [implementation/payment-spec.md](implementation/payment-spec.md)
 - [recovery-watchtower-protocol.md](recovery-watchtower-protocol.md)
+- [watchtower-services.md](watchtower-services.md)
 - [deployment/ops-runbook.md](deployment/ops-runbook.md)
 - [deployment/deployment.md](deployment/deployment.md)
 - [docs/security/external-audit-brief.md](security/external-audit-brief.md)

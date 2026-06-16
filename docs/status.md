@@ -72,8 +72,9 @@ When docs disagree, use this order:
 - Official tower moved to same-origin `/api/tower/*`.
 - Watchtower sweep is scheduled inside the daemon and public
   `/api/watchtower/*` is not exposed through nginx.
-- Last-resort tower remedies are encrypted to the tower action public key and
-  plaintext last-resort remedies are rejected by the tower HTTP layer.
+- Last-resort tower remedies are encrypted to the account `watchSeed`, decrypted
+  only after a `DisputeStarted` reveal, and plaintext remedies are rejected by
+  both tower HTTP and store insertion.
 - Tower uploads are gated by reliable local backup barriers before remote side
   effects continue.
 - Browser restart after tower restore keeps recovered runtime/channel state.
@@ -103,7 +104,8 @@ When docs disagree, use this order:
    mainnet candidate. `bun run gate:release` already passed on current `main`;
    the long soak has only partial evidence so far.
 3. Document real mainnet chain/RPC, operator keys, tower gas policy,
-   backup/restore drills, and monitoring thresholds.
+   backup/restore drills, last-resort dispute drills, and monitoring
+   thresholds.
 4. Refresh the external audit pack and treat external audit as required for
    real user funds.
 

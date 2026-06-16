@@ -55,6 +55,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 | [rebalance.md](rebalance.md) | hub auto-rebalance |
 | [lend.md](lend.md) | Lend/Borrow product and runtime design |
 | [recovery-watchtower-protocol.md](recovery-watchtower-protocol.md) | recovery, peer refresh, watchtower storage |
+| [watchtower-services.md](watchtower-services.md) | encrypted backup and last-resort dispute operations |
 | [fintech-type-safety-protocol.md](fintech-type-safety-protocol.md) | type-safety rules for money-moving code |
 
 ## Status
