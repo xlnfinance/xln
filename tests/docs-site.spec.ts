@@ -37,6 +37,18 @@ async function assertNoDocsFailures(failures: FailureEntry[]): Promise<void> {
 }
 
 test.describe('Docs site', () => {
+  test('main site exposes llms context as static text', async ({ page }) => {
+    const response = await page.request.get('/llms.txt');
+    expect(response?.ok(), '/llms.txt should be served as a real static asset').toBe(true);
+    expect(response?.headers()['content-type'] || '').toContain('text/plain');
+
+    const body = await response.text();
+    expect(body.includes('# XLN: Bilateral Settlement With Provable Credit')).toBe(true);
+    expect(body.includes('//jurisdictions/contracts/Depository.sol')).toBe(true);
+    expect(body.includes('//runtime/runtime.ts')).toBe(true);
+    expect(body.includes('<!doctype html>')).toBe(false);
+  });
+
   test('main site exposes a working docs surface', async ({ page }, testInfo) => {
     await page.goto('/', { waitUntil: 'networkidle' });
     await expect(page.getByRole('link', { name: /^docs$/i })).toBeVisible();
