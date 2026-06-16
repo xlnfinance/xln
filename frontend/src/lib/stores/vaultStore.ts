@@ -2601,6 +2601,44 @@ export const vaultOperations = {
     return updatedRuntime;
   },
 
+  async restoreRuntimeFromRecoveryCandidate(
+    runtimeId: string | null | undefined,
+    candidate: RuntimeRecoveryCandidate,
+  ): Promise<Runtime> {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId || get(activeRuntimeId));
+    if (!normalizedRuntimeId) throw new Error('No active runtime selected');
+    const currentState = get(runtimesState);
+    const runtime = currentState.runtimes[normalizedRuntimeId];
+    if (!runtime) throw new Error(`Runtime not found: ${normalizedRuntimeId}`);
+
+    const xln = await getXLN();
+    const restored = await restoreRuntimeEnvFromRecoveryCandidate(runtime, xln, candidate);
+    const restoredEnv = restored.env;
+    const updatedRuntime = { ...runtime };
+
+    runtimesState.update((state) => ({
+      ...state,
+      runtimes: {
+        ...state.runtimes,
+        [normalizedRuntimeId]: updatedRuntime,
+      },
+      activeRuntimeId: normalizedRuntimeId,
+    }));
+    this.saveToStorage();
+
+    runtimes.update((currentRuntimes) => {
+      const updated = new Map(currentRuntimes);
+      updated.set(normalizedRuntimeId, runtimeToEntry(updatedRuntime, restoredEnv));
+      return updated;
+    });
+    activeRuntimeId.set(normalizedRuntimeId);
+    registerRuntimeEnvChange(normalizedRuntimeId, restoredEnv, xln);
+    setXlnEnvironment(restoredEnv);
+    this.syncRuntime({ ...updatedRuntime, env: restoredEnv });
+    toasts.info('Runtime restored from uploaded backup', 6_000);
+    return updatedRuntime;
+  },
+
   syncRuntime(runtime: Runtime | null) {
     const meta: { label?: string; seed?: string; vaultId?: string } = {};
     meta.label = runtime?.label || 'Runtime';

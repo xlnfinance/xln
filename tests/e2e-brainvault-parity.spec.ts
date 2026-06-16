@@ -77,9 +77,8 @@ async function expectPostCreateBrainvaultRecovery(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: /Configure account/i })).toBeVisible({ timeout: 30_000 });
   const recoveryDetails = page.getByTestId('brainvault-onboarding-recovery');
   await expect(recoveryDetails).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('brainvault-onboarding-recovery-toggle')).toContainText(/BrainVault recovery/i);
-  await expect(page.getByTestId('brainvault-continue-copy')).toContainText(/account settings below/i);
-  await expect(page.getByRole('heading', { name: /Recovery services/i })).toBeVisible();
+  await expect(page.getByTestId('brainvault-onboarding-recovery-toggle')).toContainText(/Seed safety/i);
+  await expect(page.getByRole('heading', { name: /Encrypted backup and last-resort dispute protection/i })).toBeVisible();
   await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
   await expect(page.getByRole('button', { name: /Download sheet/i })).toBeVisible({ timeout: 5_000 });
   await expect(page.getByRole('link', { name: /Read safety notes/i })).toBeVisible({ timeout: 5_000 });
@@ -153,6 +152,16 @@ async function waitForRuntimeWithLabel(page: Page, label: string): Promise<Store
   return await handle.jsonValue() as StoredRuntime;
 }
 
+async function createFreshWalletWhenNoBackupExists(page: Page): Promise<void> {
+  const configureHeading = page.getByRole('heading', { name: /Configure account/i });
+  await expect(configureHeading).toBeVisible({ timeout: 120_000 });
+  const recoveryStatus = page.getByTestId('runtime-recovery-check-status');
+  await expect(recoveryStatus).toBeVisible({ timeout: 30_000 });
+  await expect(recoveryStatus).toContainText(/Checked \d+ watchtowers?,\s+found 0 backups? for this seed/i);
+  await expect(recoveryStatus.getByRole('button', { name: /I have a runtime backup file/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Restore wallet/i })).toHaveCount(0);
+}
+
 async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string, shards: number): Promise<BrainvaultCliOutput> {
   await waitForBrainvaultCreateForm(page);
 
@@ -165,6 +174,7 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open \/ restore wallet|Open (Wallet|Vault))/, exact: false });
   await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
   await openVaultButton.click();
+  await createFreshWalletWhenNoBackupExists(page);
 
   const runtime = await waitForRuntimeWithLabel(page, name);
   const mnemonic24 = normalizeMnemonic(runtime.seed || '');
@@ -202,6 +212,7 @@ test.describe('brainvault parity', () => {
     const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open \/ restore wallet|Open (Wallet|Vault))/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
+    await createFreshWalletWhenNoBackupExists(page);
 
     const runtime = await waitForRuntimeWithSeed(page, cli.mnemonic24);
     expect(runtime.label).toBe('standalone vault');
