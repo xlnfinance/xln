@@ -29,8 +29,10 @@ import { computePersistedEnvStateHash } from '../wal/hash';
 import { createWatchtowerStore } from '../watchtower/store';
 import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../watchtower/http';
 import type { JReplica, JurisdictionConfig } from '../types';
+import type { Profile } from '../networking/gossip';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
+const x25519 = (byte: string): string => `0x${byte.repeat(32)}`;
 let runtimeCounter = 0;
 
 const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JurisdictionConfig => {
@@ -96,6 +98,46 @@ const buildRuntimeEnv = async () => {
   return { env, runtimeSeed, runtimeId, entityId, wallet, jurisdiction };
 };
 
+const buildRecoveryHubProfile = (
+  entityId: string,
+  runtimeId: string,
+  jurisdiction: JurisdictionConfig,
+): Profile => ({
+  entityId,
+  name: 'Recovery Hub',
+  avatar: '',
+  bio: '',
+  website: '',
+  lastUpdated: 2,
+  runtimeId,
+  runtimeEncPubKey: x25519('66'),
+  publicAccounts: [],
+  wsUrl: null,
+  relays: [],
+  metadata: {
+    entityEncPubKey: x25519('77'),
+    isHub: true,
+    routingFeePPM: 1,
+    baseFee: 0n,
+    jurisdiction: {
+      name: jurisdiction.name,
+      chainId: jurisdiction.chainId,
+      entityProviderAddress: jurisdiction.entityProviderAddress,
+      depositoryAddress: jurisdiction.depositoryAddress,
+    },
+    board: {
+      threshold: 1,
+      validators: [{
+        signer: runtimeId,
+        weight: 1,
+        signerId: runtimeId,
+        publicKey: x25519('88'),
+      }],
+    },
+  },
+  accounts: [],
+});
+
 describe('runtime recovery tower', () => {
   test('action lookup keys stay deterministic and separate from blind backup lookup keys', async () => {
     const runtimeId = Wallet.createRandom().address.toLowerCase();
@@ -148,6 +190,39 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.height).toBe(env.height);
     expect(restoredEnv.eReplicas.size).toBe(env.eReplicas.size);
     expect(restoredEnv.jReplicas.size).toBe(env.jReplicas.size);
+  });
+
+  test('recovery checkpoint carries gossip profiles needed for restored openAccount routing', async () => {
+    const { env, runtimeSeed, runtimeId, entityId, jurisdiction } = await buildRuntimeEnv();
+    const hubEntityId = `0x${'45'.repeat(32)}`;
+    const hubRuntimeId = addr('66');
+    env.gossip!.announce(buildRecoveryHubProfile(hubEntityId, hubRuntimeId, jurisdiction));
+
+    const bundle = buildRuntimeRecoveryBundle(env, {
+      signers: [{
+        index: 0,
+        derivationIndex: 0,
+        address: runtimeId,
+        name: 'Signer 1',
+        entityId,
+        jurisdiction: jurisdiction.name,
+      }],
+      createdAt: 5678,
+    });
+    const checkpointGossip = bundle.checkpoint?.['gossip'] as { profiles?: Array<{ entityId?: string }> } | undefined;
+    expect(checkpointGossip?.profiles?.some((profile) => profile.entityId === hubEntityId)).toBe(true);
+
+    const restoredEnv = await restoreEnvFromRecoveryBundles([bundle], {
+      runtimeSeed,
+      runtimeId,
+    });
+    const restoredHub = restoredEnv.gossip?.getProfiles?.()
+      .find((profile) => profile.entityId === hubEntityId);
+
+    expect(restoredHub?.runtimeId).toBe(hubRuntimeId);
+    expect(restoredHub?.metadata.isHub).toBe(true);
+    expect(restoredHub?.metadata.jurisdiction?.chainId).toBe(jurisdiction.chainId);
+    expect(restoredHub?.metadata.jurisdiction?.depositoryAddress).toBe(jurisdiction.depositoryAddress);
   });
 
   test('recovery bundle omits transient consensus caches and compresses large checkpoints below tower body cap', async () => {

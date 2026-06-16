@@ -31,7 +31,10 @@
     writeOnboardingCompleteForEntities,
   } from '../../utils/onboardingState';
   import { normalizeEntityId, hasCounterpartyAccount } from '../../utils/entityReplica';
-  import { prewarmCounterpartyProfiles } from '../../utils/p2pPrefetch';
+  import {
+    hasUsableOpenAccountCounterpartyProfile,
+    waitForCounterpartyRuntimeRoutes,
+  } from '../../utils/p2pPrefetch';
   import {
     getManualRecoveryTowers,
     isOfficialRecoveryTower,
@@ -101,37 +104,7 @@
     }>;
   };
 
-  type JurisdictionLike = {
-    name?: unknown;
-    chainId?: unknown;
-    depositoryAddress?: unknown;
-  };
   type OnboardingTarget = { entityId: string; signerId: string };
-
-  const normalizeJurisdiction = (value: unknown): string => String(value || '').trim().toLowerCase();
-  const jurisdictionKey = (value: unknown): string => {
-    if (value && typeof value === 'object') {
-      const jurisdiction = value as JurisdictionLike;
-      const chainId = String(jurisdiction.chainId ?? '').trim();
-      const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
-      if (chainId && depository) return `dep:${chainId}:${depository}`;
-      if (chainId) return '';
-      return normalizeJurisdiction(jurisdiction.name);
-    }
-    return normalizeJurisdiction(value);
-  };
-
-  function getEntityJurisdictionKey(currentEnv: Env | undefined, targetEntityId: string): string {
-    const normalizedEntityId = normalizeEntityId(targetEntityId);
-    if (!normalizedEntityId || !currentEnv?.eReplicas) return '';
-    for (const [key, replica] of currentEnv.eReplicas.entries()) {
-      const [replicaEntityId] = String(key || '').split(':');
-      if (normalizeEntityId(replicaEntityId) !== normalizedEntityId) continue;
-      return jurisdictionKey(replica?.state?.config?.jurisdiction)
-        || jurisdictionKey(replica?.position?.jurisdiction);
-    }
-    return '';
-  }
 
   function hasEntityReplica(currentEnv: Env | null | undefined, target: OnboardingTarget): boolean {
     const normalizedEntityId = normalizeEntityId(target.entityId);
@@ -389,8 +362,6 @@
 
   function getHubEntityIds(currentEnv: Env, targetEntityId: string): string[] {
     const discovered: string[] = [];
-    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, targetEntityId);
-    if (!entityJurisdiction) return discovered;
     const add = (value: unknown) => {
       const id = String(value || '').trim();
       if (!id) return;
@@ -403,17 +374,14 @@
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       if (profile.metadata.isHub !== true) continue;
-      if (entityJurisdiction && jurisdictionKey(profile.metadata?.jurisdiction) !== entityJurisdiction) continue;
       add(profile.entityId);
     }
 
     return discovered;
   }
 
-  async function fetchPublicHubEntityIds(currentEnv: Env, targetEntityId: string): Promise<string[]> {
+  async function fetchPublicHubEntityIds(targetEntityId: string): Promise<string[]> {
     if (typeof window === 'undefined') return [];
-    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, targetEntityId);
-    if (!entityJurisdiction) return [];
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2000);
     try {
@@ -426,7 +394,6 @@
       const out: string[] = [];
       for (const hub of payload.hubs || []) {
         if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
-        if (jurisdictionKey(hub.metadata?.jurisdiction) !== entityJurisdiction) continue;
         const normalized = normalizeEntityId(hub.entityId);
         if (!normalized || normalized === normalizeEntityId(targetEntityId)) continue;
         if (!out.some(existing => normalizeEntityId(existing) === normalized)) out.push(hub.entityId);
@@ -443,7 +410,7 @@
     if (joinCount <= 0 || !target.entityId || !target.signerId) return 0;
 
     const waitForCandidates = async (): Promise<string[]> => {
-      const timeoutMs = 12_000;
+      const timeoutMs = 20_000;
       const pollMs = 300;
       const startedAt = Date.now();
       let best: string[] = [];
@@ -453,13 +420,23 @@
         if (currentEnv) {
           const ids = [
             ...getHubEntityIds(currentEnv, target.entityId),
-            ...await fetchPublicHubEntityIds(currentEnv, target.entityId),
+            ...await fetchPublicHubEntityIds(target.entityId),
           ];
           const uniqueIds = Array.from(new Map(ids.map(id => [normalizeEntityId(id), id])).values());
           const currentCandidates = uniqueIds
             .filter((hubId) => !hasCounterpartyAccount(currentEnv, target.entityId, hubId));
-          if (currentCandidates.length > best.length) best = currentCandidates;
-          if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
+          if (currentCandidates.length > 0) {
+            await waitForCounterpartyRuntimeRoutes(currentEnv, currentCandidates, 2_000);
+          }
+          const readyCandidates = currentCandidates
+            .filter((hubId) => hasUsableOpenAccountCounterpartyProfile(
+              currentEnv,
+              target.entityId,
+              hubId,
+              { requireHub: true },
+            ));
+          if (readyCandidates.length > best.length) best = readyCandidates;
+          if (readyCandidates.length >= joinCount) return readyCandidates.slice(0, joinCount);
         }
         await sleep(pollMs);
       }
@@ -467,18 +444,24 @@
       return best.slice(0, joinCount);
     };
 
-    const env = getEnv();
-    if (!env) return 0;
     const rebalancePolicy = getOpenAccountRebalancePolicyData();
     if (!rebalancePolicy) return 0;
 
     const candidates = await waitForCandidates();
     if (candidates.length === 0) return 0;
-
-    await prewarmCounterpartyProfiles(env, candidates);
+    const env = getEnv();
+    if (!env) return 0;
+    const readyCandidates = candidates
+      .filter((hubId) => hasUsableOpenAccountCounterpartyProfile(
+        env,
+        target.entityId,
+        hubId,
+        { requireHub: true },
+      ));
+    if (readyCandidates.length === 0) return 0;
 
     const creditAmount = 10_000n * 10n ** 18n;
-    const entityTxs = candidates.map((hubId) => ({
+    const entityTxs = readyCandidates.map((hubId) => ({
       type: 'openAccount' as const,
       data: {
         targetEntityId: hubId,
@@ -494,15 +477,18 @@
       entityTxs,
     }]);
 
-    return candidates.length;
+    return readyCandidates.length;
   }
 
   async function queueAutoHubJoins(joinCount: number, targets: OnboardingTarget[]): Promise<number> {
     // Each lane owns an independent bilateral account set. Primary and cross-j
     // sibling entities must both open committed hub accounts during onboarding;
     // otherwise the UI can select a sibling that exists but cannot route.
-    const joined = await Promise.all(targets.map((target) => queueAutoHubJoinsForTarget(joinCount, target)));
-    return joined.reduce((sum, count) => sum + count, 0);
+    let joined = 0;
+    for (const target of targets) {
+      joined += await queueAutoHubJoinsForTarget(joinCount, target);
+    }
+    return joined;
   }
 
   async function finish() {

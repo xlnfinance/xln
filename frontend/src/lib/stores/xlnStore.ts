@@ -5,6 +5,7 @@ import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
 import { toasts } from './toastStore';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
 import type {
   XLNModule,
@@ -482,6 +483,7 @@ const addRemoteReplicaFromCore = (
 const hydrateRemoteAccountDoc = (doc: StorageAccountDoc): AccountMachine => ({
   leftEntity: doc.leftEntity,
   rightEntity: doc.rightEntity,
+  watchSeed: doc.watchSeed,
   status: doc.status,
   mempool: doc.mempool,
   currentFrame: doc.currentFrame,
@@ -993,6 +995,12 @@ const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput):
   }
   if (!runtimeEnv.scenarioMode && typeof xln.startRuntimeLoop === 'function') {
     xln.startRuntimeLoop(runtimeEnv);
+  }
+  if (input.entityInputs?.length) {
+    const ready = await waitForOpenAccountCounterpartyProfiles(runtimeEnv, input.entityInputs, 5_000);
+    if (!ready) {
+      throw new Error('OPEN_ACCOUNT_COUNTERPARTY_PROFILE_NOT_READY: counterparty jurisdiction profile is not ready');
+    }
   }
   xln.enqueueRuntimeInput(runtimeEnv, input);
   await drainLocalRuntimeInput(xln, runtimeEnv);

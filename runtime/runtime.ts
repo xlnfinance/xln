@@ -2006,6 +2006,12 @@ export const restoreEnvFromCheckpointSnapshot = async (
       browserVMState: structuredClone(browserVMState) as Env['browserVMState'],
     });
   }
+  const snapshotGossip = normalizedSnapshot['gossip'] && typeof normalizedSnapshot['gossip'] === 'object'
+    ? normalizedSnapshot['gossip'] as { profiles?: unknown }
+    : null;
+  const snapshotGossipProfiles = Array.isArray(snapshotGossip?.profiles)
+    ? snapshotGossip.profiles as Profile[]
+    : [];
   env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
   env.frameLogs = [];
   env.networkInbox = [];
@@ -2018,6 +2024,9 @@ export const restoreEnvFromCheckpointSnapshot = async (
     assertPersistedContractConfigReady,
     setBrowserVMJurisdiction,
   });
+  for (const profile of snapshotGossipProfiles) {
+    env.gossip?.announce?.(profile);
+  }
 
   return env;
 };
