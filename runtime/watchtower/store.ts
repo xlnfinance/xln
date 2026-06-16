@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Level } from 'level';
 import { Wallet, ethers } from 'ethers';
-import { serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   TowerLastResortPayloadV1,
@@ -94,6 +94,26 @@ const computeStoredLookupBytes = (doc: StoredLookupDoc): number =>
   Buffer.byteLength(serializeTaggedJson(doc), 'utf8');
 
 const defaultDbPath = (): string => join(process.cwd(), 'data', 'watchtower');
+
+const assertEncryptedLastResortPayload = (payload: TowerLastResortPayloadV1 | null | undefined): void => {
+  const raw = String(payload?.encryptedRemedy || '').trim();
+  if (!raw) throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_MISSING');
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+  } catch {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+  }
+  if (
+    parsed['type'] !== 'tower_encrypted_payload' ||
+    parsed['version'] !== 1 ||
+    parsed['alg'] !== 'watch-seed-aes-256-gcm' ||
+    typeof parsed['iv'] !== 'string' ||
+    typeof parsed['ciphertext'] !== 'string'
+  ) {
+    throw new Error('TOWER_LAST_RESORT_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+  }
+};
 
 const buildReceiptMessage = (receipt: TowerReceiptV1): string =>
   `xln:watchtower:receipt:v1|${receipt.towerId}|${receipt.lookupKey}|${receipt.runtimeId}|${receipt.height}|${receipt.bundleHash}|${Math.max(0, Math.floor(Number(receipt.sequence || 0)))}|${Math.max(0, Math.floor(Number(receipt.slot || 0)))}|${String(receipt.towerMode || 'blind_backup')}|${Math.max(0, Math.floor(Number(receipt.storedBytes || 0)))}|${Math.max(0, Math.floor(Number(receipt.maxStoredBytes || 0)))}|${Math.max(0, Math.floor(Number(receipt.expiresAt || 0)))}`;
@@ -189,6 +209,9 @@ export const createWatchtowerStore = (options?: {
     }
     if (towerMode === 'delayed_last_resort' && !appointment.lastResortPayload) {
       throw new Error('TOWER_LAST_RESORT_PAYLOAD_MISSING');
+    }
+    if (towerMode === 'delayed_last_resort') {
+      assertEncryptedLastResortPayload(appointment.lastResortPayload);
     }
     const existing = normalizeStoredDoc(lookupKey, await readLookup(lookupKey));
     const runtimeId = String(appointment.bundle.runtimeId || '').trim().toLowerCase();

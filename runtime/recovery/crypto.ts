@@ -108,7 +108,7 @@ export const decryptTowerPayloadWithWatchSeed = async (
   if (!raw) throw new Error('TOWER_PAYLOAD_EMPTY');
   const parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
   if (parsed['type'] !== 'tower_encrypted_payload') {
-    return raw;
+    throw new Error('TOWER_PAYLOAD_NOT_ENCRYPTED');
   }
   if (parsed['version'] !== 1 || parsed['alg'] !== 'watch-seed-aes-256-gcm') {
     throw new Error('TOWER_PAYLOAD_ENCRYPTION_UNSUPPORTED');
