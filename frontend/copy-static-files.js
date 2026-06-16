@@ -11,6 +11,7 @@ import {
   statSync,
   writeFileSync,
 } from 'fs';
+import { execFileSync } from 'child_process';
 import { dirname, extname, join, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -29,6 +30,7 @@ import {
 
 const FRONTEND_DIR = dirname(fileURLToPath(import.meta.url));
 const fromFrontend = (...parts) => resolve(FRONTEND_DIR, ...parts);
+const REPO_ROOT = resolve(FRONTEND_DIR, '..');
 
 const files = [
   { src: '../jurisdictions/artifacts/contracts/Account.sol/Account.json', dest: 'static/contracts/Account.json' },
@@ -313,8 +315,26 @@ function copyDocsAndManifest() {
   console.log(`✅ Copied docs/ → static/docs-catalog/ (${manifest.counts.total} docs)`);
 }
 
+function generateLlmsStaticFiles() {
+  const generatorPath = resolve(REPO_ROOT, 'scripts/debug/gpt.cjs');
+  if (!existsSync(generatorPath)) {
+    throw new Error(`LLMS_CONTEXT_GENERATOR_MISSING:${generatorPath}`);
+  }
+
+  execFileSync(process.execPath, [generatorPath], {
+    cwd: REPO_ROOT,
+    stdio: 'inherit',
+  });
+
+  const llmsPath = fromFrontend('static/llms.txt');
+  if (!existsSync(llmsPath) || statSync(llmsPath).size === 0) {
+    throw new Error(`LLMS_CONTEXT_GENERATION_FAILED:${llmsPath}`);
+  }
+}
+
 copyContracts();
 copyScenarios();
 copyDocsAndManifest();
+generateLlmsStaticFiles();
 
 console.log('📦 Static files copied for build');
