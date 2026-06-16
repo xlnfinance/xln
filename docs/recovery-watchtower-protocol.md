@@ -44,8 +44,9 @@ Implemented in the current repo:
 - same-origin official tower endpoint under `/api/tower/*`;
 - standalone watchtower daemon with scheduled sweep;
 - blind encrypted backup uploads and restore;
-- encrypted delayed-last-resort remedies sent to the tower action public key;
-- HTTP rejection of plaintext last-resort remedies;
+- encrypted delayed-last-resort remedies that decrypt only after the account
+  `watchSeed` is revealed by `DisputeStarted`;
+- HTTP and store rejection of plaintext last-resort remedies;
 - public nginx exposure of `/api/watchtower/*` removed;
 - guarded `watchtowerCounterDispute(...)` path that rejects early tower action,
   wrong tower action, missing newer proof, and same-proof delegated finalize;
@@ -334,7 +335,7 @@ type TowerAppointmentV1 = {
   encryptedBundle: string;        // encrypted to BrainVault recovery key
   lastResortPayload?: {
     triggerHint: string;          // truncated accountId/proofBodyHash/J event hint
-    encryptedRemedy: string;      // encrypted to tower action key
+    encryptedRemedy: string;      // encrypted to account watchSeed
     actionKind: "counter_dispute_only";
     appointmentSequence: number;  // monotonically increasing per account+tower session
     proofNonce: number;           // exact proof nonce the remedy may submit
@@ -389,11 +390,19 @@ Blind backup:
 
 Last-resort disputer:
 
-- `lastResortPayload.encryptedRemedy` is readable by the tower action key;
-- remedy includes only the contract call data needed to update/finalize a dispute;
+- `lastResortPayload.encryptedRemedy` is unreadable until a J-layer
+  `DisputeStarted` event reveals the account `watchSeed`;
+- after reveal, the tower can decrypt the retained last-resort action payloads
+  for that account seed, but the sweep engine may submit only the latest
+  matching appointment;
+- remedy includes only the contract call data needed to counter-dispute with a
+  newer proof;
 - no user spend key is shared;
-- permission is revocable by rotating tower session and publishing a newer appointment set;
-- backup bundles and last-resort remedies are separate in both payload and lookup namespace: the `K` historical backup slots stay encrypted only to the user, while the tower-action payload is a single latest-only appointment under its own blinded lookup key.
+- permission is revocable by rotating tower session and publishing a newer
+  appointment set;
+- backup bundles and last-resort remedies are separate in both payload and
+  lookup namespace: the `K` historical backup slots stay encrypted only to the
+  user, while the action payload is under its own blinded lookup key.
 
 Delayed last-resort mode:
 
@@ -724,8 +733,9 @@ Current repo status:
 - standalone watchtower sweep engine exists in `runtime/watchtower/action.ts`;
 - standalone daemon schedules sweeps and exposes health without requiring public
   `/api/watchtower/*` access;
-- last-resort remedies are encrypted to the tower action key and plaintext
-  last-resort remedies are rejected by tower HTTP;
+- last-resort remedies are encrypted to the account `watchSeed`, decrypt only
+  after `DisputeStarted`, and plaintext last-resort remedies are rejected by
+  tower HTTP and store insertion;
 - browser/runtime upload paths exist for configured recovery towers;
 - PSR, recovery relay, and recovery coverage UI remain separate open work.
 
