@@ -1469,6 +1469,32 @@ async function expectSwapTokens(page: Page, fromTokenId: number, toTokenId: numb
   await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(toSymbol!, { timeout: 10_000 });
 }
 
+async function expectSwapAssetRoute(
+  page: Page,
+  fromTokenId: number,
+  sourceJurisdiction: string,
+  toTokenId: number,
+  targetJurisdiction: string,
+): Promise<void> {
+  await expectSwapTokens(page, fromTokenId, toTokenId);
+  const routeFlow = page.getByTestId('swap-route-flow').first();
+  await expect
+    .poll(async () => ({
+      mode: String(await routeFlow.getAttribute('data-route-mode') || ''),
+      sourceJurisdiction: String(await routeFlow.getAttribute('data-source-jurisdiction') || ''),
+      targetJurisdiction: String(await routeFlow.getAttribute('data-target-jurisdiction') || ''),
+    }), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'swap asset identity must include both token and jurisdiction',
+    })
+    .toMatchObject({
+      mode: 'cross',
+      sourceJurisdiction,
+      targetJurisdiction,
+    });
+}
+
 function visibleOrderbookRow(page: Page, side: 'ask' | 'bid') {
   return page
     .getByTestId('swap-orderbook')
@@ -2902,6 +2928,21 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         message: 'cross orderbook dropdown must switch the subscribed venue id',
       })
       .toMatch(/^cross:stack:31337:[^/]+:3\/stack:31338:[^/]+:3$/);
+    await expectSwapAssetRoute(page, USDT, 'Tron', USDT, 'Testnet');
+
+    await timedStep('cross_j_stable_quote.reverse_same_symbol_asset_identity', async () => {
+      await page.getByTestId('swap-flip-tokens').first().click();
+    });
+    await expectSwapAssetRoute(page, USDT, 'Testnet', USDT, 'Tron');
+    await expectCrossOrderbookReady(page, {
+      titlePattern: /USDT\s*\(Testnet\)\s*-\s*USDT\s*\(Tron\)/,
+      pairIdPattern: /^cross:stack:31337:[^/]+:3\/stack:31338:[^/]+:3$/,
+    });
+
+    await timedStep('cross_j_stable_quote.restore_original_cross_direction', async () => {
+      await page.getByTestId('swap-flip-tokens').first().click();
+    });
+    await expectSwapAssetRoute(page, USDT, 'Tron', USDT, 'Testnet');
 
     await timedStep('cross_j_stable_quote.configure_reverse_stable_source', async () => {
       await configureTokens(page, USDT, WETH);
