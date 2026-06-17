@@ -1037,7 +1037,9 @@
           for (const route of runtimeRoutes) {
             pushPath(route.path);
           }
-        } catch {}
+        } catch (error) {
+          console.warn('[PaymentPanel] runtime graph route lookup failed:', error);
+        }
 
         const localPaths = findPathsFromGraph(network.adjacency, sourceNorm, targetNorm, tokenId);
         for (const path of localPaths) pushPath(path);

@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { handleHtlcReveal } from '../account-tx/handlers/htlc-reveal';
-import { handleHtlcTimeout } from '../account-tx/handlers/htlc-timeout';
+import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
 import { handleSettleRelease } from '../account-tx/handlers/settle-hold';
 import { hashHtlcSecret } from '../htlc-utils';
 import { createDefaultDelta } from '../validation-utils';
@@ -37,8 +36,8 @@ describe('hold underflow guards', () => {
     expect(deltaB.rightHold).toBe(1n);
   });
 
-  test('htlc_reveal fails closed on hold underflow before mutating delta or deleting the lock', async () => {
-    const lockId = 'lock-reveal-underflow';
+  test('htlc_resolve(secret) fails closed on hold underflow before mutating delta or deleting the lock', async () => {
+    const lockId = 'lock-secret-underflow';
     const secret = '0x' + '11'.repeat(32);
     const delta = createDefaultDelta(7);
     delta.leftHold = 5n;
@@ -54,29 +53,30 @@ describe('hold underflow guards', () => {
           senderIsLeft: true,
           hashlock: hashHtlcSecret(secret),
           revealBeforeHeight: 100,
-          timelock: BigInt(Date.now() + 60_000),
+          timelock: 60_000n,
         },
       ]]),
     } as any;
 
-    const result = await handleHtlcReveal(
+    const result = await handleHtlcResolve(
       accountMachine,
       {
-        type: 'htlc_reveal',
-        data: { lockId, secret },
+        type: 'htlc_resolve',
+        data: { lockId, outcome: 'secret', secret },
       } as any,
+      true,
       1,
-      Date.now(),
+      1_000,
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('HTLC_REVEAL_HOLD_UNDERFLOW:left');
+    expect(result.error).toContain('HTLC_RESOLVE_HOLD_UNDERFLOW:left');
     expect(delta.leftHold).toBe(5n);
     expect(delta.offdelta).toBe(0n);
     expect(accountMachine.locks.has(lockId)).toBe(true);
   });
 
-  test('htlc_timeout fails closed without releasing the lock on hold underflow', async () => {
+  test('htlc_resolve(timeout error) fails closed without releasing the lock on hold underflow', async () => {
     const lockId = 'lock-timeout-underflow';
     const delta = createDefaultDelta(9);
     delta.leftHold = 5n;
@@ -96,18 +96,19 @@ describe('hold underflow guards', () => {
       ]]),
     } as any;
 
-    const result = await handleHtlcTimeout(
+    const result = await handleHtlcResolve(
       accountMachine,
       {
-        type: 'htlc_timeout',
-        data: { lockId },
+        type: 'htlc_resolve',
+        data: { lockId, outcome: 'error', reason: 'timeout' },
       } as any,
+      true,
       2,
-      Date.now(),
+      1_000,
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('HTLC_TIMEOUT_HOLD_UNDERFLOW:left');
+    expect(result.error).toContain('HTLC_RESOLVE_HOLD_UNDERFLOW:left');
     expect(delta.leftHold).toBe(5n);
     expect(accountMachine.locks.has(lockId)).toBe(true);
   });

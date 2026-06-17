@@ -57,8 +57,6 @@ type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
 };
 
-type RequestCollateralTx = Extract<AccountTx, { type: 'request_collateral' }>;
-
 const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
   typeof value === 'object' &&
   value !== null &&
@@ -122,19 +120,18 @@ export async function processAccountTx(
     case 'reserve_to_collateral':
       return handleReserveToCollateral(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'reserve_to_collateral' }>,
+        accountTx,
       );
 
     case 'request_collateral':
       {
-      const requestCollateralTx = accountTx as RequestCollateralTx;
       const result = handleRequestCollateral(
         accountMachine,
-        requestCollateralTx,
+        accountTx,
         byLeft,
         currentTimestamp,
       );
-      const tokenId = Number(requestCollateralTx.data.tokenId);
+      const tokenId = Number(accountTx.data.tokenId);
       if (result.success) {
         const requested = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
         const feeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
@@ -172,17 +169,17 @@ export async function processAccountTx(
     case 'set_rebalance_policy':
       return handleSetRebalancePolicy(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'set_rebalance_policy' }>,
+        accountTx,
         byLeft,
       );
 
     case 'reopen_disputed':
-      return handleReopenDisputed(accountMachine, accountTx as Extract<AccountTx, { type: 'reopen_disputed' }>);
+      return handleReopenDisputed(accountMachine, accountTx);
 
     case 'j_event_claim':
       return handleJEventClaim(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'j_event_claim' }>,
+        accountTx,
         byLeft,
         currentTimestamp,
         isValidation,
@@ -195,7 +192,7 @@ export async function processAccountTx(
     case 'htlc_lock':
       return await handleHtlcLock(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'htlc_lock' }>,
+        accountTx,
         byLeft,
         currentTimestamp,
         currentHeight,
@@ -205,7 +202,7 @@ export async function processAccountTx(
     case 'htlc_resolve': {
       const resolveResult = await handleHtlcResolve(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'htlc_resolve' }>,
+        accountTx,
         byLeft,
         currentHeight,
         currentTimestamp,
@@ -227,7 +224,7 @@ export async function processAccountTx(
     case 'pull_lock':
       return await handlePullLock(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'pull_lock' }>,
+        accountTx,
         byLeft,
         currentHeight,
         currentTimestamp,
@@ -236,7 +233,7 @@ export async function processAccountTx(
     case 'pull_resolve':
       return await handlePullResolve(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'pull_resolve' }>,
+        accountTx,
         byLeft,
         currentTimestamp,
       );
@@ -244,7 +241,7 @@ export async function processAccountTx(
     case 'pull_cancel':
       return await handlePullCancel(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'pull_cancel' }>,
+        accountTx,
         byLeft,
         currentTimestamp,
       );
@@ -252,7 +249,7 @@ export async function processAccountTx(
     case 'cross_pull_close':
       return await handleCrossPullClose(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'cross_pull_close' }>,
+        accountTx,
         byLeft,
         currentTimestamp,
       );
@@ -261,7 +258,7 @@ export async function processAccountTx(
     case 'swap_offer':
       return await handleSwapOffer(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'swap_offer' }>,
+        accountTx,
         byLeft,
         currentHeight,
         isValidation,
@@ -270,7 +267,7 @@ export async function processAccountTx(
     case 'swap_resolve':
       return await handleSwapResolve(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'swap_resolve' }>,
+        accountTx,
         byLeft,
         currentHeight,
         isValidation,
@@ -279,7 +276,7 @@ export async function processAccountTx(
     case 'cross_swap_fill_ack':
       return await handleCrossSwapFillAck(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
+        accountTx,
         byLeft,
         currentHeight,
       );
@@ -287,7 +284,7 @@ export async function processAccountTx(
     case 'swap_cancel_request':
       return await handleSwapCancelRequest(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'swap_cancel_request' }>,
+        accountTx,
         byLeft,
         currentHeight,
         isValidation,
@@ -295,10 +292,10 @@ export async function processAccountTx(
 
     // === SETTLEMENT HOLD HANDLERS ===
     case 'settle_hold':
-      return await handleSettleHold(accountMachine, accountTx as Extract<AccountTx, { type: 'settle_hold' }>);
+      return await handleSettleHold(accountMachine, accountTx);
 
     case 'settle_release':
-      return await handleSettleRelease(accountMachine, accountTx as Extract<AccountTx, { type: 'settle_release' }>);
+      return await handleSettleRelease(accountMachine, accountTx);
 
     case 'account_frame':
       // This should never be called - frames are handled by frame-level consensus
@@ -306,7 +303,10 @@ export async function processAccountTx(
       return { success: false, error: 'account_frame is not a transaction type', events: [] };
 
     default:
-      // Type-safe error handling for unknown AccountTx types
-      return { success: false, error: `Unknown accountTx type`, events: [] };
+      {
+        const unreachable: never = accountTx;
+        const unknown = unreachable as { type?: unknown };
+        return { success: false, error: `Unknown accountTx type: ${String(unknown.type)}`, events: [] };
+      }
   }
 }
