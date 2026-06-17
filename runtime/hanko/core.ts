@@ -429,8 +429,12 @@ export const recoverHankoEntities = async (
     const claim = hanko.claims[claimIndex];
     if (!claim) continue;
 
-    // Calculate voting power with flashloan assumptions
+    // Mirror EntityProvider.verifyHankoSignature exactly: nested claims may
+    // contribute to totalVotingPower, but EOA signer power must independently
+    // satisfy the threshold. Otherwise off-chain verification could accept a
+    // proof that cannot be enforced on-chain during a dispute.
     let totalVotingPower = 0;
+    let eoaVotingPower = 0;
     const totalEntities = hanko.placeholders.length + signatures.length + hanko.claims.length;
 
     for (let i = 0; i < claim.entityIndexes.length; i++) {
@@ -447,13 +451,14 @@ export const recoverHankoEntities = async (
         continue; // Placeholder — no power
       } else if (entityIndex < hanko.placeholders.length + signatures.length) {
         totalVotingPower += claim.weights[i] || 0;
+        eoaVotingPower += claim.weights[i] || 0;
       } else {
         // Entity claim — ASSUME YES (flashloan governance)
         totalVotingPower += claim.weights[i] || 0;
       }
     }
 
-    if (totalVotingPower >= claim.threshold) {
+    if (eoaVotingPower >= claim.threshold && totalVotingPower >= claim.threshold) {
       yesEntities.push(claim.entityId);
     }
   }

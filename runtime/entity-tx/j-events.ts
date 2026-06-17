@@ -493,7 +493,7 @@ async function applyFinalizedJEvent(
     const tokenSymbol = getTokenSymbol(tokenIdNum);
     const decimals = getTokenDecimals(tokenIdNum);
 
-    if (ownReserve) {
+    if (ownReserve !== undefined && ownReserve !== null) {
       const newReserve = BigInt(ownReserve as string | number | bigint);
       newState.reserves.set(tokenIdNum, newReserve);
     } else {

@@ -42,6 +42,7 @@
     "test:watchtower:smoke": "bun runtime/scripts/watchtower-smoke.ts",
     "test:rpc-settlement": "bun runtime/scripts/rpc-settlement-parity.ts",
     "soak:quick": "bun runtime/scripts/run-soak-gate.ts --profile=quick --iterations=2",
+    "soak:swap10m": "bun runtime/scripts/run-soak-gate.ts --profile=swap --minutes=10",
     "soak:release": "bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=240",
     "soak:capped-testnet": "bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=1440",
     "prod:health": "bun runtime/scripts/prod-health-smoke.ts",

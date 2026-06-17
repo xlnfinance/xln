@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
-type SoakProfile = 'quick' | 'release';
+type SoakProfile = 'quick' | 'release' | 'swap';
 
 type SoakCommand = {
   name: string;
@@ -19,6 +19,7 @@ type SoakArgs = {
   minutes: number | null;
   intervalMs: number;
   outputPath: string;
+  streamOutput: boolean;
   keepE2eRuns: number;
   minKeepE2eRuns: number;
   minFreeBytes: number;
@@ -32,12 +33,15 @@ type SoakResult = {
   durationMs: number;
   startedAt: string;
   finishedAt: string;
+  stdoutTail?: string;
+  stderrTail?: string;
 };
 
 const DEFAULT_OUTPUT = join('.logs', 'soak', `soak-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
 const DEFAULT_KEEP_E2E_RUNS = 64;
 const DEFAULT_MIN_KEEP_E2E_RUNS = 4;
 const DEFAULT_MIN_FREE_BYTES = 8 * 1024 ** 3;
+const OUTPUT_TAIL_CHARS = 16_384;
 
 const profileCommands: Record<SoakProfile, SoakCommand[]> = {
   quick: [
@@ -47,6 +51,11 @@ const profileCommands: Record<SoakProfile, SoakCommand[]> = {
   release: [
     { name: 'CI gate', command: 'bun run gate:ci', timeoutMs: 1_800_000 },
     { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },
+  ],
+  swap: [
+    { name: 'orderbook core TPS', command: 'bun run bench:swap:orderbook', timeoutMs: 120_000 },
+    { name: 'same/cross account TPS', command: 'bun run bench:swap:runtime', timeoutMs: 120_000 },
+    { name: 'swap scenario TPS', command: 'bun run bench:swap:scenarios', timeoutMs: 180_000 },
   ],
 };
 
@@ -72,14 +81,14 @@ const parseArgs = (): SoakArgs => {
   }
 
   const rawProfile = String(flags.get('--profile') || 'quick');
-  if (rawProfile !== 'quick' && rawProfile !== 'release') {
-    throw new Error(`Invalid --profile=${rawProfile}; expected quick or release`);
+  if (rawProfile !== 'quick' && rawProfile !== 'release' && rawProfile !== 'swap') {
+    throw new Error(`Invalid --profile=${rawProfile}; expected quick, release, or swap`);
   }
 
   const iterationsRaw = flags.get('--iterations');
   const minutesRaw = flags.get('--minutes');
   const iterations = iterationsRaw === undefined ? (rawProfile === 'quick' ? 2 : null) : Number(iterationsRaw);
-  const minutes = minutesRaw === undefined ? (rawProfile === 'release' ? 240 : null) : Number(minutesRaw);
+  const minutes = minutesRaw === undefined ? (rawProfile === 'release' ? 240 : rawProfile === 'swap' ? 10 : null) : Number(minutesRaw);
   if (iterations !== null && (!Number.isFinite(iterations) || iterations <= 0)) {
     throw new Error(`Invalid --iterations=${String(iterationsRaw)}`);
   }
@@ -89,6 +98,7 @@ const parseArgs = (): SoakArgs => {
 
   const intervalMs = Math.max(0, Math.floor(Number(flags.get('--interval-ms') || 0)));
   const outputPath = String(flags.get('--out') || DEFAULT_OUTPUT);
+  const streamOutput = flags.has('--stream-output');
   const keepE2eRunsRaw = Number(flags.get('--keep-e2e-runs') || process.env['SOAK_KEEP_E2E_RUNS'] || DEFAULT_KEEP_E2E_RUNS);
   const minKeepE2eRunsRaw = Number(flags.get('--min-keep-e2e-runs') || process.env['SOAK_MIN_KEEP_E2E_RUNS'] || DEFAULT_MIN_KEEP_E2E_RUNS);
   const minFreeBytesRaw = Number(
@@ -103,6 +113,7 @@ const parseArgs = (): SoakArgs => {
     minutes: minutes === null ? null : Math.floor(minutes),
     intervalMs,
     outputPath,
+    streamOutput,
     keepE2eRuns: Number.isFinite(keepE2eRunsRaw) && keepE2eRunsRaw >= 0
       ? Math.floor(keepE2eRunsRaw)
       : DEFAULT_KEEP_E2E_RUNS,
@@ -118,19 +129,35 @@ const parseArgs = (): SoakArgs => {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
-const runCommand = async (command: SoakCommand, iteration: number): Promise<SoakResult> => {
+const appendTail = (tail: string, chunk: string): string =>
+  `${tail}${chunk}`.slice(-OUTPUT_TAIL_CHARS);
+
+const prefixedOutput = (iteration: number, command: SoakCommand, chunk: string): string =>
+  `[soak:${iteration}:${command.name}] ${chunk}`;
+
+const runCommand = async (command: SoakCommand, iteration: number, streamOutput: boolean): Promise<SoakResult> => {
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   console.log(`[soak:${iteration}] ${command.name}`);
   console.log(`[soak:${iteration}] ${command.command}`);
+  let stdoutTail = '';
+  let stderrTail = '';
 
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', command.command], {
     cwd: process.cwd(),
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  proc.stdout.on('data', chunk => process.stdout.write(`[soak:${iteration}:${command.name}] ${chunk.toString()}`));
-  proc.stderr.on('data', chunk => process.stderr.write(`[soak:${iteration}:${command.name}] ${chunk.toString()}`));
+  proc.stdout.on('data', chunk => {
+    const text = chunk.toString();
+    stdoutTail = appendTail(stdoutTail, text);
+    if (streamOutput) process.stdout.write(prefixedOutput(iteration, command, text));
+  });
+  proc.stderr.on('data', chunk => {
+    const text = chunk.toString();
+    stderrTail = appendTail(stderrTail, text);
+    if (streamOutput) process.stderr.write(prefixedOutput(iteration, command, text));
+  });
 
   const timer = setTimeout(() => {
     proc.kill('SIGTERM');
@@ -145,15 +172,23 @@ const runCommand = async (command: SoakCommand, iteration: number): Promise<Soak
     proc.once('exit', resolve);
   });
   clearTimeout(timer);
+  const durationMs = Date.now() - startedAtMs;
+  if (code !== 0) {
+    if (stdoutTail) process.stdout.write(prefixedOutput(iteration, command, `stdout tail:\n${stdoutTail}`));
+    if (stderrTail) process.stderr.write(prefixedOutput(iteration, command, `stderr tail:\n${stderrTail}`));
+  }
+  console.log(`[soak:${iteration}] ${command.name} code=${code ?? 'signal'} durationMs=${durationMs}`);
 
   return {
     iteration,
     name: command.name,
     command: command.command,
     code,
-    durationMs: Date.now() - startedAtMs,
+    durationMs,
     startedAt,
     finishedAt: new Date().toISOString(),
+    ...(stdoutTail ? { stdoutTail } : {}),
+    ...(stderrTail ? { stderrTail } : {}),
   };
 };
 
@@ -248,6 +283,7 @@ const main = async (): Promise<void> => {
   console.log(`XLN soak gate: ${args.profile}`);
   console.log(`mode=${args.iterations !== null ? `${args.iterations} iteration(s)` : `${args.minutes} minute(s)`}`);
   console.log(`summary=${args.outputPath}`);
+  console.log(`streamOutput=${args.streamOutput}`);
   console.log(`keepE2eRuns=${args.keepE2eRuns}`);
   console.log(`minKeepE2eRuns=${args.minKeepE2eRuns}`);
   console.log(`minFreeBytes=${args.minFreeBytes}`);
@@ -262,7 +298,7 @@ const main = async (): Promise<void> => {
 
     for (const command of commands) {
       pruneSuccessfulE2eRuns(args.keepE2eRuns, args.minFreeBytes, args.minKeepE2eRuns);
-      const result = await runCommand(command, iteration);
+      const result = await runCommand(command, iteration, args.streamOutput);
       results.push(result);
       writeSummary(args.outputPath, {
         profile: args.profile,

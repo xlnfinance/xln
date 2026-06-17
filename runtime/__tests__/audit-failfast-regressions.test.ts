@@ -60,7 +60,8 @@ import { projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../proof-builder';
-import { signEntityHashes } from '../hanko/signing';
+import { buildRealHanko } from '../hanko/core';
+import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
 import { NobleCryptoProvider } from '../crypto-noble';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { resolveEntityProposerId } from '../state-helpers';
@@ -84,6 +85,30 @@ const makeSingleSignerConfigFor = (signerId: string): ConsensusConfig => ({
 const hex20 = (byte: string): string => `0x${byte.repeat(byte.length === 2 ? 20 : 40)}`;
 const hexBytes = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+const bufferFromHex = (value: string): Buffer => Buffer.from(value.replace(/^0x/, ''), 'hex');
+const hashHankoBoard = (threshold: number, boardEntityIds: string[], weights: number[]): string => {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  return ethers.keccak256(abiCoder.encode(
+    ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
+    [[threshold, boardEntityIds, weights, 0, 0, 0]],
+  )).toLowerCase();
+};
+const encodeHankoForTest = (hanko: Awaited<ReturnType<typeof buildRealHanko>>): string => {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  return abiCoder.encode(
+    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
+    [[
+      hanko.placeholders.map(hexBytes),
+      hexBytes(hanko.packedSignatures),
+      hanko.claims.map((claim) => [
+        hexBytes(claim.entityId),
+        claim.entityIndexes,
+        claim.weights,
+        claim.threshold,
+      ]),
+    ]],
+  );
+};
 const makeEmptyProofBody = () => ({
   watchSeed: `0x${'f1'.repeat(32)}`,
   offdeltas: [],
@@ -698,6 +723,41 @@ describe('audit fail-fast regressions', () => {
     expect(() => safeStringify({ bad: new Date(Number.NaN) })).toThrow('SAFE_STRINGIFY_FAILED');
   });
 
+  test('hanko verification requires the target claim to meet EOA-only threshold', async () => {
+    const hash = `0x${'ab'.repeat(32)}`;
+    const signerPrivateKey = deriveSignerKeySync('hanko-eoa-threshold-divergence', '1');
+    const signerAddress = deriveSignerAddressSync('hanko-eoa-threshold-divergence', '1');
+    const signerEntityId = ethers.zeroPadValue(signerAddress, 32).toLowerCase();
+    const nestedEntityId = hashHankoBoard(1, [signerEntityId], [1]);
+    const rootEntityId = hashHankoBoard(100, [signerEntityId, nestedEntityId], [40, 60]);
+    const hanko = await buildRealHanko(bufferFromHex(hash), {
+      noEntities: [],
+      privateKeys: [signerPrivateKey],
+      claims: [
+        {
+          entityId: bufferFromHex(nestedEntityId),
+          entityIndexes: [0],
+          weights: [1],
+          threshold: 1,
+        },
+        {
+          entityId: bufferFromHex(rootEntityId),
+          entityIndexes: [0, 1],
+          weights: [40, 60],
+          threshold: 100,
+        },
+      ],
+    });
+
+    const result = await verifyHankoForHash(encodeHankoForTest(hanko), hash, rootEntityId);
+
+    // Regression: the contract requires EOA signer weight to satisfy threshold
+    // independently. Nested assumed-yes weight can contribute to total power,
+    // but cannot make an unenforceable off-chain proof look valid.
+    expect(result.valid).toBe(false);
+    expect(result.entityId).toBeNull();
+  });
+
   test('j_event rejects non-validator signer ids before observation aggregation', async () => {
     const state = makeEntityState(`0x${'11'.repeat(32)}`);
     const env = createEmptyEnv('j-event-non-validator');
@@ -754,6 +814,47 @@ describe('audit fail-fast regressions', () => {
     const result = await handleJEvent(state, { ...common, ...signed }, env);
     expect(result.newState.jBlockChain.length).toBe(1);
     expect(result.newState.reserves.get(1)).toBe(100n);
+  });
+
+  test('AccountSettled applies explicit zero reserve instead of leaving stale local balance', async () => {
+    const seed = 'account-settled-zero-reserve';
+    const env = createEmptyEnv(seed);
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const counterpartyId = `0x${'42'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(signerId);
+    state.reserves.set(1, 777n);
+    const event: JurisdictionEvent = {
+      type: 'AccountSettled',
+      data: {
+        leftEntity: entityId,
+        rightEntity: counterpartyId,
+        tokenId: 1,
+        leftReserve: '0',
+        rightReserve: '12',
+        collateral: '0',
+        ondelta: '0',
+        nonce: 1,
+      },
+    };
+    const common = {
+      from: signerId,
+      observedAt: 1_000,
+      blockNumber: 4,
+      blockHash: `0x${'16'.repeat(32)}`,
+      transactionHash: `0x${'17'.repeat(32)}`,
+      event,
+    };
+    const signed = signJEventObservation(env, entityId, signerId, {
+      blockNumber: common.blockNumber,
+      blockHash: common.blockHash,
+      transactionHash: common.transactionHash,
+      events: [event],
+    });
+
+    const result = await handleJEvent(state, { ...common, ...signed }, env);
+
+    expect(result.newState.reserves.get(1)).toBe(0n);
   });
 
   test('j_event auth rejects are fatal inside applyEntityTx', async () => {
