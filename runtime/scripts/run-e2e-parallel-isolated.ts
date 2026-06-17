@@ -14,17 +14,19 @@
 
 import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import {
+  cpSync,
   createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deriveQaTestDescription, deriveQaTestHandle } from '../qa/report';
@@ -1226,6 +1228,47 @@ const fetchJsonWithTimeout = async (url: string, timeoutMs = 2000): Promise<unkn
   }
 };
 
+const prepareShardSvelteKitOutDir = (
+  sourceOutDir: string,
+  logsDir: string,
+  shard: number,
+  log: ReturnType<typeof createWriteStream>,
+): string => {
+  const frontendRoot = resolve(process.cwd(), 'frontend');
+  const sourceManifest = join(sourceOutDir, 'output', 'server', 'manifest.js');
+  if (!existsSync(sourceManifest)) {
+    throw new Error(`E2E_SVELTE_KIT_OUTPUT_MISSING:${sourceManifest}`);
+  }
+
+  const shardOutDir = resolve(frontendRoot, '.svelte-kit-e2e', basename(logsDir), `shard-${shard}`);
+  rmSync(shardOutDir, { recursive: true, force: true });
+  cpSync(sourceOutDir, shardOutDir, { recursive: true });
+
+  const outDirForFrontend = relative(frontendRoot, shardOutDir);
+  log.write(`[runner] shard-local SvelteKit output: ${outDirForFrontend}\n`);
+  return outDirForFrontend;
+};
+
+const prepareE2eSvelteKitSourceOutDir = (logsDir: string): string => {
+  const frontendRoot = resolve(process.cwd(), 'frontend');
+  const buildOutDir = resolve(frontendRoot, '.svelte-kit');
+  const buildManifest = join(buildOutDir, 'output', 'server', 'manifest.js');
+  if (!existsSync(buildManifest)) {
+    throw new Error(`E2E_SVELTE_KIT_OUTPUT_MISSING:${buildManifest}`);
+  }
+
+  const runOutRoot = resolve(frontendRoot, '.svelte-kit-e2e', basename(logsDir));
+  const sourceOutDir = join(runOutRoot, 'source');
+  rmSync(runOutRoot, { recursive: true, force: true });
+  cpSync(buildOutDir, sourceOutDir, { recursive: true });
+
+  const sourceManifest = join(sourceOutDir, 'output', 'server', 'manifest.js');
+  if (!existsSync(sourceManifest)) {
+    throw new Error(`E2E_SVELTE_KIT_SNAPSHOT_FAILED:${sourceManifest}`);
+  }
+  return sourceOutDir;
+};
+
 const captureShardFailureForensics = async (options: {
   logsDir: string;
   shard: number;
@@ -1291,6 +1334,7 @@ const runShard = async (
   task: RunTask,
   args: CliArgs,
   logsDir: string,
+  svelteKitSourceOutDir: string,
   resetLimiter: AsyncLimiter,
   signal?: AbortSignal,
 ): Promise<RunResult> => {
@@ -1474,6 +1518,7 @@ const runShard = async (
     }
 
     const shardViteCacheDir = join(logsDir, `vite-cache-shard-${shard}`);
+    const shardSvelteKitOutDir = prepareShardSvelteKitOutDir(svelteKitSourceOutDir, logsDir, shard, log);
     const viteStart = Date.now();
     // Spawn Vite directly. `bun run preview` starts an extra child node
     // process, so killing the Bun wrapper can leave `node .../vite preview`
@@ -1501,6 +1546,7 @@ const runShard = async (
           VITE_DEV_PORT: String(webPort),
           VITE_API_PROXY_TARGET: apiUrl,
           VITE_CACHE_DIR: shardViteCacheDir,
+          XLN_SVELTE_KIT_OUT_DIR: shardSvelteKitOutDir,
         }),
       },
     );
@@ -1751,6 +1797,8 @@ async function main(): Promise<void> {
     console.log(`Targets  : ${tasks.length} isolated test stack${tasks.length === 1 ? '' : 's'}`);
 
     const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
+    const svelteKitSourceOutDir = prepareE2eSvelteKitSourceOutDir(logsDir);
+    console.log(`SvelteKit: ${relative(resolve(process.cwd(), 'frontend'), svelteKitSourceOutDir)}`);
     const resetLimiter = createAsyncLimiter(Math.max(1, Math.min(args.maxResetConcurrency, maxConcurrency)));
     const results: Array<RunResult | undefined> = new Array(tasks.length);
     const claimed = new Array<boolean>(tasks.length).fill(false);
@@ -1781,7 +1829,14 @@ async function main(): Promise<void> {
         const claim = await claimTask();
         if (!claim) break;
         try {
-          const result = await runShard(claim.task, args, logsDir, resetLimiter, abortController.signal);
+          const result = await runShard(
+            claim.task,
+            args,
+            logsDir,
+            svelteKitSourceOutDir,
+            resetLimiter,
+            abortController.signal,
+          );
           results[claim.taskIndex] = result;
           if (result.status === 'failed' && args.maxFailures > 0) {
             failedCount += 1;
