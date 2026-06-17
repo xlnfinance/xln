@@ -5,6 +5,7 @@
   "scripts": {
     "clean-slate": "./scripts/dev/clean-slate.sh",
     "contracts:sync": "./scripts/sync-contract-artifacts.sh",
+    "contracts:tron:compile": "cd jurisdictions && bun scripts/compile-tron.cjs --all",
     "dev:setup": "./scripts/dev/clean-slate.sh && ./scripts/sync-contract-artifacts.sh",
     "dev": "bun run dev:setup && RUNTIME_VERBOSE_LOGS=0 DEV_VERBOSE=0 ./scripts/dev/run-dev.sh",
     "dev:debug": "bun run dev:setup && XLN_LOG_LEVEL=debug XLN_LOG_SCOPES=entity,account,account.handler,orderbook,p2p RUNTIME_VERBOSE_LOGS=0 DEV_VERBOSE=0 ./scripts/dev/run-dev.sh",
@@ -98,6 +99,9 @@
     "native:desktop:smoke": "bun scripts/native/build-platforms.ts desktop --smoke",
     "native:extension": "bun scripts/native/build-platforms.ts extension",
     "deploy": "./deploy.sh",
+    "deploy:chains:testnet": "cd jurisdictions && bun scripts/deploy-chain-matrix.cjs --profile=testnet --write-jurisdictions",
+    "deploy:chains:mainnet": "cd jurisdictions && bun scripts/deploy-chain-matrix.cjs --profile=mainnet --yes --write-jurisdictions",
+    "deploy:mainnets": "bun run deploy:chains:mainnet",
     "deploy:frontend": "./deploy.sh --frontend",
     "deploy:full": "./deploy.sh --frontend",
     "deploy:fresh": "./deploy.sh --fresh",
@@ -155,6 +159,8 @@
     "mocha": "^10.8.2",
     "playwright": "^1.60.0",
     "prettier": "^3.8.4",
+    "tronbox": "^4.8.0",
+    "tronweb": "^6.3.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },

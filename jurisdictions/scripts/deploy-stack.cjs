@@ -3,9 +3,12 @@
  * Usage: npx hardhat run scripts/deploy-stack.cjs --network localhost
  */
 const hre = require("hardhat");
+const { mkdirSync, writeFileSync } = require("node:fs");
+const { dirname } = require("node:path");
 
 async function main() {
   console.log("🚀 Deploying XLN Contract Stack...\n");
+  const network = await hre.ethers.provider.getNetwork();
 
   // 1. Deploy Account library
   console.log("1️⃣ Deploying Account library...");
@@ -43,16 +46,25 @@ async function main() {
   const deltaTransformerAddr = await deltaTransformer.getAddress();
   console.log(`   DeltaTransformer: ${deltaTransformerAddr}`);
 
-  console.log("\n✅ Stack deployed successfully!\n");
-  console.log("Update jurisdictions.json with:");
-  console.log(JSON.stringify({
+  const result = {
+    network: hre.network.name,
+    chainId: Number(network.chainId),
     contracts: {
       account: accountAddr,
       entityProvider: entityProviderAddr,
       depository: depositoryAddr,
       deltaTransformer: deltaTransformerAddr,
     }
-  }, null, 2));
+  };
+
+  if (process.env.XLN_DEPLOY_OUTPUT) {
+    mkdirSync(dirname(process.env.XLN_DEPLOY_OUTPUT), { recursive: true });
+    writeFileSync(process.env.XLN_DEPLOY_OUTPUT, JSON.stringify(result, null, 2));
+  }
+
+  console.log("\n✅ Stack deployed successfully!\n");
+  console.log("Update jurisdictions.json with:");
+  console.log(JSON.stringify(result, null, 2));
 }
 
 main()
