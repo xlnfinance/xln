@@ -4,6 +4,7 @@ node_modules
 # Hardhat files
 /cache
 /artifacts
+/build-tron
 
 # TypeChain files
 # typechain-types now tracked in git for consistency

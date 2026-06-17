@@ -7,6 +7,9 @@
   },
   "scripts": {
     "compile": "bunx hardhat compile",
+    "compile:tron": "bun scripts/compile-tron.cjs --all",
+    "deploy:chains:testnet": "bun scripts/deploy-chain-matrix.cjs --profile=testnet --write-jurisdictions",
+    "deploy:chains:mainnet": "bun scripts/deploy-chain-matrix.cjs --profile=mainnet --yes --write-jurisdictions",
     "test": "bunx hardhat test test/*.ts test/*.cjs",
     "test:default": "bunx hardhat test",
     "deploy": "bunx hardhat ignition deploy ignition/modules/Depository.cjs --network ethereum",
