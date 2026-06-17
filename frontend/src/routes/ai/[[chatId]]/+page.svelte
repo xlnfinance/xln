@@ -653,7 +653,9 @@ Help the user understand this entity's state, suggest actions, or answer questio
                 if (parsed.content) {
                   streamingContent += parsed.content;
                 }
-              } catch {}
+              } catch (error) {
+                console.warn('Failed to parse streaming response chunk:', error, data.slice(0, 160));
+              }
             }
           }
 

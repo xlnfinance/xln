@@ -75,11 +75,6 @@ export async function handleHtlcResolve(
       return { success: false, error: `Hash mismatch: expected ${lock.hashlock.slice(0,8)}..., got ${computedHash.slice(0,8)}...`, events };
     }
 
-    // Apply delta (left sends → decrease, right sends → increase)
-    const canonicalDelta = lock.senderIsLeft ? -lock.amount : lock.amount;
-    delta.offdelta += canonicalDelta;
-
-    events.push(`🔓 HTLC resolved (secret): ${lock.amount} token ${lock.tokenId}`);
   } else {
     // === ERROR PATH: Release hold without paying the beneficiary ===
     //
@@ -111,8 +106,6 @@ export async function handleHtlcResolve(
       }
     }
 
-    htlcResolveLog.debug('resolve.error_outcome', { lock: shortHash(lockId), reason: reason || 'unknown' });
-    events.push(`❌ HTLC resolved (error): ${lock.amount} token ${lock.tokenId} returned — ${reason || 'unknown'}`);
   }
 
   // 3. Release hold (common to both paths)
@@ -138,7 +131,18 @@ export async function handleHtlcResolve(
     delta.rightHold = currentHold - lock.amount;
   }
 
-  // 4. Remove lock
+  // 4. Apply outcome mutation after the hold guard. Failed resolves must be
+  // no-ops on account balances and locks.
+  if (outcome === 'secret') {
+    const canonicalDelta = lock.senderIsLeft ? -lock.amount : lock.amount;
+    delta.offdelta += canonicalDelta;
+    events.push(`🔓 HTLC resolved (secret): ${lock.amount} token ${lock.tokenId}`);
+  } else {
+    htlcResolveLog.debug('resolve.error_outcome', { lock: shortHash(lockId), reason: reason || 'unknown' });
+    events.push(`❌ HTLC resolved (error): ${lock.amount} token ${lock.tokenId} returned — ${reason || 'unknown'}`);
+  }
+
+  // 5. Remove lock
   accountMachine.locks.delete(lockId);
 
   const finalRecipient = typeof lock.envelope === 'object'

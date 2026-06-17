@@ -166,6 +166,9 @@
     warn: (...args: unknown[]) => console.warn('[Graph3D]', ...args),
     error: (...args: unknown[]) => console.error('[Graph3D]', ...args)
   };
+  const reportGraphInitError = (error: unknown) => {
+    debug.error('Graph initialization failed:', error);
+  };
   const getThemeColors = (theme: string) => ({
     background: 0x222222, // Lighter gray for debugging
     entity: 0x007acc,
@@ -1183,12 +1186,12 @@
   }
 
   $: if (initEnabled && !graphInitialized) {
-    initAndSetup().catch(() => {});
+    initAndSetup().catch(reportGraphInitError);
   }
 
   onMount(() => {
     if (initEnabled) {
-      initAndSetup().catch(() => {});
+      initAndSetup().catch(reportGraphInitError);
     }
 
     // Listen for VR toggle events from ArchitectPanel
