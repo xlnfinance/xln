@@ -622,11 +622,12 @@ export async function verifyHankoForHash(
       // Reconstruct board from claim's entityIndexes + recovered signatures + placeholders
       // For gossip/first-contact: sufficient because real security is at consensus layer
       const numPlaceholders = hanko.placeholders.length;
+      const numSignatures = eoaSignatures.length;
       let signerWeightSum = 0;
       for (let i = 0; i < matchingClaim.entityIndexes.length; i++) {
         const memberIndex = matchingClaim.entityIndexes[i];
         if (memberIndex === undefined) continue;
-        if (memberIndex >= numPlaceholders) {
+        if (memberIndex >= numPlaceholders && memberIndex < numPlaceholders + numSignatures) {
           // This slot maps to a signer (not a placeholder) — they actually signed
           signerWeightSum += matchingClaim.weights[i] ?? 0;
         }
@@ -640,8 +641,14 @@ export async function verifyHankoForHash(
       }
     }
 
-    // Valid if at least one yes entity AND entityId matches AND has valid EOA sigs from board (already verified)
-    if (recovered.yesEntities.length > 0) {
+    // Valid only if the target claim itself passed Hanko recovery. A nested
+    // yes-entity is not enough: otherwise an attacker can include one valid
+    // child claim and a target claim that only reaches threshold via nested
+    // assumed-yes weight, which the contract rejects.
+    const targetRecovered = recovered.yesEntities.some((entity) =>
+      toEntityIdHex(entity).toLowerCase() === targetEntity.toLowerCase(),
+    );
+    if (targetRecovered) {
       // Hanko valid
       return { valid: true, entityId: targetEntity };
     }

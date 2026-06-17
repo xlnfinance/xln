@@ -303,6 +303,9 @@ export const runSwapRuntimeBenchmark = async (cli: Cli): Promise<RuntimeSwapBenc
   const totalSwaps = cli.swaps * 2;
   const elapsedSeconds = Math.max(elapsedMs / 1000, 0.001);
   const tps = totalSwaps / elapsedSeconds;
+  const sameTps = cli.swaps / Math.max(sameElapsedMs / 1000, 0.001);
+  const crossTps = cli.swaps / Math.max(crossElapsedMs / 1000, 0.001);
+  const passed = tps >= cli.minTps && sameTps >= cli.minTps && crossTps >= cli.minTps;
   const output: RuntimeSwapBenchmarkResult = {
     benchmark: 'swap-account-runtime',
     sameSwaps: cli.swaps,
@@ -310,16 +313,21 @@ export const runSwapRuntimeBenchmark = async (cli: Cli): Promise<RuntimeSwapBenc
     elapsedMs: Number(elapsedMs.toFixed(3)),
     tps: Number(tps.toFixed(2)),
     minTps: cli.minTps,
-    passed: tps >= cli.minTps,
-    sameTps: Number((cli.swaps / Math.max(sameElapsedMs / 1000, 0.001)).toFixed(2)),
-    crossTps: Number((cli.swaps / Math.max(crossElapsedMs / 1000, 0.001)).toFixed(2)),
+    passed,
+    sameTps: Number(sameTps.toFixed(2)),
+    crossTps: Number(crossTps.toFixed(2)),
     sameOffdelta: String(same.deltas.get(2)?.offdelta ?? 0n),
     crossFilledSource: String([...(cross.swapOrderHistory ?? new Map()).values()].reduce(
       (sum, entry) => sum + BigInt(entry.resolves.at(-1)?.executionGiveAmount ?? 0n),
       0n,
     )),
   };
-  if (!output.passed) throw new Error(`SWAP_RUNTIME_TPS_BELOW_TARGET:${tps.toFixed(2)}<${cli.minTps}`);
+  if (!output.passed) {
+    throw new Error(
+      `SWAP_RUNTIME_TPS_BELOW_TARGET:` +
+      `aggregate=${tps.toFixed(2)} same=${sameTps.toFixed(2)} cross=${crossTps.toFixed(2)}<${cli.minTps}`,
+    );
+  }
   return output;
 };
 

@@ -177,6 +177,7 @@ export const J_BATCH_CONTRACT_LIMITS = {
   maxDisputeStarts: 8,
   maxDisputeFinalizations: 8,
   maxReserveToCollateralPairs: 64,
+  maxSecretReveals: 32,
 } as const;
 
 const requireBatchRoom = (
@@ -221,6 +222,9 @@ export function getJBatchContractLimitIssue(batch: JBatch): string | null {
   }
   if (batch.disputeFinalizations.length > J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations) {
     return `disputeFinalizations ${batch.disputeFinalizations.length}/${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`;
+  }
+  if (batch.revealSecrets.length > J_BATCH_CONTRACT_LIMITS.maxSecretReveals) {
+    return `revealSecrets ${batch.revealSecrets.length}/${J_BATCH_CONTRACT_LIMITS.maxSecretReveals}`;
   }
   for (const [index, op] of batch.reserveToCollateral.entries()) {
     if (op.pairs.length > J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs) {
@@ -1087,6 +1091,12 @@ export function batchAddRevealSecret(
     return;
   }
   requireBatchRoom(jBatchState.batch, 'revealSecret');
+  requireArrayRoom(
+    'revealSecrets',
+    jBatchState.batch.revealSecrets.length,
+    1,
+    J_BATCH_CONTRACT_LIMITS.maxSecretReveals,
+  );
   jBatchState.batch.revealSecrets.push({ transformer, secret });
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
   console.log(`📦 jBatch: Added secret reveal ${secret.slice(0, 10)}... via ${transformer.slice(0, 10)}...`);
