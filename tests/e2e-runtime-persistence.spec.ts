@@ -18,7 +18,7 @@ import {
   switchToRuntimeId,
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
-import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, waitForNamedHubs } from './utils/e2e-baseline';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -48,17 +48,11 @@ async function getActiveApiBase(page: Page): Promise<string> {
   return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
 }
 
-async function discoverHub(page: Page) {
-  const hubId = await page.evaluate(async () => {
-    const env = (window as any).isolatedEnv;
-    const p2p = env?.runtimeState?.p2p;
-    if (p2p?.refreshGossip) await p2p.refreshGossip();
-    await new Promise((r) => setTimeout(r, 600));
-    const hubs = env?.gossip?.getHubs?.() ?? [];
-    return hubs[0]?.entityId || null;
-  });
-  expect(hubId, 'No hub discovered').toBeTruthy();
-  return hubId as string;
+async function discoverHub(page: Page): Promise<string> {
+  const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+  const hubId = hubs.h1;
+  expect(hubId, 'No primary H1 hub discovered').toBeTruthy();
+  return hubId;
 }
 
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
