@@ -234,6 +234,7 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => 
   return {
     leftEntity,
     rightEntity,
+    watchSeed: `0x${'a2'.repeat(32)}`,
     status: 'active',
     mempool: [],
     currentFrame: {

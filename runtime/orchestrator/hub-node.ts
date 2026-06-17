@@ -927,7 +927,19 @@ const requireJAdapterForDebugReserve = (
     }
     return adapter;
   }
-  return requireJAdapterForEntity(env, entityId, 'DEBUG_RESERVE');
+  let entityAdapter: JAdapter | null = null;
+  try {
+    entityAdapter = getEntityJAdapter(env, entityId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;
+  }
+  if (entityAdapter) return entityAdapter;
+  const activeAdapter = getActiveJAdapter(env);
+  if (!activeAdapter) {
+    throw new Error(`DEBUG_RESERVE_JADAPTER_MISSING: entity=${entityId}`);
+  }
+  return activeAdapter;
 };
 
 const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {

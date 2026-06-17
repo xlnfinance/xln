@@ -65,6 +65,9 @@
       tab={localTab}
       {initialAction}
       env={activeEnv}
+      liveEnv={activeEnv}
+      liveEnvResolver={() => isolatedEnv ? ($isolatedEnv ?? null) : null}
+      liveEnvStore={isolatedEnv ?? null}
       history={activeHistory}
       timeIndex={activeTimeIndex}
       isLive={activeIsLive}

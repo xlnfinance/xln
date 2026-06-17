@@ -26,6 +26,8 @@ import {
   deriveCrossJurisdictionPrivateSeed,
   deriveCrossJurisdictionRouteHash,
   isCrossJurisdictionRouteTransitionAllowed,
+  projectCrossJurisdictionQuantizedClaim,
+  validateCrossJurisdictionQuantization,
   withCanonicalCrossJurisdictionRouteHash,
   cloneCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
@@ -976,6 +978,94 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.status).toBe('settled');
     expect(result.newState.messages.some(message => message.includes('terminal state settled'))).toBe(true);
+  });
+
+  test('route hash binds domain, settlement policy, and time policy', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('6a');
+    const sourceHub = entity('6b');
+    const targetHub = entity('6c');
+    const targetUser = entity('6d');
+    const route = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'route-policy-hash-test',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 900_000n },
+      settlementPolicy: { roundingMode: 'uint16_ceil', maxSourceDust: 16n, maxTargetDust: 14n },
+      priceTicks: 2500n,
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    });
+    const { routeHash: _routeHash, ...withoutHash } = route;
+
+    expect(withCanonicalCrossJurisdictionRouteHash({
+      ...withoutHash,
+      domain: { ...route.domain!, sourceAssetRef: `${jref(eth)}:external:1` },
+    }).routeHash).not.toBe(route.routeHash);
+    expect(withCanonicalCrossJurisdictionRouteHash({
+      ...withoutHash,
+      settlementPolicy: { ...route.settlementPolicy!, maxSourceDust: route.settlementPolicy!.maxSourceDust + 1n },
+    }).routeHash).not.toBe(route.routeHash);
+    expect(withCanonicalCrossJurisdictionRouteHash({
+      ...withoutHash,
+      timePolicy: { ...route.timePolicy!, runtimeExpiresAtMs: route.timePolicy!.runtimeExpiresAtMs + 1 },
+    }).routeHash).not.toBe(route.routeHash);
+  });
+
+  test('cross-j rejects non-collateralized risk modes until an executable policy exists', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    expect(() => withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'route-risk-mode-test',
+      makerEntityId: entity('6e'),
+      hubEntityId: entity('6f'),
+      source: { jurisdiction: jref(eth), entityId: entity('70'), counterpartyEntityId: entity('71'), tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: entity('72'), counterpartyEntityId: entity('73'), tokenId: 2, amount: 900n },
+      riskMode: 'credit_line',
+      status: 'intent',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    })).toThrow('CROSS_J_RISK_MODE_UNSUPPORTED');
+  });
+
+  test('cross-j quantization policy rejects fills whose uint16 projection exceeds the dust budget', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const fillNumerator = 1n;
+    const fillDenominator = 7n;
+    const cumulativeFillRatio = 9_363;
+    const route = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'route-quantization-policy-test',
+      makerEntityId: entity('74'),
+      hubEntityId: entity('75'),
+      source: { jurisdiction: jref(eth), entityId: entity('76'), counterpartyEntityId: entity('77'), tokenId: 1, amount: 1_000_000n },
+      target: { jurisdiction: jref(base), entityId: entity('78'), counterpartyEntityId: entity('79'), tokenId: 2, amount: 1_000_000n },
+      settlementPolicy: { roundingMode: 'uint16_ceil', maxSourceDust: 0n, maxTargetDust: 0n },
+      status: 'intent',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    });
+    const projected = projectCrossJurisdictionQuantizedClaim(route.source.amount, {
+      cumulativeFillRatio,
+      fillNumerator,
+      fillDenominator,
+    });
+
+    expect(projected.exactClaim).toBe(142_857n);
+    expect(projected.quantizedClaim).toBeGreaterThan(projected.exactClaim);
+    expect(validateCrossJurisdictionQuantization(route, {
+      cumulativeFillRatio,
+      fillNumerator,
+      fillDenominator,
+      cumulativeSourceAmount: projected.exactClaim,
+      cumulativeTargetAmount: projected.exactClaim,
+    })).toContain('source quantization dust');
   });
 
   test('cross-j register enforces participant and explicit lifecycle transitions', async () => {

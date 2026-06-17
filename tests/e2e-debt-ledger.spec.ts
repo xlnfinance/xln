@@ -1108,7 +1108,40 @@ async function openReserveToExternalMove(
 async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<void> {
   await openAssetsTab(page);
   const debtPanel = page.getByTestId('debt-panel').first();
-  await expect(debtPanel).toBeVisible({ timeout: 20_000 });
+  await expect(debtPanel).toBeVisible({ timeout: 20_000 }).catch(async (error) => {
+    const diagnostics = await page.evaluate(() => {
+      const env = (window as any).isolatedEnv;
+      const summarizeLedger = (ledger: any) => {
+        if (!ledger?.entries) return [];
+        return Array.from(ledger.entries()).map(([tokenId, bucket]: [unknown, any]) => ({
+          tokenId: Number(tokenId),
+          size: Number(bucket?.size || 0),
+          rows: bucket?.values
+            ? Array.from(bucket.values()).map((entry: any) => ({
+                direction: String(entry?.direction || ''),
+                status: String(entry?.status || ''),
+                remainingAmount: String(entry?.remainingAmount || '0'),
+                counterparty: String(entry?.counterparty || ''),
+              }))
+            : [],
+        }));
+      };
+      const replicas = env?.eReplicas?.entries
+        ? Array.from(env.eReplicas.entries()).map(([key, replica]: [unknown, any]) => ({
+            key: String(key || ''),
+            entityId: String(replica?.state?.entityId || ''),
+            out: summarizeLedger(replica?.state?.outDebtsByToken),
+            in: summarizeLedger(replica?.state?.inDebtsByToken),
+          }))
+        : [];
+      return {
+        hasDebtPanel: Boolean(document.querySelector('[data-testid="debt-panel"]')),
+        activeEntityText: String(document.querySelector('main')?.textContent || '').replace(/\s+/g, ' ').slice(0, 500),
+        replicas,
+      };
+    });
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nDebt UI diagnostics: ${JSON.stringify(diagnostics)}`);
+  });
   if (!(await debtPanel.evaluate((node) => node.hasAttribute('open')))) {
     await debtPanel.locator('summary').first().click();
   }

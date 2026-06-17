@@ -1,3 +1,4 @@
+import { deriveAccountWatchSeed } from '../../account-watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../account-crypto';
 import { buildCrossJurisdictionPullBinding } from '../../cross-jurisdiction';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../../cross-jurisdiction-orderbook';
@@ -121,6 +122,12 @@ export const makeAccount = (selfId: string, counterpartyId: string): AccountMach
     rightJObservations: [],
     jEventChain: [],
     lastFinalizedJHeight: 0,
+    watchSeed: deriveAccountWatchSeed({
+      runtimeSeed: 'cross-j-test-helper',
+      entityId: leftEntity,
+      counterpartyId: rightEntity,
+      timestamp: 0,
+    }),
     proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },

@@ -636,8 +636,11 @@ async function readOnchainReserveBalanceRaw(page: Page, entityId: string, symbol
   const response = await page.request.get(
     `${API_BASE_URL}/api/debug/reserve?entityId=${encodeURIComponent(entityId)}&tokenId=${encodeURIComponent(String(token.tokenId))}`,
   );
-  expect(response.ok(), `debug reserve request must succeed for ${symbol}`).toBe(true);
-  const body = await response.json().catch(() => ({})) as { reserve?: string };
+  const body = await response.json().catch(() => ({})) as { error?: string; reserve?: string };
+  expect(
+    response.ok(),
+    `debug reserve request must succeed for ${symbol}: status=${response.status()} body=${JSON.stringify(body)}`,
+  ).toBe(true);
   expect(typeof body.reserve === 'string', `debug reserve body must include reserve for ${symbol}`).toBe(true);
   return BigInt(body.reserve || '0');
 }

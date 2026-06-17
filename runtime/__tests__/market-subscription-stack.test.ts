@@ -19,7 +19,7 @@ const makeSocket = (ip = '127.0.0.1'): FakeSocket => ({
 });
 
 const makeSnapshot = (hubEntityId: string, pairId: string, depth: number): MarketSnapshotPayload => ({
-  format: 'exact-price-levels-v2',
+  format: 'exact-price-levels',
   hubEntityId,
   pairId,
   depth,

@@ -3,6 +3,7 @@ import { x25519 } from '@noble/curves/ed25519.js';
 
 import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
+import { deriveAccountWatchSeed } from '../account-watch-seed';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
@@ -83,6 +84,12 @@ const makeSingleSignerConfigFor = (signerId: string): ConsensusConfig => ({
 const hex20 = (byte: string): string => `0x${byte.repeat(byte.length === 2 ? 20 : 40)}`;
 const hexBytes = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+const makeEmptyProofBody = () => ({
+  watchSeed: `0x${'f1'.repeat(32)}`,
+  offdeltas: [],
+  tokenIds: [],
+  transformers: [],
+});
 
 const makeProposalAccount = (
   mempool: AccountTx[],
@@ -122,6 +129,12 @@ const makeProposalAccount = (
     rightJObservations: [],
     jEventChain: [],
     lastFinalizedJHeight: 0,
+    watchSeed: deriveAccountWatchSeed({
+      runtimeSeed: 'audit-failfast-test-helper',
+      entityId: leftEntity,
+      counterpartyId: rightEntity,
+      timestamp: 0,
+    }),
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
     onChainSettlementNonce: 0,
   } as AccountMachine;
@@ -1845,11 +1858,7 @@ describe('audit fail-fast regressions', () => {
               initialNonce: 3,
               finalNonce: 3,
               initialProofbodyHash: `0x${'11'.repeat(32)}`,
-              finalProofbody: {
-                offdeltas: [],
-                tokenIds: [],
-                transformers: [],
-              },
+              finalProofbody: makeEmptyProofBody(),
               leftArguments: '0x',
               rightArguments: '0x',
               starterInitialArguments: '0x',
@@ -1914,11 +1923,7 @@ describe('audit fail-fast regressions', () => {
               initialNonce: 5,
               finalNonce: 5,
               initialProofbodyHash: `0x${'44'.repeat(32)}`,
-              finalProofbody: {
-                offdeltas: [],
-                tokenIds: [],
-                transformers: [],
-              },
+              finalProofbody: makeEmptyProofBody(),
               leftArguments: '0x',
               rightArguments: '0x',
               starterInitialArguments: '0x',
@@ -3085,7 +3090,7 @@ describe('audit fail-fast regressions', () => {
           initialNonce: 7,
           finalNonce: 7,
           initialProofbodyHash: `0x${'56'.repeat(32)}`,
-          finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+          finalProofbody: makeEmptyProofBody(),
           leftArguments: '0x',
               rightArguments: '0x',
               starterInitialArguments: '0x',
@@ -3109,7 +3114,7 @@ describe('audit fail-fast regressions', () => {
             initialNonce: 7,
             finalNonce: 7,
             initialProofbodyHash: `0x${'56'.repeat(32)}`,
-            finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+            finalProofbody: makeEmptyProofBody(),
             leftArguments: '0x',
               rightArguments: '0x',
               starterInitialArguments: '0x',
@@ -3437,7 +3442,7 @@ describe('audit fail-fast regressions', () => {
             initialNonce: 3,
             finalNonce: 3,
             initialProofbodyHash: `0x${'11'.repeat(32)}`,
-            finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+            finalProofbody: makeEmptyProofBody(),
             leftArguments: '0x',
               rightArguments: '0x',
               starterInitialArguments: '0x',
@@ -3565,7 +3570,7 @@ describe('audit fail-fast regressions', () => {
             initialNonce: 7,
             finalNonce: 7,
             initialProofbodyHash: `0x${'94'.repeat(32)}`,
-            finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+            finalProofbody: makeEmptyProofBody(),
             leftArguments: '0x',
               rightArguments: '0x',
               starterInitialArguments: '0x',
@@ -4334,7 +4339,9 @@ describe('audit fail-fast regressions', () => {
     const expiredEnv = createEmptyEnv('cross-fill-notice-pending-source-offer-expired');
     expiredEnv.timestamp = env.timestamp + CROSS_J_PENDING_FILL_ACK_TTL_MS + 1;
     expiredState.timestamp = expiredEnv.timestamp;
-    await expect(applyEntityFrame(expiredEnv, expiredState, [])).rejects.toThrow(/CROSS_J_FILL_ACK_EXPIRED_FATAL/);
+    const preserved = await applyEntityFrame(expiredEnv, expiredState, []);
+    const preservedAck = preserved.newState.pendingCrossJurisdictionFillAcks?.values().next().value;
+    expect(preservedAck?.ttlExpiredAt).toBe(expiredEnv.timestamp);
 
     const stateWithOffer = first.newState;
     const sourceAccount = stateWithOffer.accounts.get(sourceUser)!;

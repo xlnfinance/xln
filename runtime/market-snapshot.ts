@@ -11,7 +11,7 @@ export type MarketSideLevel = {
 };
 
 export type MarketSnapshotPayload = {
-  format: 'exact-price-levels-v2';
+  format: 'exact-price-levels';
   hubEntityId: string;
   pairId: string;
   depth: number;
@@ -112,7 +112,7 @@ export const buildMarketSnapshotForReplica = (
     : null;
   const hubUpdatedAt = Number(replica?.state?.timestamp || 0);
   return {
-    format: 'exact-price-levels-v2',
+    format: 'exact-price-levels',
     hubEntityId,
     pairId,
     depth: Math.max(1, Math.min(depth, RPC_MARKET_MAX_DEPTH)),

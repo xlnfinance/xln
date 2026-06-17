@@ -21,7 +21,6 @@ import {
   buildCrossJurisdictionPendingFillFromAck,
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
 } from '../../../cross-jurisdiction-fill-ack';
-import { safeStringify } from '../../../serialization-utils';
 import {
   findQueuedCrossSwapAckForEntityState,
   hasQueuedCrossSwapAckForEntityState,
@@ -136,7 +135,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     const now = Number(hubState.timestamp || 0);
     const updatedAt = Number(pendingFill.updatedAt || admission.updatedAt || 0);
     const ageMs = Math.max(0, now - updatedAt);
-    if (ageMs > CROSS_J_PENDING_FILL_ACK_TTL_MS) {
+    if (ageMs > CROSS_J_PENDING_FILL_ACK_TTL_MS && pendingFill.ttlExpiredAt === undefined) {
       const payload = {
         entityId: hubState.entityId,
         accountId,
@@ -154,8 +153,9 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
           forbiddenAction: 'Do not clear pendingFill silently; the committed book mutation and exact fill payload must remain available for repair.',
         },
       };
-      orderbookCrossLog.error('pending_fill_ack_expired_fatal', payload);
-      throw new Error(`ORDERBOOK_CROSS_J_PENDING_FILL_ACK_EXPIRED_FATAL: ${safeStringify(payload)}`);
+      pendingFill.ttlExpiredAt = now;
+      admission.updatedAt = now || admission.updatedAt;
+      orderbookCrossLog.warn('pending_fill_ack_ttl_expired_preserved', payload);
     }
     return true;
   };

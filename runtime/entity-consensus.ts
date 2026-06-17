@@ -331,7 +331,7 @@ const drainPendingCrossJurisdictionFillAcks = (
   let drained = 0;
   for (const [key, pendingAck] of Array.from(pending.entries()).sort(([a], [b]) => compareStableText(a, b))) {
     const ageMs = Math.max(0, now - Number(pendingAck.storedAt || 0));
-    if (ageMs > CROSS_J_PENDING_FILL_ACK_TTL_MS) {
+    if (ageMs > CROSS_J_PENDING_FILL_ACK_TTL_MS && !pendingAck.ttlExpiredAt) {
       const payload = {
         entityId: currentEntityState.entityId,
         accountId: pendingAck.accountId,
@@ -368,8 +368,9 @@ const drainPendingCrossJurisdictionFillAcks = (
           forbiddenAction: 'Do not delete this pending ack silently; it is evidence for a possible cross-j state divergence.',
         },
       };
-      entityLog.error('crossj.fill_ack_expired_fatal', payload);
-      throw new Error(`CROSS_J_FILL_ACK_EXPIRED_FATAL: ${safeStringify(payload)}`);
+      pendingAck.ttlExpiredAt = now;
+      markStorageEntityDirty(env, currentEntityState.entityId);
+      entityLog.warn('crossj.fill_ack_ttl_expired_preserved', payload);
     }
     const account = currentEntityState.accounts.get(pendingAck.accountId);
     if (!account?.swapOffers?.has(pendingAck.tx.data.offerId)) continue;

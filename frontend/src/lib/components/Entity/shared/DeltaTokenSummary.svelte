@@ -2,6 +2,7 @@
   import { createEventDispatcher } from 'svelte';
   import { settings } from '$lib/stores/settingsStore';
   import DeltaCapacityBar from './DeltaCapacityBar.svelte';
+  import DeltaTokenSummaryApple from './DeltaTokenSummaryApple.svelte';
   import type { DeltaParts, DeltaVisualScale } from './delta-types';
   import { buildTokenVisualScale } from './delta-visual';
 
@@ -107,6 +108,22 @@
   }
 </script>
 
+{#if $settings.accountSkin === 'apple'}
+  <DeltaTokenSummaryApple
+    {symbol}
+    {name}
+    {outAmount}
+    {inAmount}
+    {derived}
+    {decimals}
+    {actionLabel}
+    {actionTokenId}
+    {actionDisabled}
+    {expanded}
+    on:action
+    on:bartoggle
+  />
+{:else}
 <div class="delta-summary" class:compact>
   <div class="summary-head" class:compact-head={compact}>
     {#if compact}
@@ -196,6 +213,7 @@
     />
   {/if}
 </div>
+{/if}
 
 <style>
   .delta-summary {

@@ -49,6 +49,10 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
+    expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
+    expect(hubNode).toContain("if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;");
+    expect(hubNode).toContain('const activeAdapter = getActiveJAdapter(env);');
+    expect(hubNode).not.toContain("return requireJAdapterForEntity(env, entityId, 'DEBUG_RESERVE');");
     expect(orchestrator).toContain('MARKET_MAKER_CREDIT_AMOUNT.toString()');
     expect(orchestrator).not.toContain("creditAmount: '50000000000000000000000000'");
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
@@ -57,7 +61,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '90'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '15'");
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
-    expect(mmNode).toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
+    expect(mmNode).toContain('return unique;');
+    expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
     expect(mmNode).toContain('const hasCrossSpecBootstrapProgress = (');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.entityId, route.orderId)');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)');

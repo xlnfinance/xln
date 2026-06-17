@@ -364,6 +364,7 @@ const isProofBodyStructLike = (value: unknown): value is ProofBodyStruct => {
 const cloneProofBodyStruct = (proofBody: unknown): unknown => {
   if (!isProofBodyStructLike(proofBody)) return proofBody;
   return {
+    watchSeed: proofBody.watchSeed,
     offdeltas: [...proofBody.offdeltas],
     tokenIds: [...proofBody.tokenIds],
     transformers: proofBody.transformers.map((transformer) => ({

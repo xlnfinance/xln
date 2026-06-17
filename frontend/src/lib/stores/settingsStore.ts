@@ -1,5 +1,5 @@
 import { writable, get } from 'svelte/store';
-import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, UIStyleSettings } from '$lib/types/ui';
+import type { Settings, ThemeName, BarColorMode, BarLayoutMode, AccountDeltaViewMode, AccountSkin, AccountBarStyle, UIStyleSettings } from '$lib/types/ui';
 import { applyThemeToDocument } from '../utils/themes';
 import {
   DEFAULT_UI_STYLE,
@@ -35,6 +35,8 @@ const resolveDefaultRelayUrl = (): string => {
 // Default settings
 const defaultSettings: Settings = {
   theme: 'dark',
+  accountSkin: 'classic',
+  accountBarStyle: 'hairline',
   uiStyle: DEFAULT_UI_STYLE,
   liteMode: false,
   barColorMode: 'rgy',
@@ -256,6 +258,24 @@ const settingsOperations = {
   setAccountDeltaViewMode(mode: AccountDeltaViewMode) {
     const safe: AccountDeltaViewMode = VALID_ACCOUNT_DELTA_VIEW_MODES.includes(mode) ? mode : defaultSettings.accountDeltaViewMode;
     settings.update(current => ({ ...current, accountDeltaViewMode: safe }));
+    this.saveToStorage();
+  },
+
+  setAccountSkin(skin: AccountSkin) {
+    const safe: AccountSkin = skin === 'apple' ? 'apple' : 'classic';
+    settings.update(current => ({ ...current, accountSkin: safe }));
+    this.saveToStorage();
+  },
+
+  toggleAccountSkin() {
+    settings.update(current => ({ ...current, accountSkin: current.accountSkin === 'apple' ? 'classic' : 'apple' }));
+    this.saveToStorage();
+  },
+
+  setAccountBarStyle(style: AccountBarStyle) {
+    const valid: readonly AccountBarStyle[] = ['hairline', 'pips', 'twin', 'capsule', 'thread'];
+    const safe: AccountBarStyle = valid.includes(style) ? style : 'hairline';
+    settings.update(current => ({ ...current, accountBarStyle: safe }));
     this.saveToStorage();
   },
 

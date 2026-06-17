@@ -58,6 +58,7 @@ const parseCli = (args: string[]): Cli => ({
 const makeAccount = (leftEntity: string, rightEntity: string): AccountMachine => ({
   leftEntity,
   rightEntity,
+  watchSeed: `0x${'a3'.repeat(32)}`,
   status: 'active',
   mempool: [],
   currentFrame: {

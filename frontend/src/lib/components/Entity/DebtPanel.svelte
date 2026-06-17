@@ -1,20 +1,26 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import { onDestroy } from 'svelte';
+  import type { Writable } from 'svelte/store';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import { xlnFunctions } from '$lib/stores/xlnStore';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
+  import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { compareStableText } from '$lib/utils/stableSort';
   import type { DebtEntry, EntityState, Env, EnvSnapshot } from '@xln/runtime/xln-api';
 
   export let entityId: string;
   export let signerId: string;
   export let sourceEnv: Env | EnvSnapshot;
+  export let entityStateOverride: EntityState | null = null;
+  export let sourceRevision: string = '';
+  export let sourceEnvResolver: (() => Env | EnvSnapshot | null) | null = null;
+  export let sourceEnvStore: Writable<Env | null> | null = null;
   export let canEnforce: boolean = false;
   export let enforcingTokenId: number | null = null;
 
   const DEBT_DRAIN_MAX_SLOTS = 100;
-
   type DebtEnforceRequest = {
     tokenId: number;
     symbol: string;
@@ -29,6 +35,10 @@
   const dispatch = createEventDispatcher<{
     enforce: DebtEnforceRequest;
   }>();
+
+  let storeSourceEnv: Env | null = null;
+  let subscribedSourceEnvStore: Writable<Env | null> | null = null;
+  let unsubscribeSourceEnvStore: (() => void) | null = null;
 
   type TokenGroup = {
     key: string;
@@ -57,24 +67,96 @@
   };
 
   $: activeXlnFunctions = $xlnFunctions;
-  $: entityState = resolveEntityState(sourceEnv, entityId, signerId);
+  $: {
+    if (sourceEnvStore !== subscribedSourceEnvStore) {
+      unsubscribeSourceEnvStore?.();
+      subscribedSourceEnvStore = sourceEnvStore;
+      storeSourceEnv = null;
+      unsubscribeSourceEnvStore = sourceEnvStore?.subscribe((nextSourceEnv) => {
+        storeSourceEnv = nextSourceEnv;
+      }) ?? null;
+    }
+  }
+  $: resolverSourceEnv = resolveCurrentResolverSourceEnv(sourceRevision, sourceEnvResolver);
+  $: storeEntityState = storeSourceEnv ? resolveEntityState(storeSourceEnv, entityId, signerId) : null;
+  $: resolverEntityState = resolverSourceEnv ? resolveEntityState(resolverSourceEnv, entityId, signerId) : null;
+  $: propEntityState = resolveEntityState(sourceEnv, entityId, signerId);
+
+  function resolveCurrentResolverSourceEnv(
+    _sourceRevision: string,
+    resolver: (() => Env | EnvSnapshot | null) | null,
+  ): Env | EnvSnapshot | null {
+    return resolver?.() ?? null;
+  }
+
+  function countDebtEntries(state: EntityState | null): number {
+    if (!state) return 0;
+    let count = 0;
+    for (const ledger of [state.outDebtsByToken, state.inDebtsByToken]) {
+      for (const bucket of ledger?.values?.() || []) {
+        count += Number(bucket?.size || 0);
+      }
+    }
+    return count;
+  }
+
+  function pickDebtEntityState(
+    candidates: Array<EntityState | null>,
+  ): EntityState | null {
+    let best: EntityState | null = null;
+    let bestDebtEntries = 0;
+    for (const candidate of candidates) {
+      const debtEntries = countDebtEntries(candidate);
+      if (debtEntries > bestDebtEntries) {
+        best = candidate;
+        bestDebtEntries = debtEntries;
+      }
+    }
+    return best ?? candidates.find((candidate): candidate is EntityState => Boolean(candidate)) ?? null;
+  }
+
+  function pickDebtEntityStateForRevision(
+    _sourceRevision: string,
+    candidates: Array<EntityState | null>,
+  ): EntityState | null {
+    return pickDebtEntityState(candidates);
+  }
+
+  $: entityState = pickDebtEntityStateForRevision(
+    sourceRevision,
+    [storeEntityState, resolverEntityState, propEntityState, entityStateOverride],
+  );
+
+  onDestroy(() => {
+    unsubscribeSourceEnvStore?.();
+    unsubscribeSourceEnvStore = null;
+    subscribedSourceEnvStore = null;
+  });
 
   function resolveEntityState(
     env: Env | EnvSnapshot,
     currentEntityId: string,
     currentSignerId: string,
   ): EntityState | null {
-    if (!(env?.eReplicas instanceof Map)) return null;
-    const exact = env.eReplicas.get(`${currentEntityId}:${currentSignerId}`);
+    const source = unwrapLiveRuntimeEnv(env) ?? env;
+    if (!(source?.eReplicas instanceof Map)) return null;
+    const exact = source.eReplicas.get(`${currentEntityId}:${currentSignerId}`);
     if (exact?.state) return exact.state as EntityState;
 
     const entityNorm = String(currentEntityId || '').trim().toLowerCase();
     const signerNorm = String(currentSignerId || '').trim().toLowerCase();
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [replicaKey, replica] of source.eReplicas.entries()) {
       const [keyEntityId, keySignerId] = String(replicaKey || '').split(':');
       const resolvedEntityId = String(keyEntityId || replica?.entityId || '').trim().toLowerCase();
       const resolvedSignerId = String(keySignerId || replica?.signerId || '').trim().toLowerCase();
-      if (resolvedEntityId === entityNorm && resolvedSignerId === signerNorm) {
+      if (resolvedEntityId === entityNorm && (!signerNorm || resolvedSignerId === signerNorm)) {
+        return (replica?.state || null) as EntityState | null;
+      }
+    }
+    for (const [replicaKey, replica] of source.eReplicas.entries()) {
+      const [keyEntityId] = String(replicaKey || '').split(':');
+      const resolvedEntityId = String(keyEntityId || replica?.entityId || '').trim().toLowerCase();
+      if (resolvedEntityId === entityNorm) {
         return (replica?.state || null) as EntityState | null;
       }
     }
@@ -151,10 +233,10 @@
     return compareStableText(String(left.debtId), String(right.debtId));
   }
 
-  function buildTokenGroups(): TokenGroup[] {
+  function buildTokenGroups(currentState: EntityState | null): TokenGroup[] {
     const allDebts = [
-      ...flattenLedger(entityState?.outDebtsByToken),
-      ...flattenLedger(entityState?.inDebtsByToken),
+      ...flattenLedger(currentState?.outDebtsByToken),
+      ...flattenLedger(currentState?.inDebtsByToken),
     ];
     const byToken = new Map<string, DebtEntry[]>();
     for (const entry of allDebts) {
@@ -174,7 +256,7 @@
         const orderedDebts = [...tokenDebts].sort(compareDebtRows);
         const openDebts = orderedDebts.filter((entry) => entry.status === 'open');
         const outstandingAmount = openDebts.reduce((sum, entry) => sum + entry.remainingAmount, 0n);
-        const reserveAmount = entityState?.reserves?.get(tokenId) ?? 0n;
+        const reserveAmount = currentState?.reserves?.get(tokenId) ?? 0n;
         const payableAmount = reserveAmount < outstandingAmount ? reserveAmount : outstandingAmount;
         return {
           key: groupKey,
@@ -245,7 +327,7 @@
     });
   }
 
-  $: tokenGroups = buildTokenGroups();
+  $: tokenGroups = buildTokenGroups(entityState);
   $: debtTotals = buildTotals(tokenGroups);
 </script>
 
