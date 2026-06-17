@@ -10,6 +10,7 @@ import { createXlnJsonRpcProvider } from '../jadapter';
 import { getCachedSignerPrivateKey } from '../account-crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 import { isLoopbackUrl } from '../loopback-url';
+import { createGossipLayer } from '../networking/gossip';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge } from './helpers';
 
 export type { JAdapterMode };
@@ -25,6 +26,7 @@ const getDefaultAnvilRpcUrl = (): string => {
 type ManagedAnvilProcess = {
   exitCode: number | null;
   kill: (signal?: NodeJS.Signals | number) => boolean;
+  unref?: () => void;
 };
 
 let managedAnvil: ManagedAnvilProcess | null = null;
@@ -98,11 +100,13 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', String(chainId),
+    '--timestamp', '1700000000',
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
   ], {
     stdio: 'ignore',
   });
+  managedAnvil.unref?.();
   managedAnvilRpc = rpcUrl;
   ensureAnvilCleanupHooks();
 
@@ -119,6 +123,17 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
 };
 
 const ensureScenarioRpcReady = async (rpcUrl: string, expectedChainId: number): Promise<number> => {
+  const forceFreshLocalAnvil =
+    process.env['XLN_FORCE_FRESH_ANVIL'] === '1' &&
+    IS_NODE_RUNTIME &&
+    isLocalRpcUrl(rpcUrl);
+  if (forceFreshLocalAnvil) {
+    await startManagedAnvil(rpcUrl, expectedChainId);
+    const freshChainId = await readRpcChainId(rpcUrl);
+    if (freshChainId === null) throw new Error(`RPC_STILL_UNAVAILABLE_AFTER_FRESH_ANVIL_START: ${rpcUrl}`);
+    return freshChainId;
+  }
+
   const existingChainId = await readRpcChainId(rpcUrl);
   if (existingChainId !== null) return existingChainId;
 
@@ -148,6 +163,7 @@ export interface ScenarioConfig {
   jurisdictionName?: string;  // default: `${name} Demo`
   position?: { x: number; y: number; z: number }; // jReplica position
   seed?: string;              // runtime seed (default: `${name}-scenario-seed`)
+  storageEnabled?: boolean;    // Optional scenario harness override
 }
 
 export interface ScenarioBootResult {
@@ -244,6 +260,17 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   const env = createEmptyEnv(seed);
   env.scenarioMode = true;
   env.timestamp = 1;
+  if (config.storageEnabled !== undefined) {
+    env.runtimeConfig = {
+      ...env.runtimeConfig,
+      storage: {
+        ...env.runtimeConfig?.storage,
+        enabled: config.storageEnabled,
+      },
+    };
+    if (env.runtimeState) env.runtimeState.persistencePaused = !config.storageEnabled;
+    if (!config.storageEnabled) env.gossip = createGossipLayer();
+  }
 
   // 2. Seed signer keys
   requireRuntimeSeed(env, config.name);

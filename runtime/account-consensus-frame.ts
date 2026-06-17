@@ -1,6 +1,8 @@
-import type { AccountFrame } from './types';
+import type { AccountFrame, AccountTx } from './types';
 import { assertAccountFrameDeltaIntegrity } from './account-frame';
 import { safeStringify } from './serialization-utils';
+import { canonicalJurisdictionEventsHash } from './j-event-observation';
+import { normalizeJurisdictionEvents } from './j-event-normalization';
 
 export const MAX_ACCOUNT_FRAME_TXS = 100;
 export const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300_000;
@@ -45,6 +47,43 @@ export function getAccountFrameValidationError(
   return '';
 }
 
+const toRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+const toInt = (value: unknown): number => {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? Math.floor(n) : 0;
+};
+
+const canonicalJEventClaimForFrameHash = (value: unknown): Record<string, unknown> => {
+  const data = toRecord(value);
+  const events = normalizeJurisdictionEvents(Array.isArray(data['events']) ? data['events'] : []);
+
+  // jBlockHash is external observation evidence, not bilateral account state.
+  // The account frame commits to jHeight + canonical event bodies + eventsHash;
+  // malformed or conflicting claims still fail in the j_event_claim handler
+  // before this frame hash can be accepted by the counterparty.
+  return {
+    version: 'xln:account-j-event-claim-frame:v1',
+    jHeight: toInt(data['jHeight']),
+    eventsHash: canonicalJurisdictionEventsHash(events),
+    events: events.map((event) => ({ type: event.type, data: event.data })),
+    observedAt: toInt(data['observedAt']),
+  };
+};
+
+export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, unknown> => {
+  if (tx.type === 'j_event_claim') {
+    return { type: tx.type, data: canonicalJEventClaimForFrameHash(tx.data) };
+  }
+  return {
+    type: tx.type,
+    data: tx.data,
+  };
+};
+
 export async function createFrameHash(frame: AccountFrame): Promise<string> {
   assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
   const { ethers } = await import('ethers');
@@ -54,10 +93,7 @@ export async function createFrameHash(frame: AccountFrame): Promise<string> {
     timestamp: frame.timestamp,
     jHeight: frame.jHeight,
     prevFrameHash: frame.prevFrameHash,
-    accountTxs: frame.accountTxs.map(tx => ({
-      type: tx.type,
-      data: tx.data,
-    })),
+    accountTxs: frame.accountTxs.map(canonicalAccountTxForFrameHash),
     deltas: frame.deltas.map(delta => ({
       tokenId: delta.tokenId,
       collateral: delta.collateral.toString(),

@@ -13,10 +13,20 @@ import type { CryptoProvider, CryptoKeyPair } from './crypto-provider';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 
+export type NobleCryptoProviderOptions = {
+  deterministicSeed?: string;
+};
+
 export class NobleCryptoProvider implements CryptoProvider {
+  private deterministicCounter = 0;
+
+  constructor(private readonly options: NobleCryptoProviderOptions = {}) {}
+
   async generateKeyPair(): Promise<CryptoKeyPair> {
     // Generate X25519 key pair (32 bytes each)
-    const keyPair = x25519.keygen();
+    const keyPair = this.options.deterministicSeed
+      ? await this.generateDeterministicKeyPair('keygen')
+      : x25519.keygen();
 
     return {
       publicKey: this.bytesToBase64(keyPair.publicKey),
@@ -29,8 +39,12 @@ export class NobleCryptoProvider implements CryptoProvider {
       throw new Error('Recipient public key required for encryption');
     }
 
-    // Generate ephemeral key pair (unlinkable to sender)
-    const ephemeral = x25519.keygen();
+    // Generate ephemeral key pair. Consensus paths pass deterministicSeed so
+    // identical HTLC txs produce identical ciphertext; external transport paths
+    // leave it unset and keep unlinkable random ephemeral keys.
+    const ephemeral = this.options.deterministicSeed
+      ? await this.generateDeterministicKeyPair('encrypt-ephemeral')
+      : x25519.keygen();
     const ephemeralPriv = ephemeral.secretKey;
     const ephemeralPub = ephemeral.publicKey;
 
@@ -56,8 +70,9 @@ export class NobleCryptoProvider implements CryptoProvider {
     // Derive ChaCha20-Poly1305 key from shared secret (use first 32 bytes)
     const key = sharedSecret.slice(0, 32);
 
-    // Generate random nonce (12 bytes for ChaCha20-Poly1305)
-    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const nonce = this.options.deterministicSeed
+      ? await this.deterministicBytes(12, 'chacha20poly1305-nonce')
+      : crypto.getRandomValues(new Uint8Array(12));
 
     // Encrypt data
     const dataBytes = new TextEncoder().encode(data);
@@ -114,6 +129,31 @@ export class NobleCryptoProvider implements CryptoProvider {
       bytes[i] = binary.charCodeAt(i);
     }
     return bytes;
+  }
+
+  private async generateDeterministicKeyPair(label: string): Promise<{ publicKey: Uint8Array; secretKey: Uint8Array }> {
+    const secretKey = await this.deterministicBytes(32, label);
+    return {
+      publicKey: x25519.getPublicKey(secretKey),
+      secretKey,
+    };
+  }
+
+  private async deterministicBytes(length: number, label: string): Promise<Uint8Array> {
+    const seed = this.options.deterministicSeed;
+    if (!seed) throw new Error('NOBLE_DETERMINISTIC_SEED_MISSING');
+    const out = new Uint8Array(length);
+    let offset = 0;
+    while (offset < length) {
+      const material = `${seed}:${label}:${this.deterministicCounter++}`;
+      const digest = new Uint8Array(
+        await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material)),
+      );
+      const take = Math.min(digest.length, length - offset);
+      out.set(digest.slice(0, take), offset);
+      offset += take;
+    }
+    return out;
   }
 
   private parseKeyBytes(raw: string, label: string): Uint8Array {

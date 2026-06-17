@@ -76,6 +76,9 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
     name: 'processbatch',
     signerIds: ['2', '3', '4', '5', '6'],
     seed: 'processbatch-mixed-seed',
+    ...(_existingEnv?.runtimeConfig?.storage?.enabled !== undefined
+      ? { storageEnabled: _existingEnv.runtimeConfig.storage.enabled }
+      : {}),
   });
 
   const jurisdictionChainId = jurisdiction.chainId;
