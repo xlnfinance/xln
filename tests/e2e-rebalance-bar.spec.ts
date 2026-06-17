@@ -417,20 +417,8 @@ async function ensureRuntimeOnline(page: Page, tag: string) {
 }
 
 async function discoverHub(page: Page): Promise<string> {
-  for (let i = 0; i < 60; i++) {
-    const fromGossip = await page.evaluate(() => {
-      const env = (window as any).isolatedEnv;
-      const XLN = (window as any).XLN;
-      XLN?.refreshGossip?.(env);
-      const profiles = env?.gossip?.getProfiles?.() || [];
-      const hub = profiles.find((p: any) =>
-        p?.metadata?.isHub === true);
-      return typeof hub?.entityId === 'string' ? hub.entityId : null;
-    });
-    if (fromGossip) return fromGossip;
-    await page.waitForTimeout(1000);
-  }
-  throw new Error('Hub not discovered within 60s');
+  const hubs = await waitForNamedHubs(page, ['h3'], { apiBaseUrl: API_BASE_URL });
+  return hubs.h3;
 }
 
 async function waitForHubProfile(page: Page, hubId: string) {
