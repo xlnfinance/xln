@@ -1,3 +1,5 @@
+import { ethers } from 'ethers';
+
 import {
   CROSS_J_MAX_FILL_RATIO,
   cloneCrossJurisdictionRoute,
@@ -46,6 +48,24 @@ const mergeAdmissionRoute = (
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
+const buildCrossJurisdictionBookAdmissionReceiptHash = (
+  input: Omit<CrossJurisdictionBookAdmissionReceipt, 'receiptHash'>,
+): string => ethers.keccak256(ethers.toUtf8Bytes([
+  'xln:cross-j:book-admission-receipt',
+  input.leg,
+  input.orderId,
+  input.routeHash,
+  input.hubEntityId,
+  input.counterpartyEntityId,
+  input.pullId,
+  String(input.tokenId),
+  input.signedAmount.toString(),
+  String(input.revealedUntilTimestamp),
+  input.fullHash,
+  input.partialRoot,
+  String(input.committedAt),
+].join('|'))).toLowerCase();
+
 export const crossJurisdictionBookAdmissionKeyFor = (sourceEntityId: string, orderId: string): string =>
   `${normalizeEntityRef(sourceEntityId)}:${String(orderId || '')}`;
 
@@ -80,6 +100,14 @@ const receiptAdmissionError = (
 ): string | null => {
   if (!receipt) {
     return `CROSS_J_BOOK_ADMISSION_PENDING: order=${routeOrderId} leg=${legName} pull=${expected.pullId}`;
+  }
+  const { receiptHash, ...receiptBody } = receipt;
+  if (!receiptHash) {
+    return `CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH: order=${routeOrderId} leg=${legName} receiptHash=missing`;
+  }
+  const expectedReceiptHash = buildCrossJurisdictionBookAdmissionReceiptHash(receiptBody);
+  if (receiptHash.toLowerCase() !== expectedReceiptHash.toLowerCase()) {
+    return `CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH: order=${routeOrderId} leg=${legName} receiptHash=${receiptHash} expected=${expectedReceiptHash}`;
   }
   if (
     receipt.leg !== legName ||
@@ -136,7 +164,7 @@ export const buildCrossJurisdictionBookAdmissionReceipt = (
   if (!pull) {
     throw new Error(`CROSS_J_BOOK_RECEIPT_PULL_REF_MISSING: order=${canonicalRoute.orderId} leg=${leg}`);
   }
-  const receipt: CrossJurisdictionBookAdmissionReceipt = {
+  const receiptBody: Omit<CrossJurisdictionBookAdmissionReceipt, 'receiptHash'> = {
     leg,
     orderId: canonicalRoute.orderId,
     routeHash: canonicalRoute.routeHash || '',
@@ -149,6 +177,10 @@ export const buildCrossJurisdictionBookAdmissionReceipt = (
     fullHash: String(accountTx.data.fullHash || ''),
     partialRoot: String(accountTx.data.partialRoot || ''),
     committedAt: Number(committedAt || 0),
+  };
+  const receipt: CrossJurisdictionBookAdmissionReceipt = {
+    receiptHash: buildCrossJurisdictionBookAdmissionReceiptHash(receiptBody),
+    ...receiptBody,
   };
   const error = receiptAdmissionError(
     canonicalRoute.orderId,

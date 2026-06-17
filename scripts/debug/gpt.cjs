@@ -1,10 +1,57 @@
 // XLN Context Generator - Creates ultra-compact LLM-friendly context
-// Output: frontend/static/llms.txt (default), llms_frontend.txt with --frontend, llms_sol.txt with --sol
+// Output: frontend/static/llms*.txt. No profile flag refreshes every LLM pack.
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const DEFAULT_CHUNK_TOKEN_LIMIT = 180_000;
+
+function resolveGitDir(projectRoot) {
+  const dotGit = path.join(projectRoot, '.git');
+  if (!fs.existsSync(dotGit)) return null;
+  const stats = fs.statSync(dotGit);
+  if (stats.isDirectory()) return dotGit;
+  const pointer = fs.readFileSync(dotGit, 'utf8').trim();
+  const match = pointer.match(/^gitdir:\s*(.+)$/i);
+  if (!match) return null;
+  const gitDir = match[1];
+  return path.isAbsolute(gitDir) ? gitDir : path.resolve(projectRoot, gitDir);
+}
+
+function readGitCommit(projectRoot) {
+  const envCommit =
+    process.env.GIT_COMMIT ||
+    process.env.GITHUB_SHA ||
+    process.env.VERCEL_GIT_COMMIT_SHA ||
+    process.env.SOURCE_VERSION;
+  if (envCommit) return String(envCommit).trim().substring(0, 7);
+
+  try {
+    const gitDir = resolveGitDir(projectRoot);
+    if (!gitDir) return 'unknown';
+    const head = fs.readFileSync(path.join(gitDir, 'HEAD'), 'utf8').trim();
+    if (/^[0-9a-f]{40}$/i.test(head)) return head.substring(0, 7);
+
+    const refMatch = head.match(/^ref:\s*(.+)$/i);
+    const refName = refMatch?.[1];
+    if (!refName) return 'unknown';
+    const refPath = path.join(gitDir, refName);
+    if (fs.existsSync(refPath)) {
+      return fs.readFileSync(refPath, 'utf8').trim().substring(0, 7);
+    }
+
+    const packedRefsPath = path.join(gitDir, 'packed-refs');
+    if (!fs.existsSync(packedRefsPath)) return 'unknown';
+    const packed = fs.readFileSync(packedRefsPath, 'utf8').split(/\r?\n/);
+    for (const line of packed) {
+      if (line.startsWith('#') || !line.includes(refName)) continue;
+      const [sha, ref] = line.trim().split(/\s+/);
+      if (ref === refName && /^[0-9a-f]{40}$/i.test(sha)) return sha.substring(0, 7);
+    }
+  } catch {
+    return 'unknown';
+  }
+  return 'unknown';
+}
 
 // CORE FILES ONLY - Everything an LLM needs to understand XLN
 // READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
@@ -161,6 +208,413 @@ const CORE_FILES = {
   ]
 };
 
+// Focused cross-jurisdiction swap pack:
+// - every local Solidity contract, including HashLadder and test harnesses
+// - runtime cross-j setup/admission/fill/clear/sweep/salvage/dispute path
+// - orderbook/MM/relay surface needed to make cross books executable
+// - swap UI and behavior tests that prove the user-visible cross flow
+const CROSS_FILES = {
+  contracts: [
+    'Types.sol',
+    'IDepository.sol',
+    'IEntityProvider.sol',
+    'IDeltaTransformer.sol',
+    'ECDSA.sol',
+    'HashLadder.sol',
+    'DeltaTransformer.sol',
+    'EntityProvider.sol',
+    'Account.sol',
+    'Depository.sol',
+    'Token.sol',
+    'ERC20Mock.sol',
+    'ERC721Mock.sol',
+    'ERC1155Mock.sol',
+    'console.sol',
+    'mocks/HashLadderHarness.sol',
+    'mocks/MockEntityProvider.sol',
+    'mocks/NoReturnERC20Mock.sol',
+  ],
+  runtime: [
+    'types.ts',
+    'types/account.ts',
+    'types/entity-tx.ts',
+    'types/cross-jurisdiction.ts',
+    'types/jurisdiction-events.ts',
+    'types/jurisdiction-runtime.ts',
+    'ids.ts',
+    'account-utils.ts',
+    'serialization-utils.ts',
+    'account-crypto.ts',
+    'state-helpers.ts',
+    'runtime.ts',
+    'runtime-jurisdiction-api.ts',
+    'runtime-swap-pairs.ts',
+    'runtime-output-routing.ts',
+    'runtime-j-submit.ts',
+    'entity-consensus.ts',
+    'entity-consensus/cross-j-orderbook.ts',
+    'account-consensus.ts',
+    'account-consensus-state.ts',
+    'account-dispute-policy.ts',
+    'j-batch.ts',
+    'j-height.ts',
+    'j-event-normalization.ts',
+    'j-event-observation.ts',
+    'jurisdiction-runtime.ts',
+    'hashladder.ts',
+    'swap-execution.ts',
+    'swap-keys.ts',
+    'open-swap-offers.ts',
+    'cross-jurisdiction.ts',
+    'cross-jurisdiction-fill-ack.ts',
+    'cross-jurisdiction-market.ts',
+    'cross-jurisdiction-orderbook.ts',
+    'cross-jurisdiction-boundary.ts',
+    'entity-tx/index.ts',
+    'entity-tx/apply.ts',
+    'entity-tx/financial.ts',
+    'entity-tx/j-events.ts',
+    'entity-tx/cross-j-outputs.ts',
+    'entity-tx/cross-jurisdiction-helpers.ts',
+    'entity-tx/handlers/account.ts',
+    'entity-tx/handlers/account-cross-j-followups.ts',
+    'entity-tx/handlers/account/committed-frame-followups.ts',
+    'entity-tx/handlers/account/committed-htlc-followups.ts',
+    'entity-tx/handlers/account/orderbook-offers.ts',
+    'entity-tx/handlers/account/orderbook-queue.ts',
+    'entity-tx/handlers/account/orderbook-matching.ts',
+    'entity-tx/handlers/account/orderbook-matching-same.ts',
+    'entity-tx/handlers/account/orderbook-matching-cross.ts',
+    'entity-tx/handlers/account/orderbook-matching-helpers.ts',
+    'entity-tx/handlers/account/orderbook-cancels.ts',
+    'entity-tx/handlers/swap-requests.ts',
+    'entity-tx/handlers/cross-j-setup.ts',
+    'entity-tx/handlers/cross-j-book-order.ts',
+    'entity-tx/handlers/cross-j-fill.ts',
+    'entity-tx/handlers/cross-j-salvage.ts',
+    'entity-tx/handlers/cross-j-clear.ts',
+    'entity-tx/handlers/cross-j-sweep.ts',
+    'entity-tx/handlers/dispute.ts',
+    'entity-tx/handlers/htlc-payment.ts',
+    'entity-tx/handlers/create-settlement.ts',
+    'account-tx/index.ts',
+    'account-tx/apply.ts',
+    'account-tx/handlers/swap-offer.ts',
+    'account-tx/handlers/swap-resolve.ts',
+    'account-tx/handlers/swap-cancel.ts',
+    'account-tx/handlers/swap-history.ts',
+    'account-tx/handlers/cross-swap-fill-ack.ts',
+    'account-tx/handlers/add-delta.ts',
+    'account-tx/handlers/j-event-claim.ts',
+    'account-tx/handlers/settle-hold.ts',
+    'orderbook/index.ts',
+    'orderbook/types.ts',
+    'orderbook/core.ts',
+    'orderbook/cross-j.ts',
+    'orderbook/validity.ts',
+    'market-snapshot.ts',
+    'market-subscription-limiter.ts',
+    'relay/market-subscriptions.ts',
+    'orchestrator/mm-node.ts',
+    'orchestrator/mesh-common.ts',
+    'orchestrator/mesh-jurisdictions.ts',
+    'orchestrator/jurisdictions.ts',
+    'server/market-maker-health.ts',
+    'server/jurisdictions.ts',
+    'dispute-arguments.ts',
+    'watchtower/action.ts',
+    'server/watchtower-proxy.ts',
+  ],
+  docs: [
+    'readme.md',
+    'status.md',
+    'mainnet.md',
+    'testnet-flow-coverage.md',
+    'consensus-invariants.md',
+    'implementation/payment-spec.md',
+    'core/rjea-architecture.md',
+    'core/11_Jurisdiction_Machine.md',
+    'recovery-watchtower-protocol.md',
+    'security/dispute-two-arguments-spec.md',
+    'security/external-audit-brief.md',
+  ],
+  swapUi: [
+    'src/lib/components/Entity/SwapPanel.svelte',
+    'src/lib/components/Entity/SwapPanel.css',
+    'src/lib/components/Entity/SwapOrderList.svelte',
+    'src/lib/components/Entity/routed-swap-planner.ts',
+    'src/lib/components/Entity/swap-formatting.ts',
+    'src/lib/components/Entity/swap-order-history.ts',
+    'src/lib/components/Entity/move-routes.ts',
+    'src/lib/components/Trading/OrderbookPanel.svelte',
+    'src/lib/components/Trading/orderbook-relay-url.ts',
+    'src/lib/stores/routePreviewStore.ts',
+    'src/lib/utils/jurisdictionBadge.ts',
+  ],
+  tests: [
+    'runtime/__tests__/helpers/cross-j.ts',
+    'runtime/__tests__/cross-jurisdiction-swap.test.ts',
+    'runtime/__tests__/cross-jurisdiction-security.test.ts',
+    'runtime/__tests__/cross-jurisdiction-reorder.test.ts',
+    'runtime/__tests__/multi-jurisdiction-entity.test.ts',
+    'runtime/__tests__/orderbook-lifecycle.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback.test.ts',
+    'runtime/__tests__/orderbook-validity.test.ts',
+    'runtime/__tests__/orderbook-relay-url.test.ts',
+    'runtime/__tests__/swap-order-preparation.test.ts',
+    'runtime/__tests__/market-subscription-stack.test.ts',
+    'runtime/__tests__/market-subscription-limiter.test.ts',
+    'runtime/__tests__/market-maker-health.test.ts',
+    'runtime/__tests__/market-maker-transport.test.ts',
+    'runtime/__tests__/htlc-events-and-dispute-tail.test.ts',
+    'runtime/__tests__/dispute-arguments.test.ts',
+    'runtime/__tests__/watchtower-last-resort.test.ts',
+    'tests/e2e-cross-j-swap.spec.ts',
+  ],
+  frontend: [],
+};
+
+const RUNTIME_FILES = {
+  contracts: [],
+  runtime: uniqueFiles([
+    'README.md',
+    'types.ts',
+    'types/account.ts',
+    'types/entity-tx.ts',
+    'types/jurisdiction-events.ts',
+    'types/jurisdiction-runtime.ts',
+    'ids.ts',
+    'constants.ts',
+    'runtime.ts',
+    'runtime-tx-handlers.ts',
+    'runtime-output-routing.ts',
+    'runtime-j-submit.ts',
+    'entity-consensus.ts',
+    'entity-consensus-frame.ts',
+    'entity-consensus/hanko-witness.ts',
+    'entity-input-merge.ts',
+    'account-consensus.ts',
+    'account-consensus-frame.ts',
+    'account-consensus-helpers.ts',
+    'account-consensus-state.ts',
+    'account-consensus/propose.ts',
+    'account-consensus/types.ts',
+    'j-batch.ts',
+    'j-height.ts',
+    'j-event-normalization.ts',
+    'j-event-observation.ts',
+    'entity-tx/index.ts',
+    'entity-tx/apply.ts',
+    'entity-tx/validation.ts',
+    'entity-tx/financial.ts',
+    'entity-tx/proposals.ts',
+    'entity-tx/j-events.ts',
+    'entity-tx/j-events-account.ts',
+    'entity-tx/j-events-batch.ts',
+    'entity-tx/j-events-debt.ts',
+    'entity-tx/j-events-history.ts',
+    'entity-tx/j-events-htlc.ts',
+    'entity-tx/j-events-types.ts',
+    'entity-tx/handlers/account.ts',
+    'entity-tx/handlers/r2c.ts',
+    'entity-tx/handlers/htlc-payment.ts',
+    'entity-tx/handlers/create-settlement.ts',
+    'entity-tx/handlers/mint-reserves.ts',
+    'account-tx/index.ts',
+    'account-tx/apply.ts',
+    'account-tx/handlers/add-delta.ts',
+    'account-tx/handlers/direct-payment.ts',
+    'account-tx/handlers/set-credit-limit.ts',
+    'account-utils.ts',
+    'account-crypto.ts',
+    'account-frame.ts',
+    'consensus-signatures.ts',
+    'serialization-utils.ts',
+    'snapshot-coder.ts',
+    'state-helpers.ts',
+    'env-events.ts',
+    'logger.ts',
+    'jurisdiction-runtime.ts',
+    'jurisdiction-config.ts',
+    'jurisdiction-stack.ts',
+    'runtime-jurisdiction-api.ts',
+    'storage/canonical-hash.ts',
+    'storage/hashes.ts',
+    'wal/hash.ts',
+  ]),
+  docs: [
+    'readme.md',
+    'core/rjea-architecture.md',
+    'consensus-invariants.md',
+    'radapter.md',
+    'merkle.md',
+  ],
+  swapUi: [],
+  tests: [
+    'runtime/__tests__/ids.test.ts',
+    'runtime/__tests__/account-frame-integrity.test.ts',
+    'runtime/__tests__/runtime-output-routing.test.ts',
+    'runtime/__tests__/runtime-ingress-timestamp.test.ts',
+    'runtime/__tests__/j-batch-reserve-availability.test.ts',
+    'runtime/__tests__/multi-jurisdiction-entity.test.ts',
+    'runtime/__tests__/serialization-utils.test.ts',
+    'runtime/__tests__/storage-canonical-hash.test.ts',
+  ],
+  frontend: [],
+};
+
+const ORDERBOOK_FILES = {
+  contracts: [],
+  runtime: [
+    'types.ts',
+    'types/account.ts',
+    'types/entity-tx.ts',
+    'ids.ts',
+    'account-utils.ts',
+    'serialization-utils.ts',
+    'state-helpers.ts',
+    'runtime-swap-pairs.ts',
+    'swap-execution.ts',
+    'swap-keys.ts',
+    'open-swap-offers.ts',
+    'entity-consensus.ts',
+    'entity-consensus/cross-j-orderbook.ts',
+    'entity-tx/handlers/account.ts',
+    'entity-tx/handlers/account/orderbook-offers.ts',
+    'entity-tx/handlers/account/orderbook-queue.ts',
+    'entity-tx/handlers/account/orderbook-matching.ts',
+    'entity-tx/handlers/account/orderbook-matching-same.ts',
+    'entity-tx/handlers/account/orderbook-matching-cross.ts',
+    'entity-tx/handlers/account/orderbook-matching-helpers.ts',
+    'entity-tx/handlers/account/orderbook-cancels.ts',
+    'account-tx/handlers/swap-offer.ts',
+    'account-tx/handlers/swap-resolve.ts',
+    'account-tx/handlers/swap-cancel.ts',
+    'account-tx/handlers/swap-history.ts',
+    'orderbook/index.ts',
+    'orderbook/types.ts',
+    'orderbook/core.ts',
+    'orderbook/cross-j.ts',
+    'orderbook/validity.ts',
+    'market-snapshot.ts',
+    'market-subscription-limiter.ts',
+    'relay/market-subscriptions.ts',
+    'orchestrator/mm-node.ts',
+    'orchestrator/mm-transport.ts',
+    'server/market-maker-health.ts',
+  ],
+  docs: [
+    'status.md',
+    'testnet-flow-coverage.md',
+  ],
+  swapUi: [
+    'src/lib/components/Trading/OrderbookPanel.svelte',
+    'src/lib/components/Trading/orderbook-relay-url.ts',
+  ],
+  tests: [
+    'runtime/__tests__/orderbook-lifecycle.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback.test.ts',
+    'runtime/__tests__/orderbook-validity.test.ts',
+    'runtime/__tests__/orderbook-relay-url.test.ts',
+    'runtime/__tests__/market-subscription-stack.test.ts',
+    'runtime/__tests__/market-subscription-limiter.test.ts',
+    'runtime/__tests__/market-maker-health.test.ts',
+    'runtime/__tests__/market-maker-transport.test.ts',
+  ],
+  frontend: [],
+};
+
+const SWAP_FILES = {
+  contracts: [
+    'Types.sol',
+    'IEntityProvider.sol',
+    'IDeltaTransformer.sol',
+    'HashLadder.sol',
+    'DeltaTransformer.sol',
+    'Account.sol',
+  ],
+  runtime: uniqueFiles([
+    'types.ts',
+    'types/account.ts',
+    'types/entity-tx.ts',
+    'ids.ts',
+    'account-utils.ts',
+    'serialization-utils.ts',
+    'state-helpers.ts',
+    'runtime-swap-pairs.ts',
+    'swap-execution.ts',
+    'swap-keys.ts',
+    'open-swap-offers.ts',
+    'entity-tx/apply.ts',
+    'entity-tx/handlers/account.ts',
+    'entity-tx/handlers/swap-requests.ts',
+    'entity-tx/handlers/account/orderbook-offers.ts',
+    'entity-tx/handlers/account/orderbook-queue.ts',
+    'entity-tx/handlers/account/orderbook-matching.ts',
+    'entity-tx/handlers/account/orderbook-matching-same.ts',
+    'entity-tx/handlers/account/orderbook-matching-helpers.ts',
+    'entity-tx/handlers/account/orderbook-cancels.ts',
+    'account-tx/apply.ts',
+    'account-tx/handlers/swap-offer.ts',
+    'account-tx/handlers/swap-resolve.ts',
+    'account-tx/handlers/swap-cancel.ts',
+    'account-tx/handlers/swap-history.ts',
+    'account-tx/handlers/add-delta.ts',
+    'orderbook/index.ts',
+    'orderbook/types.ts',
+    'orderbook/core.ts',
+    'orderbook/validity.ts',
+    'market-snapshot.ts',
+    'server/market-maker-health.ts',
+  ]),
+  docs: [
+    'status.md',
+    'mainnet.md',
+    'testnet-flow-coverage.md',
+    'consensus-invariants.md',
+    'security/dispute-two-arguments-spec.md',
+  ],
+  swapUi: [
+    'src/lib/components/Entity/SwapPanel.svelte',
+    'src/lib/components/Entity/SwapOrderList.svelte',
+    'src/lib/components/Entity/routed-swap-planner.ts',
+    'src/lib/components/Entity/swap-formatting.ts',
+    'src/lib/components/Entity/swap-order-history.ts',
+    'src/lib/components/Trading/OrderbookPanel.svelte',
+    'src/lib/components/Trading/orderbook-relay-url.ts',
+  ],
+  tests: uniqueFiles([
+    'runtime/__tests__/orderbook-lifecycle.test.ts',
+    'runtime/__tests__/orderbook-validity.test.ts',
+    'runtime/__tests__/swap-order-preparation.test.ts',
+    'runtime/__tests__/price-improvement.test.ts',
+    'tests/e2e-swap.spec.ts',
+  ]),
+  frontend: [],
+};
+
+const PROFILE_DESCRIPTIONS = {
+  runtime: {
+    title: 'XLN Runtime Context',
+    description: 'Focused pack for R/E/A/J state machines, consensus, transaction dispatch, serialization, persistence hashes, and jurisdiction integration.',
+    prompt: 'Audit runtime determinism, R/E/A/J ordering, consensus transitions, state serialization, tx dispatch, and fail-fast behavior.',
+  },
+  swap: {
+    title: 'XLN Swap Context',
+    description: 'Focused pack for same-chain swaps plus orderbook/MM/relay behavior. Cross-j swaps remain in llms_cross.txt.',
+    prompt: 'Audit same-chain swap offer, matching, cancellation, resolve, orderbook, market-maker readiness, UI click behavior, and E2E coverage.',
+  },
+  orderbook: {
+    title: 'XLN Orderbook Context',
+    description: 'Focused pack for book state, matching, relay subscriptions, market-maker publication, and orderbook UI behavior.',
+    prompt: 'Audit orderbook state transitions, matching invariants, relay freshness, market-maker health, and UI row/click semantics.',
+  },
+};
+
+function uniqueFiles(files) {
+  return Array.from(new Set(files));
+}
+
 function countLines(content) {
   return content.split('\n').length;
 }
@@ -182,46 +636,162 @@ function parseChunkTokenLimit() {
   return Math.floor(parsed);
 }
 
-function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir, totalTokens, includeFrontend) {
+function overviewFileRows(title, files, fileSizes, keyPrefix, pathPrefix) {
+  const rows = files.map(file => {
+    const key = keyPrefix ? `${keyPrefix}${file}` : file;
+    return `- \`${pathPrefix}${file}\` (${fileSizes[key] || '?'} lines)`;
+  }).join('\n');
+  return `### ${title}\n${rows}`;
+}
+
+function generateCrossSemanticOverview(totalTokens, timestamp, gitCommit, fileSizes, fileGroups) {
+  return `# XLN Cross-Jurisdiction Swap Context
+# ~${Math.round(totalTokens / 1000)}k tokens | Generated: ${timestamp} | Git: ${gitCommit}
+
+Generated by \`bun scripts/debug/gpt.cjs --cross\`.
+
+This is the focused external-analysis pack for cross-jurisdiction swaps. It
+includes every local Solidity contract, including \`HashLadder.sol\`, plus the
+runtime, orderbook, market-maker, UI, and test files that make direct cross-j
+swaps executable and disputable.
+
+## Scope
+
+- Contracts: full \`jurisdictions/contracts\` local source set, including
+  interfaces, mock tokens, \`HashLadder.sol\`, and the HashLadder harness.
+- Runtime: cross-j route hashing, admission, remote book ownership, fill ACKs,
+  hashladder reveal/verification, clear/sweep/salvage, and dispute evidence.
+- Market surface: orderbook core/cross-j book state, relay subscriptions,
+  market-maker book publishing, and health checks.
+- UI/tests: swap builder cross-route selection, cross orderbook rendering,
+  cross order submission, runtime unit tests, and the cross-j E2E contract.
+
+## Read Order
+
+1. Contracts first: \`HashLadder.sol\` -> \`DeltaTransformer.sol\` ->
+   \`Account.sol\` -> \`Depository.sol\` -> interfaces/types.
+2. Runtime model: \`types/cross-jurisdiction.ts\`, \`cross-jurisdiction.ts\`,
+   \`cross-jurisdiction-orderbook.ts\`, \`entity-consensus.ts\`.
+3. Execution path: \`entity-tx/handlers/cross-j-*.ts\`,
+   \`account-tx/handlers/cross-swap-fill-ack.ts\`,
+   \`account-tx/handlers/swap-resolve.ts\`, then orderbook matching.
+4. Backstop: \`cross-j-salvage.ts\`, \`dispute-arguments.ts\`,
+   \`entity-tx/handlers/dispute.ts\`, watchtower action, and dispute docs.
+5. Product proof: \`SwapPanel.svelte\`, \`OrderbookPanel.svelte\`, and
+   \`tests/e2e-cross-j-swap.spec.ts\`.
+
+## Cross-J Flow
+
+\`\`\`
+requestCrossJurisdictionSwap
+  -> prepare/commit/register source and target route state
+  -> admitCrossJurisdictionBookOrder at canonical book owner
+  -> orderbook-matching-cross records a firm fill
+  -> cross_swap_fill_ack mirrors the fill into the source account
+  -> pull/swap resolve claims hashladder-backed ratios on both legs
+  -> clear/sweep closes terminal book and route state
+  -> salvage/dispute path handles non-cooperative completion
+\`\`\`
+
+Expected market failures such as no book, no liquidity, or expired quote should
+end as terminal user-visible swap failures/cancellations. Unexpected ownership,
+signature binding, route-hash, fill-ratio, or state-machine contradictions must
+fail fast with debuggable payloads.
+
+## Included Files
+
+${overviewFileRows('Contracts', fileGroups.contracts, fileSizes, 'contracts/', 'jurisdictions/contracts/')}
+
+${overviewFileRows('Runtime', fileGroups.runtime, fileSizes, 'runtime/', 'runtime/')}
+
+${overviewFileRows('Docs', fileGroups.docs, fileSizes, 'docs/', 'docs/')}
+
+${overviewFileRows('Frontend Swap UI', fileGroups.swapUi, fileSizes, 'frontend/', 'frontend/')}
+
+${overviewFileRows('Behavior Tests', fileGroups.tests, fileSizes, '', '')}
+
+Suggested LLM prompt: "Audit the cross-jurisdiction swap lifecycle end to end.
+Verify route-hash binding, hashladder fill-ratio proofs, canonical book owner
+rules, fill ACK routing, salvage/dispute finality, and UI/orderbook behavior.
+Separate expected market failures from protocol correctness failures."
+
+`;
+}
+
+function generateFocusedSemanticOverview(profile, totalTokens, timestamp, gitCommit, fileSizes, fileGroups) {
+  const config = PROFILE_DESCRIPTIONS[profile];
+  return `# ${config.title}
+# ~${Math.round(totalTokens / 1000)}k tokens | Generated: ${timestamp} | Git: ${gitCommit}
+
+Generated by \`bun scripts/debug/gpt.cjs --${profile}\`.
+
+${config.description}
+
+## Included Files
+
+${overviewFileRows('Contracts', fileGroups.contracts, fileSizes, 'contracts/', 'jurisdictions/contracts/')}
+
+${overviewFileRows('Runtime', fileGroups.runtime, fileSizes, 'runtime/', 'runtime/')}
+
+${overviewFileRows('Docs', fileGroups.docs, fileSizes, 'docs/', 'docs/')}
+
+${overviewFileRows('Frontend', fileGroups.swapUi, fileSizes, 'frontend/', 'frontend/')}
+
+${overviewFileRows('Tests', fileGroups.tests, fileSizes, '', '')}
+
+Suggested LLM prompt: "${config.prompt}"
+
+`;
+}
+
+function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir, totalTokens, includeFrontend, fileGroups = CORE_FILES, profile = 'default') {
   // Count lines for each file
   const fileSizes = {};
   const projectRoot = path.resolve(docsDir, '..');
 
-  CORE_FILES.contracts.forEach(file => {
+  fileGroups.contracts.forEach(file => {
     const content = readFileContent(contractsDir, file);
     if (content) fileSizes[`contracts/${file}`] = countLines(content);
   });
 
-  CORE_FILES.runtime.forEach(file => {
+  fileGroups.runtime.forEach(file => {
     const content = readFileContent(runtimeDir, file);
     if (content) fileSizes[`runtime/${file}`] = countLines(content);
   });
 
-  CORE_FILES.docs.forEach(file => {
+  fileGroups.docs.forEach(file => {
     const content = readFileContent(docsDir, file);
     if (content) fileSizes[`docs/${file}`] = countLines(content);
   });
 
-  CORE_FILES.swapUi.forEach(file => {
+  fileGroups.swapUi.forEach(file => {
     const content = readFileContent(frontendDir, file);
     if (content) fileSizes[`frontend/${file}`] = countLines(content);
   });
 
-  CORE_FILES.tests.forEach(file => {
+  fileGroups.tests.forEach(file => {
     const content = readFileContent(projectRoot, file);
     if (content) fileSizes[file] = countLines(content);
   });
 
   if (includeFrontend) {
-    CORE_FILES.frontend.forEach(file => {
+    fileGroups.frontend.forEach(file => {
       const content = readFileContent(frontendDir, file);
       if (content) fileSizes[`frontend/${file}`] = countLines(content);
     });
   }
 
-  // Get git commit and timestamp
-  const gitCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim().substring(0, 7);
+  // Get git commit and timestamp. Read .git directly so static context generation
+  // does not depend on Apple/Xcode git being licensed on local machines.
+  const gitCommit = readGitCommit(projectRoot);
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+  if (profile === 'cross') {
+    return generateCrossSemanticOverview(totalTokens, timestamp, gitCommit, fileSizes, fileGroups);
+  }
+  if (PROFILE_DESCRIPTIONS[profile]) {
+    return generateFocusedSemanticOverview(profile, totalTokens, timestamp, gitCommit, fileSizes, fileGroups);
+  }
 
   return `# XLN: Bilateral Settlement With Provable Credit
 # ~${Math.round(totalTokens / 1000)}k tokens | Generated: ${timestamp} | Git: ${gitCommit}
@@ -675,7 +1245,19 @@ function readFileContent(baseDir, relativePath) {
   }
 }
 
-function generateContext({ solOnly, includeFrontend }) {
+function addFiles({ files, baseDir, statPrefix, outputPrefix, fileStats, allFiles }) {
+  files.forEach(file => {
+    const content = readFileContent(baseDir, file);
+    if (content) {
+      const lines = countLines(content);
+      const bytes = Buffer.byteLength(content, 'utf8');
+      fileStats.push({ file: `${statPrefix}${file}`, lines, bytes });
+      allFiles.push({ path: `${outputPrefix}${file}`, content, lines });
+    }
+  });
+}
+
+function generateContext({ solOnly, includeFrontend, fileGroups, profile }) {
   const projectRoot = path.resolve(__dirname, '../../');
   const contractsDir = path.join(projectRoot, 'jurisdictions/contracts');
   const runtimeDir = path.join(projectRoot, 'runtime');
@@ -688,67 +1270,61 @@ function generateContext({ solOnly, includeFrontend }) {
   // Collect all files first to calculate total tokens
   const allFiles = [];
 
-  CORE_FILES.contracts.forEach(file => {
-    const content = readFileContent(contractsDir, file);
-    if (content) {
-      const lines = countLines(content);
-      const bytes = Buffer.byteLength(content, 'utf8');
-      fileStats.push({ file: `contracts/${file}`, lines, bytes });
-      allFiles.push({ path: `jurisdictions/contracts/${file}`, content, lines });
-    }
+  addFiles({
+    files: fileGroups.contracts,
+    baseDir: contractsDir,
+    statPrefix: 'contracts/',
+    outputPrefix: 'jurisdictions/contracts/',
+    fileStats,
+    allFiles,
   });
 
   // Skip runtime/docs/frontend if --sol flag is present
   if (!solOnly) {
-    CORE_FILES.runtime.forEach(file => {
-      const content = readFileContent(runtimeDir, file);
-      if (content) {
-        const lines = countLines(content);
-        const bytes = Buffer.byteLength(content, 'utf8');
-        fileStats.push({ file: `runtime/${file}`, lines, bytes });
-        allFiles.push({ path: `runtime/${file}`, content, lines });
-      }
+    addFiles({
+      files: fileGroups.runtime,
+      baseDir: runtimeDir,
+      statPrefix: 'runtime/',
+      outputPrefix: 'runtime/',
+      fileStats,
+      allFiles,
     });
 
-    CORE_FILES.docs.forEach(file => {
-      const content = readFileContent(docsDir, file);
-      if (content) {
-        const lines = countLines(content);
-        const bytes = Buffer.byteLength(content, 'utf8');
-        fileStats.push({ file: `docs/${file}`, lines, bytes });
-        allFiles.push({ path: `docs/${file}`, content, lines });
-      }
+    addFiles({
+      files: fileGroups.docs,
+      baseDir: docsDir,
+      statPrefix: 'docs/',
+      outputPrefix: 'docs/',
+      fileStats,
+      allFiles,
     });
 
-    CORE_FILES.swapUi.forEach(file => {
-      const content = readFileContent(frontendDir, file);
-      if (content) {
-        const lines = countLines(content);
-        const bytes = Buffer.byteLength(content, 'utf8');
-        fileStats.push({ file: `frontend/${file}`, lines, bytes });
-        allFiles.push({ path: `frontend/${file}`, content, lines });
-      }
+    addFiles({
+      files: fileGroups.swapUi,
+      baseDir: frontendDir,
+      statPrefix: 'frontend/',
+      outputPrefix: 'frontend/',
+      fileStats,
+      allFiles,
     });
 
-    CORE_FILES.tests.forEach(file => {
-      const content = readFileContent(projectRoot, file);
-      if (content) {
-        const lines = countLines(content);
-        const bytes = Buffer.byteLength(content, 'utf8');
-        fileStats.push({ file, lines, bytes });
-        allFiles.push({ path: file, content, lines });
-      }
+    addFiles({
+      files: fileGroups.tests,
+      baseDir: projectRoot,
+      statPrefix: '',
+      outputPrefix: '',
+      fileStats,
+      allFiles,
     });
 
     if (includeFrontend) {
-      CORE_FILES.frontend.forEach(file => {
-        const content = readFileContent(frontendDir, file);
-        if (content) {
-          const lines = countLines(content);
-          const bytes = Buffer.byteLength(content, 'utf8');
-          fileStats.push({ file: `frontend/${file}`, lines, bytes });
-          allFiles.push({ path: `frontend/${file}`, content, lines });
-        }
+      addFiles({
+        files: fileGroups.frontend,
+        baseDir: frontendDir,
+        statPrefix: 'frontend/',
+        outputPrefix: 'frontend/',
+        fileStats,
+        allFiles,
       });
     }
   }
@@ -758,7 +1334,16 @@ function generateContext({ solOnly, includeFrontend }) {
   const totalTokens = Math.round(totalBytes / 3.5);
 
   // Generate overview with token count
-  const overview = generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir, totalTokens, includeFrontend);
+  const overview = generateSemanticOverview(
+    contractsDir,
+    runtimeDir,
+    docsDir,
+    frontendDir,
+    totalTokens,
+    includeFrontend,
+    fileGroups,
+    profile,
+  );
   let output = overview;
 
   // Append all file contents
@@ -767,7 +1352,7 @@ function generateContext({ solOnly, includeFrontend }) {
     output += content + '\n';
   });
 
-  return { output, fileStats, overview, allFiles };
+  return { output, fileStats, overview, allFiles, fileGroups };
 }
 
 function makeChunkPreamble({ outputFilename, partIndex, totalParts, allChunkNames, files }) {
@@ -873,72 +1458,149 @@ ${topFiles}
 `;
 }
 
-// Check for --sol flag
-const solOnly = process.argv.includes('--sol');
-const includeFrontend = process.argv.includes('--frontend');
+const PROFILE_CONFIGS = {
+  default: {
+    flag: '--default',
+    outputFilename: 'llms.txt',
+    fileGroups: CORE_FILES,
+    includeFrontend: false,
+    solOnly: false,
+  },
+  frontend: {
+    flag: '--frontend',
+    outputFilename: 'llms_frontend.txt',
+    fileGroups: CORE_FILES,
+    includeFrontend: true,
+    solOnly: false,
+  },
+  sol: {
+    flag: '--sol',
+    outputFilename: 'llms_sol.txt',
+    fileGroups: CORE_FILES,
+    includeFrontend: false,
+    solOnly: true,
+  },
+  cross: {
+    flag: '--cross',
+    outputFilename: 'llms_cross.txt',
+    fileGroups: CROSS_FILES,
+    includeFrontend: false,
+    solOnly: false,
+  },
+  runtime: {
+    flag: '--runtime',
+    outputFilename: 'llms_runtime.txt',
+    fileGroups: RUNTIME_FILES,
+    includeFrontend: false,
+    solOnly: false,
+  },
+  swap: {
+    flag: '--swap',
+    outputFilename: 'llms_swap.txt',
+    fileGroups: SWAP_FILES,
+    includeFrontend: false,
+    solOnly: false,
+  },
+  orderbook: {
+    flag: '--orderbook',
+    outputFilename: 'llms_orderbook.txt',
+    fileGroups: ORDERBOOK_FILES,
+    includeFrontend: false,
+    solOnly: false,
+  },
+};
 
-// Generate and write
-const { output: context, fileStats, overview, allFiles } = generateContext({ solOnly, includeFrontend });
-const outputFilename = solOnly
-  ? 'llms_sol.txt'
-  : (includeFrontend ? 'llms_frontend.txt' : 'llms.txt');
-const outputPath = path.join(__dirname, '../../frontend/static/', outputFilename);
-
-// Ensure directory exists
-const outputDir = path.dirname(outputPath);
-if (!fs.existsSync(outputDir)) {
-  fs.mkdirSync(outputDir, { recursive: true });
-}
-
-// Write with UTF-8 BOM so browsers detect encoding correctly
-fs.writeFileSync(outputPath, '\ufeff' + context, 'utf8');
-
+const outputDir = path.join(__dirname, '../../frontend/static/');
 const writeChunks = !process.argv.includes('--no-chunks');
-let chunkFiles = [];
-if (writeChunks) {
-  const chunkTokenLimit = parseChunkTokenLimit();
-  const base = outputFilename.replace(/\.txt$/i, '');
-  for (const stale of fs.readdirSync(outputDir)) {
-    if (new RegExp(`^${base}_part_\\d+\\.txt$`).test(stale) || stale === `${base}_manifest.txt`) {
-      fs.unlinkSync(path.join(outputDir, stale));
+const chunkTokenLimit = writeChunks ? parseChunkTokenLimit() : null;
+
+function selectedProfilesFromArgs(argv) {
+  const profileFlags = Object.entries(PROFILE_CONFIGS)
+    .filter(([, config]) => argv.includes(config.flag))
+    .map(([name]) => name);
+  if (argv.includes('--all') || profileFlags.length === 0) return Object.keys(PROFILE_CONFIGS);
+  return profileFlags;
+}
+
+function writeProfile(profile) {
+  const config = PROFILE_CONFIGS[profile];
+  const { output: context, fileStats, overview, allFiles, fileGroups } = generateContext({
+    solOnly: config.solOnly,
+    includeFrontend: config.includeFrontend,
+    fileGroups: config.fileGroups,
+    profile,
+  });
+  const outputFilename = config.outputFilename;
+  const outputPath = path.join(outputDir, outputFilename);
+
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+
+  // Write with UTF-8 BOM so browsers detect encoding correctly
+  fs.writeFileSync(outputPath, '\ufeff' + context, 'utf8');
+
+  let chunkFiles = [];
+  if (writeChunks) {
+    const base = outputFilename.replace(/\.txt$/i, '');
+    for (const stale of fs.readdirSync(outputDir)) {
+      if (new RegExp(`^${base}_part_\\d+\\.txt$`).test(stale) || stale === `${base}_manifest.txt`) {
+        fs.unlinkSync(path.join(outputDir, stale));
+      }
     }
+    chunkFiles = buildChunkFiles({ overview, allFiles, outputFilename, tokenLimit: chunkTokenLimit });
+    for (const chunk of chunkFiles) {
+      fs.writeFileSync(path.join(outputDir, chunk.filename), '\ufeff' + chunk.content, 'utf8');
+    }
+    const manifest = buildManifest({ outputFilename, chunkFiles, fileStats, tokenLimit: chunkTokenLimit });
+    fs.writeFileSync(path.join(outputDir, `${base}_manifest.txt`), '\ufeff' + manifest, 'utf8');
   }
-  chunkFiles = buildChunkFiles({ overview, allFiles, outputFilename, tokenLimit: chunkTokenLimit });
-  for (const chunk of chunkFiles) {
-    fs.writeFileSync(path.join(outputDir, chunk.filename), '\ufeff' + chunk.content, 'utf8');
+
+  const lines = context.split('\n').length;
+  const bytes = Buffer.byteLength(context, 'utf8');
+  const kb = (bytes / 1024).toFixed(1);
+  const tokensTotal = Math.round(bytes / 3.5);
+  const frontendLabel = config.includeFrontend ? ` | Frontend: ${fileGroups.frontend.length}` : '';
+  const counts = `Contracts: ${fileGroups.contracts.length} | Runtime: ${config.solOnly ? 0 : fileGroups.runtime.length} | Docs: ${config.solOnly ? 0 : fileGroups.docs.length} | Swap UI: ${config.solOnly ? 0 : fileGroups.swapUi.length} | Tests: ${config.solOnly ? 0 : fileGroups.tests.length}${frontendLabel}`;
+  const fileTokens = fileStats.map(f => ({
+    ...f,
+    tokens: Math.round(f.bytes / 3.5),
+    pct: (f.bytes / bytes * 100).toFixed(1)
+  })).sort((a, b) => b.tokens - a.tokens);
+
+  console.log(`OK ${outputFilename} generated`);
+  console.log(`${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
+  console.log(`xln.finance/${outputFilename}`);
+  if (writeChunks) {
+    const base = outputFilename.replace(/\.txt$/i, '');
+    console.log(`Chunks: ${chunkFiles.length} | Manifest: xln.finance/${base}_manifest.txt`);
   }
-  const manifest = buildManifest({ outputFilename, chunkFiles, fileStats, tokenLimit: chunkTokenLimit });
-  fs.writeFileSync(path.join(outputDir, `${base}_manifest.txt`), '\ufeff' + manifest, 'utf8');
+  console.log(counts);
+  console.log('Token Breakdown (top 8):');
+  fileTokens.slice(0, 8).forEach(f => {
+    const tokStr = f.tokens.toLocaleString().padStart(7);
+    const pctStr = f.pct.padStart(4);
+    console.log(`  ${tokStr} tok (${pctStr}%) - ${f.file}`);
+  });
+  console.log('');
+
+  return {
+    profile,
+    outputFilename,
+    lines,
+    kb,
+    tokensTotal,
+    chunks: chunkFiles.length,
+  };
 }
 
-// Stats
-const lines = context.split('\n').length;
-const bytes = Buffer.byteLength(context, 'utf8');
-const kb = (bytes / 1024).toFixed(1);
-const tokensTotal = Math.round(bytes / 3.5);
+const selectedProfiles = selectedProfilesFromArgs(process.argv.slice(2));
+const summaries = selectedProfiles.map(writeProfile);
 
-console.log(`OK ${outputFilename} generated`);
-console.log(`${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
-console.log(`xln.finance/${outputFilename}`);
-if (writeChunks) {
-  const base = outputFilename.replace(/\.txt$/i, '');
-  console.log(`Chunks: ${chunkFiles.length} | Manifest: xln.finance/${base}_manifest.txt`);
+if (summaries.length > 1) {
+  console.log('Generated profiles:');
+  summaries.forEach(summary => {
+    const chunkLabel = writeChunks ? `, chunks=${summary.chunks}` : '';
+    console.log(`  ${summary.profile}: ${summary.outputFilename}, ~${summary.tokensTotal.toLocaleString()} tokens${chunkLabel}`);
+  });
 }
-const frontendLabel = includeFrontend ? ` | Frontend: ${CORE_FILES.frontend.length}` : '';
-console.log(
-  `Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length} | Swap UI: ${CORE_FILES.swapUi.length} | Tests: ${CORE_FILES.tests.length}${frontendLabel}`,
-);
-
-// Token breakdown by file (top 15)
-console.log('\nToken Breakdown (top 15):');
-const fileTokens = fileStats.map(f => ({
-  ...f,
-  tokens: Math.round(f.bytes / 3.5),
-  pct: (f.bytes / bytes * 100).toFixed(1)
-})).sort((a, b) => b.tokens - a.tokens);
-
-fileTokens.slice(0, 15).forEach(f => {
-  const tokStr = f.tokens.toLocaleString().padStart(7);
-  const pctStr = f.pct.padStart(4);
-  console.log(`  ${tokStr} tok (${pctStr}%) - ${f.file}`);
-});

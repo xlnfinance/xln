@@ -54,7 +54,7 @@
     updatedAt: number;
   };
   type MarketSnapshotPayload = {
-    format?: 'exact-price-levels-v2';
+    format?: 'exact-price-levels';
     hubEntityId: string;
     pairId: string;
     depth: number;

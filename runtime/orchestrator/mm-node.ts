@@ -734,7 +734,7 @@ const isWithinPairBand = (anchorTicks: bigint, priceTicks: bigint): boolean => {
 const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {
   const unique = normalizePositiveTokenIds([...tokenIds]);
   if (unique.length >= HUB_REQUIRED_TOKEN_COUNT) {
-    return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);
+    return unique;
   }
   return [...DEFAULT_ACCOUNT_TOKEN_IDS];
 };

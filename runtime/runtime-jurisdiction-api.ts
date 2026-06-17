@@ -38,6 +38,8 @@ export type CrossJurisdictionSwapSubmitParams = {
   expiresInMs?: number;
   priceTicks?: bigint;
   priceImprovementMode?: CrossJurisdictionSwapRoute['priceImprovementMode'];
+  riskMode?: CrossJurisdictionSwapRoute['riskMode'];
+  settlementPolicy?: CrossJurisdictionSwapRoute['settlementPolicy'];
   memo?: string;
 };
 
@@ -153,6 +155,18 @@ export function buildCrossJurisdictionSwapSubmission(
       tokenId: Number(params.targetTokenId),
       amount: BigInt(params.targetAmount),
     },
+    domain: {
+      protocol: 'xln-cross-j',
+      hashSchema: 'route-domain',
+      sourceStackId: sourceUserStackId,
+      targetStackId: targetHubStackId,
+      sourceEntityProviderAddress: sourceUserJ.entityProviderAddress.toLowerCase(),
+      targetEntityProviderAddress: targetHubJ.entityProviderAddress.toLowerCase(),
+      sourceAssetRef: `${sourceUserStackId}:${Number(params.sourceTokenId)}`,
+      targetAssetRef: `${targetHubStackId}:${Number(params.targetTokenId)}`,
+    },
+    ...(params.settlementPolicy ? { settlementPolicy: params.settlementPolicy } : {}),
+    riskMode: params.riskMode || 'fully_collateralized',
     ...(params.priceTicks !== undefined ? { priceTicks: params.priceTicks } : {}),
     ...(params.priceImprovementMode ? { priceImprovementMode: params.priceImprovementMode } : {}),
     status: 'intent',

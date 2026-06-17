@@ -16,6 +16,36 @@ let mainWindow = null;
 let staticServer = null;
 let isQuitting = false;
 let pendingDeepLink = null;
+let smokeTimer = null;
+
+function isSmokeMode() {
+	return process.env.XLN_ELECTRON_SMOKE === '1';
+}
+
+function smokeTimeoutMs() {
+	const raw = Number(process.env.XLN_ELECTRON_SMOKE_TIMEOUT_MS || '15000');
+	return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 15000;
+}
+
+function finishSmoke(exitCode, message) {
+	if (!isSmokeMode()) return;
+	if (smokeTimer) {
+		clearTimeout(smokeTimer);
+		smokeTimer = null;
+	}
+	if (message) {
+		const writer = exitCode === 0 ? console.log : console.error;
+		writer(message);
+	}
+	app.exit(exitCode);
+}
+
+function installSmokeTimeout() {
+	if (!isSmokeMode()) return;
+	smokeTimer = setTimeout(() => {
+		finishSmoke(1, `XLN_ELECTRON_SMOKE_TIMEOUT after ${smokeTimeoutMs()}ms`);
+	}, smokeTimeoutMs());
+}
 
 const mimeTypes = new Map([
 	['.html', 'text/html; charset=utf-8'],
@@ -196,15 +226,19 @@ function createWindow(baseUrl) {
 		}
 		if (isAllowedExternalUrl(url)) shell.openExternal(url);
 	});
+	mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl) => {
+		finishSmoke(1, `XLN_ELECTRON_SMOKE_LOAD_FAILED code=${errorCode} url=${validatedUrl} error=${errorDescription}`);
+	});
+	mainWindow.webContents.on('render-process-gone', (_event, details) => {
+		finishSmoke(1, `XLN_ELECTRON_SMOKE_RENDER_GONE reason=${details.reason} exitCode=${details.exitCode}`);
+	});
 	mainWindow.webContents.once('did-finish-load', () => {
 		if (pendingDeepLink) {
 			const url = pendingDeepLink;
 			pendingDeepLink = null;
 			sendDeepLink(url);
 		}
-		if (process.env.XLN_ELECTRON_SMOKE === '1') {
-			setTimeout(() => app.quit(), 500);
-		}
+		finishSmoke(0, 'XLN_ELECTRON_SMOKE_READY');
 	});
 	mainWindow.on('close', (event) => {
 		if (isQuitting) return;
@@ -234,6 +268,7 @@ if (!gotLock) {
 
 	app.whenReady().then(async () => {
 		app.name = APP_NAME;
+		installSmokeTimeout();
 		app.on('web-contents-created', (_event, contents) => {
 			contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
 			contents.session.setPermissionCheckHandler(() => false);

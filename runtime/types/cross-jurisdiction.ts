@@ -43,6 +43,7 @@ export type CrossJurisdictionBookStatus =
 
 export interface CrossJurisdictionPendingFill {
   fillId: string;
+  receiptHash: string;
   ackKind: 'fill' | 'cancel';
   fillSeq: number;
   previousFillSeq?: number;
@@ -53,9 +54,12 @@ export interface CrossJurisdictionPendingFill {
   fillDenominator?: bigint;
   routeHash: string;
   updatedAt: number;
+  firstSeenAt: number;
+  ttlExpiredAt?: number;
 }
 
 export interface CrossJurisdictionBookAdmissionReceipt {
+  receiptHash: string;
   leg: CrossJurisdictionBookLeg;
   orderId: string;
   routeHash: string;
@@ -80,6 +84,35 @@ export interface CrossJurisdictionCloseProof {
   cumulativeTargetAmount: bigint;
   binaryHash: string;
   closeMode: 'full' | 'partial_cancel_remainder' | 'pure_cancel';
+}
+
+export interface CrossJurisdictionRouteDomain {
+  protocol: 'xln-cross-j';
+  hashSchema: 'route-domain';
+  sourceStackId: string;
+  targetStackId: string;
+  sourceEntityProviderAddress?: string;
+  targetEntityProviderAddress?: string;
+  sourceDeltaTransformerAddress?: string;
+  targetDeltaTransformerAddress?: string;
+  sourceAssetRef: string;
+  targetAssetRef: string;
+}
+
+export interface CrossJurisdictionSettlementPolicy {
+  roundingMode: 'uint16_ceil';
+  maxSourceDust: bigint;
+  maxTargetDust: bigint;
+  minSourceFillAmount?: bigint;
+  minTargetFillAmount?: bigint;
+}
+
+export interface CrossJurisdictionTimePolicy {
+  runtimeClock: 'unix_ms';
+  settlementClock: 'unix_seconds';
+  deadlineConversion: 'floor_ms_to_unix_seconds';
+  runtimeExpiresAtMs: number;
+  finalityPolicy: 'source_deadline_then_target_safety';
 }
 
 export interface CrossJurisdictionPullBinding {
@@ -144,6 +177,9 @@ export interface CrossJurisdictionSwapRoute {
   priceImprovementSourceAmount?: bigint;
   priceImprovementTargetAmount?: bigint;
   pendingClearRequestedAt?: number;
+  domain?: CrossJurisdictionRouteDomain;
+  settlementPolicy?: CrossJurisdictionSettlementPolicy;
+  timePolicy?: CrossJurisdictionTimePolicy;
   clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear';
   priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';

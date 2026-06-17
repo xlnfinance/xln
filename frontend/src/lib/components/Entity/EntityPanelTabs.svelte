@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { onDestroy, onMount } from 'svelte';
+  import type { Writable } from 'svelte/store';
   import type { ComponentType } from 'svelte';
   import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
@@ -124,6 +125,9 @@
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
   export let env: Env | EnvSnapshot;
+  export let liveEnv: Env | null = null;
+  export let liveEnvResolver: (() => Env | null) | null = null;
+  export let liveEnvStore: Writable<Env | null> | null = null;
   export let envRevision: string = '';
   export let history: EnvSnapshot[];
   export let timeIndex: number;
@@ -1137,6 +1141,7 @@
   $: activeHistory = history;
   $: activeTimeIndex = timeIndex;
   $: activeEnv = env;
+  $: activeLiveEnv = liveEnv;
   $: activeIsLive = isLive;
   $: liveRuntimeEnv = getRuntimeEnv(activeEnv);
 
@@ -5124,7 +5129,11 @@
           <DebtPanel
             entityId={replica.state?.entityId || tab.entityId}
             signerId={currentSignerId}
-            sourceEnv={activeEnv}
+            sourceEnv={activeLiveEnv ?? activeEnv}
+            entityStateOverride={replica.state ?? null}
+            sourceRevision={envRevision}
+            sourceEnvResolver={liveEnvResolver}
+            sourceEnvStore={liveEnvStore}
             canEnforce={activeIsLive}
             enforcingTokenId={debtEnforcingTokenId}
             on:enforce={(event) => enforceOutstandingDebt(event.detail)}
@@ -5669,6 +5678,44 @@
                       </button>
                     </div>
                   </div>
+
+                  <div class="appearance-block">
+                    <span class="appearance-label">Skin (A/B)</span>
+                    <div class="appearance-pill-group" role="tablist" aria-label="Account skin">
+                      <button
+                        class="appearance-pill"
+                        class:active={$settings.accountSkin === 'classic'}
+                        on:click={() => settingsOperations.setAccountSkin('classic')}
+                      >
+                        <span class="pill-icon">&#9776;</span> Classic
+                      </button>
+                      <button
+                        class="appearance-pill"
+                        class:active={$settings.accountSkin === 'apple'}
+                        on:click={() => settingsOperations.setAccountSkin('apple')}
+                      >
+                        <span class="pill-icon">&#9679;</span> Apple
+                      </button>
+                    </div>
+                  </div>
+
+                  {#if $settings.accountSkin === 'apple'}
+                    <div class="appearance-block">
+                      <span class="appearance-label">Bar style</span>
+                      <select
+                        class="appearance-select"
+                        value={$settings.accountBarStyle}
+                        on:change={(e) => settingsOperations.setAccountBarStyle(e.currentTarget.value as 'hairline' | 'pips' | 'twin' | 'capsule' | 'thread')}
+                        style="margin-top:6px; width:100%; background:#11151a; color:#e5e7eb; border:1px solid #2c333d; border-radius:6px; padding:6px 8px; font-size:12px;"
+                      >
+                        <option value="hairline">Hairline · line + dot</option>
+                        <option value="pips">Pips · signal dots</option>
+                        <option value="twin">Twin · out / in lines</option>
+                        <option value="capsule">Capsule · iOS fill</option>
+                        <option value="thread">Thread · fine + diamond</option>
+                      </select>
+                    </div>
+                  {/if}
 
                   <div class="appearance-block">
                     <div class="appearance-scale-row">

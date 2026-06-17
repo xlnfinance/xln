@@ -227,6 +227,7 @@ const hubEntityId = (seed: string): string =>
 const makeAccount = (leftEntity: string, rightEntity: string, height: number, timestamp: number): AccountMachine => ({
   leftEntity,
   rightEntity,
+  watchSeed: `0x${'a1'.repeat(32)}`,
   status: 'active',
   mempool: [],
   currentFrame: {

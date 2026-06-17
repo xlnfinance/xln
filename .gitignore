@@ -25,6 +25,13 @@ frontend/build/
 frontend/src/lib/generated/version.ts
 .svelte-kit/
 
+# Native generated files
+native/dist/
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/ios/App/build/
+
 # Backend generated files
 dist/
 

@@ -679,7 +679,7 @@ export async function swapMarket(env: Env): Promise<void> {
     entityTxs: [{
       type: 'placeSwapOffer',
       data: {
-        offerId: 'alice-eth-ask-v2',
+        offerId: 'alice-eth-ask-repriced',
         counterpartyEntityId: hubEth.id,
         giveTokenId: ETH,
         giveAmount: eth(10),
@@ -697,21 +697,21 @@ export async function swapMarket(env: Env): Promise<void> {
   const [, aliceEthRepAfter] = findReplica(env, alice.id);
   const aliceEthAccountAfter = aliceEthRepAfter.state.accounts.get(hubEth.id);
   assert(!aliceEthAccountAfter?.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
-  const aliceEthOfferV2 = aliceEthAccountAfter?.swapOffers?.get('alice-eth-ask-v2');
-  const aliceEthOfferV2InHistory = aliceEthAccountAfter
+  const aliceEthRepricedOffer = aliceEthAccountAfter?.swapOffers?.get('alice-eth-ask-repriced');
+  const aliceEthRepricedOfferInHistory = aliceEthAccountAfter
     ? getAccountFrameHistoryView(aliceEthAccountAfter).some((frame) =>
     Array.isArray(frame?.accountTxs) &&
       frame.accountTxs.some(
-        (tx) => tx?.type === 'swap_offer' && String(tx?.data?.offerId || '') === 'alice-eth-ask-v2',
+        (tx) => tx?.type === 'swap_offer' && String(tx?.data?.offerId || '') === 'alice-eth-ask-repriced',
       ),
     )
     : false;
-  if (!aliceEthOfferV2 && !aliceEthOfferV2InHistory) {
-    console.warn('[SWAP-MARKET] Alice ETH ask v2 was not observed as open/history (likely rejected or immediately resolved)');
+  if (!aliceEthRepricedOffer && !aliceEthRepricedOfferInHistory) {
+    console.warn('[SWAP-MARKET] Alice ETH repriced ask was not observed as open/history (likely rejected or immediately resolved)');
   }
-  if (aliceEthOfferV2) {
-    assert(aliceEthOfferV2.giveAmount === eth(10), `Alice ETH ask v2 giveAmount = ${eth(10)} (got ${aliceEthOfferV2.giveAmount})`);
-    assert(aliceEthOfferV2.wantAmount === usdc(30200), `Alice ETH ask v2 wantAmount = ${usdc(30200)} (got ${aliceEthOfferV2.wantAmount})`);
+  if (aliceEthRepricedOffer) {
+    assert(aliceEthRepricedOffer.giveAmount === eth(10), `Alice ETH repriced ask giveAmount = ${eth(10)} (got ${aliceEthRepricedOffer.giveAmount})`);
+    assert(aliceEthRepricedOffer.wantAmount === usdc(30200), `Alice ETH repriced ask wantAmount = ${usdc(30200)} (got ${aliceEthRepricedOffer.wantAmount})`);
   }
 
   // ============================================================================

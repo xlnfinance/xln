@@ -29,12 +29,15 @@ export type {
   CrossJurisdictionBookLeg,
   CrossJurisdictionBookStatus,
   CrossJurisdictionCloseProof,
+  CrossJurisdictionRouteDomain,
+  CrossJurisdictionSettlementPolicy,
   CrossJurisdictionPendingFill,
   CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
   CrossJurisdictionSwapStatus,
+  CrossJurisdictionTimePolicy,
 } from './types/cross-jurisdiction';
 export type {
   DebtEntry,
@@ -321,6 +324,7 @@ export interface PendingCrossJurisdictionFillAck {
   accountId: string;
   tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
   storedAt: number;
+  ttlExpiredAt?: number;
   reason?: string;
 }
 

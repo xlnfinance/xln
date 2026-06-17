@@ -99,7 +99,7 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
                   type: 'market_snapshot',
                   id: 'synthetic_market_snapshot',
                   payload: {
-                    format: 'exact-price-levels-v2',
+                    format: 'exact-price-levels',
                     hubEntityId: String(hubEntityId || '').toLowerCase(),
                     pairId: String(pairId || ''),
                     depth,

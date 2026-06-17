@@ -41,7 +41,7 @@ test('storage radix merkle root changes when a leaf value changes', () => {
   ]);
   const changed = buildHexKeyedMerkle([
     { hexKey: hexKey(0x11), value: value('alice') },
-    { hexKey: hexKey(0x22), value: value('bob-v2') },
+    { hexKey: hexKey(0x22), value: value('bob-updated') },
   ]);
 
   expect(base.root).not.toBe(changed.root);

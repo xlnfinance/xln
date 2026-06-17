@@ -7,12 +7,15 @@ import type {
   CrossJurisdictionBookAdmission,
   CrossJurisdictionBookAdmissionReceipt,
   CrossJurisdictionCloseProof,
+  CrossJurisdictionRouteDomain,
+  CrossJurisdictionSettlementPolicy,
   CrossJurisdictionPendingFill,
   CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
   CrossJurisdictionSwapStatus,
+  CrossJurisdictionTimePolicy,
   Env,
   SwapOffer,
   SwapOrderHistoryEntry,
@@ -150,6 +153,166 @@ const clampFillRatio = (value: unknown): number =>
 const scaleByExactRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
   numerator >= denominator ? total : (total * numerator) / denominator;
 
+const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
+  if (denominator <= 0n) throw new Error(`CROSS_J_CEIL_DIV_DENOMINATOR_INVALID:${denominator.toString()}`);
+  return numerator <= 0n ? 0n : (numerator + denominator - 1n) / denominator;
+};
+
+const defaultQuantizationDust = (amount: bigint): bigint =>
+  amount <= 0n ? 0n : ceilDiv(amount, BigInt(CROSS_J_MAX_FILL_RATIO));
+
+const normalizeOptionalAddress = (value: unknown): string | undefined => {
+  const text = String(value ?? '').trim().toLowerCase();
+  return /^0x[0-9a-f]{40}$/.test(text) ? text : undefined;
+};
+
+const normalizeStackRef = (value: unknown): string =>
+  String(value ?? '').trim().toLowerCase();
+
+const defaultAssetRef = (jurisdiction: string, tokenId: number): string =>
+  `${normalizeStackRef(jurisdiction)}:${Math.floor(Number(tokenId))}`;
+
+const normalizeCrossJurisdictionRouteDomain = (
+  route: CrossJurisdictionSwapRoute,
+): CrossJurisdictionRouteDomain => {
+  const sourceStackId = normalizeStackRef(route.domain?.sourceStackId || route.source.jurisdiction);
+  const targetStackId = normalizeStackRef(route.domain?.targetStackId || route.target.jurisdiction);
+  return {
+    protocol: 'xln-cross-j',
+    hashSchema: 'route-domain',
+    sourceStackId,
+    targetStackId,
+    ...(normalizeOptionalAddress(route.domain?.sourceEntityProviderAddress)
+      ? { sourceEntityProviderAddress: normalizeOptionalAddress(route.domain?.sourceEntityProviderAddress)! }
+      : {}),
+    ...(normalizeOptionalAddress(route.domain?.targetEntityProviderAddress)
+      ? { targetEntityProviderAddress: normalizeOptionalAddress(route.domain?.targetEntityProviderAddress)! }
+      : {}),
+    ...(normalizeOptionalAddress(route.domain?.sourceDeltaTransformerAddress)
+      ? { sourceDeltaTransformerAddress: normalizeOptionalAddress(route.domain?.sourceDeltaTransformerAddress)! }
+      : {}),
+    ...(normalizeOptionalAddress(route.domain?.targetDeltaTransformerAddress)
+      ? { targetDeltaTransformerAddress: normalizeOptionalAddress(route.domain?.targetDeltaTransformerAddress)! }
+      : {}),
+    sourceAssetRef: String(route.domain?.sourceAssetRef || defaultAssetRef(route.source.jurisdiction, route.source.tokenId)).trim().toLowerCase(),
+    targetAssetRef: String(route.domain?.targetAssetRef || defaultAssetRef(route.target.jurisdiction, route.target.tokenId)).trim().toLowerCase(),
+  };
+};
+
+const normalizeCrossJurisdictionSettlementPolicy = (
+  route: CrossJurisdictionSwapRoute,
+): CrossJurisdictionSettlementPolicy => {
+  const sourceAmount = BigInt(route.source.amount);
+  const targetAmount = BigInt(route.target.amount);
+  const maxSourceDust = route.settlementPolicy?.maxSourceDust ?? defaultQuantizationDust(sourceAmount);
+  const maxTargetDust = route.settlementPolicy?.maxTargetDust ?? defaultQuantizationDust(targetAmount);
+  if (maxSourceDust < 0n || maxTargetDust < 0n) {
+    throw new Error(`CROSS_J_SETTLEMENT_POLICY_DUST_INVALID:${route.orderId}`);
+  }
+  return {
+    roundingMode: 'uint16_ceil',
+    maxSourceDust,
+    maxTargetDust,
+    ...(route.settlementPolicy?.minSourceFillAmount !== undefined
+      ? { minSourceFillAmount: BigInt(route.settlementPolicy.minSourceFillAmount) }
+      : {}),
+    ...(route.settlementPolicy?.minTargetFillAmount !== undefined
+      ? { minTargetFillAmount: BigInt(route.settlementPolicy.minTargetFillAmount) }
+      : {}),
+  };
+};
+
+const normalizeCrossJurisdictionTimePolicy = (
+  route: CrossJurisdictionSwapRoute,
+): CrossJurisdictionTimePolicy => {
+  const runtimeExpiresAtMs = Math.floor(Number(route.timePolicy?.runtimeExpiresAtMs ?? route.expiresAt ?? 0));
+  if (!Number.isFinite(runtimeExpiresAtMs) || runtimeExpiresAtMs < 0) {
+    throw new Error(`CROSS_J_TIME_POLICY_EXPIRES_INVALID:${route.orderId}`);
+  }
+  return {
+    runtimeClock: 'unix_ms',
+    settlementClock: 'unix_seconds',
+    deadlineConversion: 'floor_ms_to_unix_seconds',
+    runtimeExpiresAtMs,
+    finalityPolicy: 'source_deadline_then_target_safety',
+  };
+};
+
+export function withCrossJurisdictionPolicyDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
+  return {
+    ...route,
+    riskMode: route.riskMode || 'fully_collateralized',
+    domain: normalizeCrossJurisdictionRouteDomain(route),
+    settlementPolicy: normalizeCrossJurisdictionSettlementPolicy(route),
+    timePolicy: normalizeCrossJurisdictionTimePolicy(route),
+  };
+}
+
+export function assertCrossJurisdictionRiskPolicy(route: CrossJurisdictionSwapRoute): void {
+  const riskMode = route.riskMode || 'fully_collateralized';
+  if (riskMode !== 'fully_collateralized') {
+    throw new Error(`CROSS_J_RISK_MODE_UNSUPPORTED:${route.orderId}:${riskMode}`);
+  }
+}
+
+export function projectCrossJurisdictionQuantizedClaim(
+  total: bigint,
+  input: {
+    cumulativeFillRatio: number;
+    fillNumerator?: bigint | undefined;
+    fillDenominator?: bigint | undefined;
+  },
+): { exactClaim: bigint; quantizedClaim: bigint; roundingDelta: bigint } {
+  const ratio = clampFillRatio(input.cumulativeFillRatio);
+  const quantizedClaim = ratio >= CROSS_J_MAX_FILL_RATIO
+    ? total
+    : (total * BigInt(ratio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  const hasExact = input.fillNumerator !== undefined && input.fillDenominator !== undefined;
+  const exactClaim = hasExact
+    ? scaleByExactRatio(total, input.fillNumerator!, input.fillDenominator!)
+    : quantizedClaim;
+  return {
+    exactClaim,
+    quantizedClaim,
+    roundingDelta: quantizedClaim >= exactClaim ? quantizedClaim - exactClaim : exactClaim - quantizedClaim,
+  };
+}
+
+export function validateCrossJurisdictionQuantization(
+  route: CrossJurisdictionSwapRoute,
+  input: {
+    cumulativeFillRatio: number;
+    fillNumerator?: bigint | undefined;
+    fillDenominator?: bigint | undefined;
+    cumulativeSourceAmount: bigint;
+    cumulativeTargetAmount: bigint;
+  },
+): string | null {
+  const policy = normalizeCrossJurisdictionSettlementPolicy(route);
+  if (input.cumulativeSourceAmount < (policy.minSourceFillAmount ?? 0n)) {
+    return `source fill below minimum ${input.cumulativeSourceAmount} < ${policy.minSourceFillAmount}`;
+  }
+  if (input.cumulativeTargetAmount < (policy.minTargetFillAmount ?? 0n)) {
+    return `target fill below minimum ${input.cumulativeTargetAmount} < ${policy.minTargetFillAmount}`;
+  }
+
+  const source = projectCrossJurisdictionQuantizedClaim(BigInt(route.source.amount), input);
+  const target = projectCrossJurisdictionQuantizedClaim(BigInt(route.target.amount), input);
+  if (source.exactClaim !== input.cumulativeSourceAmount) {
+    return `source exact claim mismatch ${source.exactClaim} != ${input.cumulativeSourceAmount}`;
+  }
+  if (target.exactClaim !== input.cumulativeTargetAmount) {
+    return `target exact claim mismatch ${target.exactClaim} != ${input.cumulativeTargetAmount}`;
+  }
+  if (source.roundingDelta > policy.maxSourceDust) {
+    return `source quantization dust ${source.roundingDelta} > ${policy.maxSourceDust}`;
+  }
+  if (target.roundingDelta > policy.maxTargetDust) {
+    return `target quantization dust ${target.roundingDelta} > ${policy.maxTargetDust}`;
+  }
+  return null;
+}
+
 export function validateCrossJurisdictionFillProgress(
   route: CrossJurisdictionSwapRoute,
   input: CrossJurisdictionFillProgressInput,
@@ -221,6 +384,16 @@ export function validateCrossJurisdictionFillProgress(
   }
   if (input.incrementalTargetAmount !== undefined && input.incrementalTargetAmount !== incrementalTargetAmount) {
     return { ok: false, error: `incremental target mismatch: expected ${incrementalTargetAmount}, got ${input.incrementalTargetAmount}` };
+  }
+  const quantizationError = validateCrossJurisdictionQuantization(route, {
+    cumulativeFillRatio: nextRatio,
+    fillNumerator: input.fillNumerator,
+    fillDenominator: input.fillDenominator,
+    cumulativeSourceAmount,
+    cumulativeTargetAmount,
+  });
+  if (quantizationError) {
+    return { ok: false, error: `quantization policy failed: ${quantizationError}` };
   }
 
   return {
@@ -360,6 +533,26 @@ const ROUTE_HASH_ABI_TYPES = [
   'uint256',
   'string',
   'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'string',
+  'uint256',
+  'uint256',
+  'uint256',
+  'uint256',
+  'string',
+  'string',
+  'string',
+  'uint256',
+  'string',
 ] as const;
 
 function requireRuntimeSeed(runtimeSeed: string | undefined): string {
@@ -491,6 +684,50 @@ export function getCrossJurisdictionPrivateSeed(
   return deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route);
 }
 
+const cloneCrossJurisdictionRouteDomain = (
+  domain: CrossJurisdictionRouteDomain | undefined,
+): CrossJurisdictionRouteDomain | undefined => {
+  if (!domain) return undefined;
+  return {
+    protocol: 'xln-cross-j',
+    hashSchema: 'route-domain',
+    sourceStackId: String(domain.sourceStackId || ''),
+    targetStackId: String(domain.targetStackId || ''),
+    ...(domain.sourceEntityProviderAddress ? { sourceEntityProviderAddress: String(domain.sourceEntityProviderAddress) } : {}),
+    ...(domain.targetEntityProviderAddress ? { targetEntityProviderAddress: String(domain.targetEntityProviderAddress) } : {}),
+    ...(domain.sourceDeltaTransformerAddress ? { sourceDeltaTransformerAddress: String(domain.sourceDeltaTransformerAddress) } : {}),
+    ...(domain.targetDeltaTransformerAddress ? { targetDeltaTransformerAddress: String(domain.targetDeltaTransformerAddress) } : {}),
+    sourceAssetRef: String(domain.sourceAssetRef || ''),
+    targetAssetRef: String(domain.targetAssetRef || ''),
+  };
+};
+
+const cloneCrossJurisdictionSettlementPolicy = (
+  policy: CrossJurisdictionSettlementPolicy | undefined,
+): CrossJurisdictionSettlementPolicy | undefined => {
+  if (!policy) return undefined;
+  return {
+    roundingMode: 'uint16_ceil',
+    maxSourceDust: BigInt(policy.maxSourceDust),
+    maxTargetDust: BigInt(policy.maxTargetDust),
+    ...(policy.minSourceFillAmount !== undefined ? { minSourceFillAmount: BigInt(policy.minSourceFillAmount) } : {}),
+    ...(policy.minTargetFillAmount !== undefined ? { minTargetFillAmount: BigInt(policy.minTargetFillAmount) } : {}),
+  };
+};
+
+const cloneCrossJurisdictionTimePolicy = (
+  policy: CrossJurisdictionTimePolicy | undefined,
+): CrossJurisdictionTimePolicy | undefined => {
+  if (!policy) return undefined;
+  return {
+    runtimeClock: 'unix_ms',
+    settlementClock: 'unix_seconds',
+    deadlineConversion: 'floor_ms_to_unix_seconds',
+    runtimeExpiresAtMs: Number(policy.runtimeExpiresAtMs || 0),
+    finalityPolicy: 'source_deadline_then_target_safety',
+  };
+};
+
 export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
   const clone: CrossJurisdictionSwapRoute = {
     orderId: String(route.orderId || ''),
@@ -531,6 +768,9 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const priceImprovementSourceAmount = optionalBigInt(route.priceImprovementSourceAmount);
   const priceImprovementTargetAmount = optionalBigInt(route.priceImprovementTargetAmount);
   const pendingClearRequestedAt = optionalNumber(route.pendingClearRequestedAt);
+  const domain = cloneCrossJurisdictionRouteDomain(route.domain);
+  const settlementPolicy = cloneCrossJurisdictionSettlementPolicy(route.settlementPolicy);
+  const timePolicy = cloneCrossJurisdictionTimePolicy(route.timePolicy);
   const claimedRatio = optionalNumber(route.claimedRatio);
   const sourceClaimed = optionalBigInt(route.sourceClaimed);
   const targetClaimed = optionalBigInt(route.targetClaimed);
@@ -562,6 +802,9 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (priceImprovementSourceAmount !== undefined) clone.priceImprovementSourceAmount = priceImprovementSourceAmount;
   if (priceImprovementTargetAmount !== undefined) clone.priceImprovementTargetAmount = priceImprovementTargetAmount;
   if (pendingClearRequestedAt !== undefined) clone.pendingClearRequestedAt = pendingClearRequestedAt;
+  if (domain) clone.domain = domain;
+  if (settlementPolicy) clone.settlementPolicy = settlementPolicy;
+  if (timePolicy) clone.timePolicy = timePolicy;
   if (route.clearingPolicy) clone.clearingPolicy = route.clearingPolicy;
   if (route.priceImprovementMode) clone.priceImprovementMode = route.priceImprovementMode;
   if (route.riskMode) clone.riskMode = route.riskMode;
@@ -579,6 +822,7 @@ export function cloneCrossJurisdictionBookAdmissionReceipt(
   receipt: CrossJurisdictionBookAdmissionReceipt,
 ): CrossJurisdictionBookAdmissionReceipt {
   return {
+    receiptHash: String(receipt.receiptHash || ''),
     leg: receipt.leg,
     orderId: String(receipt.orderId || ''),
     routeHash: String(receipt.routeHash || ''),
@@ -599,6 +843,7 @@ function cloneCrossJurisdictionPendingFill(
 ): CrossJurisdictionPendingFill {
   return {
     fillId: String(pendingFill.fillId || ''),
+    receiptHash: String(pendingFill.receiptHash || pendingFill.fillId || ''),
     ackKind: pendingFill.ackKind === 'cancel' ? 'cancel' : 'fill',
     fillSeq: Math.max(0, Math.floor(Number(pendingFill.fillSeq ?? 0) || 0)),
     ...(pendingFill.previousFillSeq !== undefined
@@ -611,6 +856,8 @@ function cloneCrossJurisdictionPendingFill(
     ...(pendingFill.fillDenominator !== undefined ? { fillDenominator: BigInt(pendingFill.fillDenominator) } : {}),
     routeHash: String(pendingFill.routeHash || ''),
     updatedAt: Number(pendingFill.updatedAt || 0),
+    firstSeenAt: Number(pendingFill.firstSeenAt || pendingFill.updatedAt || 0),
+    ...(pendingFill.ttlExpiredAt !== undefined ? { ttlExpiredAt: Number(pendingFill.ttlExpiredAt) } : {}),
   };
 }
 
@@ -774,29 +1021,53 @@ export function cloneCrossJurisdictionAccountInputRoute(input: AccountInput): Ac
 
 export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRoute): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const policyRoute = withCrossJurisdictionPolicyDefaults(route);
+  const domain = policyRoute.domain!;
+  const settlementPolicy = policyRoute.settlementPolicy!;
+  const timePolicy = policyRoute.timePolicy!;
   return ethers.keccak256(abiCoder.encode(
     ROUTE_HASH_ABI_TYPES,
     [
-      String(route.orderId || ''),
-      normalizeEntityId(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId),
-      String(route.venueId || ''),
-      normalizeEntityId(route.makerEntityId),
-      normalizeEntityId(route.hubEntityId),
-      normalizeJurisdiction(route.source.jurisdiction),
-      normalizeEntityId(route.source.entityId),
-      normalizeEntityId(route.source.counterpartyEntityId),
-      String(Math.floor(Number(route.source.tokenId))),
-      BigInt(route.source.amount),
-      normalizeJurisdiction(route.target.jurisdiction),
-      normalizeEntityId(route.target.entityId),
-      normalizeEntityId(route.target.counterpartyEntityId),
-      String(Math.floor(Number(route.target.tokenId))),
-      BigInt(route.target.amount),
-      route.priceTicks !== undefined,
-      BigInt(route.priceTicks ?? 0n),
-      BigInt(Math.floor(Number(route.expiresAt ?? 0))),
-      String(route.riskMode || ''),
-      String(route.priceImprovementMode || ''),
+      String(policyRoute.orderId || ''),
+      normalizeEntityId(policyRoute.bookOwnerEntityId || policyRoute.source.counterpartyEntityId || policyRoute.hubEntityId),
+      String(policyRoute.venueId || ''),
+      normalizeEntityId(policyRoute.makerEntityId),
+      normalizeEntityId(policyRoute.hubEntityId),
+      normalizeJurisdiction(policyRoute.source.jurisdiction),
+      normalizeEntityId(policyRoute.source.entityId),
+      normalizeEntityId(policyRoute.source.counterpartyEntityId),
+      String(Math.floor(Number(policyRoute.source.tokenId))),
+      BigInt(policyRoute.source.amount),
+      normalizeJurisdiction(policyRoute.target.jurisdiction),
+      normalizeEntityId(policyRoute.target.entityId),
+      normalizeEntityId(policyRoute.target.counterpartyEntityId),
+      String(Math.floor(Number(policyRoute.target.tokenId))),
+      BigInt(policyRoute.target.amount),
+      policyRoute.priceTicks !== undefined,
+      BigInt(policyRoute.priceTicks ?? 0n),
+      BigInt(Math.floor(Number(policyRoute.expiresAt ?? 0))),
+      String(policyRoute.riskMode || ''),
+      String(policyRoute.priceImprovementMode || ''),
+      domain.protocol,
+      domain.hashSchema,
+      domain.sourceStackId,
+      domain.targetStackId,
+      domain.sourceEntityProviderAddress || '',
+      domain.targetEntityProviderAddress || '',
+      domain.sourceDeltaTransformerAddress || '',
+      domain.targetDeltaTransformerAddress || '',
+      domain.sourceAssetRef,
+      domain.targetAssetRef,
+      settlementPolicy.roundingMode,
+      settlementPolicy.maxSourceDust,
+      settlementPolicy.maxTargetDust,
+      settlementPolicy.minSourceFillAmount ?? 0n,
+      settlementPolicy.minTargetFillAmount ?? 0n,
+      timePolicy.runtimeClock,
+      timePolicy.settlementClock,
+      timePolicy.deadlineConversion,
+      BigInt(timePolicy.runtimeExpiresAtMs),
+      timePolicy.finalityPolicy,
     ],
   ));
 }
@@ -813,7 +1084,8 @@ export function withCrossJurisdictionVenueDefaults(route: CrossJurisdictionSwapR
 }
 
 export function withCanonicalCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
-  const withDefaults = withCrossJurisdictionVenueDefaults(route);
+  const withDefaults = withCrossJurisdictionPolicyDefaults(withCrossJurisdictionVenueDefaults(route));
+  assertCrossJurisdictionRiskPolicy(withDefaults);
   const routeHash = deriveCrossJurisdictionRouteHash(withDefaults);
   if (withDefaults.routeHash && String(withDefaults.routeHash).toLowerCase() !== routeHash.toLowerCase()) {
     throw new Error(`CROSS_J_ROUTE_HASH_MISMATCH:${route.orderId}`);

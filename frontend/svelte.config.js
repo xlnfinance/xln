@@ -1,6 +1,8 @@
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
+const outDir = process.env.XLN_SVELTE_KIT_OUT_DIR || '.svelte-kit';
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	// Consult https://svelte.dev/docs/kit/integrations
@@ -8,6 +10,7 @@ const config = {
 	preprocess: vitePreprocess(),
 
 	kit: {
+		outDir,
 		// Static adapter for GitHub Pages deployment
 		adapter: adapter({
 			pages: 'build',

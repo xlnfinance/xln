@@ -811,6 +811,9 @@
     allowHeaderDeleteRuntime={true}
     headerRuntimeAddLabel="+ Add Runtime"
     env={currentFrame}
+    liveEnv={$isolatedEnv}
+    liveEnvResolver={() => $isolatedEnv}
+    liveEnvStore={isolatedEnv}
     envRevision={currentFrameRevision}
     history={$isolatedHistory}
     timeIndex={$isolatedTimeIndex}

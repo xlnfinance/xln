@@ -3537,6 +3537,7 @@ describe('orderbook matching fallback execution mapping', () => {
             route: makerRoute,
             pendingFill: {
               fillId: 'test-pending-fill',
+              receiptHash: 'test-pending-fill-receipt',
               ackKind: 'fill',
               fillSeq: 1,
               cumulativeFillRatio: 16_384,
@@ -3544,6 +3545,7 @@ describe('orderbook matching fallback execution mapping', () => {
               cumulativeTargetAmount: 1n,
               routeHash: 'hash',
               updatedAt: 2,
+              firstSeenAt: 2,
             },
             updatedAt: 2,
           },
@@ -3576,7 +3578,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(book, remoteOrderId)).not.toBeNull();
   });
 
-  test('fatals expired remote admitted cross-j pending fill progress instead of suspending forever', () => {
+  test('preserves expired remote admitted cross-j pending fill progress for replay', () => {
     const lot = SWAP_LOT_SCALE;
     const pairId = 'cross:base:2/tron:1';
     const remoteOrderId = 'remote-maker:maker-cross-expired-pending-progress';
@@ -3673,6 +3675,7 @@ describe('orderbook matching fallback execution mapping', () => {
             route: makerRoute,
             pendingFill: {
               fillId: 'test-expired-pending-fill',
+              receiptHash: 'test-expired-pending-fill-receipt',
               ackKind: 'fill',
               fillSeq: 1,
               cumulativeFillRatio: 16_384,
@@ -3680,6 +3683,7 @@ describe('orderbook matching fallback execution mapping', () => {
               cumulativeTargetAmount: 1n,
               routeHash: 'expired-pending-hash',
               updatedAt: 1,
+              firstSeenAt: 1,
             },
             updatedAt: 1,
           },
@@ -3705,9 +3709,9 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(
-      /ORDERBOOK_CROSS_J_PENDING_FILL_ACK_EXPIRED_FATAL/,
-    );
+    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).not.toThrow();
+    const admission = entityState.crossJurisdictionBookAdmissions.get('remote-maker:maker-cross-expired-pending-progress');
+    expect(admission?.pendingFill?.ttlExpiredAt).toBe(entityState.timestamp);
   });
 
   test('suspends cross-j orders after the first same-pass fill until ACK commits', () => {

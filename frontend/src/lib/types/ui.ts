@@ -99,8 +99,16 @@ export interface UiSettingsExport {
   barAnimRipple: boolean;
 }
 
+export type AccountSkin = 'classic' | 'apple';
+// Minimal capacity-bar styles for the 'apple' skin.
+export type AccountBarStyle = 'hairline' | 'pips' | 'twin' | 'capsule' | 'thread';
+
 export interface Settings {
   theme: ThemeName;
+  // Account list visual skin: 'classic' (current) or 'apple' (minimal, progressive disclosure). A/B.
+  accountSkin: AccountSkin;
+  // Capacity-bar style used by the 'apple' skin.
+  accountBarStyle: AccountBarStyle;
   uiStyle: UIStyleSettings;
   liteMode: boolean;
   barColorMode: BarColorMode;
