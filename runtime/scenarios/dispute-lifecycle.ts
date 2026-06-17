@@ -96,6 +96,9 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     name: 'dispute-lifecycle',
     signerIds: ['2', '3'],
     seed: 'dispute-lifecycle-deterministic',
+    ...(_existingEnv?.runtimeConfig?.storage?.enabled !== undefined
+      ? { storageEnabled: _existingEnv.runtimeConfig.storage.enabled }
+      : {}),
   });
   env.quietRuntimeLogs = true;
   const restoreStrict = enableStrictScenario(env, 'dispute-lifecycle');

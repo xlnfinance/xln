@@ -17,6 +17,7 @@ import { deriveDelta } from '../../account-utils';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { createOnionEnvelopes, type HtlcEnvelope } from '../../htlc-envelope-types';
 import { getRuntimeJurisdictionHeight } from '../../j-height';
+import { safeStringify } from '../../serialization-utils';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
@@ -462,7 +463,25 @@ export async function handleHtlcPayment(
       return `${formatEntityId(entityId)}:${isHex ? 'hex32' : 'b64'}:len=${key.length}:src=${source}`;
     }).join(' | ');
     console.log(`🧅 HTLC-KEYS: ${keyDebug}`);
-    const crypto = new NobleCryptoProvider();
+    const deterministicEnvelopeSeed = safeStringify({
+      version: 'xln:htlc-envelope-entropy:v1',
+      sender: newState.entityId,
+      targetEntityId,
+      tokenId,
+      recipientAmount: desiredRecipientAmount.toString(),
+      senderLockAmount: finalizedSenderLockAmount.toString(),
+      totalFee: finalizedTotalFee.toString(),
+      hashlock: finalizedHashlock,
+      secret: finalizedSecret,
+      route,
+      startedAtMs: paymentStartedAtMs,
+      hopForwardAmounts: Array.from(hopForwardAmounts.entries())
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([entityId, forwardAmount]) => [entityId, forwardAmount.toString()]),
+      entityPubKeys: Array.from(entityPubKeys.entries())
+        .sort(([left], [right]) => left.localeCompare(right)),
+    });
+    const crypto = new NobleCryptoProvider({ deterministicSeed: deterministicEnvelopeSeed });
 
     envelope = await createOnionEnvelopes(
       route,

@@ -108,7 +108,7 @@ export function getScenariosByTag(tag: string): ScenarioMetadata[] {
 export type ScenarioEntry = {
   key: string;
   name: string;
-  load: () => Promise<(env: Env) => Promise<void>>;
+  load: () => Promise<(env: Env) => Promise<void | Env>>;
   requiresStress?: boolean;
 };
 
@@ -142,7 +142,7 @@ export const scenarioRegistry: ScenarioEntry[] = [
     name: 'ProcessBatch Smoke',
     load: async () => {
       const { runProcessBatchScenario } = await import('./processbatch');
-      return async (env: Env): Promise<void> => { await runProcessBatchScenario(env); };
+      return async (env: Env): Promise<Env> => runProcessBatchScenario(env);
     },
   },
   {
@@ -150,7 +150,7 @@ export const scenarioRegistry: ScenarioEntry[] = [
     name: 'Dispute Lifecycle',
     load: async () => {
       const { runDisputeLifecycle } = await import('./dispute-lifecycle');
-      return async (env: Env): Promise<void> => { await runDisputeLifecycle(env); };
+      return async (env: Env): Promise<Env> => runDisputeLifecycle(env);
     },
   },
 ];

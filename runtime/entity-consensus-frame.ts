@@ -1,9 +1,34 @@
 import { ethers } from 'ethers';
-import type { EntityState, EntityTx } from './types';
+import type { AccountTx, EntityState, EntityTx } from './types';
 import { HEAVY_LOGS } from './utils';
 import { shortHash, shortId } from './logger';
 import { safeStringify } from './serialization-utils';
 import { compareCanonicalText } from './swap-execution';
+import {
+  canonicalDisputeFinalizationEvidenceHash,
+  canonicalJurisdictionEventsHash,
+} from './j-event-observation';
+import { normalizeJurisdictionEvents } from './j-event-normalization';
+import { canonicalAccountTxForFrameHash } from './account-consensus-frame';
+
+export type EntityFrameHashDebugRecord = {
+  entityId: string;
+  height: number;
+  hash: string;
+  payload: unknown;
+};
+
+let frameHashDebugRecorder: ((record: EntityFrameHashDebugRecord) => void) | null = null;
+
+export function setEntityFrameHashDebugRecorder(
+  recorder: ((record: EntityFrameHashDebugRecord) => void) | null,
+): () => void {
+  const previous = frameHashDebugRecorder;
+  frameHashDebugRecorder = recorder;
+  return () => {
+    frameHashDebugRecorder = previous;
+  };
+}
 
 const compareNumericKey = (
   left: string | number,
@@ -15,6 +40,112 @@ const compareNumericKey = (
     return leftNum - rightNum;
   }
   return compareCanonicalText(String(left), String(right));
+};
+
+const toRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+const toInt = (value: unknown): number => {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? Math.floor(n) : 0;
+};
+
+const rawJEvents = (data: Record<string, unknown>): unknown[] =>
+  Array.isArray(data['events'])
+    ? data['events']
+    : data['event'] !== undefined
+      ? [data['event']]
+      : [];
+
+const canonicalEventsForFrameHash = (data: Record<string, unknown>): Array<Record<string, unknown>> =>
+  normalizeJurisdictionEvents(rawJEvents(data)).map((event) => ({
+    type: event.type,
+    data: event.data,
+  }));
+
+const canonicalJEventDataForFrameHash = (value: unknown): Record<string, unknown> => {
+  const data = toRecord(value);
+  const events = canonicalEventsForFrameHash(data);
+  const normalizedEvents = normalizeJurisdictionEvents(rawJEvents(data));
+  const eventsHash = typeof data['eventsHash'] === 'string' && data['eventsHash']
+    ? data['eventsHash'].toLowerCase()
+    : canonicalJurisdictionEventsHash(normalizedEvents);
+  const evidence = Array.isArray(data['disputeFinalizationEvidence'])
+    ? data['disputeFinalizationEvidence']
+    : [];
+  const evidenceHash = typeof data['disputeFinalizationEvidenceHash'] === 'string' && data['disputeFinalizationEvidenceHash']
+    ? data['disputeFinalizationEvidenceHash'].toLowerCase()
+    : evidence.length > 0
+      ? canonicalDisputeFinalizationEvidenceHash(evidence)
+      : '';
+
+  // J block hash, tx hash, and observation signature are external evidence.
+  // They are fail-fast verified by handleJEvent before a validator signs this
+  // frame. The RJEA frame hash commits to the semantic event set instead:
+  // block height + eventsHash + canonical event bodies (+ evidence hash).
+  // This avoids honest replay divergence when the same event bodies are carried
+  // by different simulator block headers, while still changing the frame hash
+  // whenever the event content or optional dispute evidence changes.
+  return {
+    version: 'xln:j-event-frame:v1',
+    from: String(data['from'] ?? '').toLowerCase(),
+    observedAt: toInt(data['observedAt']),
+    blockNumber: toInt(data['blockNumber']),
+    eventsHash,
+    events,
+    ...(evidenceHash ? { disputeFinalizationEvidenceHash: evidenceHash } : {}),
+  };
+};
+
+const canonicalJEventAccountClaimDataForFrameHash = (value: unknown): Record<string, unknown> => {
+  const data = toRecord(value);
+  const events = canonicalEventsForFrameHash(data);
+  const eventsHash = canonicalJurisdictionEventsHash(normalizeJurisdictionEvents(rawJEvents(data)));
+  return {
+    version: 'xln:j-event-account-claim-frame:v1',
+    counterpartyEntityId: String(data['counterpartyEntityId'] ?? '').toLowerCase(),
+    jHeight: toInt(data['jHeight']),
+    eventsHash,
+    events,
+    observedAt: toInt(data['observedAt']),
+  };
+};
+
+const canonicalNestedAccountFrameForFrameHash = (value: unknown): unknown => {
+  const frame = toRecord(value);
+  if (!Array.isArray(frame['accountTxs'])) return value;
+  return {
+    ...frame,
+    accountTxs: frame['accountTxs'].map((tx) => canonicalAccountTxForFrameHash(tx as AccountTx)),
+  };
+};
+
+const canonicalAccountInputForFrameHash = (value: unknown): Record<string, unknown> => {
+  const data = toRecord(value);
+  return {
+    ...data,
+    ...(data['newAccountFrame'] !== undefined
+      ? { newAccountFrame: canonicalNestedAccountFrameForFrameHash(data['newAccountFrame']) }
+      : {}),
+  };
+};
+
+const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> => {
+  if (tx.type === 'j_event') {
+    return { type: tx.type, data: canonicalJEventDataForFrameHash(tx.data) };
+  }
+  if (tx.type === 'j_event_account_claim') {
+    return { type: tx.type, data: canonicalJEventAccountClaimDataForFrameHash(tx.data) };
+  }
+  if (tx.type === 'accountInput') {
+    return { type: tx.type, data: canonicalAccountInputForFrameHash(tx.data) };
+  }
+  return {
+    type: tx.type,
+    data: tx.data,
+  };
 };
 
 // Entity-frame hashes are BFT commitments. Validators recompute the frame from
@@ -43,10 +174,7 @@ export async function createEntityFrameHash(
     prevFrameHash,
     height,
     timestamp,
-    txs: txs.map(tx => ({
-      type: tx.type,
-      data: tx.data,
-    })),
+    txs: txs.map(canonicalEntityTxForFrameHash),
     entityId: newState.entityId,
     reserves: Array.from(newState.reserves.entries())
       .sort((a, b) => compareNumericKey(a[0], b[0]))
@@ -91,5 +219,14 @@ export async function createEntityFrameHash(
   };
 
   const encoded = safeStringify(frameData);
-  return ethers.keccak256(ethers.toUtf8Bytes(encoded));
+  const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));
+  if (frameHashDebugRecorder) {
+    frameHashDebugRecorder({
+      entityId: newState.entityId,
+      height,
+      hash,
+      payload: JSON.parse(encoded),
+    });
+  }
+  return hash;
 }

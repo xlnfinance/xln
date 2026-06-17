@@ -45,6 +45,14 @@ const requirePositiveAmount = (value: bigint, context: string): void => {
   if (value <= 0n) throw new Error(`${context}_AMOUNT_MUST_BE_POSITIVE`);
 };
 
+const requireLogicalNow = (env: Env, context: string): number => {
+  const timestamp = Number(env.timestamp);
+  if (!Number.isFinite(timestamp)) {
+    throw new Error(`${context}_TIMESTAMP_INVALID`);
+  }
+  return Math.max(0, Math.floor(timestamp));
+};
+
 const setCreditLimitOp = (
   accountId: string,
   tokenId: number,
@@ -109,7 +117,7 @@ export const handleLendingOfferEntityTx = (
   }
   const termId = normalizeLendingTerm(entityTx.data.termId);
   const interestBps = normalizeInterestBps(entityTx.data.interestBps);
-  const now = Math.max(0, Math.floor(Number(env.timestamp || Date.now())));
+  const now = requireLogicalNow(env, 'LENDING_OFFER');
   const positionId = entityTx.data.positionId || buildLendingPositionId({
     hubEntityId: newState.entityId,
     lenderEntityId,
@@ -200,7 +208,7 @@ export const handleLendingBorrowEntityTx = (
     return { newState, outputs: [] };
   }
 
-  const now = Math.max(0, Math.floor(Number(env.timestamp || Date.now())));
+  const now = requireLogicalNow(env, 'LENDING_BORROW');
   const loanId = entityTx.data.loanId || buildLendingLoanId({
     hubEntityId: newState.entityId,
     borrowerEntityId,
