@@ -1907,7 +1907,27 @@
   function tokenSymbol(tokenIdValue: number): string {
     if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 'Token';
     const info = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
-    return String(info?.symbol || `Token #${tokenIdValue}`).trim();
+    const symbol = String(info?.symbol || '').trim();
+    return symbol || `Token #${tokenIdValue}`;
+  }
+
+  function selectedTokenSymbol(
+    tokenIdValue: number,
+    tokenIdRaw: string,
+    options: Array<{ tokenId: number; symbol: string }>,
+  ): string {
+    const raw = String(tokenIdRaw || '').trim();
+    const rawTokenId = Number.parseInt(raw, 10);
+    const selectedOption = options.find((token) => String(token.tokenId) === raw)
+      || (Number.isFinite(tokenIdValue) ? options.find((token) => token.tokenId === tokenIdValue) : null)
+      || (Number.isFinite(rawTokenId) ? options.find((token) => token.tokenId === rawTokenId) : null)
+      || options[0]
+      || null;
+    const optionSymbol = String(selectedOption?.symbol || '').trim();
+    if (optionSymbol) return optionSymbol;
+    if (Number.isFinite(tokenIdValue) && tokenIdValue > 0) return tokenSymbol(tokenIdValue);
+    if (Number.isFinite(rawTokenId) && rawTokenId > 0) return tokenSymbol(rawTokenId);
+    return '';
   }
 
   function handlePriceRatioInput(event: Event): void {
@@ -2086,8 +2106,8 @@
       || reason.startsWith('Insufficient inbound capacity');
   }
 
-  $: giveTokenSymbol = tokenSymbol(giveToken);
-  $: wantTokenSymbol = tokenSymbol(wantToken);
+  $: giveTokenSymbol = selectedTokenSymbol(giveToken, giveTokenId, giveTokenOptions);
+  $: wantTokenSymbol = selectedTokenSymbol(wantToken, wantTokenId, wantTokenOptions);
   $: {
     currentReplica;
     wantTokenPresentInAccount = hasTokenInAccount(activeOrderAccountId, wantToken);
@@ -3586,7 +3606,9 @@
                 on:click|stopPropagation={() => toggleTokenMenu('give')}
               >
                 <span class={`token-dot token-${tokenClass(giveTokenSymbol)}`}>{tokenIconText(giveTokenSymbol)}</span>
-                <span class="token-select-visible" data-testid="swap-from-token-label">{giveTokenSymbol}</span>
+                {#key giveTokenId}
+                  <span class="token-select-visible" data-testid="swap-from-token-label">{giveTokenSymbol}</span>
+                {/key}
                 <span class="token-select-chevron" aria-hidden="true">⌄</span>
               </button>
               <select
@@ -3748,7 +3770,9 @@
                 on:click|stopPropagation={() => toggleTokenMenu('want')}
               >
                 <span class={`token-dot token-${tokenClass(wantTokenSymbol)}`}>{tokenIconText(wantTokenSymbol)}</span>
-                <span class="token-select-visible" data-testid="swap-to-token-label">{wantTokenSymbol}</span>
+                {#key wantTokenId}
+                  <span class="token-select-visible" data-testid="swap-to-token-label">{wantTokenSymbol}</span>
+                {/key}
                 <span class="token-select-chevron" aria-hidden="true">⌄</span>
               </button>
               <select
