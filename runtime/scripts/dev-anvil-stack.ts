@@ -58,20 +58,31 @@ const parseArgs = (): Args => {
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+const destroyProvider = async (provider: unknown): Promise<void> => {
+  const destroy = (provider as { destroy?: () => void | Promise<void> }).destroy;
+  if (typeof destroy === 'function') {
+    await destroy.call(provider);
+  }
+};
+
 const waitForRpcReady = async (rpcUrl: string, timeoutMs = 20_000): Promise<void> => {
   const provider = createXlnJsonRpcProvider(rpcUrl);
-  const deadline = Date.now() + timeoutMs;
-  let lastError = 'unknown';
-  while (Date.now() < deadline) {
-    try {
-      await provider.getBlockNumber();
-      return;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-      await sleep(250);
+  try {
+    const deadline = Date.now() + timeoutMs;
+    let lastError = 'unknown';
+    while (Date.now() < deadline) {
+      try {
+        await provider.getBlockNumber();
+        return;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        await sleep(250);
+      }
     }
+    throw new Error(`RPC not ready at ${rpcUrl}: ${lastError}`);
+  } finally {
+    await destroyProvider(provider);
   }
-  throw new Error(`RPC not ready at ${rpcUrl}: ${lastError}`);
 };
 
 const log = (enabled: boolean, message: string): void => {
@@ -80,6 +91,15 @@ const log = (enabled: boolean, message: string): void => {
 
 const keepAlive = (): Promise<void> =>
   new Promise(() => undefined);
+
+const childExited = (child: ChildProcess): Promise<void> =>
+  new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+    child.once('exit', () => resolve());
+  });
 
 const main = async (): Promise<void> => {
   const args = parseArgs();
@@ -106,12 +126,29 @@ const main = async (): Promise<void> => {
   }
 
   const cleanup = (): void => {
-    if (!anvil || anvil.exitCode !== null) return;
-    try {
-      anvil.kill('SIGTERM');
-    } catch {
-      // ignore cleanup failures
+    const child = anvil;
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    child.kill('SIGTERM');
+  };
+
+  const stopSpawnedAnvil = async (): Promise<void> => {
+    const child = anvil;
+    if (!child) return;
+    if (child.exitCode !== null || child.signalCode !== null) {
+      if (anvil === child) anvil = null;
+      return;
     }
+
+    child.kill('SIGTERM');
+    const exited = await Promise.race([
+      childExited(child).then(() => true),
+      sleep(2_000).then(() => false),
+    ]);
+    if (!exited && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await childExited(child);
+    }
+    if (anvil === child) anvil = null;
   };
 
   process.on('SIGINT', () => {
@@ -156,7 +193,11 @@ const main = async (): Promise<void> => {
   if (args.keepAlive) {
     log(verbose, '[dev-anvil-stack] stack ready; keeping process alive');
     await keepAlive();
+    return;
   }
+
+  await destroyProvider(jadapter.provider);
+  await stopSpawnedAnvil();
 };
 
 await main();
