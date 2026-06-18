@@ -571,7 +571,7 @@
       {/each}
     </aside>
 
-    <main class="preview-pane">
+    <section class="preview-pane" aria-label="Scenario preview">
       <div class="graph-shell">
         {#if status === 'loading'}
           <div class="loading-layer" data-testid="scenario-loading">Running deterministic runtime scenario...</div>
@@ -649,7 +649,7 @@
           </select>
         </div>
       </div>
-    </main>
+    </section>
 
     <aside class="builder-pane">
       <div class="builder-section">
@@ -673,16 +673,27 @@
 
 <style>
   .scenario-player {
-    min-height: 100dvh;
-    padding: 24px;
+    box-sizing: border-box;
+    height: calc(100dvh - 57px);
+    padding: 20px 24px 0;
     background: #090a0c;
     color: #f4f4f5;
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    overflow: hidden;
     font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  :global(main.with-topbar:has([data-testid="scenario-player"])) {
+    height: calc(100dvh - 57px);
+    min-height: calc(100dvh - 57px);
+    overflow: hidden;
   }
 
   .player-topbar,
   .scenario-toolbar,
   .workspace-grid {
+    width: 100%;
     max-width: 1560px;
     margin: 0 auto;
   }
@@ -692,7 +703,7 @@
     align-items: end;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 18px;
+    margin-bottom: 14px;
   }
 
   .title-block h1,
@@ -777,7 +788,7 @@
   }
 
   .scenario-toolbar {
-    padding: 10px 0 18px;
+    padding: 8px 0 16px;
   }
 
   .scenario-select-label {
@@ -811,22 +822,21 @@
     grid-template-columns: 260px minmax(420px, 1fr) 300px;
     gap: 14px;
     align-items: stretch;
+    min-height: 0;
   }
 
   .scenario-list,
   .builder-pane,
   .preview-pane {
     min-width: 0;
-    border: 1px solid #20242b;
-    border-radius: 8px;
-    background: #0d0f14;
+    min-height: 0;
   }
 
   .scenario-list {
     display: grid;
     align-content: start;
     gap: 6px;
-    padding: 8px;
+    overflow: auto;
   }
 
   .scenario-list button {
@@ -834,7 +844,7 @@
     gap: 5px;
     width: 100%;
     min-height: 86px;
-    padding: 10px;
+    padding: 10px 8px;
     border: 1px solid transparent;
     border-radius: 7px;
     background: transparent;
@@ -866,20 +876,20 @@
 
   .preview-pane {
     display: grid;
-    grid-template-rows: minmax(360px, 1fr) auto auto;
+    grid-template-rows: minmax(260px, 1fr) auto auto;
     overflow: hidden;
   }
 
   .graph-shell {
     position: relative;
-    min-height: 360px;
+    min-height: 260px;
     background: #050608;
   }
 
   .scenario-graph {
     width: 100%;
     height: 100%;
-    min-height: 360px;
+    min-height: 260px;
   }
 
   .scenario-graph line {
@@ -949,7 +959,7 @@
     display: flex;
     justify-content: space-between;
     gap: 12px;
-    padding: 14px 16px;
+    padding: 12px 0 10px;
     border-top: 1px solid #20242b;
   }
 
@@ -979,7 +989,7 @@
   .timeline {
     display: grid;
     gap: 10px;
-    padding: 12px 16px 14px;
+    padding: 10px 0 12px;
     border-top: 1px solid #20242b;
   }
 
@@ -991,7 +1001,7 @@
     display: grid;
     grid-template-rows: auto auto 1fr;
     gap: 14px;
-    padding: 14px;
+    overflow: hidden;
   }
 
   .builder-section h2 {
@@ -1012,10 +1022,8 @@
 
   .metrics-grid div {
     min-width: 0;
-    padding: 10px;
-    border: 1px solid #20242b;
-    border-radius: 7px;
-    background: #090a0c;
+    padding: 0 0 9px;
+    border-bottom: 1px solid #20242b;
   }
 
   .metrics-grid strong,
@@ -1035,13 +1043,15 @@
 
   .builder-notes {
     display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
     min-height: 0;
     gap: 8px;
   }
 
   .builder-notes textarea {
     width: 100%;
-    min-height: 220px;
+    min-height: 0;
+    height: 100%;
     resize: none;
     box-sizing: border-box;
     border: 1px solid #20242b;
@@ -1053,8 +1063,21 @@
   }
 
   @media (max-width: 1100px) {
+    .scenario-player {
+      height: auto;
+      min-height: calc(100dvh - 57px);
+      padding-bottom: 16px;
+      overflow: visible;
+    }
+
+    :global(main.with-topbar:has([data-testid="scenario-player"])) {
+      height: auto;
+      overflow: visible;
+    }
+
     .workspace-grid {
       grid-template-columns: 1fr;
+      overflow: visible;
     }
 
     .scenario-list {
