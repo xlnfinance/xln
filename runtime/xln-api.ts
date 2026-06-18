@@ -417,6 +417,10 @@ export interface XLNModule {
     lockAhb: (env: Env) => Promise<Env>;
     swap: (env: Env) => Promise<Env>;
     grid: (env: Env) => Promise<Env>;
+    settle?: (env: Env) => Promise<Env>;
+    swapMarket?: (env: Env) => Promise<Env>;
+    rapidFire?: (env: Env) => Promise<Env>;
+    disputeLifecycle?: (env: Env) => Promise<Env>;
     fullMechanics: (env: Env) => Promise<Env>;
   };
 

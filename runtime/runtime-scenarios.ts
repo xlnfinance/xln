@@ -38,6 +38,10 @@ export const scenarios = {
     await runSettleScenario(env);
     return env;
   },
+  disputeLifecycle: async (env: Env): Promise<Env> => {
+    const { runDisputeLifecycle } = await import('./scenarios/dispute-lifecycle');
+    return await runDisputeLifecycle(env);
+  },
   fullMechanics: async (env: Env): Promise<Env> => {
     const { getScenario } = await import('./scenarios');
     const scenario = getScenario('ahb');

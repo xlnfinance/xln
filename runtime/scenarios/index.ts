@@ -9,7 +9,7 @@ export interface ScenarioMetadata {
   name: string;
   description: string;
   tags: string[];
-  run: (env: Env) => Promise<void>;
+  run: (env: Env) => Promise<Env | void>;
 }
 
 // Lazy-load scenarios - run is async callable that imports on first call
@@ -89,7 +89,7 @@ export const SCENARIOS: ScenarioMetadata[] = [
     name: 'Dispute Lifecycle',
     description: 'Unilateral dispute lifecycle: start -> finalize -> resume, without bilateral j_event_claim flow',
     tags: ['dispute', 'safety', 'rpc'],
-    run: async (env: Env) => { await (await import('./dispute-lifecycle')).runDisputeLifecycle(env); },
+    run: async (env: Env) => (await import('./dispute-lifecycle')).runDisputeLifecycle(env),
   },
 ];
 
