@@ -35,6 +35,7 @@
   let resettingEverything = $state(false);
   let bootGeneration = $state(0);
   let lockTestMode = $state(false);
+  let scenarioPreviewMode = $state(false);
   let currentHash = $state('');
   let pendingRemoteRuntime = $state<RemoteRuntimeRequest | null>(null);
   let remoteRuntimeAuthInput = $state('');
@@ -301,6 +302,7 @@
     if (!browser) return;
     const params = new URLSearchParams(pageSearch);
     lockTestMode = params.get('locktest') === '1' && canUseLockTestMode();
+    scenarioPreviewMode = params.get('scenarioPreview') === '1';
   });
 
   async function deactivateThisTab(): Promise<void> {
@@ -495,6 +497,11 @@
       </button>
     </div>
   {/if}
+{:else if lockTestMode && scenarioPreviewMode}
+  <div class="scenario-preview-banner" data-testid="scenario-preview-wallet-banner">
+    Scenario preview. Runtime writes and wallet bootstrap are disabled in this view.
+  </div>
+  {@render children?.()}
 {:else if lockTestMode}
   <main class="app-shell-ready app-shell-ready--empty" data-testid="app-runtime-ready"></main>
 {:else if $error}
@@ -743,6 +750,23 @@
 
   .app-shell-ready {
     display: contents;
+  }
+
+  .scenario-preview-banner {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    z-index: 80;
+    transform: translateX(-50%);
+    max-width: min(720px, calc(100vw - 24px));
+    padding: 8px 12px;
+    border: 1px solid rgba(61, 220, 151, 0.36);
+    border-radius: 7px;
+    background: rgba(12, 35, 26, 0.94);
+    color: #d9ffed;
+    font-size: 12px;
+    font-weight: 800;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
   }
 
   .remote-page-notice {

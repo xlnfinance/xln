@@ -193,9 +193,10 @@ export interface RegisteredEntity {
  * Set via: JADAPTER_MODE=browservm|rpc (default: rpc)
  */
 export function getJAdapterMode(): JAdapterMode {
-  // Browser scenarios run in BrowserVM mode by default.
-  // Ignore env var leakage from build/test runners (process.env.* polyfills).
-  if (IS_BROWSER_RUNTIME) return 'browservm';
+  // BrowserVM JAdapter is intentionally disabled in the current runtime path.
+  // Browser scenario previews must use the app's /rpc proxy instead of choosing
+  // browservm and failing before the scenario can build deterministic history.
+  if (IS_BROWSER_RUNTIME) return 'rpc';
   const mode = process.env['JADAPTER_MODE']?.toLowerCase();
   if (mode === 'rpc' || mode === 'anvil') return mode as JAdapterMode;
   if (mode === 'browservm') return 'browservm';
