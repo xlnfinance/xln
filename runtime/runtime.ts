@@ -288,6 +288,12 @@ import {
 } from './utils';
 import { createStructuredLogger, logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
+import {
+  buildRuntimeActivityEvents,
+  dedupeRuntimeActivityEvents,
+  type RuntimeActivityEvent,
+  type RuntimeActivityFilters,
+} from './activity-history';
 import { validateRuntimeRecoveryBundle as validateRecoveryBundle } from './recovery/bundle';
 import type { RuntimeRecoveryBundleV1 } from './recovery/types';
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
@@ -3473,6 +3479,89 @@ export const readPersistedFrameJournals = async (
     if (receipt) receipts.push(receipt);
   }
   return receipts;
+};
+
+export type PersistedRuntimeActivityPage = {
+  ok: true;
+  runtimeId?: string | undefined;
+  latestHeight: number;
+  fromHeight: number;
+  toHeight: number;
+  scannedFrames: number;
+  returned: number;
+  limit: number;
+  scanLimit: number;
+  nextBeforeHeight: number | null;
+  filters: RuntimeActivityFilters;
+  events: RuntimeActivityEvent[];
+};
+
+export const readPersistedRuntimeActivityPage = async (
+  env: Env,
+  opts: RuntimeActivityFilters & {
+    beforeHeight?: number | undefined;
+    limit?: number | undefined;
+    scanLimit?: number | undefined;
+  } = {},
+): Promise<PersistedRuntimeActivityPage> => {
+  const latestHeight = await resolvePersistedLatestHeight(env);
+  const limit = Math.max(1, Math.min(500, Math.floor(Number(opts.limit ?? 100))));
+  const scanLimit = Math.max(1, Math.min(500, Math.floor(Number(opts.scanLimit ?? 100))));
+  if (latestHeight <= 0) {
+    return {
+      ok: true,
+      runtimeId: env.runtimeId,
+      latestHeight: 0,
+      fromHeight: 0,
+      toHeight: 0,
+      scannedFrames: 0,
+      returned: 0,
+      limit,
+      scanLimit,
+      nextBeforeHeight: null,
+      filters: opts,
+      events: [],
+    };
+  }
+
+  const startHeight = Math.max(
+    1,
+    Math.min(
+      latestHeight,
+      Number.isFinite(Number(opts.beforeHeight)) ? Math.floor(Number(opts.beforeHeight)) : latestHeight,
+    ),
+  );
+  const events: RuntimeActivityEvent[] = [];
+  let scannedFrames = 0;
+  let height = startHeight;
+  let uniqueEventCount = 0;
+  for (; height >= 1 && scannedFrames < scanLimit && uniqueEventCount < limit; height -= 1) {
+    const journal = await readPersistedFrameJournal(env, height);
+    scannedFrames += 1;
+    if (!journal) continue;
+    events.push(...buildRuntimeActivityEvents(journal, opts));
+    uniqueEventCount = dedupeRuntimeActivityEvents(events).length;
+  }
+
+  const returned = dedupeRuntimeActivityEvents(events).slice(0, limit).map((event) => ({
+    ...event,
+    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
+    id: env.runtimeId ? `${env.runtimeId}:${event.id}` : event.id,
+  }));
+  return {
+    ok: true,
+    runtimeId: env.runtimeId,
+    latestHeight,
+    fromHeight: Math.max(1, height + 1),
+    toHeight: startHeight,
+    scannedFrames,
+    returned: returned.length,
+    limit,
+    scanLimit,
+    nextBeforeHeight: height >= 1 ? height : null,
+    filters: opts,
+    events: returned,
+  };
 };
 
 export const readPersistedCheckpointSnapshot = async (

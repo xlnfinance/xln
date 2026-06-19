@@ -8,6 +8,7 @@ type OrchestratorDebugApiDeps = {
   pathname: string;
   url: URL;
   headers: HeadersInit;
+  hubApiHost: string;
   relayStore: RelayStore;
   hubChildren: HubChild[];
   marketMakerChild: MarketMakerChild;
@@ -150,6 +151,71 @@ const handleDebugRelay = (deps: OrchestratorDebugApiDeps): Response =>
     debugEvents: deps.relayStore.debugEvents.slice(-200),
   }), { headers: deps.headers });
 
+type ActivityPageLike = {
+  ok?: boolean;
+  runtimeId?: string;
+  latestHeight?: number;
+  scannedFrames?: number;
+  returned?: number;
+  nextBeforeHeight?: number | null;
+  events?: Array<Record<string, unknown>>;
+};
+
+const handleDebugActivity = async (deps: OrchestratorDebugApiDeps): Promise<Response> => {
+  await deps.pollAllHubHealth();
+  const limit = Math.max(1, Math.min(500, Number(deps.url.searchParams.get('limit') || '100')));
+  const hubPages: ActivityPageLike[] = [];
+  const failures: Array<{ hub: string; apiPort: number; error: string }> = [];
+
+  const liveChildren = deps.hubChildren.filter((child) => child.proc?.exitCode === null && child.lastHealth);
+  await Promise.all(liveChildren.map(async (child) => {
+    const upstreamUrl = `http://${deps.hubApiHost}:${child.apiPort}${deps.pathname}${deps.url.search}`;
+    try {
+      const response = await fetch(upstreamUrl, { method: 'GET' });
+      const text = await response.text();
+      if (!response.ok) {
+        failures.push({ hub: child.name, apiPort: child.apiPort, error: `HTTP ${response.status}: ${text.slice(0, 240)}` });
+        return;
+      }
+      const parsed = JSON.parse(text) as ActivityPageLike;
+      hubPages.push(parsed);
+    } catch (error) {
+      failures.push({
+        hub: child.name,
+        apiPort: child.apiPort,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }));
+
+  const events = hubPages
+    .flatMap((page) => Array.isArray(page.events) ? page.events : [])
+    .sort((left, right) => {
+      const byTime = Number(right['timestamp'] || 0) - Number(left['timestamp'] || 0);
+      if (byTime !== 0) return byTime;
+      const byHeight = Number(right['height'] || 0) - Number(left['height'] || 0);
+      if (byHeight !== 0) return byHeight;
+      return String(right['id'] || '').localeCompare(String(left['id'] || ''));
+    })
+    .slice(0, limit);
+  const nextBeforeHeights = hubPages
+    .map((page) => Number(page.nextBeforeHeight))
+    .filter((height) => Number.isFinite(height) && height > 0);
+
+  return new Response(safeStringify({
+    ok: failures.length === 0,
+    partial: failures.length > 0,
+    latestHeight: Math.max(0, ...hubPages.map((page) => Number(page.latestHeight || 0))),
+    scannedFrames: hubPages.reduce((sum, page) => sum + Math.max(0, Number(page.scannedFrames || 0)), 0),
+    returned: events.length,
+    limit,
+    nextBeforeHeight: nextBeforeHeights.length > 0 ? Math.max(...nextBeforeHeights) : null,
+    hubs: hubPages.length,
+    failures,
+    events,
+  }), { headers: deps.headers });
+};
+
 export const maybeHandleOrchestratorDebugApi = async (
   deps: OrchestratorDebugApiDeps,
 ): Promise<Response | null> => {
@@ -161,6 +227,9 @@ export const maybeHandleOrchestratorDebugApi = async (
   }
   if (deps.pathname === '/api/debug/events') {
     return handleDebugEvents(deps);
+  }
+  if (deps.pathname === '/api/debug/activity' && deps.request.method === 'GET') {
+    return await handleDebugActivity(deps);
   }
   if (deps.pathname === '/api/debug/events/mark' && deps.request.method === 'POST') {
     return await handleDebugEventsMark(deps);

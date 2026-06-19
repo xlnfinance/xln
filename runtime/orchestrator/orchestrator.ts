@@ -1698,6 +1698,7 @@ const server = Bun.serve({
       pathname,
       url,
       headers,
+      hubApiHost: args.host,
       relayStore,
       hubChildren,
       marketMakerChild,

@@ -99,6 +99,7 @@ import { handleP2PControl } from './server/p2p-control';
 import { handleRuntimeInputControl, handleRuntimeInputStatus } from './server/runtime-input-control';
 import { handleSignerRegistration } from './server/signer-control';
 import { fetchRpcCode, probeLocalAnvilContractStack } from './server/stack-probe';
+import { handleRuntimeActivityRequest } from './server/activity-api';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -572,6 +573,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }),
       { headers },
     );
+  }
+
+  if (pathname === '/api/debug/activity' && env) {
+    return await handleRuntimeActivityRequest(env, new URL(req.url), headers);
   }
 
   const debugDumpsResponse = await maybeHandleDebugDumpsRequest({ req, pathname, relayStore, headers });
