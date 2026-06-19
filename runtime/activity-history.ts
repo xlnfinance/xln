@@ -327,6 +327,156 @@ const eventFromCrossJurisdiction = (
   });
 };
 
+const accountCounterparty = (fromEntityId: string, toEntityId: string, viewedEntityId: string): string | undefined => {
+  if (viewedEntityId === fromEntityId) return toEntityId || undefined;
+  if (viewedEntityId === toEntityId) return fromEntityId || undefined;
+  return toEntityId || fromEntityId || undefined;
+};
+
+const eventFromAccountFrameTx = (
+  journal: PersistedActivityJournal,
+  index: number,
+  inputEntityId: string,
+  accountInput: RawRecord,
+  tx: RawRecord,
+  viewedEntityId: string,
+): RuntimeActivityEvent => {
+  const txType = String(tx['type'] || 'unknown');
+  const data = recordValue(tx['data']);
+  const fromEntityId = normalizeId(accountInput['fromEntityId']) || inputEntityId;
+  const toEntityId = normalizeId(accountInput['toEntityId']);
+  const direction = inferDirection(fromEntityId, toEntityId, viewedEntityId);
+  const counterpartyId = accountCounterparty(fromEntityId, toEntityId, viewedEntityId);
+  const base = {
+    entityId: viewedEntityId || inputEntityId,
+    ...(counterpartyId ? { counterpartyId } : {}),
+  };
+
+  switch (txType) {
+    case 'direct_payment': {
+      const sourceEntityId = normalizeId(data['fromEntityId']) || fromEntityId;
+      const targetEntityId = normalizeId(data['toEntityId']) || normalizeId(data['targetEntityId']) || toEntityId;
+      const paymentDirection = inferDirection(sourceEntityId, targetEntityId, viewedEntityId);
+      const paymentCounterparty = routeCounterparty(data['route'], viewedEntityId, targetEntityId || counterpartyId);
+      return makeEvent(journal, index, {
+        kind: 'offchain',
+        type: 'payment',
+        source: 'runtime_input',
+        direction: paymentDirection,
+        title: paymentDirection === 'in' ? 'Payment received' : paymentDirection === 'out' ? 'Payment sent' : 'Payment routed',
+        subtitle: `${bigintText(data['amount']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'} ${paymentDirection === 'in' ? `from ${shortId(sourceEntityId)}` : `to ${shortId(targetEntityId)}`}`,
+        status: 'committed',
+        entityId: viewedEntityId || inputEntityId,
+        ...(paymentCounterparty ? { counterpartyId: paymentCounterparty } : {}),
+        tokenId: numberValue(data['tokenId']),
+        amount: bigintText(data['amount']),
+        rawType: txType,
+      });
+    }
+    case 'htlc_lock':
+      return makeEvent(journal, index, {
+        kind: 'offchain',
+        type: 'payment',
+        source: 'runtime_input',
+        direction,
+        title: direction === 'in' ? 'Payment received' : direction === 'out' ? 'Payment sent' : 'Payment routed',
+        subtitle: `${bigintText(data['amount']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'} locked with HTLC`,
+        status: 'locked',
+        ...base,
+        tokenId: numberValue(data['tokenId']),
+        amount: bigintText(data['amount']),
+        hash: typeof data['hashlock'] === 'string' ? data['hashlock'] : undefined,
+        rawType: txType,
+      });
+    case 'htlc_resolve':
+      return makeEvent(journal, index, {
+        kind: 'offchain',
+        type: 'payment',
+        source: 'runtime_input',
+        direction,
+        title: String(data['outcome'] || '') === 'secret' ? 'Payment finalized' : 'Payment failed',
+        subtitle: String(data['reason'] || data['outcome'] || 'HTLC resolved'),
+        status: String(data['outcome'] || '') === 'secret' ? 'finalized' : 'failed',
+        ...base,
+        rawType: txType,
+      });
+    case 'swap_offer':
+      return eventFromSwap(journal, index, inputEntityId, 'placeSwapOffer', data, viewedEntityId);
+    case 'swap_cancel_request':
+      return eventFromSwap(journal, index, inputEntityId, 'proposeCancelSwap', data, viewedEntityId);
+    case 'swap_resolve':
+      return eventFromSwap(journal, index, inputEntityId, 'resolveSwap', data, viewedEntityId);
+    case 'add_delta':
+      return makeEvent(journal, index, {
+        kind: 'offchain',
+        type: 'account',
+        source: 'runtime_input',
+        direction: 'neutral',
+        title: 'Token lane opened',
+        subtitle: `Token ${numberValue(data['tokenId']) ?? '?'}`,
+        status: 'created',
+        ...base,
+        tokenId: numberValue(data['tokenId']),
+        rawType: txType,
+      });
+    case 'set_credit_limit':
+      return makeEvent(journal, index, {
+        kind: 'offchain',
+        type: 'account',
+        source: 'runtime_input',
+        direction: 'neutral',
+        title: 'Credit limit updated',
+        subtitle: `${bigintText(data['amount']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'}`,
+        status: 'updated',
+        ...base,
+        tokenId: numberValue(data['tokenId']),
+        amount: bigintText(data['amount']),
+        rawType: txType,
+      });
+    case 'request_collateral':
+    case 'set_rebalance_policy':
+      return makeEvent(journal, index, {
+        kind: 'offchain',
+        type: 'account',
+        source: 'runtime_input',
+        direction: 'neutral',
+        title: txType === 'request_collateral' ? 'Collateral requested' : 'Rebalance policy updated',
+        subtitle: `${bigintText(data['amount']) ?? bigintText(data['r2cRequestSoftLimit']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'}`,
+        status: 'updated',
+        ...base,
+        tokenId: numberValue(data['tokenId']),
+        amount: bigintText(data['amount']),
+        rawType: txType,
+      });
+    default:
+      return makeEvent(journal, index, {
+        kind: normalizeKind(txType),
+        type: normalizeType(txType),
+        source: 'runtime_input',
+        direction: 'neutral',
+        title: txType,
+        subtitle: `Account frame transaction committed in frame ${journal.height}`,
+        status: 'committed',
+        ...base,
+        rawType: txType,
+      });
+  }
+};
+
+const eventsFromAccountInput = (
+  journal: PersistedActivityJournal,
+  startIndex: number,
+  inputEntityId: string,
+  data: RawRecord,
+  viewedEntityId: string,
+): RuntimeActivityEvent[] => {
+  const frame = recordValue(data['newAccountFrame']);
+  const accountTxs = Array.isArray(frame['accountTxs']) ? frame['accountTxs'] as RawRecord[] : [];
+  return accountTxs.map((accountTx, offset) =>
+    eventFromAccountFrameTx(journal, startIndex + offset, inputEntityId, data, accountTx, viewedEntityId)
+  );
+};
+
 const eventFromEntityTx = (
   journal: PersistedActivityJournal,
   index: number,
@@ -340,6 +490,8 @@ const eventFromEntityTx = (
     return null;
   }
   switch (txType) {
+    case 'accountInput':
+      return null;
     case 'directPayment':
       return eventFromDirectPayment(journal, index, normalizeId(inputEntityId), data, viewedEntityId);
     case 'htlcPayment':
@@ -508,6 +660,20 @@ export const buildRuntimeActivityEvents = (
   for (const entityInput of input?.entityInputs ?? []) {
     const inputEntityId = normalizeId(entityInput?.entityId);
     for (const tx of entityInput?.entityTxs ?? []) {
+      if (String((tx as RawRecord)?.['type'] || '') === 'accountInput') {
+        const accountEvents = eventsFromAccountInput(
+          journal,
+          index,
+          inputEntityId,
+          recordValue((tx as RawRecord)?.['data']),
+          viewedEntityId,
+        );
+        index += accountEvents.length || 1;
+        for (const event of accountEvents) {
+          if (eventMatchesFilters(event, filters)) events.push(event);
+        }
+        continue;
+      }
       const event = eventFromEntityTx(journal, index++, inputEntityId, tx as RawRecord, viewedEntityId);
       if (event && eventMatchesFilters(event, filters)) events.push(event);
     }

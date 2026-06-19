@@ -134,6 +134,62 @@ describe('runtime activity history', () => {
     expect(htlcAliasEvents).toHaveLength(1);
   });
 
+  test('expands accountInput frame transactions into payment history', () => {
+    const events = buildRuntimeActivityEvents({
+      height: 25,
+      timestamp: 1_700_000_035_000,
+      runtimeInput: {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: alice,
+          signerId: alice,
+          entityTxs: [{
+            type: 'accountInput',
+            data: {
+              kind: 'frame',
+              fromEntityId: alice,
+              toEntityId: hub,
+              newAccountFrame: {
+                height: 4,
+                timestamp: 1_700_000_035_000,
+                jHeight: 9,
+                prevFrameHash: '0xprev',
+                stateHash: '0xstate',
+                accountTxs: [{
+                  type: 'htlc_lock',
+                  data: {
+                    lockId: 'lock-1',
+                    hashlock: '0xhash',
+                    timelock: 1_700_000_045_000n,
+                    revealBeforeHeight: 44,
+                    amount: 7n * 10n ** 18n,
+                    tokenId: 1,
+                  },
+                }],
+                deltas: [],
+              },
+              newHanko: '0xhanko',
+            },
+          }],
+        }],
+      },
+      logs: [],
+    } as any, { entityId: alice, types: ['payment'] });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'offchain',
+      type: 'payment',
+      direction: 'out',
+      title: 'Payment sent',
+      status: 'locked',
+      amount: '7000000000000000000',
+      tokenId: 1,
+      counterpartyId: hub,
+      rawType: 'htlc_lock',
+    });
+  });
+
   test('deduplicates repeated htlc lifecycle logs by hashlock', () => {
     const first = buildRuntimeActivityEvents({
       height: 31,
