@@ -58,8 +58,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(mmNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '90'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '30'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '90'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '270'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '180'");
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
     expect(mmNode).toContain('return unique;');
     expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
@@ -69,7 +71,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds)');
     expect(mmNode).toContain('(progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0)');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '6'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '60'");
     expect(mmNode).toContain('bootstrapCrossCursor');
     expect(mmNode).toContain('const jobCount = Math.min(MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length)');
     expect(mmNode).toContain('const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {');
