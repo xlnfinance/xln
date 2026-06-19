@@ -6,7 +6,6 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { deriveSignerAddressSync } from '../account-crypto';
@@ -85,7 +84,16 @@ import {
 } from './jurisdictions';
 import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
-import { MARKET_MAKER_CREDIT_AMOUNT } from './mesh-common';
+import {
+  MARKET_MAKER_CREDIT_AMOUNT,
+  deriveMarketMakerEntityId,
+  type MarketMakerEntityJurisdictionConfig,
+} from './mesh-common';
+import {
+  resolveMeshJurisdictionConfig,
+  resolveSecondaryJurisdictions,
+  type MeshJurisdictionConfig,
+} from './mesh-jurisdictions';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -503,20 +511,74 @@ const pollMarketMakerHealth = async (): Promise<void> => {
 
 const getHubSpecsArg = (): string => HUB_NAMES.join(',');
 
-const getMarketMakerIdentity = (): { name: string; entityId: string; signerId: string; creditAmount: string } => {
-  const signerId = deriveSignerAddressSync(marketMakerChild.seed, marketMakerChild.signerLabel).toLowerCase();
-  const entityId = hashBoard(encodeBoard({
-    mode: 'proposer-based',
-    threshold: 1n,
-    validators: [signerId],
-    shares: { [signerId]: 1n },
-  })).toLowerCase();
+type MarketMakerJurisdictionConfig = MeshJurisdictionConfig & {
+  contracts: NonNullable<MeshJurisdictionConfig['contracts']>;
+};
+
+type MarketMakerSupportPeerIdentity = {
+  name: string;
+  entityId: string;
+  signerId: string;
+  creditAmount: string;
+};
+
+const resolveLocalMarketMakerRpcUrl = (value: string): string => {
+  const raw = String(value || '').trim();
+  if (!raw.startsWith('/')) return raw;
+  const match = raw.match(/^\/(?:api\/)?rpc([2-8])?(?:\?.*)?$/);
+  if (match) {
+    const index = match[1] ? Number(match[1]) : 1;
+    const rpc = String(args.rpcUrls[index] || '').trim();
+    if (rpc) return rpc;
+  }
+  return new URL(raw, `http://${args.host}:${marketMakerChild.apiPort}`).toString();
+};
+
+const toMarketMakerEntityJurisdictionConfig = (
+  jurisdiction: MarketMakerJurisdictionConfig,
+): MarketMakerEntityJurisdictionConfig => {
+  if (!jurisdiction.contracts?.entityProvider || !jurisdiction.contracts?.depository) {
+    throw new Error(`MARKET_MAKER_JURISDICTION_CONTRACTS_MISSING:${jurisdiction.name || 'unknown'}`);
+  }
   return {
-    name: marketMakerChild.name,
+    name: jurisdiction.name,
+    address: resolveLocalMarketMakerRpcUrl(jurisdiction.rpc),
+    entityProviderAddress: jurisdiction.contracts.entityProvider,
+    depositoryAddress: jurisdiction.contracts.depository,
+    chainId: Number(jurisdiction.chainId || 0),
+  };
+};
+
+const buildMarketMakerIdentity = (
+  jurisdiction: MarketMakerJurisdictionConfig,
+  signerLabel: string,
+  name: string,
+): MarketMakerSupportPeerIdentity => {
+  const signerId = deriveSignerAddressSync(marketMakerChild.seed, signerLabel).toLowerCase();
+  const entityId = deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction));
+  return {
+    name,
     entityId,
     signerId,
     creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString(),
   };
+};
+
+const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
+  const primary = resolveMeshJurisdictionConfig<MarketMakerJurisdictionConfig>(args.rpcUrl);
+  const identities: MarketMakerSupportPeerIdentity[] = [
+    buildMarketMakerIdentity(primary, marketMakerChild.signerLabel, marketMakerChild.name),
+  ];
+  for (const [index, secondary] of resolveSecondaryJurisdictions<MarketMakerJurisdictionConfig>(primary.rpc).entries()) {
+    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+    if (!secondaryName) continue;
+    identities.push(buildMarketMakerIdentity(
+      secondary,
+      `${marketMakerChild.signerLabel}:${secondaryName}`,
+      `${marketMakerChild.name} ${secondaryName}`,
+    ));
+  }
+  return identities;
 };
 
 const getMeshHubIdentitiesArg = (): string => JSON.stringify(
@@ -643,7 +705,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     '--rpc-url', args.rpcUrl,
     ...buildSecondaryRpcArgs(),
     '--mesh-hub-names', getHubSpecsArg(),
-    '--support-peer-identities-json', JSON.stringify([getMarketMakerIdentity()]),
+    '--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities()),
     '--db-path', child.dbPath,
     ...(child.deployTokens ? ['--deploy-tokens'] : []),
   ];
