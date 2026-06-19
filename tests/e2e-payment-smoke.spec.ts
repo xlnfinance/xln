@@ -19,6 +19,7 @@ const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 300_000 : 240_000;
 const CONSENSUS_TIMEOUT_MS = 60_000;
 const PAYMENT_AMOUNT = 7n * 10n ** 18n;
 const USE_BASELINE = Boolean(process.env.E2E_RESET_BASE_URL);
+const HISTORY_SCREENSHOT_PATH = String(process.env.E2E_HISTORY_SCREENSHOT_PATH || '').trim();
 
 type HubDirectoryEntry = {
   entityId?: string;
@@ -26,6 +27,33 @@ type HubDirectoryEntry = {
   online?: boolean;
   name?: string;
 };
+
+type ActivityApiEvent = {
+  type?: string;
+  rawType?: string;
+  title?: string;
+  amount?: string;
+  entityId?: string;
+  counterpartyId?: string;
+};
+
+function isExpectedUiPaymentActivity(event: ActivityApiEvent): boolean {
+  const type = String(event.type || '');
+  const rawType = String(event.rawType || '').toLowerCase();
+  const title = String(event.title || '').toLowerCase();
+  const amountText = String(event.amount || '');
+  let amount = 0n;
+  try {
+    amount = BigInt(amountText);
+  } catch {
+    return false;
+  }
+  return (
+    (type === 'payment' || rawType.includes('payment') || title.includes('payment')) &&
+    amount >= PAYMENT_AMOUNT &&
+    amount < 8n * 10n ** 18n
+  );
+}
 
 function randomMnemonic(): string {
   const mnemonic = Wallet.createRandom().mnemonic?.phrase;
@@ -216,6 +244,142 @@ async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<vo
     .toBe(true);
 }
 
+async function countRuntimeActivityEvents(
+  page: Page,
+  entityId: string,
+  params: Record<string, string>,
+  predicate: (event: ActivityApiEvent) => boolean,
+): Promise<number> {
+  const localEvents = await page.evaluate(async ({ targetEntityId, sourceParams }) => {
+    const view = window as typeof window & {
+      XLN?: {
+        readPersistedRuntimeActivityPage?: (env: unknown, opts: Record<string, unknown>) => Promise<{ events?: ActivityApiEvent[] }>;
+      };
+      isolatedEnv?: unknown;
+    };
+    if (!view.isolatedEnv) return [];
+    const XLN = view.XLN?.readPersistedRuntimeActivityPage
+      ? view.XLN
+      : await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href)
+        .catch(() => null);
+    if (!XLN?.readPersistedRuntimeActivityPage) return [];
+    const kind = sourceParams.kind && sourceParams.kind !== 'all' ? sourceParams.kind : undefined;
+    const types = sourceParams.types ? String(sourceParams.types).split(',').filter(Boolean) : undefined;
+    const body = await XLN.readPersistedRuntimeActivityPage(view.isolatedEnv, {
+      entityId: targetEntityId,
+      ...(kind ? { kind } : {}),
+      ...(types ? { types } : {}),
+      limit: 80,
+      scanLimit: 100,
+    });
+    return Array.isArray(body.events) ? body.events : [];
+  }, { targetEntityId: entityId, sourceParams: params }).catch(() => [] as ActivityApiEvent[]);
+
+  const url = new URL('/api/debug/activity', API_BASE_URL);
+  url.searchParams.set('entityId', entityId);
+  url.searchParams.set('limit', '80');
+  url.searchParams.set('scanLimit', '100');
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+
+  const response = await page.request.get(url.toString());
+  const serverEvents = response.ok()
+    ? ((await response.json() as { events?: ActivityApiEvent[] }).events ?? [])
+    : [];
+  return [...localEvents, ...serverEvents].filter(predicate).length;
+}
+
+async function openEntityHistoryPage(page: Page, entityId: string): Promise<Page> {
+  const target = `${APP_BASE_URL}/address/${encodeURIComponent(entityId)}`;
+  const historyPage = await page.context().newPage();
+  await historyPage.goto(target, { waitUntil: 'domcontentloaded' });
+  await historyPage.waitForURL(target, { timeout: CONSENSUS_TIMEOUT_MS });
+  return historyPage;
+}
+
+async function verifyEntityActivityHistory(page: Page, entityId: string, options: { requirePaymentFilter?: boolean } = {}): Promise<void> {
+  await expect
+    .poll(
+      () => countRuntimeActivityEvents(
+        page,
+        entityId,
+        { kind: 'all' },
+        isExpectedUiPaymentActivity,
+      ),
+      {
+        timeout: CONSENSUS_TIMEOUT_MS,
+        intervals: [500, 1000, 1500],
+        message: `activity API must expose payment history for ${entityId.slice(0, 12)}`,
+      },
+    )
+    .toBeGreaterThan(0);
+
+  const historyPage = await openEntityHistoryPage(page, entityId);
+  try {
+    await expect(historyPage.getByTestId('entity-history-panel')).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+    await expect
+      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
+        timeout: CONSENSUS_TIMEOUT_MS,
+        intervals: [500, 1000, 1500],
+        message: 'entity history should render at least one event',
+      })
+      .toBeGreaterThan(0);
+
+    await historyPage.getByTestId('history-kind-offchain').click();
+    await expect
+      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
+        timeout: CONSENSUS_TIMEOUT_MS,
+        intervals: [500, 1000, 1500],
+        message: 'off-chain history tab should keep payment events visible',
+      })
+      .toBeGreaterThan(0);
+
+    if (options.requirePaymentFilter) {
+      await historyPage.getByTestId('history-type-payment').click();
+      await expect
+        .poll(() => historyPage.getByTestId('entity-history-event').count(), {
+          timeout: CONSENSUS_TIMEOUT_MS,
+          intervals: [500, 1000, 1500],
+          message: 'payment filter should keep payment events visible',
+        })
+        .toBeGreaterThan(0);
+      await expect(
+        historyPage.getByTestId('history-event-amount').filter({ hasText: /^7(\.|$)/ }).first(),
+      ).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
+      await expect
+        .poll(() => historyPage.getByTestId('entity-history-event').filter({ hasText: 'Payment finalized' }).count(), {
+          timeout: CONSENSUS_TIMEOUT_MS,
+          intervals: [500, 1000, 1500],
+          message: 'sender history should render one finalized row for the UI payment',
+        })
+        .toBe(1);
+      if (HISTORY_SCREENSHOT_PATH) {
+        await historyPage.screenshot({ path: HISTORY_SCREENSHOT_PATH, fullPage: true });
+      }
+      await historyPage.getByTestId('history-clear-filters').click();
+    }
+
+    await historyPage.getByTestId('history-search').fill('payment');
+    await expect
+      .poll(() => historyPage.getByTestId('entity-history-event').count(), {
+        timeout: CONSENSUS_TIMEOUT_MS,
+        intervals: [500, 1000, 1500],
+        message: 'search should find payment history',
+      })
+      .toBeGreaterThan(0);
+    await historyPage.getByTestId('history-clear-filters').click();
+
+    await historyPage.getByTestId('history-mode-infinite').click();
+    await expect(historyPage.getByTestId('history-load-older')).toBeVisible();
+    await historyPage.getByTestId('history-mode-timeframe').click();
+    await expect(historyPage.getByTestId('history-from')).toBeVisible();
+    await expect(historyPage.getByTestId('history-to')).toBeVisible();
+    await historyPage.getByTestId('history-kind-onchain').click();
+    await expect(historyPage.getByTestId('entity-history-panel')).toBeVisible();
+  } finally {
+    await historyPage.close().catch(() => {});
+  }
+}
+
 test.describe('Payment Smoke', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
@@ -326,6 +490,11 @@ test.describe('Payment Smoke', () => {
         senderAfterFaucet,
         Number(PAYMENT_AMOUNT / 10n ** 18n),
       );
+
+      await Promise.all([
+        verifyEntityActivityHistory(senderPage, sender.entityId, { requirePaymentFilter: true }),
+        verifyEntityActivityHistory(recipientPage, recipient.entityId),
+      ]);
 
       await Promise.all([
         senderPage.reload({ waitUntil: 'domcontentloaded' }),

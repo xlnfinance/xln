@@ -132,7 +132,7 @@ export async function createRpcAdapter(
     return [
       code,
       message,
-    ].some((value) => /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND/i.test(value));
+    ].some((value) => /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed/i.test(value));
   };
   const watcherErrorDetails = (error: unknown): Record<string, unknown> => {
     if (!(error instanceof Error)) return { raw: String(error) };

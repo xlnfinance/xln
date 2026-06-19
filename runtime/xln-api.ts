@@ -78,6 +78,7 @@ export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 export type { JAdapter } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
+export type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -152,6 +153,7 @@ import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
+import type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
 import type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
@@ -444,6 +446,21 @@ export interface XLNModule {
     options?: LoadEnvFromDbOptions,
   ) => Promise<Env | null>;
   getPersistedLatestHeight: (env: Env) => Promise<number>;
+  readPersistedRuntimeActivityPage: (
+    env: Env,
+    opts?: RuntimeActivityFilters & {
+      beforeHeight?: number | undefined;
+      limit?: number | undefined;
+      scanLimit?: number | undefined;
+    },
+  ) => Promise<{
+    latestHeight: number;
+    scannedFrames: number;
+    returned: number;
+    limit: number;
+    nextBeforeHeight: number | null;
+    events: RuntimeActivityEvent[];
+  }>;
   readPersistedStorageHead: (env: Env) => Promise<import('./storage/types').StorageHead | null>;
   readPersistedStorageFrameRecord: (env: Env, height: number) => Promise<import('./storage/types').StorageFrameRecord | null>;
   listPersistedCheckpointHeights: (env: Env) => Promise<number[]>;

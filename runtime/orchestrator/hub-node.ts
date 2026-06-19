@@ -52,6 +52,7 @@ import {
   handleLendingRepayRequest,
   handleLendingStateRequest,
 } from '../server/lending';
+import { handleRuntimeActivityRequest } from '../server/activity-api';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -1917,6 +1918,10 @@ const run = async (): Promise<void> => {
         } catch (error) {
           return new Response(safeStringify({ error: (error as Error).message }), { status: 500, headers });
         }
+      }
+
+      if (pathname === '/api/debug/activity' && request.method === 'GET') {
+        return await handleRuntimeActivityRequest(env, url, headers);
       }
 
       return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
