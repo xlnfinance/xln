@@ -16,6 +16,7 @@ describe('frontend time-machine current env contract', () => {
     expect(source).toContain('!$isLive && $timeIndex === LIVE_TIME_INDEX');
     expect(source).not.toContain('safeSet(timeIndex, maxTimeIndex)');
     expect(source).not.toContain('safeSet(timeIndex, $history.length - 1)');
+    expect(source).toContain('safeSet(timeIndex, 0);\n      safeSet(isLive, false);');
   });
 
   test('legacy time store uses -1 for live and never stores max index as live', () => {
@@ -50,6 +51,9 @@ describe('frontend time-machine current env contract', () => {
     expect(graph).toContain('export let isolatedIsLive: Writable<boolean>;');
     expect(graph).toContain('isolatedTimeIndex.set(-1)');
     expect(graph).toContain('isolatedIsLive.set(true)');
+    expect(graph).toContain('getLiveEnvForAction');
+    expect(graph).toContain('enqueueRuntimeInput(actionEnv');
+    expect(graph).not.toContain('enqueueRuntimeInput(env,');
     expect(dock).toContain('isolatedIsLive,');
   });
 });

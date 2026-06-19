@@ -86,7 +86,7 @@
   }
 
   function isLiveRuntimeFrame(frame: RuntimeFrame): frame is Env {
-    return frame.jReplicas instanceof Map;
+    return unwrapLiveRuntimeEnv(frame) !== null;
   }
 
   function cloneLiveEnv(frame: Env): Env {

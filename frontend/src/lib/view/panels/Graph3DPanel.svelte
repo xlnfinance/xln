@@ -19,6 +19,7 @@
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
   import EntityMiniPanel from '../components/EntityMiniPanel.svelte';
   import { compareStableText } from '$lib/utils/stableSort';
+  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 
   // Mini panel state for entity click
   let showMiniPanel = false;
@@ -80,6 +81,22 @@
       return hist[idx]?.eReplicas || new Map();
     }
     return get(isolatedEnv)?.eReplicas || new Map();
+  }
+
+  function getLiveEnvForAction(action: string): any {
+    const currentEnv = get(isolatedEnv);
+    const liveEnv = unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv;
+    if (!liveEnv?.eReplicas || !(liveEnv.eReplicas instanceof Map)) {
+      throw new Error(`${action} requires live runtime environment`);
+    }
+    return liveEnv;
+  }
+
+  function goToLiveForAction(): void {
+    if (!$isolatedIsLive || $isolatedTimeIndex !== -1) {
+      isolatedTimeIndex.set(-1);
+      isolatedIsLive.set(true);
+    }
   }
 
   /**
@@ -5343,12 +5360,7 @@
       }
 
 
-      // Ensure we're in LIVE mode for payments
-      if (!$isolatedIsLive || $isolatedTimeIndex !== -1) {
-        isolatedTimeIndex.set(-1)  // Go to live;
-        isolatedIsLive.set(true);
-        await new Promise(resolve => setTimeout(resolve, 100)); // Wait for mode switch
-      }
+      goToLiveForAction();
 
       const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const job: PaymentJob = {
@@ -5390,18 +5402,17 @@
         throw new Error('XLN runtime not loaded');
       }
 
-      if (!env) {
-        throw new Error('XLN environment not available');
-      }
+      goToLiveForAction();
+      const actionEnv = getLiveEnvForAction('Graph payment');
 
       // Debug logging
 
       // Step 1: Find routes (copy from PaymentPanel findRoutes logic)
       // Find our replica to check for direct account
       let ourReplica: any = null;
-      for (const key of env.eReplicas.keys()) {
+      for (const key of actionEnv.eReplicas.keys()) {
         if (key.startsWith(job.from + ':')) {
-          ourReplica = env.eReplicas.get(key);
+          ourReplica = actionEnv.eReplicas.get(key);
           break;
         }
       }
@@ -5443,7 +5454,7 @@
 
       // Step 2: Find signerId (copy from PaymentPanel)
       let signerId = '1'; // default
-      for (const key of env.eReplicas.keys()) {
+      for (const key of actionEnv.eReplicas.keys()) {
         if (key.startsWith(job.from + ':')) {
           signerId = key.split(':')[1] || '1';
           break;
@@ -5472,7 +5483,7 @@
       triggerEntityActivity(job.to);
 
       // Queue the payment through runtime ingress (single-writer loop processes it)
-      (XLN as any).enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [paymentInput] });
+      (XLN as any).enqueueRuntimeInput(actionEnv, { runtimeTxs: [], entityInputs: [paymentInput] });
 
       // Add to activity ticker AFTER successful processing
       recentActivity = [{
@@ -5617,8 +5628,11 @@
       }
 
 
-      // Execute scenario
-      const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
+      goToLiveForAction();
+      const actionEnv = getLiveEnvForAction('Graph scenario');
+      const result = await XLN?.executeScenario(actionEnv, parsed.scenario);
+      isolatedHistory.set(actionEnv.history || []);
+      isolatedEnv.set(createRuntimeViewEnv(actionEnv));
 
       if (!result.success) {
         console.error('Scenario execution errors:', result.errors);
