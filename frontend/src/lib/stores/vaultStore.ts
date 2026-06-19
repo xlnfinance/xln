@@ -77,6 +77,8 @@ export interface Runtime {
   env?: Env | null;
 }
 
+const runtimeCreationInFlight = new Map<string, Promise<void>>();
+
 type CreateRuntimeOptions = {
   loginType?: 'manual' | 'demo' | undefined;
   requiresOnboarding?: boolean | undefined;
@@ -2743,6 +2745,34 @@ export const vaultOperations = {
       return existing.runtime;
     }
 
+    const priorCreation = runtimeCreationInFlight.get(id);
+    if (priorCreation) {
+      markPerf('await_existing_creation');
+      await priorCreation.catch(() => undefined);
+      const postCreateState = get(runtimesState);
+      const created = findRuntimeByIdCaseInsensitive(postCreateState.runtimes, id);
+      if (created) {
+        if (created.runtime.seed !== seed) {
+          throw new Error(`Runtime id collision for ${id}: existing runtime has different seed`);
+        }
+        await this.selectRuntime(created.key);
+        flushPerf('existing');
+        return created.runtime;
+      }
+    }
+
+    let releaseRuntimeCreation!: () => void;
+    const runtimeCreationBarrier = new Promise<void>((resolve) => {
+      releaseRuntimeCreation = resolve;
+    });
+    runtimeCreationInFlight.set(id, runtimeCreationBarrier);
+    const finishRuntimeCreation = (): void => {
+      if (runtimeCreationInFlight.get(id) === runtimeCreationBarrier) {
+        runtimeCreationInFlight.delete(id);
+      }
+      releaseRuntimeCreation();
+    };
+
     const loginType = options.loginType === 'demo' ? 'demo' : 'manual';
     const requiresOnboarding =
       typeof options.requiresOnboarding === 'boolean'
@@ -3059,6 +3089,7 @@ export const vaultOperations = {
       markPerf('sync_runtime');
       flushPerf('ok');
 
+      finishRuntimeCreation();
       return runtime;
     } catch (error) {
       console.error(`[VaultStore] createRuntime failed for ${id.slice(0, 12)}`, error);
@@ -3091,6 +3122,7 @@ export const vaultOperations = {
           ? previousActiveRuntimeId
           : '');
       }
+      finishRuntimeCreation();
       throw error;
     }
   },
