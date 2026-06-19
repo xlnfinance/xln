@@ -51,6 +51,7 @@ import {
   getEntityReplicaById,
   hasQueuedOpenAccount,
   hasPairMutualCredit,
+  isCanonicalAccountOpener,
   isAccountConsensusReady,
   settleRuntimeFor,
   sleep,
@@ -1168,7 +1169,12 @@ const ensureMarketMakerHubConnectivity = async (
     const hasPendingConsensus =
       Boolean(mmAccount?.pendingFrame) ||
       Number(mmAccount?.mempool?.length || 0) > 0;
-    if (!mmAccount && !hasPendingConsensus && !hasQueuedOpenAccount(env, mmEntityId, hubEntityId)) {
+    if (
+      !mmAccount &&
+      !hasPendingConsensus &&
+      isCanonicalAccountOpener(mmEntityId, hubEntityId) &&
+      !hasQueuedOpenAccount(env, mmEntityId, hubEntityId)
+    ) {
       accountOpenInputs.push({
         entityId: mmEntityId,
         signerId: mmSignerId,

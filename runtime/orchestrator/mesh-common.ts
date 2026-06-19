@@ -18,6 +18,12 @@ export const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
 };
 
+export const isCanonicalAccountOpener = (entityId: string, counterpartyId: string): boolean => {
+  const left = String(entityId || '').toLowerCase();
+  const right = String(counterpartyId || '').toLowerCase();
+  return Boolean(left && right && left < right);
+};
+
 export const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs?.length) return true;
   if (env.pendingNetworkOutputs?.length) return true;
