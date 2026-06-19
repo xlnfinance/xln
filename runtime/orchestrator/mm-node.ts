@@ -1323,10 +1323,13 @@ const maintainMarketMakerQuotes = async (
     connectivityBudget,
   );
   if (!shouldContinue()) return;
-  if (!isMarketMakerConnectivityReady(env, mmEntityId, hubEntityIds, tokenIds)) {
+  const quoteReadyHubEntityIds = hubEntityIds.filter((hubEntityId) =>
+    isMarketMakerConnectivityReady(env, mmEntityId, [hubEntityId], tokenIds),
+  );
+  if (quoteReadyHubEntityIds.length === 0) {
     return;
   }
-  const desiredOffers = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds);
+  const desiredOffers = buildMarketMakerOfferSpecs(quoteReadyHubEntityIds, tokenIds);
   const grouped = new Map<string, MarketMakerOfferSpec[]>();
   for (const spec of desiredOffers) {
     const arr = grouped.get(spec.hubEntityId) ?? [];
