@@ -91,6 +91,7 @@
               isolatedEnv,
               isolatedHistory,
               isolatedTimeIndex,
+              isolatedIsLive,
               graphInitSignal,
             },
           });

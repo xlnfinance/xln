@@ -112,6 +112,13 @@
     return true;
   }
 
+  function publishCurrentEnv(frames: any[] = $isolatedEnv?.history || []): void {
+    isolatedIsLive.set(true);
+    isolatedTimeIndex.set(-1);
+    isolatedHistory.set(frames);
+    isolatedEnv.set($isolatedEnv);
+  }
+
   const DEMO_RUNTIME_SEED = '';
 
   function resolveRuntimeSeed(): string | null {
@@ -211,10 +218,7 @@
 
       lastAction = `✅ Minted ${mintAmount} to entity (on-chain)`;
 
-      // Update stores to trigger reactivity (set timeIndex FIRST to avoid race condition)
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv();
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Mint error:', err);
@@ -281,10 +285,7 @@
 
       lastAction = `✅ R2R sent: ${r2rAmount} units (on-chain)`;
 
-      // Update stores to trigger reactivity
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv();
     } catch (err: any) {
       lastAction = `❌ ${err.message}`;
       console.error('[Architect] R2R error:', err);
@@ -358,32 +359,20 @@
       // Run the ACTUAL AHB scenario (same code as CLI)
       await XLN.scenarios.ahb($isolatedEnv);
 
-      // Update isolated stores
-      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
-      // When history triggers updateNetworkData, timeIndex must already be correct
       const frames = $isolatedEnv.history || [];
 
-      // Exit live mode and set timeIndex FIRST
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-
-      // THEN set history and env (which trigger Graph3DPanel updates)
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv(frames);
 
       lastAction = `AHB: ${frames.length} frames loaded. Use TimeMachine to navigate.`;
 
-      // NO autopilot - user controls playback via TimeMachine
-      // Start at LAST frame to show final state (user can rewind with TimeMachine)
+      // NO autopilot - user controls historical frames via TimeMachine.
+      // Keep the workspace LIVE on the scenario's final runtime env by default.
       tutorialActive = false; // Don't show tutorial UI - just use TimeMachine
     } catch (err: any) {
       // CRITICAL: Still update history with frames created before error
       const frames = $isolatedEnv?.history || [];
       if (frames.length > 0) {
-        isolatedIsLive.set(false);
-        isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-        isolatedHistory.set(frames);
-        isolatedEnv.set($isolatedEnv);
+        publishCurrentEnv(frames);
         lastAction = `AHB: ${frames.length} frames (stopped at error). ${err.message}`;
       } else {
         lastAction = `❌ ${err.message}`;
@@ -412,18 +401,12 @@
       await XLN.scenarios.lockAhb($isolatedEnv);
 
       const frames = $isolatedEnv.history || [];
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv(frames);
       lastAction = `HTLC: ${frames.length} frames loaded.`;
     } catch (err: any) {
       const frames = $isolatedEnv?.history || [];
       if (frames.length > 0) {
-        isolatedIsLive.set(false);
-        isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-        isolatedHistory.set(frames);
-        isolatedEnv.set($isolatedEnv);
+        publishCurrentEnv(frames);
         lastAction = `HTLC: ${frames.length} frames (error). ${err.message}`;
       } else {
         lastAction = `❌ ${err.message}`;
@@ -451,18 +434,12 @@
       await XLN.scenarios.swap($isolatedEnv);
 
       const frames = $isolatedEnv.history || [];
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv(frames);
       lastAction = `Swap: ${frames.length} frames loaded.`;
     } catch (err: any) {
       const frames = $isolatedEnv?.history || [];
       if (frames.length > 0) {
-        isolatedIsLive.set(false);
-        isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-        isolatedHistory.set(frames);
-        isolatedEnv.set($isolatedEnv);
+        publishCurrentEnv(frames);
         lastAction = `Swap: ${frames.length} frames (error). ${err.message}`;
       } else {
         lastAction = `❌ ${err.message}`;
@@ -488,10 +465,7 @@
       await XLN.scenarios.swapMarket($isolatedEnv);
 
       const frames = $isolatedEnv.history || [];
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(0);
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv(frames);
 
       lastAction = `Swap Market: ${frames.length} frames`;
     } catch (err: any) {
@@ -515,10 +489,7 @@
       await XLN.scenarios.rapidFire($isolatedEnv);
 
       const frames = $isolatedEnv.history || [];
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(0);
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv(frames);
 
       lastAction = `Rapid Fire: ${frames.length} frames`;
     } catch (err: any) {
@@ -540,7 +511,7 @@
 
       // Reset UI state
       isolatedHistory.set([]);
-      isolatedTimeIndex.set(0);
+      isolatedTimeIndex.set(-1);
       isolatedIsLive.set(true);
       tutorialActive = false;
       lastAction = 'Reset complete - ready for new scenario';
@@ -574,16 +545,8 @@
       // Run the grid scenario
       await XLN.scenarios.grid($isolatedEnv);
 
-      // Update isolated stores
       const frames = $isolatedEnv.history || [];
-
-      // Exit live mode and set timeIndex FIRST
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-
-      // THEN set history and env
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv(frames);
       lastAction = 'Grid Scalability scenario loaded';
     } catch (err: any) {
       if (err && typeof err === 'object' && 'message' in err) {
@@ -621,16 +584,8 @@
       // Run the settle scenario
       await (XLN.scenarios as any).settle($isolatedEnv);
 
-      // Update isolated stores
       const frames = $isolatedEnv.history || [];
-
-      // Exit live mode and set timeIndex FIRST
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
-
-      // THEN set history and env
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv(frames);
       lastAction = 'Settlement Workspace scenario loaded';
     } catch (err: any) {
       if (err && typeof err === 'object' && 'message' in err) {
@@ -736,10 +691,7 @@
 
       lastAction = ` Created 3×3 hub (9 entities at y=320)`;
 
-      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedEnv.set($isolatedEnv);
+      publishCurrentEnv();
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Create hub error:', err);
@@ -769,9 +721,7 @@
 
       lastAction = ` Funded all ${entityIds.length} entities with $1M`;
 
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      publishCurrentEnv();
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Fund all error:', err);
@@ -844,9 +794,7 @@
 
       lastAction = ` Payment: ${shortAddress(from)} → ${shortAddress(to)} ($${(amount/1000).toFixed(0)}K)`;
 
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      publishCurrentEnv();
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Random payment error:', err);
@@ -942,9 +890,7 @@
 
       lastAction = ` 20% Transfer: ${shortAddress(from!)} → ${shortAddress(to!)} ($${(Number(amount)/1000).toFixed(0)}K)`;
 
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      publishCurrentEnv();
     } catch (err) {
       const error = err as Error;
       lastAction = ` ${error.message}`;
@@ -1003,9 +949,7 @@
 
       lastAction = ` Created 100 entities! Check FPS overlay (should be 60+)`;
 
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      publishCurrentEnv();
     } catch (err) {
       const error = err as Error;
       lastAction = ` ${error.message}`;
@@ -1163,9 +1107,7 @@
       const totalEntities = topology.layers.reduce((sum: number, layer: any) => sum + layer.entityCount, 0);
       lastAction = ` Created ${topologyType.toUpperCase()} economy: ${totalEntities} entities across ${topology.layers.length} layers`;
 
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      publishCurrentEnv();
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Topology creation error:', err);
@@ -1365,9 +1307,7 @@
           await detectAndHandleCrisis(XLN, topology);
         }
 
-        isolatedEnv.set($isolatedEnv);
-        isolatedHistory.set($isolatedEnv.history || []);
-        isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+        publishCurrentEnv();
 
       } catch (err: any) {
         console.error('[Smart Loop] Error:', err);
@@ -1651,9 +1591,7 @@
           }
         }
 
-        isolatedEnv.set($isolatedEnv);
-        isolatedHistory.set($isolatedEnv.history || []);
-        isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+        publishCurrentEnv();
 
       } catch (err: any) {
         console.error('[Fed Loop] Payment error:', err);
@@ -1725,10 +1663,7 @@
         newXlnomyName = 'Testnet';
       }
 
-      // Update stores to trigger reactivity
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      publishCurrentEnv();
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Xlnomy creation error:', err);
@@ -1827,12 +1762,7 @@
         ? (names[currentIndex + 1] || 'entity')
         : 'entity'; // Fallback
 
-      // Update stores
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-
-      // Advance to latest frame
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      publishCurrentEnv();
       panelBridge.emit('entity:created', { entityId, type: 'manual' });
     } catch (err: any) {
       lastAction = ` ${err.message}`;
