@@ -29,6 +29,7 @@
   export let isolatedEnv: Writable<any>;
   export let isolatedHistory: Writable<any[]>;
   export let isolatedTimeIndex: Writable<number>;
+  export let isolatedIsLive: Writable<boolean>;
   export let graphInitSignal: Writable<boolean> | undefined = undefined;
   $: initEnabled = graphInitSignal ? $graphInitSignal : true;
 
@@ -5343,8 +5344,9 @@
 
 
       // Ensure we're in LIVE mode for payments
-      if (!($isolatedTimeIndex === -1)) {
+      if (!$isolatedIsLive || $isolatedTimeIndex !== -1) {
         isolatedTimeIndex.set(-1)  // Go to live;
+        isolatedIsLive.set(true);
         await new Promise(resolve => setTimeout(resolve, 100)); // Wait for mode switch
       }
 

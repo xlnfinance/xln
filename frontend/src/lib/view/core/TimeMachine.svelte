@@ -28,12 +28,20 @@
     }
   }
 
+  const LIVE_TIME_INDEX = -1;
+
   // Direct store usage - no fallback logic
   $: maxTimeIndex = Math.max(0, $history.length - 1);
+  $: selectedFrameIndex = $isLive || $timeIndex < 0
+    ? maxTimeIndex
+    : Math.max(0, Math.min($timeIndex, maxTimeIndex));
 
-  // LIVE auto-advance: when new frames arrive, stay at latest
-  $: if ($isLive && maxTimeIndex > 0 && $timeIndex !== maxTimeIndex) {
-    safeSet(timeIndex, maxTimeIndex);
+  // Canonical contract: -1 means LIVE/current env; >=0 means historical frame.
+  $: if ($isLive && $timeIndex !== LIVE_TIME_INDEX) {
+    safeSet(timeIndex, LIVE_TIME_INDEX);
+  }
+  $: if (!$isLive && $timeIndex === LIVE_TIME_INDEX) {
+    safeSet(isLive, true);
   }
 
   // BrowserVM time-travel: restore EVM state when timeIndex changes
@@ -53,7 +61,7 @@
   }
 
   $: if ($timeIndex !== lastTimeTravelIndex && $history.length > 0) {
-    const targetIndex = $timeIndex < 0 ? $history.length - 1 : $timeIndex;
+    const targetIndex = $timeIndex < 0 ? $history.length - 1 : Math.max(0, Math.min($timeIndex, $history.length - 1));
     const frame = $history[targetIndex];
     if (frame) {
       const jReplicas = Array.from(frame.jReplicas.values()) as JReplica[];
@@ -106,15 +114,17 @@
       safeSet(isLive, false);  // Exit live mode when scrubbing
     },
     stepForward: () => {
-      const current = $timeIndex;
+      const current = selectedFrameIndex;
       const max = maxTimeIndex;
       if (current < max) {
         safeSet(timeIndex, current + 1);
         safeSet(isLive, false);
+      } else {
+        localTimeOperations.goToLive();
       }
     },
     stepBackward: () => {
-      const current = $timeIndex;
+      const current = selectedFrameIndex;
       if (current > 0) {
         safeSet(timeIndex, current - 1);
       }
@@ -125,7 +135,7 @@
       safeSet(isLive, false);
     },
     goToLive: () => {
-      safeSet(timeIndex, maxTimeIndex);
+      safeSet(timeIndex, LIVE_TIME_INDEX);
       safeSet(isLive, true);
     }
   };
@@ -152,7 +162,7 @@
   let sliceEnd: number | null = null;
 
   // Get current frame subtitle (Fed Chair educational content)
-  $: currentSubtitle = $history[$timeIndex]?.meta?.subtitle;
+  $: currentSubtitle = $history[selectedFrameIndex]?.meta?.subtitle;
 
   // FPS tracking
   let fps = 0;
@@ -215,13 +225,13 @@
       }
 
       // Reset to start if at end or in live mode
-      if ($isLive || $timeIndex >= maxTimeIndex) {
+      if ($isLive || selectedFrameIndex >= maxTimeIndex) {
         localTimeOperations.goToHistoryStart();
       }
 
       playbackInterval = window.setInterval(() => {
         const end = sliceEnd ?? maxTimeIndex;
-        if ($timeIndex >= end) {
+        if (selectedFrameIndex >= end) {
           if (loopMode === 'all' || loopMode === 'slice') {
             localTimeOperations.goToTimeIndex(sliceStart ?? 0);
           } else {
@@ -273,9 +283,9 @@
 
   function markSlicePoint() {
     if (sliceStart === null) {
-      sliceStart = $timeIndex;
+      sliceStart = selectedFrameIndex;
     } else if (sliceEnd === null) {
-      sliceEnd = $timeIndex;
+      sliceEnd = selectedFrameIndex;
       if (sliceEnd < sliceStart) {
         [sliceStart, sliceEnd] = [sliceEnd, sliceStart];
       }
@@ -351,9 +361,9 @@
     window.removeEventListener('keydown', handleKeyboard);
   });
 
-  $: currentTime = formatTime($timeIndex);
+  $: currentTime = formatTime(selectedFrameIndex);
   $: totalTime = formatTime(maxTimeIndex);
-  $: progressPercent = maxTimeIndex > 0 ? ($timeIndex / maxTimeIndex) * 100 : 0;
+  $: progressPercent = maxTimeIndex > 0 ? (selectedFrameIndex / maxTimeIndex) * 100 : 0;
 </script>
 
 <div class="time-machine">
@@ -398,7 +408,7 @@
           on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; showExportMenu = false; }}
           title="Click for playback settings"
         >
-          {$isLive ? `LIVE/${$history.length}` : `${$timeIndex + 1}/${$history.length}`}
+          {$isLive ? `LIVE/${$history.length}` : `${selectedFrameIndex + 1}/${$history.length}`}
         </button>
         <!-- Dropdown menu -->
         {#if showSpeedMenu}
@@ -447,7 +457,7 @@
       class="scrubber"
       min="0"
       max={maxTimeIndex}
-      value={$timeIndex}
+      value={selectedFrameIndex}
       on:input={handleSliderInput}
       style="--xln-slider-progress: {progressPercent}%"
       disabled={$history.length === 0}

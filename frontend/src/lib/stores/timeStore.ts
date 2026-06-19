@@ -5,7 +5,7 @@ import type { Env, EnvSnapshot, EntityReplica } from '@xln/runtime/xln-api';
 import { xlnEnvironment, history } from './xlnStore';
 
 const defaultTimeState: TimeState = {
-  currentTimeIndex: 0,
+  currentTimeIndex: -1,
   maxTimeIndex: 0,
   isLive: true,
 };
@@ -121,13 +121,12 @@ const timeOperations = {
 
     // TIME-MACHINE-DEBUG removed
 
-    // Update maxTimeIndex, and auto-advance currentTimeIndex if in live mode
+    // Canonical contract: -1 means LIVE/current env; >=0 means historical frame.
     if (maxIndex !== currentState.maxTimeIndex && maxIndex >= 0) {
       timeState.update(current => ({
         ...current,
         maxTimeIndex: maxIndex,
-        // LIVE auto-advance: keep timeIndex at latest frame
-        currentTimeIndex: current.isLive ? maxIndex : current.currentTimeIndex,
+        currentTimeIndex: current.isLive ? -1 : Math.max(0, Math.min(current.currentTimeIndex, maxIndex)),
       }));
     }
   },
@@ -147,12 +146,12 @@ const timeOperations = {
     timeOperations.triggerEntityPanelUpdates();
   },
 
-  // Go to live (auto-advance to latest frame)
+  // Go to live (show current runtime env, not a historical frame)
   goToLive: () => {
     const $history = get(history);
     const maxIndex = Math.max(0, $history.length - 1);
     const newState = {
-      currentTimeIndex: maxIndex,
+      currentTimeIndex: -1,
       maxTimeIndex: maxIndex,
       isLive: true
     };
@@ -185,21 +184,23 @@ const timeOperations = {
   // Step backward in time (exits live mode)
   stepBackward: () => {
     const $timeState = get(timeState);
-    const targetIndex = Math.max(0, $timeState.currentTimeIndex - 1);
+    const $history = get(history);
+    const actualMaxIndex = Math.max(0, $history.length - 1);
+    const visibleIndex = $timeState.isLive ? actualMaxIndex : $timeState.currentTimeIndex;
+    const targetIndex = Math.max(0, visibleIndex - 1);
     timeOperations.goToTimeIndex(targetIndex);
   },
 
   // Step forward in time
   stepForward: () => {
     const $timeState = get(timeState);
+    if ($timeState.isLive) return;
     const $history = get(history);
     const actualMaxIndex = Math.max(0, $history.length - 1);
 
     if ($timeState.currentTimeIndex < actualMaxIndex) {
       timeOperations.goToTimeIndex($timeState.currentTimeIndex + 1);
-    }
-    // At latest frame → go live
-    if ($timeState.currentTimeIndex + 1 >= actualMaxIndex) {
+    } else {
       timeOperations.goToLive();
     }
   },

@@ -70,6 +70,27 @@
     localEnvRevisionStore.update((revision) => revision + 1);
   };
 
+  const forceLiveCursor = () => {
+    localIsLive.set(true);
+    localTimeIndex.set(-1);
+  };
+
+  const setLocalHistoryPreservingCursor = (frames: EnvSnapshot[]) => {
+    localHistoryStore.set(frames);
+    if (get(localIsLive)) {
+      localTimeIndex.set(-1);
+      return;
+    }
+    if (frames.length === 0) {
+      forceLiveCursor();
+      return;
+    }
+    const selectedIndex = get(localTimeIndex);
+    if (selectedIndex >= frames.length) {
+      localTimeIndex.set(frames.length - 1);
+    }
+  };
+
   const formatSpotlightAmount = (tokenIdRaw: unknown, amountRaw: unknown): string => {
     const tokenId = Number(tokenIdRaw || 0);
     const amountMinor = String(amountRaw || '').trim();
@@ -213,7 +234,7 @@
         unregisterEnvChange = XLN.registerEnvChangeCallback(runtimeEnv, (nextEnv: Env) => {
           publishLocalEnv(nextEnv);
           const nextRuntimeEnv = unwrapLiveRuntimeEnv(nextEnv) ?? nextEnv;
-          localHistoryStore.set(nextRuntimeEnv.history || []);
+          setLocalHistoryPreservingCursor(nextRuntimeEnv.history || []);
         });
         envChangeRegisteredFor = runtimeKey;
       };
@@ -221,8 +242,7 @@
       if (env) {
         publishLocalEnv(env);
         localHistoryStore.set((unwrapLiveRuntimeEnv(env) ?? env).history || []);
-        localIsLive.set(true);
-        localTimeIndex.set(-1);
+        forceLiveCursor();
         registerEnvChanges(env);
       }
 
@@ -234,8 +254,7 @@
 
         publishLocalEnv(runtime.env);
         localHistoryStore.set((unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env).history || []);
-        localIsLive.set(true);
-        localTimeIndex.set(-1);
+        forceLiveCursor();
         registerEnvChanges(runtime.env);
       });
 
@@ -247,9 +266,7 @@
         const nextLiveEnv = unwrapLiveRuntimeEnv(nextEnv) ?? nextEnv;
         if (activeLiveEnv && activeLiveEnv !== nextLiveEnv) return;
         publishLocalEnv(nextEnv);
-        localHistoryStore.set(nextLiveEnv.history || []);
-        localIsLive.set(true);
-        localTimeIndex.set(-1);
+        setLocalHistoryPreservingCursor(nextLiveEnv.history || []);
         registerEnvChanges(nextEnv);
       });
     } catch (err) {
