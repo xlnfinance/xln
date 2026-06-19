@@ -67,10 +67,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '90'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '270'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '180'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '180'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '20'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '60'");
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
     expect(mmNode).toContain('return unique;');
     expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
@@ -81,6 +82,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('(progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0)');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '6'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '60'");
+    expect(mmNode).toContain('type MarketMakerCrossOfferBudget = {');
+    expect(mmNode).toContain('const reserveCrossOfferBudget = (');
+    expect(mmNode).toContain('remainingOffersTotal: MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
+    expect(mmNode).toContain('route.source.counterpartyEntityId');
     expect(mmNode).toContain('bootstrapCrossCursor');
     expect(mmNode).toContain('const jobCount = Math.min(MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length)');
     expect(mmNode).toContain('const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {');
