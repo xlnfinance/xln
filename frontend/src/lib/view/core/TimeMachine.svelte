@@ -124,10 +124,17 @@
       }
     },
     stepBackward: () => {
+      if ($history.length === 0) {
+        localTimeOperations.goToLive();
+        return;
+      }
       const current = selectedFrameIndex;
       if (current > 0) {
         safeSet(timeIndex, current - 1);
+        safeSet(isLive, false);
+        return;
       }
+      safeSet(timeIndex, 0);
       safeSet(isLive, false);
     },
     goToHistoryStart: () => {

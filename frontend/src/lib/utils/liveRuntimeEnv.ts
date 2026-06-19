@@ -6,8 +6,8 @@ type RuntimeViewEnv = Env & { [LIVE_RUNTIME_ENV_KEY]?: Env };
 
 export function isRuntimeLikeEnv(value: unknown): value is Env {
   if (!value || typeof value !== 'object') return false;
-  const env = value as { eReplicas?: unknown; jReplicas?: unknown };
-  return env.eReplicas instanceof Map && env.jReplicas instanceof Map;
+  const env = value as { eReplicas?: unknown; jReplicas?: unknown; history?: unknown };
+  return env.eReplicas instanceof Map && env.jReplicas instanceof Map && Array.isArray(env.history);
 }
 
 export function attachLiveRuntimeEnv<T extends object>(viewEnv: T, liveEnv: Env): T {

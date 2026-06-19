@@ -1144,13 +1144,14 @@
   $: activeLiveEnv = liveEnv;
   $: activeIsLive = isLive;
   $: liveRuntimeEnv = getRuntimeEnv(activeEnv);
+  $: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === 'function' ? liveEnvResolver() : null) ?? liveRuntimeEnv;
 
   function resolveEntitySigner(entityId: string, reason: string): string {
-    const env = getRuntimeEnv(activeEnv);
+    const env = getRuntimeEnv(actionRuntimeEnv);
     if (env && activeXlnFunctions?.resolveEntityProposerId) {
       return activeXlnFunctions.resolveEntityProposerId(env, entityId, reason);
     }
-    return requireSignerIdForEntity(requireRuntimeEnv(activeEnv, reason), entityId, reason);
+    return requireSignerIdForEntity(requireRuntimeEnv(actionRuntimeEnv, reason), entityId, reason);
   }
 
   function findReplicaForTab(
@@ -2192,11 +2193,11 @@
         pendingAssetAutoC2Rs = pendingAssetAutoC2Rs.filter((entry) => entry !== pending);
         resolvingAssetAutoC2R = false;
         refreshPendingCollateralFundingToken();
-      } else if (!sentBatchPending && isLocalExecutorForWorkspace(pending.counterpartyEntityId, currentAccount)) {
+      } else if (activeIsLive && !sentBatchPending && isLocalExecutorForWorkspace(pending.counterpartyEntityId, currentAccount)) {
         resolvingAssetAutoC2R = true;
         void (async () => {
           try {
-            const env = requireRuntimeEnv(activeEnv, 'asset-c2r-auto-execute');
+            const env = requireRuntimeEnv(actionRuntimeEnv, 'asset-c2r-auto-execute');
             const entityId = replica?.state?.entityId || tab.entityId;
             if (!entityId) throw new Error('Environment not ready');
             const signerId = resolveEntitySigner(entityId, 'asset-c2r-auto-execute');
@@ -4859,6 +4860,8 @@
       {/if}
       <EntityDropdown
         {tab}
+        replicasOverride={activeReplicas}
+        envOverride={activeEnv}
         on:entitySelect={handleEntitySelect}
       />
     </header>
@@ -5801,10 +5804,10 @@
                       <h4 class="section-head">Open Account</h4>
                     </div>
                   </div>
-                  {#if liveRuntimeEnv}
+                  {#if activeIsLive && actionRuntimeEnv}
                     <HubDiscoveryPanel
                       entityId={replica?.state?.entityId || tab.entityId}
-                      env={liveRuntimeEnv}
+                      env={requireRuntimeEnv(actionRuntimeEnv, 'hub-discovery')}
                     />
                   {/if}
                 </div>
