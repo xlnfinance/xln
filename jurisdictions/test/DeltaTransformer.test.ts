@@ -9,6 +9,7 @@ import type { AccountMachine, SwapOffer } from "../../runtime/types.ts";
 
 const { ethers } = hre;
 const MAX_FILL_RATIO = 65535n;
+const TEST_WATCH_SEED = `0x${"11".repeat(32)}`;
 
 function makeSwapOffer(
   offerId: string,
@@ -36,6 +37,7 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountMach
   return {
     leftEntity: "left",
     rightEntity: "right",
+    watchSeed: TEST_WATCH_SEED,
     status: "active",
     mempool: [],
     currentFrame: {
@@ -360,6 +362,21 @@ describe("DeltaTransformer", function () {
     expect(await transformer.hashRevealed(hash)).to.equal(true);
     await expect(transformer.revealSecret(secret)).to.be.revertedWithCustomError(transformer, "AlreadyRevealed");
     expect(await transformer.hashToBlock(hash)).to.equal(firstRevealBlock);
+  });
+
+  it("does not underflow when cleaning a fresh-chain secret reveal", async function () {
+    const { transformer } = await loadFixture(deployFixture);
+
+    const secretValue = ethers.encodeBytes32String("fresh-secret");
+    const hash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [secretValue]));
+
+    await transformer.revealSecret(secretValue);
+    const revealBlock = await transformer.hashToBlock(hash);
+    expect(revealBlock).to.be.gt(0n);
+    expect(revealBlock).to.be.lt(100000n);
+
+    await expect(transformer.cleanSecret(hash)).to.not.be.reverted;
+    expect(await transformer.hashToBlock(hash)).to.equal(revealBlock);
   });
 
   it("applies mixed-side positional fill ratio arrays exactly in batch order", async function () {

@@ -12,8 +12,10 @@
  */
 
 import type { AccountMachine, AccountTx, HtlcLock } from '../../types';
-import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
+import { deriveDelta } from '../../account-utils';
 import { FINANCIAL, LIMITS } from '../../constants';
+import { ensureDelta } from '../delta-utils';
+import { addHold } from '../hold-utils';
 
 export async function handleHtlcLock(
   accountMachine: AccountMachine,
@@ -21,7 +23,7 @@ export async function handleHtlcLock(
   byLeft: boolean,
   currentTimestamp: number,
   currentHeight: number,
-  isValidation: boolean = false
+  _isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId, envelope } = accountTx.data;
   const events: string[] = [];
@@ -65,28 +67,7 @@ export async function handleHtlcLock(
     };
   }
 
-  // 4. Get or create delta
-  let delta = accountMachine.deltas.get(tokenId);
-  if (!delta) {
-    const defaultCreditLimit = getDefaultCreditLimit(tokenId);
-    delta = {
-      tokenId,
-      collateral: 0n,
-      ondelta: 0n,
-      offdelta: 0n,
-      leftCreditLimit: defaultCreditLimit,
-      rightCreditLimit: defaultCreditLimit,
-      leftAllowance: 0n,
-      rightAllowance: 0n,
-      leftHold: 0n,
-      rightHold: 0n,
-    };
-    accountMachine.deltas.set(tokenId, delta);
-  }
-
-  // Initialize holds if not present
-  if (delta.leftHold === undefined) delta.leftHold = 0n;
-  if (delta.rightHold === undefined) delta.rightHold = 0n;
+  const delta = ensureDelta(accountMachine, tokenId);
 
   // 5. Determine sender perspective (Channel.ts: byLeft = frame proposer = sender)
   const senderIsLeft = byLeft;
@@ -119,21 +100,13 @@ export async function handleHtlcLock(
   // 8. Update capacity hold (prevents double-spend)
   // CRITICAL CONSENSUS FIX: Apply holds during BOTH validation and commit
   // Holds must be in frame hash to prevent same-frame over-commit attacks
-  if (senderIsLeft) {
-    delta.leftHold += amount;
-  } else {
-    delta.rightHold += amount;
-  }
+  const holdError = addHold(delta, senderIsLeft ? 'left' : 'right', amount);
+  if (holdError) return { success: false, error: holdError, events };
 
   // 9. Add lock to locks Map
   // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
-  // BUT only on commit persist to real accountMachine (validation uses temporary clone)
-  if (!isValidation) {
-    accountMachine.locks.set(lockId, lock);
-  } else {
-    // Validation: Add to clone to check duplicates, but clone is discarded
-    accountMachine.locks.set(lockId, lock);
-  }
+  // Validation runs on a temporary clone; commit runs on the real machine.
+  accountMachine.locks.set(lockId, lock);
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);
 

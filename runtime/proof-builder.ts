@@ -27,7 +27,7 @@ import type { ProofBodyStruct, TransformerClauseStruct } from '../jurisdictions/
 import type { DeltaTransformer } from '../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.ts';
 import { sortTransformerEntries } from './transformer-ordering.ts';
-import { normalizeAccountWatchSeed } from './account-watch-seed';
+import { normalizeAccountWatchSeed } from './account-watch-seed.ts';
 
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
 
@@ -153,6 +153,8 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     // If senderIsLeft=true, left is sending to right → positive amount
     // If senderIsLeft=false, right is sending to left → negative amount
     const signedAmount = lock.senderIsLeft ? lock.amount : -lock.amount;
+    // HTLC lock timelocks are stored in runtime milliseconds; the on-chain
+    // transformer compares seconds, so payments enter RuntimeBatch in seconds.
     const revealedUntilTimestamp = Math.floor(Number(lock.timelock) / 1000);
     if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= 0) {
       throw new Error(`HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
@@ -289,6 +291,9 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
         deltaIndex: BigInt(p.deltaIndex),
         amount: p.amount,
         claimedRatio: p.claimedRatio,
+        // Pull deadlines stay in runtime milliseconds until ABI conversion.
+        // Keep this separate from payment timestamps, which were normalized
+        // when the payment batch entries were built.
         revealedUntilTimestamp: BigInt(Math.floor(p.revealedUntilTimestamp / 1000)),
         fullHash: p.fullHash,
         partialRoot: p.partialRoot,

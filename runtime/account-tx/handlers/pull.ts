@@ -1,6 +1,5 @@
 import type { AccountMachine, AccountTx, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../types';
 import { deriveDelta } from '../../account-utils';
-import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL, LIMITS } from '../../constants';
 import {
   buildCommittedCrossJurisdictionPullBinding,
@@ -11,6 +10,8 @@ import {
   HASHLADDER_MAX_FILL_RATIO,
   verifyHashLadderBinary,
 } from '../../hashladder';
+import { addHold, releaseHold } from '../hold-utils';
+import { ensureDelta } from '../delta-utils';
 
 type PullLockTx = Extract<AccountTx, { type: 'pull_lock' }>;
 type PullResolveTx = Extract<AccountTx, { type: 'pull_resolve' }>;
@@ -188,21 +189,15 @@ export async function handlePullLock(
     return { success: false, error: `Only the paying side can create a pull lock`, events };
   }
 
-  let delta = accountMachine.deltas.get(tokenId);
-  if (!delta) {
-    delta = createDefaultDelta(tokenId);
-    accountMachine.deltas.set(tokenId, delta);
-  }
-  delta.leftHold ??= 0n;
-  delta.rightHold ??= 0n;
+  const delta = ensureDelta(accountMachine, tokenId);
 
   const loserCapacity = deriveDelta(delta, loserIsLeft).outCapacity;
   if (absAmount > loserCapacity) {
     return { success: false, error: `Insufficient pull capacity: need ${absAmount}, available ${loserCapacity}`, events };
   }
 
-  if (loserIsLeft) delta.leftHold += absAmount;
-  else delta.rightHold += absAmount;
+  const holdError = addHold(delta, loserIsLeft ? 'left' : 'right', absAmount);
+  if (holdError) return { success: false, error: holdError, events };
 
   accountMachine.pulls.set(pullId, {
     pullId,
@@ -264,13 +259,7 @@ export async function handlePullResolve(
   );
   if (crossResolveError) return { success: false, error: crossResolveError, events };
 
-  let delta = accountMachine.deltas.get(pull.tokenId);
-  if (!delta) {
-    delta = createDefaultDelta(pull.tokenId);
-    accountMachine.deltas.set(pull.tokenId, delta);
-  }
-  delta.leftHold ??= 0n;
-  delta.rightHold ??= 0n;
+  const delta = ensureDelta(accountMachine, pull.tokenId);
 
   const absAmount = absBigInt(pull.amount);
   const previousClaimed = pull.claimedAmount ?? ((absAmount * BigInt(previousRatio)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
@@ -283,13 +272,13 @@ export async function handlePullResolve(
     return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
   }
   const loserIsLeft = !beneficiaryIsLeft;
-  if (loserIsLeft) {
-    if ((delta.leftHold || 0n) < applied) return { success: false, error: `Pull left hold underflow`, events };
-    delta.leftHold -= applied;
-  } else {
-    if ((delta.rightHold || 0n) < applied) return { success: false, error: `Pull right hold underflow`, events };
-    delta.rightHold -= applied;
-  }
+  const holdError = releaseHold(
+    delta,
+    loserIsLeft ? 'left' : 'right',
+    applied,
+    () => `Pull ${loserIsLeft ? 'left' : 'right'} hold underflow`,
+  );
+  if (holdError) return { success: false, error: holdError, events };
 
   if (applied > 0n) {
     if (pull.amount > 0n) delta.offdelta += applied;
@@ -355,13 +344,7 @@ export async function handleCrossPullClose(
     return { success: false, error: `Only the pull beneficiary can close cross-j pull`, events };
   }
 
-  let delta = accountMachine.deltas.get(pull.tokenId);
-  if (!delta) {
-    delta = createDefaultDelta(pull.tokenId);
-    accountMachine.deltas.set(pull.tokenId, delta);
-  }
-  delta.leftHold ??= 0n;
-  delta.rightHold ??= 0n;
+  const delta = ensureDelta(accountMachine, pull.tokenId);
 
   const absAmount = absBigInt(pull.amount);
   const previousRatio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0) || 0)));
@@ -382,15 +365,13 @@ export async function handleCrossPullClose(
   const remainingHold = absAmount > cumulativeClaimed ? absAmount - cumulativeClaimed : 0n;
   const payerIsLeft = !beneficiaryIsLeft;
   const debitHold = applied + remainingHold;
-  if (debitHold > 0n) {
-    if (payerIsLeft) {
-      if ((delta.leftHold || 0n) < debitHold) return { success: false, error: `Pull left hold underflow`, events };
-      delta.leftHold -= debitHold;
-    } else {
-      if ((delta.rightHold || 0n) < debitHold) return { success: false, error: `Pull right hold underflow`, events };
-      delta.rightHold -= debitHold;
-    }
-  }
+  const holdError = releaseHold(
+    delta,
+    payerIsLeft ? 'left' : 'right',
+    debitHold,
+    () => `Pull ${payerIsLeft ? 'left' : 'right'} hold underflow`,
+  );
+  if (holdError) return { success: false, error: holdError, events };
   if (applied > 0n) {
     if (pull.amount > 0n) delta.offdelta += applied;
     else delta.offdelta -= applied;
@@ -439,26 +420,18 @@ export async function handlePullCancel(
     };
   }
 
-  let delta = accountMachine.deltas.get(pull.tokenId);
-  if (!delta) {
-    delta = createDefaultDelta(pull.tokenId);
-    accountMachine.deltas.set(pull.tokenId, delta);
-  }
-  delta.leftHold ??= 0n;
-  delta.rightHold ??= 0n;
+  const delta = ensureDelta(accountMachine, pull.tokenId);
 
   const absAmount = absBigInt(pull.amount);
   const claimedAmount = pull.claimedAmount ?? ((absAmount * BigInt(pull.claimedRatio ?? 0)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
   const remainingHold = absAmount > claimedAmount ? absAmount - claimedAmount : 0n;
-  if (remainingHold > 0n) {
-    if (payerIsLeft) {
-      if ((delta.leftHold || 0n) < remainingHold) return { success: false, error: `Pull left hold underflow`, events };
-      delta.leftHold -= remainingHold;
-    } else {
-      if ((delta.rightHold || 0n) < remainingHold) return { success: false, error: `Pull right hold underflow`, events };
-      delta.rightHold -= remainingHold;
-    }
-  }
+  const holdError = releaseHold(
+    delta,
+    payerIsLeft ? 'left' : 'right',
+    remainingHold,
+    () => `Pull ${payerIsLeft ? 'left' : 'right'} hold underflow`,
+  );
+  if (holdError) return { success: false, error: holdError, events };
 
   accountMachine.pulls?.delete(pullId);
   events.push(`🪝 Pull cancelled: ${pullId.slice(0, 8)}... released ${remainingHold}${reason ? ` (${reason})` : ''}`);

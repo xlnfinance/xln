@@ -13,7 +13,6 @@
 import type { AccountMachine, AccountTx, SwapOffer } from '../../types';
 import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
 import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../account-utils';
-import { createDefaultDelta } from '../../validation-utils';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL, LIMITS } from '../../constants';
 import { recordSwapOfferLifecycle } from './swap-history';
@@ -23,6 +22,8 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
 import { getCrossJurisdictionBookReceiptError } from '../../cross-jurisdiction-orderbook';
+import { ensureDelta } from '../delta-utils';
+import { addHold } from '../hold-utils';
 
 const computePriceTicks = (side: 0 | 1, baseAmount: bigint, quoteAmount: bigint, stepTicks: bigint): bigint => {
   if (baseAmount <= 0n || quoteAmount <= 0n || stepTicks <= 0n) return 0n;
@@ -127,7 +128,7 @@ export async function handleSwapOffer(
   }
   const pairPolicy = crossMarket ? null : getSwapPairPolicyByBaseQuote(baseTokenId, quoteTokenId);
   const stepTicks = BigInt(Math.max(1, pairPolicy?.priceStepTicks ?? 1));
-  let priceTicks = computePriceTicks(side, rawBaseAmount, rawQuoteAmount, stepTicks);
+  let priceTicks: bigint;
   if (!crossMarket) {
     const prepared = prepareSwapOrder(giveTokenId, wantTokenId, giveAmount, wantAmount);
     if (!prepared) {
@@ -163,8 +164,11 @@ export async function handleSwapOffer(
       // Adopt explicit price — this is the exact book level the user clicked
       priceTicks = inputPriceTicks;
     }
-  } else if (priceTicks <= 0n) {
-    return { success: false, error: `Invalid cross-j price ratio or order too small after canonical quantization`, events };
+  } else {
+    priceTicks = computePriceTicks(side, rawBaseAmount, rawQuoteAmount, stepTicks);
+    if (priceTicks <= 0n) {
+      return { success: false, error: `Invalid cross-j price ratio or order too small after canonical quantization`, events };
+    }
   }
   const quantizedBaseAmount = (rawBaseAmount / LOT_SCALE) * LOT_SCALE;
   const recomputedQuote = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
@@ -252,16 +256,7 @@ export async function handleSwapOffer(
     }
   }
 
-  // 5. Get or create delta for giveToken (the token being locked)
-  let delta = accountMachine.deltas.get(giveTokenId);
-  if (!delta) {
-    delta = createDefaultDelta(giveTokenId);
-    accountMachine.deltas.set(giveTokenId, delta);
-  }
-
-  // Initialize holds if not present
-  delta.leftHold ??= 0n;
-  delta.rightHold ??= 0n;
+  const delta = ensureDelta(accountMachine, giveTokenId);
 
   // Cross-j source funds are already locked by the paired pull_lock in the same
   // account. The swap_offer is the order/audit object for the book, not a second
@@ -301,11 +296,8 @@ export async function handleSwapOffer(
   // Holds ARE consensus-critical - included in AccountFrame.deltas hash.
   // Must be in BOTH validation (for hash) and commit (for real state) to match
   if (!crossJurisdiction) {
-    if (makerIsLeft) {
-      delta.leftHold += effectiveGiveAmount;
-    } else {
-      delta.rightHold += effectiveGiveAmount;
-    }
+    const holdError = addHold(delta, makerIsLeft ? 'left' : 'right', effectiveGiveAmount);
+    if (holdError) return { success: false, error: holdError, events };
   }
 
   // 9. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)

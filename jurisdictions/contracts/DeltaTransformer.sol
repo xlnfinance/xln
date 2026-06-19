@@ -306,7 +306,7 @@ contract DeltaTransformer {
   
   // anyone can get gas refund by deleting very old revealed secrets
   function cleanSecret(bytes32 hash) public {
-    if (hashToBlock[hash] != 0 && hashToBlock[hash] < block.number - 100000){
+    if (block.number > 100000 && hashToBlock[hash] != 0 && hashToBlock[hash] < block.number - 100000){
       delete hashToBlock[hash];
     }
   }

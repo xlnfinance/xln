@@ -32,6 +32,8 @@ import {
 } from '../../orderbook/types';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 import { createStructuredLogger, shortOrder } from '../../logger';
+import { getHold, releaseHold } from '../hold-utils';
+import { ensureDelta } from '../delta-utils';
 
 const swapResolveLog = createStructuredLogger('account.swap');
 
@@ -280,24 +282,8 @@ export async function handleSwapResolve(
     }
   }
 
-  // 5. Get or create deltas for both tokens
-  let giveDelta = accountMachine.deltas.get(offer.giveTokenId);
-  if (!giveDelta) {
-    giveDelta = createDefaultDelta(offer.giveTokenId);
-    accountMachine.deltas.set(offer.giveTokenId, giveDelta);
-  }
-
-  let wantDelta = accountMachine.deltas.get(offer.wantTokenId);
-  if (!wantDelta) {
-    wantDelta = createDefaultDelta(offer.wantTokenId);
-    accountMachine.deltas.set(offer.wantTokenId, wantDelta);
-  }
-
-  // Initialize holds if needed.
-  giveDelta.leftHold ??= 0n;
-  giveDelta.rightHold ??= 0n;
-  wantDelta.leftHold ??= 0n;
-  wantDelta.rightHold ??= 0n;
+  const giveDelta = ensureDelta(accountMachine, offer.giveTokenId);
+  const wantDelta = ensureDelta(accountMachine, offer.wantTokenId);
 
   // 5b. Check counterparty capacity for the full outgoing bundle.
   // swap_resolve is proposed by the counterparty/hub, so they must be able to fund:
@@ -325,9 +311,8 @@ export async function handleSwapResolve(
     }
   }
 
-  const currentMakerHold = offer.makerIsLeft
-    ? (giveDelta.leftHold || 0n)
-    : (giveDelta.rightHold || 0n);
+  const makerHoldSide = offer.makerIsLeft ? 'left' : 'right';
+  const currentMakerHold = getHold(giveDelta, makerHoldSide);
   if (currentMakerHold < effectiveGive) {
     return {
       success: false,
@@ -364,13 +349,14 @@ export async function handleSwapResolve(
 
   // 6. Release hold proportionally
   const holdRelease = filledGive;
-  if (offer.makerIsLeft) {
-    const currentHold = giveDelta.leftHold || 0n;
-    giveDelta.leftHold = currentHold - holdRelease;
-  } else {
-    const currentHold = giveDelta.rightHold || 0n;
-    giveDelta.rightHold = currentHold - holdRelease;
-  }
+  const holdReleaseError = releaseHold(
+    giveDelta,
+    makerHoldSide,
+    holdRelease,
+    (currentHold, releaseAmount) =>
+      `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
+  );
+  if (holdReleaseError) return { success: false, error: holdReleaseError, events };
 
   // 7. Handle remainder
   const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
@@ -381,13 +367,14 @@ export async function handleSwapResolve(
     // Cancel or fully filled - remove offer and notify orderbook
     const remainingHold = effectiveGive - filledGive;
     if (remainingHold > 0n) {
-      if (offer.makerIsLeft) {
-        const currentHold = giveDelta.leftHold || 0n;
-        giveDelta.leftHold = currentHold - remainingHold;
-      } else {
-        const currentHold = giveDelta.rightHold || 0n;
-        giveDelta.rightHold = currentHold - remainingHold;
-      }
+      const releaseError = releaseHold(
+        giveDelta,
+        makerHoldSide,
+        remainingHold,
+        (currentHold, releaseAmount) =>
+          `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
+      );
+      if (releaseError) return { success: false, error: releaseError, events };
     }
     accountMachine.swapOffers.delete(offerId);
     swapOfferCancelled = { offerId, accountId: makerId };
@@ -411,13 +398,14 @@ export async function handleSwapResolve(
 
     if (!requantized) {
       if (remainingGiveRaw > 0n) {
-        if (offer.makerIsLeft) {
-          const currentHold = giveDelta.leftHold || 0n;
-          giveDelta.leftHold = currentHold - remainingGiveRaw;
-        } else {
-          const currentHold = giveDelta.rightHold || 0n;
-          giveDelta.rightHold = currentHold - remainingGiveRaw;
-        }
+        const releaseError = releaseHold(
+          giveDelta,
+          makerHoldSide,
+          remainingGiveRaw,
+          (currentHold, releaseAmount) =>
+            `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
+        );
+        if (releaseError) return { success: false, error: releaseError, events };
       }
       accountMachine.swapOffers.delete(offerId);
       swapOfferCancelled = { offerId, accountId: makerId };
@@ -426,13 +414,14 @@ export async function handleSwapResolve(
     } else {
       const releasedGiveDust = requantized.releasedGiveDust;
       if (releasedGiveDust > 0n) {
-        if (offer.makerIsLeft) {
-          const currentHold = giveDelta.leftHold || 0n;
-          giveDelta.leftHold = currentHold - releasedGiveDust;
-        } else {
-          const currentHold = giveDelta.rightHold || 0n;
-          giveDelta.rightHold = currentHold - releasedGiveDust;
-        }
+        const releaseError = releaseHold(
+          giveDelta,
+          makerHoldSide,
+          releasedGiveDust,
+          (currentHold, releaseAmount) =>
+            `Hold underflow: current=${currentHold} < required=${releaseAmount}`,
+        );
+        if (releaseError) return { success: false, error: releaseError, events };
       }
 
       offer.giveAmount = requantized.effectiveGive;

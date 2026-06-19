@@ -2,6 +2,7 @@ import type { AccountMachine, AccountTx, Delta, Env, JurisdictionConfig } from '
 import { createStructuredLogger, shortHash, shortId } from './logger';
 import { txFingerprint } from './state-helpers';
 import { getJurisdictionConfigName } from './jurisdiction-runtime';
+import { getReplicaByEntityId } from './replica-utils';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
@@ -235,8 +236,8 @@ export async function runPostFrameAutoRebalanceCheck(
         });
       }
     };
-    const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
-    const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === counterpartyEntityId);
+    const ourReplica = getReplicaByEntityId(env, ourEntityId);
+    const counterpartyReplica = getReplicaByEntityId(env, counterpartyEntityId);
     const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
     const emitSkip = (reason: string) => {
       emitRebalanceDebug({

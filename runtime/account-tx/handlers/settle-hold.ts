@@ -16,6 +16,7 @@ import type { AccountMachine, AccountTx, SettlementDiff } from '../../types';
 import { compileOps } from '../../settlement-ops';
 import { deriveDelta } from '../../account-utils';
 import { createStructuredLogger } from '../../logger';
+import { addHold, ensureHoldAdd, ensureHoldRelease, getHold, releaseHold } from '../hold-utils';
 
 type SettleHoldTx = Extract<AccountTx, { type: 'settle_hold' }>;
 type SettleReleaseTx = Extract<AccountTx, { type: 'settle_release' }>;
@@ -186,18 +187,19 @@ export async function handleSettleHold(
       };
     }
 
-    // Initialize holds if not present
-    delta.leftHold ??= 0n;
-    delta.rightHold ??= 0n;
+    const leftHoldError = ensureHoldAdd('left', diff.leftWithdrawing);
+    if (leftHoldError) return { success: false, events: [], error: leftHoldError };
+    const rightHoldError = ensureHoldAdd('right', diff.rightWithdrawing);
+    if (rightHoldError) return { success: false, events: [], error: rightHoldError };
 
     // Add holds (tracked even for deposits to prevent concurrent double-spend)
-    delta.leftHold += diff.leftWithdrawing;
-    delta.rightHold += diff.rightWithdrawing;
+    addHold(delta, 'left', diff.leftWithdrawing);
+    addHold(delta, 'right', diff.rightWithdrawing);
 
     settlementHoldLog.debug('hold.delta_updated', {
       tokenId: diff.tokenId,
-      leftHold: delta.leftHold.toString(),
-      rightHold: delta.rightHold.toString(),
+      leftHold: getHold(delta, 'left').toString(),
+      rightHold: getHold(delta, 'right').toString(),
       leftDeposit: isLeftDeposit,
       rightDeposit: isRightDeposit,
     });
@@ -248,23 +250,23 @@ export async function handleSettleRelease(
       continue;
     }
 
-    delta.leftHold ??= 0n;
-    delta.rightHold ??= 0n;
+    const leftError = ensureHoldRelease(
+      delta,
+      'left',
+      planned.left,
+      (currentHold, releaseAmount) =>
+        `SETTLE_RELEASE_HOLD_UNDERFLOW:left token=${tokenId} hold=${currentHold.toString()} release=${releaseAmount.toString()}`,
+    );
+    if (leftError) return { success: false, events: [], error: leftError };
 
-    if (delta.leftHold < planned.left) {
-      return {
-        success: false,
-        events: [],
-        error: `SETTLE_RELEASE_HOLD_UNDERFLOW:left token=${tokenId} hold=${delta.leftHold.toString()} release=${planned.left.toString()}`,
-      };
-    }
-    if (delta.rightHold < planned.right) {
-      return {
-        success: false,
-        events: [],
-        error: `SETTLE_RELEASE_HOLD_UNDERFLOW:right token=${tokenId} hold=${delta.rightHold.toString()} release=${planned.right.toString()}`,
-      };
-    }
+    const rightError = ensureHoldRelease(
+      delta,
+      'right',
+      planned.right,
+      (currentHold, releaseAmount) =>
+        `SETTLE_RELEASE_HOLD_UNDERFLOW:right token=${tokenId} hold=${currentHold.toString()} release=${releaseAmount.toString()}`,
+    );
+    if (rightError) return { success: false, events: [], error: rightError };
   }
 
   for (const diff of diffs) {
@@ -274,17 +276,28 @@ export async function handleSettleRelease(
       continue;
     }
 
-    // Initialize holds if not present (safety)
-    delta.leftHold ??= 0n;
-    delta.rightHold ??= 0n;
+    const leftError = releaseHold(
+      delta,
+      'left',
+      diff.leftWithdrawing,
+      (currentHold, releaseAmount) =>
+        `SETTLE_RELEASE_HOLD_UNDERFLOW:left token=${diff.tokenId} hold=${currentHold.toString()} release=${releaseAmount.toString()}`,
+    );
+    if (leftError) return { success: false, events: [], error: leftError };
 
-    delta.leftHold -= diff.leftWithdrawing;
-    delta.rightHold -= diff.rightWithdrawing;
+    const rightError = releaseHold(
+      delta,
+      'right',
+      diff.rightWithdrawing,
+      (currentHold, releaseAmount) =>
+        `SETTLE_RELEASE_HOLD_UNDERFLOW:right token=${diff.tokenId} hold=${currentHold.toString()} release=${releaseAmount.toString()}`,
+    );
+    if (rightError) return { success: false, events: [], error: rightError };
 
     settlementHoldLog.debug('release.delta_updated', {
       tokenId: diff.tokenId,
-      leftHold: delta.leftHold.toString(),
-      rightHold: delta.rightHold.toString(),
+      leftHold: getHold(delta, 'left').toString(),
+      rightHold: getHold(delta, 'right').toString(),
     });
   }
 

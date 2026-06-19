@@ -237,6 +237,35 @@ describe("EntityProvider with Automatic Governance", function () {
       expect(hasActiveProposal).to.be.false;
       expect(articlesHash).to.not.equal(ethers.ZeroHash);
     });
+
+    it("tracks governance supply through the ERC1155 update hook", async function () {
+      const EntityProviderSupplyHarness = await ethers.getContractFactory("EntityProviderSupplyHarness");
+      const harness = await EntityProviderSupplyHarness.deploy();
+      await harness.waitForDeployment();
+
+      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("supply_hook_board"));
+      await harness.registerNumberedEntity(boardHash);
+
+      const entityNumber = 2;
+      const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
+      const [controlTokenId, dividendTokenId] = await harness.getTokenIds(entityNumber);
+      const expectedSupply = ethers.parseUnits("1", 15);
+
+      expect(await harness.totalControlSupply(entityId)).to.equal(expectedSupply);
+      expect(await harness.totalDividendSupply(entityId)).to.equal(expectedSupply);
+
+      await harness.harnessMint(alice.address, controlTokenId, 123);
+      await harness.harnessMint(alice.address, dividendTokenId, 456);
+
+      expect(await harness.totalControlSupply(entityId)).to.equal(expectedSupply + 123n);
+      expect(await harness.totalDividendSupply(entityId)).to.equal(expectedSupply + 456n);
+
+      await harness.harnessBurn(alice.address, controlTokenId, 23);
+      await harness.harnessBurn(alice.address, dividendTokenId, 56);
+
+      expect(await harness.totalControlSupply(entityId)).to.equal(expectedSupply + 100n);
+      expect(await harness.totalDividendSupply(entityId)).to.equal(expectedSupply + 400n);
+    });
   });
 
   describe("Board proposal permissions", function () {

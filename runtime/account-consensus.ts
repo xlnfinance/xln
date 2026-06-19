@@ -11,7 +11,6 @@ import type {
   Env,
   EntityState,
   Delta,
-  EntityReplica,
 } from './types';
 import {
   cloneAccountFrame,
@@ -46,8 +45,9 @@ import { MEMPOOL_LIMIT } from './account-consensus/constants';
 import { proposeAccountFrame } from './account-consensus/propose';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from './dispute-arguments';
 import type { HandleAccountInputResult } from './account-consensus/types';
-import { createDisputeProofHashWithNonce } from './proof-builder';
-import { verifyHankoForHash } from './hanko/signing';
+import { buildAccountProofBody, createDisputeProofHashWithNonce } from './proof-builder';
+import { signEntityHashes, verifyHankoForHash } from './hanko/signing';
+import { getReplicaByEntityId } from './replica-utils';
 export { proposeAccountFrame } from './account-consensus/propose';
 export type {
   AccountConsensusFrameResult,
@@ -321,7 +321,6 @@ export async function handleAccountInput(
 
     const expectedAckEntity = accountMachine.proofHeader.toEntity;
     accountLog.debug('hanko.ack.verify', { height: ackHeight, frame: shortHash(frameHash) });
-    const { verifyHankoForHash } = await import('./hanko/signing');
     const verifyResult = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
     const valid = verifyResult.valid;
     const recoveredEntityId = verifyResult.entityId;
@@ -691,7 +690,6 @@ export async function handleAccountInput(
     accountLog.debug('hanko.frame.verify', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
 
     // Verify hanko - CRITICAL: Must verify fromEntityId is the signer with board validation
-    const { verifyHankoForHash } = await import('./hanko/signing');
     const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(
       hankoToVerify,
       receivedFrame.stateHash,
@@ -712,7 +710,7 @@ export async function handleAccountInput(
 
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
-    const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
+    const ourReplica = getReplicaByEntityId(env, ourEntityId);
     const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
     const frameJHeight = receivedFrame.jHeight ?? currentJHeight;
 
@@ -1037,7 +1035,7 @@ export async function handleAccountInput(
 
     // Send confirmation (ACK) using HANKO
     const ackEntityId = accountMachine.proofHeader.fromEntity;
-    const ackReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ackEntityId);
+    const ackReplica = getReplicaByEntityId(env, ackEntityId);
     const ackSignerId = ackReplica?.state.config.validators[0];
     if (!ackSignerId) {
       return { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events };
@@ -1050,13 +1048,12 @@ export async function handleAccountInput(
     let batchedWithNewFrame = false;
     let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
-    const { buildAccountProofBody: buildProof, createDisputeProofHashWithNonce: createHash } = await import('./proof-builder');
     const ackDepositoryAddress = getAccountDepositoryAddress(env, accountMachine);
     if (!isAddress20(ackDepositoryAddress)) {
       return { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events };
     }
-    const ackProofResult = buildProof(accountMachine);
-    const ackDisputeHash = createHash(
+    const ackProofResult = buildAccountProofBody(accountMachine);
+    const ackDisputeHash = createDisputeProofHashWithNonce(
       accountMachine,
       ackProofResult.proofBodyHash,
       ackDepositoryAddress,
@@ -1065,7 +1062,6 @@ export async function handleAccountInput(
     // ACK and its dispute proof are separate hankos over separate hashes, but
     // they are signed by the same entity in the same local step. One call keeps
     // the hot path from repeating signer lookup and lazy-entity prechecks.
-    const { signEntityHashes } = await import('./hanko/signing');
     const [confirmationHanko, ackDisputeHanko] = await signEntityHashes(env, ackEntityId, ackSignerId, [
       receivedFrame.stateHash,
       ackDisputeHash,
@@ -1325,7 +1321,6 @@ export async function generateAccountProof(
   };
 
   // Build ABI-encoded proofBody for on-chain disputes
-  const { buildAccountProofBody } = await import('./proof-builder.js');
   const abiResult = buildAccountProofBody(accountMachine);
 
   // Store ABI-encoded proofBody for later dispute submission
@@ -1351,9 +1346,7 @@ export async function generateAccountProof(
 
   // Generate hanko signature - CRITICAL: Use signerId, not entityId
   const proofEntityId = accountMachine.proofHeader.fromEntity;
-  const proofReplica = Array.from(env.eReplicas.values()).find(
-    (r: EntityReplica) => r.state.entityId === proofEntityId,
-  );
+  const proofReplica = getReplicaByEntityId(env, proofEntityId);
   const proofSignerId = proofReplica?.state.config.validators[0];
   if (!proofSignerId) {
     throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);

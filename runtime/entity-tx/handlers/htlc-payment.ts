@@ -1,6 +1,9 @@
 /**
  * HTLC Payment Handler (Entity-level)
  * Creates conditional payment with hashlock, routes through network
+ * Keysend model: the sender supplies the preimage up front and every hop uses
+ * encrypted envelopes. Hashlock-only invoice mode is intentionally rejected so
+ * validator replay never depends on secret discovery outside the signed tx.
  *
  * Pattern: Exactly like directPayment but creates htlc_lock instead of direct_payment
  * Reference: entity-tx/apply.ts:302-437 (directPayment handler)
@@ -18,6 +21,7 @@ import { NobleCryptoProvider } from '../../crypto-noble';
 import { createOnionEnvelopes, type HtlcEnvelope } from '../../htlc-envelope-types';
 import { getRuntimeJurisdictionHeight } from '../../j-height';
 import { safeStringify } from '../../serialization-utils';
+import { getReplicaByEntityId } from '../../replica-utils';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
@@ -423,9 +427,9 @@ export async function handleHtlcPayment(
       }
 
       // Fallback: local replica key for same-rt scenarios or when gossip is stale.
-      const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-      const localKey = normalizeX25519Hex(replica?.[1]?.state?.entityEncPubKey)
-        ?? normalizeX25519Base64(replica?.[1]?.state?.entityEncPubKey);
+      const replica = getReplicaByEntityId(env, entityId);
+      const localKey = normalizeX25519Hex(replica?.state?.entityEncPubKey)
+        ?? normalizeX25519Base64(replica?.state?.entityEncPubKey);
       if (localKey) return { key: localKey, source: 'localReplica.state.entityEncPubKey' };
 
       return null;

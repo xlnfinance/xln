@@ -9,6 +9,7 @@ import {
 
 const DEPOSITORY = '0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1';
 const PROOF_BODY_HASH = '0x216659016a52d3f9df41568d0c85bd6870ee46705ada7366c9f68d60e0a83548';
+const TEST_WATCH_SEED = `0x${'11'.repeat(32)}`;
 
 describe('proof-builder dispute hash', () => {
   test('uses canonical sorted account key regardless of local left/right orientation', () => {
@@ -16,11 +17,13 @@ describe('proof-builder dispute hash', () => {
       leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
       rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
       proofHeader: { nonce: 1 },
+      watchSeed: TEST_WATCH_SEED,
     };
     const rightOriented = {
       leftEntity: leftOriented.rightEntity,
       rightEntity: leftOriented.leftEntity,
       proofHeader: { nonce: 1 },
+      watchSeed: TEST_WATCH_SEED,
     };
 
     const sortedKey = ethers.solidityPacked(
@@ -29,8 +32,8 @@ describe('proof-builder dispute hash', () => {
     );
     const expected = ethers.keccak256(
       ethers.AbiCoder.defaultAbiCoder().encode(
-        ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
-        [1, DEPOSITORY, sortedKey, 1, PROOF_BODY_HASH],
+        ['uint256', 'address', 'bytes', 'uint256', 'bytes32', 'bytes32'],
+        [1, DEPOSITORY, sortedKey, 1, PROOF_BODY_HASH, TEST_WATCH_SEED],
       ),
     );
 
@@ -45,6 +48,7 @@ describe('proof-builder dispute hash', () => {
       leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
       rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
       proofHeader: { nonce: 1 },
+      watchSeed: TEST_WATCH_SEED,
     };
     expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, '')).toThrow('MISSING_DEPOSITORY_ADDRESS');
     expect(() => createDisputeProofHashWithNonce(account, PROOF_BODY_HASH, '', 1)).toThrow(
@@ -77,6 +81,7 @@ describe('proof-builder dispute hash', () => {
         ],
       ]),
       swapOffers: new Map(),
+      watchSeed: TEST_WATCH_SEED,
     } as any;
 
     expect(() => buildAccountProofBody(accountMachine)).toThrow('MISSING_DELTA_TRANSFORMER_ADDRESS');
@@ -97,6 +102,7 @@ describe('proof-builder dispute hash', () => {
       ]),
       swapOffers: new Map(),
       pulls: new Map(),
+      watchSeed: TEST_WATCH_SEED,
     } as any;
 
     expect(() => buildAccountProofBody(accountMachine)).toThrow(
@@ -118,6 +124,7 @@ describe('proof-builder dispute hash', () => {
         }],
       ]),
       pulls: new Map(),
+      watchSeed: TEST_WATCH_SEED,
     } as any;
 
     expect(() => buildAccountProofBody(accountMachine)).toThrow(
@@ -140,6 +147,7 @@ describe('proof-builder dispute hash', () => {
           partialRoot: '0x' + '44'.repeat(32),
         }],
       ]),
+      watchSeed: TEST_WATCH_SEED,
     } as any;
 
     expect(() => buildAccountProofBody(accountMachine)).toThrow(
@@ -186,18 +194,19 @@ describe('proof-builder dispute hash', () => {
         ['pull-positive', {
           tokenId: 3,
           amount: 23n,
-          revealedUntilTimestamp: Date.now() + 60_000,
+          revealedUntilTimestamp: 183_000,
           fullHash: '0x' + '33'.repeat(32),
           partialRoot: '0x' + '44'.repeat(32),
         }],
         ['pull-negative', {
           tokenId: 1,
           amount: -29n,
-          revealedUntilTimestamp: Date.now() + 60_000,
+          revealedUntilTimestamp: 183_000,
           fullHash: '0x' + '55'.repeat(32),
           partialRoot: '0x' + '66'.repeat(32),
         }],
       ]),
+      watchSeed: TEST_WATCH_SEED,
     } as any;
 
     const proof = buildAccountProofBody(accountMachine);
