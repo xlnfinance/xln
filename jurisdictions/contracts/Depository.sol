@@ -419,19 +419,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     // Process reserveToReserve transfers (the core functionality we need)
-    
-    
     for (uint i = 0; i < batch.reserveToReserve.length; i++) {
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
       _reserveToReserve(entityId, batch.reserveToReserve[i]);
     }
 
@@ -1150,7 +1138,7 @@ contract Depository is ReentrancyGuardLite {
 
 
   function onERC1155Received(address, address, uint256 id, uint256, bytes calldata) external returns (bytes4) {
-    // SECURITY FIX: Don't credit here - _externalTokenToReserve:713 already credits
+    // SECURITY FIX: Don't credit here - _externalTokenToReserve already credits
     // This prevents double-crediting when ERC1155.safeTransferFrom triggers this callback
     // If tokens sent directly (not via externalTokenToReserve), they will be stuck but not inflate reserves
     bytes32 packedToken = _packTokenReference(TypeERC1155, msg.sender, uint96(id));

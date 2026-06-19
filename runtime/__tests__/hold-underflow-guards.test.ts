@@ -36,6 +36,36 @@ describe('hold underflow guards', () => {
     expect(deltaB.rightHold).toBe(1n);
   });
 
+  test('settle_release rejects negative release amounts without increasing holds', async () => {
+    const deltaA = createDefaultDelta(1);
+    deltaA.leftHold = 5n;
+    const deltaB = createDefaultDelta(2);
+    deltaB.rightHold = 9n;
+
+    const accountMachine = {
+      deltas: new Map([
+        [1, deltaA],
+        [2, deltaB],
+      ]),
+    } as any;
+
+    const result = await handleSettleRelease(accountMachine, {
+      type: 'settle_release',
+      data: {
+        workspaceVersion: 1,
+        diffs: [
+          { tokenId: 1, leftWithdrawing: 2n, rightWithdrawing: 0n },
+          { tokenId: 2, leftWithdrawing: 0n, rightWithdrawing: -3n },
+        ],
+      },
+    } as any);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('HOLD_RELEASE_NEGATIVE:right amount=-3');
+    expect(deltaA.leftHold).toBe(5n);
+    expect(deltaB.rightHold).toBe(9n);
+  });
+
   test('htlc_resolve(secret) fails closed on hold underflow before mutating delta or deleting the lock', async () => {
     const lockId = 'lock-secret-underflow';
     const secret = '0x' + '11'.repeat(32);

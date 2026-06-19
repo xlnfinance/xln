@@ -24,6 +24,7 @@ import {
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
+import { getReplicaByEntityId } from '../replica-utils';
 
 const accountLog = createStructuredLogger('account');
 
@@ -340,7 +341,7 @@ export async function proposeAccountFrame(
   // Generate HANKO signature - CRITICAL: Use signerId, not entityId
   // For single-signer entities, build hanko with single EOA signature
   const signingEntityId = accountMachine.proofHeader.fromEntity;
-  const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
+  const signingReplica = getReplicaByEntityId(env, signingEntityId);
   if (!signingReplica) {
     return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events };
   }

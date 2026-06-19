@@ -6,6 +6,7 @@ import type { AccountMachine, SwapOffer } from '../types';
 
 const MAX_FILL_RATIO = 65535n;
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
+const TEST_WATCH_SEED = `0x${'11'.repeat(32)}`;
 
 function makeSwapOffer(
   offerId: string,
@@ -34,6 +35,7 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountMach
     leftEntity: 'left',
     rightEntity: 'right',
     status: 'active',
+    watchSeed: TEST_WATCH_SEED,
     mempool: [],
     currentFrame: {
       height: 0,

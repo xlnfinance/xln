@@ -35,6 +35,8 @@ import {
 import { removeBookOrderById } from '../../orderbook/cross-j';
 import { swapKey } from '../../swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../cross-jurisdiction-orderbook';
+import { shouldLogFullPayloads } from '../../logger';
+import { getFirstSignerForEntity } from '../../replica-utils';
 import {
   isAccountControlTx,
   isArgumentChangingAccountTx,
@@ -227,13 +229,28 @@ function hasQueuedDisputeFinalize(state: EntityState, counterpartyEntityId: stri
   );
 }
 
-const firstSignerForEntity = (env: Env, entityId: string): string | null => {
-  for (const replica of env.eReplicas.values()) {
-    if (String(replica.state.entityId).toLowerCase() !== String(entityId).toLowerCase()) continue;
-    return replica.state.config.validators[0] ?? null;
+function allowCrossJTargetDisputeWithoutPullArgs(
+  state: EntityState,
+  targetCrossRiskAmount: bigint,
+  hasStarterPullArgs: boolean,
+  allowUnsafeCrossJTargetDispute: boolean | undefined,
+  acceptedCrossJTargetLossAmount: bigint | number | string | undefined,
+): boolean {
+  if (targetCrossRiskAmount <= 0n || hasStarterPullArgs) return true;
+  const acceptedLoss = BigInt(acceptedCrossJTargetLossAmount ?? 0n);
+  if (!allowUnsafeCrossJTargetDispute || acceptedLoss < targetCrossRiskAmount) {
+    addMessage(
+      state,
+      `❌ Cross-j target dispute blocked: source pull arguments missing; accept possible loss up to ${targetCrossRiskAmount} or start source dispute first`,
+    );
+    return false;
   }
-  return null;
-};
+  addMessage(
+    state,
+    `⚠️ Unsafe cross-j target dispute accepted: pull arguments missing, possible loss up to ${targetCrossRiskAmount}`,
+  );
+  return true;
+}
 
 const removeOrderbookRowForDispute = (
   env: Env,
@@ -269,7 +286,7 @@ const removeOrderbookRowForDispute = (
     };
   }
 
-  const signerId = firstSignerForEntity(env, bookOwnerEntityId);
+  const signerId = getFirstSignerForEntity(env, bookOwnerEntityId);
   if (!signerId) {
     throw new Error(
       `DISPUTE_CROSS_J_BOOK_OWNER_MISSING: order=${offerId} owner=${bookOwnerEntityId} source=${sourceEntityId}`,
@@ -525,19 +542,14 @@ export async function handleDisputeStart(
     account.counterpartyDisputeProofBodyHash &&
     account.disputeArgumentSnapshotsByHash?.[account.counterpartyDisputeProofBodyHash],
   );
-  if (targetCrossRiskAmount > 0n && !explicitStarterPullArgs && !snapshotCanSupplyStarterArgs) {
-    const acceptedLoss = BigInt(acceptedCrossJTargetLossAmount ?? 0n);
-    if (!allowUnsafeCrossJTargetDispute || acceptedLoss < targetCrossRiskAmount) {
-      addMessage(
-        newState,
-        `❌ Cross-j target dispute blocked: source pull arguments missing; accept possible loss up to ${targetCrossRiskAmount} or start source dispute first`,
-      );
-      return { newState, outputs };
-    }
-    addMessage(
-      newState,
-      `⚠️ Unsafe cross-j target dispute accepted: pull arguments missing, possible loss up to ${targetCrossRiskAmount}`,
-    );
+  if (!allowCrossJTargetDisputeWithoutPullArgs(
+    newState,
+    targetCrossRiskAmount,
+    explicitStarterPullArgs || snapshotCanSupplyStarterArgs,
+    allowUnsafeCrossJTargetDispute,
+    acceptedCrossJTargetLossAmount,
+  )) {
+    return { newState, outputs };
   }
 
   // Use stored counterparty dispute hanko AND proofBodyHash (exchanged during bilateral consensus)
@@ -577,19 +589,14 @@ export async function handleDisputeStart(
     overrideInitialArguments && overrideInitialArguments !== '0x'
       ? overrideInitialArguments
       : (starterIsLeft ? initialSnapshotArguments.leftArguments : initialSnapshotArguments.rightArguments);
-  if (targetCrossRiskAmount > 0n && !hasNonZeroPullArgument(starterInitialArguments)) {
-    const acceptedLoss = BigInt(acceptedCrossJTargetLossAmount ?? 0n);
-    if (!allowUnsafeCrossJTargetDispute || acceptedLoss < targetCrossRiskAmount) {
-      addMessage(
-        newState,
-        `❌ Cross-j target dispute blocked: source pull arguments missing; accept possible loss up to ${targetCrossRiskAmount} or start source dispute first`,
-      );
-      return { newState, outputs };
-    }
-    addMessage(
-      newState,
-      `⚠️ Unsafe cross-j target dispute accepted: pull arguments missing, possible loss up to ${targetCrossRiskAmount}`,
-    );
+  if (!allowCrossJTargetDisputeWithoutPullArgs(
+    newState,
+    targetCrossRiskAmount,
+    hasNonZeroPullArgument(starterInitialArguments),
+    allowUnsafeCrossJTargetDispute,
+    acceptedCrossJTargetLossAmount,
+  )) {
+    return { newState, outputs };
   }
   console.log(`✅ Using stored counterparty proofBodyHash: ${storedProofBodyHash.slice(0, 10)}...`);
 
@@ -692,41 +699,43 @@ export async function handleDisputeStart(
       );
     }
     const disputeHashSource = storedDisputeHash ? 'stored+recomputed' : 'recomputed';
-    const hankoDebug = await inspectHankoForHash(counterpartyDisputeHanko, exactDisputeHash);
-    const matchingClaim = hankoDebug.claims.find(
-      (claim) => String(claim.entityId).toLowerCase() === String(counterpartyEntityId).toLowerCase(),
-    );
-    console.log(
-      `🧾 disputeStart.debug ${JSON.stringify({
-        contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
-        entityId: entityState.entityId,
-        counterpartyEntityId,
-        signedNonce,
-        nonceSource,
-        onChainNonce,
-        proofHeaderNonce: account.proofHeader.nonce,
-        storedCounterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
-        proofBodyHash: proofBodyHashToUse,
-        disputeHashSource,
-        disputeHash: exactDisputeHash,
-        depositoryAddress,
-        hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
-        recoveredAddresses: hankoDebug.recoveredAddresses,
-        matchingClaim: matchingClaim
-          ? {
-              entityId: matchingClaim.entityId,
-              threshold: matchingClaim.threshold,
-              entityIndexes: matchingClaim.entityIndexes,
-              weights: matchingClaim.weights,
-              boardEntityIds: matchingClaim.boardEntityIds,
-              reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
-              entityMatchesBoardHash:
-                String(matchingClaim.entityId).toLowerCase() ===
-                String(matchingClaim.reconstructedBoardHash).toLowerCase(),
-            }
-          : null,
-      })}`,
-    );
+    if (shouldLogFullPayloads()) {
+      const hankoDebug = await inspectHankoForHash(counterpartyDisputeHanko, exactDisputeHash);
+      const matchingClaim = hankoDebug.claims.find(
+        (claim) => String(claim.entityId).toLowerCase() === String(counterpartyEntityId).toLowerCase(),
+      );
+      console.log(
+        `🧾 disputeStart.debug ${JSON.stringify({
+          contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
+          entityId: entityState.entityId,
+          counterpartyEntityId,
+          signedNonce,
+          nonceSource,
+          onChainNonce,
+          proofHeaderNonce: account.proofHeader.nonce,
+          storedCounterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
+          proofBodyHash: proofBodyHashToUse,
+          disputeHashSource,
+          disputeHash: exactDisputeHash,
+          depositoryAddress,
+          hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
+          recoveredAddresses: hankoDebug.recoveredAddresses,
+          matchingClaim: matchingClaim
+            ? {
+                entityId: matchingClaim.entityId,
+                threshold: matchingClaim.threshold,
+                entityIndexes: matchingClaim.entityIndexes,
+                weights: matchingClaim.weights,
+                boardEntityIds: matchingClaim.boardEntityIds,
+                reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
+                entityMatchesBoardHash:
+                  String(matchingClaim.entityId).toLowerCase() ===
+                  String(matchingClaim.reconstructedBoardHash).toLowerCase(),
+              }
+            : null,
+        })}`,
+      );
+    }
     const exactDisputeVerify = await verifyHankoForHash(
       counterpartyDisputeHanko,
       exactDisputeHash,

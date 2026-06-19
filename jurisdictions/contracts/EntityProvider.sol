@@ -126,10 +126,7 @@ contract EntityProvider is ERC1155 {
     
     _mint(foundationAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
     _mint(foundationAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
-    
-    totalControlSupply[foundationId] = TOTAL_CONTROL_SUPPLY;
-    totalDividendSupply[foundationId] = TOTAL_DIVIDEND_SUPPLY;
-    
+
     emit GovernanceEnabled(foundationId, controlTokenId, dividendTokenId);
     
     nextNumber = 2; // Foundation takes #1, next entity will be #2
@@ -179,8 +176,6 @@ contract EntityProvider is ERC1155 {
     _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
     _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
 
-    totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
-    totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
     boardHashToEntityId[boardHash] = entityId;
     entityIdToNumber[entityId] = entityNumber;
 
@@ -230,8 +225,6 @@ contract EntityProvider is ERC1155 {
       _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
       _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
 
-      totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
-      totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
       boardHashToEntityId[boardHashes[i]] = entityId;
       entityIdToNumber[entityId] = entityNumber;
 
@@ -1012,40 +1005,33 @@ contract EntityProvider is ERC1155 {
     articlesHash = entities[entityId].articlesHash;
   }
 
-  /**
-   * @notice Override to track token supply changes
-   */
-  function _afterTokenTransfer(
-    address /*operator*/,
+  function _update(
     address from,
     address to,
     uint256[] memory ids,
-    uint256[] memory amounts,
-    bytes memory /*data*/
-  ) internal {
+    uint256[] memory amounts
+  ) internal override {
+    super._update(from, to, ids, amounts);
+
     for (uint i = 0; i < ids.length; i++) {
+      if (from != address(0) && to != address(0)) continue;
+
       uint256 entityNumber = getEntityFromToken(ids[i]);
       bytes32 entityId = bytes32(entityNumber);
-      
+
       if (entities[entityId].currentBoardHash != bytes32(0)) {
         (uint256 controlTokenId,) = getTokenIds(entityNumber);
-        
-        // Update total supply for control tokens
+
         if (ids[i] == controlTokenId) {
           if (from == address(0)) {
-            // Mint
             totalControlSupply[entityId] += amounts[i];
           } else if (to == address(0)) {
-            // Burn
             totalControlSupply[entityId] -= amounts[i];
           }
         } else {
-          // Dividend token
           if (from == address(0)) {
-            // Mint
             totalDividendSupply[entityId] += amounts[i];
           } else if (to == address(0)) {
-            // Burn
             totalDividendSupply[entityId] -= amounts[i];
           }
         }
@@ -1084,9 +1070,7 @@ contract EntityProvider is ERC1155 {
     
     _mint(entityAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
     _mint(entityAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
-    
-    totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
-    totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+
     boardHashToEntityId[boardHash] = entityId;
     entityIdToNumber[entityId] = entityNumber;
     

@@ -6,6 +6,7 @@
 
 import type { AccountMachine, AccountTx } from '../../types';
 import { FINANCIAL } from '../../constants';
+import { ensureDelta } from '../delta-utils';
 
 // Maximum credit limit (prevents overflow attacks)
 const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max payment
@@ -31,19 +32,9 @@ export function handleSetCreditLimit(
   // Proposer extends credit → set counterparty's credit limit field
   const side = byLeft ? 'right' : 'left';
 
-  let delta = accountMachine.deltas.get(tokenId);
-  if (!delta) {
-    delta = {
-      tokenId,
-      collateral: 0n,
-      ondelta: 0n,
-      offdelta: 0n,
-      leftCreditLimit: 0n,
-      rightCreditLimit: 0n,
-      leftAllowance: 0n,
-      rightAllowance: 0n,
-    };
-    accountMachine.deltas.set(tokenId, delta);
+  const deltaExisted = accountMachine.deltas.has(tokenId);
+  const delta = ensureDelta(accountMachine, tokenId);
+  if (!deltaExisted) {
     events.push(`📊 Created delta for token ${tokenId}`);
   }
 

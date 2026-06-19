@@ -12,6 +12,7 @@
 import type { AccountMachine, AccountTx } from '../../types';
 import { hashHtlcSecret } from '../../htlc-utils';
 import { createStructuredLogger, shortHash } from '../../logger';
+import { releaseHold } from '../hold-utils';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');
 
@@ -109,27 +110,15 @@ export async function handleHtlcResolve(
   }
 
   // 3. Release hold (common to both paths)
-  if (lock.senderIsLeft) {
-    const currentHold = delta.leftHold || 0n;
-    if (currentHold < lock.amount) {
-      return {
-        success: false,
-        error: `HTLC_RESOLVE_HOLD_UNDERFLOW:left hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
-        events,
-      };
-    }
-    delta.leftHold = currentHold - lock.amount;
-  } else {
-    const currentHold = delta.rightHold || 0n;
-    if (currentHold < lock.amount) {
-      return {
-        success: false,
-        error: `HTLC_RESOLVE_HOLD_UNDERFLOW:right hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
-        events,
-      };
-    }
-    delta.rightHold = currentHold - lock.amount;
-  }
+  const releaseSide = lock.senderIsLeft ? 'left' : 'right';
+  const releaseError = releaseHold(
+    delta,
+    releaseSide,
+    lock.amount,
+    (currentHold, releaseAmount) =>
+      `HTLC_RESOLVE_HOLD_UNDERFLOW:${releaseSide} hold=${currentHold.toString()} amount=${releaseAmount.toString()}`,
+  );
+  if (releaseError) return { success: false, error: releaseError, events };
 
   // 4. Apply outcome mutation after the hold guard. Failed resolves must be
   // no-ops on account balances and locks.

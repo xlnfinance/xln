@@ -9,6 +9,7 @@ import {
   buildTowerAppointmentOwnerMessage,
   deriveRuntimeRecoveryActionLookupKey,
   encryptRuntimeRecoveryBundle,
+  encryptTowerPayloadForWatchSeed,
 } from '../recovery/crypto';
 import type { JReplica, JurisdictionConfig, TowerLastResortPayloadV1, TowerAppointmentV1 } from '../xln-api';
 import {
@@ -154,29 +155,30 @@ describe('watchtower restart resilience', () => {
     const watchSeed = `0x${'12'.repeat(32)}`;
     const watchedEntityId = `0x${'12'.repeat(32)}`;
     const counterentity = `0x${'34'.repeat(32)}`;
+    const lastResortRemedy = encodeTowerCounterDisputeRemedy({
+      version: 1,
+      type: 'counter_dispute_remedy',
+      rpcUrl: 'http://127.0.0.1:1',
+      chainId: 31337,
+      depositoryAddress: addr('55'),
+      watchedEntityId,
+      towerAddress: towerWallet.address.toLowerCase(),
+      lastResortWindowBlocks: 8,
+      appointmentSequence: 3,
+      ownerAuthorizationHanko: '0x1234',
+      latestProof: {
+        counterentity,
+        finalNonce: 7,
+        finalProofbody: { watchSeed, tokenIds: [1], offdeltas: [-5n], transformers: [] },
+        leftArguments: '0x',
+        rightArguments: '0x',
+        starterIncrementedArguments: '0x',
+        sig: '0x5678',
+      },
+    });
     const lastResortPayload: TowerLastResortPayloadV1 = {
       triggerHint: 'restart-test',
-      encryptedRemedy: encodeTowerCounterDisputeRemedy({
-        version: 1,
-        type: 'counter_dispute_remedy',
-        rpcUrl: 'http://127.0.0.1:1',
-        chainId: 31337,
-        depositoryAddress: addr('55'),
-        watchedEntityId,
-        towerAddress: towerWallet.address.toLowerCase(),
-        lastResortWindowBlocks: 8,
-        appointmentSequence: 3,
-        ownerAuthorizationHanko: '0x1234',
-        latestProof: {
-          counterentity,
-          finalNonce: 7,
-          finalProofbody: { watchSeed, tokenIds: [1], offdeltas: [-5n], transformers: [] },
-          leftArguments: '0x',
-          rightArguments: '0x',
-          starterIncrementedArguments: '0x',
-          sig: '0x5678',
-        },
-      }),
+      encryptedRemedy: await encryptTowerPayloadForWatchSeed(lastResortRemedy, watchSeed),
       watch: {
         rpcUrl: 'http://127.0.0.1:1',
         chainId: 31337,
