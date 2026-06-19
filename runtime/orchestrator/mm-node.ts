@@ -513,14 +513,19 @@ const waitForTokenCatalog = async (jadapter: JAdapter, rounds = 80): Promise<JTo
   throw new Error('TOKEN_CATALOG_EMPTY');
 };
 
-const waitForActiveJAdapter = async (env: Env, rounds = 200): Promise<JAdapter> => {
+const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200): Promise<JAdapter> => {
   for (let i = 0; i < rounds; i += 1) {
     const jadapter = getActiveJAdapter(env);
     if (jadapter) return jadapter;
     await settleRuntimeFor(env, 5);
     await sleep(50);
   }
-  throw new Error('ACTIVE_JADAPTER_NOT_READY');
+  throw new Error(
+    `ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName} ` +
+    `active=${String(env.activeJurisdiction || 'none')} ` +
+    `jReplicas=${Array.from(env.jReplicas?.keys?.() || []).join(',') || 'none'} ` +
+    `runtimeMempool=${Number(env.runtimeMempool?.runtimeTxs?.length || 0)}`,
+  );
 };
 
 const waitForReplicaReady = async (env: Env, entityId: string, rounds = 200): Promise<void> => {
@@ -2162,7 +2167,7 @@ const run = async (): Promise<void> => {
   });
   await settleRuntimeFor(env, 35);
 
-  const jadapter = await waitForActiveJAdapter(env);
+  const jadapter = await waitForActiveJAdapter(env, jurisdiction.name);
   ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   startupPhase = 'token-catalog';
   const tokenCatalog = await waitForTokenCatalog(jadapter);
