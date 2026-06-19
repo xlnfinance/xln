@@ -227,6 +227,10 @@ const MARKET_MAKER_BOOTSTRAP_START_DELAY_MS = Math.max(
   0,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '2000'),
 );
+const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
+  0,
+  Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'),
+);
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
   Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '30'),
@@ -1955,7 +1959,7 @@ const run = async (): Promise<void> => {
 
   const env = await main(resolvedArgs.seed);
   configureMarketMakerStorage(env);
-  startRuntimeLoop(env);
+  startRuntimeLoop(env, { tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS });
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
   let mmContexts: MarketMakerEntityContext[] = [];

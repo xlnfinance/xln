@@ -877,7 +877,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   const state = ensureRuntimeState(env);
   if (state.halted) return state.stopLoop ?? (() => {});
   if (state.loopActive) return state.stopLoop ?? (() => {});
-  void config;
+  const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));
   let running = true;
   let loopPromise: Promise<void> | null = null;
   state.loopActive = true;
@@ -951,7 +951,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
             await sleep(remainingDelayMs);
           } else {
             // Drain chained outputs/ACKs immediately.
-            await sleep(0);
+            await sleep(runtimeLoopTickDelayMs);
           }
           continue;
         }
