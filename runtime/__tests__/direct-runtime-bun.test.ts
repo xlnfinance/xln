@@ -148,6 +148,31 @@ describe('direct runtime websocket route', () => {
     expect(received).toEqual([]);
   });
 
+  test('rejects same-runtime direct websocket peers', async () => {
+    const serverSeed = 'direct-route-server-same-runtime';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const received: RoutedEntityInput[] = [];
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      onEntityInput: (_from, input) => {
+        received.push(input);
+      },
+    });
+
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(serverSeed, serverRuntimeId)));
+
+    expect(ws.readyState).toBe(3);
+    expect(sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Direct runtime websocket only accepts inter-runtime peers',
+    });
+    expect(received).toEqual([]);
+    expect(route.getSessionState()).toEqual([]);
+  });
+
   test('rejects duplicate runtime hello without displacing the live socket', async () => {
     const serverSeed = 'direct-route-server-duplicate';
     const clientSeed = 'direct-route-client-duplicate';

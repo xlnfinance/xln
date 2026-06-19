@@ -31,6 +31,7 @@ import { applyJEventsToEnv } from '../jadapter/watcher';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
+import { getTokenIdsForJurisdiction } from '../account-utils';
 import { isLocalOperatorRequest, publicLocalHubHealth } from '../health-redaction';
 import {
   deriveRuntimeAdapterCapabilityToken,
@@ -412,6 +413,31 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
 const resolvedArgs = parseArgs();
 const supportPeerIdentities = parseSupportPeerIdentities(resolvedArgs.supportPeerIdentitiesJson);
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
+const normalizePositiveTokenIds = (tokenIds: readonly number[]): number[] =>
+  Array.from(new Set(tokenIds.filter(tokenId => Number.isFinite(tokenId) && tokenId > 0).map(tokenId => Math.floor(tokenId))))
+    .sort((a, b) => a - b);
+
+const tokenIdsForHubJurisdiction = (
+  hub: Pick<HubBootstrapEntry, 'jurisdictionName' | 'chainId'>,
+): number[] => {
+  const jurisdictionTokenIds = normalizePositiveTokenIds(getTokenIdsForJurisdiction({
+    name: hub.jurisdictionName,
+    chainId: hub.chainId ?? null,
+  }));
+  return jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT
+    ? jurisdictionTokenIds
+    : [...DEFAULT_ACCOUNT_TOKEN_IDS];
+};
+
+const tokenCatalogForHubJurisdiction = (
+  tokenCatalog: JTokenInfo[],
+  hub: Pick<HubBootstrapEntry, 'jurisdictionName' | 'chainId'>,
+): JTokenInfo[] => {
+  const desiredTokenIds = new Set(tokenIdsForHubJurisdiction(hub));
+  const selected = tokenCatalog.filter((token) => desiredTokenIds.has(Number(token.tokenId)));
+  return selected.length >= HUB_REQUIRED_TOKEN_COUNT ? selected : tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
+};
+
 const resolveLocalApiUrl = (value: string): string => {
   const raw = String(value || '').trim();
   if (!raw.startsWith('/')) return raw;
@@ -954,7 +980,9 @@ const requireJAdapterForDebugReserve = (
 
 const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]): LocalHealthResponse['bootstrapReserves'] => {
   const replica = getEntityReplicaById(env, entityId);
-  const tokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT).map(token => {
+  const tokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
+    jurisdictionName: getEntityJurisdictionName(env, entityId),
+  }).map(token => {
     const tokenId = Number(token.tokenId);
     const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
     const current = replica?.state?.reserves?.get(tokenId) ?? 0n;
@@ -987,7 +1015,9 @@ const syncReserveSnapshotFromChain = async (
   if (!replica?.state) {
     throw new Error(`HUB_REPLICA_MISSING_FOR_RESERVE_SYNC: ${entityId}`);
   }
-  for (const token of tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
+  for (const token of tokenCatalogForHubJurisdiction(tokenCatalog, {
+    jurisdictionName: getEntityJurisdictionName(env, entityId),
+  })) {
     const tokenId = Number(token.tokenId);
     if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
     const current = await jadapter.getReserves(entityId, tokenId);
@@ -1004,7 +1034,9 @@ const ensureBootstrapReserves = async (
   const startedAt = startTiming('reserve_funding');
   const jadapter = requireJAdapterForEntity(env, entityId, 'RESERVE_FUNDING');
 
-  const bootstrapTokens = tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT);
+  const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
+    jurisdictionName: getEntityJurisdictionName(env, entityId),
+  });
   await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
   if (!resolvedArgs.deployTokens) {
     const reserveHealth = getReserveHealth(env, entityId, tokenCatalog);
@@ -1069,9 +1101,10 @@ const ensurePeerBootstrapReserves = async (
     const catalog = sameJurisdictionName(jurisdictionName, env.activeJurisdiction || replicaName)
       ? tokenCatalog
       : await ensureTokenCatalog(jadapter, true, replicaName);
+    const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });
     const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
     for (const peer of profiles) {
-      for (const token of catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
+      for (const token of bootstrapTokens) {
         const tokenId = Number(token.tokenId);
         if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
         const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
@@ -2146,8 +2179,10 @@ const run = async (): Promise<void> => {
       const creditInputs: EntityInput[] = [];
 
       const collectSupportPeerInputs = (
-        owner: Pick<HubBootstrapEntry, 'entityId' | 'signerId' | 'jurisdictionName'>,
+        owner: Pick<HubBootstrapEntry, 'entityId' | 'signerId' | 'jurisdictionName' | 'chainId'>,
       ): void => {
+        const supportPeerTokenIds = tokenIdsForHubJurisdiction(owner);
+        const [openTokenId = HUB_MESH_TOKEN_ID, ...extraCreditTokenIds] = supportPeerTokenIds;
         const visibleSupportPeers = visibleDirectSupportPeers(
           supportPeerIdentities,
           visibleProfiles,
@@ -2169,9 +2204,9 @@ const run = async (): Promise<void> => {
               entityTxs: [
                 {
                   type: 'openAccount',
-                  data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: peer.creditAmount },
+                  data: { targetEntityId: peer.entityId, tokenId: openTokenId, creditAmount: peer.creditAmount },
                 },
-                ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
+                ...extraCreditTokenIds.map((tokenId) => ({
                   type: 'extendCredit' as const,
                   data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
                 })),
@@ -2180,7 +2215,7 @@ const run = async (): Promise<void> => {
             continue;
           }
           if (!localAccount || !canWrite) continue;
-          const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
+          const missingTokenIds = supportPeerTokenIds.filter((tokenId) =>
             getCreditGrantedByEntity(localAccount, owner.entityId, tokenId) < peer.creditAmount,
           );
           if (missingTokenIds.length > 0) {

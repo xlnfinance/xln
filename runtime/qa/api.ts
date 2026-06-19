@@ -1,9 +1,66 @@
 import { safeStringify } from '../serialization-utils';
-import { enrichQaRunUrls, listQaRuns, qaArtifactContentType, readQaRun, resolveQaArtifactPath, summarizeQaRun } from './report';
+import {
+  enrichQaRunUrls,
+  listQaRuns,
+  listQaStoryScreenshots,
+  qaArtifactContentType,
+  readQaRun,
+  resolveQaArtifactPath,
+  resolveQaStoryScreenshotPath,
+  summarizeQaRun,
+  type QaStorySource,
+} from './report';
 
 type JsonHeaders = Record<string, string>;
 
 export async function maybeHandleQaRequest(request: Request, pathname: string, headers: JsonHeaders): Promise<Response | null> {
+  if (pathname === '/api/qa/stories' && request.method === 'GET') {
+    try {
+      const url = new URL(request.url);
+      const limitRaw = Number(url.searchParams.get('limit') || '200');
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 200;
+      const stories = await listQaStoryScreenshots(limit);
+      return new Response(
+        safeStringify({
+          ok: true,
+          total: stories.length,
+          stories,
+        }),
+        {
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-store',
+          },
+        },
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 500, headers });
+    }
+  }
+
+  if (pathname === '/api/qa/story-image' && request.method === 'GET') {
+    const url = new URL(request.url);
+    const source = String(url.searchParams.get('source') || '').trim() as QaStorySource;
+    const relativePath = String(url.searchParams.get('path') || '').trim();
+    if (!source || !relativePath) {
+      return new Response(safeStringify({ ok: false, error: 'source and path are required' }), { status: 400, headers });
+    }
+    try {
+      const absolutePath = await resolveQaStoryScreenshotPath(source, relativePath);
+      return new Response(Bun.file(absolutePath), {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-store',
+          'Content-Type': qaArtifactContentType(absolutePath),
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 404, headers });
+    }
+  }
+
   if (pathname === '/api/qa/runs' && request.method === 'GET') {
     try {
       const url = new URL(request.url);

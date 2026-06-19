@@ -70,8 +70,8 @@
   // Check if env is ready
   $: envReady = $isolatedEnv !== null && $isolatedEnv !== undefined;
 
-  // CRITICAL: Check if viewing history (timeIndex >= 0 means historical frame, -1 means LIVE)
-  $: isHistoryMode = $isolatedTimeIndex >= 0;
+  // CRITICAL: mutations are only valid against the active live runtime frame.
+  $: isLiveActionFrame = Boolean($isolatedIsLive) && $isolatedTimeIndex === -1;
 
   let cachedXLN: XLNModule | null = null;
 
@@ -94,19 +94,29 @@
     mints: Array<{ entityId: string; tokenId: number; amount: bigint }>
   ): Promise<void> {
     if (mints.length === 0) return;
+    if (!requireLiveMode('reserve funding')) {
+      throw new Error('reserve funding requires LIVE mode');
+    }
     const jadapter = await requireBrowserVMDebugAdapter('Reserve funding');
     await jadapter.debugFundReservesBatch(mints);
   }
 
-  async function ingressRuntimeInput(XLN: any, input: { runtimeTxs: any[]; entityInputs: any[] }): Promise<void> {
+  async function ingressRuntimeInput(
+    XLN: any,
+    input: { runtimeTxs: any[]; entityInputs: any[] },
+    action = 'runtime action'
+  ): Promise<void> {
+    if (!requireLiveMode(action)) {
+      throw new Error(`${action} requires LIVE mode`);
+    }
     XLN.enqueueRuntimeInput($isolatedEnv, input);
   }
 
   /** Guard function - blocks mutations when viewing history */
   function requireLiveMode(action: string): boolean {
-    if (isHistoryMode) {
-      lastAction = `⚠️ Cannot ${action} while viewing history. Jump to LIVE first.`;
-      console.warn('[Architect] Blocked mutation in history mode:', action);
+    if (!isLiveActionFrame) {
+      lastAction = `${action} requires LIVE mode. Switch to the current runtime state before acting.`;
+      console.warn('[Architect] Blocked mutation outside live mode:', action);
       return false;
     }
     return true;
@@ -267,7 +277,7 @@
       if (!signerId) {
         throw new Error(`Missing signer for ${shortAddress(r2rFromEntity)}`);
       }
-      XLN.enqueueRuntimeInput($isolatedEnv, {
+      await ingressRuntimeInput(XLN, {
         runtimeTxs: [],
         entityInputs: [{
           entityId: r2rFromEntity,
@@ -281,7 +291,7 @@
             },
           }],
         }],
-      });
+      }, 'send R2R transaction');
 
       lastAction = `✅ R2R sent: ${r2rAmount} units (on-chain)`;
 
@@ -339,6 +349,7 @@
   /** Start AHB Tutorial with autopilot */
   let ahbRunning = false; // Guard against double execution
   async function startAHBTutorial() {
+    if (!requireLiveMode('run AHB tutorial')) return;
     if (ahbRunning) {
       return;
     }
@@ -388,6 +399,7 @@
   /** Start HTLC Tutorial (lock-ahb scenario) */
   let htlcRunning = false;
   async function startHTLCTutorial() {
+    if (!requireLiveMode('run HTLC tutorial')) return;
     if (htlcRunning) {
       return;
     }
@@ -421,6 +433,7 @@
   /** Start Swap Tutorial */
   let swapRunning = false;
   async function startSwapTutorial() {
+    if (!requireLiveMode('run swap tutorial')) return;
     if (swapRunning) {
       return;
     }
@@ -501,6 +514,7 @@
 
   /** Reset to fresh runtime instance */
   async function resetScenario() {
+    if (!requireLiveMode('reset scenario')) return;
     loading = true;
     try {
       const XLN = await getXLN();
@@ -526,6 +540,7 @@
   /** Start Grid Scalability Scenario */
   let gridRunning = false;
   async function startGridScenario() {
+    if (!requireLiveMode('run grid scenario')) return;
     if (gridRunning) {
       return;
     }
@@ -565,6 +580,7 @@
   /** Start Settlement Workspace Scenario */
   let settleRunning = false;
   async function startSettleScenario() {
+    if (!requireLiveMode('run settlement scenario')) return;
     if (settleRunning) {
       return;
     }
@@ -765,19 +781,19 @@
 
       // Open account if needed
       if (!hasAccount) {
-        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+        await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
           entityId: from,
           signerId: fromReplica.signerId,
           entityTxs: [{
             type: 'openAccount',
             data: { targetEntityId: to }
           }]
-        }] });
+        }] }, 'send payment');
       }
 
       // Send payment
       const amount = Math.floor(Math.random() * 100000) + 10000; // 10K-110K
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
         entityId: from,
         signerId: fromReplica.signerId,
         entityTxs: [{
@@ -790,7 +806,7 @@
             description: 'Random banker demo payment'
           }
         }]
-      }] });
+      }] }, 'send payment');
 
       lastAction = ` Payment: ${shortAddress(from)} → ${shortAddress(to)} ($${(amount/1000).toFixed(0)}K)`;
 
@@ -886,7 +902,7 @@
         }]
       });
 
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: txBatch });
+      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: txBatch }, 'send transfer');
 
       lastAction = ` 20% Transfer: ${shortAddress(from!)} → ${shortAddress(to!)} ($${(Number(amount)/1000).toFixed(0)}K)`;
 
@@ -945,7 +961,7 @@
       }
 
       // Batch create all 100 entities in ONE frame
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: entityInputs });
+      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: entityInputs }, 'scale stress test');
 
       lastAction = ` Created 100 entities! Check FPS overlay (should be 60+)`;
 
@@ -1281,7 +1297,7 @@
 
     // Single batch: all accounts opened in ONE frame
     if (accountInputs.length > 0) {
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: accountInputs });
+      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: accountInputs }, 'open demo accounts');
     }
   }
 
@@ -1293,6 +1309,10 @@
 
     fedPaymentInterval = setInterval(async () => {
       try {
+        if (!requireLiveMode('smart payment loop')) {
+          stopFedPaymentLoop();
+          return;
+        }
         const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
         const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
@@ -1397,18 +1417,18 @@
 
       if (!hasAccount) {
         // Open account first
-        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+        await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
           entityId: fromId,
           signerId: fromReplica.signerId,
           entityTxs: [{
             type: 'openAccount',
             data: { targetEntityId: toId }
           }]
-        }] });
+        }] }, 'smart payment loop');
       }
 
       // Send 20% payment
-      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+      await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
         entityId: fromId,
         signerId: fromReplica.signerId,
         entityTxs: [{
@@ -1421,7 +1441,7 @@
             description: `20% circular payment`
           }
         }]
-      }] });
+      }] }, 'smart payment loop');
     }
   }
 
@@ -1468,6 +1488,7 @@
 
   /** VR/topology payment loop. */
   async function startFedPaymentLoop() {
+    if (!requireLiveMode('Fed payment loop')) return;
     if (fedPaymentInterval) clearInterval(fedPaymentInterval);
 
     const bankEntityIds = entityIds.filter(id => {
@@ -1490,6 +1511,10 @@
 
     fedPaymentInterval = setInterval(async () => {
       try {
+        if (!requireLiveMode('Fed payment loop')) {
+          stopFedPaymentLoop();
+          return;
+        }
         const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
         const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
@@ -1505,7 +1530,7 @@
           const fedReplica = fedKey ? $isolatedEnv.eReplicas.get(fedKey) : null;
 
           if (fedReplica) {
-            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+            await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
               entityId: fedId,
               signerId: fedReplica.signerId,
               entityTxs: [{
@@ -1518,7 +1543,7 @@
                   description: `Fed discount window lending`
                 }
               }]
-            }] });
+            }] }, 'Fed payment loop');
           }
         } else if (action === 1) {
           // Random bank borrows from Fed (reverse direction)
@@ -1529,7 +1554,7 @@
           const bankReplica = bankKey ? $isolatedEnv.eReplicas.get(bankKey) : null;
 
           if (bankReplica) {
-            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+            await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
               entityId: bank,
               signerId: bankReplica.signerId,
               entityTxs: [{
@@ -1542,7 +1567,7 @@
                   description: `Bank repaying Fed loan`
                 }
               }]
-            }] });
+            }] }, 'Fed payment loop');
           }
         } else {
           // Interbank payment (Bank → Bank)
@@ -1563,18 +1588,18 @@
 
             if (!hasAccount) {
               // Open account first
-              XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+              await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
                 entityId: from,
                 signerId: fromReplica.signerId,
                 entityTxs: [{
                   type: 'openAccount',
                   data: { targetEntityId: to }
                 }]
-              }] });
+              }] }, 'Fed payment loop');
             }
 
             // Send payment
-            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
+            await ingressRuntimeInput(XLN, { runtimeTxs: [], entityInputs: [{
               entityId: from,
               signerId: fromReplica.signerId,
               entityTxs: [{
@@ -1587,7 +1612,7 @@
                   description: `Interbank settlement`
                 }
               }]
-            }] });
+            }] }, 'Fed payment loop');
           }
         }
 

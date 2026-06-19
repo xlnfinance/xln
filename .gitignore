@@ -122,3 +122,4 @@ frontend/static/runtime.js
 frontend/static/runtime-bundle.js
 frontend/public/runtime.js
 frontend/build/runtime.js
+.gstack/

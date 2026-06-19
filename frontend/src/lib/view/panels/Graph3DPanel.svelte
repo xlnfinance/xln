@@ -84,19 +84,15 @@
   }
 
   function getLiveEnvForAction(action: string): any {
+    if (get(isolatedTimeIndex) !== -1 || !get(isolatedIsLive)) {
+      throw new Error(`${action} requires LIVE mode. Switch to the current runtime state before acting.`);
+    }
     const currentEnv = get(isolatedEnv);
     const liveEnv = unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv;
     if (!liveEnv?.eReplicas || !(liveEnv.eReplicas instanceof Map)) {
       throw new Error(`${action} requires live runtime environment`);
     }
     return liveEnv;
-  }
-
-  function goToLiveForAction(): void {
-    if (!$isolatedIsLive || $isolatedTimeIndex !== -1) {
-      isolatedTimeIndex.set(-1);
-      isolatedIsLive.set(true);
-    }
   }
 
   /**
@@ -5359,8 +5355,7 @@
         return;
       }
 
-
-      goToLiveForAction();
+      getLiveEnvForAction('Graph payment');
 
       const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const job: PaymentJob = {
@@ -5402,7 +5397,6 @@
         throw new Error('XLN runtime not loaded');
       }
 
-      goToLiveForAction();
       const actionEnv = getLiveEnvForAction('Graph payment');
 
       // Debug logging
@@ -5628,7 +5622,6 @@
       }
 
 
-      goToLiveForAction();
       const actionEnv = getLiveEnvForAction('Graph scenario');
       const result = await XLN?.executeScenario(actionEnv, parsed.scenario);
       isolatedHistory.set(actionEnv.history || []);
