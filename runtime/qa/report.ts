@@ -62,6 +62,24 @@ export type QaRunManifest = {
 };
 
 export const QA_LOGS_ROOT = resolve(process.cwd(), '.logs', 'e2e-parallel');
+export const QA_STORY_SCREENSHOTS_ROOT = resolve(process.cwd(), 'tests', 'e2e', 'screenshots');
+
+export type QaStorySource = 'e2e-screenshots' | 'qa-run';
+
+export type QaStoryScreenshot = {
+  id: string;
+  source: QaStorySource;
+  title: string;
+  group: string;
+  name: string;
+  relativePath: string;
+  sizeBytes: number;
+  updatedAt: number;
+  url: string;
+  runId?: string;
+  shard?: number;
+  status?: QaShardManifest['status'];
+};
 
 const MIME_TYPES: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
@@ -70,9 +88,12 @@ const MIME_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
   '.webm': 'video/webm',
   '.zip': 'application/zip',
 };
+
+const STORY_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 const parseRunIdTimestamp = (runId: string): number | null => {
   const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/.exec(runId);
@@ -103,6 +124,36 @@ const detectArtifactKind = (name: string): QaArtifactKind => {
 
 const detectContentType = (name: string): string =>
   MIME_TYPES[extname(name).toLowerCase()] ?? 'application/octet-stream';
+
+const storyTitle = (name: string): string => {
+  const stem = name.replace(/\.[^.]+$/, '');
+  const words = stem
+    .replace(/^\d+[-_]/, '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : stem;
+};
+
+const storyGroup = (name: string): string => {
+  const stem = name.replace(/\.[^.]+$/, '').toLowerCase();
+  const firstToken = stem.split(/[-_]/).find(Boolean) || 'screens';
+  if (/^\d+$/.test(firstToken)) return 'journey';
+  if (firstToken === 'step') return 'proposal flow';
+  if (firstToken === 'working') return 'working path';
+  if (firstToken === 'selection') return 'selection';
+  if (firstToken === 'proposal') return 'proposal';
+  if (firstToken === 'execution') return 'execution';
+  if (firstToken === 'zero') return 'empty state';
+  if (firstToken === 'debug') return 'debug';
+  if (firstToken === 'fast') return 'fast path';
+  if (firstToken === 'final') return 'final state';
+  if (firstToken === 'full') return 'full flow';
+  return firstToken;
+};
+
+export const makeQaStoryImageUrl = (source: QaStorySource, relativePath: string): string =>
+  `/api/qa/story-image?source=${encodeURIComponent(source)}&path=${encodeURIComponent(relativePath)}`;
 
 const shortTail = (text: string, lines = 80): string => text.split('\n').slice(-lines).join('\n');
 
@@ -303,6 +354,44 @@ const walkArtifacts = async (baseDir: string, currentDir: string, out: QaArtifac
   }
 };
 
+const walkStoryScreenshots = async (
+  baseDir: string,
+  currentDir: string,
+  out: QaStoryScreenshot[],
+): Promise<void> => {
+  const entries = await readdir(currentDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
+    const absolutePath = join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      await walkStoryScreenshots(baseDir, absolutePath, out);
+      continue;
+    }
+    if (!STORY_IMAGE_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
+    const fileStat = await stat(absolutePath);
+    const relativePath = absolutePath.slice(baseDir.length + 1);
+    out.push({
+      id: `e2e-screenshots:${relativePath}`,
+      source: 'e2e-screenshots',
+      title: storyTitle(entry.name),
+      group: storyGroup(entry.name),
+      name: entry.name,
+      relativePath,
+      sizeBytes: fileStat.size,
+      updatedAt: fileStat.mtimeMs,
+      url: makeQaStoryImageUrl('e2e-screenshots', relativePath),
+    });
+  }
+};
+
+const listRepositoryStoryScreenshots = async (): Promise<QaStoryScreenshot[]> => {
+  const rootStat = await stat(QA_STORY_SCREENSHOTS_ROOT).catch(() => null);
+  if (!rootStat?.isDirectory()) return [];
+  const stories: QaStoryScreenshot[] = [];
+  await walkStoryScreenshots(QA_STORY_SCREENSHOTS_ROOT, QA_STORY_SCREENSHOTS_ROOT, stories);
+  return stories.sort((a, b) => compareStableText(a.group, b.group) || compareStableText(a.name, b.name));
+};
+
 const readLastRunStatus = async (resultsDir: string): Promise<'passed' | 'failed' | 'unknown'> => {
   try {
     const raw = await readFile(join(resultsDir, '.last-run.json'), 'utf8');
@@ -492,6 +581,64 @@ export const enrichQaRunUrls = (run: QaRunManifest): QaRunManifest => ({
     })),
   })),
 });
+
+const listQaRunStoryScreenshots = async (runLimit: number): Promise<QaStoryScreenshot[]> => {
+  const runs = await listQaRuns(runLimit);
+  const stories: QaStoryScreenshot[] = [];
+  for (const run of runs) {
+    for (const shard of run.shards) {
+      const imageArtifacts = (shard.artifacts ?? []).filter(artifact => artifact.kind === 'image');
+      for (const artifact of imageArtifacts) {
+        stories.push({
+          id: `qa-run:${run.runId}:${artifact.relativePath}`,
+          source: 'qa-run',
+          title: storyTitle(artifact.name),
+          group: shard.handle || shard.title || `shard-${shard.shard}`,
+          name: artifact.name,
+          relativePath: artifact.relativePath,
+          sizeBytes: artifact.sizeBytes,
+          updatedAt: run.completedAt ?? run.createdAt,
+          url: makeQaArtifactUrl(run.runId, artifact.relativePath),
+          runId: run.runId,
+          shard: shard.shard,
+          status: shard.status,
+        });
+      }
+    }
+  }
+  return stories.sort((a, b) => b.updatedAt - a.updatedAt || compareStableText(a.id, b.id));
+};
+
+export const listQaStoryScreenshots = async (limit = 200): Promise<QaStoryScreenshot[]> => {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 200;
+  const [repoStories, runStories] = await Promise.all([
+    listRepositoryStoryScreenshots(),
+    listQaRunStoryScreenshots(5),
+  ]);
+  return [...repoStories, ...runStories].slice(0, safeLimit);
+};
+
+export const resolveQaStoryScreenshotPath = async (
+  source: QaStorySource,
+  relativePath: string,
+): Promise<string> => {
+  if (source !== 'e2e-screenshots') {
+    throw new Error('INVALID_QA_STORY_SOURCE');
+  }
+  if (!relativePath || relativePath.startsWith('/') || relativePath.includes('\0')) {
+    throw new Error('INVALID_QA_STORY_IMAGE_PATH');
+  }
+  const root = QA_STORY_SCREENSHOTS_ROOT;
+  const absolutePath = resolve(root, relativePath);
+  if (!absolutePath.startsWith(`${root}/`) && absolutePath !== root) {
+    throw new Error('INVALID_QA_STORY_IMAGE_PATH');
+  }
+  const fileStat = await stat(absolutePath).catch(() => null);
+  if (!fileStat?.isFile() || !STORY_IMAGE_EXTENSIONS.has(extname(absolutePath).toLowerCase())) {
+    throw new Error('QA_STORY_IMAGE_NOT_FOUND');
+  }
+  return absolutePath;
+};
 
 export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'shards'> & { failingTargets: string[] } => ({
   manifestVersion: run.manifestVersion,

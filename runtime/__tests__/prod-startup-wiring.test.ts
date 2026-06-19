@@ -167,8 +167,9 @@ describe('production startup wiring', () => {
     expect(healthRoute).not.toContain('buildExpectedMarketMakerCrossRouteGroups(');
   });
 
-  test('market maker bootstrap batches account open and credit setup', () => {
+  test('market maker bootstrap never sends hub-side credit inputs itself', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
     expect(ensureStart).toBeGreaterThan(0);
@@ -178,8 +179,40 @@ describe('production startup wiring', () => {
     expect(ensureConnectivity).toContain('const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);');
     expect(ensureConnectivity).toContain("type: 'openAccount'");
     expect(ensureConnectivity).toContain("type: 'extendCredit' as const");
-    expect(ensureConnectivity).toContain('if (localCreditInputs.length > 0 || remoteCreditInputs.length > 0)');
-    expect(ensureConnectivity).not.toContain('if (localCreditInputs.length > 0) {\n    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });\n    await settleRuntimeFor(env, 45);\n    await yieldMarketMakerApi();\n    return;\n  }');
+    expect(ensureConnectivity).not.toContain('hubSignerIdsByEntityId');
+    expect(ensureConnectivity).not.toContain('remoteCreditInputs');
+    expect(ensureConnectivity).not.toContain('sendEntityInput');
+    expect(mmNode).not.toContain('RoutedEntityInput');
+    expect(orchestrator).toContain("'--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities())");
+    expect(orchestrator).not.toContain('--mesh-hub-identities-json');
+  });
+
+  test('hub support-peer provisioning uses full jurisdiction token sets', () => {
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    expect(hubNode).toContain("import { getTokenIdsForJurisdiction } from '../account-utils';");
+    expect(hubNode).toContain('const tokenIdsForHubJurisdiction = (');
+    expect(hubNode).toContain('const tokenCatalogForHubJurisdiction = (');
+
+    const collectSupportStart = hubNode.indexOf('const collectSupportPeerInputs = (');
+    const hubPeerStart = hubNode.indexOf('for (const peer of peers)', collectSupportStart);
+    expect(collectSupportStart).toBeGreaterThan(0);
+    expect(hubPeerStart).toBeGreaterThan(collectSupportStart);
+    const collectSupportPeerInputs = hubNode.slice(collectSupportStart, hubPeerStart);
+    expect(collectSupportPeerInputs).toContain('const supportPeerTokenIds = tokenIdsForHubJurisdiction(owner);');
+    expect(collectSupportPeerInputs).toContain('const [openTokenId = HUB_MESH_TOKEN_ID, ...extraCreditTokenIds] = supportPeerTokenIds;');
+    expect(collectSupportPeerInputs).toContain('...extraCreditTokenIds.map((tokenId) => ({');
+    expect(collectSupportPeerInputs).toContain('const missingTokenIds = supportPeerTokenIds.filter((tokenId) =>');
+    expect(collectSupportPeerInputs).not.toContain('DEFAULT_ACCOUNT_TOKEN_IDS');
+
+    const reserveStart = hubNode.indexOf('const getReserveHealth = (');
+    const supportPeerReserveEnd = hubNode.indexOf('const getEntityJurisdictionName = (');
+    expect(reserveStart).toBeGreaterThan(0);
+    expect(supportPeerReserveEnd).toBeGreaterThan(reserveStart);
+    const reserveBootstrap = hubNode.slice(reserveStart, supportPeerReserveEnd);
+    expect(reserveBootstrap).toContain('tokenCatalogForHubJurisdiction(tokenCatalog, {');
+    expect(reserveBootstrap).toContain('const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });');
+    expect(reserveBootstrap).not.toContain('tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
+    expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
 
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {

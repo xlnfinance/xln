@@ -21,7 +21,6 @@ import {
   main,
   enqueueRuntimeInput,
   handleInboundP2PEntityInput,
-  sendEntityInput,
   startP2P,
   stopP2P,
   startRuntimeLoop,
@@ -36,7 +35,7 @@ import {
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
 } from '../runtime.ts';
-import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env, RoutedEntityInput } from '../types';
+import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   BOOTSTRAP_POLL_MS,
@@ -95,17 +94,10 @@ type Args = {
   rpc2Url: string;
   rpcUrls: Record<number, string>;
   meshHubNames: string[];
-  meshHubIdentitiesJson: string;
   dbPath: string;
 };
 
 type MarketMakerServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
-
-type MeshHubIdentity = {
-  name: string;
-  entityId: string;
-  signerId: string;
-};
 
 type JurisdictionConfig = MeshJurisdictionConfig & {
   contracts: NonNullable<MeshJurisdictionConfig['contracts']>;
@@ -384,7 +376,6 @@ const parseArgs = (): Args => {
       .split(',')
       .map(part => part.trim())
       .filter(Boolean),
-    meshHubIdentitiesJson: getArg('--mesh-hub-identities-json', '[]'),
     dbPath: getArg('--db-path', ''),
   };
 };
@@ -607,22 +598,6 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       (Number(left.chainId || 0) - Number(right.chainId || 0)) ||
       compareStableText(left.entityId, right.entityId),
     );
-};
-
-const parseMeshHubIdentities = (raw: string): MeshHubIdentity[] => {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((entry) => ({
-        name: String(entry?.name || '').trim(),
-        entityId: String(entry?.entityId || '').trim().toLowerCase(),
-        signerId: String(entry?.signerId || '').trim().toLowerCase(),
-      }))
-      .filter((entry) => entry.name && entry.entityId && entry.signerId);
-  } catch {
-    return [];
-  }
 };
 
 const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): {
@@ -1164,18 +1139,14 @@ const ensureMarketMakerHubConnectivity = async (
   mmEntityId: string,
   mmSignerId: string,
   hubEntityIds: string[],
-  hubSignerIdsByEntityId: ReadonlyMap<string, string>,
   tokenIds: number[],
   budget: MarketMakerConnectivityBudget,
 ): Promise<void> => {
   const accountOpenInputs: EntityInput[] = [];
   const localCreditInputsByEntity = new Map<string, EntityInput>();
-  const remoteCreditInputsByEntity = new Map<string, RoutedEntityInput>();
 
   for (const hubEntityId of hubEntityIds) {
     if (budget.remainingTxs <= 0) break;
-    const hubSignerId = String(hubSignerIdsByEntityId.get(hubEntityId.toLowerCase()) || '');
-    if (!hubSignerId) continue;
     const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
     const hasPendingConsensus =
       Boolean(mmAccount?.pendingFrame) ||
@@ -1222,8 +1193,6 @@ const ensureMarketMakerHubConnectivity = async (
 
   collectCreditInputs:
   for (const hubEntityId of hubEntityIds) {
-    const hubSignerId = String(hubSignerIdsByEntityId.get(hubEntityId.toLowerCase()) || '');
-    if (!hubSignerId) continue;
     const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
     const hasPendingConsensus =
       Boolean(mmAccount?.pendingFrame) ||
@@ -1234,29 +1203,8 @@ const ensureMarketMakerHubConnectivity = async (
     for (const tokenId of tokenIds) {
       if (budget.remainingTxs <= 0) break collectCreditInputs;
       if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
-      const mmOutCapacity = getEntityOutCapacity(mmAccount, mmEntityId, tokenId);
       const hubOutCapacity = getEntityOutCapacity(mmAccount, hubEntityId, tokenId);
 
-      if (mmOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
-        const input = remoteCreditInputsByEntity.get(hubEntityId) ?? {
-          entityId: hubEntityId,
-          signerId: hubSignerId,
-          entityTxs: [],
-        };
-        const entityTxs = input.entityTxs ?? (input.entityTxs = []);
-        entityTxs.push({
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: mmEntityId,
-            tokenId,
-            amount: MARKET_MAKER_CREDIT_AMOUNT,
-          },
-        });
-        remoteCreditInputsByEntity.set(hubEntityId, input);
-        budget.remainingTxs -= 1;
-      }
-
-      if (budget.remainingTxs <= 0) break collectCreditInputs;
       if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
         const input = localCreditInputsByEntity.get(mmEntityId) ?? {
           entityId: mmEntityId,
@@ -1283,19 +1231,7 @@ const ensureMarketMakerHubConnectivity = async (
     enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });
   }
 
-  const remoteCreditInputs = Array.from(remoteCreditInputsByEntity.values());
-  for (const input of remoteCreditInputs) {
-    const result = sendEntityInput(env, input);
-    if (result.deferred) {
-      console.warn(
-        `[MESH-MM] deferred hub credit request entity=${input.entityId.slice(-6)} txs=${input.entityTxs?.length || 0}`,
-      );
-    }
-  }
-  if (remoteCreditInputs.length > 0) {
-    await yieldMarketMakerApi();
-  }
-  if (localCreditInputs.length > 0 || remoteCreditInputs.length > 0) {
+  if (localCreditInputs.length > 0) {
     await settleRuntimeFor(env, 45);
     await yieldMarketMakerApi();
   }
@@ -1319,7 +1255,6 @@ const maintainMarketMakerQuotes = async (
   mmEntityId: string,
   mmSignerId: string,
   hubEntityIds: string[],
-  hubSignerIdsByEntityId: ReadonlyMap<string, string>,
   tokenIds: number[],
   maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
   maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
@@ -1333,7 +1268,6 @@ const maintainMarketMakerQuotes = async (
     mmEntityId,
     mmSignerId,
     hubEntityIds,
-    hubSignerIdsByEntityId,
     tokenIds,
     connectivityBudget,
   );
@@ -1695,7 +1629,6 @@ const maintainMarketMakerCrossQuotes = async (
   targetContext: MarketMakerEntityContext,
   sourceHubs: HubProfile[],
   targetHubs: HubProfile[],
-  hubSignerIdsByEntityId: ReadonlyMap<string, string>,
   sourceTokenIds: number[],
   targetTokenIds: number[],
   maxOffersPerAccount = Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
@@ -1723,7 +1656,6 @@ const maintainMarketMakerCrossQuotes = async (
     sourceContext.entityId,
     sourceContext.signerId,
     sourceHubEntityIds,
-    hubSignerIdsByEntityId,
     sourceTokenIds,
     connectivityBudget,
   );
@@ -1733,7 +1665,6 @@ const maintainMarketMakerCrossQuotes = async (
     targetContext.entityId,
     targetContext.signerId,
     targetHubEntityIds,
-    hubSignerIdsByEntityId,
     targetTokenIds,
     connectivityBudget,
   );
@@ -2221,11 +2152,6 @@ const run = async (): Promise<void> => {
   ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   startupPhase = 'token-catalog';
   const tokenCatalog = await waitForTokenCatalog(jadapter);
-  const meshHubIdentities = parseMeshHubIdentities(resolvedArgs.meshHubIdentitiesJson);
-  const configuredHubSignerIdsByEntityId = new Map(
-    meshHubIdentities.map((hub) => [hub.entityId.toLowerCase(), hub.signerId.toLowerCase()] as const),
-  );
-
   startupPhase = 'import-replica';
   const primaryMmContext = await createMarketMakerEntityContext(
     env,
@@ -2291,10 +2217,6 @@ const run = async (): Promise<void> => {
       if (!shouldContinue()) return;
       if (!areMarketMakerHubTransportsReady(getP2PState(env), visibleHubs)) return;
       await yieldMarketMakerApi();
-      const hubSignerIdsByEntityId = new Map(configuredHubSignerIdsByEntityId);
-      for (const profile of visibleHubs) {
-        if (profile.signerId) hubSignerIdsByEntityId.set(profile.entityId.toLowerCase(), profile.signerId.toLowerCase());
-      }
 
       if (mode === 'bootstrap') {
         for (const context of mmContexts) {
@@ -2308,7 +2230,6 @@ const run = async (): Promise<void> => {
             context.entityId,
             context.signerId,
             hubEntityIds,
-            hubSignerIdsByEntityId,
             getMarketMakerTokenIds(mmTokenIdsByContext, context),
             connectivityBudget,
           );
@@ -2328,7 +2249,6 @@ const run = async (): Promise<void> => {
           context.entityId,
           context.signerId,
           hubEntityIds,
-          hubSignerIdsByEntityId,
           contextTokenIds,
           mode === 'bootstrap'
             ? MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK
@@ -2407,7 +2327,6 @@ const run = async (): Promise<void> => {
           job.targetContext,
           job.sourceHubs,
           job.targetHubs,
-          hubSignerIdsByEntityId,
           job.sourceTokenIds,
           job.targetTokenIds,
           mode === 'bootstrap'

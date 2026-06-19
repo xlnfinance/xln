@@ -201,6 +201,11 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
             ws.close();
             return;
           }
+          if (normalizedFrom === serverRuntimeId) {
+            send(ws, { type: 'error', error: 'Direct runtime websocket only accepts inter-runtime peers' });
+            ws.close();
+            return;
+          }
           const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
           if (!peerKey) {
             send(ws, { type: 'error', error: 'Missing or invalid fromEncryptionPubKey' });

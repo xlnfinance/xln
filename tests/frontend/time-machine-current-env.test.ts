@@ -38,21 +38,29 @@ describe('frontend time-machine current env contract', () => {
     expect(source).not.toContain('localIsLive.set(true);\n        localTimeIndex.set(-1);\n        registerEnvChanges(nextEnv);');
   });
 
-  test('demo and graph actions return to live current env instead of latest history frame', () => {
+  test('demo and graph actions block historical frames instead of auto-switching live', () => {
     const architect = read('frontend/src/lib/view/panels/ArchitectPanel.svelte');
     const graph = read('frontend/src/lib/view/panels/Graph3DPanel.svelte');
     const dock = read('frontend/src/lib/view/DockRoot.svelte');
 
     expect(architect).toContain('function publishCurrentEnv');
+    expect(architect).toContain('$: isLiveActionFrame = Boolean($isolatedIsLive) && $isolatedTimeIndex === -1;');
+    expect(architect).toContain('function requireLiveMode');
+    expect(architect).toContain('Switch to the current runtime state before acting.');
+    expect(architect).toContain('await ingressRuntimeInput');
+    expect(architect).not.toContain('XLN.enqueueRuntimeInput($isolatedEnv, {');
     expect(architect).not.toContain('isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1)');
     expect(architect).not.toContain('isolatedTimeIndex.set(Math.max(0, frames.length - 1))');
     expect(architect).not.toContain('isolatedIsLive.set(false)');
 
     expect(graph).toContain('export let isolatedIsLive: Writable<boolean>;');
-    expect(graph).toContain('isolatedTimeIndex.set(-1)');
-    expect(graph).toContain('isolatedIsLive.set(true)');
     expect(graph).toContain('getLiveEnvForAction');
+    expect(graph).toContain('get(isolatedTimeIndex) !== -1 || !get(isolatedIsLive)');
+    expect(graph).toContain('Switch to the current runtime state before acting.');
     expect(graph).toContain('enqueueRuntimeInput(actionEnv');
+    expect(graph).not.toContain('function goToLiveForAction');
+    expect(graph).not.toContain('isolatedTimeIndex.set(-1)');
+    expect(graph).not.toContain('isolatedIsLive.set(true)');
     expect(graph).not.toContain('enqueueRuntimeInput(env,');
     expect(dock).toContain('isolatedIsLive,');
   });

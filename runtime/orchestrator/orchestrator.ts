@@ -26,6 +26,7 @@ import { type MarketSnapshotPayload } from '../market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
+import { serveRuntimeBundle, serveStatic } from '../server/static-assets';
 import { handleWatchtowerProxy } from '../server/watchtower-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
@@ -586,16 +587,6 @@ const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
   return identities;
 };
 
-const getMeshHubIdentitiesArg = (): string => JSON.stringify(
-  hubChildren
-    .map((child) => ({
-      name: child.name,
-      entityId: String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim().toLowerCase(),
-      signerId: deriveSignerAddressSync(child.seed, child.signerLabel).toLowerCase(),
-    }))
-    .filter((entry) => entry.entityId.length > 0),
-);
-
 const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const next: NodeJS.ProcessEnv = { ...env };
   if (next['FORCE_COLOR'] && next['NO_COLOR']) {
@@ -784,7 +775,6 @@ const spawnMarketMaker = async (): Promise<void> => {
     '--rpc-url', args.rpcUrl,
     ...buildSecondaryRpcArgs(),
     '--mesh-hub-names', getHubSpecsArg(),
-    '--mesh-hub-identities-json', getMeshHubIdentitiesArg(),
     '--db-path', marketMakerChild.dbPath,
   ];
   marketMakerChild.startedAt = Date.now();
@@ -1654,6 +1644,7 @@ const {
 });
 
 const httpDrain = createHttpDrainTracker();
+const FRONTEND_STATIC_DIR = './frontend/build';
 const server = Bun.serve({
   hostname: args.host,
   port: args.port,
@@ -1881,6 +1872,24 @@ const server = Bun.serve({
 
     if (pathname.startsWith('/api/')) {
       return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
+    }
+
+    if (request.method === 'GET' || request.method === 'HEAD') {
+      if (pathname === '/runtime.js') {
+        const runtimeBundle = await serveRuntimeBundle();
+        if (runtimeBundle) return runtimeBundle;
+      }
+
+      if (pathname === '/') {
+        const index = await serveStatic('/index.html', FRONTEND_STATIC_DIR);
+        if (index) return index;
+      }
+
+      const file = await serveStatic(pathname, FRONTEND_STATIC_DIR);
+      if (file) return file;
+
+      const fallback = await serveStatic('/index.html', FRONTEND_STATIC_DIR);
+      if (fallback) return fallback;
     }
 
     return new Response(safeStringify({
