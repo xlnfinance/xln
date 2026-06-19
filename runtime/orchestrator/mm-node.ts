@@ -1186,19 +1186,30 @@ const ensureMarketMakerHubConnectivity = async (
       isCanonicalAccountOpener(mmEntityId, hubEntityId) &&
       !hasQueuedOpenAccount(env, mmEntityId, hubEntityId)
     ) {
+      const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);
       accountOpenInputs.push({
         entityId: mmEntityId,
         signerId: mmSignerId,
-        entityTxs: [{
-          type: 'openAccount',
-          data: {
-            targetEntityId: hubEntityId,
-            tokenId: tokenIds[0] ?? 1,
-            creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
+        entityTxs: [
+          {
+            type: 'openAccount',
+            data: {
+              targetEntityId: hubEntityId,
+              tokenId: openTokenId,
+              creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
+            },
           },
-        }],
+          ...extraCreditTokenIds.map((tokenId) => ({
+            type: 'extendCredit' as const,
+            data: {
+              counterpartyEntityId: hubEntityId,
+              tokenId,
+              amount: MARKET_MAKER_CREDIT_AMOUNT,
+            },
+          })),
+        ],
       });
-      budget.remainingTxs -= 1;
+      budget.remainingTxs = Math.max(0, budget.remainingTxs - 1 - extraCreditTokenIds.length);
     }
   }
 
@@ -1270,9 +1281,6 @@ const ensureMarketMakerHubConnectivity = async (
   const localCreditInputs = Array.from(localCreditInputsByEntity.values());
   if (localCreditInputs.length > 0) {
     enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });
-    await settleRuntimeFor(env, 45);
-    await yieldMarketMakerApi();
-    return;
   }
 
   const remoteCreditInputs = Array.from(remoteCreditInputsByEntity.values());
@@ -1285,6 +1293,9 @@ const ensureMarketMakerHubConnectivity = async (
     }
   }
   if (remoteCreditInputs.length > 0) {
+    await yieldMarketMakerApi();
+  }
+  if (localCreditInputs.length > 0 || remoteCreditInputs.length > 0) {
     await settleRuntimeFor(env, 45);
     await yieldMarketMakerApi();
   }

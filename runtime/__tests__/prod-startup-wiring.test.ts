@@ -167,6 +167,21 @@ describe('production startup wiring', () => {
     expect(healthRoute).not.toContain('buildExpectedMarketMakerCrossRouteGroups(');
   });
 
+  test('market maker bootstrap batches account open and credit setup', () => {
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
+    const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
+    expect(ensureStart).toBeGreaterThan(0);
+    expect(readyStart).toBeGreaterThan(ensureStart);
+
+    const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
+    expect(ensureConnectivity).toContain('const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);');
+    expect(ensureConnectivity).toContain("type: 'openAccount'");
+    expect(ensureConnectivity).toContain("type: 'extendCredit' as const");
+    expect(ensureConnectivity).toContain('if (localCreditInputs.length > 0 || remoteCreditInputs.length > 0)');
+    expect(ensureConnectivity).not.toContain('if (localCreditInputs.length > 0) {\n    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });\n    await settleRuntimeFor(env, 45);\n    await yieldMarketMakerApi();\n    return;\n  }');
+  });
+
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
     const debugApi = readFileSync(join(repoRoot, 'runtime/orchestrator/debug-api.ts'), 'utf8');
     const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/PaymentPanel.svelte'), 'utf8');
