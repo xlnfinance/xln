@@ -67,6 +67,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain("creditAmount: '50000000000000000000000000'");
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(mmNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
+    expect(mmNode).toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
@@ -97,6 +98,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('if (!isMarketMakerConnectivityReady(env, sourceContext.entityId, sourceHubEntityIds, sourceTokenIds)) return;');
     expect(mmNode).not.toContain('if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;');
     expect(mmNode).toContain('const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);');
+    expect(hubNode).toContain('isCanonicalAccountOpener(bootstrap.entityId, peer.entityId)');
   });
 
   test('deploy starts and checks the production Tron chain', () => {

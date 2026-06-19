@@ -96,6 +96,7 @@ import {
   hasAccount,
   hasQueuedOpenAccount,
   hasPairMutualCredits,
+  isCanonicalAccountOpener,
   settleRuntimeFor,
   sleep,
   waitUntil,
@@ -2142,7 +2143,7 @@ const run = async (): Promise<void> => {
         const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
         const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
         if (
-          bootstrap.entityId.toLowerCase() < peer.entityId.toLowerCase() &&
+          isCanonicalAccountOpener(bootstrap.entityId, peer.entityId) &&
           !hasAccount(env, bootstrap.entityId, peer.entityId) &&
           !hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId) &&
           canWrite
@@ -2181,7 +2182,11 @@ const run = async (): Promise<void> => {
       for (const peer of visibleSupportPeers) {
         const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
         const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
-        if (!hasAccount(env, bootstrap.entityId, peer.entityId) && canWrite) {
+        if (
+          isCanonicalAccountOpener(bootstrap.entityId, peer.entityId) &&
+          !hasAccount(env, bootstrap.entityId, peer.entityId) &&
+          canWrite
+        ) {
           if (hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId)) continue;
           openInputs.push({
             entityId: bootstrap.entityId,
