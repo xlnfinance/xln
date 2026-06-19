@@ -380,7 +380,9 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
     }
     if (await hubCard.isVisible().catch(() => false)) return;
     await expect(refresh).toBeVisible({ timeout: 10_000 });
-    await refresh.click({ timeout: 5_000 });
+    if (await refresh.isEnabled().catch(() => false)) {
+      await refresh.click({ timeout: 5_000 });
+    }
     await page.waitForTimeout(1_000);
   }
 
