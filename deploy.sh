@@ -121,7 +121,7 @@ wait_for_public_rpc_placeholder() {
 }
 
 wait_for_main_stack() {
-  local deadline=$((SECONDS + 900))
+  local deadline=$((SECONDS + 1800))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
     body="$(curl -fsS http://127.0.0.1:8080/api/health || true)"
