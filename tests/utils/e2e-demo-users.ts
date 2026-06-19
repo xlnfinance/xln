@@ -486,7 +486,11 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
         runtimeErrorText,
         primaryActionText: String(primaryAction?.innerText || '').trim(),
         primaryActionDisabled: Boolean(primaryAction?.disabled),
-        nameValue: String((document.querySelector('#name') as HTMLInputElement | null)?.value || ''),
+        nameValue: String(
+          ((document.querySelector('#display-name') as HTMLInputElement | null)?.value
+            || (document.querySelector('#name') as HTMLInputElement | null)?.value
+            || ''),
+        ),
         passphraseLength: String((document.querySelector('#passphrase') as HTMLInputElement | null)?.value || '').length,
         bodyText: String(document.body?.innerText || '').slice(0, 500),
         selectedRuntimeId: String(selectedTrigger?.dataset?.runtimeId || ''),
@@ -542,7 +546,7 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 async function waitForReadyAfterCreate(
   page: Page,
   previousRuntimeId: string | null,
-  options: { onboardingAssist?: boolean } = {},
+  options: { onboardingAssist?: boolean; onboardingLabel?: string } = {},
 ): Promise<string> {
   if (!options.onboardingAssist) {
     return await waitForNextRuntimeReady(page, previousRuntimeId);
@@ -550,8 +554,9 @@ async function waitForReadyAfterCreate(
 
   const deadline = Date.now() + RUNTIME_READY_TIMEOUT;
   while (Date.now() < deadline) {
+    await completeProfileOnboardingIfVisible(page, options.onboardingLabel || 'XLN runtime');
+    await dismissOnboardingIfVisible(page);
     try {
-      await dismissOnboardingIfVisible(page);
       const runtimeId = await page.evaluate(({ priorRuntimeId }) => {
         const env = (window as typeof window & {
           isolatedEnv?: {
@@ -984,7 +989,10 @@ export async function createRuntime(
     // BrainVault/manual creation can land on the profile onboarding screen before
     // the runtime is considered fully ready. Assist that screen while polling,
     // otherwise the test can wait forever for a ready signal gated behind Start.
-    runtimeId = await waitForReadyAfterCreate(page, previousRuntimeId, { onboardingAssist: true });
+    runtimeId = await waitForReadyAfterCreate(page, previousRuntimeId, {
+      onboardingAssist: true,
+      onboardingLabel: label,
+    });
     await completeProfileOnboardingIfVisible(page, label);
     await waitForRuntimeReady(page, runtimeId);
   }

@@ -136,6 +136,19 @@ describe('production startup wiring', () => {
     expect(diagnose).not.toContain('payload.marketMaker.startupPhase !== "ready"');
   });
 
+  test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
+    const debugApi = readFileSync(join(repoRoot, 'runtime/orchestrator/debug-api.ts'), 'utf8');
+    const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/PaymentPanel.svelte'), 'utf8');
+
+    expect(paymentPanel).toContain('/api/gossip/profile?entityId=');
+    expect(debugApi).toContain("import { buildKnownProfileBundle } from '../server/gossip-profiles';");
+    expect(debugApi).toContain("if (deps.pathname === '/api/gossip/profile')");
+    expect(debugApi).toContain('const bundle = buildKnownProfileBundle({');
+    expect(debugApi).toContain('relayStore: deps.relayStore');
+    expect(debugApi).toContain('found: !!bundle.profile');
+    expect(debugApi).toContain("safeStringify({ ok: false, error: 'entityId is required' })");
+  });
+
   test('fresh deploy stops runtime processes before deleting runtime state', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const stopIndex = deploy.indexOf('pm2 delete xln-server');

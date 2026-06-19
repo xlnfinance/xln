@@ -485,30 +485,76 @@ async function waitForRenderedCommittedAccountCard(
 }
 
 async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
-  await expect
-    .poll(
-      async () => page.evaluate((targetHubId) => {
+  let lastProfileState: unknown = null;
+  try {
+    await expect
+      .poll(
+      async () => page.evaluate(async (targetHubId) => {
         const env = (window as typeof window & {
           isolatedEnv?: {
             gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string }> };
-            runtimeState?: { p2p?: { ensureProfiles?: (ids: string[]) => Promise<boolean> } };
+            runtimeState?: {
+              p2p?: {
+                isConnected?: () => boolean;
+                connect?: () => void;
+                reconnect?: () => void;
+                ensureProfiles?: (ids: string[]) => Promise<boolean>;
+              };
+            };
           };
         }).isolatedEnv;
         const target = String(targetHubId || '').toLowerCase();
-        const profile = env?.gossip?.getProfiles?.().find((candidate) =>
+        const getProfile = () => env?.gossip?.getProfiles?.().find((candidate) =>
           String(candidate?.entityId || '').toLowerCase() === target,
         );
+        const profile = getProfile();
         if (String(profile?.runtimeId || '').trim()) return true;
-        void env?.runtimeState?.p2p?.ensureProfiles?.([target]);
-        return false;
-      }, hubId),
+
+        const p2p = env?.runtimeState?.p2p;
+        if (!p2p) {
+          return { ok: false, reason: 'missing-p2p', profileCount: env?.gossip?.getProfiles?.().length || 0 };
+        }
+
+        const connectedBefore = typeof p2p.isConnected === 'function' ? p2p.isConnected() : null;
+        if (!connectedBefore) {
+          if (typeof p2p.connect === 'function') {
+            try { p2p.connect(); } catch {}
+          } else if (typeof p2p.reconnect === 'function') {
+            try { p2p.reconnect(); } catch {}
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+
+        const ensureResult = await p2p.ensureProfiles?.([target]).catch((error) =>
+          error instanceof Error ? error.message : String(error),
+        );
+        const refreshedProfile = getProfile();
+        return {
+          ok: Boolean(String(refreshedProfile?.runtimeId || '').trim()),
+          reason: refreshedProfile ? 'profile-without-runtime' : 'missing-profile',
+          connectedBefore,
+          connectedAfter: typeof p2p.isConnected === 'function' ? p2p.isConnected() : null,
+          ensureResult,
+          profileCount: env?.gossip?.getProfiles?.().length || 0,
+          targetRuntimeId: String(refreshedProfile?.runtimeId || '').trim(),
+        };
+      }, hubId).then((state) => {
+        lastProfileState = state;
+        return state === true || Boolean((state as { ok?: boolean } | null)?.ok);
+      }),
       {
         timeout: timeoutMs,
         intervals: [100, 250, 500],
         message: `hub ${hubId.slice(0, 10)} must have a gossip runtime route before connect`,
       },
-    )
-    .toBe(true);
+      )
+      .toBe(true);
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `lastHubProfileState=${stringifyDebug(lastProfileState)}`,
+    );
+  }
 }
 
 async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeoutMs = 30_000): Promise<void> {
