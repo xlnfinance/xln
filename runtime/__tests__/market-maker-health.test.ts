@@ -22,6 +22,38 @@ test('market maker server health treats absent cross topology as neutral', () =>
   expect(health.cross.routes).toEqual([]);
 });
 
+test('market maker server health separates quote coverage readiness from full depth', () => {
+  const state = createMarketMakerServerState();
+  state.entityId = 'mm';
+  state.targetHubIds = ['0x0000000000000000000000000000000000abcdef'];
+  state.tokenIds = [1, 2, 3];
+
+  const account = {
+    swapOffers: new Map([
+      ['mm-abcdef-2-1-ask-1', {}],
+      ['mm-abcdef-1-3-ask-1', {}],
+      ['mm-abcdef-2-3-ask-1', {}],
+    ]),
+    mempool: [],
+    pendingFrame: null,
+  };
+  const health = getMarketMakerHealth({} as Env, state, () => account as any);
+
+  expect(health.ok).toBe(true);
+  expect(health.hubs[0]?.ready).toBe(true);
+  expect(health.hubs[0]?.depthReady).toBe(false);
+  expect(health.hubs[0]?.pairs.map(pair => ({
+    pairId: pair.pairId,
+    offers: pair.offers,
+    ready: pair.ready,
+    depthReady: pair.depthReady,
+  }))).toEqual([
+    { pairId: '1/2', offers: 1, ready: true, depthReady: false },
+    { pairId: '1/3', offers: 1, ready: true, depthReady: false },
+    { pairId: '2/3', offers: 1, ready: true, depthReady: false },
+  ]);
+});
+
 test('market snapshots expose order counts for aggregated price levels', () => {
   const book = createBook({ bucketWidthTicks: 1n, maxOrders: 10, stpPolicy: 0 });
   applyCommand(book, {

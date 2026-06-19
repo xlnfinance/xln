@@ -1289,19 +1289,25 @@ const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth):
       const sourceOffers = sourceSnapshots.get(pairId) ?? 0;
       const targetOffers = targetSnapshots.get(pairId) ?? 0;
       const offers = Math.max(Number(pair.offers || 0), sourceOffers, targetOffers);
+      const expectedOffers = Math.max(1, Number(pair.expectedOffers || health.marketMaker.cross.expectedOffersPerPair || 1));
       return {
         ...pair,
         offers,
-        ready: offers >= Math.max(1, health.marketMaker.cross.expectedOffersPerPair || 1),
+        ready: offers > 0,
+        depthReady: offers >= expectedOffers,
+        expectedOffers,
       };
     });
     const offers = pairs.reduce((sum, pair) => sum + pair.offers, 0);
+    const expectedOffers = pairs.reduce((sum, pair) => sum + Number(pair.expectedOffers || 0), 0);
     return {
       ...route,
       offers,
       ready: pairs.length > 0 &&
-        offers >= Math.max(1, cross.expectedOffersPerRoute || 1) &&
         pairs.every(pair => pair.ready),
+      depthReady: expectedOffers > 0 &&
+        offers >= expectedOffers &&
+        pairs.every(pair => pair.depthReady),
       pairs,
     };
   }));

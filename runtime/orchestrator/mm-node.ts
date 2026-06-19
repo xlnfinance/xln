@@ -162,10 +162,13 @@ type MarketMakerCrossRouteHealth = {
   targetHubEntityId: string;
   offers: number;
   ready: boolean;
+  depthReady: boolean;
   pairs: Array<{
     pairId: string;
     offers: number;
     ready: boolean;
+    depthReady: boolean;
+    expectedOffers: number;
     sourceTokenIds: number[];
     targetTokenIds: number[];
   }>;
@@ -201,7 +204,8 @@ type MarketMakerHealth = {
     hubEntityId: string;
     offers: number;
     ready: boolean;
-    pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
+    depthReady: boolean;
+    pairs: Array<{ pairId: string; offers: number; ready: boolean; depthReady: boolean; expectedOffers: number }>;
   }>;
   cross: {
     applicable: boolean;
@@ -811,6 +815,12 @@ const collectOfferIdsForAccount = (
     if (offerId) ids.add(offerId);
   }
   return ids;
+};
+
+const getMarketMakerOfferLevel = (spec: Pick<MarketMakerOfferSpec, 'offerId'>): number => {
+  const match = String(spec.offerId || '').match(/-(?:ask|bid|sell)-(\d+)$/);
+  const level = match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+  return Number.isFinite(level) && level > 0 ? Math.floor(level) : Number.MAX_SAFE_INTEGER;
 };
 
 const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]): MarketMakerOfferSpec[] => {
@@ -1599,6 +1609,10 @@ const buildMarketMakerCrossHealth = (
         const specs = expectedByPair.get(pairId) ?? [];
         const expected = group.expectedPairs.get(pairId) ?? null;
         const offers = specs.filter(spec => hasMarketMakerCrossOffer(env, spec)).length;
+        const expectedOffers = Math.max(
+          specs.length,
+          expected ? MARKET_MAKER_CROSS_LEVELS_PER_PAIR : 0,
+        );
         const sourceTokenIds = expected?.sourceTokenIds?.length
           ? expected.sourceTokenIds
           : normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.source.tokenId ?? 0));
@@ -1608,20 +1622,24 @@ const buildMarketMakerCrossHealth = (
         return {
           pairId,
           offers,
-          ready: specs.length > 0 && offers >= specs.length,
+          ready: expectedOffers > 0 && offers > 0,
+          depthReady: expectedOffers > 0 && offers >= expectedOffers,
+          expectedOffers,
           sourceTokenIds,
           targetTokenIds,
         };
       })
       .sort((left, right) => compareStableText(left.pairId, right.pairId));
     const offers = group.specs.filter(spec => hasMarketMakerCrossOffer(env, spec)).length;
+    const expectedOffers = pairs.reduce((sum, pair) => sum + pair.expectedOffers, 0);
     return {
       sourceJurisdiction: group.sourceJurisdiction,
       targetJurisdiction: group.targetJurisdiction,
       sourceHubEntityId: group.sourceHubEntityId,
       targetHubEntityId: group.targetHubEntityId,
       offers,
-      ready: group.specs.length > 0 && offers >= group.specs.length && pairs.every(pair => pair.ready),
+      ready: pairs.length > 0 && pairs.every(pair => pair.ready),
+      depthReady: expectedOffers > 0 && offers >= expectedOffers && pairs.every(pair => pair.depthReady),
       pairs,
     };
   }).sort((left, right) =>
@@ -1818,6 +1836,7 @@ const maintainMarketMakerCrossQuotes = async (
       })
       .sort((left, right) =>
         (progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0) ||
+        getMarketMakerOfferLevel(left) - getMarketMakerOfferLevel(right) ||
         compareStableText(left.pairId, right.pairId) ||
         compareStableText(left.offerId, right.offerId),
       );
@@ -1917,13 +1936,16 @@ const getMarketMakerHealth = (
       return {
         pairId: pair.pairId,
         offers: pairOffers,
-        ready: pairOffers >= expectedPairOffers,
+        ready: expectedPairOffers > 0 && pairOffers > 0,
+        depthReady: expectedPairOffers > 0 && pairOffers >= expectedPairOffers,
+        expectedOffers: expectedPairOffers,
       };
     });
     return {
       hubEntityId,
       offers,
-      ready: offers >= expectedHubOffers && pairHealth.every((pair) => pair.ready),
+      ready: expectedHubOffers > 0 && pairHealth.every((pair) => pair.ready),
+      depthReady: expectedHubOffers > 0 && offers >= expectedHubOffers && pairHealth.every((pair) => pair.depthReady),
       pairs: pairHealth,
     };
   });

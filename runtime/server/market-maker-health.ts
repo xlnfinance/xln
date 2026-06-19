@@ -132,7 +132,8 @@ export const getMarketMakerHealth = (
     hubEntityId: string;
     offers: number;
     ready: boolean;
-    pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
+    depthReady: boolean;
+    pairs: Array<{ pairId: string; offers: number; ready: boolean; depthReady: boolean; expectedOffers: number }>;
   }>;
 } => {
   const entityId = state.entityId;
@@ -168,7 +169,14 @@ export const getMarketMakerHealth = (
         hubEntityId,
         offers: 0,
         ready: false,
-        pairs: pairs.map(pair => ({ pairId: pair.pairId, offers: 0, ready: false })),
+        depthReady: false,
+        pairs: pairs.map(pair => ({
+          pairId: pair.pairId,
+          offers: 0,
+          ready: false,
+          depthReady: false,
+          expectedOffers: getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId),
+        })),
       })),
     };
   }
@@ -179,12 +187,19 @@ export const getMarketMakerHealth = (
     const pairHealth = pairs.map(pair => {
       const pairOffers = countMarketMakerOffersForHubPair(account, hubEntityId, pair);
       const expectedPairOffers = getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId);
-      return { pairId: pair.pairId, offers: pairOffers, ready: pairOffers >= expectedPairOffers };
+      return {
+        pairId: pair.pairId,
+        offers: pairOffers,
+        ready: expectedPairOffers > 0 && pairOffers > 0,
+        depthReady: expectedPairOffers > 0 && pairOffers >= expectedPairOffers,
+        expectedOffers: expectedPairOffers,
+      };
     });
     return {
       hubEntityId,
       offers,
-      ready: offers >= expectedOffersPerHub && pairHealth.every(pair => pair.ready),
+      ready: expectedOffersPerHub > 0 && pairHealth.every(pair => pair.ready),
+      depthReady: expectedOffersPerHub > 0 && offers >= expectedOffersPerHub && pairHealth.every(pair => pair.depthReady),
       pairs: pairHealth,
     };
   });

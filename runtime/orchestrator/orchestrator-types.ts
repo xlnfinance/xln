@@ -174,10 +174,13 @@ export type MarketMakerCrossRouteHealthPayload = {
   targetHubEntityId: string;
   offers: number;
   ready: boolean;
+  depthReady?: boolean;
   pairs?: Array<{
     pairId: string;
     offers: number;
     ready: boolean;
+    depthReady?: boolean;
+    expectedOffers?: number;
     sourceTokenIds?: number[];
     targetTokenIds?: number[];
   }>;
@@ -220,10 +223,13 @@ export type MarketMakerHealthPayload = {
       hubEntityId: string;
       offers: number;
       ready: boolean;
+      depthReady?: boolean;
       pairs?: Array<{
         pairId: string;
         offers: number;
         ready: boolean;
+        depthReady?: boolean;
+        expectedOffers?: number;
       }>;
     }>;
   };
@@ -320,10 +326,13 @@ export type AggregatedHealth = {
       hubEntityId: string;
       offers: number;
       ready: boolean;
+      depthReady?: boolean;
       pairs: Array<{
         pairId: string;
         offers: number;
         ready: boolean;
+        depthReady?: boolean;
+        expectedOffers?: number;
         sourceTokenIds?: number[];
         targetTokenIds?: number[];
       }>;
