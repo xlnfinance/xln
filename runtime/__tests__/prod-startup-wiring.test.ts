@@ -136,6 +136,20 @@ describe('production startup wiring', () => {
     expect(diagnose).not.toContain('payload.marketMaker.startupPhase !== "ready"');
   });
 
+  test('market maker cross readiness only expects feasible cross specs', () => {
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const buildExpectedStart = mmNode.indexOf('const buildExpectedMarketMakerCrossRouteGroups = (');
+    const buildHealthStart = mmNode.indexOf('const buildMarketMakerCrossHealth = (');
+    expect(buildExpectedStart).toBeGreaterThan(0);
+    expect(buildHealthStart).toBeGreaterThan(buildExpectedStart);
+    const buildExpected = mmNode.slice(buildExpectedStart, buildHealthStart);
+
+    expect(buildExpected).toContain('env: Env,');
+    expect(buildExpected).toContain('for (const spec of buildMarketMakerCrossOfferSpecs(');
+    expect(buildExpected).toContain('group.specs.push(spec);');
+    expect(buildExpected).not.toContain('for (const pair of buildMarketMakerCrossTokenPairs');
+  });
+
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
     const debugApi = readFileSync(join(repoRoot, 'runtime/orchestrator/debug-api.ts'), 'utf8');
     const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/PaymentPanel.svelte'), 'utf8');

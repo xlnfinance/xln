@@ -1484,6 +1484,7 @@ type MarketMakerCrossHealthRouteGroup = {
 };
 
 const buildExpectedMarketMakerCrossRouteGroups = (
+  env: Env,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
   tokenIdsByContext: MarketMakerTokenIdsByContext,
@@ -1508,61 +1509,7 @@ const buildExpectedMarketMakerCrossRouteGroups = (
       if (targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
       const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
       if (targetHubs.length === 0) continue;
-      const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
-      for (const sourceHub of sourceHubs) {
-        const targetHub = targetByBaseName.get(hubBaseName(sourceHub.name));
-        if (!targetHub || sameJurisdiction(sourceHub, targetHub)) continue;
-        const sourceHubEntityId = normalizeEntityRef(sourceHub.entityId);
-        const targetHubEntityId = normalizeEntityRef(targetHub.entityId);
-        if (!sourceHubEntityId || !targetHubEntityId) continue;
-        const key = `${sourceContext.entityId}:${targetContext.entityId}:${sourceHubEntityId}:${targetHubEntityId}`;
-        const group = groups.get(key) ?? {
-          sourceJurisdiction: sourceContext.jurisdictionName,
-          targetJurisdiction: targetContext.jurisdictionName,
-          sourceHubEntityId,
-          targetHubEntityId,
-          expectedPairs: new Map<string, MarketMakerCrossHealthPairExpectation>(),
-          specs: [],
-        };
-        for (const pair of buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds)) {
-          const market = deriveCanonicalCrossJurisdictionMarketForLegs(
-            sourceJurisdictionRef,
-            pair.sourceTokenId,
-            targetJurisdictionRef,
-            pair.targetTokenId,
-          );
-          const expected = group.expectedPairs.get(market.venueId) ?? {
-            sourceTokenIds: [],
-            targetTokenIds: [],
-          };
-          expected.sourceTokenIds = normalizePositiveTokenIds([...expected.sourceTokenIds, pair.sourceTokenId]);
-          expected.targetTokenIds = normalizePositiveTokenIds([...expected.targetTokenIds, pair.targetTokenId]);
-          group.expectedPairs.set(market.venueId, expected);
-        }
-        groups.set(key, group);
-      }
-    }
-  }
-  return groups;
-};
 
-const buildMarketMakerCrossHealth = (
-  env: Env,
-  contexts: MarketMakerEntityContext[],
-  visibleHubs: HubProfile[],
-  tokenIdsByContext: MarketMakerTokenIdsByContext,
-): MarketMakerHealth['cross'] => {
-  const routeGroups = buildExpectedMarketMakerCrossRouteGroups(contexts, visibleHubs, tokenIdsByContext);
-
-  for (const sourceContext of contexts) {
-    const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
-    if (sourceHubs.length === 0) continue;
-    const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
-    for (const targetContext of contexts) {
-      if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
-      const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
-      if (targetHubs.length === 0) continue;
-      const targetTokenIds = getMarketMakerTokenIds(tokenIdsByContext, targetContext);
       for (const spec of buildMarketMakerCrossOfferSpecs(
         env,
         sourceContext,
@@ -1578,7 +1525,7 @@ const buildMarketMakerCrossHealth = (
         const targetHubEntityId = normalizeEntityRef(route.target.entityId);
         if (!sourceHubEntityId || !targetHubEntityId) continue;
         const key = `${sourceContext.entityId}:${targetContext.entityId}:${sourceHubEntityId}:${targetHubEntityId}`;
-        const group = routeGroups.get(key) ?? {
+        const group = groups.get(key) ?? {
           sourceJurisdiction: sourceContext.jurisdictionName,
           targetJurisdiction: targetContext.jurisdictionName,
           sourceHubEntityId,
@@ -1586,17 +1533,34 @@ const buildMarketMakerCrossHealth = (
           expectedPairs: new Map<string, MarketMakerCrossHealthPairExpectation>(),
           specs: [],
         };
-        if (!group.expectedPairs.has(spec.pairId)) {
-          group.expectedPairs.set(spec.pairId, {
-            sourceTokenIds: normalizePositiveTokenIds([route.source.tokenId]),
-            targetTokenIds: normalizePositiveTokenIds([route.target.tokenId]),
-          });
-        }
+        const expected = group.expectedPairs.get(spec.pairId) ?? {
+          sourceTokenIds: [],
+          targetTokenIds: [],
+        };
+        expected.sourceTokenIds = normalizePositiveTokenIds([
+          ...expected.sourceTokenIds,
+          route.source.tokenId,
+        ]);
+        expected.targetTokenIds = normalizePositiveTokenIds([
+          ...expected.targetTokenIds,
+          route.target.tokenId,
+        ]);
+        group.expectedPairs.set(spec.pairId, expected);
         group.specs.push(spec);
-        routeGroups.set(key, group);
+        groups.set(key, group);
       }
     }
   }
+  return groups;
+};
+
+const buildMarketMakerCrossHealth = (
+  env: Env,
+  contexts: MarketMakerEntityContext[],
+  visibleHubs: HubProfile[],
+  tokenIdsByContext: MarketMakerTokenIdsByContext,
+): MarketMakerHealth['cross'] => {
+  const routeGroups = buildExpectedMarketMakerCrossRouteGroups(env, contexts, visibleHubs, tokenIdsByContext);
 
   const expectedRouteCount = routeGroups.size;
   const routes = Array.from(routeGroups.values()).map((group) => {
@@ -2135,7 +2099,7 @@ const run = async (): Promise<void> => {
                 cross: {
                   applicable: allVisibleHubs.length > 0 && mmContexts.length > 1,
                   ok: false,
-                  expectedRoutes: buildExpectedMarketMakerCrossRouteGroups(mmContexts, allVisibleHubs, mmTokenIdsByContext).size,
+                  expectedRoutes: buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, allVisibleHubs, mmTokenIdsByContext).size,
                   expectedOffersPerRoute: 0,
                   expectedOffersPerPair: 0,
                   routes: [],
