@@ -1057,10 +1057,15 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       pairs: existing?.pairs ?? [],
     };
   });
-  const mmCrossReady = !marketMakerActive || (Boolean(rawMmCross) && mmCross.ok);
-  const mmOk = !marketMakerActive
+  const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);
+  const mmCrossReady = Boolean(rawMmCross) && mmCross.ok;
+  const mmOk = !args.mmEnabled
     ? true
-    : mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.ready) && mmCrossReady;
+    : marketMakerActive &&
+      mmHealthReady &&
+      mmHubs.length === HUB_NAMES.length &&
+      mmHubs.every((hub) => hub.ready) &&
+      mmCrossReady;
   const hubMeshOk =
     hubIds.length === HUB_NAMES.length &&
     hubChildren.every((child) => child.lastHealth?.mesh?.ready === true);
@@ -1366,12 +1371,6 @@ const waitForMarketMakerReady = async (): Promise<void> => {
   while (Date.now() < deadline) {
     await pollMarketMakerHealth();
     const health = await buildAggregatedHealthResponse();
-    if (
-      !args.mmEnabled ||
-      health.marketMaker.ok
-    ) {
-      return;
-    }
     if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
       if (restartAttempts < marketMakerReadyRestartLimit) {
         restartAttempts += 1;
@@ -1387,6 +1386,12 @@ const waitForMarketMakerReady = async (): Promise<void> => {
       throw new Error(
         `MM_EXITED_EARLY code=${String(marketMakerChild.exitCode)} signal=${String(marketMakerChild.exitSignal)} phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify(health.marketMaker)}`,
       );
+    }
+    if (
+      !args.mmEnabled ||
+      health.marketMaker.ok
+    ) {
+      return;
     }
     await delay(250);
   }

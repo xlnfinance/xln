@@ -26,6 +26,13 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const [health, info] = await Promise.all([');
     expect(orchestrator).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)");
     expect(orchestrator).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS)");
+    expect(orchestrator).toContain('const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);');
+    expect(orchestrator).toContain('const mmOk = !args.mmEnabled');
+    expect(orchestrator).toContain('marketMakerActive &&');
+    const waitForMarketMakerReady = orchestrator.slice(orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'));
+    expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
+      waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
+    );
     expect(orchestrator.indexOf('if (health) marketMakerChild.lastHealth = health;')).toBeLessThan(
       orchestrator.indexOf('if (info) marketMakerChild.lastInfo = info;'),
     );
@@ -58,6 +65,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(mmNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
+    expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
+    expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '90'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '270'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'");
