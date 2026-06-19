@@ -2066,6 +2066,7 @@ const run = async (): Promise<void> => {
         );
         const allVisibleHubs = readVisibleHubProfiles(env, true);
         const activeEntityId = activeMmEntityId;
+        const cachedHealth = cachedMarketMakerHealth;
         const health = {
           ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
           name: resolvedArgs.name,
@@ -2088,7 +2089,7 @@ const run = async (): Promise<void> => {
             ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
           },
           marketMaker: activeEntityId
-            ? (cachedMarketMakerHealth ?? {
+            ? (cachedHealth ?? {
                 enabled: true,
                 ok: false,
                 entityId: activeEntityId,
@@ -2103,7 +2104,7 @@ const run = async (): Promise<void> => {
                 cross: {
                   applicable: allVisibleHubs.length > 0 && mmContexts.length > 1,
                   ok: false,
-                  expectedRoutes: buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, allVisibleHubs, mmTokenIdsByContext).size,
+                  expectedRoutes: 0,
                   expectedOffersPerRoute: 0,
                   expectedOffersPerPair: 0,
                   routes: [],

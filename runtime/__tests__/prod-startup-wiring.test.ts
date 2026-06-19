@@ -154,6 +154,19 @@ describe('production startup wiring', () => {
     expect(buildExpected).not.toContain('for (const pair of buildMarketMakerCrossTokenPairs');
   });
 
+  test('market maker health fallback stays cheap before quote bootstrap caches readiness', () => {
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')");
+    const controlRouteStart = mmNode.indexOf("if (pathname === '/api/control/p2p/stop'");
+    expect(healthRouteStart).toBeGreaterThan(0);
+    expect(controlRouteStart).toBeGreaterThan(healthRouteStart);
+
+    const healthRoute = mmNode.slice(healthRouteStart, controlRouteStart);
+    expect(healthRoute).toContain('const cachedHealth = cachedMarketMakerHealth;');
+    expect(healthRoute).toContain('expectedRoutes: 0');
+    expect(healthRoute).not.toContain('buildExpectedMarketMakerCrossRouteGroups(');
+  });
+
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
     const debugApi = readFileSync(join(repoRoot, 'runtime/orchestrator/debug-api.ts'), 'utf8');
     const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/PaymentPanel.svelte'), 'utf8');
