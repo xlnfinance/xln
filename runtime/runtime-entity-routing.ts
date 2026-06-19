@@ -5,6 +5,10 @@ import { extractCrossJurisdictionRouteFromTx } from './cross-jurisdiction-bounda
 import { normalizeRuntimeId } from './networking/runtime-id';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
+type RuntimeProcessLike = {
+  env?: Record<string, string | undefined>;
+  exit?: (code?: number) => never;
+};
 
 export type RuntimeEntityRoutingDeps = {
   ensureRuntimeState(env: Env): RuntimeState;
@@ -26,6 +30,12 @@ export type RuntimeEntityRoutingDeps = {
 
 const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
 const RUNTIME_HINT_TTL_MS = 60_000;
+
+const getRuntimeProcessGlobal = (): RuntimeProcessLike | null =>
+  ((globalThis as typeof globalThis & { process?: RuntimeProcessLike }).process ?? null);
+
+const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>
+  String(runtimeProcess?.env?.['XLN_RUNTIME_EXIT_ON_FATAL'] || '').trim() === '1';
 
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   const runtimeId = normalizeRuntimeId(String(profile?.runtimeId || ''));
@@ -264,6 +274,10 @@ export const handleInboundP2PEntityInput = (
           signerId: input.signerId,
           txTypes,
         }, input.entityId);
+        const runtimeProcess = getRuntimeProcessGlobal();
+        if (shouldExitOnRuntimeFatal(runtimeProcess) && runtimeProcess?.exit) {
+          runtimeProcess.exit(1);
+        }
       });
     });
   }
