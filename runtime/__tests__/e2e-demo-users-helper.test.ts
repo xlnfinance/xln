@@ -38,4 +38,27 @@ describe('e2e demo user helper', () => {
     expect(body).toContain('const ensureResult = await p2p.ensureProfiles?.([target])');
     expect(body.indexOf('p2p.connect()')).toBeLessThan(body.indexOf('p2p.ensureProfiles'));
   });
+
+  test('uses public readiness checks for prod UI-only hub connect', () => {
+    const helper = readFileSync(join(repoRoot, 'tests/utils/e2e-connect.ts'), 'utf8');
+    const connectStart = helper.indexOf('async function connectHubThroughUi');
+    const connectEnd = helper.indexOf('async function waitForRenderedCommittedAccountCard');
+    expect(connectStart).toBeGreaterThanOrEqual(0);
+    expect(connectEnd).toBeGreaterThan(connectStart);
+
+    const connectBody = helper.slice(connectStart, connectEnd);
+    expect(connectBody.indexOf('if (await hasRenderedCommittedAccountCard(page, hubId)) return;')).toBeLessThan(
+      connectBody.indexOf('if (await hasExportedRuntimeP2P(page))'),
+    );
+    expect(connectBody).toContain('if (await hasExportedRuntimeP2P(page))');
+    expect(connectBody).toContain('waitForHubRuntimeTransportReady(page, hubId)');
+    expect(connectBody).toContain('waitForPublicHubRuntimeProfile(page, hubId)');
+    expect(connectBody.indexOf('waitForPublicHubRuntimeProfile(page, hubId)')).toBeLessThan(
+      connectBody.indexOf('hub-connect-button'),
+    );
+
+    const full = helper;
+    expect(full).toContain("new URL('/api/gossip/profile', origin)");
+    expect(full).toContain('async function hasExportedRuntimeP2P');
+  });
 });

@@ -390,7 +390,12 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await ensureHubCardVisible(page, hubId);
-  await waitForHubRuntimeTransportReady(page, hubId);
+  if (await hasRenderedCommittedAccountCard(page, hubId)) return;
+  if (await hasExportedRuntimeP2P(page)) {
+    await waitForHubRuntimeTransportReady(page, hubId);
+  } else {
+    await waitForPublicHubRuntimeProfile(page, hubId);
+  }
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
 
   let lastUiState = 'not-read';
@@ -553,6 +558,52 @@ async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 2
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\n` +
       `lastHubProfileState=${stringifyDebug(lastProfileState)}`,
+    );
+  }
+}
+
+async function waitForPublicHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
+  let lastProfileState: unknown = null;
+  try {
+    await expect
+      .poll(
+        async () => {
+          const origin = new URL(page.url()).origin;
+          const url = new URL('/api/gossip/profile', origin);
+          url.searchParams.set('entityId', hubId);
+          const response = await page.request.get(url.toString()).catch((error) => ({
+            ok: () => false,
+            status: () => 0,
+            json: async () => ({ error: error instanceof Error ? error.message : String(error) }),
+          }));
+          const body = await response.json().catch(() => ({} as {
+            found?: boolean;
+            profile?: { entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } } | null;
+            error?: string;
+          }));
+          const profile = body.profile;
+          const entityMatches = String(profile?.entityId || '').toLowerCase() === hubId.toLowerCase();
+          const runtimeId = String(profile?.runtimeId || profile?.metadata?.runtimeId || '').trim();
+          lastProfileState = {
+            status: response.status(),
+            found: body.found,
+            entityMatches,
+            runtimeId,
+            error: body.error,
+          };
+          return response.ok() && body.found !== false && entityMatches && runtimeId.length > 0;
+        },
+        {
+          timeout: timeoutMs,
+          intervals: [250, 500, 1000],
+          message: `hub ${hubId.slice(0, 10)} must be discoverable through public gossip profile API before UI connect`,
+        },
+      )
+      .toBe(true);
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `lastPublicHubProfileState=${stringifyDebug(lastProfileState)}`,
     );
   }
 }
@@ -1193,6 +1244,19 @@ async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
   return await page.evaluate(() => typeof (window as typeof window & { isolatedEnv?: unknown }).isolatedEnv !== 'undefined');
 }
 
+async function hasExportedRuntimeP2P(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeState?: {
+          p2p?: unknown;
+        };
+      };
+    }).isolatedEnv;
+    return Boolean(env?.runtimeState?.p2p);
+  }).catch(() => false);
+}
+
 async function hasRenderedCommittedAccountCard(page: Page, hubId: string): Promise<boolean> {
   return page.evaluate((targetHubId) => {
     const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
@@ -1245,7 +1309,8 @@ export async function connectRuntimeToHubWithCredit(
     creditAmountDisplay === DEFAULT_CREDIT_AMOUNT_DISPLAY
     && tokenIds.includes(1);
   const hasRuntimeEnv = await hasExportedRuntimeEnv(page);
-  if (!hasRuntimeEnv) {
+  const hasRuntimeP2P = hasRuntimeEnv ? await hasExportedRuntimeP2P(page) : false;
+  if (!hasRuntimeEnv || !hasRuntimeP2P) {
     if (!canUseDefaultUiConnect) {
       throw new Error(`prod/runtime-global-free connect only supports default hub connect for ${hubId.slice(0, 10)}`);
     }
