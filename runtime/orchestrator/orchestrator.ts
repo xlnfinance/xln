@@ -398,6 +398,9 @@ const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
 const getHealthyHubChild = (): HubChild | null =>
   hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth) || null;
 
+const getExitedHubChild = (): HubChild | null =>
+  hubChildren.find((child) => child.exitCode !== null || child.proc?.exitCode !== null) || null;
+
 const fetchHubMarketSnapshots = async (
   child: HubChild,
   hubEntityId: string,
@@ -519,6 +522,7 @@ type MarketMakerSupportPeerIdentity = {
   name: string;
   entityId: string;
   signerId: string;
+  jurisdictionName: string;
   creditAmount: string;
 };
 
@@ -560,6 +564,7 @@ const buildMarketMakerIdentity = (
     name,
     entityId,
     signerId,
+    jurisdictionName: jurisdiction.name,
     creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString(),
   };
 };
@@ -1128,10 +1133,11 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       mmHubs.length === HUB_NAMES.length &&
       mmHubs.every((hub) => hub.ready) &&
       mmCrossReady;
+  const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
   const hubMeshOk =
+    hubsOnline &&
     hubIds.length === HUB_NAMES.length &&
     hubChildren.every((child) => child.lastHealth?.mesh?.ready === true);
-  const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
   const custodyOk = args.custodyEnabled
     ? Boolean(custodySupport?.identity.entityId && custodySupport?.daemonChild.proc.exitCode === null && custodySupport?.custodyChild.proc.exitCode === null)
     : true;
@@ -1433,6 +1439,13 @@ const waitForMarketMakerReady = async (): Promise<void> => {
   while (Date.now() < deadline) {
     await pollMarketMakerHealth();
     const health = await buildAggregatedHealthResponse();
+    const exitedHub = getExitedHubChild();
+    if (exitedHub) {
+      throw new Error(
+        `HUB_EXITED_DURING_MM_READY name=${exitedHub.name} code=${String(exitedHub.exitCode ?? exitedHub.proc?.exitCode)} ` +
+        `stderr=${safeStringify(exitedHub.recentStderr.slice(-8))}`,
+      );
+    }
     if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
       if (restartAttempts < marketMakerReadyRestartLimit) {
         restartAttempts += 1;

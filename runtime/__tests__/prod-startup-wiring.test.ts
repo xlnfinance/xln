@@ -56,14 +56,21 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction))');
     expect(orchestrator).toContain('resolveSecondaryJurisdictions<MarketMakerJurisdictionConfig>(primary.rpc)');
     expect(orchestrator).toContain('`${marketMakerChild.signerLabel}:${secondaryName}`');
+    expect(orchestrator).toContain('jurisdictionName: jurisdiction.name');
     expect(orchestrator).toContain("'--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities())");
     expect(orchestrator).not.toContain('JSON.stringify([getMarketMakerIdentity()])');
+    expect(orchestrator).toContain('const getExitedHubChild = (): HubChild | null =>');
+    expect(orchestrator).toContain('HUB_EXITED_DURING_MM_READY name=${exitedHub.name}');
+    expect(orchestrator).toContain('hubsOnline &&');
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
+    expect(hubNode).toContain('jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || \'\')');
+    expect(hubNode).toContain('normalizeJurisdictionKey(identity.jurisdictionName) !== normalizedJurisdiction');
+    expect(hubNode).toContain('for (const hubBootstrap of hubBootstraps)');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
     expect(hubNode).toContain("if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;");

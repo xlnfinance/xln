@@ -133,6 +133,7 @@ type SupportPeerIdentity = {
   name: string;
   entityId: string;
   signerId: string;
+  jurisdictionName: string;
   creditAmount: bigint;
 };
 
@@ -394,8 +395,15 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
       name: String(entry?.name || '').trim(),
       entityId: String(entry?.entityId || '').trim().toLowerCase(),
       signerId: String(entry?.signerId || '').trim().toLowerCase(),
+      jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || ''),
       creditAmount: BigInt(String(entry?.creditAmount || HUB_MESH_CREDIT_AMOUNT)),
-    })).filter((entry) => entry.name && entry.entityId && entry.signerId && entry.creditAmount > 0n);
+    })).filter((entry) =>
+      entry.name &&
+      entry.entityId &&
+      entry.signerId &&
+      entry.jurisdictionName &&
+      entry.creditAmount > 0n,
+    );
   } catch {
     return [];
   }
@@ -1226,7 +1234,9 @@ const visibleDirectSupportPeers = (
   identities: SupportPeerIdentity[],
   profiles: ReturnType<NonNullable<Env['gossip']>['getProfiles']>,
   selfEntityId: string,
+  jurisdictionName: string,
 ): VisibleSupportPeer[] => {
+  const normalizedJurisdiction = normalizeJurisdictionKey(jurisdictionName);
   const profilesByEntityId = new Map(
     profiles.map(profile => [String(profile.entityId || '').toLowerCase(), profile] as const),
   );
@@ -1234,6 +1244,7 @@ const visibleDirectSupportPeers = (
     .map((identity) => {
       const entityId = identity.entityId.toLowerCase();
       if (entityId === selfEntityId.toLowerCase()) return null;
+      if (normalizeJurisdictionKey(identity.jurisdictionName) !== normalizedJurisdiction) return null;
       const profile = profilesByEntityId.get(entityId);
       const runtimeId = normalizeRuntimeId(profile?.runtimeId || '');
       if (!runtimeId) return null;
@@ -2130,14 +2141,60 @@ const run = async (): Promise<void> => {
         return;
       }
       const visibleProfiles = env.gossip?.getProfiles?.() || [];
-      const visibleSupportPeers = visibleDirectSupportPeers(
-        supportPeerIdentities,
-        visibleProfiles,
-        bootstrap.entityId,
-      );
 
       const openInputs: EntityInput[] = [];
       const creditInputs: EntityInput[] = [];
+
+      const collectSupportPeerInputs = (
+        owner: Pick<HubBootstrapEntry, 'entityId' | 'signerId' | 'jurisdictionName'>,
+      ): void => {
+        const visibleSupportPeers = visibleDirectSupportPeers(
+          supportPeerIdentities,
+          visibleProfiles,
+          owner.entityId,
+          owner.jurisdictionName,
+        );
+        for (const peer of visibleSupportPeers) {
+          const localAccount = getAccountMachine(env, owner.entityId, peer.entityId);
+          const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
+          if (
+            isCanonicalAccountOpener(owner.entityId, peer.entityId) &&
+            !hasAccount(env, owner.entityId, peer.entityId) &&
+            canWrite
+          ) {
+            if (hasQueuedOpenAccount(env, owner.entityId, peer.entityId)) continue;
+            openInputs.push({
+              entityId: owner.entityId,
+              signerId: owner.signerId,
+              entityTxs: [
+                {
+                  type: 'openAccount',
+                  data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: peer.creditAmount },
+                },
+                ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
+                  type: 'extendCredit' as const,
+                  data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
+                })),
+              ],
+            });
+            continue;
+          }
+          if (!localAccount || !canWrite) continue;
+          const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
+            getCreditGrantedByEntity(localAccount, owner.entityId, tokenId) < peer.creditAmount,
+          );
+          if (missingTokenIds.length > 0) {
+            creditInputs.push({
+              entityId: owner.entityId,
+              signerId: owner.signerId,
+              entityTxs: missingTokenIds.map((tokenId) => ({
+                type: 'extendCredit' as const,
+                data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
+              })),
+            });
+          }
+        }
+      };
 
       for (const peer of peers) {
         const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
@@ -2179,45 +2236,8 @@ const run = async (): Promise<void> => {
         }
       }
 
-      for (const peer of visibleSupportPeers) {
-        const localAccount = getAccountMachine(env, bootstrap.entityId, peer.entityId);
-        const canWrite = !localAccount?.pendingFrame && Number(localAccount?.mempool?.length || 0) === 0;
-        if (
-          isCanonicalAccountOpener(bootstrap.entityId, peer.entityId) &&
-          !hasAccount(env, bootstrap.entityId, peer.entityId) &&
-          canWrite
-        ) {
-          if (hasQueuedOpenAccount(env, bootstrap.entityId, peer.entityId)) continue;
-          openInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: [
-              {
-                type: 'openAccount',
-                data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: peer.creditAmount },
-              },
-              ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
-                type: 'extendCredit' as const,
-                data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
-              })),
-            ],
-          });
-          continue;
-        }
-        if (!localAccount || !canWrite) continue;
-        const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
-          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < peer.creditAmount,
-        );
-        if (missingTokenIds.length > 0) {
-          creditInputs.push({
-            entityId: bootstrap.entityId,
-            signerId: bootstrap.signerId,
-            entityTxs: missingTokenIds.map((tokenId) => ({
-              type: 'extendCredit' as const,
-              data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
-            })),
-          });
-        }
+      for (const hubBootstrap of hubBootstraps) {
+        collectSupportPeerInputs(hubBootstrap);
       }
 
       if (openInputs.length > 0) {
