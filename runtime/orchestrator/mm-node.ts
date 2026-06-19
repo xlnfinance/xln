@@ -222,13 +222,21 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '12'),
 );
+const MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
+  MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '90'),
+);
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
   MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '90'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '270'),
+);
+const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
+  2,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '30'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '180'),
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -240,7 +248,7 @@ const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '12'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '60'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
@@ -2267,7 +2275,9 @@ const run = async (): Promise<void> => {
           hubEntityIds,
           hubSignerIdsByEntityId,
           contextTokenIds,
-          MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
+          mode === 'bootstrap'
+            ? MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK
+            : MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
           mode === 'bootstrap'
             ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK
             : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
@@ -2339,7 +2349,7 @@ const run = async (): Promise<void> => {
           job.sourceTokenIds,
           job.targetTokenIds,
           mode === 'bootstrap'
-            ? MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK
+            ? MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK
             : Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
           mode === 'bootstrap'
             ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK
