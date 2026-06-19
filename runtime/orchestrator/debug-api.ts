@@ -1,5 +1,6 @@
 import { safeStringify } from '../serialization-utils';
 import { pushDebugEvent, type RelayStore } from '../relay-store';
+import { buildKnownProfileBundle } from '../server/gossip-profiles';
 import { getDebugEntityEntries } from './public-discovery';
 import type { HubChild, MarketMakerChild } from './orchestrator-types';
 
@@ -62,6 +63,32 @@ const handleDebugEntities = async (deps: OrchestratorDebugApiDeps): Promise<Resp
   }
 
   return new Response(safeStringify({ entities }), { headers: deps.headers });
+};
+
+const handleGossipProfile = (deps: OrchestratorDebugApiDeps): Response => {
+  const targetEntityId = String(deps.url.searchParams.get('entityId') || '').trim().toLowerCase();
+  if (!targetEntityId) {
+    return new Response(
+      safeStringify({ ok: false, error: 'entityId is required' }),
+      { status: 400, headers: deps.headers },
+    );
+  }
+
+  const bundle = buildKnownProfileBundle({
+    env: null,
+    relayStore: deps.relayStore,
+    entityId: targetEntityId,
+  });
+  return new Response(
+    safeStringify({
+      ok: true,
+      entityId: targetEntityId,
+      found: !!bundle.profile,
+      profile: bundle.profile,
+      peers: bundle.peers,
+    }),
+    { headers: deps.headers },
+  );
 };
 
 const handleDebugEvents = (deps: OrchestratorDebugApiDeps): Response => {
@@ -221,6 +248,9 @@ export const maybeHandleOrchestratorDebugApi = async (
 ): Promise<Response | null> => {
   if (deps.pathname === '/api/debug/entities') {
     return await handleDebugEntities(deps);
+  }
+  if (deps.pathname === '/api/gossip/profile') {
+    return handleGossipProfile(deps);
   }
   if (deps.pathname === '/api/debug/reserve' && deps.request.method === 'GET') {
     return await deps.proxyAnyHubGet(deps.request, `${deps.pathname}${deps.url.search}`);
