@@ -1,5 +1,6 @@
 import type { AccountMachine, Delta, EntityReplica, EntityTx, Env } from '../types';
 import { deriveDelta } from '../account-utils';
+import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText } from '../serialization-utils';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
 
@@ -23,6 +24,34 @@ export const isCanonicalAccountOpener = (entityId: string, counterpartyId: strin
   const right = String(counterpartyId || '').toLowerCase();
   return Boolean(left && right && left < right);
 };
+
+export type MarketMakerEntityJurisdictionConfig = {
+  name: string;
+  address: string;
+  entityProviderAddress: string;
+  depositoryAddress: string;
+  chainId: number;
+};
+
+export const buildMarketMakerConsensusConfig = (
+  signerId: string,
+  jurisdiction: MarketMakerEntityJurisdictionConfig,
+) => {
+  const normalizedSignerId = String(signerId || '').trim().toLowerCase();
+  if (!normalizedSignerId) throw new Error('MARKET_MAKER_SIGNER_ID_MISSING');
+  return {
+    mode: 'proposer-based' as const,
+    threshold: 1n,
+    validators: [normalizedSignerId],
+    shares: { [normalizedSignerId]: 1n },
+    jurisdiction,
+  };
+};
+
+export const deriveMarketMakerEntityId = (
+  signerId: string,
+  jurisdiction: MarketMakerEntityJurisdictionConfig,
+): string => hashBoard(encodeBoard(buildMarketMakerConsensusConfig(signerId, jurisdiction))).toLowerCase();
 
 export const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs?.length) return true;

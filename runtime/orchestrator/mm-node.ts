@@ -3,7 +3,6 @@
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
-import { encodeBoard, hashBoard } from '../entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
@@ -45,6 +44,8 @@ import {
   HUB_DEFAULT_MIN_TRADE_SIZE,
   MARKET_MAKER_CREDIT_AMOUNT,
   HUB_REQUIRED_TOKEN_COUNT,
+  buildMarketMakerConsensusConfig,
+  deriveMarketMakerEntityId,
   getAccountMachine,
   getCreditGrantedByEntity,
   getEntityOutCapacity,
@@ -56,6 +57,7 @@ import {
   settleRuntimeFor,
   sleep,
   waitUntil,
+  type MarketMakerEntityJurisdictionConfig,
 } from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
@@ -422,7 +424,7 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
 const resolveImportedJurisdictionRpc = (jurisdiction: JurisdictionConfig): string =>
   resolveLocalApiUrl(jurisdiction.rpc);
 
-const toEntityJurisdictionConfig = (jurisdiction: JurisdictionConfig) => ({
+const toEntityJurisdictionConfig = (jurisdiction: JurisdictionConfig): MarketMakerEntityJurisdictionConfig => ({
   name: jurisdiction.name,
   address: resolveImportedJurisdictionRpc(jurisdiction),
   entityProviderAddress: jurisdiction.contracts.entityProvider,
@@ -472,14 +474,9 @@ const createMarketMakerEntityContext = async (
   const privateKey = deriveSignerKeySync(resolvedArgs.seed, signerLabel);
   const signerId = deriveSignerAddressSync(resolvedArgs.seed, signerLabel).toLowerCase();
   registerSignerKey(signerId, privateKey);
-  const consensusConfig = {
-    mode: 'proposer-based' as const,
-    threshold: 1n,
-    validators: [signerId],
-    shares: { [signerId]: 1n },
-    jurisdiction: toEntityJurisdictionConfig(jurisdiction),
-  };
-  const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
+  const entityJurisdiction = toEntityJurisdictionConfig(jurisdiction);
+  const consensusConfig = buildMarketMakerConsensusConfig(signerId, entityJurisdiction);
+  const entityId = deriveMarketMakerEntityId(signerId, entityJurisdiction);
   if (!getEntityReplicaById(env, entityId)) {
     enqueueRuntimeInput(env, {
       runtimeTxs: [{

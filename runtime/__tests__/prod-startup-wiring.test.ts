@@ -52,6 +52,12 @@ describe('production startup wiring', () => {
     expect(runtimeEntityRouting).toContain("runtimeProcess.exit(1);");
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0'");
     expect(orchestrator).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1'");
+    expect(orchestrator).toContain('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {');
+    expect(orchestrator).toContain('deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction))');
+    expect(orchestrator).toContain('resolveSecondaryJurisdictions<MarketMakerJurisdictionConfig>(primary.rpc)');
+    expect(orchestrator).toContain('`${marketMakerChild.signerLabel}:${secondaryName}`');
+    expect(orchestrator).toContain("'--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities())");
+    expect(orchestrator).not.toContain('JSON.stringify([getMarketMakerIdentity()])');
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
@@ -67,6 +73,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain("creditAmount: '50000000000000000000000000'");
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(mmNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
+    expect(mmNode).toContain('buildMarketMakerConsensusConfig(signerId, entityJurisdiction)');
+    expect(mmNode).toContain('deriveMarketMakerEntityId(signerId, entityJurisdiction)');
     expect(mmNode).toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
