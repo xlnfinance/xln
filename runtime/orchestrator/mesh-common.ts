@@ -143,8 +143,6 @@ export const hasQueuedOpenAccount = (
   entityId: string,
   counterpartyId: string,
 ): boolean => {
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica) return false;
   const target = String(counterpartyId || '').toLowerCase();
   const containsOpenAccount = (txs: readonly EntityTx[] | undefined): boolean =>
     Array.isArray(txs) && txs.some((tx) =>
@@ -152,9 +150,68 @@ export const hasQueuedOpenAccount = (
       String(tx.data.targetEntityId || '').toLowerCase() === target,
     );
 
+  if (containsOpenAccount(queuedEntityTxsFor(env, entityId))) return true;
+
+  const replica = getEntityReplicaById(env, entityId);
+  if (!replica) return false;
   if (containsOpenAccount(replica.mempool)) return true;
   if (containsOpenAccount(replica.proposal?.txs)) return true;
   if (containsOpenAccount(replica.lockedFrame?.txs)) return true;
+  return false;
+};
+
+const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {
+  const normalizedEntityId = String(targetEntityId || '').toLowerCase();
+  const queues = [env.runtimeMempool?.entityInputs, env.runtimeInput?.entityInputs]
+    .filter((queue, index, all) => Array.isArray(queue) && all.indexOf(queue) === index);
+  const txs: EntityTx[] = [];
+  for (const queue of queues) {
+    for (const input of queue || []) {
+      if (String(input.entityId || '').toLowerCase() !== normalizedEntityId) continue;
+      txs.push(...(input.entityTxs || []));
+    }
+  }
+  return txs;
+};
+
+const parseQueuedAmount = (value: unknown): bigint | null => {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
+  return null;
+};
+
+export const hasQueuedExtendCredit = (
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+  tokenId: number,
+  minAmount: bigint = 0n,
+): boolean => {
+  const target = String(counterpartyId || '').toLowerCase();
+  const expectedTokenId = Number(tokenId);
+  const containsExtendCredit = (txs: readonly EntityTx[] | undefined): boolean =>
+    Array.isArray(txs) && txs.some((tx) => {
+      if (tx.type !== 'extendCredit') return false;
+      const data = tx.data as {
+        counterpartyEntityId?: string;
+        tokenId?: number;
+        amount?: unknown;
+      };
+      if (String(data.counterpartyEntityId || '').toLowerCase() !== target) return false;
+      if (Number(data.tokenId) !== expectedTokenId) return false;
+      if (minAmount <= 0n) return true;
+      const amount = parseQueuedAmount(data.amount);
+      return amount !== null && amount >= minAmount;
+    });
+
+  if (containsExtendCredit(queuedEntityTxsFor(env, entityId))) return true;
+
+  const replica = getEntityReplicaById(env, entityId);
+  if (!replica) return false;
+  if (containsExtendCredit(replica.mempool)) return true;
+  if (containsExtendCredit(replica.proposal?.txs)) return true;
+  if (containsExtendCredit(replica.lockedFrame?.txs)) return true;
   return false;
 };
 
