@@ -502,20 +502,48 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   }
 };
 
+let hubHealthPollInFlight: Promise<void> | null = null;
 const pollAllHubHealth = async (): Promise<void> => {
-  await Promise.all(hubChildren.map(child => pollHubHealth(child)));
+  if (hubHealthPollInFlight) return hubHealthPollInFlight;
+  hubHealthPollInFlight = Promise.all(hubChildren.map(child => pollHubHealth(child)))
+    .then(() => undefined)
+    .finally(() => {
+      hubHealthPollInFlight = null;
+    });
+  return hubHealthPollInFlight;
 };
 
+let marketMakerHealthPollInFlight: Promise<void> | null = null;
 const pollMarketMakerHealth = async (): Promise<void> => {
+  if (marketMakerHealthPollInFlight) return marketMakerHealthPollInFlight;
+  marketMakerHealthPollInFlight = pollMarketMakerHealthOnce().finally(() => {
+    marketMakerHealthPollInFlight = null;
+  });
+  return marketMakerHealthPollInFlight;
+};
+
+const pollMarketMakerHealthOnce = async (): Promise<void> => {
   if (!marketMakerChild.proc || marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
     return;
   }
   const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  const [health, info] = await Promise.all([
-    fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS),
-    fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS),
-  ]);
-  if (health) marketMakerChild.lastHealth = health;
+  const health = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS);
+  let info: MarketMakerInfoPayload | null = null;
+  if (!health && !marketMakerChild.lastInfo) {
+    info = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS);
+  }
+  if (health) {
+    marketMakerChild.lastHealth = health;
+    const nextInfo: MarketMakerInfoPayload = { ...(marketMakerChild.lastInfo || {}) };
+    if (health.name !== undefined) nextInfo.name = health.name;
+    if (health.entityId !== undefined && health.entityId !== null) nextInfo.entityId = health.entityId;
+    if (health.runtimeId !== undefined && health.runtimeId !== null) nextInfo.runtimeId = health.runtimeId;
+    if (health.apiUrl !== undefined) nextInfo.apiUrl = health.apiUrl;
+    if (health.relayUrl !== undefined) nextInfo.relayUrl = health.relayUrl;
+    if (health.directWsUrl !== undefined) nextInfo.directWsUrl = health.directWsUrl;
+    if (health.startupPhase !== undefined) nextInfo.startupPhase = health.startupPhase;
+    marketMakerChild.lastInfo = nextInfo;
+  }
   if (info) marketMakerChild.lastInfo = info;
   marketMakerChild.lastStartupPhase = String(
     marketMakerChild.lastHealth?.startupPhase ||

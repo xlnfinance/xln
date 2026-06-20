@@ -164,6 +164,7 @@ export type HubInfoPayload = {
   runtimeId?: string;
   apiUrl?: string;
   relayUrl?: string;
+  directWsUrl?: string;
   startupPhase?: string;
 };
 

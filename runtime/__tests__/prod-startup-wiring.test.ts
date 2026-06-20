@@ -29,8 +29,13 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('await stopAllChildren({');
     expect(orchestrator).toContain('quiesceRounds: 1');
     expect(orchestrator).toContain('quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS');
-    expect(orchestrator).toContain('const [health, info] = await Promise.all([');
+    expect(orchestrator).toContain('let hubHealthPollInFlight: Promise<void> | null = null;');
+    expect(orchestrator).toContain('if (hubHealthPollInFlight) return hubHealthPollInFlight;');
+    expect(orchestrator).toContain('let marketMakerHealthPollInFlight: Promise<void> | null = null;');
+    expect(orchestrator).toContain('if (marketMakerHealthPollInFlight) return marketMakerHealthPollInFlight;');
     expect(orchestrator).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)");
+    expect(orchestrator).not.toContain('const [health, info] = await Promise.all([');
+    expect(orchestrator).toContain('if (!health && !marketMakerChild.lastInfo) {');
     expect(orchestrator).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS)");
     expect(orchestrator).toContain('const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);');
     expect(orchestrator).toContain('const mmOk = !args.mmEnabled');
@@ -39,11 +44,13 @@ describe('production startup wiring', () => {
     expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
       waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
     );
-    expect(orchestrator.indexOf('if (health) marketMakerChild.lastHealth = health;')).toBeLessThan(
+    expect(orchestrator.indexOf('marketMakerChild.lastHealth = health;')).toBeLessThan(
       orchestrator.indexOf('if (info) marketMakerChild.lastInfo = info;'),
     );
     expect(orchestrator).toContain('if (info) marketMakerChild.lastInfo = info;');
-    expect(orchestrator).toContain('if (health) marketMakerChild.lastHealth = health;');
+    expect(orchestrator).toContain('if (health) {');
+    expect(orchestrator).toContain('marketMakerChild.lastHealth = health;');
+    expect(orchestrator).toContain('if (health.startupPhase !== undefined) nextInfo.startupPhase = health.startupPhase;');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdictions.ts'), 'utf8'))
       .toContain('const seedPath = existsSync(canonicalPath) ? canonicalPath : resolveRepoJurisdictionsJsonPath();');
