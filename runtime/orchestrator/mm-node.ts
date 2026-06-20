@@ -1321,7 +1321,14 @@ const maintainMarketMakerQuotes = async (
       MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT,
     ),
   );
-  for (const [hubEntityId, specs] of grouped.entries()) {
+  const groupedEntries = Array.from(grouped.entries())
+    .sort((left, right) =>
+      countMarketMakerOffersForHub(env, mmEntityId, left[0]) -
+      countMarketMakerOffersForHub(env, mmEntityId, right[0]) ||
+      compareStableText(left[0], right[0]),
+    );
+
+  for (const [hubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return;
     if (remainingNewOffers <= 0) break;
