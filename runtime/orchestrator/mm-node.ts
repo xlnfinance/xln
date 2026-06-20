@@ -268,6 +268,10 @@ const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '1'),
 );
+const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1'),
+);
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT = Math.max(
   4,
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '12'),
@@ -1751,6 +1755,7 @@ const maintainMarketMakerCrossQuotes = async (
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   crossOfferBudget?: MarketMakerCrossOfferBudget,
+  coverageOnly = false,
   shouldContinue: () => boolean = () => true,
 ): Promise<void> => {
   if (
@@ -1846,6 +1851,7 @@ const maintainMarketMakerCrossQuotes = async (
     const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
     const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);
     const coverageGapCount = crossSpecPairIds(specs).filter(pairId => (visibleByPair.get(pairId) || 0) === 0).length;
+    if (coverageOnly && coverageGapCount === 0) continue;
     const perAccountLimit = coverageGapCount > 0
       ? Math.min(Math.max(1, Math.floor(maxOffersPerAccount)), coverageGapCount)
       : Math.min(
@@ -2371,6 +2377,7 @@ const run = async (): Promise<void> => {
   let shuttingDown = false;
   let loopInFlight = false;
   let bootstrapCrossCursor = 0;
+  let steadyCrossCursor = 0;
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<void> => {
     if (shuttingDown) return;
     if (loopInFlight) return;
@@ -2436,6 +2443,11 @@ const run = async (): Promise<void> => {
         await maintainSameContextQuotes(context);
         if (!shouldContinue()) return;
       }
+      if (mode === 'bootstrap') {
+        const health = buildMarketMakerHealthSnapshot();
+        if (!health?.hubs.every((hub) => hub.ready)) return;
+        if (health.cross.ok) return;
+      }
 
       type CrossQuoteJob = {
         sourceContext: MarketMakerEntityContext;
@@ -2477,15 +2489,21 @@ const run = async (): Promise<void> => {
           }
         : undefined;
       const selectedCrossQuoteJobs: CrossQuoteJob[] = [];
-      if (mode === 'bootstrap' && crossQuoteJobs.length > 0) {
-        const jobCount = Math.min(MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length);
+      if (crossQuoteJobs.length > 0) {
+        const routeJobsPerTick = mode === 'bootstrap'
+          ? MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK
+          : MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK;
+        const cursor = mode === 'bootstrap' ? bootstrapCrossCursor : steadyCrossCursor;
+        const jobCount = Math.min(routeJobsPerTick, crossQuoteJobs.length);
         for (let offset = 0; offset < jobCount; offset += 1) {
-          const selectedJob = crossQuoteJobs[(bootstrapCrossCursor + offset) % crossQuoteJobs.length];
+          const selectedJob = crossQuoteJobs[(cursor + offset) % crossQuoteJobs.length];
           if (selectedJob) selectedCrossQuoteJobs.push(selectedJob);
         }
-        bootstrapCrossCursor = (bootstrapCrossCursor + jobCount) % crossQuoteJobs.length;
-      } else {
-        selectedCrossQuoteJobs.push(...crossQuoteJobs);
+        if (mode === 'bootstrap') {
+          bootstrapCrossCursor = (bootstrapCrossCursor + jobCount) % crossQuoteJobs.length;
+        } else {
+          steadyCrossCursor = (steadyCrossCursor + jobCount) % crossQuoteJobs.length;
+        }
       }
       for (const job of selectedCrossQuoteJobs) {
         await yieldMarketMakerApi();
@@ -2506,6 +2524,7 @@ const run = async (): Promise<void> => {
             : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
           connectivityBudget,
           crossOfferBudget,
+          mode === 'bootstrap',
           shouldContinue,
         );
         await yieldMarketMakerApi();
