@@ -2067,7 +2067,21 @@ const run = async (): Promise<void> => {
         );
         const allVisibleHubs = readVisibleHubProfiles(env, true);
         const activeEntityId = activeMmEntityId;
-        const cachedHealth = cachedMarketMakerHealth;
+        const liveMarketMakerHealth = activeEntityId && primaryContext
+          ? getMarketMakerHealth(
+              env,
+              primaryContext.entityId,
+              visibleHubs.map(profile => profile.entityId),
+              getMarketMakerTokenIds(mmTokenIdsByContext, primaryContext),
+              {
+                contexts: mmContexts,
+                visibleHubs: allVisibleHubs,
+                tokenIdsByContext: mmTokenIdsByContext,
+              },
+            )
+          : null;
+        if (liveMarketMakerHealth) cachedMarketMakerHealth = liveMarketMakerHealth;
+        const cachedHealth = liveMarketMakerHealth ?? cachedMarketMakerHealth;
         const health = {
           ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
           name: resolvedArgs.name,
