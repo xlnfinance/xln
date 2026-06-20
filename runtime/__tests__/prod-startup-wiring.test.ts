@@ -24,6 +24,11 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
     expect(orchestrator).toContain("process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '30000'");
     expect(orchestrator).toContain("process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'");
+    expect(orchestrator).toContain("process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000'");
+    expect(orchestrator).toContain('const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;');
+    expect(orchestrator).toContain('await stopAllChildren({');
+    expect(orchestrator).toContain('quiesceRounds: 1');
+    expect(orchestrator).toContain('quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS');
     expect(orchestrator).toContain('const [health, info] = await Promise.all([');
     expect(orchestrator).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)");
     expect(orchestrator).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS)");
@@ -86,7 +91,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8')).toContain('const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));');
     expect(readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8')).not.toContain('void config;');
-    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
+    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
     expect(mmNode).toContain('startRuntimeLoop(env, { tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS });');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
@@ -108,10 +113,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)');
     expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds)');
     expect(mmNode).toContain('(progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0)');
+    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '1'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '24'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '12'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT']");
-    expect(mmNode).toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT / 2');
+    expect(mmNode).toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT / 3');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '60'");
     expect(mmNode).toContain('type MarketMakerCrossOfferBudget = {');
     expect(mmNode).toContain('const reserveCrossOfferBudget = (');
@@ -132,6 +138,15 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;');
     expect(mmNode).toContain('const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);');
     expect(hubNode).toContain('isCanonicalAccountOpener(bootstrap.entityId, peer.entityId)');
+  });
+
+  test('isolated e2e runner bounds green-path MM teardown and cleans child ports', () => {
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    expect(runner).toContain('const stopShardRuntimePorts = async (');
+    expect(runner).toContain('await stopProcess(api, 35_000);');
+    expect(runner).toContain('await stopShardRuntimePorts(apiPort, log);');
+    expect(runner).toContain('await freePort(apiPort + 13, log);');
+    expect(runner).not.toContain('await stopProcess(api, 120_000);');
   });
 
   test('deploy starts and checks the production Tron chain', () => {

@@ -863,6 +863,17 @@ const stopProcess = async (proc: ManagedChildProcess | null, termTimeoutMs = 120
   await waitForProcessExit(proc, 1200);
 };
 
+const stopShardRuntimePorts = async (
+  apiPort: number,
+  log: ReturnType<typeof createWriteStream>,
+): Promise<void> => {
+  await freePort(apiPort, log);
+  await freePort(apiPort + 10, log);
+  await freePort(apiPort + 11, log);
+  await freePort(apiPort + 12, log);
+  await freePort(apiPort + 13, log);
+};
+
 const pidsOnPort = (port: number): number[] => {
   const res = spawnSync('lsof', ['-ti', `tcp:${port}`], {
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -1698,7 +1709,8 @@ const runShard = async (
     if (!teardownReason && api && api.exitCode === null) {
       log.write('[runner] playwright passed; stopping api with runtime quiesce before teardown\n');
     }
-    await stopProcess(api, 120_000);
+    await stopProcess(api, 35_000);
+    await stopShardRuntimePorts(apiPort, log);
     await stopProcess(vite);
     await Promise.all([stopProcess(anvil), stopProcess(anvil2)]);
     log.end();
