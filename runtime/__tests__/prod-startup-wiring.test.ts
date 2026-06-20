@@ -100,8 +100,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: Env): void => {');
     expect(mmNode).toContain("if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(mmNode).toContain('env.quietRuntimeLogs = true;');
-    expect(readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8')).toContain('const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));');
-    expect(readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8')).not.toContain('void config;');
+    const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+    expect(runtimeSource).toContain('const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));');
+    expect(runtimeSource).toContain('if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
+    expect(runtimeSource).not.toContain('void config;');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
     expect(mmNode).toContain('startRuntimeLoop(env, { tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS });');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
