@@ -215,6 +215,33 @@ export const hasQueuedExtendCredit = (
   return false;
 };
 
+export const collectQueuedSwapOfferIds = (
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+): Set<string> => {
+  const target = String(counterpartyId || '').toLowerCase();
+  const ids = new Set<string>();
+  for (const tx of queuedEntityTxsFor(env, entityId)) {
+    if (tx.type !== 'placeSwapOffer') continue;
+    const data = tx.data as {
+      counterpartyEntityId?: string;
+      offerId?: string;
+    };
+    if (String(data.counterpartyEntityId || '').toLowerCase() !== target) continue;
+    const offerId = String(data.offerId || '').trim();
+    if (offerId) ids.add(offerId);
+  }
+  return ids;
+};
+
+export const hasQueuedSwapOffer = (
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+  offerId: string,
+): boolean => collectQueuedSwapOfferIds(env, entityId, counterpartyId).has(String(offerId || '').trim());
+
 export const getAccountMachine = (
   env: Env,
   entityId: string,
