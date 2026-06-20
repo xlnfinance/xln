@@ -49,6 +49,7 @@ import {
   getCreditGrantedByEntity,
   getEntityOutCapacity,
   getEntityReplicaById,
+  hasPendingRuntimeWork,
   hasQueuedOpenAccount,
   hasQueuedExtendCredit,
   hasPairMutualCredit,
@@ -274,7 +275,7 @@ const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT = Math.max(
   4,
-  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '12'),
+  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '6'),
 );
 const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
   2,
@@ -293,7 +294,7 @@ const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '60'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '3'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
@@ -2046,6 +2047,23 @@ const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean =
   );
 };
 
+const hasMarketMakerQuoteBacklog = (
+  env: Env,
+  contexts: MarketMakerEntityContext[],
+  visibleHubs: HubProfile[],
+): boolean => {
+  if (hasPendingRuntimeWork(env)) return true;
+  for (const context of contexts) {
+    const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
+    for (const hub of sameJurisdictionHubs) {
+      const account = getAccountMachine(env, context.entityId, hub.entityId);
+      if (account?.pendingFrame) return true;
+      if (Number(account?.mempool?.length || 0) > 0) return true;
+    }
+  }
+  return false;
+};
+
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
@@ -2382,7 +2400,6 @@ const run = async (): Promise<void> => {
     if (shuttingDown) return;
     if (loopInFlight) return;
     loopInFlight = true;
-    const shouldContinue = () => !shuttingDown;
     try {
       const connectivityBudget: MarketMakerConnectivityBudget = {
         remainingTxs: mode === 'bootstrap'
@@ -2390,13 +2407,17 @@ const run = async (): Promise<void> => {
           : MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
       };
       const visibleHubs = readVisibleHubProfiles(env, true);
+      const shouldContinue = () => !shuttingDown && !hasMarketMakerQuoteBacklog(env, mmContexts, visibleHubs);
       if (visibleHubs.length === 0) return;
       if (!shouldContinue()) return;
       if (!areMarketMakerHubTransportsReady(getP2PState(env), visibleHubs)) return;
       await yieldMarketMakerApi();
+      const healthBeforeQuotes = mode === 'bootstrap' ? buildMarketMakerHealthSnapshot() : null;
+      const primarySameReady = Boolean(healthBeforeQuotes?.hubs.every((hub) => hub.ready));
 
       if (mode === 'bootstrap') {
         for (const context of mmContexts) {
+          if (primarySameReady) break;
           await yieldMarketMakerApi();
           if (!shouldContinue()) return;
           const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
@@ -2439,9 +2460,11 @@ const run = async (): Promise<void> => {
         await yieldMarketMakerApi();
       };
 
-      for (const context of mmContexts) {
-        await maintainSameContextQuotes(context);
-        if (!shouldContinue()) return;
+      if (!primarySameReady) {
+        for (const context of mmContexts) {
+          await maintainSameContextQuotes(context);
+          if (!shouldContinue()) return;
+        }
       }
       if (mode === 'bootstrap') {
         const health = buildMarketMakerHealthSnapshot();
