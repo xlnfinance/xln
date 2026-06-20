@@ -226,22 +226,59 @@ export async function handleAccountInput(
   const replayFrameIsStale =
     replayNewFrameHeight !== undefined &&
     replayNewFrameHeight <= replayCurrentHeight;
-  const cachedReplayAck = accountMachine.lastOutboundFrameAck;
-  const canReackCommittedReplay =
-    input.newAccountFrame !== undefined &&
-    input.newAccountFrame !== null &&
-    replayNewFrameHeight === replayCurrentHeight &&
-    input.newAccountFrame.stateHash === accountMachine.currentFrame?.stateHash &&
-    !!cachedReplayAck &&
-    Number(cachedReplayAck.height) === replayNewFrameHeight &&
-    cachedReplayAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase();
-  if (canReackCommittedReplay) {
-    // Network delivery is at-least-once. If the peer retries an already
-    // committed frame because our ACK was lost, we must resend the exact cached
-    // ACK before the generic stale-input guard. Do not rebuild a new ACK here:
-    // the peer is waiting for the hanko over the old frame hash.
+  const buildDuplicateCommittedFrameAck = async (receivedFrame: AccountFrame): Promise<HandleAccountInputResult | null> => {
+    const receivedHeight = Number(receivedFrame.height ?? 0);
+    if (
+      receivedHeight !== replayCurrentHeight ||
+      receivedFrame.stateHash !== accountMachine.currentFrame?.stateHash
+    ) {
+      return null;
+    }
+    const cachedAck = accountMachine.lastOutboundFrameAck;
+    if (
+      cachedAck &&
+      Number(cachedAck.height) === receivedHeight &&
+      cachedAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
+    ) {
+      events.push(
+        `↩️ Re-sent ACK for duplicate committed frame ${String(receivedHeight)}`,
+      );
+      return {
+        success: true,
+        response: {
+          kind: 'ack',
+          fromEntityId: accountMachine.proofHeader.fromEntity,
+          toEntityId: input.fromEntityId,
+          height: cachedAck.height,
+          prevHanko: cachedAck.prevHanko,
+        },
+        events,
+      };
+    }
+
+    const ackEntityId = accountMachine.proofHeader.fromEntity;
+    const ackReplica = getReplicaByEntityId(env, ackEntityId);
+    const ackSignerId = ackReplica?.state.config.validators[0];
+    if (!ackSignerId) {
+      return {
+        success: false,
+        error: `Cannot rebuild duplicate ACK signer for ${ackEntityId.slice(-4)}`,
+        events,
+      };
+    }
+    const [rebuiltHanko] = await signEntityHashes(env, ackEntityId, ackSignerId, [
+      receivedFrame.stateHash,
+    ]);
+    if (!rebuiltHanko) {
+      return { success: false, error: 'Failed to rebuild duplicate ACK hanko', events };
+    }
+    accountMachine.lastOutboundFrameAck = {
+      height: receivedHeight,
+      counterpartyEntityId: input.fromEntityId,
+      prevHanko: rebuiltHanko,
+    };
     events.push(
-      `↩️ Re-sent ACK for duplicate committed frame ${String(replayNewFrameHeight)}`,
+      `↩️ Rebuilt ACK for duplicate committed frame ${String(receivedHeight)}`,
     );
     return {
       success: true,
@@ -249,11 +286,19 @@ export async function handleAccountInput(
         kind: 'ack',
         fromEntityId: accountMachine.proofHeader.fromEntity,
         toEntityId: input.fromEntityId,
-        height: cachedReplayAck.height,
-        prevHanko: cachedReplayAck.prevHanko,
+        height: receivedHeight,
+        prevHanko: rebuiltHanko,
       },
       events,
     };
+  };
+
+  if (input.newAccountFrame !== undefined && input.newAccountFrame !== null) {
+    // Network delivery is at-least-once. If the peer retries an already
+    // committed frame because our ACK was lost, re-ACK before the generic stale
+    // guards. The safety gate is exact: same height and same committed stateHash.
+    const duplicateAck = await buildDuplicateCommittedFrameAck(input.newAccountFrame);
+    if (duplicateAck) return duplicateAck;
   }
   if (replayAckIsStale && (replayNewFrameHeight === undefined || replayFrameIsStale)) {
     // Network delivery is at-least-once: a valid ACK/frame_ack can arrive after
@@ -537,29 +582,8 @@ export async function handleAccountInput(
   if (input.newAccountFrame) {
     const receivedFrame = input.newAccountFrame;
     if (Number(receivedFrame.height) <= Number(accountMachine.currentHeight ?? 0)) {
-      const cachedAck = accountMachine.lastOutboundFrameAck;
-      const canReackCommittedFrame =
-        Number(receivedFrame.height) === Number(accountMachine.currentHeight ?? 0) &&
-        receivedFrame.stateHash === accountMachine.currentFrame?.stateHash &&
-        !!cachedAck &&
-        Number(cachedAck.height) === Number(receivedFrame.height) &&
-        cachedAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase();
-      if (canReackCommittedFrame) {
-        events.push(
-          `↩️ Re-sent ACK for duplicate committed frame ${String(receivedFrame.height)}`,
-        );
-        return {
-          success: true,
-          response: {
-            kind: 'ack',
-            fromEntityId: accountMachine.proofHeader.fromEntity,
-            toEntityId: input.fromEntityId,
-            height: cachedAck.height,
-            prevHanko: cachedAck.prevHanko,
-          },
-          events,
-        };
-      }
+      const duplicateAck = await buildDuplicateCommittedFrameAck(receivedFrame);
+      if (duplicateAck) return duplicateAck;
       events.push(
         `ℹ️ Ignored stale frame ${String(receivedFrame.height)} (current=${String(accountMachine.currentHeight ?? 0)})`,
       );

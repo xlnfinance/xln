@@ -547,14 +547,18 @@ async function checkAccountTimeoutsHandler(
         ? accountInputProposedFrameHeight(accountMachine.pendingAccountInput)
         : 0;
       if (
-        firstValidator &&
         frameAge > ACCOUNT_PENDING_RESEND_AFTER_MS &&
         accountMachine.pendingAccountInput &&
         cachedInputHeight === accountMachine.pendingFrame.height
       ) {
+        const targetSignerId = resolveEntityProposerId(
+          _env,
+          accountMachine.pendingAccountInput.toEntityId,
+          'account pending frame resend',
+        );
         outputs.push({
           entityId: accountMachine.pendingAccountInput.toEntityId,
-          signerId: firstValidator,
+          signerId: targetSignerId,
           entityTxs: [
             {
               type: 'accountInput',
