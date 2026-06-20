@@ -20,6 +20,7 @@ type HealthPayload = {
   marketMaker?: {
     ok?: boolean;
     entityId?: string | null;
+    startupPhase?: string | null;
     hubs?: Array<{ offers?: number }>;
     cross?: { ok?: boolean; expectedRoutes?: number };
   };
@@ -41,8 +42,13 @@ const apiPort = portBase + 4;
 const custodyPort = portBase + 7;
 const custodyDaemonPort = portBase + 8;
 const nodePortBase = portBase + 10;
+const marketMakerApiPort = nodePortBase + 3;
 const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
 const children: ManagedProcess[] = [];
+const marketMakerInfoLatencyMaxMs = Math.max(
+  250,
+  Number(process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500'),
+);
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -140,6 +146,29 @@ const fetchHealth = async (): Promise<HealthPayload> => {
   return await response.json() as HealthPayload;
 };
 
+const assertMarketMakerInfoResponsive = async (): Promise<void> => {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), marketMakerInfoLatencyMaxMs);
+  try {
+    const response = await fetch(`http://127.0.0.1:${marketMakerApiPort}/api/info`, {
+      signal: controller.signal,
+    });
+    const elapsedMs = Date.now() - startedAt;
+    if (!response.ok) throw new Error(`MM_INFO_HTTP_${response.status}`);
+    await response.json();
+    if (elapsedMs > marketMakerInfoLatencyMaxMs) {
+      throw new Error(`MM_INFO_SLOW elapsedMs=${elapsedMs} maxMs=${marketMakerInfoLatencyMaxMs}`);
+    }
+  } catch (error) {
+    const elapsedMs = Date.now() - startedAt;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`MM_INFO_UNRESPONSIVE elapsedMs=${elapsedMs} maxMs=${marketMakerInfoLatencyMaxMs} error=${message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const healthReady = (health: HealthPayload): boolean => {
   const offers = health.marketMaker?.hubs?.map(hub => Number(hub.offers || 0)) ?? [];
   return health.coreOk === true &&
@@ -171,6 +200,7 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
       ok: health.marketMaker?.cross?.ok ?? null,
       expectedRoutes: health.marketMaker?.cross?.expectedRoutes ?? null,
     },
+    startupPhase: health.marketMaker?.startupPhase ?? null,
   },
   custody: health.custody?.ok ?? null,
   bootstrapReserves: health.bootstrapReserves?.ok ?? null,
@@ -190,6 +220,9 @@ const waitForHealth = async (): Promise<void> => {
     try {
       const health = await fetchHealth();
       last = summarizeHealth(health);
+      if (health.marketMaker?.entityId || health.marketMaker?.startupPhase) {
+        await assertMarketMakerInfoResponsive();
+      }
       if (iteration % 3 === 0 || healthReady(health)) {
         console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
       }
@@ -251,6 +284,11 @@ const main = async (): Promise<void> => {
     RELAY_URL: `ws://127.0.0.1:${apiPort}/relay`,
     PUBLIC_RPC: `http://127.0.0.1:${apiPort}/rpc`,
     XLN_MIN_DISK_FREE_BYTES: '1',
+    MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '180',
+    MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK: '180',
+    MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT: '30',
+    MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT: '30',
+    MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT: '30',
   });
 
   await waitForHealth();

@@ -4,8 +4,8 @@ Purpose: track external AI audits with a terse usefulness score so we can ask th
 
 ## Running Summary
 
-- Reports logged: 6
-- Average score: 858/1000
+- Reports logged: 7
+- Average score: 866/1000
 - Current best reviewer: Codex - strongest launch-blocker audit so far; tied findings directly to XLN nonce, finality, and Hanko enforceability.
 
 ## 2026-06-20 - Runtime Security / Settlement / TRON / Hanko
@@ -22,8 +22,9 @@ Best of round: Codex; this is the audit style to repeat for capped-testnet launc
 | Reviewer | Score | One-line verdict |
 | --- | ---: | --- |
 | Claude MM liveness | 910/1000 | Strong root-cause split: traced wrong crontab resend signer, explained retarget warning as resend fallout, and identified the decisive hub-log fork between frame rejection and missing duplicate re-ACK. |
+| External MM batching | 920/1000 | Excellent production-root correction: identified runtime-frame coalescing and producer-boundary yielding as the right fix without weakening runtime/account consensus atomicity. |
 
-Best of round: Claude MM liveness; stronger than the signer-only hypothesis because it gives a concrete falsifiable next diagnostic and an account-consensus liveness fix path.
+Best of round: External MM batching; it explains the prod-only API starvation after the signer/liveness fixes and gives the cleanest no-hack patch boundary.
 
 ## 2026-06-19 - Frontend Time-Machine / Runtime Env Contract
 

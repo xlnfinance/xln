@@ -275,18 +275,20 @@ const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT = Math.max(
   4,
-  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '180'),
+  // Keep the per-input batch bounded. The bootstrap tick budget can be high, but
+  // one oversized EntityInput starves the MM API while runtime consensus digests it.
+  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '30'),
 );
 const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
   2,
   Number(
     process.env['MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||
-    '180',
+    '30',
   ),
 );
 const MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '60'),
+  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '30'),
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
@@ -1211,8 +1213,7 @@ const ensureMarketMakerHubConnectivity = async (
   hubEntityIds: string[],
   tokenIds: number[],
   budget: MarketMakerConnectivityBudget,
-): Promise<void> => {
-  const accountOpenInputs: EntityInput[] = [];
+): Promise<boolean> => {
   const localCreditInputsByEntity = new Map<string, EntityInput>();
 
   for (const hubEntityId of hubEntityIds) {
@@ -1228,36 +1229,35 @@ const ensureMarketMakerHubConnectivity = async (
       !hasQueuedOpenAccount(env, mmEntityId, hubEntityId)
     ) {
       const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);
-      accountOpenInputs.push({
-        entityId: mmEntityId,
-        signerId: mmSignerId,
-        entityTxs: [
-          {
-            type: 'openAccount',
-            data: {
-              targetEntityId: hubEntityId,
-              tokenId: openTokenId,
-              creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: mmEntityId,
+          signerId: mmSignerId,
+          entityTxs: [
+            {
+              type: 'openAccount',
+              data: {
+                targetEntityId: hubEntityId,
+                tokenId: openTokenId,
+                creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
+              },
             },
-          },
-          ...extraCreditTokenIds.map((tokenId) => ({
-            type: 'extendCredit' as const,
-            data: {
-              counterpartyEntityId: hubEntityId,
-              tokenId,
-              amount: MARKET_MAKER_CREDIT_AMOUNT,
-            },
-          })),
-        ],
+            ...extraCreditTokenIds.map((tokenId) => ({
+              type: 'extendCredit' as const,
+              data: {
+                counterpartyEntityId: hubEntityId,
+                tokenId,
+                amount: MARKET_MAKER_CREDIT_AMOUNT,
+              },
+            })),
+          ],
+        }],
       });
       budget.remainingTxs = Math.max(0, budget.remainingTxs - 1 - extraCreditTokenIds.length);
+      await yieldMarketMakerApi();
+      return true;
     }
-  }
-
-  if (accountOpenInputs.length > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: accountOpenInputs });
-    await yieldMarketMakerApi();
-    return;
   }
 
   collectCreditInputs:
@@ -1298,12 +1298,11 @@ const ensureMarketMakerHubConnectivity = async (
 
   const localCreditInputs = Array.from(localCreditInputsByEntity.values());
   if (localCreditInputs.length > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });
-  }
-
-  if (localCreditInputs.length > 0) {
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [localCreditInputs[0]!] });
     await yieldMarketMakerApi();
+    return true;
   }
+  return false;
 };
 
 const isMarketMakerConnectivityReady = (
@@ -1329,23 +1328,23 @@ const maintainMarketMakerQuotes = async (
   maxNewOffersTotal = MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   shouldContinue: () => boolean = () => true,
-): Promise<void> => {
-  if (hubEntityIds.length === 0 || tokenIds.length < 3) return;
-  if (!shouldContinue()) return;
-  await ensureMarketMakerHubConnectivity(
+): Promise<boolean> => {
+  if (hubEntityIds.length === 0 || tokenIds.length < 3) return false;
+  if (!shouldContinue()) return false;
+  if (await ensureMarketMakerHubConnectivity(
     env,
     mmEntityId,
     mmSignerId,
     hubEntityIds,
     tokenIds,
     connectivityBudget,
-  );
-  if (!shouldContinue()) return;
+  )) return true;
+  if (!shouldContinue()) return false;
   const quoteReadyHubEntityIds = hubEntityIds.filter((hubEntityId) =>
     isMarketMakerConnectivityReady(env, mmEntityId, [hubEntityId], tokenIds),
   );
   if (quoteReadyHubEntityIds.length === 0) {
-    return;
+    return false;
   }
   const desiredOffers = buildMarketMakerOfferSpecs(quoteReadyHubEntityIds, tokenIds);
   const grouped = new Map<string, MarketMakerOfferSpec[]>();
@@ -1372,7 +1371,7 @@ const maintainMarketMakerQuotes = async (
 
   for (const [hubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
-    if (!shouldContinue()) return;
+    if (!shouldContinue()) return false;
     if (remainingNewOffers <= 0) break;
     const account = getAccountMachine(env, mmEntityId, hubEntityId);
     if (!account) continue;
@@ -1414,7 +1413,7 @@ const maintainMarketMakerQuotes = async (
   }
 
   if (entityTxs.length > 0) {
-    if (!shouldContinue()) return;
+    if (!shouldContinue()) return false;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{
@@ -1423,7 +1422,10 @@ const maintainMarketMakerQuotes = async (
         entityTxs,
       }],
     });
+    await yieldMarketMakerApi();
+    return true;
   }
+  return false;
 };
 
 const hasCrossRouteRegistered = (env: Env, entityId: string, orderId: string): boolean => {
@@ -1765,7 +1767,7 @@ const maintainMarketMakerCrossQuotes = async (
   crossOfferBudget?: MarketMakerCrossOfferBudget,
   coverageOnly = false,
   shouldContinue: () => boolean = () => true,
-): Promise<void> => {
+): Promise<boolean> => {
   if (
     sourceHubs.length === 0 ||
     targetHubs.length === 0 ||
@@ -1774,30 +1776,30 @@ const maintainMarketMakerCrossQuotes = async (
     sourceContext.entityId === targetContext.entityId ||
     sameJurisdiction(sourceContext, targetContext)
   ) {
-    return;
+    return false;
   }
-  if (!shouldContinue()) return;
+  if (!shouldContinue()) return false;
 
   const sourceHubEntityIds = sourceHubs.map(profile => profile.entityId);
   const targetHubEntityIds = targetHubs.map(profile => profile.entityId);
-  await ensureMarketMakerHubConnectivity(
+  if (await ensureMarketMakerHubConnectivity(
     env,
     sourceContext.entityId,
     sourceContext.signerId,
     sourceHubEntityIds,
     sourceTokenIds,
     connectivityBudget,
-  );
-  if (!shouldContinue()) return;
-  await ensureMarketMakerHubConnectivity(
+  )) return true;
+  if (!shouldContinue()) return false;
+  if (await ensureMarketMakerHubConnectivity(
     env,
     targetContext.entityId,
     targetContext.signerId,
     targetHubEntityIds,
     targetTokenIds,
     connectivityBudget,
-  );
-  if (!shouldContinue()) return;
+  )) return true;
+  if (!shouldContinue()) return false;
 
   const desiredOffers = buildMarketMakerCrossOfferSpecs(
     env,
@@ -1808,7 +1810,7 @@ const maintainMarketMakerCrossQuotes = async (
     sourceTokenIds,
     targetTokenIds,
   );
-  if (desiredOffers.length === 0) return;
+  if (desiredOffers.length === 0) return false;
 
   const grouped = new Map<string, MarketMakerOfferSpec[]>();
   for (const spec of desiredOffers) {
@@ -1845,7 +1847,7 @@ const maintainMarketMakerCrossQuotes = async (
 
   for (const [sourceHubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
-    if (!shouldContinue()) return;
+    if (!shouldContinue()) return false;
     const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
     if (!account) continue;
     if (String(account.status || 'active') !== 'active') continue;
@@ -1927,12 +1929,15 @@ const maintainMarketMakerCrossQuotes = async (
 
   const entityInputs = Array.from(inputsByEntity.values()).filter(input => (input.entityTxs?.length || 0) > 0);
   if (entityInputs.length > 0) {
-    if (!shouldContinue()) return;
+    if (!shouldContinue()) return false;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
-      entityInputs,
+      entityInputs: [entityInputs[0]!],
     });
+    await yieldMarketMakerApi();
+    return true;
   }
+  return false;
 };
 
 const getMarketMakerHealth = (
@@ -2434,26 +2439,29 @@ const run = async (): Promise<void> => {
           const sameJurisdictionHubs = quoteableHubsFor(context);
           const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
           if (hubEntityIds.length === 0) continue;
-          await ensureMarketMakerHubConnectivity(
+          if (await ensureMarketMakerHubConnectivity(
             env,
             context.entityId,
             context.signerId,
             hubEntityIds,
             getMarketMakerTokenIds(mmTokenIdsByContext, context),
             connectivityBudget,
-          );
+          )) {
+            await yieldMarketMakerApi();
+            return;
+          }
           if (!shouldContinue()) return;
         }
       }
 
-      const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<void> => {
+      const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<boolean> => {
         await yieldMarketMakerApi();
-        if (!shouldContinue()) return;
+        if (!shouldContinue()) return false;
         const sameJurisdictionHubs = quoteableHubsFor(context);
         const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
-        if (hubEntityIds.length === 0) return;
+        if (hubEntityIds.length === 0) return false;
         const contextTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, context);
-        await maintainMarketMakerQuotes(
+        const enqueued = await maintainMarketMakerQuotes(
           env,
           context.entityId,
           context.signerId,
@@ -2469,11 +2477,12 @@ const run = async (): Promise<void> => {
           shouldContinue,
         );
         await yieldMarketMakerApi();
+        return enqueued;
       };
 
       if (mode !== 'bootstrap' || !primarySameDepthReady) {
         for (const context of mmContexts) {
-          await maintainSameContextQuotes(context);
+          if (await maintainSameContextQuotes(context)) return;
           if (!shouldContinue()) return;
         }
       }
@@ -2542,7 +2551,7 @@ const run = async (): Promise<void> => {
       for (const job of selectedCrossQuoteJobs) {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
-        await maintainMarketMakerCrossQuotes(
+        if (await maintainMarketMakerCrossQuotes(
           env,
           job.sourceContext,
           job.targetContext,
@@ -2560,7 +2569,10 @@ const run = async (): Promise<void> => {
           crossOfferBudget,
           false,
           shouldContinue,
-        );
+        )) {
+          await yieldMarketMakerApi();
+          return;
+        }
         await yieldMarketMakerApi();
       }
       if (!shouldContinue()) return;
