@@ -24,13 +24,24 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import type { AccountMachine } from '../../types';
 
 /**
- * Sign nonce+1 dispute proof for post-settlement validity.
+ * Settlement signatures must jump past both the on-chain nonce and the latest
+ * off-chain proof nonce. Otherwise an older high-nonce dispute proof can still
+ * outrank a fresh cooperative settlement on-chain.
+ */
+const getNextSettlementNonce = (account: AccountMachine): number => {
+  const onChainNonce = account.onChainSettlementNonce ?? 0;
+  const proofNonce = account.proofHeader?.nonce ?? 0;
+  return Math.max(onChainNonce, proofNonce) + 1;
+};
+
+/**
+ * Sign the next dispute proof after a cooperative settlement nonce.
  */
 async function signPostSettlementDisputeProof(
   env: Env,
   entityState: EntityState,
   account: AccountMachine,
-  onChainNonce: number,
+  settlementNonce: number,
 ): Promise<{ hanko: HankoString; proofBodyHash: string; disputeHash: string; nonce: number } | null> {
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.depositoryAddress) return null;
@@ -38,21 +49,26 @@ async function signPostSettlementDisputeProof(
   if (!signerId) return null;
 
   try {
+    const nonce = Math.max(
+      settlementNonce,
+      account.onChainSettlementNonce ?? 0,
+      account.proofHeader?.nonce ?? 0,
+    ) + 1;
     const { proofBodyHash, proofBodyStruct } = buildAccountProofBody(account);
     const disputeHash = createDisputeProofHashWithNonce(
-      account, proofBodyHash, jurisdiction.depositoryAddress, onChainNonce + 1
+      account, proofBodyHash, jurisdiction.depositoryAddress, nonce
     );
     const hankos = await signEntityHashes(env, entityState.entityId, signerId, [disputeHash]);
     if (!hankos[0]) return null;
     account.disputeProofBodiesByHash ??= {};
     account.disputeProofBodiesByHash[proofBodyHash] = proofBodyStruct;
     account.disputeProofNoncesByHash ??= {};
-    account.disputeProofNoncesByHash[proofBodyHash] = onChainNonce + 1;
+    account.disputeProofNoncesByHash[proofBodyHash] = nonce;
     storeDisputeArgumentSnapshot(
       account,
-      captureDisputeArgumentSnapshot(account, proofBodyHash, onChainNonce + 1, proofBodyStruct),
+      captureDisputeArgumentSnapshot(account, proofBodyHash, nonce, proofBodyStruct),
     );
-    return { hanko: hankos[0], proofBodyHash, disputeHash, nonce: onChainNonce + 1 };
+    return { hanko: hankos[0], proofBodyHash, disputeHash, nonce };
   } catch (e) {
     console.warn(`⚠️ Post-settlement dispute proof signing failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;
@@ -336,13 +352,10 @@ export async function handleSettleApprove(
   workspace.compiledDiffs = diffs;
   workspace.compiledForgiveTokenIds = forgiveTokenIds;
 
-  // Sign with max(onChainNonce, proofNonce) + 1 — cuts off ALL older proofs on-chain
-  const onChainNonce = account.onChainSettlementNonce ?? 0;
-  const proofNonce = account.proofHeader?.nonce ?? 0;
-  const signedNonce = Math.max(onChainNonce, proofNonce) + 1;
+  const signedNonce = getNextSettlementNonce(account);
   workspace.nonceAtSign = signedNonce;
 
-  console.log(`⚖️ Using settlement nonce: ${signedNonce} (onChain=${onChainNonce}, proof=${proofNonce})`);
+  console.log(`⚖️ Using settlement nonce: ${signedNonce} (onChain=${account.onChainSettlementNonce ?? 0}, proof=${account.proofHeader?.nonce ?? 0})`);
 
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction) throw new Error('No jurisdiction configured');
@@ -415,7 +428,7 @@ export async function handleSettleApprove(
   });
 
   const hashesToSign: Array<{ hash: string; type: 'settlement'; context: string }> = [
-    { hash: settlementHash, type: 'settlement', context: `settlement:${counterpartyEntityId.slice(-8)}:nonce:${onChainNonce}` },
+    { hash: settlementHash, type: 'settlement', context: `settlement:${counterpartyEntityId.slice(-8)}:nonce:${signedNonce}` },
   ];
 
   return { newState, outputs, mempoolOps, hashesToSign };
@@ -660,8 +673,7 @@ export async function processSettleAction(
       if (env && entityState && canAutoApproveWorkspace(workspace, iAmLeft)) {
         console.log(`✅ Auto-approving settlement from ${fromEntityId.slice(-4)}`);
         try {
-          const onChainNonce = account.onChainSettlementNonce ?? 0;
-          const signedNonce = onChainNonce + 1;
+          const signedNonce = getNextSettlementNonce(account);
           workspace.nonceAtSign = signedNonce;
 
           // Cache compiled diffs

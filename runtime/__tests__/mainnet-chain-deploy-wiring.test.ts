@@ -49,4 +49,15 @@ describe('mainnet chain deployment wiring', () => {
     expect(compile).toContain("viaIR: true");
     expect(ignore).toContain('/build-tron');
   });
+
+  test('TRON RPC watcher requires solidified finality depth instead of EVM fallback', () => {
+    const rpc = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+    expect(rpc).toContain('const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188])');
+    expect(rpc).toContain('const TRON_FINALITY_DEPTH = 19');
+    expect(rpc).toContain('if (isTronChainId(config.chainId) && configuredDepth < TRON_FINALITY_DEPTH)');
+    expect(rpc).toContain('if (isTronChainId(config.chainId)) return TRON_FINALITY_DEPTH;');
+    expect(rpc.indexOf('if (isTronChainId(config.chainId)) return TRON_FINALITY_DEPTH;')).toBeLessThan(
+      rpc.indexOf('return 2;'),
+    );
+  });
 });

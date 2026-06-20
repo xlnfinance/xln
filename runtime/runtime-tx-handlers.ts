@@ -1,6 +1,7 @@
 import type { JAdapterConfig } from './jadapter/types';
 import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { setBrowserVMJurisdiction } from './jadapter';
+import { createJAdapterWithRetry } from './jadapter/retry';
 import { getSignerPrivateKey } from './account-crypto';
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from './account-utils';
 import { markStorageEntityDirty } from './env-events';
@@ -56,7 +57,6 @@ const importJurisdictionRuntimeTx = async (
   console.log(`[Runtime] Importing J-machine "${runtimeTx.data.name}" (chain ${runtimeTx.data.chainId})...`);
 
   try {
-    const { createJAdapter } = await import('./jadapter');
     const isBrowserVM = runtimeTx.data.rpcs.length === 0;
     const fromReplica = runtimeTx.data.contracts
       ? ({
@@ -84,7 +84,16 @@ const importJurisdictionRuntimeTx = async (
     }
     if (fromReplica) adapterConfig.fromReplica = fromReplica;
 
-    const jadapter = await createJAdapter(adapterConfig);
+    const jadapter = await createJAdapterWithRetry(adapterConfig, {
+      context: `importJ:${runtimeTx.data.name}`,
+      attempts: typeof window !== 'undefined' ? 5 : 3,
+      onRetry: (attempt, attempts, retryError) => {
+        console.warn(
+          `[Runtime] Retrying J-machine import "${runtimeTx.data.name}" ` +
+            `(${attempt}/${attempts}): ${retryError instanceof Error ? retryError.message : String(retryError)}`,
+        );
+      },
+    });
     if (!fromReplica) {
       await jadapter.deployStack();
     }

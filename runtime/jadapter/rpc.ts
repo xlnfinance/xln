@@ -70,6 +70,11 @@ import {
   type RpcBatchRequest,
 } from './rpc-utils';
 
+const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
+const TRON_FINALITY_DEPTH = 19;
+
+const isTronChainId = (chainId: number): boolean => TRON_CHAIN_IDS.has(chainId);
+
 /**
  * Create RPC adapter - works with any JSON-RPC provider
  *
@@ -339,9 +344,17 @@ export async function createRpcAdapter(
   const resolveFinalityDepth = (scenarioMode: boolean): number => {
     if (scenarioMode || DEV_CHAIN_IDS.has(config.chainId)) return 0;
     if (config.confirmationDepth !== undefined && Number.isFinite(config.confirmationDepth)) {
-      return Math.max(0, Math.floor(config.confirmationDepth));
+      const configuredDepth = Math.max(0, Math.floor(config.confirmationDepth));
+      if (isTronChainId(config.chainId) && configuredDepth < TRON_FINALITY_DEPTH) {
+        throw new Error(
+          `TRON watcher confirmationDepth=${configuredDepth} is unsafe; ` +
+            `require at least ${TRON_FINALITY_DEPTH} confirmations or a solidified-block RPC source`,
+        );
+      }
+      return configuredDepth;
     }
     if (config.chainId === 1) return 12;
+    if (isTronChainId(config.chainId)) return TRON_FINALITY_DEPTH;
     return 2;
   };
 

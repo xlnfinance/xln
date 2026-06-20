@@ -3,10 +3,10 @@
  * Bridges between account-consensus and hanko.ts library
  */
 
-import type { Env, HankoString } from '../types';
+import type { ConsensusConfig, Env, HankoString } from '../types';
 import { buildRealHanko } from './core';
 import { ethers } from 'ethers';
-import { detectEntityType, generateLazyEntityId } from '../entity-factory';
+import { detectEntityType, encodeBoard, generateLazyEntityId, hashBoard } from '../entity-factory';
 import { recoverAddressFromDigestSignature } from '../account-crypto';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
@@ -153,6 +153,18 @@ const reconstructBoardHash = (
   );
   return ethers.keccak256(encodedBoard).toLowerCase();
 };
+
+const findLocalConsensusConfig = (env: Env | undefined, expectedEntityId: string): ConsensusConfig | null => {
+  const expected = expectedEntityId.toLowerCase();
+  if (!env?.eReplicas) return null;
+  const replica = Array.from(env.eReplicas.values()).find(
+    (r) => String(r.state?.entityId || '').toLowerCase() === expected,
+  );
+  return replica?.state?.config ?? null;
+};
+
+const computeRegisteredBoardHash = (config: ConsensusConfig): string =>
+  hashBoard(encodeBoard(config)).toLowerCase();
 
 export async function inspectHankoForHash(
   hankoBytes: HankoString,
@@ -479,10 +491,12 @@ export async function verifyHankoForHash(
       return { valid: false, entityId: null };
     }
 
+    const expectedEntityType = detectEntityType(expectedEntityId);
     const expectedEntityIdPadded = expectedEntityId.replace('0x', '').padStart(64, '0');
+    const localConsensusConfig = findLocalConsensusConfig(env, expectedEntityId);
 
     if (
-      detectEntityType(expectedEntityId) === 'lazy' &&
+      expectedEntityType === 'lazy' &&
       decodedHanko.placeholders.length === 0 &&
       decodedHanko.claims.length === 1 &&
       eoaSignatures.length === 1
@@ -570,37 +584,52 @@ export async function verifyHankoForHash(
       reconstructedBoardEntityIds,
     );
 
-    if (detectEntityType(expectedEntityId) === 'lazy' && reconstructedBoardHash !== expectedEntityId.toLowerCase()) {
-      console.warn(
-        `❌ Hanko rejected: lazy entity board hash mismatch ` +
-          `expected=${expectedEntityId.slice(-8)} reconstructed=${reconstructedBoardHash.slice(-8)}`,
-      );
-      return { valid: false, entityId: null };
+    if (expectedEntityType === 'lazy') {
+      if (reconstructedBoardHash !== expectedEntityId.toLowerCase()) {
+        console.warn(
+          `❌ Hanko rejected: lazy entity board hash mismatch ` +
+            `expected=${expectedEntityId.slice(-8)} reconstructed=${reconstructedBoardHash.slice(-8)}`,
+        );
+        return { valid: false, entityId: null };
+      }
+    } else {
+      if (!localConsensusConfig) {
+        console.warn(
+          `❌ Hanko rejected: registered entity board unavailable ` +
+            `entity=${expectedEntityId.slice(-8)}`,
+        );
+        return { valid: false, entityId: null };
+      }
+      const authoritativeBoardHash = computeRegisteredBoardHash(localConsensusConfig);
+      if (reconstructedBoardHash !== authoritativeBoardHash) {
+        console.warn(
+          `❌ Hanko rejected: registered entity board hash mismatch ` +
+            `expected=${authoritativeBoardHash.slice(-8)} reconstructed=${reconstructedBoardHash.slice(-8)}`,
+        );
+        return { valid: false, entityId: null };
+      }
     }
 
     // CRITICAL: Verify recovered addresses match entity's board validators
     let expectedAddresses: string[] = [];
-    if (env && env.eReplicas) {
-      const replica = Array.from(env.eReplicas.values()).find((r) => r.state?.entityId === expectedEntityId);
-      if (replica) {
-        const validators = (replica.state?.config?.validators || []) as unknown[];
+    if (localConsensusConfig && env) {
+      const validators = (localConsensusConfig.validators || []) as unknown[];
 
-        // Convert validators to addresses (local entity: signerId derivation is allowed)
-        const { getSignerAddress } = await import('../account-crypto');
-        expectedAddresses = validators.map((validator) => {
-          if (typeof validator !== 'string' || !validator) return null;
-          const v = validator.trim();
-          if (!v) return null;
-          // Validator may already be an EOA address (0x + 40 hex chars)
-          if (ethers.isAddress(v)) {
-            return v.toLowerCase();
-          }
-          // Or it may be a secp256k1 public key (33/65 bytes hex)
-          // Public keys and signer IDs share the same wire slot. Try a key/address
-          // interpretation first, then fall back to deterministic local signer IDs.
-          return publicKeyToAddress(v) ?? getSignerAddress(env, v)?.toLowerCase();
-        }).filter(Boolean) as string[];
-      }
+      // Convert validators to addresses (local entity: signerId derivation is allowed)
+      const { getSignerAddress } = await import('../account-crypto');
+      expectedAddresses = validators.map((validator) => {
+        if (typeof validator !== 'string' || !validator) return null;
+        const v = validator.trim();
+        if (!v) return null;
+        // Validator may already be an EOA address (0x + 40 hex chars)
+        if (ethers.isAddress(v)) {
+          return v.toLowerCase();
+        }
+        // Or it may be a secp256k1 public key (33/65 bytes hex)
+        // Public keys and signer IDs share the same wire slot. Try a key/address
+        // interpretation first, then fall back to deterministic local signer IDs.
+        return publicKeyToAddress(v) ?? getSignerAddress(env, v)?.toLowerCase();
+      }).filter(Boolean) as string[];
     }
 
     // IMPORTANT (determinism): do NOT use gossip metadata as board-of-record

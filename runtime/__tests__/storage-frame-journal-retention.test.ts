@@ -24,8 +24,10 @@ import {
   readStorageFrameRecord,
   readStorageHead,
   readStorageOverlayRecordsFromDiffs,
+  saveRuntimeFrameToStorage,
   verifyStorageTailIntegrity,
 } from '../storage';
+import { getPerfMs } from '../utils';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
 import { KEY_HEAD, keyDiff, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
@@ -108,6 +110,52 @@ describe('storage frame journal retention', () => {
     await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
       'STORAGE_APPEND_INVARIANT_FAILED',
     );
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('stale lower-height writer can be stopped without appending or corrupting head', async () => {
+    const seed = `frame-stale-writer ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.height = 1;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    env.height = 2;
+    env.timestamp = 2_000;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+
+    env.height = 1;
+    env.timestamp = 3_000;
+    const result = await saveRuntimeFrameToStorage({
+      env,
+      tryOpenDb: async (targetEnv) => {
+        await getRuntimeStorageDb(targetEnv).open();
+        return true;
+      },
+      getRuntimeDb: getRuntimeStorageDb,
+      tryOpenFrameDb: async (targetEnv) => {
+        await getFrameDb(targetEnv).open();
+        return true;
+      },
+      getFrameDb,
+      getPerfMs,
+      formatPerfMs: (value) => value.toFixed(2),
+      stopStaleWriterOnHeadAhead: true,
+    });
+
+    expect(result.staleWriterStopped).toBe(true);
+    expect(result.frameDbCommitted).toBe(false);
+    const head = await readStorageHead(getFrameDb(env));
+    expect(head?.latestHeight).toBe(2);
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
