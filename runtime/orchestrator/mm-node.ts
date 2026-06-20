@@ -265,7 +265,18 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '6'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '1'),
+);
+const MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT = Math.max(
+  4,
+  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '24'),
+);
+const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
+  2,
+  Number(
+    process.env['MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||
+    String(Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT / 2))),
+  ),
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
@@ -1303,7 +1314,13 @@ const maintainMarketMakerQuotes = async (
   }
 
   const entityTxs: EntityInput['entityTxs'] = [];
-  let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
+  let remainingNewOffers = Math.max(
+    1,
+    Math.min(
+      Math.floor(maxNewOffersTotal),
+      MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT,
+    ),
+  );
   for (const [hubEntityId, specs] of grouped.entries()) {
     await yieldMarketMakerApi();
     if (!shouldContinue()) return;
@@ -1757,7 +1774,13 @@ const maintainMarketMakerCrossQuotes = async (
     pendingCrossRequestOrderIdsBySourceEntity.set(normalizedEntityId, ids);
     return ids;
   };
-  let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
+  let remainingNewOffers = Math.max(
+    1,
+    Math.min(
+      Math.floor(maxNewOffersTotal),
+      MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT,
+    ),
+  );
   const groupedEntries = Array.from(grouped.entries())
     .sort((left, right) =>
       countCrossSpecBootstrapProgress(env, left[1], getPendingCrossRequestOrderIds) -
