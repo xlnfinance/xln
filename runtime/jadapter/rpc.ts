@@ -2016,6 +2016,10 @@ export async function createRpcAdapter(
       return null;
     },
 
+    async getCurrentBlockNumber(): Promise<number> {
+      return await provider.getBlockNumber();
+    },
+
     async syncRuntimeState(): Promise<null> {
       return null;
     },

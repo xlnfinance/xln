@@ -211,6 +211,7 @@ export type RuntimeTx =
         ticker: string;         // "ETH", "MATIC", "SIM"
         rpcs: string[];         // [] = BrowserVM, [...urls] = RPC
         blockTimeMs?: number;   // Expected settlement-chain block time for wall-clock safety windows
+        startAtCurrentBlock?: boolean; // Rebuildable runtimes can skip old settlement-chain history.
         rpcPolicy?: 'single' | 'failover' | { mode: 'quorum'; min: number };
         contracts?: {
           depository?: string;
