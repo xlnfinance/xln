@@ -60,10 +60,12 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '');");
     expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
+    expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
     expect(runtimeEntityRouting).toContain('const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>');
     expect(runtimeEntityRouting).toContain("runtimeProcess.exit(1);");
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0'");
     expect(orchestrator).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1'");
+    expect(orchestrator).toContain("XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '1'");
     expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
     expect(orchestrator).toContain('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {');
     expect(orchestrator).toContain('deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction))');
@@ -89,6 +91,10 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("if (!message.startsWith('ENTITY_JURISDICTION_MISSING')) throw error;");
     expect(hubNode).toContain('const activeAdapter = getActiveJAdapter(env);');
     expect(hubNode).not.toContain("return requireJAdapterForEntity(env, entityId, 'DEBUG_RESERVE');");
+    expect(hubNode).toContain('const configureHubRuntimeLogging = (env: Env): void => {');
+    expect(hubNode).toContain("if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;");
+    expect(hubNode).toContain('env.quietRuntimeLogs = true;');
+    expect(hubNode).toContain('configureHubRuntimeLogging(env);');
     expect(orchestrator).toContain('MARKET_MAKER_CREDIT_AMOUNT.toString()');
     expect(orchestrator).not.toContain("creditAmount: '50000000000000000000000000'");
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
@@ -183,6 +189,12 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;');
     expect(mmNode).toContain('const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);');
     expect(hubNode).toContain('isCanonicalAccountOpener(bootstrap.entityId, peer.entityId)');
+  });
+
+  test('prod runtime child logs keep merge debug output behind explicit heavy logging', () => {
+    const mergeSource = readFileSync(join(repoRoot, 'runtime/entity-input-merge.ts'), 'utf8');
+    expect(mergeSource).toContain('if (HEAVY_LOGS) {\n          console.log(\n            `🔍 MERGE-PRECOMMITS:');
+    expect(mergeSource).toContain('if (HEAVY_LOGS) {\n        console.log(\n          `    🔄 Merging inputs for');
   });
 
   test('isolated e2e runner bounds green-path MM teardown and cleans child ports', () => {

@@ -456,6 +456,16 @@ if (!directWsUrl) {
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
 
+const envFlagEnabled = (value: unknown): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+};
+
+const configureHubRuntimeLogging = (env: Env): void => {
+  if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;
+  env.quietRuntimeLogs = true;
+};
+
 const resolveOperatorAppUrl = (): string => {
   const explicit = String(process.env['XLN_OPERATOR_APP_URL'] || process.env['XLN_APP_URL'] || '').trim();
   if (explicit) return explicit.replace(/\/+$/, '').endsWith('/app')
@@ -1359,6 +1369,7 @@ const run = async (): Promise<void> => {
 
   const runtimeBootStartedAt = startTiming('runtime_boot');
   const env = await main(resolvedArgs.seed);
+  configureHubRuntimeLogging(env);
   startRuntimeLoop(env);
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
