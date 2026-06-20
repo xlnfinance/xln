@@ -49,7 +49,7 @@ import {
   getCreditGrantedByEntity,
   getEntityOutCapacity,
   getEntityReplicaById,
-  hasPendingRuntimeWork,
+  collectQueuedSwapOfferIds,
   hasQueuedOpenAccount,
   hasQueuedExtendCredit,
   hasPairMutualCredit,
@@ -294,7 +294,7 @@ const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '3'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '64'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
@@ -1376,6 +1376,9 @@ const maintainMarketMakerQuotes = async (
     if (!isAccountConsensusReady(account)) continue;
 
     const existingOfferIds = collectOfferIdsForAccount(account);
+    for (const offerId of collectQueuedSwapOfferIds(env, mmEntityId, hubEntityId)) {
+      existingOfferIds.add(offerId);
+    }
     const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
     const allowedNewOffers = Math.min(
       Math.max(1, Math.floor(maxOffersPerAccount)),
@@ -2052,7 +2055,6 @@ const hasMarketMakerQuoteBacklog = (
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
 ): boolean => {
-  if (hasPendingRuntimeWork(env)) return true;
   for (const context of contexts) {
     const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
     for (const hub of sameJurisdictionHubs) {
