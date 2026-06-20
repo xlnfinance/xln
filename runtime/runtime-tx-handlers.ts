@@ -1,4 +1,4 @@
-import type { JAdapterConfig } from './jadapter/types';
+import type { JAdapter, JAdapterConfig } from './jadapter/types';
 import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { setBrowserVMJurisdiction } from './jadapter';
 import { createJAdapterWithRetry } from './jadapter/retry';
@@ -138,9 +138,11 @@ const importJurisdictionRuntimeTx = async (
       throw new Error(`IMPORT_J_STATE_ROOT_UNAVAILABLE: name=${runtimeTx.data.name} mode=browservm`);
     }
 
+    const initialBlockNumber = await resolveInitialJBlockNumber(jadapter, runtimeTx);
+
     const jReplica: JReplica = {
       name: runtimeTx.data.name,
-      blockNumber: 0n,
+      blockNumber: initialBlockNumber,
       stateRoot,
       mempool: [],
       blockDelayMs: 300,
@@ -167,6 +169,21 @@ const importJurisdictionRuntimeTx = async (
     console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
     throw error;
   }
+};
+
+const resolveInitialJBlockNumber = async (
+  jadapter: JAdapter,
+  runtimeTx: ImportJRuntimeTx,
+): Promise<bigint> => {
+  if (!runtimeTx.data.startAtCurrentBlock) return 0n;
+  if (!jadapter.getCurrentBlockNumber) {
+    throw new Error(`IMPORT_J_CURRENT_BLOCK_UNAVAILABLE: name=${runtimeTx.data.name}`);
+  }
+  const currentBlock = await jadapter.getCurrentBlockNumber();
+  if (!Number.isFinite(currentBlock) || currentBlock < 0) {
+    throw new Error(`IMPORT_J_CURRENT_BLOCK_INVALID: name=${runtimeTx.data.name} block=${String(currentBlock)}`);
+  }
+  return BigInt(Math.floor(currentBlock));
 };
 
 const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): void => {

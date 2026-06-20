@@ -176,6 +176,7 @@ export interface JAdapter {
   setQuietLogs?(quiet: boolean): void;
   registerEntityWallet?(entityId: string, privateKey: string): void;
   captureStateRoot?(): Promise<Uint8Array | null>;
+  getCurrentBlockNumber?(): Promise<number>;
   syncRuntimeState?(
     accountPairs: Array<{ entityId: string; counterpartyId: string }>,
     tokenIds: number[],

@@ -80,6 +80,9 @@ describe('production startup wiring', () => {
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime-tx-handlers.ts'), 'utf8');
+    const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
+    const rpcAdapter = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
@@ -127,6 +130,16 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool';");
     expect(mmNode).toContain('const publishMarketMakerHealthSnapshot = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('if (health) cachedMarketMakerHealth = health;');
+    expect(mmNode).toContain('const shouldStartJWatcherAtCurrentBlock = (): boolean =>');
+    expect(mmNode).toContain("!envFlagEnabled(process.env['XLN_MARKET_MAKER_REPLAY_HISTORICAL_J_EVENTS'])");
+    expect(mmNode).toContain('startAtCurrentBlock: shouldStartJWatcherAtCurrentBlock()');
+    expect(runtimeTxHandlers).toContain('const initialBlockNumber = await resolveInitialJBlockNumber(jadapter, runtimeTx);');
+    expect(runtimeTxHandlers).toContain('IMPORT_J_CURRENT_BLOCK_UNAVAILABLE');
+    expect(runtimeTxHandlers).toContain('IMPORT_J_CURRENT_BLOCK_INVALID');
+    expect(runtimeTxHandlers).toContain('blockNumber: initialBlockNumber');
+    expect(jadapterTypes).toContain('getCurrentBlockNumber?(): Promise<number>;');
+    expect(rpcAdapter).toContain('async getCurrentBlockNumber(): Promise<number> {');
+    expect(rpcAdapter).toContain('return await provider.getBlockNumber();');
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
     expect(mmNode).toContain('return unique;');
     expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');

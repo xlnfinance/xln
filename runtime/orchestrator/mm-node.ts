@@ -459,6 +459,9 @@ const configureMarketMakerRuntimeLogging = (env: Env): void => {
   env.quietRuntimeLogs = true;
 };
 
+const shouldStartJWatcherAtCurrentBlock = (): boolean =>
+  !envFlagEnabled(process.env['XLN_MARKET_MAKER_REPLAY_HISTORICAL_J_EVENTS']);
+
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
   resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
 
@@ -498,6 +501,7 @@ const importJurisdictionIfNeeded = async (
         rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
         blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
         contracts: jurisdiction.contracts,
+        startAtCurrentBlock: shouldStartJWatcherAtCurrentBlock(),
       },
     }],
     entityInputs: [],
@@ -2333,11 +2337,12 @@ const run = async (): Promise<void> => {
       type: 'importJ',
       data: {
         name: jurisdiction.name,
-            chainId: jurisdiction.chainId,
-            ticker: 'XLN',
-            rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
-            blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
-            contracts: jurisdiction.contracts,
+        chainId: jurisdiction.chainId,
+        ticker: 'XLN',
+        rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
+        blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
+        contracts: jurisdiction.contracts,
+        startAtCurrentBlock: shouldStartJWatcherAtCurrentBlock(),
       },
     }],
     entityInputs: [],
