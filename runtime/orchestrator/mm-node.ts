@@ -276,7 +276,7 @@ const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
   2,
   Number(
     process.env['MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||
-    String(Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT / 3))),
+    String(Math.max(15, MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT * 5)),
   ),
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
@@ -1162,6 +1162,30 @@ const countCrossSpecBootstrapProgressByPair = (
   return counts;
 };
 
+const countCrossSpecVisibleOffersByPair = (
+  env: Env,
+  specs: MarketMakerOfferSpec[],
+): Map<string, number> => {
+  const counts = new Map<string, number>();
+  for (const spec of specs) {
+    if (!spec.crossJurisdiction || !hasMarketMakerCrossOffer(env, spec)) continue;
+    counts.set(spec.pairId, (counts.get(spec.pairId) || 0) + 1);
+  }
+  return counts;
+};
+
+const crossSpecPairIds = (specs: MarketMakerOfferSpec[]): string[] =>
+  Array.from(new Set(specs.map(spec => spec.pairId).filter(Boolean)))
+    .sort(compareStableText);
+
+const countCrossPairCoverageGaps = (
+  env: Env,
+  specs: MarketMakerOfferSpec[],
+): number => {
+  const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);
+  return crossSpecPairIds(specs).filter(pairId => (visibleByPair.get(pairId) || 0) === 0).length;
+};
+
 const ensureMarketMakerHubConnectivity = async (
   env: Env,
   mmEntityId: string,
@@ -1790,6 +1814,8 @@ const maintainMarketMakerCrossQuotes = async (
   );
   const groupedEntries = Array.from(grouped.entries())
     .sort((left, right) =>
+      countCrossPairCoverageGaps(env, right[1]) -
+      countCrossPairCoverageGaps(env, left[1]) ||
       countCrossSpecBootstrapProgress(env, left[1], getPendingCrossRequestOrderIds) -
       countCrossSpecBootstrapProgress(env, right[1], getPendingCrossRequestOrderIds) ||
       compareStableText(left[0], right[0]),
@@ -1809,8 +1835,13 @@ const maintainMarketMakerCrossQuotes = async (
       ? Math.max(0, crossOfferBudget.remainingOffersTotal)
       : Number.MAX_SAFE_INTEGER;
     const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
+    const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);
+    const coverageGapCount = crossSpecPairIds(specs).filter(pairId => (visibleByPair.get(pairId) || 0) === 0).length;
+    const perAccountLimit = coverageGapCount > 0
+      ? Math.min(Math.max(1, Math.floor(maxOffersPerAccount)), coverageGapCount)
+      : Math.max(1, Math.floor(maxOffersPerAccount));
     const allowedNewOffers = Math.min(
-      Math.max(1, Math.floor(maxOffersPerAccount)),
+      perAccountLimit,
       remainingOpenSlots,
       remainingNewOffers,
       remainingGlobalOffers,
@@ -1837,6 +1868,7 @@ const maintainMarketMakerCrossQuotes = async (
         );
       })
       .sort((left, right) =>
+        (visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0) ||
         (progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0) ||
         getMarketMakerOfferLevel(left) - getMarketMakerOfferLevel(right) ||
         compareStableText(left.pairId, right.pairId) ||

@@ -112,12 +112,14 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.entityId, route.orderId)');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)');
     expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds)');
-    expect(mmNode).toContain('(progressByPair.get(left.pairId) || 0) - (progressByPair.get(right.pairId) || 0)');
+    expect(mmNode).toContain('const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);');
+    expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
+    expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '12'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT']");
-    expect(mmNode).toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT / 3');
+    expect(mmNode).toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT * 5');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '60'");
     expect(mmNode).toContain('type MarketMakerCrossOfferBudget = {');
     expect(mmNode).toContain('const reserveCrossOfferBudget = (');
