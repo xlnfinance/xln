@@ -107,9 +107,11 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
 
       if (input.hashPrecommits) {
         const existingPrecommits = existing.hashPrecommits || new Map<string, string[]>();
-        console.log(
-          `🔍 MERGE-PRECOMMITS: Merging ${input.hashPrecommits.size} hashPrecommits into existing ${existingPrecommits.size} for ${entityShort}:${input.signerId || ''}`,
-        );
+        if (HEAVY_LOGS) {
+          console.log(
+            `🔍 MERGE-PRECOMMITS: Merging ${input.hashPrecommits.size} hashPrecommits into existing ${existingPrecommits.size} for ${entityShort}:${input.signerId || ''}`,
+          );
+        }
         input.hashPrecommits.forEach((sigs, signerId) => {
           if (HEAVY_LOGS) console.log(`🔍 MERGE-DETAIL: Adding hashPrecommit from ${signerId} (${sigs.length} sigs)`);
           existingPrecommits.set(signerId, sigs);
@@ -126,9 +128,11 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
         }
       }
 
-      console.log(
-        `    🔄 Merging inputs for ${key}: txs=${input.entityTxs?.length || 0}, hashPrecommits=${input.hashPrecommits?.size || 0}, frame=${!!input.proposedFrame}`,
-      );
+      if (HEAVY_LOGS) {
+        console.log(
+          `    🔄 Merging inputs for ${key}: txs=${input.entityTxs?.length || 0}, hashPrecommits=${input.hashPrecommits?.size || 0}, frame=${!!input.proposedFrame}`,
+        );
+      }
     } else {
       merged.set(key, { ...input });
     }
