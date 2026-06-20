@@ -128,6 +128,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const jobCount = Math.min(MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length)');
     expect(mmNode).toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT');
     expect(mmNode).toContain('MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT');
+    expect(mmNode).toContain('hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)');
     expect(mmNode).toContain('const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {');
     expect(mmNode).toContain('if (hasSourceAccountCrossOffer(env, route)) return true;');
     expect(mmNode).not.toContain('Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)');
@@ -193,6 +194,27 @@ describe('production startup wiring', () => {
     expect(healthRoute).not.toContain('getMarketMakerHealth(');
     expect(mmNode).toContain("publishMarketMakerHealthSnapshot();\n      await yieldMarketMakerApi();\n      await driveQuotes('bootstrap');");
     expect(mmNode).toContain("startupPhase = 'bootstrap-offers';\n    publishMarketMakerHealthSnapshot();");
+  });
+
+  test('market maker quote hot path is producer-only after runtime loop starts', () => {
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const meshCommon = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-common.ts'), 'utf8');
+    const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
+    const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
+    const driveStart = mmNode.indexOf("const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady')");
+    const markReadyStart = mmNode.indexOf('const markOffersReady = (): void => {');
+    expect(ensureStart).toBeGreaterThan(0);
+    expect(readyStart).toBeGreaterThan(ensureStart);
+    expect(driveStart).toBeGreaterThan(readyStart);
+    expect(markReadyStart).toBeGreaterThan(driveStart);
+
+    const ensureConnectivity = mmNode.slice(ensureStart, readyStart);
+    const driveQuotes = mmNode.slice(driveStart, markReadyStart);
+    expect(ensureConnectivity).not.toContain('settleRuntimeFor(');
+    expect(driveQuotes).not.toContain('settleRuntimeFor(');
+    expect(driveQuotes).toContain('await yieldMarketMakerApi();');
+    expect(meshCommon).toContain('const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {');
+    expect(meshCommon).toContain('export const hasQueuedExtendCredit = (');
   });
 
   test('market maker bootstrap never sends hub-side credit inputs itself', () => {

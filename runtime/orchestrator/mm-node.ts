@@ -50,6 +50,7 @@ import {
   getEntityOutCapacity,
   getEntityReplicaById,
   hasQueuedOpenAccount,
+  hasQueuedExtendCredit,
   hasPairMutualCredit,
   isCanonicalAccountOpener,
   isAccountConsensusReady,
@@ -1213,7 +1214,6 @@ const ensureMarketMakerHubConnectivity = async (
 
   if (accountOpenInputs.length > 0) {
     enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: accountOpenInputs });
-    await settleRuntimeFor(env, 35);
     await yieldMarketMakerApi();
     return;
   }
@@ -1230,6 +1230,7 @@ const ensureMarketMakerHubConnectivity = async (
     for (const tokenId of tokenIds) {
       if (budget.remainingTxs <= 0) break collectCreditInputs;
       if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
+      if (hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
       const hubOutCapacity = getEntityOutCapacity(mmAccount, hubEntityId, tokenId);
 
       if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
@@ -1259,7 +1260,6 @@ const ensureMarketMakerHubConnectivity = async (
   }
 
   if (localCreditInputs.length > 0) {
-    await settleRuntimeFor(env, 45);
     await yieldMarketMakerApi();
   }
 };
@@ -2448,7 +2448,7 @@ const run = async (): Promise<void> => {
         await yieldMarketMakerApi();
       }
       if (!shouldContinue()) return;
-      await settleRuntimeFor(env, 45);
+      await yieldMarketMakerApi();
     } finally {
       loopInFlight = false;
     }
