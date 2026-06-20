@@ -246,6 +246,17 @@ let custodySupport: CustodySupportState | null = null;
 
 let resetPromise: Promise<void> | null = null;
 const CHILD_GRACEFUL_SHUTDOWN_MS = 20_000;
+const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;
+const CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS = Math.max(
+  1_000,
+  Math.floor(Number(process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000')),
+);
+
+type StopAllChildrenOptions = {
+  quiesceRounds?: number;
+  quiesceTimeoutMs?: number;
+  quiescePauseMs?: number;
+};
 
 const startTiming = (stage: keyof typeof timings): number => {
   const now = Date.now();
@@ -837,19 +848,22 @@ const spawnMarketMaker = async (): Promise<void> => {
   });
 };
 
-const stopAllChildren = async (): Promise<void> => {
+const stopAllChildren = async (options: StopAllChildrenOptions = {}): Promise<void> => {
   for (const child of hubChildren) clearChildRestartTimer(child);
   clearChildRestartTimer(marketMakerChild);
   const ownedLiveChildren = hubChildren.filter((child) => child.proc && child.proc.exitCode === null);
   const ownedLiveMarketMaker = marketMakerChild.proc && marketMakerChild.proc.exitCode === null ? marketMakerChild : null;
+  const quiesceRounds = options.quiesceRounds ?? 2;
+  const quiesceTimeoutMs = options.quiesceTimeoutMs ?? CHILD_RESET_QUIESCE_TIMEOUT_MS;
+  const quiescePauseMs = options.quiescePauseMs ?? 150;
   const quiesceUrls = [
     ...ownedLiveChildren.map((child) => `http://${args.host}:${child.apiPort}/api/control/runtime/quiesce`),
     ...(ownedLiveMarketMaker ? [`http://${args.host}:${ownedLiveMarketMaker.apiPort}/api/control/runtime/quiesce`] : []),
   ];
   // Initial reset often has no owned children yet. Do not probe random old listeners on the same ports.
-  for (let round = 0; round < 2 && quiesceUrls.length > 0; round += 1) {
-    await Promise.all(quiesceUrls.map((url) => postJson(url, 45_000)));
-    await delay(150);
+  for (let round = 0; round < quiesceRounds && quiesceUrls.length > 0; round += 1) {
+    await Promise.all(quiesceUrls.map((url) => postJson(url, quiesceTimeoutMs)));
+    await delay(quiescePauseMs);
   }
 
   const hubProcs = hubChildren.map((child) => {
@@ -1960,7 +1974,10 @@ const server = Bun.serve({
 
 const shutdown = async (): Promise<void> => {
   await stopServerGracefully(server, httpDrain, 'orchestrator', 5_000);
-  await stopAllChildren();
+  await stopAllChildren({
+    quiesceRounds: 1,
+    quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS,
+  });
   process.exit(0);
 };
 
