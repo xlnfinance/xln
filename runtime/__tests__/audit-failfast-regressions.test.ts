@@ -3008,6 +3008,17 @@ describe('audit fail-fast regressions', () => {
     const replica = makeReplicaMissingPrevFrameHash();
     replica.state.timestamp = 100_000;
     const counterpartyId = hex20('22');
+    const counterpartySignerId = hex20('23');
+    env.gossip = {
+      getProfiles: () => [{
+        entityId: counterpartyId,
+        metadata: {
+          board: {
+            validators: [{ signerId: counterpartySignerId }],
+          },
+        },
+      }],
+    } as Env['gossip'];
     const pendingFrame = {
       height: 11,
       timestamp: replica.state.timestamp - ACCOUNT_PENDING_RESEND_AFTER_MS - 1,
@@ -3037,6 +3048,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(outputs).toHaveLength(1);
     expect(outputs[0]?.entityId).toBe(counterpartyId);
+    expect(outputs[0]?.signerId).toBe(counterpartySignerId);
     expect(outputs[0]?.entityTxs).toEqual([
       { type: 'accountInput', data: accountMachine.pendingAccountInput },
     ]);
@@ -3079,6 +3091,50 @@ describe('audit fail-fast regressions', () => {
     expect(result.response?.kind).toBe('ack');
     expect(result.response?.height).toBe(10);
     expect(result.response?.prevHanko).toBe(accountMachine.lastOutboundFrameAck.prevHanko);
+  });
+
+  test('handleAccountInput rebuilds duplicate committed ACK when ACK cache was lost', async () => {
+    const seed = 'account-frame-duplicate-reack-cache-miss';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    attachSigningReplica(env, left.entityId, left.signerId);
+    const accountMachine = makeProposalAccount([], left.entityId, right.entityId);
+    accountMachine.currentHeight = 10;
+    accountMachine.currentFrame = {
+      ...accountMachine.currentFrame,
+      height: 10,
+      stateHash: `0x${'ef'.repeat(32)}`,
+    };
+    delete accountMachine.lastOutboundFrameAck;
+
+    const result = await handleAccountInput(env, accountMachine, {
+      kind: 'frame',
+      fromEntityId: right.entityId,
+      toEntityId: left.entityId,
+      signerId: right.signerId,
+      height: 10,
+      newAccountFrame: {
+        ...accountMachine.currentFrame,
+        prevFrameHash: `0x${'34'.repeat(32)}`,
+      },
+      newHanko: `0x${'56'.repeat(65)}`,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.response?.kind).toBe('ack');
+    expect(result.response?.height).toBe(10);
+    expect(result.response?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.prevHanko);
+    expect(result.events).toContain('↩️ Rebuilt ACK for duplicate committed frame 10');
+    const verified = await verifyHankoForHash(
+      result.response?.prevHanko || '',
+      accountMachine.currentFrame.stateHash,
+      left.entityId,
+      env,
+    );
+    expect(verified.valid).toBe(true);
   });
 
   test('handleAccountInput rejects frames whose byLeft does not match the signed proposer', async () => {

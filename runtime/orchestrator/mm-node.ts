@@ -259,34 +259,34 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '6'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '180'),
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '1'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '2'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1'),
+  Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '2'),
 );
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT = Math.max(
   4,
-  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '6'),
+  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '180'),
 );
 const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
   2,
   Number(
     process.env['MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||
-    '6',
+    '180',
   ),
 );
 const MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '3'),
+  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '60'),
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
@@ -2031,9 +2031,16 @@ const getMarketMakerHealth = (
     };
   });
 
+  const hubsDepthReady = hubs.length > 0 && hubs.every((entry) => entry.depthReady);
+  const crossDepthReady = !cross.applicable || (
+    cross.expectedRoutes > 0 &&
+    cross.routes.length >= cross.expectedRoutes &&
+    cross.routes.every((route) => route.depthReady)
+  );
+
   return {
     enabled: true,
-    ok: hubs.length > 0 && hubs.every((entry) => entry.ready) && cross.ok,
+    ok: hubsDepthReady && crossDepthReady,
     entityId: mmEntityId,
     connectivity,
     expectedOffersPerHub,
@@ -2054,20 +2061,13 @@ const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean =
   );
 };
 
-const hasMarketMakerQuoteBacklog = (
+const hasMarketMakerAccountBacklog = (
   env: Env,
-  contexts: MarketMakerEntityContext[],
-  visibleHubs: HubProfile[],
+  entityId: string,
+  hubEntityId: string,
 ): boolean => {
-  for (const context of contexts) {
-    const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
-    for (const hub of sameJurisdictionHubs) {
-      const account = getAccountMachine(env, context.entityId, hub.entityId);
-      if (account?.pendingFrame) return true;
-      if (Number(account?.mempool?.length || 0) > 0) return true;
-    }
-  }
-  return false;
+  const account = getAccountMachine(env, entityId, hubEntityId);
+  return Boolean(account?.pendingFrame) || Number(account?.mempool?.length || 0) > 0;
 };
 
 const run = async (): Promise<void> => {
@@ -2414,20 +2414,24 @@ const run = async (): Promise<void> => {
           : MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK,
       };
       const visibleHubs = readVisibleHubProfiles(env, true);
-      const shouldContinue = () => !shuttingDown && !hasMarketMakerQuoteBacklog(env, mmContexts, visibleHubs);
+      const shouldContinue = () => !shuttingDown;
+      const quoteableHubsFor = (context: MarketMakerEntityContext): HubProfile[] =>
+        visibleHubs
+          .filter(profile => sameJurisdiction(context, profile))
+          .filter(profile => !hasMarketMakerAccountBacklog(env, context.entityId, profile.entityId));
       if (visibleHubs.length === 0) return;
       if (!shouldContinue()) return;
       if (!areMarketMakerHubTransportsReady(getP2PState(env), visibleHubs)) return;
       await yieldMarketMakerApi();
       const healthBeforeQuotes = mode === 'bootstrap' ? buildMarketMakerHealthSnapshot() : null;
-      const primarySameReady = Boolean(healthBeforeQuotes?.hubs.every((hub) => hub.ready));
+      const primarySameDepthReady = Boolean(healthBeforeQuotes?.hubs.every((hub) => hub.depthReady));
 
       if (mode === 'bootstrap') {
         for (const context of mmContexts) {
-          if (primarySameReady) break;
+          if (primarySameDepthReady) break;
           await yieldMarketMakerApi();
           if (!shouldContinue()) return;
-          const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
+          const sameJurisdictionHubs = quoteableHubsFor(context);
           const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
           if (hubEntityIds.length === 0) continue;
           await ensureMarketMakerHubConnectivity(
@@ -2445,7 +2449,7 @@ const run = async (): Promise<void> => {
       const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<void> => {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
-        const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
+        const sameJurisdictionHubs = quoteableHubsFor(context);
         const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
         if (hubEntityIds.length === 0) return;
         const contextTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, context);
@@ -2467,7 +2471,7 @@ const run = async (): Promise<void> => {
         await yieldMarketMakerApi();
       };
 
-      if (!primarySameReady) {
+      if (mode !== 'bootstrap' || !primarySameDepthReady) {
         for (const context of mmContexts) {
           await maintainSameContextQuotes(context);
           if (!shouldContinue()) return;
@@ -2475,8 +2479,8 @@ const run = async (): Promise<void> => {
       }
       if (mode === 'bootstrap') {
         const health = buildMarketMakerHealthSnapshot();
-        if (!health?.hubs.every((hub) => hub.ready)) return;
-        if (health.cross.ok) return;
+        if (!health?.hubs.every((hub) => hub.depthReady)) return;
+        if (isMarketMakerDepthComplete(health)) return;
       }
 
       type CrossQuoteJob = {
@@ -2491,14 +2495,14 @@ const run = async (): Promise<void> => {
       for (const sourceContext of mmContexts) {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
-        const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
+        const sourceHubs = quoteableHubsFor(sourceContext);
         if (sourceHubs.length === 0) continue;
         const sourceTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, sourceContext);
         for (const targetContext of mmContexts) {
           await yieldMarketMakerApi();
           if (!shouldContinue()) return;
           if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
-          const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
+          const targetHubs = quoteableHubsFor(targetContext);
           if (targetHubs.length === 0) continue;
           const targetTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, targetContext);
           crossQuoteJobs.push({
@@ -2554,7 +2558,7 @@ const run = async (): Promise<void> => {
             : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
           connectivityBudget,
           crossOfferBudget,
-          mode === 'bootstrap',
+          false,
           shouldContinue,
         );
         await yieldMarketMakerApi();
@@ -2582,7 +2586,7 @@ const run = async (): Promise<void> => {
       await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
       const health = publishMarketMakerHealthSnapshot();
-      if (health?.ok) return true;
+      if (isMarketMakerDepthComplete(health)) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
     if (shuttingDown) return false;
@@ -2600,7 +2604,7 @@ const run = async (): Promise<void> => {
     if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;
     await driveQuotes();
     const health = publishMarketMakerHealthSnapshot();
-    if (startupPhase !== 'offers-ready' && health?.ok) {
+    if (startupPhase !== 'offers-ready' && isMarketMakerDepthComplete(health)) {
       markOffersReady();
     }
   };
