@@ -741,19 +741,22 @@ async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
 
 async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
   const deadline = Date.now() + 90_000;
+  let catchupBlocksMined = 0;
   for (;;) {
     const current = await readCurrentChainBlock(page);
     const runtimeVisible = await readRuntimeJurisdictionHeight(page);
     if (current >= targetBlock && runtimeVisible >= targetBlock) return;
     if (Date.now() > deadline) {
       throw new Error(
-        `Timed out waiting for block ${targetBlock}, current=${current}, runtimeVisible=${runtimeVisible}`,
+        `Timed out waiting for block ${targetBlock}, current=${current}, ` +
+          `runtimeVisible=${runtimeVisible}, catchupBlocksMined=${catchupBlocksMined}`,
       );
     }
     if (current < targetBlock) {
       await mineBlocks(page, Math.min(targetBlock - current, MAX_BATCH_MINE_BLOCKS));
     } else {
-      await page.waitForTimeout(250);
+      catchupBlocksMined += 1;
+      await mineOneBlock(page);
     }
   }
 }

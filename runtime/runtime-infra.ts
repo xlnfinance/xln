@@ -2,6 +2,7 @@ import type { Env, JReplica } from './types';
 import type { JAdapter } from './jadapter';
 import type { BrowserVMProvider, JAdapterConfig } from './jadapter/types';
 import { createJAdapter } from './jadapter';
+import { createJAdapterWithRetry } from './jadapter/retry';
 
 const hasLiveJAdapter = (value: unknown): value is JAdapter => {
   if (!value || typeof value !== 'object') return false;
@@ -74,7 +75,16 @@ export const rehydrateRestoredRuntimeInfra = async (
           chainId,
         };
         if (env.browserVMState !== undefined) adapterConfig.browserVMState = env.browserVMState;
-        jReplica.jadapter = await createJAdapter(adapterConfig);
+        jReplica.jadapter = await createJAdapterWithRetry(adapterConfig, {
+          context: `restore:${name}:browservm`,
+          attempts: 5,
+          onRetry: (attempt, attempts, error) => {
+            console.warn(
+              `⚠️ Retrying BrowserVM JAdapter restore for "${name}" ` +
+                `(${attempt}/${attempts}): ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        });
       } else if (hasRpcs) {
         const rpcUrl = jReplica.rpcs?.[0];
         if (!rpcUrl) continue;
@@ -84,7 +94,16 @@ export const rehydrateRestoredRuntimeInfra = async (
           rpcUrl,
           fromReplica: jReplica,
         };
-        const jadapter = await createJAdapter(adapterConfig);
+        const jadapter = await createJAdapterWithRetry(adapterConfig, {
+          context: `restore:${name}:rpc`,
+          attempts: 5,
+          onRetry: (attempt, attempts, error) => {
+            console.warn(
+              `⚠️ Retrying RPC JAdapter restore for "${name}" ` +
+                `(${attempt}/${attempts}): ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        });
         if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
           throw new Error(
             `RESTORE_JADAPTER_ADDRESSES_MISSING: name=${name} ` +
@@ -99,7 +118,9 @@ export const rehydrateRestoredRuntimeInfra = async (
         console.log(`✅ JAdapter derived for jReplica "${name}" (${hasRpcs ? 'rpc' : 'browservm'})`);
       }
     } catch (error) {
-      console.warn(`⚠️ Failed to derive JAdapter for jReplica "${name}":`, error);
+      throw new Error(
+        `RESTORE_JADAPTER_FAILED: name=${name} cause=${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 };

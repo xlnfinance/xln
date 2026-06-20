@@ -2623,7 +2623,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
       }
       try {
-        await saveEnvToDB(env, appliedRuntimeInputForPersistence, entityOutbox);
+        const saveOutcome = await saveEnvToDB(env, appliedRuntimeInputForPersistence, entityOutbox);
+        if (saveOutcome.staleWriterStopped) {
+          clearPendingAuditEvents(env);
+          return env;
+        }
         flushPendingAuditEvents(env);
         env.frameLogs = [];
         if (!quietRuntimeLogs) {
@@ -2777,7 +2781,7 @@ export const saveEnvToDB = async (
   env: Env,
   currentFrameInput?: RuntimeInput,
   _currentFrameOutputs?: RoutedEntityInput[],
-): Promise<void> => {
+): Promise<{ staleWriterStopped: boolean }> => {
   if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
@@ -2788,12 +2792,25 @@ export const saveEnvToDB = async (
     getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
     tryOpenFrameDb,
     getFrameDb,
-      rotateEpochDb: rotateStorageEpochDb,
-      getPerfMs,
+    rotateEpochDb: rotateStorageEpochDb,
+    getPerfMs,
     formatPerfMs,
     frameDbRecords: pendingFrameDbRecords,
+    stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
     ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
   }));
+  if (saveResult.staleWriterStopped) {
+    const state = ensureRuntimeState(env);
+    state.halted = true;
+    state.fatalDebugPayload = {
+      message:
+        `STALE_RUNTIME_WRITER_STOPPED: frame=${env.height} runtime=${String(env.runtimeId || '').slice(0, 12)}`,
+      height: Math.max(0, env.height ?? 0),
+      timestamp: Math.max(0, env.timestamp ?? 0),
+    };
+    state.stopLoop?.();
+    return { staleWriterStopped: true };
+  }
   if (saveResult.frameDbCommitted) {
     dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
   }
@@ -2808,6 +2825,7 @@ export const saveEnvToDB = async (
     });
     runtimeSyncChannel.close();
   }
+  return { staleWriterStopped: false };
 };
 
 type VerifyRuntimeChainResult = {

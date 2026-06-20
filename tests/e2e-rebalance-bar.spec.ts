@@ -564,7 +564,11 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string) {
     lastBody = body;
     lastStatus = resp.status();
     const code = String(body?.code || '');
-    if (code !== 'FAUCET_ACCOUNT_PENDING_FRAME' && code !== 'FAUCET_CLIENT_PENDING_FRAME') {
+    if (
+      code !== 'FAUCET_ACCOUNT_NOT_READY' &&
+      code !== 'FAUCET_ACCOUNT_PENDING_FRAME' &&
+      code !== 'FAUCET_CLIENT_PENDING_FRAME'
+    ) {
       break;
     }
     await page.waitForTimeout(300);
@@ -587,7 +591,11 @@ async function faucetAmount(page: Page, userEntityId: string, hubEntityId: strin
     lastBody = body;
     lastStatus = resp.status();
     const code = String(body?.code || '');
-    if (code !== 'FAUCET_ACCOUNT_PENDING_FRAME' && code !== 'FAUCET_CLIENT_PENDING_FRAME') {
+    if (
+      code !== 'FAUCET_ACCOUNT_NOT_READY' &&
+      code !== 'FAUCET_ACCOUNT_PENDING_FRAME' &&
+      code !== 'FAUCET_CLIENT_PENDING_FRAME'
+    ) {
       break;
     }
     await page.waitForTimeout(300);

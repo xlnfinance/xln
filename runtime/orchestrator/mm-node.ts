@@ -147,14 +147,30 @@ type MarketMakerEntityContext = {
 
 type MarketMakerTokenIdsByContext = ReadonlyMap<string, number[]>;
 
+type MarketMakerCrossRouteBlocker = {
+  role: 'source-mm-hub' | 'target-mm-hub';
+  entityId: string;
+  counterpartyEntityId: string;
+  reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool';
+  status: string | null;
+  currentHeight: number | null;
+  pendingFrame: boolean;
+  pendingFrameHeight: number | null;
+  mempoolLength: number;
+  swapOffers: number;
+};
+
 type MarketMakerCrossRouteHealth = {
   sourceJurisdiction: string;
   targetJurisdiction: string;
+  sourceMmEntityId: string;
+  targetMmEntityId: string;
   sourceHubEntityId: string;
   targetHubEntityId: string;
   offers: number;
   ready: boolean;
   depthReady: boolean;
+  blockers: MarketMakerCrossRouteBlocker[];
   pairs: Array<{
     pairId: string;
     offers: number;
@@ -241,11 +257,11 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '20'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '90'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '60'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '540'),
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -1426,10 +1442,44 @@ type MarketMakerCrossHealthPairExpectation = {
 type MarketMakerCrossHealthRouteGroup = {
   sourceJurisdiction: string;
   targetJurisdiction: string;
+  sourceMmEntityId: string;
+  targetMmEntityId: string;
   sourceHubEntityId: string;
   targetHubEntityId: string;
   expectedPairs: Map<string, MarketMakerCrossHealthPairExpectation>;
   specs: MarketMakerOfferSpec[];
+};
+
+const describeMarketMakerAccountBlocker = (
+  env: Env,
+  role: MarketMakerCrossRouteBlocker['role'],
+  entityId: string,
+  counterpartyEntityId: string,
+): MarketMakerCrossRouteBlocker | null => {
+  const account = getAccountMachine(env, entityId, counterpartyEntityId);
+  const status = account ? String(account.status || 'active') : null;
+  const currentHeight = account ? Number(account.currentHeight ?? 0) : null;
+  const pendingFrame = Boolean(account?.pendingFrame);
+  const mempoolLength = Number(account?.mempool?.length || 0);
+  let reason: MarketMakerCrossRouteBlocker['reason'] | null = null;
+  if (!account) reason = 'missing-account';
+  else if (status !== 'active') reason = 'inactive-account';
+  else if (Number(currentHeight ?? 0) <= 0) reason = 'height-zero';
+  else if (pendingFrame) reason = 'pending-frame';
+  else if (mempoolLength > 0) reason = 'mempool';
+  if (!reason) return null;
+  return {
+    role,
+    entityId,
+    counterpartyEntityId,
+    reason,
+    status,
+    currentHeight,
+    pendingFrame,
+    pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
+    mempoolLength,
+    swapOffers: Number(account?.swapOffers?.size || 0),
+  };
 };
 
 const buildExpectedMarketMakerCrossRouteGroups = (
@@ -1477,6 +1527,8 @@ const buildExpectedMarketMakerCrossRouteGroups = (
         const group = groups.get(key) ?? {
           sourceJurisdiction: sourceContext.jurisdictionName,
           targetJurisdiction: targetContext.jurisdictionName,
+          sourceMmEntityId: sourceContext.entityId,
+          targetMmEntityId: targetContext.entityId,
           sourceHubEntityId,
           targetHubEntityId,
           expectedPairs: new Map<string, MarketMakerCrossHealthPairExpectation>(),
@@ -1548,14 +1600,21 @@ const buildMarketMakerCrossHealth = (
       .sort((left, right) => compareStableText(left.pairId, right.pairId));
     const offers = group.specs.filter(spec => hasMarketMakerCrossOffer(env, spec)).length;
     const expectedOffers = pairs.reduce((sum, pair) => sum + pair.expectedOffers, 0);
+    const blockers = [
+      describeMarketMakerAccountBlocker(env, 'source-mm-hub', group.sourceMmEntityId, group.sourceHubEntityId),
+      describeMarketMakerAccountBlocker(env, 'target-mm-hub', group.targetMmEntityId, group.targetHubEntityId),
+    ].filter((blocker): blocker is MarketMakerCrossRouteBlocker => Boolean(blocker));
     return {
       sourceJurisdiction: group.sourceJurisdiction,
       targetJurisdiction: group.targetJurisdiction,
+      sourceMmEntityId: group.sourceMmEntityId,
+      targetMmEntityId: group.targetMmEntityId,
       sourceHubEntityId: group.sourceHubEntityId,
       targetHubEntityId: group.targetHubEntityId,
       offers,
       ready: pairs.length > 0 && pairs.every(pair => pair.ready),
       depthReady: expectedOffers > 0 && offers >= expectedOffers && pairs.every(pair => pair.depthReady),
+      blockers,
       pairs,
     };
   }).sort((left, right) =>
@@ -2262,8 +2321,7 @@ const run = async (): Promise<void> => {
         await yieldMarketMakerApi();
       };
 
-      const sameQuoteContexts = mode === 'bootstrap' ? mmContexts.slice(0, 1) : mmContexts;
-      for (const context of sameQuoteContexts) {
+      for (const context of mmContexts) {
         await maintainSameContextQuotes(context);
         if (!shouldContinue()) return;
       }

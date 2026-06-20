@@ -11,7 +11,7 @@ import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
 import { createFrameHash } from '../account-consensus-frame';
 import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
-import { generateLazyEntityId } from '../entity-factory';
+import { generateLazyEntityId, generateNumberedEntityId } from '../entity-factory';
 import { isLeftEntity } from '../entity-id-utils';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
@@ -43,6 +43,7 @@ import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/hand
 import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity-tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
+import { processSettleAction } from '../entity-tx/handlers/settle';
 import { handleJEvent } from '../entity-tx/j-events';
 import { tryFinalizeAccountJEvents } from '../entity-tx/j-events-account';
 import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity-tx/j-events-htlc';
@@ -754,6 +755,100 @@ describe('audit fail-fast regressions', () => {
     // Regression: the contract requires EOA signer weight to satisfy threshold
     // independently. Nested assumed-yes weight can contribute to total power,
     // but cannot make an unenforceable off-chain proof look valid.
+    expect(result.valid).toBe(false);
+    expect(result.entityId).toBeNull();
+  });
+
+  test('registered hanko verification accepts a board that matches local registered config', async () => {
+    const hash = `0x${'bc'.repeat(32)}`;
+    const env = createEmptyEnv('registered-hanko-board-positive');
+    const signerPrivateKey = deriveSignerKeySync('registered-hanko-board-positive', '1');
+    const signerAddress = deriveSignerAddressSync('registered-hanko-board-positive', '1').toLowerCase();
+    const entityId = generateNumberedEntityId(42).toLowerCase();
+    const config: ConsensusConfig = {
+      mode: 'proposer-based',
+      threshold: 1n,
+      validators: [signerAddress],
+      shares: { [signerAddress]: 1n },
+    };
+    env.eReplicas.set(`${entityId}:${signerAddress}`, {
+      entityId,
+      signerId: signerAddress,
+      mempool: [],
+      isProposer: true,
+      state: { entityId, config },
+    } as unknown as EntityReplica);
+    const hanko = await buildRealHanko(bufferFromHex(hash), {
+      noEntities: [],
+      privateKeys: [signerPrivateKey],
+      claims: [{
+        entityId: bufferFromHex(entityId),
+        entityIndexes: [0],
+        weights: [1],
+        threshold: 1,
+      }],
+    });
+
+    const result = await verifyHankoForHash(encodeHankoForTest(hanko), hash, entityId, env);
+
+    expect(result.valid).toBe(true);
+    expect(result.entityId?.toLowerCase()).toBe(entityId);
+  });
+
+  test('registered hanko verification rejects forged self-contained board without local board of record', async () => {
+    const hash = `0x${'bd'.repeat(32)}`;
+    const signerPrivateKey = deriveSignerKeySync('registered-hanko-board-missing', '1');
+    const entityId = generateNumberedEntityId(43).toLowerCase();
+    const hanko = await buildRealHanko(bufferFromHex(hash), {
+      noEntities: [],
+      privateKeys: [signerPrivateKey],
+      claims: [{
+        entityId: bufferFromHex(entityId),
+        entityIndexes: [0],
+        weights: [1],
+        threshold: 1,
+      }],
+    });
+
+    const result = await verifyHankoForHash(encodeHankoForTest(hanko), hash, entityId);
+
+    expect(result.valid).toBe(false);
+    expect(result.entityId).toBeNull();
+  });
+
+  test('registered hanko verification rejects forged board even when signer is a real validator', async () => {
+    const hash = `0x${'be'.repeat(32)}`;
+    const env = createEmptyEnv('registered-hanko-board-mismatch');
+    const signerPrivateKey = deriveSignerKeySync('registered-hanko-board-mismatch', '1');
+    const signerAddress = deriveSignerAddressSync('registered-hanko-board-mismatch', '1').toLowerCase();
+    const cosignerAddress = deriveSignerAddressSync('registered-hanko-board-mismatch', '2').toLowerCase();
+    const entityId = generateNumberedEntityId(44).toLowerCase();
+    const config: ConsensusConfig = {
+      mode: 'proposer-based',
+      threshold: 2n,
+      validators: [signerAddress, cosignerAddress],
+      shares: { [signerAddress]: 1n, [cosignerAddress]: 1n },
+    };
+    env.eReplicas.set(`${entityId}:${signerAddress}`, {
+      entityId,
+      signerId: signerAddress,
+      mempool: [],
+      isProposer: true,
+      state: { entityId, config },
+    } as unknown as EntityReplica);
+    const forgedHanko = await buildRealHanko(bufferFromHex(hash), {
+      noEntities: [],
+      privateKeys: [signerPrivateKey],
+      claims: [{
+        entityId: bufferFromHex(entityId),
+        entityIndexes: [0],
+        weights: [1],
+        threshold: 1,
+      }],
+    });
+
+    const result = await verifyHankoForHash(encodeHankoForTest(forgedHanko), hash, entityId, env);
+
     expect(result.valid).toBe(false);
     expect(result.entityId).toBeNull();
   });
@@ -3416,6 +3511,54 @@ describe('audit fail-fast regressions', () => {
     expect(finalization?.starterInitialArguments).toBe('0x1111');
     expect(finalization?.starterIncrementedArguments).toBe('0x2222');
     expect(newState.accounts.get(starterId)?.activeDispute?.finalizeQueued).toBe(true);
+  });
+
+  test('auto-approved settlement nonce outranks stale high-nonce dispute proofs', async () => {
+    const seed = 'auto-settlement-nonce-bumps-proof';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    const user = registerLazySigner(seed, '1');
+    const hub = registerLazySigner(seed, '2');
+    attachSigningReplica(env, user.entityId, user.signerId);
+    attachSigningReplica(env, hub.entityId, hub.signerId);
+
+    const depositoryAddress = hex20('1');
+    const userState = makeEntityState(user.entityId);
+    userState.config = {
+      ...makeSingleSignerConfigFor(user.signerId),
+      jurisdiction: {
+        name: 'Testnet',
+        depositoryAddress,
+        entityProviderAddress: hex20('2'),
+        chainId: 31337,
+      },
+    } as EntityState['config'];
+
+    const account = makeProposalAccount([], user.entityId, hub.entityId);
+    account.onChainSettlementNonce = 1;
+    account.proofHeader = { fromEntity: user.entityId, toEntity: hub.entityId, nonce: 50 };
+
+    const result = await processSettleAction(
+      account,
+      {
+        type: 'propose',
+        ops: [{ type: 'c2r', tokenId: 1, amount: 1n }],
+        version: 1,
+      },
+      hub.entityId,
+      user.entityId,
+      1_000,
+      env,
+      userState,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.autoApproveOutput?.entityTxs?.[0]?.data?.settleAction?.nonceAtSign).toBe(51);
+    expect(account.settlementWorkspace?.nonceAtSign).toBe(51);
+    expect(account.settlementWorkspace?.postSettlementDisputeProof?.nonce).toBe(52);
+    expect(account.disputeProofNoncesByHash?.[
+      account.settlementWorkspace!.postSettlementDisputeProof!.proofBodyHash
+    ]).toBe(52);
   });
 
   test('settlement finalization activates post-settlement dispute hash atomically', () => {

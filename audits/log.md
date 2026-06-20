@@ -4,9 +4,17 @@ Purpose: track external AI audits with a terse usefulness score so we can ask th
 
 ## Running Summary
 
-- Reports logged: 3
-- Average score: 833/1000
-- Current best reviewer: Claude - best precision and lowest false-positive rate on the frontend time-machine contract.
+- Reports logged: 4
+- Average score: 857/1000
+- Current best reviewer: Codex - strongest launch-blocker audit so far; tied findings directly to XLN nonce, finality, and Hanko enforceability.
+
+## 2026-06-20 - Runtime Security / Settlement / TRON / Hanko
+
+| Reviewer | Score | One-line verdict |
+| --- | ---: | --- |
+| Codex | 930/1000 | Excellent signal: all 3 P1s reproduced against real XLN paths, with no generic crypto noise. |
+
+Best of round: Codex; this is the audit style to repeat for capped-testnet launch blockers.
 
 ## 2026-06-19 - Frontend Time-Machine / Runtime Env Contract
 

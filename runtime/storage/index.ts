@@ -279,6 +279,7 @@ export type StorageFrameSaveResult = {
   materialized: boolean;
   materializedOverlayRecords: number;
   frameDbCommitted: boolean;
+  staleWriterStopped?: boolean;
   latestSnapshotHeight?: number;
   retainedHistoryBytes?: number;
   snapshotCreated?: boolean;
@@ -300,6 +301,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   tryOpenFrameDb: (env: Env) => Promise<boolean>;
   getFrameDb: (env: Env) => RuntimeFrameDbLike;
   rotateEpochDb?: (env: Env, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
+  stopStaleWriterOnHeadAhead?: boolean;
 } & PerfDeps): Promise<StorageFrameSaveResult> => {
   const config = runtimeConfigFromEnv(options.env);
   if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
@@ -335,6 +337,14 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   const writeStartedAt = options.getPerfMs();
   const head = await readHead(historyDb, config);
+  if (options.stopStaleWriterOnHeadAhead && head.latestHeight > options.env.height) {
+    return {
+      materialized: false,
+      materializedOverlayRecords: 0,
+      frameDbCommitted: false,
+      staleWriterStopped: true,
+    };
+  }
   if (head.latestHeight !== options.env.height - 1) {
     throw new Error(
       `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ${options.env.height} after persisted head ${head.latestHeight}`,
