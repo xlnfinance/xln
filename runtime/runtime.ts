@@ -2677,7 +2677,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     }
 
     // 1. Broadcast entity outputs via P2P (fire-and-forget)
-    if (remoteOutputs.length > 0) {
+    if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true) {
       console.log(`📡 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
     }
     const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs, outputRoutingDeps);
