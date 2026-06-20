@@ -670,6 +670,24 @@ const prioritizeJEventFrame = (
   return true;
 };
 
+const applyEntityInputFrameCap = (
+  runtimeInput: RuntimeInput,
+  mempool: RuntimeInput,
+  runtimeState: NonNullable<Env['runtimeState']>,
+  maxEntityInputsPerFrame: number,
+  timestamp: number,
+): boolean => {
+  const frameLimit = Math.max(0, Math.floor(Number(maxEntityInputsPerFrame)));
+  if (frameLimit <= 0 || runtimeInput.entityInputs.length <= frameLimit) return false;
+
+  const deferredInputs = runtimeInput.entityInputs.slice(frameLimit);
+  runtimeInput.entityInputs = runtimeInput.entityInputs.slice(0, frameLimit);
+  mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
+  mempool.queuedAt = mempool.queuedAt ?? timestamp;
+  runtimeState.clockPrimed = true;
+  return true;
+};
+
 const getRuntimeWakeDeps = (): RuntimeWakeDeps => ({
   ensureRuntimeState,
   ensureRuntimeMempool,
@@ -872,9 +890,17 @@ const quarantineLiveRuntimeInput = (
  *   3. broadcast — J-batch execution + E-output P2P dispatch (side effects)
  *   4. sleep     — configurable delay (0 = no wait, just yield)
  */
-export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): () => void {
+export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxEntityInputsPerFrame?: number }): () => void {
   if (env.scenarioMode) return () => {};
   const state = ensureRuntimeState(env);
+  if (config?.maxEntityInputsPerFrame !== undefined) {
+    const configuredMaxEntityInputs = Number(config.maxEntityInputsPerFrame);
+    if (Number.isFinite(configuredMaxEntityInputs)) {
+      state.maxEntityInputsPerFrame = Math.max(1, Math.floor(configuredMaxEntityInputs));
+    } else {
+      delete state.maxEntityInputsPerFrame;
+    }
+  }
   if (state.halted) return state.stopLoop ?? (() => {});
   if (state.loopActive) return state.stopLoop ?? (() => {});
   const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));
@@ -2433,6 +2459,13 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       runtimeInput,
       mempool,
       state,
+      mempoolQueuedAt ?? (env.timestamp ?? 0),
+    );
+    applyEntityInputFrameCap(
+      runtimeInput,
+      mempool,
+      state,
+      state.maxEntityInputsPerFrame ?? 0,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
     );
     const hasRuntimeInput =

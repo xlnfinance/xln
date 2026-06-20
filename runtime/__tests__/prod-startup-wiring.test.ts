@@ -111,10 +111,14 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('env.quietRuntimeLogs = true;');
     const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     expect(runtimeSource).toContain('const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));');
+    expect(runtimeSource).toContain('maxEntityInputsPerFrame?: number');
+    expect(runtimeSource).toContain('const applyEntityInputFrameCap =');
+    expect(runtimeSource).toContain('mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];');
     expect(runtimeSource).toContain('if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
     expect(runtimeSource).not.toContain('void config;');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
-    expect(mmNode).toContain('startRuntimeLoop(env, { tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS });');
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'");
+    expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'");
@@ -151,6 +155,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
     expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '2'");
     expect(mmNode).toContain("MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '2'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '30'");

@@ -241,6 +241,10 @@ const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
   Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'),
 );
+const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'),
+);
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
   Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '30'),
@@ -2081,7 +2085,10 @@ const run = async (): Promise<void> => {
   const env = await main(resolvedArgs.seed);
   configureMarketMakerStorage(env);
   configureMarketMakerRuntimeLogging(env);
-  startRuntimeLoop(env, { tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS });
+  startRuntimeLoop(env, {
+    tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
+    maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
+  });
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
   let mmContexts: MarketMakerEntityContext[] = [];
