@@ -98,8 +98,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("role: 'source-mm-hub' | 'target-mm-hub';");
     expect(mmNode).toContain('const describeMarketMakerAccountBlocker = (');
     expect(mmNode).toContain("reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool';");
-    expect(mmNode).toContain('const liveMarketMakerHealth = activeEntityId && primaryContext');
-    expect(mmNode).toContain('if (liveMarketMakerHealth) cachedMarketMakerHealth = liveMarketMakerHealth;');
+    expect(mmNode).toContain('const publishMarketMakerHealthSnapshot = (): MarketMakerHealth | null => {');
+    expect(mmNode).toContain('if (health) cachedMarketMakerHealth = health;');
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
     expect(mmNode).toContain('return unique;');
     expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
@@ -160,7 +160,7 @@ describe('production startup wiring', () => {
     expect(buildExpected).not.toContain('for (const pair of buildMarketMakerCrossTokenPairs');
   });
 
-  test('market maker health publishes live bootstrap readiness before quote loop completes', () => {
+  test('market maker health route serves cached bootstrap readiness without scanning state', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')");
     const controlRouteStart = mmNode.indexOf("if (pathname === '/api/control/p2p/stop'");
@@ -168,11 +168,11 @@ describe('production startup wiring', () => {
     expect(controlRouteStart).toBeGreaterThan(healthRouteStart);
 
     const healthRoute = mmNode.slice(healthRouteStart, controlRouteStart);
-    expect(healthRoute).toContain('const liveMarketMakerHealth = activeEntityId && primaryContext');
-    expect(healthRoute).toContain('if (liveMarketMakerHealth) cachedMarketMakerHealth = liveMarketMakerHealth;');
-    expect(healthRoute).toContain('const cachedHealth = liveMarketMakerHealth ?? cachedMarketMakerHealth;');
+    expect(healthRoute).toContain('const cachedHealth = cachedMarketMakerHealth;');
     expect(healthRoute).toContain('expectedRoutes: 0');
-    expect(healthRoute).not.toContain('const cachedHealth = cachedMarketMakerHealth;');
+    expect(healthRoute).not.toContain('getMarketMakerHealth(');
+    expect(mmNode).toContain("publishMarketMakerHealthSnapshot();\n      await yieldMarketMakerApi();\n      await driveQuotes('bootstrap');");
+    expect(mmNode).toContain("startupPhase = 'bootstrap-offers';\n    publishMarketMakerHealthSnapshot();");
   });
 
   test('market maker bootstrap never sends hub-side credit inputs itself', () => {

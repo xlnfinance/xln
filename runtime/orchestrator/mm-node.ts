@@ -1977,6 +1977,31 @@ const run = async (): Promise<void> => {
   let lastDirectEntityInput: DirectEntityInputDebug | null = null;
   let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
 
+  const buildMarketMakerHealthSnapshot = (): MarketMakerHealth | null => {
+    const primaryContext = mmContexts[0] ?? null;
+    const activeEntityId = activeMmEntityId;
+    if (!activeEntityId || !primaryContext) return null;
+    const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryContext, profile));
+    const allVisibleHubs = readVisibleHubProfiles(env, true);
+    return getMarketMakerHealth(
+      env,
+      primaryContext.entityId,
+      visibleHubs.map(profile => profile.entityId),
+      getMarketMakerTokenIds(mmTokenIdsByContext, primaryContext),
+      {
+        contexts: mmContexts,
+        visibleHubs: allVisibleHubs,
+        tokenIdsByContext: mmTokenIdsByContext,
+      },
+    );
+  };
+
+  const publishMarketMakerHealthSnapshot = (): MarketMakerHealth | null => {
+    const health = buildMarketMakerHealthSnapshot();
+    if (health) cachedMarketMakerHealth = health;
+    return health;
+  };
+
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
   nodeLog.info('startup phase', { phase: startupPhase });
 
@@ -2067,21 +2092,7 @@ const run = async (): Promise<void> => {
         );
         const allVisibleHubs = readVisibleHubProfiles(env, true);
         const activeEntityId = activeMmEntityId;
-        const liveMarketMakerHealth = activeEntityId && primaryContext
-          ? getMarketMakerHealth(
-              env,
-              primaryContext.entityId,
-              visibleHubs.map(profile => profile.entityId),
-              getMarketMakerTokenIds(mmTokenIdsByContext, primaryContext),
-              {
-                contexts: mmContexts,
-                visibleHubs: allVisibleHubs,
-                tokenIdsByContext: mmTokenIdsByContext,
-              },
-            )
-          : null;
-        if (liveMarketMakerHealth) cachedMarketMakerHealth = liveMarketMakerHealth;
-        const cachedHealth = liveMarketMakerHealth ?? cachedMarketMakerHealth;
+        const cachedHealth = cachedMarketMakerHealth;
         const health = {
           ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
           name: resolvedArgs.name,
@@ -2431,50 +2442,30 @@ const run = async (): Promise<void> => {
   const waitForBootstrapOffers = async (): Promise<boolean> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
     while (!shuttingDown && Date.now() < deadline) {
+      publishMarketMakerHealthSnapshot();
+      await yieldMarketMakerApi();
       await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
-      const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
-      const allVisibleHubs = readVisibleHubProfiles(env, true);
-      const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
-      const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
-        contexts: mmContexts,
-        visibleHubs: allVisibleHubs,
-        tokenIdsByContext: mmTokenIdsByContext,
-      });
-      cachedMarketMakerHealth = health;
-      if (health.ok) return true;
+      const health = publishMarketMakerHealthSnapshot();
+      if (health?.ok) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
     if (shuttingDown) return false;
+    const health = publishMarketMakerHealthSnapshot();
     const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
-    const allVisibleHubs = readVisibleHubProfiles(env, true);
-    const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
-    const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
-      contexts: mmContexts,
-      visibleHubs: allVisibleHubs,
-      tokenIdsByContext: mmTokenIdsByContext,
-    });
-    cachedMarketMakerHealth = health;
     console.warn(
-      `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify(health.hubs.map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))} cross=${safeStringify({ expectedRoutes: health.cross.expectedRoutes, routes: health.cross.routes.map(route => ({ sourceHubEntityId: route.sourceHubEntityId, targetHubEntityId: route.targetHubEntityId, offers: route.offers, ready: route.ready })) })}`,
+      `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify((health?.hubs ?? []).map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))} cross=${safeStringify({ expectedRoutes: health?.cross.expectedRoutes ?? 0, routes: (health?.cross.routes ?? []).map(route => ({ sourceHubEntityId: route.sourceHubEntityId, targetHubEntityId: route.targetHubEntityId, offers: route.offers, ready: route.ready })) })}`,
     );
     return false;
   };
 
   let loop: ReturnType<typeof setInterval> | null = null;
   const runQuoteMaintenance = async (): Promise<void> => {
+    publishMarketMakerHealthSnapshot();
     await driveQuotes();
     if (startupPhase !== 'offers-ready') {
-      const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
-      const allVisibleHubs = readVisibleHubProfiles(env, true);
-      const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
-      const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
-        contexts: mmContexts,
-        visibleHubs: allVisibleHubs,
-        tokenIdsByContext: mmTokenIdsByContext,
-      });
-      cachedMarketMakerHealth = health;
-      if (health.ok) {
+      const health = publishMarketMakerHealthSnapshot();
+      if (health?.ok) {
         markOffersReady();
       }
     }
@@ -2494,6 +2485,7 @@ const run = async (): Promise<void> => {
     }, MARKET_MAKER_QUOTE_LOOP_MS);
   };
   startupPhase = 'runtime-ready';
+  publishMarketMakerHealthSnapshot();
   console.log(
     `[MESH-MM] RUNTIME_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
@@ -2502,6 +2494,7 @@ const run = async (): Promise<void> => {
     await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);
     if (shuttingDown) return;
     startupPhase = 'bootstrap-offers';
+    publishMarketMakerHealthSnapshot();
     if (await waitForBootstrapOffers()) {
       markOffersReady();
     } else {
