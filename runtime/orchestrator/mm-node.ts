@@ -279,6 +279,10 @@ const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
     String(Math.max(15, MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT * 5)),
   ),
 );
+const MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '3'),
+);
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1'),
@@ -443,6 +447,11 @@ const configureMarketMakerStorage = (env: Env): void => {
     },
   };
   console.log('[MESH-MM] Runtime storage disabled for rebuildable market-maker state');
+};
+
+const configureMarketMakerRuntimeLogging = (env: Env): void => {
+  if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;
+  env.quietRuntimeLogs = true;
 };
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
@@ -1839,7 +1848,10 @@ const maintainMarketMakerCrossQuotes = async (
     const coverageGapCount = crossSpecPairIds(specs).filter(pairId => (visibleByPair.get(pairId) || 0) === 0).length;
     const perAccountLimit = coverageGapCount > 0
       ? Math.min(Math.max(1, Math.floor(maxOffersPerAccount)), coverageGapCount)
-      : Math.max(1, Math.floor(maxOffersPerAccount));
+      : Math.min(
+          Math.max(1, Math.floor(maxOffersPerAccount)),
+          MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT,
+        );
     const allowedNewOffers = Math.min(
       perAccountLimit,
       remainingOpenSlots,
@@ -2017,11 +2029,23 @@ const getMarketMakerHealth = (
   };
 };
 
+const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean => {
+  if (!health?.enabled || !health.ok) return false;
+  if (health.hubs.length === 0 || !health.hubs.every((hub) => hub.depthReady)) return false;
+  if (!health.cross.applicable) return true;
+  return (
+    health.cross.expectedRoutes > 0 &&
+    health.cross.routes.length >= health.cross.expectedRoutes &&
+    health.cross.routes.every((route) => route.depthReady)
+  );
+};
+
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
   const env = await main(resolvedArgs.seed);
   configureMarketMakerStorage(env);
+  configureMarketMakerRuntimeLogging(env);
   startRuntimeLoop(env, { tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS });
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
@@ -2523,13 +2547,12 @@ const run = async (): Promise<void> => {
 
   let loop: ReturnType<typeof setInterval> | null = null;
   const runQuoteMaintenance = async (): Promise<void> => {
-    publishMarketMakerHealthSnapshot();
+    const before = publishMarketMakerHealthSnapshot();
+    if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;
     await driveQuotes();
-    if (startupPhase !== 'offers-ready') {
-      const health = publishMarketMakerHealthSnapshot();
-      if (health?.ok) {
-        markOffersReady();
-      }
+    const health = publishMarketMakerHealthSnapshot();
+    if (startupPhase !== 'offers-ready' && health?.ok) {
+      markOffersReady();
     }
   };
   const failQuoteLoop = (error: unknown): void => {
