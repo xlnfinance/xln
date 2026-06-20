@@ -143,6 +143,98 @@ describe('runtime ingress timestamp', () => {
     expect(replica.state.crontabState?.hooks?.has('watchdog:futuristic')).toBe(true);
   });
 
+  test('runtime frame cap leaves excess entity inputs queued for later frames', async () => {
+    const env = createIsolatedEnv('runtime-entity-input-frame-cap');
+    env.quietRuntimeLogs = true;
+    env.scenarioMode = true;
+    env.timestamp = 1_000;
+    env.runtimeState = {
+      loopActive: false,
+      halted: false,
+      maxEntityInputsPerFrame: 1,
+    };
+
+    const entityIds = [`0x${'21'.repeat(32)}`, `0x${'22'.repeat(32)}`, `0x${'23'.repeat(32)}`];
+    for (const entityId of entityIds) {
+      env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, 1_000));
+    }
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: entityIds.map(entityId => ({ entityId, signerId: '1', entityTxs: [] })),
+    });
+
+    await process(env);
+    expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual(entityIds.slice(1));
+    expect(env.runtimeMempool?.queuedAt).toBe(1_000);
+
+    await process(env);
+    expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual(entityIds.slice(2));
+    expect(env.runtimeMempool?.queuedAt).toBe(1_000);
+
+    await process(env);
+    expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
+    expect(env.runtimeMempool?.queuedAt).toBeUndefined();
+  });
+
+  test('runtime frame cap preserves watcher j_event priority across queued entity inputs', async () => {
+    const env = createIsolatedEnv('runtime-entity-input-frame-cap-j-event');
+    env.quietRuntimeLogs = true;
+    env.scenarioMode = true;
+    env.timestamp = 1_000;
+    env.runtimeState = {
+      loopActive: false,
+      halted: false,
+      maxEntityInputsPerFrame: 1,
+    };
+
+    const normalSignerId = '1';
+    const jEventSignerId = '2';
+    const normalSignerAddress = deriveSignerAddressSync(env.runtimeSeed!, normalSignerId).toLowerCase();
+    const jEventSignerAddress = deriveSignerAddressSync(env.runtimeSeed!, jEventSignerId).toLowerCase();
+    const normalEntityId = generateLazyEntityId([normalSignerAddress], 1n);
+    const jEventEntityId = generateLazyEntityId([jEventSignerAddress], 1n);
+    env.eReplicas.set(`${normalEntityId}:${normalSignerId}`, makeReplica(normalEntityId, 1_000, normalSignerId));
+    env.eReplicas.set(`${jEventEntityId}:${jEventSignerId}`, makeReplica(jEventEntityId, 1_000, jEventSignerId));
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [
+        {
+          entityId: normalEntityId,
+          signerId: normalSignerId,
+          entityTxs: [{
+            type: 'profile-update',
+            data: {
+              profile: {
+                entityId: normalEntityId,
+                name: 'Normal Input',
+              },
+            },
+          }],
+        },
+        {
+          entityId: jEventEntityId,
+          signerId: jEventSignerId,
+          entityTxs: [{
+            type: 'j_event',
+            data: {
+              from: jEventSignerId,
+              observedAt: 1_000,
+              blockNumber: 1,
+              blockHash: `0x${'ab'.repeat(32)}`,
+              transactionHash: `0x${'cd'.repeat(32)}`,
+            },
+          }],
+        },
+      ],
+    });
+
+    await process(env);
+    expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual([normalEntityId]);
+    expect(env.runtimeMempool?.queuedAt).toBe(1_000);
+  });
+
   test('new ingress timestamp is clamped in live mode and still fires due hooks', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;

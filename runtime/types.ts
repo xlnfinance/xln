@@ -554,22 +554,23 @@ export interface Env {
       accountMerkleRadix?: 16 | 256;
     };
   } | undefined;
-	  runtimeState?: {
-	    loopActive?: boolean;
-	    halted?: boolean;
-	    fatalDebugPayload?: {
-	      message: string;
-	      stack?: string;
-	      height?: number;
-	      timestamp?: number;
-	    };
-	    loopPromise?: Promise<void> | null;
+  runtimeState?: {
+    loopActive?: boolean;
+    halted?: boolean;
+    fatalDebugPayload?: {
+      message: string;
+      stack?: string;
+      height?: number;
+      timestamp?: number;
+    };
+    loopPromise?: Promise<void> | null;
     stopLoop?: (() => void) | null;
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
     clockPrimed?: boolean;
     persistencePaused?: boolean;
     lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
+    maxEntityInputsPerFrame?: number;
     processingPromise?: Promise<void> | null;
     p2p?: RuntimeP2P | null | undefined;
     pendingP2PConfig?: RuntimeP2PConfigLike | null;
