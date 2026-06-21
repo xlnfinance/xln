@@ -132,7 +132,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("role: 'source-mm-hub' | 'target-mm-hub';");
     expect(mmNode).toContain('const describeMarketMakerAccountBlocker = (');
     expect(mmNode).toContain("reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool';");
-    expect(mmNode).toContain('const publishMarketMakerHealthSnapshot = (): MarketMakerHealth | null => {');
+    expect(mmNode).toContain('const publishMarketMakerHealthSnapshot = (options: { includeCross?: boolean } = {}): MarketMakerHealth | null => {');
     expect(mmNode).toContain('if (health) cachedMarketMakerHealth = health;');
     expect(mmNode).toContain('const shouldStartJWatcherAtCurrentBlock = (): boolean =>');
     expect(mmNode).toContain("!envFlagEnabled(process.env['XLN_MARKET_MAKER_REPLAY_HISTORICAL_J_EVENTS'])");
@@ -190,7 +190,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('if (hasPendingRuntimeWork(env)) return true;');
     expect(mmNode).not.toContain('!hasMarketMakerQuoteBacklog(env, mmContexts, visibleHubs)');
     expect(mmNode).not.toContain('const primarySameReady =');
-    expect(mmNode).toContain('const primarySameDepthReady = Boolean(healthBeforeQuotes?.hubs.every((hub) => hub.depthReady));');
+    expect(mmNode).toContain('const primarySameDepthReady = isMarketMakerSameDepthComplete(healthBeforeQuotes);');
     expect(mmNode).toContain("if (mode !== 'bootstrap' || !primarySameDepthReady) {");
     expect(mmNode).toContain('const reserveCrossOfferBudget = (');
     expect(mmNode).toContain('remainingOffersTotal: MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
@@ -297,9 +297,14 @@ describe('production startup wiring', () => {
     expect(healthRoute).toContain('const cachedHealth = cachedMarketMakerHealth;');
     expect(healthRoute).toContain('expectedRoutes: 0');
     expect(healthRoute).not.toContain('getMarketMakerHealth(');
-    expect(mmNode).toContain("publishMarketMakerHealthSnapshot();\n      await yieldMarketMakerApi();\n      await driveQuotes('bootstrap');");
-    expect(mmNode).toContain("startupPhase = 'bootstrap-offers';\n    publishMarketMakerHealthSnapshot();");
-    expect(mmNode).toContain('const before = publishMarketMakerHealthSnapshot();');
+    expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
+    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {');
+    expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
+    expect(mmNode).toContain('if (!isMarketMakerSameDepthComplete(sameHealth)) return sameHealth;');
+    expect(mmNode).toContain('return publishMarketMakerHealthSnapshot({ includeCross: true });');
+    expect(mmNode).toContain("publishBootstrapHealthSnapshot();\n      await yieldMarketMakerApi();\n      await driveQuotes('bootstrap');");
+    expect(mmNode).toContain("startupPhase = 'bootstrap-offers';\n    publishBootstrapHealthSnapshot();");
+    expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain("if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;");
   });
 
