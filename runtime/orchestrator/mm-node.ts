@@ -302,6 +302,10 @@ const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '64'),
 );
+const MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT'] || '1'),
+);
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
   Math.min(8, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '4')),
@@ -1233,32 +1237,33 @@ const ensureMarketMakerHubConnectivity = async (
       !hasQueuedOpenAccount(env, mmEntityId, hubEntityId)
     ) {
       const [openTokenId = 1, ...extraCreditTokenIds] = normalizePositiveTokenIds(tokenIds);
+      const connectivityTxs: NonNullable<EntityInput['entityTxs']> = [
+        {
+          type: 'openAccount' as const,
+          data: {
+            targetEntityId: hubEntityId,
+            tokenId: openTokenId,
+            creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
+          },
+        },
+        ...extraCreditTokenIds.map((tokenId) => ({
+          type: 'extendCredit' as const,
+          data: {
+            counterpartyEntityId: hubEntityId,
+            tokenId,
+            amount: MARKET_MAKER_CREDIT_AMOUNT,
+          },
+        })),
+      ].slice(0, MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT);
       enqueueRuntimeInput(env, {
         runtimeTxs: [],
         entityInputs: [{
           entityId: mmEntityId,
           signerId: mmSignerId,
-          entityTxs: [
-            {
-              type: 'openAccount',
-              data: {
-                targetEntityId: hubEntityId,
-                tokenId: openTokenId,
-                creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
-              },
-            },
-            ...extraCreditTokenIds.map((tokenId) => ({
-              type: 'extendCredit' as const,
-              data: {
-                counterpartyEntityId: hubEntityId,
-                tokenId,
-                amount: MARKET_MAKER_CREDIT_AMOUNT,
-              },
-            })),
-          ],
+          entityTxs: connectivityTxs,
         }],
       });
-      budget.remainingTxs = Math.max(0, budget.remainingTxs - 1 - extraCreditTokenIds.length);
+      budget.remainingTxs = Math.max(0, budget.remainingTxs - connectivityTxs.length);
       await yieldMarketMakerApi();
       return true;
     }
@@ -1286,6 +1291,7 @@ const ensureMarketMakerHubConnectivity = async (
           entityTxs: [],
         };
         const entityTxs = input.entityTxs ?? (input.entityTxs = []);
+        if (entityTxs.length >= MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT) break collectCreditInputs;
         entityTxs.push({
           type: 'extendCredit',
           data: {
@@ -1296,6 +1302,7 @@ const ensureMarketMakerHubConnectivity = async (
         });
         localCreditInputsByEntity.set(mmEntityId, input);
         budget.remainingTxs -= 1;
+        if (entityTxs.length >= MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT) break collectCreditInputs;
       }
     }
   }

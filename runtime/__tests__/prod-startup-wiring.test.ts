@@ -167,6 +167,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '2'");
     expect(mmNode).not.toContain("MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '30'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '64'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT'] || '1'");
     expect(mmNode).toContain('type MarketMakerCrossOfferBudget = {');
     expect(mmNode).toContain('const hasMarketMakerAccountBacklog = (');
     expect(mmNode).toContain('const quoteableHubsFor = (context: MarketMakerEntityContext): HubProfile[] =>');
@@ -200,6 +201,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT');
     expect(mmNode).toContain('Math.floor(maxNewOffersTotal),\n      MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT');
     expect(mmNode).toContain('Math.floor(maxNewOffersTotal),\n      MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT');
+    expect(mmNode).toContain('].slice(0, MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT)');
+    expect(mmNode).toContain('if (entityTxs.length >= MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT) break collectCreditInputs;');
     expect(mmNode).toContain('collectQueuedSwapOfferIds(env, mmEntityId, hubEntityId)');
     expect(mmNode).toContain('hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)');
     expect(mmNode).toContain('const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {');
