@@ -173,6 +173,21 @@ export function prewarmSignerKeyCache(seed: Uint8Array | string, count = 20): st
   return warmed;
 }
 
+export function prewarmSignerLabels(seed: Uint8Array | string, signerLabels: readonly string[]): string[] {
+  const warmed: string[] = [];
+  const seen = new Set<string>();
+  for (const rawLabel of signerLabels) {
+    const signerLabel = String(rawLabel || '').trim();
+    if (!signerLabel || seen.has(signerLabel)) continue;
+    seen.add(signerLabel);
+    const privateKey = deriveSignerKeySync(seed, signerLabel);
+    const address = deriveSignerAddressSync(seed, signerLabel).toLowerCase();
+    registerSignerKey(address, privateKey);
+    warmed.push(address);
+  }
+  return warmed;
+}
+
 export function setRuntimeSeed(_seed: Uint8Array | string | null): void {
   if (runtimeSeedLocked) {
     console.warn('⚠️ Runtime seed update ignored (crypto lock enabled)');

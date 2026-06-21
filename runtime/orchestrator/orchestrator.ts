@@ -1572,6 +1572,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
   resetState.completedAt = null;
   resetState.failedAt = null;
   resetState.resolvedAt = null;
+  const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';
 
   const resetTotalStartedAt = startTiming('reset_total');
   try {
@@ -1582,13 +1583,22 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     const clearStartedAt = startTiming('reset_clear_state');
     clearRelayState();
     await reapStaleManagedChildren();
-    if (existsSync(args.dbRoot)) {
+    if (preserveState) {
+      if (!existsSync(args.dbRoot)) {
+        throw new Error(`PRESERVE_STATE_DB_ROOT_MISSING:${args.dbRoot}`);
+      }
+      if (!existsSync(shardJurisdictionsPath)) {
+        throw new Error(`PRESERVE_STATE_JURISDICTIONS_MISSING:${shardJurisdictionsPath}`);
+      }
+    } else if (existsSync(args.dbRoot)) {
       rmSync(args.dbRoot, { recursive: true, force: true });
     }
     mkdirSync(args.dbRoot, { recursive: true });
-    seedShardJurisdictions(jurisdictionsConfig);
-    await deployRpc2JurisdictionStack(jurisdictionsConfig);
-    syncCanonicalJurisdictionsFromShard(jurisdictionsConfig);
+    if (!preserveState) {
+      seedShardJurisdictions(jurisdictionsConfig);
+      await deployRpc2JurisdictionStack(jurisdictionsConfig);
+      syncCanonicalJurisdictionsFromShard(jurisdictionsConfig);
+    }
     finishTiming('reset_clear_state', clearStartedAt);
 
     const h1 = hubChildren[0]!;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -64,6 +64,7 @@ type BootstrapMetrics = {
   runtimeStateHash: string;
   entityStateHash: string;
   workDir: string;
+  templateDir?: string;
 };
 
 const repoRoot = process.cwd();
@@ -80,6 +81,9 @@ const custodyDaemonPort = portBase + 8;
 const nodePortBase = portBase + 10;
 const marketMakerApiPort = nodePortBase + 3;
 const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
+const templateDir = String(process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR'] || '').trim();
+const useSnapshotTemplate = templateDir.length > 0;
+const persistMarketMakerStorage = useSnapshotTemplate || process.env['XLN_LOCAL_PROD_SMOKE_PERSIST_MM'] === '1';
 const children: ManagedProcess[] = [];
 const marketMakerInfoLatencyMaxMs = Math.max(
   250,
@@ -156,6 +160,17 @@ const startManaged = (name: string, command: string, args: string[], env: Record
   });
   closeSync(out);
   children.push({ name, proc });
+};
+
+const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {
+  const requiredEntries = ['anvil-state.json', 'anvil2-state.json', 'prod-main', 'prod-mesh'] as const;
+  for (const entry of requiredEntries) {
+    const source = join(sourceDir, entry);
+    if (!existsSync(source)) {
+      throw new Error(`LOCAL_PROD_SMOKE_TEMPLATE_ENTRY_MISSING:${source}`);
+    }
+    cpSync(source, join(targetDir, entry), { recursive: true, force: true });
+  }
 };
 
 const stopManaged = async (): Promise<void> => {
@@ -351,13 +366,17 @@ const main = async (): Promise<void> => {
 
   console.log(`[local-prod-smoke] workDir=${workDir} portBase=${portBase}`);
   recordStage('smoke:start', { workDir, portBase });
-  startManaged('anvil', 'scripts/start-anvil.sh', ['--reset'], {
+  if (useSnapshotTemplate) {
+    copySnapshotTemplate(templateDir, workDir);
+    recordStage('snapshot:copied', { templateDir, workDir });
+  }
+  startManaged('anvil', 'scripts/start-anvil.sh', useSnapshotTemplate ? [] : ['--reset'], {
     XLN_PORT_BASE: String(portBase),
     ANVIL_STATE: join(workDir, 'anvil-state.json'),
     ANVIL_LOG: join(workDir, 'anvil.log'),
     ANVIL_TMPDIR: join(workDir, 'anvil-tmp'),
   });
-  startManaged('anvil2', 'scripts/start-anvil2.sh', ['--reset'], {
+  startManaged('anvil2', 'scripts/start-anvil2.sh', useSnapshotTemplate ? [] : ['--reset'], {
     XLN_PORT_BASE: String(portBase),
     ANVIL2_STATE: join(workDir, 'anvil2-state.json'),
     ANVIL2_LOG: join(workDir, 'anvil2.log'),
@@ -388,6 +407,11 @@ const main = async (): Promise<void> => {
       process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '1000',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK: '1000',
+    ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
+    ...(persistMarketMakerStorage ? {
+      XLN_MARKET_MAKER_DISABLE_STORAGE: '0',
+      XLN_MARKET_MAKER_DISABLE_RESTORE: '0',
+    } : {}),
   });
   recordStage('server:started', { apiPort, marketMakerApiPort });
 
@@ -446,6 +470,7 @@ const main = async (): Promise<void> => {
     runtimeStateHash: bootstrap.runtimeStateHash,
     entityStateHash: bootstrap.entityStateHash,
     workDir,
+    ...(useSnapshotTemplate ? { templateDir } : {}),
   };
   const metricsPath = process.env['XLN_LOCAL_PROD_SMOKE_METRICS_JSON'] || join(workDir, 'bootstrap-metrics.json');
   writeFileSync(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`);

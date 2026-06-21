@@ -9,6 +9,7 @@ import type {
 } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
+import { prewarmSignerLabels } from '../account-crypto';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
@@ -296,6 +297,9 @@ const resolveJReplicaForJurisdictionName = (
   return null;
 };
 
+const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>
+  Boolean(resolveJReplicaForJurisdictionName(env, jurisdictionName)?.replica?.jadapter);
+
 const sameJurisdictionName = (left: unknown, right: unknown): boolean => {
   const leftKey = normalizeJurisdictionKey(left);
   const rightKey = normalizeJurisdictionKey(right);
@@ -459,6 +463,21 @@ let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
 const envFlagEnabled = (value: unknown): boolean => {
   const normalized = String(value ?? '').trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+};
+
+const buildLocalHubSignerLabels = (): string[] => {
+  const primary = resolveMeshJurisdictionConfig(resolvedArgs.rpcUrl);
+  const labels = [resolvedArgs.signerLabel];
+  for (const [index, secondary] of resolveSecondaryJurisdictions(primary.rpc).entries()) {
+    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+    if (secondaryName) labels.push(`${resolvedArgs.signerLabel}:${secondaryName}`);
+  }
+  return labels;
+};
+
+const prewarmLocalHubSignerKeys = (): void => {
+  const signerIds = prewarmSignerLabels(resolvedArgs.seed, buildLocalHubSignerLabels());
+  console.log(`[MESH-HUB] SIGNER_KEYS_PREWARMED name=${resolvedArgs.name} count=${signerIds.length}`);
 };
 
 const configureHubRuntimeLogging = (env: Env): void => {
@@ -1370,6 +1389,7 @@ const run = async (): Promise<void> => {
   const runtimeBootStartedAt = startTiming('runtime_boot');
   const env = await main(resolvedArgs.seed);
   configureHubRuntimeLogging(env);
+  prewarmLocalHubSignerKeys();
   startRuntimeLoop(env);
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
@@ -2070,7 +2090,7 @@ const run = async (): Promise<void> => {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
     if (!secondaryName) continue;
     const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
-    if (!env.jReplicas.has(secondaryName)) {
+    if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {
       console.log(`[${resolvedArgs.name}] Importing sibling hub jurisdiction ${secondaryName} (${secondary.rpc})`);
       enqueueRuntimeInput(env, {
         runtimeTxs: [{
