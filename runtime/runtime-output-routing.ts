@@ -108,15 +108,15 @@ const readBoardValidatorSignerId = (validator: unknown): string => {
   return String(raw.signerId || raw.signer || '').trim();
 };
 
-const resolveGossipBoardSignerId = (env: Env, entityId: string): string => {
+const resolveGossipBoardSignerIds = (env: Env, entityId: string): string[] => {
   const targetEntityId = String(entityId || '').trim().toLowerCase();
-  if (!targetEntityId || !env.gossip?.getProfiles) return '';
+  if (!targetEntityId || !env.gossip?.getProfiles) return [];
   const profile = env.gossip.getProfiles().find(candidate =>
     String(candidate?.entityId || '').trim().toLowerCase() === targetEntityId,
   );
   const validators = profile?.metadata?.board?.validators;
-  if (!Array.isArray(validators) || validators.length === 0) return '';
-  return readBoardValidatorSignerId(validators[0]);
+  if (!Array.isArray(validators) || validators.length === 0) return [];
+  return validators.map(readBoardValidatorSignerId).filter(Boolean);
 };
 
 export const splitPendingOutputsByRetryWindow = (
@@ -233,15 +233,36 @@ export const planEntityOutputs = (
       }
     }
     let outputToRoute = output;
-    const gossipSignerId = resolveGossipBoardSignerId(env, output.entityId);
-    if (gossipSignerId && gossipSignerId.toLowerCase() !== String(output.signerId || '').toLowerCase()) {
-      env.warn?.('network', 'ROUTE_RETARGET_REMOTE_PROFILE_SIGNER', {
-        entityId: output.entityId,
-        inputSignerId: output.signerId,
-        resolvedSignerId: gossipSignerId,
-        txTypes: (output.entityTxs || []).map(tx => tx.type),
-      }, output.entityId);
-      outputToRoute = { ...output, signerId: gossipSignerId };
+    const gossipSignerIds = resolveGossipBoardSignerIds(env, output.entityId);
+    const preferredGossipSignerId = gossipSignerIds[0] || '';
+    const outputSignerId = String(output.signerId || '').trim();
+    const outputSignerKnownByGossip = gossipSignerIds.some(
+      signerId => signerId.toLowerCase() === outputSignerId.toLowerCase(),
+    );
+    if (preferredGossipSignerId && preferredGossipSignerId.toLowerCase() !== outputSignerId.toLowerCase()) {
+      if (isTriggerOnlyOutput(output)) {
+        env.warn?.('network', 'ROUTE_RETARGET_REMOTE_PROFILE_SIGNER', {
+          entityId: output.entityId,
+          inputSignerId: output.signerId,
+          resolvedSignerId: preferredGossipSignerId,
+        }, output.entityId);
+        outputToRoute = { ...output, signerId: preferredGossipSignerId };
+      } else if (isTxBearingOutput(output) && !outputSignerKnownByGossip) {
+        const txTypes = (output.entityTxs || []).map(tx => tx.type);
+        env.error?.('network', 'ROUTE_REMOTE_SIGNER_MISMATCH', {
+          entityId: output.entityId,
+          signerId: output.signerId,
+          resolvedSignerId: preferredGossipSignerId,
+          boardSignerIds: gossipSignerIds,
+          txTypes,
+          hasProposedFrame: Boolean(output.proposedFrame),
+          hasHashPrecommits: Boolean(output.hashPrecommits && output.hashPrecommits.size > 0),
+        }, output.entityId);
+        throw new Error(
+          `ROUTE_REMOTE_SIGNER_MISMATCH: entity=${output.entityId} signer=${output.signerId} ` +
+          `resolved=${preferredGossipSignerId} txTypes=${txTypes.join(',')}`,
+        );
+      }
     }
 
     const targetRuntimeId = deps.resolveRuntimeIdForEntity(env, outputToRoute.entityId);
