@@ -241,6 +241,10 @@ const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
   Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'),
 );
+const MARKET_MAKER_API_YIELD_MS = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_API_YIELD_MS'] || '1'),
+);
 const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
   1,
   Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'),
@@ -322,7 +326,7 @@ const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
 );
 const yieldMarketMakerApi = async (): Promise<void> => {
-  await new Promise<void>(resolve => setImmediate(resolve));
+  await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));
 };
 const ORDERBOOK_MAX_BASE_AMOUNT = MAX_ORDERBOOK_QTY_LOTS * SWAP_LOT_SCALE;
 const MARKET_MAKER_DEPTH_MULTIPLIER = (() => {
