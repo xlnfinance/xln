@@ -2086,6 +2086,14 @@ const hasMarketMakerAccountBacklog = (
   return Boolean(account?.pendingFrame) || Number(account?.mempool?.length || 0) > 0;
 };
 
+const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {
+  const runtimeMempool = env.runtimeMempool;
+  return Boolean(env.runtimeState?.processingPromise) ||
+    Number(runtimeMempool?.runtimeTxs?.length || 0) > 0 ||
+    Number(runtimeMempool?.entityInputs?.length || 0) > 0 ||
+    Number(runtimeMempool?.jInputs?.length || 0) > 0;
+};
+
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
@@ -2427,6 +2435,7 @@ const run = async (): Promise<void> => {
     if (loopInFlight) return;
     loopInFlight = true;
     try {
+      if (hasMarketMakerRuntimeBacklog(env)) return;
       const connectivityBudget: MarketMakerConnectivityBudget = {
         remainingTxs: mode === 'bootstrap'
           ? MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK
