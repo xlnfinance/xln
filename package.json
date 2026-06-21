@@ -49,6 +49,7 @@
     "prod:health": "bun runtime/scripts/prod-health-smoke.ts",
     "prod:health:capped-testnet": "bun runtime/scripts/prod-health-smoke.ts --expected-hubs=3 --require-hub-self-relay --expected-towers=1",
     "prod:smoke:local": "bun runtime/scripts/local-prod-smoke.ts",
+    "prod:bootstrap:bench": "bun runtime/scripts/bootstrap-benchmark.ts",
     "prod:diagnose": "./scripts/prod-diagnose.sh",
     "security:audit-pack": "bun runtime/scripts/check-security-audit-pack.ts",
     "gate:quick": "bun runtime/scripts/run-release-gate.ts --profile=quick",

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -29,6 +29,41 @@ type HealthPayload = {
   bootstrapReserves?: { ok?: boolean; targetMet?: boolean };
   reset?: { inProgress?: boolean; lastError?: string | null; completedAt?: number | null };
   degraded?: string[];
+  bootstrap?: BootstrapHashInfo;
+};
+
+type BootstrapHashInfo = {
+  readyHash?: string | null;
+  runtimeStateHash?: string | null;
+  entityStateHash?: string | null;
+  readyAt?: number | null;
+};
+
+type MarketMakerInfoPayload = {
+  bootstrap?: BootstrapHashInfo;
+  runtimeBacklog?: {
+    runtimeTxs?: number;
+    entityInputs?: number;
+    jInputs?: number;
+    processing?: boolean;
+  };
+};
+
+type BootstrapStage = {
+  stage: string;
+  elapsedMs: number;
+  at: string;
+  details?: unknown;
+};
+
+type BootstrapMetrics = {
+  schema: 'xln-local-prod-bootstrap-benchmark-v1';
+  elapsedMs: number;
+  stages: BootstrapStage[];
+  bootstrapHash: string;
+  runtimeStateHash: string;
+  entityStateHash: string;
+  workDir: string;
 };
 
 const repoRoot = process.cwd();
@@ -50,8 +85,35 @@ const marketMakerInfoLatencyMaxMs = Math.max(
   250,
   Number(process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500'),
 );
+const postBootstrapStabilityMs = Math.max(
+  0,
+  Number(process.env['XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS'] || '2000'),
+);
+const smokeStartedAt = Date.now();
+const stages: BootstrapStage[] = [];
+const recordedStages = new Set<string>();
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+const recordStage = (stage: string, details?: unknown): void => {
+  const entry: BootstrapStage = {
+    stage,
+    elapsedMs: Date.now() - smokeStartedAt,
+    at: new Date().toISOString(),
+    ...(details === undefined ? {} : { details }),
+  };
+  stages.push(entry);
+  console.log(`[local-prod-smoke] stage ${JSON.stringify(entry)}`);
+};
+
+const recordStageOnce = (stage: string, details?: unknown): void => {
+  if (recordedStages.has(stage)) return;
+  recordedStages.add(stage);
+  recordStage(stage, details);
+};
+
+const isHash64 = (value: unknown): value is string =>
+  typeof value === 'string' && /^(?:0x)?[a-f0-9]{64}$/i.test(value);
 
 const isPortOpen = async (port: number): Promise<boolean> => {
   return await new Promise<boolean>((resolve) => {
@@ -131,6 +193,7 @@ const waitForRpc = async (port: number, expectedChainId: string, label: string):
       last = await rpcChainId(port);
       if (last === expectedChainId) {
         console.log(`[local-prod-smoke] ${label} chainId=${expectedChainId}`);
+        recordStageOnce(`rpc:${label.toLowerCase()}-ready`, { port, chainId: expectedChainId });
         return;
       }
     } catch (error) {
@@ -147,7 +210,7 @@ const fetchHealth = async (): Promise<HealthPayload> => {
   return await response.json() as HealthPayload;
 };
 
-const assertMarketMakerInfoResponsive = async (): Promise<void> => {
+const assertMarketMakerInfoResponsive = async (): Promise<MarketMakerInfoPayload> => {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), marketMakerInfoLatencyMaxMs);
@@ -157,16 +220,27 @@ const assertMarketMakerInfoResponsive = async (): Promise<void> => {
     });
     const elapsedMs = Date.now() - startedAt;
     if (!response.ok) throw new Error(`MM_INFO_HTTP_${response.status}`);
-    await response.json();
+    const payload = await response.json() as MarketMakerInfoPayload;
     if (elapsedMs > marketMakerInfoLatencyMaxMs) {
       throw new Error(`MM_INFO_SLOW elapsedMs=${elapsedMs} maxMs=${marketMakerInfoLatencyMaxMs}`);
     }
+    return payload;
   } catch (error) {
     const elapsedMs = Date.now() - startedAt;
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`MM_INFO_UNRESPONSIVE elapsedMs=${elapsedMs} maxMs=${marketMakerInfoLatencyMaxMs} error=${message}`);
   } finally {
     clearTimeout(timer);
+  }
+};
+
+const assertNoMarketMakerBootstrapBacklog = (payload: MarketMakerInfoPayload): void => {
+  const runtimeTxs = Number(payload.runtimeBacklog?.runtimeTxs ?? 0);
+  const entityInputs = Number(payload.runtimeBacklog?.entityInputs ?? 0);
+  if (runtimeTxs !== 0 || entityInputs !== 0) {
+    throw new Error(
+      `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_BACKLOG runtimeTxs=${runtimeTxs} entityInputs=${entityInputs}`,
+    );
   }
 };
 
@@ -226,17 +300,31 @@ const waitForHealth = async (): Promise<void> => {
   const deadline = Date.now() + 420_000;
   let last: unknown = null;
   let iteration = 0;
+  let lastMarketMakerPhase: string | null = null;
   while (Date.now() < deadline) {
     try {
       const health = await fetchHealth();
       last = summarizeHealth(health);
+      const marketMakerPhase = String(health.marketMaker?.startupPhase || '');
+      if (marketMakerPhase && marketMakerPhase !== lastMarketMakerPhase) {
+        lastMarketMakerPhase = marketMakerPhase;
+        recordStage(`marketMaker:${marketMakerPhase}`, last);
+      }
+      if (health.custody?.ok === true) recordStageOnce('custody:ready', last);
+      if (health.bootstrapReserves?.ok === true) recordStageOnce('bootstrap-reserves:ready', last);
+      if (health.hubMesh?.ok === true) recordStageOnce('hubMesh:ready', last);
+      if (health.marketMaker?.cross?.ok === true) recordStageOnce('marketMaker:cross-ready', last);
+      if (health.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
       if (health.marketMaker?.entityId || health.marketMaker?.startupPhase) {
         await assertMarketMakerInfoResponsive();
       }
       if (iteration % 10 === 0 || healthReady(health)) {
         console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
       }
-      if (healthReady(health)) return;
+      if (healthReady(health)) {
+        recordStageOnce('system:ready', last);
+        return;
+      }
     } catch (error) {
       last = error instanceof Error ? error.message : String(error);
     }
@@ -262,6 +350,7 @@ const main = async (): Promise<void> => {
   mkdirSync(workDir, { recursive: true });
 
   console.log(`[local-prod-smoke] workDir=${workDir} portBase=${portBase}`);
+  recordStage('smoke:start', { workDir, portBase });
   startManaged('anvil', 'scripts/start-anvil.sh', ['--reset'], {
     XLN_PORT_BASE: String(portBase),
     ANVIL_STATE: join(workDir, 'anvil-state.json'),
@@ -297,14 +386,69 @@ const main = async (): Promise<void> => {
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '1000',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK: '1000',
   });
+  recordStage('server:started', { apiPort, marketMakerApiPort });
 
   await waitForHealth();
+  const marketMakerInfo = await assertMarketMakerInfoResponsive();
   const serverLog = readFileSync(logPath('server'), 'utf8');
-  const hashMatch = serverLog.match(/BOOTSTRAP_READY_HASH hash=([a-f0-9]{64})/);
-  if (!hashMatch) {
+  const hashMatch = serverLog.match(
+    /BOOTSTRAP_READY_HASH hash=((?:0x)?[a-f0-9]{64})\s+runtimeStateHash=((?:0x)?[a-f0-9]{64})\s+entityStateHash=((?:0x)?[a-f0-9]{64})/,
+  );
+  if (!hashMatch || !isHash64(hashMatch[1]) || !isHash64(hashMatch[2]) || !isHash64(hashMatch[3])) {
     throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_HASH_MISSING');
   }
-  console.log(`[local-prod-smoke] bootstrapHash=${hashMatch[1]}`);
+  const bootstrap = marketMakerInfo.bootstrap ?? {};
+  if (!isHash64(bootstrap.readyHash)) {
+    throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_HASH_MISSING');
+  }
+  if (!isHash64(bootstrap.runtimeStateHash)) {
+    throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_RUNTIME_HASH_MISSING');
+  }
+  if (!isHash64(bootstrap.entityStateHash)) {
+    throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_ENTITY_HASH_MISSING');
+  }
+  if (bootstrap.readyHash !== hashMatch[1]) {
+    throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_HASH_MISMATCH info=${bootstrap.readyHash} log=${hashMatch[1]}`);
+  }
+  if (bootstrap.runtimeStateHash !== hashMatch[2]) {
+    throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_RUNTIME_HASH_MISMATCH info=${bootstrap.runtimeStateHash} log=${hashMatch[2]}`);
+  }
+  if (bootstrap.entityStateHash !== hashMatch[3]) {
+    throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH info=${bootstrap.entityStateHash} log=${hashMatch[3]}`);
+  }
+  assertNoMarketMakerBootstrapBacklog(marketMakerInfo);
+  if (postBootstrapStabilityMs > 0) {
+    recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });
+    await sleep(postBootstrapStabilityMs);
+    const postBootstrapHealth = await fetchHealth();
+    if (!healthReady(postBootstrapHealth)) {
+      throw new Error(
+        `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HEALTH_REGRESSED last=${JSON.stringify(summarizeHealth(postBootstrapHealth))}`,
+      );
+    }
+    const postBootstrapInfo = await assertMarketMakerInfoResponsive();
+    assertNoMarketMakerBootstrapBacklog(postBootstrapInfo);
+    if (postBootstrapInfo.bootstrap?.readyHash !== bootstrap.readyHash) {
+      throw new Error(
+        `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HASH_CHANGED before=${String(bootstrap.readyHash)} after=${String(postBootstrapInfo.bootstrap?.readyHash)}`,
+      );
+    }
+    recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));
+  }
+  const metrics: BootstrapMetrics = {
+    schema: 'xln-local-prod-bootstrap-benchmark-v1',
+    elapsedMs: Date.now() - smokeStartedAt,
+    stages,
+    bootstrapHash: bootstrap.readyHash,
+    runtimeStateHash: bootstrap.runtimeStateHash,
+    entityStateHash: bootstrap.entityStateHash,
+    workDir,
+  };
+  const metricsPath = process.env['XLN_LOCAL_PROD_SMOKE_METRICS_JSON'] || join(workDir, 'bootstrap-metrics.json');
+  writeFileSync(metricsPath, `${JSON.stringify(metrics, null, 2)}\n`);
+  console.log(
+    `[local-prod-smoke] bootstrapHash=${metrics.bootstrapHash} runtimeStateHash=${metrics.runtimeStateHash} entityStateHash=${metrics.entityStateHash} metrics=${metricsPath}`,
+  );
   console.log('[local-prod-smoke] green');
 };
 

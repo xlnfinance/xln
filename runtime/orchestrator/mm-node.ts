@@ -84,6 +84,7 @@ import {
   type MeshJurisdictionConfig,
 } from './mesh-jurisdictions';
 import { areMarketMakerHubTransportsReady } from './mm-transport';
+import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 
 type Args = {
   name: string;
@@ -2513,6 +2514,14 @@ export const buildMarketMakerBootstrapFingerprint = (
   };
 };
 
+export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string => {
+  const payload = {
+    schema: 'market-maker-bootstrap-entity-state-v1',
+    entities: computeCanonicalEntityHashesFromEnv(env),
+  };
+  return createHash('sha256').update(safeStringify(payload)).digest('hex');
+};
+
 const assertMarketMakerBootstrapFinalized = (
   env: Env,
   health: MarketMakerHealth | null,
@@ -2590,16 +2599,25 @@ const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {
     Number(runtimeMempool?.entityInputs?.length || 0) > 0;
 };
 
-const getMarketMakerRuntimeBacklogSnapshot = (env: Env): Record<string, unknown> => ({
-  processing: Boolean(env.runtimeState?.processingPromise),
-  runtimeTxs: Number(env.runtimeMempool?.runtimeTxs?.length || 0),
-  entityInputs: Number(env.runtimeMempool?.entityInputs?.length || 0),
-  jInputs: Number(env.runtimeMempool?.jInputs?.length || 0),
-  queuedEntityInputs: (env.runtimeMempool?.entityInputs ?? []).slice(0, 8).map(input => ({
-    entityId: input.entityId,
-    txTypes: (input.entityTxs ?? []).map(tx => tx?.type ?? 'unknown'),
-  })),
-});
+const getMarketMakerRuntimeBacklogSnapshot = (
+  env: Env,
+  options: { includeQueuedEntityInputs?: boolean } = {},
+): Record<string, unknown> => {
+  const snapshot: Record<string, unknown> = {
+    processing: Boolean(env.runtimeState?.processingPromise),
+    runtimeTxs: Number(env.runtimeMempool?.runtimeTxs?.length || 0),
+    entityInputs: Number(env.runtimeMempool?.entityInputs?.length || 0),
+    jInputs: Number(env.runtimeMempool?.jInputs?.length || 0),
+  };
+  if (options.includeQueuedEntityInputs === true) {
+    snapshot['queuedEntityInputs'] = (env.runtimeMempool?.entityInputs ?? []).slice(0, 8).map(input => ({
+      entityId: input.entityId,
+      txCount: Number(input.entityTxs?.length || 0),
+      txTypes: (input.entityTxs ?? []).slice(0, 16).map(tx => tx?.type ?? 'unknown'),
+    }));
+  }
+  return snapshot;
+};
 
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
@@ -2616,6 +2634,10 @@ const run = async (): Promise<void> => {
   let mmContexts: MarketMakerEntityContext[] = [];
   let mmTokenIdsByContext: Map<string, number[]> = new Map();
   let cachedMarketMakerHealth: MarketMakerHealth | null = null;
+  let bootstrapReadyHash: string | null = null;
+  let bootstrapRuntimeStateHash: string | null = null;
+  let bootstrapEntityStateHash: string | null = null;
+  let bootstrapReadyAt: number | null = null;
   type DirectEntityInputDebug = {
     at: number;
     fromRuntimeId: string;
@@ -2742,7 +2764,6 @@ const run = async (): Promise<void> => {
             url.searchParams.get('crossDebug') === '1' ||
             url.searchParams.get('debug') === 'cross';
           const currentHealth = cachedMarketMakerHealth;
-          const allVisibleHubs = readVisibleHubProfiles(env, true);
           return new Response(safeStringify({
             name: resolvedArgs.name,
             entityId: activeMmEntityId,
@@ -2751,7 +2772,15 @@ const run = async (): Promise<void> => {
             relayUrl: resolvedArgs.relayUrl,
             directWsUrl,
             startupPhase,
-            runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(env),
+            runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(env, {
+              includeQueuedEntityInputs: includeCrossDebug,
+            }),
+            bootstrap: {
+              readyHash: bootstrapReadyHash,
+              runtimeStateHash: bootstrapRuntimeStateHash,
+              entityStateHash: bootstrapEntityStateHash,
+              readyAt: bootstrapReadyAt,
+            },
             currentHealth: currentHealth ? {
               ok: currentHealth.ok,
               depthComplete: isMarketMakerDepthComplete(currentHealth),
@@ -2764,7 +2793,14 @@ const run = async (): Promise<void> => {
               crossBlockers: currentHealth.cross.routes.map(route => route.blockers.length),
             } : null,
             ...(includeCrossDebug
-              ? { crossDebug: buildMarketMakerCrossDebugSummary(env, mmContexts, allVisibleHubs, mmTokenIdsByContext) }
+              ? {
+                  crossDebug: buildMarketMakerCrossDebugSummary(
+                    env,
+                    mmContexts,
+                    readVisibleHubProfiles(env, true),
+                    mmTokenIdsByContext,
+                  ),
+                }
               : {}),
           }), { headers: JSON_HEADERS });
         }
@@ -2839,6 +2875,12 @@ const run = async (): Promise<void> => {
               visibleHubNames: visibleHubs.map(profile => profile.name),
               visibleHubIds: visibleHubs.map(profile => profile.entityId),
               ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
+            },
+            bootstrap: {
+              readyHash: bootstrapReadyHash,
+              runtimeStateHash: bootstrapRuntimeStateHash,
+              entityStateHash: bootstrapEntityStateHash,
+              readyAt: bootstrapReadyAt,
             },
             marketMaker: marketMakerHealth,
           };
@@ -3172,9 +3214,15 @@ const run = async (): Promise<void> => {
       mmTokenIdsByContext,
       health,
     );
+    const runtimeStateHash = computeCanonicalStateHashFromEnv(env);
+    const entityStateHash = buildMarketMakerBootstrapEntityStateHash(env);
+    bootstrapReadyHash = fingerprint.hash;
+    bootstrapRuntimeStateHash = runtimeStateHash;
+    bootstrapEntityStateHash = entityStateHash;
+    bootstrapReadyAt = Date.now();
     startupPhase = 'offers-ready';
     console.log(
-      `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} payload=${safeStringify(fingerprint.payload)}`,
+      `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash} payload=${safeStringify(fingerprint.payload)}`,
     );
     console.log(
       `[MESH-MM] OFFERS_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
