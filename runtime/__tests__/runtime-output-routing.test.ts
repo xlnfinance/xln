@@ -161,7 +161,7 @@ describe('runtime output routing', () => {
     expect(warnings).toContain('ROUTE_RETARGET_LOCAL_TRIGGER_SIGNER');
   });
 
-  test('retargets remote outputs to the target gossip board signer before delivery', () => {
+  test('retargets trigger-only remote outputs to the target gossip board signer before delivery', () => {
     const targetRuntimeId = runtimeId('69');
     const targetEntityId = entityId('6a');
     const staleSenderSignerId = runtimeId('6b');
@@ -187,7 +187,7 @@ describe('runtime output routing', () => {
     const result = planEntityOutputs(env, [{
       entityId: targetEntityId,
       signerId: staleSenderSignerId,
-      entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
+      entityTxs: [],
     }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => null,
@@ -203,6 +203,156 @@ describe('runtime output routing', () => {
     expect(result.remoteOutputs).toHaveLength(1);
     expect(result.remoteOutputs[0]?.output.signerId).toBe(targetSignerId);
     expect(warnings).toContain('ROUTE_RETARGET_REMOTE_PROFILE_SIGNER');
+  });
+
+  test('fails fast on tx-bearing remote outputs with stale signer instead of gossip retargeting', () => {
+    const targetRuntimeId = runtimeId('69');
+    const targetEntityId = entityId('6a');
+    const staleSenderSignerId = runtimeId('6b');
+    const targetSignerId = runtimeId('6c');
+    const errors: string[] = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      warn: () => {},
+      error: (_scope: string, code: string) => errors.push(code),
+      runtimeState: {},
+      gossip: {
+        getProfiles: () => [{
+          entityId: targetEntityId,
+          metadata: {
+            board: {
+              validators: [{ signerId: targetSignerId }],
+            },
+          },
+        }],
+      },
+    } as unknown as Env;
+
+    expect(() => planEntityOutputs(env, [{
+      entityId: targetEntityId,
+      signerId: staleSenderSignerId,
+      entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
+    }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => null,
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    })).toThrow('ROUTE_REMOTE_SIGNER_MISMATCH');
+
+    expect(errors).toContain('ROUTE_REMOTE_SIGNER_MISMATCH');
+  });
+
+  test('routes tx-bearing remote outputs when signer is a non-primary gossip board validator', () => {
+    const targetRuntimeId = runtimeId('69');
+    const targetEntityId = entityId('6a');
+    const primarySignerId = runtimeId('6b');
+    const secondarySignerId = runtimeId('6c');
+    const errors: string[] = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      warn: () => {},
+      error: (_scope: string, code: string) => errors.push(code),
+      runtimeState: {},
+      gossip: {
+        getProfiles: () => [{
+          entityId: targetEntityId,
+          metadata: {
+            board: {
+              validators: [{ signerId: primarySignerId }, { signerId: secondarySignerId }],
+            },
+          },
+        }],
+      },
+    } as unknown as Env;
+
+    const result = planEntityOutputs(env, [{
+      entityId: targetEntityId,
+      signerId: secondarySignerId,
+      entityTxs: [{ type: 'accountInput', data: { fromEntityId: entityId('6d'), toEntityId: targetEntityId } } as any],
+    }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => null,
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    });
+
+    expect(result.remoteOutputs).toHaveLength(1);
+    expect(result.remoteOutputs[0]?.output.signerId).toBe(secondarySignerId);
+    expect(errors).not.toContain('ROUTE_REMOTE_SIGNER_MISMATCH');
+  });
+
+  test('routes consensus-only remote outputs without retargeting to primary gossip validator', () => {
+    const targetRuntimeId = runtimeId('69');
+    const targetEntityId = entityId('6a');
+    const primarySignerId = runtimeId('6b');
+    const secondarySignerId = runtimeId('6c');
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      warn: (_scope: string, code: string) => warnings.push(code),
+      error: (_scope: string, code: string) => errors.push(code),
+      runtimeState: {},
+      gossip: {
+        getProfiles: () => [{
+          entityId: targetEntityId,
+          metadata: {
+            board: {
+              validators: [{ signerId: primarySignerId }, { signerId: secondarySignerId }],
+            },
+          },
+        }],
+      },
+    } as unknown as Env;
+
+    const proposedFrameResult = planEntityOutputs(env, [{
+      entityId: targetEntityId,
+      signerId: secondarySignerId,
+      proposedFrame: {
+        hash: '0xproposal',
+        collectedSigs: new Map(),
+      } as any,
+    }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => null,
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    });
+    const precommitResult = planEntityOutputs(env, [{
+      entityId: targetEntityId,
+      signerId: secondarySignerId,
+      hashPrecommits: new Map([[primarySignerId, ['0xsig']]]),
+    }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => null,
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    });
+
+    expect(proposedFrameResult.remoteOutputs[0]?.output.signerId).toBe(secondarySignerId);
+    expect(precommitResult.remoteOutputs[0]?.output.signerId).toBe(secondarySignerId);
+    expect(warnings).not.toContain('ROUTE_RETARGET_REMOTE_PROFILE_SIGNER');
+    expect(errors).not.toContain('ROUTE_REMOTE_SIGNER_MISMATCH');
   });
 
   test('resolves remote runtime directly from gossip profile when hint cache is empty', () => {
