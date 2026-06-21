@@ -448,4 +448,57 @@ describe('production startup wiring', () => {
     expect(anvil2).toContain('ANVIL_CHAIN_ID="${ANVIL2_CHAIN_ID:-31338}"');
     expect(anvil2).toContain('ANVIL_STATE="${ANVIL2_STATE:-$REPO_ROOT/data/anvil2-state.json}"');
   });
+
+  test('market maker /api/info serves cached health and keeps crossDebug opt-in', () => {
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const infoStart = mmNode.indexOf("if (pathname === '/api/info') {");
+    const infoEnd = mmNode.indexOf("if (pathname === '/api/health') {", infoStart);
+    expect(infoStart).toBeGreaterThan(0);
+    expect(infoEnd).toBeGreaterThan(infoStart);
+    const infoHandler = mmNode.slice(infoStart, infoEnd);
+    // Hot path must not recompute the full includeCross health scan.
+    expect(infoHandler).not.toContain('buildMarketMakerHealthSnapshot({ includeCross: true })');
+    expect(infoHandler).toContain('const currentHealth = cachedMarketMakerHealth;');
+    // Cross debug is opt-in via query only.
+    expect(infoHandler).toContain("url.searchParams.get('crossDebug') === '1'");
+    expect(infoHandler).toContain("url.searchParams.get('debug') === 'cross'");
+    expect(infoHandler).toContain('crossDebug: includeCrossDebug');
+    expect(infoHandler).toContain('? buildMarketMakerCrossDebugSummary(');
+    expect(infoHandler).toContain(': undefined,');
+  });
+
+  test('buildAggregatedHealthResponse skips market snapshot enrichment unless explicitly requested', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const start = orchestrator.indexOf('const buildAggregatedHealthResponse = async (');
+    const end = orchestrator.indexOf('const waitForHubBaseline', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const fn = orchestrator.slice(start, end);
+    expect(fn).toContain('options: { includeMarketSnapshots?: boolean } = {}');
+    expect(fn).toContain('const baseHealth = computeAggregatedHealth();');
+    expect(fn).toContain('options.includeMarketSnapshots === true');
+    expect(fn).toContain('? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)');
+    expect(fn).toContain(': baseHealth;');
+    // Default health/metrics handlers must call it without opting into enrichment.
+    expect(orchestrator).toContain('const health = await buildAggregatedHealthResponse();');
+  });
+
+  test('hub account-status uses cached child mapping before polling hub health', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const start = orchestrator.indexOf("if (pathname === '/api/hub/account-status' && request.method === 'GET') {");
+    const end = orchestrator.indexOf("if (pathname === '/api/lending/state'", start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const handler = orchestrator.slice(start, end);
+    // Cached lookup must come first; poll only as a fallback when the child is unknown.
+    const lookupIndex = handler.indexOf('let child = getHubChildByEntityId(hubEntityId);');
+    const fallbackPollIndex = handler.indexOf('await pollAllHubHealth();');
+    expect(lookupIndex).toBeGreaterThan(0);
+    expect(fallbackPollIndex).toBeGreaterThan(lookupIndex);
+    expect(handler).toContain('child = getHubChildByEntityId(hubEntityId);');
+    // The very first statement of the handler must not be an unconditional poll.
+    expect(handler.indexOf('await pollAllHubHealth();')).toBeGreaterThan(
+      handler.indexOf('const hubEntityId ='),
+    );
+  });
 });

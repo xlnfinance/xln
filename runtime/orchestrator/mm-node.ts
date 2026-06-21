@@ -2699,8 +2699,12 @@ const run = async (): Promise<void> => {
         if (upgraded !== undefined) return upgraded;
 
         if (pathname === '/api/info') {
-          const currentHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
-          const allVisibleHubs = readVisibleHubProfiles(env, true);
+          // Hot path: use the cached health snapshot instead of recomputing a full
+          // includeCross scan, which can wedge the MM API under prod bootstrap load.
+          const currentHealth = cachedMarketMakerHealth;
+          // Cross debug is an expensive scan; only build it when explicitly requested.
+          const includeCrossDebug = url.searchParams.get('crossDebug') === '1'
+            || url.searchParams.get('debug') === 'cross';
           return new Response(safeStringify({
             name: resolvedArgs.name,
             entityId: activeMmEntityId,
@@ -2721,7 +2725,9 @@ const run = async (): Promise<void> => {
               crossOffers: currentHealth.cross.routes.map(route => route.offers),
               crossBlockers: currentHealth.cross.routes.map(route => route.blockers.length),
             } : null,
-            crossDebug: buildMarketMakerCrossDebugSummary(env, mmContexts, allVisibleHubs, mmTokenIdsByContext),
+            crossDebug: includeCrossDebug
+              ? buildMarketMakerCrossDebugSummary(env, mmContexts, readVisibleHubProfiles(env, true), mmTokenIdsByContext)
+              : undefined,
           }), { headers: JSON_HEADERS });
         }
 
