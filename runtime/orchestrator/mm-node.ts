@@ -237,7 +237,7 @@ export type MarketMakerHealth = {
 };
 
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
-const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(250, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '250'));
+const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(25, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'),
@@ -1012,6 +1012,25 @@ const sameJurisdiction = (
 
 const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
 
+type MarketMakerEntityTx = NonNullable<EntityInput['entityTxs']>[number];
+
+const pushMarketMakerEntityTx = (
+  inputsByEntitySigner: Map<string, EntityInput>,
+  entityId: string,
+  signerId: string,
+  tx: MarketMakerEntityTx,
+): void => {
+  const key = `${normalizeEntityRef(entityId)}:${normalizeEntityRef(signerId)}`;
+  const input = inputsByEntitySigner.get(key) ?? {
+    entityId,
+    signerId,
+    entityTxs: [],
+  };
+  const entityTxs = input.entityTxs ?? (input.entityTxs = []);
+  entityTxs.push(tx);
+  inputsByEntitySigner.set(key, input);
+};
+
 const resolveEntityRuntimeIdForCrossJ = (env: Env, routeEntityIds: string[], entityId: string): string | null => {
   const target = normalizeEntityRef(entityId);
   const localRuntimeId = String(env.runtimeId || '').trim().toLowerCase();
@@ -1296,14 +1315,7 @@ const ensureMarketMakerHubConnectivity = async (
     tx: NonNullable<EntityInput['entityTxs']>[number],
   ): boolean => {
     if (budget.remainingTxs <= 0) return false;
-    const input = localCreditInputsByEntity.get(entityId) ?? {
-      entityId,
-      signerId,
-      entityTxs: [],
-    };
-    const entityTxs = input.entityTxs ?? (input.entityTxs = []);
-    entityTxs.push(tx);
-    localCreditInputsByEntity.set(entityId, input);
+    pushMarketMakerEntityTx(localCreditInputsByEntity, entityId, signerId, tx);
     budget.remainingTxs = Math.max(0, budget.remainingTxs - 1);
     return true;
   };
@@ -1434,7 +1446,7 @@ const maintainMarketMakerQuotes = async (
     grouped.set(spec.hubEntityId, arr);
   }
 
-  const entityInputs: EntityInput[] = [];
+  const entityInputsByEntitySigner = new Map<string, EntityInput>();
   let remainingNewOffers = Math.max(
     1,
     Math.floor(maxNewOffersTotal),
@@ -1474,17 +1486,12 @@ const maintainMarketMakerQuotes = async (
       )
       .slice(0, allowedNewOffers);
     if (missing.length === 0) continue;
-    const missingByPair = new Map<string, MarketMakerOfferSpec[]>();
     for (const spec of missing) {
-      const pairSpecs = missingByPair.get(spec.pairId) ?? [];
-      pairSpecs.push(spec);
-      missingByPair.set(spec.pairId, pairSpecs);
-    }
-    for (const pairSpecs of missingByPair.values()) {
-      entityInputs.push({
-        entityId: mmEntityId,
-        signerId: mmSignerId,
-        entityTxs: pairSpecs.map(spec => ({
+      pushMarketMakerEntityTx(
+        entityInputsByEntitySigner,
+        mmEntityId,
+        mmSignerId,
+        {
           type: 'placeSwapOffer' as const,
           data: {
             counterpartyEntityId: spec.hubEntityId,
@@ -1495,12 +1502,13 @@ const maintainMarketMakerQuotes = async (
             wantAmount: spec.wantAmount,
             minFillRatio: spec.minFillRatio,
           },
-        })),
-      });
+        },
+      );
     }
     remainingNewOffers -= missing.length;
   }
 
+  const entityInputs = Array.from(entityInputsByEntitySigner.values());
   if (entityInputs.length > 0) {
     if (!shouldContinue()) return false;
     enqueueRuntimeInput(env, {
@@ -2013,7 +2021,7 @@ const maintainMarketMakerCrossQuotes = async (
     grouped.set(spec.hubEntityId, arr);
   }
 
-  const entityInputs: EntityInput[] = [];
+  const entityInputsByEntitySigner = new Map<string, EntityInput>();
   const pendingCrossRequestOrderIdsBySourceEntity = new Map<string, Set<string>>();
   const getPendingCrossRequestOrderIds = (entityId: string): Set<string> => {
     const normalizedEntityId = normalizeEntityRef(entityId);
@@ -2089,29 +2097,22 @@ const maintainMarketMakerCrossQuotes = async (
     }
     if (missing.length === 0) continue;
 
-    const missingByEntityAndPair = new Map<string, MarketMakerOfferSpec[]>();
     for (const spec of missing) {
       const route = spec.crossJurisdiction!;
-      const key = `${normalizeEntityRef(route.source.entityId)}:${spec.pairId}`;
-      const pairSpecs = missingByEntityAndPair.get(key) ?? [];
-      pairSpecs.push(spec);
-      missingByEntityAndPair.set(key, pairSpecs);
-    }
-    for (const pairSpecs of missingByEntityAndPair.values()) {
-      const firstRoute = pairSpecs[0]?.crossJurisdiction;
-      if (!firstRoute) continue;
-      entityInputs.push({
-        entityId: firstRoute.source.entityId,
-        signerId: sourceContext.signerId,
-        entityTxs: pairSpecs.map(spec => ({
+      pushMarketMakerEntityTx(
+        entityInputsByEntitySigner,
+        route.source.entityId,
+        sourceContext.signerId,
+        {
           type: 'requestCrossJurisdictionSwap' as const,
           data: { route: spec.crossJurisdiction! },
-        })),
-      });
+        },
+      );
     }
     remainingNewOffers -= missing.length;
   }
 
+  const entityInputs = Array.from(entityInputsByEntitySigner.values());
   const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
   if (nonEmptyEntityInputs.length > 0) {
     if (!shouldContinue()) return false;

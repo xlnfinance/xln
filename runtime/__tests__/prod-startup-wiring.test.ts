@@ -125,10 +125,12 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
+    expect(mmNode).toContain('const pushMarketMakerEntityTx = (');
+    expect(mmNode).toContain('const entityInputsByEntitySigner = new Map<string, EntityInput>();');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '250'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
@@ -192,8 +194,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const pushLocalConnectivityTx = (');
     expect(mmNode).toContain('const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<boolean> => {');
     expect(mmNode).toContain('if (await maintainSameContextQuotes(context)) return;');
-    expect(mmNode).toContain('const missingByPair = new Map<string, MarketMakerOfferSpec[]>();');
-    expect(mmNode).toContain('const missingByEntityAndPair = new Map<string, MarketMakerOfferSpec[]>();');
+    expect(mmNode).toContain('const entityInputsByEntitySigner = new Map<string, EntityInput>();');
+    expect(mmNode).toContain('pushMarketMakerEntityTx(');
+    expect(mmNode).not.toContain('const missingByPair = new Map<string, MarketMakerOfferSpec[]>();');
+    expect(mmNode).not.toContain('const missingByEntityAndPair = new Map<string, MarketMakerOfferSpec[]>();');
     expect(mmNode).toContain('entityInputs,');
     expect(mmNode).not.toContain('const hasMarketMakerQuoteBacklog = (');
     expect(mmNode).not.toContain('if (hasPendingRuntimeWork(env)) return true;');
@@ -385,6 +389,8 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("recordStageOnce('system:ready', last);");
     expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
     expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
+    expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_RUNTIME_HASH_MISMATCH');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HEALTH_REGRESSED');
