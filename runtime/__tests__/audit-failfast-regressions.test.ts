@@ -66,6 +66,7 @@ import { buildRealHanko } from '../hanko/core';
 import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
 import { NobleCryptoProvider } from '../crypto-noble';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
+import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 import { resolveEntityProposerId } from '../state-helpers';
 import type { AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
 import { ethers } from 'ethers';
@@ -1368,6 +1369,133 @@ describe('audit fail-fast regressions', () => {
     expect(offer?.giveAmount).toBe(route.source.amount);
     expect(offer?.wantAmount).toBe(route.target.amount);
     expect(offer?.priceTicks).toBe(20_000n);
+  });
+
+  test('market maker cross amount fitting round-trips through account swap_offer for both market sides', async () => {
+    const cases = [
+      {
+        label: 'source-base',
+        sourceJurisdiction: 'stack:31337:0x1111111111111111111111111111111111111111',
+        targetJurisdiction: 'stack:31338:0x2222222222222222222222222222222222222222',
+        sourceTokenId: 2,
+        targetTokenId: 1,
+        sourceAmount: 123_456_789n * SWAP_LOT_SCALE,
+        targetAmount: 308_642_000_000_000_000_000_000n,
+        priceTicks: 25_000_123n,
+      },
+      {
+        label: 'source-quote',
+        sourceJurisdiction: 'stack:31337:0x3333333333333333333333333333333333333333',
+        targetJurisdiction: 'stack:31338:0x4444444444444444444444444444444444444444',
+        sourceTokenId: 1,
+        targetTokenId: 2,
+        sourceAmount: 308_642_000_000_000_000_000_000n,
+        targetAmount: 123_456_789n * SWAP_LOT_SCALE,
+        priceTicks: 25_000_123n,
+      },
+    ] as const;
+
+    for (const entry of cases) {
+      const sourceMm = `0x${(entry.label === 'source-base' ? '37' : '38').repeat(32)}`;
+      const sourceHub = `0x${(entry.label === 'source-base' ? '47' : '48').repeat(32)}`;
+      const targetHub = `0x${(entry.label === 'source-base' ? '57' : '58').repeat(32)}`;
+      const targetMm = `0x${(entry.label === 'source-base' ? '67' : '68').repeat(32)}`;
+      const amounts = fitCrossAmountsToOrderbook(
+        entry.sourceJurisdiction,
+        entry.sourceTokenId,
+        entry.sourceAmount,
+        entry.targetJurisdiction,
+        entry.targetTokenId,
+        entry.targetAmount,
+        entry.priceTicks,
+      );
+      if (!amounts) throw new Error(`test fixture did not fit ${entry.label}`);
+      const route = buildPreparedCrossJurisdictionRoute({
+        orderId: `mm-fit-roundtrip-${entry.label}`,
+        makerEntityId: sourceMm,
+        hubEntityId: sourceHub,
+        source: {
+          jurisdiction: entry.sourceJurisdiction,
+          entityId: sourceMm,
+          counterpartyEntityId: sourceHub,
+          tokenId: entry.sourceTokenId,
+          amount: amounts.sourceAmount,
+        },
+        target: {
+          jurisdiction: entry.targetJurisdiction,
+          entityId: targetHub,
+          counterpartyEntityId: targetMm,
+          tokenId: entry.targetTokenId,
+          amount: amounts.targetAmount,
+        },
+        priceTicks: amounts.priceTicks,
+        status: 'intent',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        expiresAt: 61_000,
+      }, { runtimeSeed: `mm-fit-roundtrip-${entry.label}`, sourceDisputeDelayMs: 5_000, now: 1_000 });
+      const targetReceipt = buildCrossJurisdictionBookAdmissionReceipt(
+        route,
+        'target',
+        {
+          type: 'pull_lock',
+          data: {
+            pullId: route.targetPull!.pullId,
+            tokenId: route.targetPull!.tokenId,
+            amount: route.targetPull!.signedAmount,
+            revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
+            fullHash: route.targetPull!.fullHash,
+            partialRoot: route.targetPull!.partialRoot,
+          },
+        },
+        targetHub,
+        targetMm,
+        1_001,
+      );
+      const restingRoute = withCanonicalCrossJurisdictionRouteHash({
+        ...route,
+        targetReceipt,
+        status: 'resting' as const,
+        updatedAt: 1_001,
+      });
+      const account = makeProposalAccount([], sourceMm, sourceHub);
+      account.pulls = new Map([[
+        route.sourcePull!.pullId,
+        {
+          pullId: route.sourcePull!.pullId,
+          tokenId: route.sourcePull!.tokenId,
+          amount: route.sourcePull!.signedAmount,
+          claimedRatio: 0,
+          claimedAmount: 0n,
+          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+          fullHash: route.sourcePull!.fullHash,
+          partialRoot: route.sourcePull!.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(restingRoute, 'source'),
+          createdHeight: 1,
+          createdTimestamp: 1_000,
+        },
+      ]]);
+
+      const result = await handleSwapOffer(account, {
+        type: 'swap_offer',
+        data: {
+          offerId: restingRoute.orderId,
+          giveTokenId: restingRoute.source.tokenId,
+          giveAmount: restingRoute.source.amount,
+          wantTokenId: restingRoute.target.tokenId,
+          wantAmount: restingRoute.target.amount,
+          minFillRatio: 0,
+          crossJurisdiction: restingRoute,
+        },
+      }, true, 1);
+
+      expect(result.error).toBeUndefined();
+      expect(result.success).toBe(true);
+      const offer = account.swapOffers.get(restingRoute.orderId);
+      expect(offer?.giveAmount).toBe(amounts.sourceAmount);
+      expect(offer?.wantAmount).toBe(amounts.targetAmount);
+      expect(offer?.priceTicks).toBe(amounts.priceTicks);
+    }
   });
 
   test('target-side cross-j book owner admits remote source offer from committed receipts', () => {
