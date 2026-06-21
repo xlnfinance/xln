@@ -2738,7 +2738,10 @@ const run = async (): Promise<void> => {
         if (upgraded !== undefined) return upgraded;
 
         if (pathname === '/api/info') {
-          const currentHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
+          const includeCrossDebug =
+            url.searchParams.get('crossDebug') === '1' ||
+            url.searchParams.get('debug') === 'cross';
+          const currentHealth = cachedMarketMakerHealth;
           const allVisibleHubs = readVisibleHubProfiles(env, true);
           return new Response(safeStringify({
             name: resolvedArgs.name,
@@ -2760,7 +2763,9 @@ const run = async (): Promise<void> => {
               crossOffers: currentHealth.cross.routes.map(route => route.offers),
               crossBlockers: currentHealth.cross.routes.map(route => route.blockers.length),
             } : null,
-            crossDebug: buildMarketMakerCrossDebugSummary(env, mmContexts, allVisibleHubs, mmTokenIdsByContext),
+            ...(includeCrossDebug
+              ? { crossDebug: buildMarketMakerCrossDebugSummary(env, mmContexts, allVisibleHubs, mmTokenIdsByContext) }
+              : {}),
           }), { headers: JSON_HEADERS });
         }
 
