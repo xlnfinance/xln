@@ -329,7 +329,16 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
     expect(mmNode).toContain('if (!isMarketMakerSameDepthComplete(sameHealth)) return sameHealth;');
     expect(mmNode).toContain('return publishMarketMakerHealthSnapshot({ includeCross: true });');
+    expect(mmNode).toContain("import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';");
+    expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string => {');
+    expect(mmNode).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
     expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
+    expect(mmNode).toContain('const runtimeStateHash = computeCanonicalStateHashFromEnv(env);');
+    expect(mmNode).toContain('const entityStateHash = buildMarketMakerBootstrapEntityStateHash(env);');
+    expect(mmNode).toContain('bootstrapReadyHash = fingerprint.hash;');
+    expect(mmNode).toContain('bootstrapRuntimeStateHash = runtimeStateHash;');
+    expect(mmNode).toContain('bootstrapEntityStateHash = entityStateHash;');
+    expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
     expect(mmNode).toContain('payload=${safeStringify(fingerprint.payload)}');
     expect(mmNode).toContain("const beforeDrive = publishBootstrapHealthSnapshot();\n      refreshBootstrapPhase(beforeDrive);\n      if (isMarketMakerDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return true;");
     expect(mmNode).toContain("await driveQuotes('bootstrap');");
@@ -353,8 +362,39 @@ describe('production startup wiring', () => {
     expect(infoRoute).toContain("url.searchParams.get('crossDebug') === '1'");
     expect(infoRoute).toContain("url.searchParams.get('debug') === 'cross'");
     expect(infoRoute).toContain('const currentHealth = cachedMarketMakerHealth;');
-    expect(infoRoute).toContain('? { crossDebug: buildMarketMakerCrossDebugSummary(env, mmContexts, allVisibleHubs, mmTokenIdsByContext) }');
+    expect(infoRoute).toContain('bootstrap: {');
+    expect(infoRoute).toContain('readyHash: bootstrapReadyHash');
+    expect(infoRoute).toContain('runtimeStateHash: bootstrapRuntimeStateHash');
+    expect(infoRoute).toContain('entityStateHash: bootstrapEntityStateHash');
+    expect(infoRoute).toContain('runtimeBacklog: getMarketMakerRuntimeBacklogSnapshot(env, {');
+    expect(infoRoute).toContain('includeQueuedEntityInputs: includeCrossDebug');
+    expect(infoRoute).toContain('crossDebug: buildMarketMakerCrossDebugSummary(');
+    expect(infoRoute).toContain('readVisibleHubProfiles(env, true)');
+    expect(infoRoute).not.toContain('const allVisibleHubs = readVisibleHubProfiles(env, true);');
     expect(infoRoute).not.toContain('buildMarketMakerHealthSnapshot({ includeCross: true })');
+  });
+
+  test('local prod smoke records bootstrap benchmark stages and hash assertions', () => {
+    const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
+    const smoke = readFileSync(join(repoRoot, 'runtime/scripts/local-prod-smoke.ts'), 'utf8');
+    const benchmark = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-benchmark.ts'), 'utf8');
+
+    expect(packageJson).toContain('"prod:bootstrap:bench": "bun runtime/scripts/bootstrap-benchmark.ts"');
+    expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
+    expect(smoke).toContain("recordStage(`marketMaker:${marketMakerPhase}`, last);");
+    expect(smoke).toContain("recordStageOnce('system:ready', last);");
+    expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
+    expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_RUNTIME_HASH_MISMATCH');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HEALTH_REGRESSED');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HASH_CHANGED');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_POST_BOOTSTRAP_BACKLOG');
+    expect(smoke).toContain("writeFileSync(metricsPath, `${JSON.stringify(metrics, null, 2)}\\n`);");
+    expect(benchmark).toContain("schema: 'xln-bootstrap-benchmark-summary-v1'");
+    expect(benchmark).toContain('BOOTSTRAP_BENCH_BOOTSTRAP_HASH_DRIFT');
+    expect(benchmark).toContain('BOOTSTRAP_BENCH_ENTITY_HASH_DRIFT');
+    expect(benchmark).toContain("runtimeStateHashes: metrics.map(entry => entry.runtimeStateHash)");
   });
 
   test('orchestrator health does not enrich cross market snapshots by default', () => {
