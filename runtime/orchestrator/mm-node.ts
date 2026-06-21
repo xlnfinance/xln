@@ -322,7 +322,7 @@ const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
 );
 const yieldMarketMakerApi = async (): Promise<void> => {
-  await sleep(0);
+  await new Promise<void>(resolve => setImmediate(resolve));
 };
 const ORDERBOOK_MAX_BASE_AMOUNT = MAX_ORDERBOOK_QTY_LOTS * SWAP_LOT_SCALE;
 const MARKET_MAKER_DEPTH_MULTIPLIER = (() => {
