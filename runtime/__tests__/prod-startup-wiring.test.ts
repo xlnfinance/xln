@@ -206,6 +206,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('steadyCrossCursor');
     expect(mmNode).toContain('const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }>');
     expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index)');
+    expect(mmNode).toContain("advanceCrossCursorAfterEnqueue(entry.index);\n          await yieldMarketMakerApi();\n          return;");
+    expect(mmNode).not.toContain("if (mode !== 'bootstrap') return;");
     expect(mmNode).not.toContain("const sameQuoteContexts = mode === 'bootstrap' ? mmContexts.slice(0, 1) : mmContexts;");
     expect(mmNode).toContain("const jobCount = mode === 'bootstrap'");
     expect(mmNode).toContain('? crossQuoteJobs.length');
