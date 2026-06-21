@@ -333,7 +333,7 @@ export async function proposeAccountFrame(
     console.warn(`⚠️ Frame too large: ${frameSize} bytes`);
     return {
       success: false,
-      error: `Frame exceeds 1MB limit: ${frameSize} bytes`,
+      error: `Frame exceeds ${MAX_FRAME_SIZE_BYTES} byte limit: ${frameSize} bytes`,
       events,
     };
   }

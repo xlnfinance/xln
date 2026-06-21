@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>xln Reactive Network Cascade</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #071113;
+      --fg: #eef8f6;
+      --muted: #9eb4b8;
+      --line: #28444a;
+      --panel: #0e1b1f;
+      --panel-2: #111a24;
+      --green: #35d08b;
+      --blue: #83b7ff;
+      --amber: #ffc760;
+      --pink: #e783df;
+      --red: #ff7b7b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    a {
+      color: var(--blue);
+    }
+
+    code, pre {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    .page {
+      width: min(1480px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 34px 0 64px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+      gap: 28px;
+      align-items: end;
+      padding: 28px 0 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(36px, 5vw, 74px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+
+    .eyebrow {
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .lede {
+      max-width: 860px;
+      color: var(--muted);
+      font-size: 20px;
+      margin: 0;
+    }
+
+    .rule {
+      border: 1px solid var(--line);
+      background: #0b181b;
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .rule b {
+      display: block;
+      color: var(--amber);
+      margin-bottom: 8px;
+    }
+
+    .rule code {
+      color: var(--fg);
+      font-size: 15px;
+      white-space: normal;
+    }
+
+    .visual {
+      margin: 30px 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #081214;
+    }
+
+    .visual img {
+      width: 100%;
+      display: block;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin: 26px 0;
+    }
+
+    .tile {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 16px;
+      min-height: 168px;
+    }
+
+    .tile h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+
+    .tile p {
+      color: var(--muted);
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .tile .speed {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+      font-size: 12px;
+      font-weight: 800;
+      color: #061010;
+      background: var(--green);
+    }
+
+    .tile.entity .speed { background: var(--blue); }
+    .tile.runtime .speed { background: var(--amber); }
+    .tile.cross .speed { background: var(--pink); }
+
+    section {
+      margin-top: 38px;
+    }
+
+    section h2 {
+      margin: 0 0 14px;
+      font-size: 30px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+      background: var(--panel);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    th {
+      color: var(--fg);
+      background: #102026;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    td {
+      color: var(--muted);
+    }
+
+    td strong {
+      color: var(--fg);
+    }
+
+    .contracts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    pre {
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #071316;
+      color: #d8f2ec;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .invariants {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .invariant {
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .invariant b {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--amber);
+    }
+
+    .invariant p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #0a171a;
+    }
+
+    .step span {
+      display: block;
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer {
+      margin-top: 48px;
+      padding-top: 20px;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .hero,
+      .grid,
+      .contracts,
+      .invariants,
+      .flow {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">Reactive Network</div>
+        <h1>xln reaction cascade</h1>
+        <p class="lede">
+          xln is a stack of deterministic reactors. A command reacts at the
+          narrowest layer that can handle it. Only committed effects bubble to
+          the next layer, and cross-runtime messages stay encrypted until the
+          target runtime decrypts and validates them.
+        </p>
+      </div>
+      <div class="rule">
+        <b>One rule for every layer</b>
+        <code>(prevState, orderedInputBatch, env.timestamp) -&gt; nextState + explicitOutputs</code>
+      </div>
+    </header>
+
+    <figure class="visual">
+      <img src="../assets/reactive-network-cascade.svg" alt="xln Reactive Network cascade diagram">
+    </figure>
+
+    <div class="grid" aria-label="Reaction levels">
+      <article class="tile account">
+        <span class="speed">fastest</span>
+        <h2>Account-local</h2>
+        <p>
+          A swap, payment, lock, resolve, or credit-limit update changes one
+          bilateral account. No entity book, no runtime route, no network send.
+        </p>
+      </article>
+      <article class="tile entity">
+        <span class="speed">bubble</span>
+        <h2>Entity-local</h2>
+        <p>
+          A committed account effect needs entity-owned state: orderbooks,
+          account queues, profile data, BFT frame signatures, or J batches.
+        </p>
+      </article>
+      <article class="tile runtime">
+        <span class="speed">frame</span>
+        <h2>Intra-runtime</h2>
+        <p>
+          Runtime drains queued runtime, entity, and J inputs into one atomic
+          frame, then plans local outputs, remote outputs, and persistence.
+        </p>
+      </article>
+      <article class="tile cross">
+        <span class="speed">network</span>
+        <h2>Cross-runtime</h2>
+        <p>
+          Entity-to-entity traffic crosses a runtime boundary as encrypted
+          <code>entity_input</code>; relay/direct transport is a blind pipe.
+        </p>
+      </article>
+    </div>
+
+    <section>
+      <h2>Reaction Matrix</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>When it fires</th>
+              <th>Input payload</th>
+              <th>State touched</th>
+              <th>Outputs</th>
+              <th>Determinism guard</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Account</strong></td>
+              <td>One bilateral account can settle the command by itself.</td>
+              <td><code>AccountTx[]</code> inside <code>AccountFrame</code>; message shape is <code>AccountInput.kind</code>.</td>
+              <td>Account deltas, locks, pulls, swaps, frame hash chain, pending frame.</td>
+              <td>Committed account state, optional <code>AccountEvent</code>, optional bubble trigger.</td>
+              <td>Frame hash, hanko signatures, one pending frame, replay from tx list.</td>
+            </tr>
+            <tr>
+              <td><strong>Entity</strong></td>
+              <td>Account effects need entity books, account queues, BFT consensus, or J output.</td>
+              <td><code>EntityInput { entityId, signerId, runtimeId?, entityTxs?, proposedFrame?, hashPrecommits? }</code></td>
+              <td>Entity accounts map, proposals, orderbooks, reserves, profile, J batch state.</td>
+              <td><code>mempoolOps</code> to accounts, <code>outputs</code> to entities, <code>jOutputs</code> to jurisdiction.</td>
+              <td>Signer is part of the route; no late proposer guessing for tx-bearing output.</td>
+            </tr>
+            <tr>
+              <td><strong>Runtime</strong></td>
+              <td>Inputs must be ordered, merged, routed, persisted, or delivered across replicas.</td>
+              <td><code>RuntimeInput { runtimeTxs, entityInputs, jInputs?, timestamp?, queuedAt? }</code></td>
+              <td>Runtime mempool, replicas, J replicas, network inbox, output plan, WAL/storage.</td>
+              <td>Local enqueue, remote encrypted dispatch, J submit/watch, stored runtime frame.</td>
+              <td>Runtime frame is atomic. Side effects happen after frame computation/persistence.</td>
+            </tr>
+            <tr>
+              <td><strong>Cross-runtime</strong></td>
+              <td>Target entity signer is not local to this runtime.</td>
+              <td><code>entity_input</code> wire message with encrypted <code>DeliverableEntityInput</code>.</td>
+              <td>No consensus state in relay; target runtime decrypts and enqueues after validation.</td>
+              <td>Remote <code>runtimeMempool.entityInputs</code>, or fail-fast transport error.</td>
+              <td>X25519 + ChaCha20-Poly1305 payload; relay cannot forge txs or read payload.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Payload Contracts</h2>
+      <div class="contracts">
+        <pre><code>type RuntimeInput = {
+  runtimeTxs: RuntimeTx[];
+  entityInputs: EntityInput[];
+  jInputs?: JInput[];
+  timestamp?: number;
+  queuedAt?: number;
+};</code></pre>
+        <pre><code>type EntityInput = {
+  entityId: string;
+  signerId: string;
+  runtimeId?: string;
+  from?: string;
+  entityTxs?: EntityTx[];
+  proposedFrame?: ProposedEntityFrame;
+  hashPrecommits?: Map&lt;string, string[]&gt;;
+};</code></pre>
+        <pre><code>type AccountInput =
+  | { kind: "frame"; newAccountFrame; newHanko }
+  | { kind: "ack"; prevHanko }
+  | { kind: "frame_ack"; prevHanko; newAccountFrame; newHanko }
+  | { kind: "dispute"; newDisputeHanko; newDisputeHash }
+  | { kind: "settle"; settleAction; newSettlementHanko? };</code></pre>
+        <pre><code>type CrossRuntimeWire = {
+  type: "entity_input";
+  from: sourceRuntimeId;
+  to: targetRuntimeId;
+  encrypted: true;
+  fromEncryptionPubKey: hex;
+  payload: encryptJSON(DeliverableEntityInput);
+};</code></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Cascade Walkthrough</h2>
+      <div class="flow">
+        <article class="step">
+          <span>1. Account command</span>
+          <p>A user, matcher, or HTLC handler produces an <code>AccountTx</code> for one bilateral account.</p>
+        </article>
+        <article class="step">
+          <span>2. Account frame</span>
+          <p>The account reactor hashes and signs a frame. If state remains local, the cascade stops here.</p>
+        </article>
+        <article class="step">
+          <span>3. Bubble event</span>
+          <p>Committed effects that need entity state become <code>mempoolOps</code>, entity txs, or account followups.</p>
+        </article>
+        <article class="step">
+          <span>4. Entity frame</span>
+          <p>The entity reactor updates books/accounts/profile/J batches and emits explicit entity or J outputs.</p>
+        </article>
+        <article class="step">
+          <span>5. Runtime route</span>
+          <p>The runtime keeps local outputs in-process and encrypts remote entity outputs for the target runtime.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Invariants For Implementers</h2>
+      <div class="invariants">
+        <article class="invariant">
+          <b>Use the narrowest reactor</b>
+          <p>Do not promote account-local work into entity/runtime paths unless the committed effect needs shared entity state or transport.</p>
+        </article>
+        <article class="invariant">
+          <b>Bubble data, never mutable state</b>
+          <p>An upper layer receives explicit payloads: account events, mempool ops, entity inputs, or J inputs. It must not reach into lower-layer internals.</p>
+        </article>
+        <article class="invariant">
+          <b>Side effects after the frame</b>
+          <p>Runtime frames remain atomic. Network sends, relay delivery, J submits, and profile announcements occur only after deterministic state transition work.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      Canonical neighbors:
+      <a href="runtime-reaj.md">Runtime REAJ Architecture</a>,
+      <a href="../core/rjea-architecture.md">RJEA Architecture</a>,
+      <a href="../implementation/payment-spec.md">Payment Spec</a>.
+    </footer>
+  </main>
+</body>
+</html>

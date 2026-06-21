@@ -528,8 +528,8 @@ const validateEntityInput = (input: EntityInput): boolean => {
         log.error(`❌ HashPrecommits must be Map, got: ${typeof input.hashPrecommits}`);
         return false;
       }
-      if (input.hashPrecommits.size > 100) {
-        log.error(`❌ Too many hashPrecommits: ${input.hashPrecommits.size} > 100`);
+      if (input.hashPrecommits.size > LIMITS.MAX_VALIDATORS) {
+        log.error(`❌ Too many hashPrecommits: ${input.hashPrecommits.size} > ${LIMITS.MAX_VALIDATORS}`);
         return false;
       }
       for (const [signerId, sigs] of input.hashPrecommits) {

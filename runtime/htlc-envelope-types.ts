@@ -19,9 +19,10 @@
  */
 
 import type { CryptoProvider } from './crypto-provider';
+import { HTLC } from './constants';
 import { safeStringify } from './serialization-utils';
 
-const MAX_ENVELOPE_SERIALIZED_BYTES = 2048;
+const MAX_ENVELOPE_SERIALIZED_BYTES = 10_000;
 
 export interface HtlcEnvelope {
   nextHop?: string;           // Next entity to forward to (undefined if final)
@@ -75,12 +76,10 @@ export async function createOnionEnvelopes(
     throw new Error('Route must have at least sender and recipient');
   }
 
-  // MEDIUM-8: Enforce MAX_HOPS (prevent oversized payloads)
-  const MAX_HOPS = 20; // From constants.ts
   const numHops = route.length - 1; // Exclude sender
 
-  if (numHops > MAX_HOPS) {
-    throw new Error(`Route too long: ${numHops} hops > MAX_HOPS (${MAX_HOPS})`);
+  if (numHops > HTLC.MAX_HOPS) {
+    throw new Error(`Route too long: ${numHops} hops > MAX_HOPS (${HTLC.MAX_HOPS})`);
   }
 
   // MEDIUM-8: Detect loops (duplicate entities in route)

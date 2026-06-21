@@ -4,6 +4,7 @@ import {
   createMarketMakerServerState,
   getMarketMakerHealth,
 } from '../server/market-maker-health';
+import { buildDefaultEntitySwapPairs } from '../account-utils';
 import { buildMarketSnapshotForReplica } from '../market-snapshot';
 import { applyCommand, createBook } from '../orderbook';
 import type { Env } from '../types';
@@ -22,7 +23,7 @@ test('market maker server health treats absent cross topology as neutral', () =>
   expect(health.cross.routes).toEqual([]);
 });
 
-test('market maker server health separates quote coverage readiness from full depth', () => {
+test('market maker server health requires full quote depth', () => {
   const state = createMarketMakerServerState();
   state.entityId = 'mm';
   state.targetHubIds = ['0x0000000000000000000000000000000000abcdef'];
@@ -39,7 +40,7 @@ test('market maker server health separates quote coverage readiness from full de
   };
   const health = getMarketMakerHealth({} as Env, state, () => account as any);
 
-  expect(health.ok).toBe(true);
+  expect(health.ok).toBe(false);
   expect(health.hubs[0]?.ready).toBe(true);
   expect(health.hubs[0]?.depthReady).toBe(false);
   expect(health.hubs[0]?.pairs.map(pair => ({
@@ -52,6 +53,33 @@ test('market maker server health separates quote coverage readiness from full de
     { pairId: '1/3', offers: 1, ready: true, depthReady: false },
     { pairId: '2/3', offers: 1, ready: true, depthReady: false },
   ]);
+});
+
+test('market maker server health is green only at full configured depth', () => {
+  const state = createMarketMakerServerState();
+  state.entityId = 'mm';
+  state.targetHubIds = ['0x0000000000000000000000000000000000abcdef'];
+  state.tokenIds = [1, 2, 3];
+
+  const offers = new Map<string, unknown>();
+  for (const pair of buildDefaultEntitySwapPairs(state.tokenIds)) {
+    const pairKey = `${pair.baseTokenId}-${pair.quoteTokenId}`;
+    for (const side of ['ask', 'bid']) {
+      for (let level = 1; level <= 10; level += 1) {
+        offers.set(`mm-abcdef-${pairKey}-${side}-${level}`, {});
+      }
+    }
+  }
+  const health = getMarketMakerHealth({} as Env, state, () => ({
+    swapOffers: offers,
+    mempool: [],
+    pendingFrame: null,
+  } as any));
+
+  expect(health.ok).toBe(true);
+  expect(health.expectedOffersPerPair).toBe(20);
+  expect(health.expectedOffersPerHub).toBe(60);
+  expect(health.hubs[0]?.depthReady).toBe(true);
 });
 
 test('market snapshots expose order counts for aggregated price levels', () => {

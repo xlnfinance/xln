@@ -14,19 +14,19 @@
 
 export const LIMITS = {
   /** Maximum messages stored per entity (memory limit) */
-  MESSAGE_HISTORY: 100,
+  MESSAGE_HISTORY: 1000,
 
   /** Maximum transactions in entity mempool before rejection */
   MEMPOOL_SIZE: 1000,
 
-  /** Maximum size of a single frame in bytes (like Bitcoin block limit) */
-  MAX_FRAME_SIZE_BYTES: 1_048_576, // 1MB
+  /** Maximum size of a single frame in bytes. 1000 tx frames get a 10KB/tx budget. */
+  MAX_FRAME_SIZE_BYTES: 10_000_000,
 
   /** Maximum number of accounts per entity (prevents state bloat) */
   MAX_ACCOUNTS_PER_ENTITY: 1000,
 
   /** Maximum proposals per entity (prevents governance spam) */
-  MAX_PROPOSALS_PER_ENTITY: 100,
+  MAX_PROPOSALS_PER_ENTITY: 1000,
 
   /** Maximum validators per entity (BFT performance limit) */
   MAX_VALIDATORS: 100,
@@ -35,7 +35,7 @@ export const LIMITS = {
   MAX_ACCOUNT_HTLC_LOCKS: 32,
 
   /** Maximum active swap offers per bilateral account */
-  MAX_ACCOUNT_SWAP_OFFERS: 512,
+  MAX_ACCOUNT_SWAP_OFFERS: 1000,
 
   /** Maximum resting orders per pair book */
   MAX_ORDERBOOK_ORDERS_PER_PAIR: 10_000,
@@ -59,7 +59,7 @@ export const FINANCIAL = {
   MAX_COLLATERAL: 2n ** 64n - 1n, // U64 max
 
   /** Maximum route length for multi-hop payments */
-  MAX_ROUTE_HOPS: 10,
+  MAX_ROUTE_HOPS: 100,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
@@ -74,7 +74,7 @@ export const HTLC = {
   MIN_FORWARD_TIMELOCK_MS: 20_000, // 20 seconds minimum at first hop
 
   /** Maximum hops for HTLC routing (prevents loops) */
-  MAX_HOPS: 20,
+  MAX_HOPS: 100,
 
   /** Default HTLC expiry (baseline, may be raised per-route) */
   DEFAULT_EXPIRY_MS: 30_000,

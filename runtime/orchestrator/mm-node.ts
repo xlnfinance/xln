@@ -132,12 +132,6 @@ type MarketMakerConnectivityBudget = {
   remainingTxs: number;
 };
 
-type MarketMakerCrossOfferBudget = {
-  maxOffersPerEntity: number;
-  remainingOffersTotal: number;
-  remainingOffersByEntityId: Map<string, number>;
-};
-
 type MarketMakerEntityContext = {
   entityId: string;
   signerId: string;
@@ -235,7 +229,7 @@ const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_START_DELAY_MS = Math.max(
   0,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '2000'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'),
 );
 const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
@@ -245,80 +239,53 @@ const MARKET_MAKER_API_YIELD_MS = Math.max(
   1,
   Number(process.env['MARKET_MAKER_API_YIELD_MS'] || '1'),
 );
-const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'),
-);
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '30'),
+  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
-  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '12'),
+  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
   MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '180'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '60'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '180'),
-);
-const MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '2'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '2'),
-);
-const MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT = Math.max(
-  1,
-  // Keep per-input account work bounded. maxEntityInputsPerFrame caps
-  // EntityInputs, but account consensus still runs all txs inside one input.
-  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '4'),
-);
-const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
-  1,
-  Number(
-    process.env['MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||
-    '4',
-  ),
-);
-const MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '4'),
+  Number(process.env['MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1'),
+  Number(process.env['MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '64'),
-);
-const MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT'] || '1'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
-  Math.min(8, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '4')),
+  // Keep default cross depth small for bootstrap speed; account frames can now
+  // carry 1000 txs, and MAX_ACCOUNT_SWAP_OFFERS bounds env-driven depth.
+  Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3')),
 );
 const MARKET_MAKER_MAX_LEVELS_PER_PAIR = Math.max(
   1,
   Math.min(
-    15,
-    Number(process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '15'),
+    1000,
+    Number(process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'),
   ),
 );
 const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
@@ -1227,9 +1194,26 @@ const ensureMarketMakerHubConnectivity = async (
   budget: MarketMakerConnectivityBudget,
 ): Promise<boolean> => {
   const localCreditInputsByEntity = new Map<string, EntityInput>();
+  const pushLocalConnectivityTx = (
+    entityId: string,
+    signerId: string,
+    tx: NonNullable<EntityInput['entityTxs']>[number],
+  ): boolean => {
+    if (budget.remainingTxs <= 0) return false;
+    const input = localCreditInputsByEntity.get(entityId) ?? {
+      entityId,
+      signerId,
+      entityTxs: [],
+    };
+    const entityTxs = input.entityTxs ?? (input.entityTxs = []);
+    entityTxs.push(tx);
+    localCreditInputsByEntity.set(entityId, input);
+    budget.remainingTxs = Math.max(0, budget.remainingTxs - 1);
+    return true;
+  };
 
+  collectOpenAccountInputs:
   for (const hubEntityId of hubEntityIds) {
-    if (budget.remainingTxs <= 0) break;
     const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
     const hasPendingConsensus =
       Boolean(mmAccount?.pendingFrame) ||
@@ -1258,18 +1242,12 @@ const ensureMarketMakerHubConnectivity = async (
             amount: MARKET_MAKER_CREDIT_AMOUNT,
           },
         })),
-      ].slice(0, MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT);
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId: mmEntityId,
-          signerId: mmSignerId,
-          entityTxs: connectivityTxs,
-        }],
-      });
-      budget.remainingTxs = Math.max(0, budget.remainingTxs - connectivityTxs.length);
-      await yieldMarketMakerApi();
-      return true;
+      ];
+      for (const tx of connectivityTxs) {
+        if (!pushLocalConnectivityTx(mmEntityId, mmSignerId, tx)) {
+          break collectOpenAccountInputs;
+        }
+      }
     }
   }
 
@@ -1283,37 +1261,28 @@ const ensureMarketMakerHubConnectivity = async (
     if (!mmAccount) continue;
 
     for (const tokenId of tokenIds) {
-      if (budget.remainingTxs <= 0) break collectCreditInputs;
       if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
       if (hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
       const hubOutCapacity = getEntityOutCapacity(mmAccount, hubEntityId, tokenId);
 
       if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
-        const input = localCreditInputsByEntity.get(mmEntityId) ?? {
-          entityId: mmEntityId,
-          signerId: mmSignerId,
-          entityTxs: [],
-        };
-        const entityTxs = input.entityTxs ?? (input.entityTxs = []);
-        if (entityTxs.length >= MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT) break collectCreditInputs;
-        entityTxs.push({
+        if (!pushLocalConnectivityTx(mmEntityId, mmSignerId, {
           type: 'extendCredit',
           data: {
             counterpartyEntityId: hubEntityId,
             tokenId,
             amount: MARKET_MAKER_CREDIT_AMOUNT,
           },
-        });
-        localCreditInputsByEntity.set(mmEntityId, input);
-        budget.remainingTxs -= 1;
-        if (entityTxs.length >= MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT) break collectCreditInputs;
+        })) {
+          break collectCreditInputs;
+        }
       }
     }
   }
 
   const localCreditInputs = Array.from(localCreditInputsByEntity.values());
   if (localCreditInputs.length > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [localCreditInputs[0]!] });
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });
     await yieldMarketMakerApi();
     return true;
   }
@@ -1372,10 +1341,7 @@ const maintainMarketMakerQuotes = async (
   const entityTxs: EntityInput['entityTxs'] = [];
   let remainingNewOffers = Math.max(
     1,
-    Math.min(
-      Math.floor(maxNewOffersTotal),
-      MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT,
-    ),
+    Math.floor(maxNewOffersTotal),
   );
   const groupedEntries = Array.from(grouped.entries())
     .sort((left, right) =>
@@ -1758,25 +1724,6 @@ const pushEntityTx = (
   inputsByEntity.set(key, input);
 };
 
-const reserveCrossOfferBudget = (
-  budget: MarketMakerCrossOfferBudget | undefined,
-  entityIds: readonly string[],
-): boolean => {
-  if (!budget) return true;
-  if (budget.remainingOffersTotal <= 0) return false;
-  const keys = Array.from(new Set(entityIds.map(normalizeEntityRef).filter(Boolean)));
-  for (const key of keys) {
-    const remaining = budget.remainingOffersByEntityId.get(key) ?? budget.maxOffersPerEntity;
-    if (remaining <= 0) return false;
-  }
-  budget.remainingOffersTotal -= 1;
-  for (const key of keys) {
-    const remaining = budget.remainingOffersByEntityId.get(key) ?? budget.maxOffersPerEntity;
-    budget.remainingOffersByEntityId.set(key, remaining - 1);
-  }
-  return true;
-};
-
 const maintainMarketMakerCrossQuotes = async (
   env: Env,
   sourceContext: MarketMakerEntityContext,
@@ -1788,8 +1735,6 @@ const maintainMarketMakerCrossQuotes = async (
   maxOffersPerAccount = Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
-  crossOfferBudget?: MarketMakerCrossOfferBudget,
-  coverageOnly = false,
   shouldContinue: () => boolean = () => true,
 ): Promise<boolean> => {
   if (
@@ -1855,10 +1800,7 @@ const maintainMarketMakerCrossQuotes = async (
   };
   let remainingNewOffers = Math.max(
     1,
-    Math.min(
-      Math.floor(maxNewOffersTotal),
-      MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT,
-    ),
+    Math.floor(maxNewOffersTotal),
   );
   const groupedEntries = Array.from(grouped.entries())
     .sort((left, right) =>
@@ -1879,24 +1821,13 @@ const maintainMarketMakerCrossQuotes = async (
 
     const existingOfferIds = collectOfferIdsForAccount(account);
     if (remainingNewOffers <= 0) continue;
-    const remainingGlobalOffers = crossOfferBudget
-      ? Math.max(0, crossOfferBudget.remainingOffersTotal)
-      : Number.MAX_SAFE_INTEGER;
     const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
     const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);
-    const coverageGapCount = crossSpecPairIds(specs).filter(pairId => (visibleByPair.get(pairId) || 0) === 0).length;
-    if (coverageOnly && coverageGapCount === 0) continue;
-    const perAccountLimit = coverageGapCount > 0
-      ? Math.min(Math.max(1, Math.floor(maxOffersPerAccount)), coverageGapCount)
-      : Math.min(
-          Math.max(1, Math.floor(maxOffersPerAccount)),
-          MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT,
-        );
+    const perAccountLimit = Math.max(1, Math.floor(maxOffersPerAccount));
     const allowedNewOffers = Math.min(
       perAccountLimit,
       remainingOpenSlots,
       remainingNewOffers,
-      remainingGlobalOffers,
     );
     if (allowedNewOffers <= 0) continue;
 
@@ -1929,14 +1860,6 @@ const maintainMarketMakerCrossQuotes = async (
     const missing: MarketMakerOfferSpec[] = [];
     for (const spec of missingCandidates) {
       if (missing.length >= allowedNewOffers) break;
-      const route = spec.crossJurisdiction!;
-      if (!reserveCrossOfferBudget(crossOfferBudget, [
-        route.source.entityId,
-        route.source.counterpartyEntityId,
-        route.target.entityId,
-      ])) {
-        continue;
-      }
       missing.push(spec);
     }
     if (missing.length === 0) continue;
@@ -1956,7 +1879,7 @@ const maintainMarketMakerCrossQuotes = async (
     if (!shouldContinue()) return false;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
-      entityInputs: [entityInputs[0]!],
+      entityInputs,
     });
     await yieldMarketMakerApi();
     return true;
@@ -2119,7 +2042,6 @@ const run = async (): Promise<void> => {
   configureMarketMakerRuntimeLogging(env);
   startRuntimeLoop(env, {
     tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
-    maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
   });
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
@@ -2580,20 +2502,12 @@ const run = async (): Promise<void> => {
           });
         }
       }
-      const crossOfferBudget: MarketMakerCrossOfferBudget | undefined = mode === 'bootstrap'
-        ? {
-            maxOffersPerEntity: MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK,
-            remainingOffersTotal: MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK,
-            remainingOffersByEntityId: new Map<string, number>(),
-          }
-        : undefined;
       const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }> = [];
       if (crossQuoteJobs.length > 0) {
-        const routeJobsPerTick = mode === 'bootstrap'
-          ? MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK
-          : MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK;
         const cursor = mode === 'bootstrap' ? bootstrapCrossCursor : steadyCrossCursor;
-        const jobCount = Math.min(routeJobsPerTick, crossQuoteJobs.length);
+        const jobCount = mode === 'bootstrap'
+          ? crossQuoteJobs.length
+          : Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length);
         let nextCursor = cursor;
         for (let offset = 0; offset < jobCount; offset += 1) {
           const selectedIndex = (cursor + offset) % crossQuoteJobs.length;
@@ -2636,13 +2550,11 @@ const run = async (): Promise<void> => {
             ? MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK
             : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
           connectivityBudget,
-          crossOfferBudget,
-          false,
           shouldContinue,
         )) {
           advanceCrossCursorAfterEnqueue(entry.index);
           await yieldMarketMakerApi();
-          return;
+          if (mode !== 'bootstrap') return;
         }
         await yieldMarketMakerApi();
       }
@@ -2683,6 +2595,10 @@ const run = async (): Promise<void> => {
 
   let loop: ReturnType<typeof setInterval> | null = null;
   const runQuoteMaintenance = async (): Promise<void> => {
+    if (startupPhase === 'offers-ready') {
+      publishMarketMakerHealthSnapshot({ includeCross: true });
+      return;
+    }
     const before = startupPhase === 'offers-ready'
       ? publishMarketMakerHealthSnapshot({ includeCross: true })
       : publishBootstrapHealthSnapshot();
@@ -2722,10 +2638,11 @@ const run = async (): Promise<void> => {
     publishBootstrapHealthSnapshot();
     if (await waitForBootstrapOffers()) {
       markOffersReady();
+      publishMarketMakerHealthSnapshot({ includeCross: true });
     } else {
       startupPhase = 'bootstrap-degraded';
+      startQuoteLoop();
     }
-    startQuoteLoop();
   })().catch(failQuoteLoop);
 
   let shutdownStarted = false;
