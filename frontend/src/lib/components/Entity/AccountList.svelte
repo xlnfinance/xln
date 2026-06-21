@@ -9,6 +9,7 @@
 
   export let replica: EntityReplica | null;
   export let selectedAccountId: string | null = null;
+  export let pendingFaucetKeys: Set<string> = new Set();
 
   $: entityHeight = Number(replica?.state?.height ?? 0);
   $: runtimeHeight = Number($xlnEnvironment?.height ?? 0);
@@ -291,6 +292,7 @@
               lockSummary={getLockSummary(entry.counterpartyId)}
               activeFlows={activeFlowSummary.items}
               activeFlowOverflowCount={activeFlowSummary.overflowCount}
+              {pendingFaucetKeys}
               isSelected={selectedAccountId
                 ? String(selectedAccountId).toLowerCase() === String(entry.counterpartyId).toLowerCase()
                 : index === 0}

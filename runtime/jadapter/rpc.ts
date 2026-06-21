@@ -842,75 +842,71 @@ export async function createRpcAdapter(
 
       const rpcUrl = config.rpcUrl;
       if (rpcUrl && rpcUrl.startsWith('http')) {
-        try {
-          let nextId = 1;
-          let nativeBalanceId: number | null = null;
-          const tokenIds: number[] = [];
-          const allowanceIds: number[] = [];
-          const batch: RpcBatchRequest[] = [];
+        let nextId = 1;
+        let nativeBalanceId: number | null = null;
+        const tokenIds: number[] = [];
+        const allowanceIds: number[] = [];
+        const batch: RpcBatchRequest[] = [];
 
-          if (includeNativeBalance) {
-            nativeBalanceId = nextId;
-            batch.push({
-              id: nextId,
-              jsonrpc: '2.0',
-              method: 'eth_getBalance',
-              params: [owner, 'latest'],
-            });
-            nextId += 1;
-          }
-
-          for (const tokenAddress of tokenAddresses) {
-            tokenIds.push(nextId);
-            batch.push({
-              id: nextId,
-              jsonrpc: '2.0',
-              method: 'eth_call',
-              params: [{
-                to: tokenAddress,
-                data: erc20Interface.encodeFunctionData('balanceOf', [owner]),
-              }, 'latest'],
-            });
-            nextId += 1;
-          }
-
-          for (const allowanceRead of allowances) {
-            allowanceIds.push(nextId);
-            batch.push({
-              id: nextId,
-              jsonrpc: '2.0',
-              method: 'eth_call',
-              params: [{
-                to: allowanceRead.tokenAddress,
-                data: erc20Interface.encodeFunctionData('allowance', [owner, allowanceRead.spender]),
-              }, 'latest'],
-            });
-            nextId += 1;
-          }
-
-          const responses = await sendRpcBatch(rpcUrl, batch);
-          const readBigInt = (id: number): bigint => {
-            const item = responses.get(id);
-            if (!item) return 0n;
-            if (item.error) {
-              return 0n;
-            }
-            if (typeof item.result !== 'string') return 0n;
-            try {
-              return BigInt(item.result);
-            } catch {
-              return 0n;
-            }
-          };
-
-          return {
-            nativeBalance: nativeBalanceId === null ? null : readBigInt(nativeBalanceId),
-            tokenBalances: tokenIds.map(readBigInt),
-            allowances: allowanceIds.map(readBigInt),
-          };
-        } catch (err) {
-          console.warn('[JAdapter:rpc] Wallet snapshot batch failed, falling back:', (err as Error).message);
+        if (includeNativeBalance) {
+          nativeBalanceId = nextId;
+          batch.push({
+            id: nextId,
+            jsonrpc: '2.0',
+            method: 'eth_getBalance',
+            params: [owner, 'latest'],
+          });
+          nextId += 1;
         }
+
+        for (const tokenAddress of tokenAddresses) {
+          tokenIds.push(nextId);
+          batch.push({
+            id: nextId,
+            jsonrpc: '2.0',
+            method: 'eth_call',
+            params: [{
+              to: tokenAddress,
+              data: erc20Interface.encodeFunctionData('balanceOf', [owner]),
+            }, 'latest'],
+          });
+          nextId += 1;
+        }
+
+        for (const allowanceRead of allowances) {
+          allowanceIds.push(nextId);
+          batch.push({
+            id: nextId,
+            jsonrpc: '2.0',
+            method: 'eth_call',
+            params: [{
+              to: allowanceRead.tokenAddress,
+              data: erc20Interface.encodeFunctionData('allowance', [owner, allowanceRead.spender]),
+            }, 'latest'],
+          });
+          nextId += 1;
+        }
+
+        const responses = await sendRpcBatch(rpcUrl, batch);
+        const readBigInt = (id: number): bigint => {
+          const item = responses.get(id);
+          if (!item) return 0n;
+          if (item.error) {
+            return 0n;
+          }
+          if (typeof item.result !== 'string') return 0n;
+          try {
+            return BigInt(item.result);
+          } catch {
+            return 0n;
+          }
+        };
+
+        return {
+          nativeBalance: nativeBalanceId === null ? null : readBigInt(nativeBalanceId),
+          tokenBalances: tokenIds.map(readBigInt),
+          allowances: allowanceIds.map(readBigInt),
+        };
       }
 
       const [nativeBalance, tokenBalances, allowanceValues] = await Promise.all([

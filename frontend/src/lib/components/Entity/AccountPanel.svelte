@@ -10,12 +10,14 @@
   import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
+  import { faucetPendingKey } from './account-faucet';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let env: Env | EnvSnapshot;
+  export let pendingFaucetKeys: Set<string> = new Set();
 
   const dispatch = createEventDispatcher();
 
@@ -435,7 +437,12 @@
   }
 
   function handleFaucet(tokenId: number): void {
+    if (isFaucetPending(tokenId)) return;
     dispatch('faucet', { counterpartyId, tokenId });
+  }
+
+  function isFaucetPending(tokenId: number): boolean {
+    return pendingFaucetKeys.has(faucetPendingKey(counterpartyId, tokenId));
   }
 
   function clearNowTimer(): void {
@@ -516,9 +523,10 @@
               <svelte:fragment slot="actions">
                 <button
                   class="delta-faucet"
+                  disabled={isFaucetPending(td.tokenId)}
                   on:click|stopPropagation={() => handleFaucet(td.tokenId)}
                 >
-                  Faucet
+                  {isFaucetPending(td.tokenId) ? 'Funding...' : 'Faucet'}
                 </button>
               </svelte:fragment>
             </DeltaTokenSummary>

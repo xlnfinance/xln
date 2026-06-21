@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
 
 const repoRoot = process.cwd();
 
@@ -448,4 +449,119 @@ describe('production startup wiring', () => {
     expect(anvil2).toContain('ANVIL_CHAIN_ID="${ANVIL2_CHAIN_ID:-31338}"');
     expect(anvil2).toContain('ANVIL_STATE="${ANVIL2_STATE:-$REPO_ROOT/data/anvil2-state.json}"');
   });
+
+  test('explicit hub action proxy uses cached hub child without synchronous health polling', async () => {
+    const originalFetch = globalThis.fetch;
+    const hubEntityId = `0x${'ab'.repeat(32)}`;
+    let pollCalls = 0;
+    let upstreamUrl = '';
+    let upstreamBody = '';
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      upstreamUrl = url instanceof Request ? url.url : String(url);
+      upstreamBody = String(init?.body || '');
+      return new Response(JSON.stringify({ success: true, serverDurationMs: 0 }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: '',
+        pollAllHubHealth: async () => {
+          pollCalls += 1;
+          throw new Error('health poll should not run for a cached explicit hub');
+        },
+        getHubChildByEntityId: (entityId: string) =>
+          entityId === hubEntityId ? ({ apiPort: 19301 } as any) : null,
+        getHealthyHub: () => null,
+      });
+      const body = JSON.stringify({ hubEntityId, userEntityId: `0x${'cd'.repeat(32)}` });
+      const response = await handlers.proxyHubApi(new Request('http://xln.local/api/faucet/offchain', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      }), '/api/faucet/offchain');
+
+      expect(response.status).toBe(200);
+      expect(pollCalls).toBe(0);
+      expect(upstreamUrl).toBe('http://127.0.0.1:19301/api/faucet/offchain');
+      expect(upstreamBody).toBe(body);
+      expect(response.headers.get('x-xln-proxy-health-polled')).toBe('0');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('explicit hub action proxy polls health only as a lookup fallback', async () => {
+    const originalFetch = globalThis.fetch;
+    const hubEntityId = `0x${'ef'.repeat(32)}`;
+    let pollCalls = 0;
+    let hubVisible = false;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch;
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: '',
+        pollAllHubHealth: async () => {
+          pollCalls += 1;
+          hubVisible = true;
+        },
+        getHubChildByEntityId: (entityId: string) =>
+          hubVisible && entityId === hubEntityId ? ({ apiPort: 19302 } as any) : null,
+        getHealthyHub: () => null,
+      });
+      const response = await handlers.proxyHubApi(new Request('http://xln.local/api/faucet/offchain', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ hubEntityId }),
+      }), '/api/faucet/offchain');
+
+      expect(response.status).toBe(200);
+      expect(pollCalls).toBe(1);
+      expect(response.headers.get('x-xln-proxy-health-polled')).toBe('1');
+      expect(Number(response.headers.get('x-xln-proxy-health-poll-ms'))).toBeGreaterThanOrEqual(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('orchestrator rpc proxy fails fast when upstream hangs', async () => {
+    const previousTimeout = process.env['XLN_RPC_PROXY_TIMEOUT_MS'];
+    const server = Bun.serve({
+      port: 0,
+      fetch: () => new Promise<Response>(() => {}),
+    });
+    process.env['XLN_RPC_PROXY_TIMEOUT_MS'] = '25';
+    try {
+      const handlers = createOrchestratorProxyHandlers({
+        host: '127.0.0.1',
+        defaultRpcUrl: `http://127.0.0.1:${server.port}`,
+        pollAllHubHealth: async () => {},
+        getHubChildByEntityId: () => null,
+        getHealthyHub: () => null,
+      });
+      const startedAt = performance.now();
+      const response = await handlers.proxyRpc(new Request('http://127.0.0.1/rpc', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'eth_chainId', params: [] }),
+      }));
+      const body = await response.json() as { error?: string };
+
+      expect(response.status).toBe(502);
+      expect(body.error).toContain('PROXY_UPSTREAM_TIMEOUT:25');
+      expect(performance.now() - startedAt).toBeLessThan(1_000);
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env['XLN_RPC_PROXY_TIMEOUT_MS'];
+      } else {
+        process.env['XLN_RPC_PROXY_TIMEOUT_MS'] = previousTimeout;
+      }
+      await server.stop(true);
+    }
+  }, 2_000);
 });

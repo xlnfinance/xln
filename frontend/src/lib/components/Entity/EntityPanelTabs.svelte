@@ -1376,6 +1376,9 @@
   let onchainReserves: Map<number, bigint> = new Map();
   let pendingReserveFaucets: PendingReserveFaucet[] = [];
   let pendingOffchainFaucets: PendingOffchainFaucet[] = [];
+  $: pendingOffchainFaucetKeys = new Set(
+    pendingOffchainFaucets.map(req => faucetPendingKey(req.hubEntityId, req.tokenId)),
+  );
 
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
@@ -2650,7 +2653,7 @@
       }
       sendAssetAmount = '';
       toasts.success(`Sent ${token.symbol}`);
-      await fetchExternalTokens();
+      void fetchExternalTokens();
     } finally {
       sendingExternalToken = null;
     }
@@ -3691,7 +3694,7 @@
       const signerId = String(currentSignerId || '').trim();
       const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
       const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv) || getActiveJurisdictionName(activeEnv) || '').trim();
-      const refreshMs = 1_000;
+      const refreshMs = 5_000;
       const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
       if (nextKey !== externalBalancePollKey) {
         externalBalancePollKey = nextKey;
@@ -3700,6 +3703,7 @@
           void fetchExternalTokens();
           if (activeIsLive) {
             externalBalancePollTimer = window.setInterval(() => {
+              if (document.visibilityState === 'hidden') return;
               void fetchExternalTokens();
             }, refreshMs);
           }
@@ -4898,6 +4902,7 @@
           entityId={tab.entityId}
           {replica}
           env={activeEnv}
+          pendingFaucetKeys={pendingOffchainFaucetKeys}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
           on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
@@ -5290,6 +5295,7 @@
           <AccountList
             {replica}
             {selectedAccountId}
+            pendingFaucetKeys={pendingOffchainFaucetKeys}
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}

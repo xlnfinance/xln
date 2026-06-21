@@ -134,6 +134,10 @@ let clickEpochMs = 0;
 let faucetRequestStartedAt: number | null = null;
 let faucetResponseAt: number | null = null;
 let faucetResponseBody: FaucetResponseBody | null = null;
+let faucetProxyHealthPolled: string | null = null;
+let faucetProxyHealthPollMs: string | null = null;
+let faucetProxyUpstreamMs: string | null = null;
+let faucetProxyTotalMs: string | null = null;
 
 page.on('request', (request) => {
   const url = new URL(request.url());
@@ -160,6 +164,10 @@ page.on('response', async (response) => {
   const url = new URL(response.url());
   if (url.pathname === '/api/faucet/offchain') {
     faucetResponseAt = entry.endedAt;
+    faucetProxyHealthPolled = response.headers()['x-xln-proxy-health-polled'] ?? null;
+    faucetProxyHealthPollMs = response.headers()['x-xln-proxy-health-poll-ms'] ?? null;
+    faucetProxyUpstreamMs = response.headers()['x-xln-proxy-upstream-ms'] ?? null;
+    faucetProxyTotalMs = response.headers()['x-xln-proxy-total-ms'] ?? null;
     faucetResponseBody = await response.json().catch(() => null) as FaucetResponseBody | null;
   }
 });
@@ -258,6 +266,10 @@ try {
     faucetApiRoundtripMs:
       faucetRequestStartedAt === null || faucetResponseAt === null ? null : faucetResponseAt - faucetRequestStartedAt,
     faucetServerDurationMs: faucetResponseBody?.serverDurationMs ?? null,
+    faucetProxyHealthPolled,
+    faucetProxyHealthPollMs,
+    faucetProxyUpstreamMs,
+    faucetProxyTotalMs,
     faucetRequestId: faucetResponseBody?.requestId ?? null,
     clickToDomVisibleMs,
     apiRequestsAfterClick: apiTrafficAfterClick.length,

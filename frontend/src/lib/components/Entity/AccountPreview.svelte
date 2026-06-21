@@ -13,6 +13,7 @@
   import { formatEntityId } from '$lib/utils/format';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusDescription, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
+  import { faucetPendingKey } from './account-faucet';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -40,6 +41,7 @@
     subtitle: string;
   }> = [];
   export let activeFlowOverflowCount = 0;
+  export let pendingFaucetKeys: Set<string> = new Set();
 
   const dispatch = createEventDispatcher();
   let expandedDetailTokenId: number | 'all' | null = null;
@@ -213,6 +215,7 @@
       pendingOutDebtMode: 'none' | 'pending' | 'settling';
       visualScale: ReturnType<typeof buildTokenVisualScale>;
       actionLabel?: string;
+      actionDisabled?: boolean;
     }> = [];
     for (const detail of tokenDetails) {
       const tokenId = detail.tokenId;
@@ -222,6 +225,7 @@
       const inTotal = derived.inCapacity;
       const tokenRequested = pendingRequestedByToken.get(tokenId) || 0n;
       const tokenC2R = pendingC2RByToken.get(tokenId) || 0n;
+      const faucetPending = isFaucetPending(tokenId);
       rows.push({
         tokenId,
         symbol: String(info.symbol || `T${tokenId}`),
@@ -236,7 +240,8 @@
           ? (hasPendingBatch ? 'settling' : 'pending')
           : 'none',
         visualScale: buildTokenVisualScale(String(info.symbol || ''), Number(info.decimals ?? 18), derived),
-        actionLabel: faucetLabel,
+        actionLabel: faucetPending ? 'Funding...' : faucetLabel,
+        actionDisabled: faucetPending,
       });
     }
     return rows.sort((a, b) => {
@@ -364,7 +369,12 @@
   }
 
   function handleTokenFaucet(tokenId: number): void {
+    if (isFaucetPending(tokenId)) return;
     dispatch('faucet', { counterpartyId, tokenId });
+  }
+
+  function isFaucetPending(tokenId: number): boolean {
+    return pendingFaucetKeys.has(faucetPendingKey(counterpartyId, tokenId));
   }
 
   function handleSettleApprove(e: MouseEvent) {
@@ -546,9 +556,9 @@
             visualScale={aggregateVisualScale}
             showBar={!liteMode}
             expanded={expandedDetailTokenId === 'all'}
-            actionLabel={liteMode ? '' : faucetLabel}
+            actionLabel={liteMode ? '' : (isFaucetPending(agg.primaryTokenId) ? 'Funding...' : faucetLabel)}
             actionTokenId={agg.primaryTokenId}
-            actionDisabled={false}
+            actionDisabled={isFaucetPending(agg.primaryTokenId)}
             on:action={(event) => {
               event.stopPropagation();
               handleTokenFaucet(agg.primaryTokenId);
@@ -584,7 +594,7 @@
                 expanded={expandedDetailTokenId === row.tokenId}
                 actionLabel={liteMode ? '' : (row.actionLabel || '')}
                 actionTokenId={row.tokenId}
-                actionDisabled={false}
+                actionDisabled={row.actionDisabled || false}
                 on:action={(event) => {
                   event.stopPropagation();
                   if (event.detail.tokenId !== null) handleTokenFaucet(event.detail.tokenId);

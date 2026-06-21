@@ -2,6 +2,33 @@ import type { RequestHandler } from './$types';
 import { findForbiddenRpcProxyMethod, isLocalProxyRequest } from '../rpc-proxy-safety';
 
 const DEFAULT_LOCAL_RPC_URL = 'http://localhost:8545';
+const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
+
+const readRpcProxyTimeoutMs = (): number => {
+  const value = Number(process.env['XLN_RPC_PROXY_TIMEOUT_MS'] || '');
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_RPC_PROXY_TIMEOUT_MS;
+};
+
+const fetchTextWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ response: Response; text: string }> => {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const text = await response.text();
+    return { response, text };
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`RPC_PROXY_TIMEOUT:${timeoutMs}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+};
 
 function resolveLocalRpcUrlFromRequest(requestUrl: string): string {
   const { hostname, port } = new URL(requestUrl);
@@ -36,12 +63,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
         { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers: { 'Content-Type': 'application/json' } },
       );
     }
-    const upstream = await fetch(getRpcUrl(request.url, getClientAddress()), {
+    const { response: upstream, text: data } = await fetchTextWithTimeout(getRpcUrl(request.url, getClientAddress()), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,
-    });
-    const data = await upstream.text();
+    }, readRpcProxyTimeoutMs());
     return new Response(data, {
       status: upstream.status,
       headers: {
