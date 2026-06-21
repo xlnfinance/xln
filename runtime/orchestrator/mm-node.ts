@@ -2563,7 +2563,7 @@ const run = async (): Promise<void> => {
         )) {
           advanceCrossCursorAfterEnqueue(entry.index);
           await yieldMarketMakerApi();
-          if (mode !== 'bootstrap') return;
+          return;
         }
         await yieldMarketMakerApi();
       }
