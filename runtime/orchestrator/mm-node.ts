@@ -235,6 +235,10 @@ const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
   Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'),
 );
+const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'),
+);
 const MARKET_MAKER_API_YIELD_MS = Math.max(
   1,
   Number(process.env['MARKET_MAKER_API_YIELD_MS'] || '1'),
@@ -1338,7 +1342,7 @@ const maintainMarketMakerQuotes = async (
     grouped.set(spec.hubEntityId, arr);
   }
 
-  const entityTxs: EntityInput['entityTxs'] = [];
+  const entityInputs: EntityInput[] = [];
   let remainingNewOffers = Math.max(
     1,
     Math.floor(maxNewOffersTotal),
@@ -1378,30 +1382,38 @@ const maintainMarketMakerQuotes = async (
       )
       .slice(0, allowedNewOffers);
     if (missing.length === 0) continue;
-    entityTxs.push(...missing.map(spec => ({
-      type: 'placeSwapOffer' as const,
-      data: {
-        counterpartyEntityId: spec.hubEntityId,
-        offerId: spec.offerId,
-        giveTokenId: spec.giveTokenId,
-        giveAmount: spec.giveAmount,
-        wantTokenId: spec.wantTokenId,
-        wantAmount: spec.wantAmount,
-        minFillRatio: spec.minFillRatio,
-      },
-    })));
+    const missingByPair = new Map<string, MarketMakerOfferSpec[]>();
+    for (const spec of missing) {
+      const pairSpecs = missingByPair.get(spec.pairId) ?? [];
+      pairSpecs.push(spec);
+      missingByPair.set(spec.pairId, pairSpecs);
+    }
+    for (const pairSpecs of missingByPair.values()) {
+      entityInputs.push({
+        entityId: mmEntityId,
+        signerId: mmSignerId,
+        entityTxs: pairSpecs.map(spec => ({
+          type: 'placeSwapOffer' as const,
+          data: {
+            counterpartyEntityId: spec.hubEntityId,
+            offerId: spec.offerId,
+            giveTokenId: spec.giveTokenId,
+            giveAmount: spec.giveAmount,
+            wantTokenId: spec.wantTokenId,
+            wantAmount: spec.wantAmount,
+            minFillRatio: spec.minFillRatio,
+          },
+        })),
+      });
+    }
     remainingNewOffers -= missing.length;
   }
 
-  if (entityTxs.length > 0) {
+  if (entityInputs.length > 0) {
     if (!shouldContinue()) return false;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
-      entityInputs: [{
-        entityId: mmEntityId,
-        signerId: mmSignerId,
-        entityTxs,
-      }],
+      entityInputs,
     });
     await yieldMarketMakerApi();
     return true;
@@ -1707,23 +1719,6 @@ const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHe
   routes: [],
 });
 
-const pushEntityTx = (
-  inputsByEntity: Map<string, EntityInput>,
-  entityId: string,
-  signerId: string,
-  tx: NonNullable<EntityInput['entityTxs']>[number],
-): void => {
-  const key = `${entityId}:${signerId}`;
-  const input = inputsByEntity.get(key) ?? {
-    entityId,
-    signerId,
-    entityTxs: [],
-  };
-  const entityTxs = input.entityTxs ?? (input.entityTxs = []);
-  entityTxs.push(tx);
-  inputsByEntity.set(key, input);
-};
-
 const maintainMarketMakerCrossQuotes = async (
   env: Env,
   sourceContext: MarketMakerEntityContext,
@@ -1788,7 +1783,7 @@ const maintainMarketMakerCrossQuotes = async (
     grouped.set(spec.hubEntityId, arr);
   }
 
-  const inputsByEntity = new Map<string, EntityInput>();
+  const entityInputs: EntityInput[] = [];
   const pendingCrossRequestOrderIdsBySourceEntity = new Map<string, Set<string>>();
   const getPendingCrossRequestOrderIds = (entityId: string): Set<string> => {
     const normalizedEntityId = normalizeEntityRef(entityId);
@@ -1864,22 +1859,35 @@ const maintainMarketMakerCrossQuotes = async (
     }
     if (missing.length === 0) continue;
 
+    const missingByEntityAndPair = new Map<string, MarketMakerOfferSpec[]>();
     for (const spec of missing) {
       const route = spec.crossJurisdiction!;
-      pushEntityTx(inputsByEntity, route.source.entityId, sourceContext.signerId, {
-        type: 'requestCrossJurisdictionSwap',
-        data: { route },
+      const key = `${normalizeEntityRef(route.source.entityId)}:${spec.pairId}`;
+      const pairSpecs = missingByEntityAndPair.get(key) ?? [];
+      pairSpecs.push(spec);
+      missingByEntityAndPair.set(key, pairSpecs);
+    }
+    for (const pairSpecs of missingByEntityAndPair.values()) {
+      const firstRoute = pairSpecs[0]?.crossJurisdiction;
+      if (!firstRoute) continue;
+      entityInputs.push({
+        entityId: firstRoute.source.entityId,
+        signerId: sourceContext.signerId,
+        entityTxs: pairSpecs.map(spec => ({
+          type: 'requestCrossJurisdictionSwap' as const,
+          data: { route: spec.crossJurisdiction! },
+        })),
       });
     }
     remainingNewOffers -= missing.length;
   }
 
-  const entityInputs = Array.from(inputsByEntity.values()).filter(input => (input.entityTxs?.length || 0) > 0);
-  if (entityInputs.length > 0) {
+  const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
+  if (nonEmptyEntityInputs.length > 0) {
     if (!shouldContinue()) return false;
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
-      entityInputs,
+      entityInputs: nonEmptyEntityInputs,
     });
     await yieldMarketMakerApi();
     return true;
@@ -2042,6 +2050,7 @@ const run = async (): Promise<void> => {
   configureMarketMakerRuntimeLogging(env);
   startRuntimeLoop(env, {
     tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
+    maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
   });
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
@@ -2575,12 +2584,19 @@ const run = async (): Promise<void> => {
 
   const waitForBootstrapOffers = async (): Promise<boolean> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
+    const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
+      if (isMarketMakerDepthComplete(health)) return;
+      startupPhase = isMarketMakerSameDepthComplete(health)
+        ? 'bootstrap-cross'
+        : 'bootstrap-same-chain';
+    };
     while (!shuttingDown && Date.now() < deadline) {
-      publishBootstrapHealthSnapshot();
+      refreshBootstrapPhase(publishBootstrapHealthSnapshot());
       await yieldMarketMakerApi();
       await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
       const health = publishBootstrapHealthSnapshot();
+      refreshBootstrapPhase(health);
       if (isMarketMakerDepthComplete(health)) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
@@ -2634,7 +2650,7 @@ const run = async (): Promise<void> => {
   void (async () => {
     await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);
     if (shuttingDown) return;
-    startupPhase = 'bootstrap-offers';
+    startupPhase = 'bootstrap-same-chain';
     publishBootstrapHealthSnapshot();
     if (await waitForBootstrapOffers()) {
       markOffersReady();
