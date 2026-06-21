@@ -1378,8 +1378,13 @@ type CustodyMePayload = {
   };
 };
 
-const buildAggregatedHealthResponse = async (): Promise<AggregatedHealth> => {
-  const health = await enrichMarketMakerCrossFromHubSnapshots(computeAggregatedHealth());
+const buildAggregatedHealthResponse = async (
+  options: { includeMarketSnapshots?: boolean } = {},
+): Promise<AggregatedHealth> => {
+  const baseHealth = computeAggregatedHealth();
+  const health = options.includeMarketSnapshots
+    ? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)
+    : baseHealth;
   if (!health.custody.enabled || health.custody.ok || !health.custody.servicePort) {
     return health;
   }
@@ -1736,10 +1741,13 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/hub/account-status' && request.method === 'GET') {
-      await pollAllHubHealth();
       const hubEntityId = String(url.searchParams.get('hubEntityId') || '').toLowerCase();
       const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
-      const child = getHubChildByEntityId(hubEntityId);
+      let child = getHubChildByEntityId(hubEntityId);
+      if (!child) {
+        await pollAllHubHealth();
+        child = getHubChildByEntityId(hubEntityId);
+      }
       if (!child) {
         return new Response(safeStringify({
           success: false,

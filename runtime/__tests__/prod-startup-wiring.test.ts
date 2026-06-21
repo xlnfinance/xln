@@ -342,6 +342,44 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && isMarketMakerDepthComplete(health) && !hasMarketMakerRuntimeBacklog(env))");
   });
 
+  test('market maker info route keeps cross debug opt-in off the hot path', () => {
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const infoRouteStart = mmNode.indexOf("if (pathname === '/api/info')");
+    const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')");
+    expect(infoRouteStart).toBeGreaterThan(0);
+    expect(healthRouteStart).toBeGreaterThan(infoRouteStart);
+
+    const infoRoute = mmNode.slice(infoRouteStart, healthRouteStart);
+    expect(infoRoute).toContain("url.searchParams.get('crossDebug') === '1'");
+    expect(infoRoute).toContain("url.searchParams.get('debug') === 'cross'");
+    expect(infoRoute).toContain('const currentHealth = cachedMarketMakerHealth;');
+    expect(infoRoute).toContain('? { crossDebug: buildMarketMakerCrossDebugSummary(env, mmContexts, allVisibleHubs, mmTokenIdsByContext) }');
+    expect(infoRoute).not.toContain('buildMarketMakerHealthSnapshot({ includeCross: true })');
+  });
+
+  test('orchestrator health does not enrich cross market snapshots by default', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const buildHealthStart = orchestrator.indexOf('const buildAggregatedHealthResponse = async (');
+    const waitBaselineStart = orchestrator.indexOf('const waitForHubBaseline = async (): Promise<void> => {');
+    expect(buildHealthStart).toBeGreaterThan(0);
+    expect(waitBaselineStart).toBeGreaterThan(buildHealthStart);
+
+    const buildHealth = orchestrator.slice(buildHealthStart, waitBaselineStart);
+    expect(buildHealth).toContain('options: { includeMarketSnapshots?: boolean } = {},');
+    expect(buildHealth).toContain('const baseHealth = computeAggregatedHealth();');
+    expect(buildHealth).toContain('const health = options.includeMarketSnapshots');
+    expect(buildHealth).toContain('? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)');
+    expect(buildHealth).toContain(': baseHealth;');
+
+    const healthRouteStart = orchestrator.indexOf("if (pathname === '/api/health')");
+    const metricsRouteStart = orchestrator.indexOf("if (pathname === '/api/metrics')");
+    expect(healthRouteStart).toBeGreaterThan(0);
+    expect(metricsRouteStart).toBeGreaterThan(healthRouteStart);
+    const healthRoute = orchestrator.slice(healthRouteStart, metricsRouteStart);
+    expect(healthRoute).toContain('const health = await buildAggregatedHealthResponse();');
+    expect(healthRoute).not.toContain('includeMarketSnapshots');
+  });
+
   test('market maker quote hot path is producer-only after runtime loop starts', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const meshCommon = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-common.ts'), 'utf8');
@@ -527,6 +565,21 @@ describe('production startup wiring', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  test('hub account-status proxy skips health polling when cached child mapping is known', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const routeStart = orchestrator.indexOf("if (pathname === '/api/hub/account-status' && request.method === 'GET')");
+    const nextRouteStart = orchestrator.indexOf("if (pathname === '/api/lending/state'", routeStart);
+    expect(routeStart).toBeGreaterThan(0);
+    expect(nextRouteStart).toBeGreaterThan(routeStart);
+
+    const route = orchestrator.slice(routeStart, nextRouteStart);
+    expect(route).toContain('let child = getHubChildByEntityId(hubEntityId);');
+    expect(route).toContain('if (!child) {\n        await pollAllHubHealth();\n        child = getHubChildByEntityId(hubEntityId);\n      }');
+    expect(route.indexOf('let child = getHubChildByEntityId(hubEntityId);')).toBeLessThan(
+      route.indexOf('await pollAllHubHealth();'),
+    );
   });
 
   test('orchestrator rpc proxy fails fast when upstream hangs', async () => {
