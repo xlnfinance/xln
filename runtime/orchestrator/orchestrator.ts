@@ -1101,7 +1101,8 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     hubEntityId: string;
     offers: number;
     ready: boolean;
-    pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
+    depthReady: boolean;
+    pairs: Array<{ pairId: string; offers: number; ready: boolean; depthReady?: boolean; expectedOffers?: number }>;
   }>();
   for (const hub of marketMakerChild.lastHealth?.marketMaker?.hubs ?? []) {
     const hubEntityId = String(hub.hubEntityId || '').toLowerCase();
@@ -1110,11 +1111,14 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       hubEntityId,
       offers: Number(hub.offers || 0),
       ready: hub.ready === true,
+      depthReady: hub.depthReady === true,
       pairs: Array.isArray(hub.pairs)
         ? hub.pairs.map((pair) => ({
             pairId: String(pair.pairId || ''),
             offers: Number(pair.offers || 0),
             ready: pair.ready === true,
+            depthReady: pair.depthReady === true,
+            expectedOffers: Number(pair.expectedOffers || 0),
           }))
       : [],
     });
@@ -1152,21 +1156,27 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   };
   const mmHubs = hubIds.map((hubEntityId) => {
     const existing = mmHubsById.get(hubEntityId);
+    const offers = existing?.offers ?? 0;
+    const depthReady = existing?.depthReady === true ||
+      (!!mmExpectedOffersPerHub && offers >= mmExpectedOffersPerHub);
     return {
       hubEntityId,
-      offers: existing?.offers ?? 0,
-      ready: existing?.ready === true || (!!mmExpectedOffersPerHub && (existing?.offers ?? 0) >= mmExpectedOffersPerHub),
+      offers,
+      ready: existing?.ready === true || depthReady,
+      depthReady,
       pairs: existing?.pairs ?? [],
     };
   });
   const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);
+  const mmChildDepthReady = marketMakerChild.lastHealth?.marketMaker?.ok === true;
   const mmCrossReady = Boolean(rawMmCross) && mmCross.ok;
   const mmOk = !args.mmEnabled
     ? true
     : marketMakerActive &&
       mmHealthReady &&
+      mmChildDepthReady &&
       mmHubs.length === HUB_NAMES.length &&
-      mmHubs.every((hub) => hub.ready) &&
+      mmHubs.every((hub) => hub.depthReady) &&
       mmCrossReady;
   const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
   const hubMeshOk =
@@ -1350,10 +1360,10 @@ const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth):
     ...cross,
     routes,
     ok: (cross.expectedRoutes > 0 ? routes.length >= cross.expectedRoutes : routes.length > 0) &&
-      routes.every(route => route.ready),
+      routes.every(route => route.depthReady),
   };
   const sameChainReady = !health.marketMaker.enabled ||
-    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.ready));
+    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.depthReady));
   const marketMaker = {
     ...health.marketMaker,
     ok: !health.marketMaker.enabled || (sameChainReady && enrichedCross.ok),

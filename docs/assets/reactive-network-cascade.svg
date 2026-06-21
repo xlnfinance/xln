@@ -1,0 +1,164 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc">
+  <title id="title">xln Reactive Network cascade</title>
+  <desc id="desc">A deterministic four-level reaction stack: Account, Entity, Runtime, and encrypted cross-runtime entity messages.</desc>
+  <defs>
+    <style>
+      .bg { fill: #071113; }
+      .panel { fill: #0f1b1e; stroke: #244247; stroke-width: 2; }
+      .panel2 { fill: #101923; stroke: #2b4055; stroke-width: 2; }
+      .account { fill: #10231d; stroke: #25c27a; }
+      .entity { fill: #172033; stroke: #6aa5ff; }
+      .runtime { fill: #251c12; stroke: #ffbf58; }
+      .wire { fill: #261525; stroke: #e06bd9; }
+      .box { fill: #0b1518; stroke: #30484f; stroke-width: 1.5; rx: 16; }
+      .box2 { fill: #111a24; stroke: #38516a; stroke-width: 1.5; rx: 16; }
+      .box3 { fill: #1c160d; stroke: #6c4d1f; stroke-width: 1.5; rx: 16; }
+      .box4 { fill: #1c1020; stroke: #70406c; stroke-width: 1.5; rx: 16; }
+      .label { fill: #ecf7f5; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 27px; font-weight: 760; letter-spacing: 0; }
+      .sub { fill: #a9c0c2; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 18px; letter-spacing: 0; }
+      .micro { fill: #89a2a7; font-family: "SFMono-Regular", Consolas, monospace; font-size: 15px; letter-spacing: 0; }
+      .code { fill: #d9f4ee; font-family: "SFMono-Regular", Consolas, monospace; font-size: 17px; letter-spacing: 0; }
+      .green { fill: #68e2a4; }
+      .blue { fill: #92bdff; }
+      .amber { fill: #ffd38a; }
+      .pink { fill: #f2a0ee; }
+      .muted { fill: #7f9699; }
+      .arrow { stroke: #d8e8e6; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .arrow-green { stroke: #25c27a; stroke-width: 3; fill: none; marker-end: url(#arrow-green); }
+      .arrow-blue { stroke: #6aa5ff; stroke-width: 3; fill: none; marker-end: url(#arrow-blue); }
+      .arrow-amber { stroke: #ffbf58; stroke-width: 3; fill: none; marker-end: url(#arrow-amber); }
+      .arrow-pink { stroke: #e06bd9; stroke-width: 3; fill: none; marker-end: url(#arrow-pink); }
+      .dash { stroke-dasharray: 10 10; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d8e8e6"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#25c27a"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6aa5ff"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffbf58"/>
+    </marker>
+    <marker id="arrow-pink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#e06bd9"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1120"/>
+  <rect x="38" y="36" width="1524" height="1048" rx="34" class="panel"/>
+
+  <text x="78" y="95" class="label">xln Reactive Network: deterministic reaction cascade</text>
+  <text x="78" y="128" class="sub">Same primitive at every level: (previous state, ordered input batch) -&gt; next state + explicit outputs. No hidden clocks. No hidden side effects.</text>
+
+  <g transform="translate(78 172)">
+    <rect x="0" y="0" width="1444" height="74" rx="20" class="panel2"/>
+    <text x="24" y="32" class="sub">Ingress sources</text>
+    <text x="24" y="57" class="micro">UI / API command</text>
+    <text x="330" y="57" class="micro">Account counterparty message</text>
+    <text x="710" y="57" class="micro">J watcher event</text>
+    <text x="990" y="57" class="micro">Relay / direct encrypted entity_input</text>
+    <path d="M 224 44 L 292 44" class="arrow"/>
+    <path d="M 622 44 L 690 44" class="arrow"/>
+    <path d="M 865 44 L 930 44" class="arrow"/>
+  </g>
+
+  <g transform="translate(78 282)">
+    <rect x="0" y="0" width="1444" height="164" rx="26" class="account"/>
+    <text x="28" y="43" class="label">01 Account reactor</text>
+    <text x="28" y="73" class="sub">Fastest path: only one bilateral account changes.</text>
+    <rect x="360" y="24" width="300" height="116" class="box"/>
+    <text x="384" y="55" class="code">AccountTx[]</text>
+    <text x="384" y="84" class="micro">direct_payment</text>
+    <text x="384" y="106" class="micro">same-account swap</text>
+    <text x="384" y="128" class="micro">htlc_lock / htlc_resolve</text>
+    <rect x="720" y="24" width="320" height="116" class="box"/>
+    <text x="744" y="55" class="code">AccountFrame</text>
+    <text x="744" y="84" class="micro">height, prevFrameHash</text>
+    <text x="744" y="106" class="micro">txs, stateHash</text>
+    <text x="744" y="128" class="micro">left/right hanko</text>
+    <rect x="1100" y="24" width="304" height="116" class="box"/>
+    <text x="1124" y="55" class="code">Result</text>
+    <text x="1124" y="84" class="micro">commit deltas / locks</text>
+    <text x="1124" y="106" class="micro">AccountEvent[]</text>
+    <text x="1124" y="128" class="micro">optional bubble</text>
+    <path d="M 660 82 L 714 82" class="arrow-green"/>
+    <path d="M 1042 82 L 1094 82" class="arrow-green"/>
+    <path d="M 1254 140 C 1230 176 1090 180 980 166" class="arrow-green dash"/>
+    <text x="1016" y="158" class="micro green">no bubble when account-local</text>
+  </g>
+
+  <g transform="translate(78 478)">
+    <rect x="0" y="0" width="1444" height="188" rx="26" class="entity"/>
+    <text x="28" y="43" class="label">02 Entity reactor</text>
+    <text x="28" y="73" class="sub">Bubble path: account effects need entity-owned books, accounts, BFT signatures, or J batches.</text>
+    <rect x="330" y="24" width="326" height="140" class="box2"/>
+    <text x="354" y="55" class="code">AccountInput</text>
+    <text x="354" y="84" class="micro">kind: frame | ack | frame_ack</text>
+    <text x="354" y="106" class="micro">fromEntityId, toEntityId</text>
+    <text x="354" y="128" class="micro">newAccountFrame / prevHanko</text>
+    <text x="354" y="150" class="micro">settleAction / dispute seal</text>
+    <rect x="718" y="24" width="326" height="140" class="box2"/>
+    <text x="742" y="55" class="code">EntityInput</text>
+    <text x="742" y="84" class="micro">entityId, signerId, runtimeId</text>
+    <text x="742" y="106" class="micro">entityTxs[]</text>
+    <text x="742" y="128" class="micro">proposedFrame</text>
+    <text x="742" y="150" class="micro">hashPrecommits</text>
+    <rect x="1106" y="24" width="298" height="140" class="box2"/>
+    <text x="1130" y="55" class="code">EntityOutput</text>
+    <text x="1130" y="84" class="micro">mempoolOps -&gt; accounts</text>
+    <text x="1130" y="106" class="micro">outputs -&gt; entityInputs</text>
+    <text x="1130" y="128" class="micro">jOutputs -&gt; JInput</text>
+    <text x="1130" y="150" class="micro">profile/orderbook update</text>
+    <path d="M 656 92 L 712 92" class="arrow-blue"/>
+    <path d="M 1044 92 L 1100 92" class="arrow-blue"/>
+    <path d="M 294 -32 C 250 20 250 104 320 104" class="arrow-green"/>
+    <text x="52" y="140" class="micro blue">Bubble event: promote only the committed effect, not mutable account internals.</text>
+  </g>
+
+  <g transform="translate(78 700)">
+    <rect x="0" y="0" width="1444" height="176" rx="26" class="runtime"/>
+    <text x="28" y="43" class="label">03 Runtime reactor</text>
+    <text x="28" y="73" class="sub">Intra-runtime routing: ordered mempools are drained into one atomic RuntimeFrame.</text>
+    <rect x="330" y="24" width="326" height="128" class="box3"/>
+    <text x="354" y="55" class="code">RuntimeInput</text>
+    <text x="354" y="84" class="micro">runtimeTxs[]</text>
+    <text x="354" y="106" class="micro">entityInputs[]</text>
+    <text x="354" y="128" class="micro">jInputs[], timestamp, queuedAt</text>
+    <rect x="718" y="24" width="326" height="128" class="box3"/>
+    <text x="742" y="55" class="code">RuntimeFrame</text>
+    <text x="742" y="84" class="micro">applyRuntimeInput()</text>
+    <text x="742" y="106" class="micro">local / remote / deferred plan</text>
+    <text x="742" y="128" class="micro">persist before external effects</text>
+    <rect x="1106" y="24" width="298" height="128" class="box3"/>
+    <text x="1130" y="55" class="code">Outputs</text>
+    <text x="1130" y="84" class="micro">local enqueue</text>
+    <text x="1130" y="106" class="micro">remote dispatch</text>
+    <text x="1130" y="128" class="micro">J submit / watch</text>
+    <path d="M 656 88 L 712 88" class="arrow-amber"/>
+    <path d="M 1044 88 L 1100 88" class="arrow-amber"/>
+    <text x="52" y="139" class="micro amber">Atomic boundary: no yielding inside account/entity consensus.</text>
+  </g>
+
+  <g transform="translate(78 912)">
+    <rect x="0" y="0" width="1444" height="134" rx="26" class="wire"/>
+    <text x="28" y="43" class="label">04 Cross-runtime encrypted entity messages</text>
+    <text x="28" y="73" class="sub">Slowest and widest boundary: entity A emits an output, runtime A encrypts, relay/direct routes, runtime B decrypts and enqueues.</text>
+    <rect x="486" y="25" width="278" height="82" class="box4"/>
+    <text x="510" y="56" class="code">entity_input wire</text>
+    <text x="510" y="84" class="micro">type, from, to, encrypted=true</text>
+    <rect x="830" y="25" width="366" height="82" class="box4"/>
+    <text x="854" y="56" class="code">payload = encryptJSON(EntityInput)</text>
+    <text x="854" y="84" class="micro">X25519 + ChaCha20-Poly1305</text>
+    <path d="M 308 67 L 480 67" class="arrow-pink"/>
+    <path d="M 764 67 L 824 67" class="arrow-pink"/>
+    <path d="M 1196 67 L 1366 67" class="arrow-pink"/>
+    <text x="1218" y="100" class="micro pink">decrypt -&gt; validate -&gt; runtimeMempool.entityInputs</text>
+  </g>
+
+  <g transform="translate(110 1030)">
+    <text x="0" y="0" class="micro muted">Determinism guardrail: every bubble is explicit data. Runtime may perform network/J side effects only after the frame is computed and persisted.</text>
+  </g>
+</svg>

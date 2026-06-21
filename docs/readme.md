@@ -14,8 +14,9 @@ more L2", but a consequence of the scaling and enforcement constraints.
 2. [intro.md](intro.md) — XLN in 5 minutes
 3. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
 4. [core/rjea-architecture.md](core/rjea-architecture.md) — the runtime/entity/account/jurisdiction stack
-5. [status.md](status.md) — the current source of truth
-6. [../todo.md](../todo.md) — the active TODO/NEXT backlog
+5. [architecture/reactive-network.html](architecture/reactive-network.html) — the reactive cascade diagram
+6. [status.md](status.md) — the current source of truth
+7. [../todo.md](../todo.md) — the active TODO/NEXT backlog
 
 **Developers**
 
@@ -40,6 +41,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 | Document | Description |
 |----------|-------------|
 | [architecture/bilaterality.md](architecture/bilaterality.md) | why bilateral topology is necessary |
+| [architecture/reactive-network.html](architecture/reactive-network.html) | visual cascade of account/entity/runtime/cross-runtime reactions |
 | [architecture/why-evm.md](architecture/why-evm.md) | why XLN needs EVM enforcement |
 | [architecture/hanko.md](architecture/hanko.md) | hierarchical entity signatures |
 | [architecture/contracts.md](architecture/contracts.md) | on-chain contract surface |

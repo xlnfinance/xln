@@ -8,7 +8,7 @@ import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
-import { createFrameHash } from '../account-consensus-frame';
+import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account-consensus-frame';
 import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
 import { generateLazyEntityId, generateNumberedEntityId } from '../entity-factory';
@@ -2916,7 +2916,7 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.swapOffers.size).toBe(LIMITS.MAX_ACCOUNT_SWAP_OFFERS);
   });
 
-  test('proposeAccountFrame caps the frame at 100 txs and leaves the remainder queued', async () => {
+  test('proposeAccountFrame accepts a 1000 tx account frame', async () => {
     const seed = 'account-frame-cap-seed';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -2926,7 +2926,7 @@ describe('audit fail-fast regressions', () => {
 
     const left = registerLazySigner(seed, '1');
     const right = registerLazySigner(seed, '2');
-    const mempool = Array.from({ length: 105 }, (_, index) => ({
+    const mempool = Array.from({ length: MAX_ACCOUNT_FRAME_TXS }, (_, index) => ({
       type: 'add_delta' as const,
       data: { tokenId: index + 1 },
     }));
@@ -2936,12 +2936,9 @@ describe('audit fail-fast regressions', () => {
     const result = await proposeAccountFrame(env, accountMachine);
 
     expect(result.success).toBe(true);
-    expect(result.accountInput?.newAccountFrame.accountTxs).toHaveLength(100);
-    expect(accountMachine.pendingFrame?.accountTxs).toHaveLength(100);
-    expect(accountMachine.mempool).toHaveLength(5);
-    expect(accountMachine.mempool.map(tx => (tx as Extract<AccountTx, { type: 'add_delta' }>).data.tokenId)).toEqual([
-      101, 102, 103, 104, 105,
-    ]);
+    expect(result.accountInput?.newAccountFrame.accountTxs).toHaveLength(MAX_ACCOUNT_FRAME_TXS);
+    expect(accountMachine.pendingFrame?.accountTxs).toHaveLength(MAX_ACCOUNT_FRAME_TXS);
+    expect(accountMachine.mempool).toHaveLength(0);
   });
 
   test('proposeAccountFrame bundles the last outbound ACK into the next frame for loss recovery', async () => {

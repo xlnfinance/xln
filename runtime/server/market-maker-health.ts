@@ -17,7 +17,7 @@ const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
   560n * 10n ** 18n, 640n * 10n ** 18n, 720n * 10n ** 18n,
   800n * 10n ** 18n, 900n * 10n ** 18n, 1_000n * 10n ** 18n,
 ] as const;
-const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 30;
+const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 20;
 
 type MarketMakerLevelProfile = {
   offsetsBps: readonly number[];
@@ -204,5 +204,5 @@ export const getMarketMakerHealth = (
     };
   });
 
-  return { enabled: true, ok: perHub.length > 0 && perHub.every(entry => entry.ready), entityId, expectedOffersPerHub, expectedOffersPerPair, cross, hubs: perHub };
+  return { enabled: true, ok: perHub.length > 0 && perHub.every(entry => entry.depthReady), entityId, expectedOffersPerHub, expectedOffersPerPair, cross, hubs: perHub };
 };

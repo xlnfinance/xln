@@ -21,6 +21,7 @@ type HealthPayload = {
     ok?: boolean;
     entityId?: string | null;
     startupPhase?: string | null;
+    expectedOffersPerHub?: number;
     hubs?: Array<{ offers?: number }>;
     cross?: { ok?: boolean; expectedRoutes?: number };
   };
@@ -171,14 +172,18 @@ const assertMarketMakerInfoResponsive = async (): Promise<void> => {
 
 const healthReady = (health: HealthPayload): boolean => {
   const offers = health.marketMaker?.hubs?.map(hub => Number(hub.offers || 0)) ?? [];
+  const expectedOffersPerHub = Number(health.marketMaker?.expectedOffersPerHub || 0);
   return health.coreOk === true &&
     health.systemOk === true &&
     Number(health.hubs?.length || 0) >= 3 &&
     health.system?.relay === true &&
     health.hubMesh?.ok === true &&
     health.marketMaker?.ok === true &&
+    health.marketMaker?.startupPhase === 'offers-ready' &&
     Boolean(health.marketMaker?.entityId) &&
-    offers.some(offerCount => offerCount > 0) &&
+    expectedOffersPerHub > 0 &&
+    offers.length >= 3 &&
+    offers.every(offerCount => offerCount >= expectedOffersPerHub) &&
     Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0 &&
     health.marketMaker?.cross?.ok === true &&
     health.custody?.ok === true &&
@@ -195,6 +200,7 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
   marketMaker: {
     ok: health.marketMaker?.ok ?? null,
     entity: Boolean(health.marketMaker?.entityId),
+    expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? null,
     offers: health.marketMaker?.hubs?.map(hub => hub.offers ?? 0) ?? [],
     cross: {
       ok: health.marketMaker?.cross?.ok ?? null,
@@ -223,7 +229,7 @@ const waitForHealth = async (): Promise<void> => {
       if (health.marketMaker?.entityId || health.marketMaker?.startupPhase) {
         await assertMarketMakerInfoResponsive();
       }
-      if (iteration % 3 === 0 || healthReady(health)) {
+      if (iteration % 10 === 0 || healthReady(health)) {
         console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
       }
       if (healthReady(health)) return;
@@ -231,7 +237,7 @@ const waitForHealth = async (): Promise<void> => {
       last = error instanceof Error ? error.message : String(error);
     }
     iteration += 1;
-    await sleep(10_000);
+    await sleep(1_000);
   }
   throw new Error(`LOCAL_PROD_SMOKE_HEALTH_TIMEOUT last=${JSON.stringify(last)}`);
 };
@@ -284,13 +290,8 @@ const main = async (): Promise<void> => {
     RELAY_URL: `ws://127.0.0.1:${apiPort}/relay`,
     PUBLIC_RPC: `http://127.0.0.1:${apiPort}/rpc`,
     XLN_MIN_DISK_FREE_BYTES: '1',
-    MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '180',
-    MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK: '180',
-    MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME: '1',
-    MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT: '1',
-    MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT: '4',
-    MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT: '4',
-    MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT: '4',
+    MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '1000',
+    MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK: '1000',
   });
 
   await waitForHealth();

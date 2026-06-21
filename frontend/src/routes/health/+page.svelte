@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Activity, Camera, Database, Network, RefreshCw, ShieldCheck, Siren } from 'lucide-svelte';
+  import { Activity, Camera, Database, Network, RefreshCw, ShieldCheck, Siren, Zap } from 'lucide-svelte';
+  import BootstrapLive from '$lib/components/Health/BootstrapLive.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
 
   type HealthData = {
@@ -11,8 +12,18 @@
     uptime?: number | null;
     reset?: {
       inProgress?: boolean;
+      startedAt?: number | null;
       completedAt?: number | null;
+      failedAt?: number | null;
+      resolvedAt?: number | null;
       lastError?: string | null;
+      hasError?: boolean;
+    };
+    boot?: {
+      phase?: string | null;
+      startedAt?: number | null;
+      completedAt?: number | null;
+      error?: string | null;
     };
     jMachines?: Array<{
       name: string;
@@ -38,6 +49,7 @@
       activeClients?: string[];
       activeClientCount?: number;
       clientCount?: number;
+      profileCount?: number;
       clientsDetailed?: Array<{
         runtimeId: string;
         lastSeen: number;
@@ -66,6 +78,8 @@
         restartCount?: number;
         apiPort?: number;
         lastErrorLine?: string | null;
+        recentStdout?: string[];
+        recentStderr?: string[];
       }>;
     };
     disk?: {
@@ -99,28 +113,76 @@
       entityId?: string | null;
       startupPhase?: string | null;
       expectedOffersPerHub?: number;
+      expectedOffersPerPair?: number;
+      hubCount?: number;
       cross?: {
         applicable?: boolean;
         ok?: boolean;
         expectedRoutes?: number;
+        expectedOffersPerRoute?: number;
+        expectedOffersPerPair?: number;
+        routeCount?: number;
         expectedPairs?: number;
-        routes?: unknown[];
+        routes?: Array<{
+          sourceJurisdiction?: string;
+          targetJurisdiction?: string;
+          sourceHubEntityId?: string;
+          targetHubEntityId?: string;
+          offers?: number;
+          ready?: boolean;
+          depthReady?: boolean;
+          expectedOffers?: number;
+          pairs?: Array<{
+            pairId?: string;
+            offers?: number;
+            ready?: boolean;
+            depthReady?: boolean;
+            expectedOffers?: number;
+            sourceTokenIds?: number[];
+            targetTokenIds?: number[];
+          }>;
+        }>;
       };
       hubs?: Array<{
         hubEntityId: string;
         offers: number;
         ready: boolean;
+        depthReady?: boolean;
+        pairs?: Array<{
+          pairId: string;
+          offers: number;
+          ready: boolean;
+          depthReady?: boolean;
+          expectedOffers?: number;
+        }>;
       }>;
     };
     custody?: {
       enabled?: boolean;
       ok?: boolean;
+      entityId?: string | null;
     };
     bootstrapReserves?: {
       ok?: boolean;
       targetMet?: boolean;
       requiredTokenCount?: number;
       entityCount?: number;
+      entities?: Array<{
+        entityId: string;
+        role?: 'hub' | 'market-maker';
+        ready: boolean;
+        targetMet: boolean;
+        tokens: Array<{
+          tokenId: number;
+          symbol: string;
+          decimals?: number;
+          current?: string;
+          expectedMin?: string;
+          ready: boolean;
+          operational?: boolean;
+          targetMet?: boolean;
+        }>;
+      }>;
     };
   };
 
@@ -207,7 +269,7 @@
   let error = $state<string | null>(null);
   let storyError = $state<string | null>(null);
   let autoRefresh = $state(true);
-  let activeSection = $state('overview');
+  let activeSection = $state('bootstrap');
   let storyGroupFilter = $state('all');
   let selectedStoryId = $state('');
 
@@ -627,6 +689,9 @@
   </header>
 
   <nav class="section-tabs" aria-label="Health admin sections">
+    <button class:active={activeSection === 'bootstrap'} onclick={() => jumpTo('bootstrap')}>
+      <Zap size={15} /> Bootstrap
+    </button>
     <button class:active={activeSection === 'overview'} onclick={() => jumpTo('overview')}>
       <Activity size={15} /> Overview
     </button>
@@ -663,6 +728,13 @@
   {:else if error}
     <div class="panel error">{error}</div>
   {:else if health}
+    <BootstrapLive
+      {health}
+      {rpcOk}
+      {rpcLatencyMs}
+      criticalCount={criticalSignals.length}
+    />
+
     <section id="overview" class="hero-console">
       <div class="readiness-tile" class:ready={overallOk} class:failed={!overallOk}>
         <span class="pulse"></span>
@@ -1070,6 +1142,7 @@
     max-width: 1680px;
     margin: 0 auto;
     padding: 24px 20px 18px;
+    overflow-x: clip;
   }
 
   .top {
@@ -1078,6 +1151,7 @@
     align-items: center;
     gap: 12px;
     margin-bottom: 12px;
+    min-width: 0;
   }
 
   h1 {
@@ -1112,6 +1186,9 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .switch {
@@ -1164,6 +1241,8 @@
     border-radius: 10px;
     background: rgba(10, 10, 9, 0.84);
     backdrop-filter: blur(16px);
+    max-width: 100%;
+    min-width: 0;
   }
 
   .section-tabs button {
@@ -1705,6 +1784,8 @@
     max-height: 300px;
     overflow: auto;
     padding: 8px;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .entity-row {
@@ -1712,11 +1793,28 @@
     justify-content: space-between;
     align-items: center;
     gap: 10px;
+    flex-wrap: wrap;
+    min-width: 0;
     padding: 8px;
     border: 1px solid #1f2c3a;
     border-radius: 9px;
     background: #0b121b;
     margin-bottom: 8px;
+  }
+
+  .entity-row :global(.entity-identity) {
+    min-width: 0;
+    flex: 1 1 230px;
+  }
+
+  .entity-row :global(.entity-identity .text),
+  .entity-row :global(.entity-identity .address-wrap) {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .entity-row :global(.entity-identity .address) {
+    min-width: 0;
   }
 
   .entity-offline {
@@ -1728,6 +1826,8 @@
     gap: 6px;
     align-items: center;
     flex-wrap: wrap;
+    min-width: 0;
+    justify-content: flex-end;
   }
 
   .stream.small {

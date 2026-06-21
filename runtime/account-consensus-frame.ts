@@ -4,9 +4,9 @@ import { safeStringify } from './serialization-utils';
 import { canonicalJurisdictionEventsHash } from './j-event-observation';
 import { normalizeJurisdictionEvents } from './j-event-normalization';
 
-export const MAX_ACCOUNT_FRAME_TXS = 100;
+export const MAX_ACCOUNT_FRAME_TXS = 1000;
 export const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300_000;
-export const MAX_FRAME_SIZE_BYTES = 1_048_576;
+export const MAX_FRAME_SIZE_BYTES = 10_000_000;
 
 export function validateAccountFrame(
   frame: AccountFrame,
