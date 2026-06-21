@@ -145,6 +145,15 @@ export type MarketMakerEntityContext = {
 
 export type MarketMakerTokenIdsByContext = ReadonlyMap<string, number[]>;
 
+type CrossQuoteJob = {
+  sourceContext: MarketMakerEntityContext;
+  targetContext: MarketMakerEntityContext;
+  sourceHubs: HubProfile[];
+  targetHubs: HubProfile[];
+  sourceTokenIds: number[];
+  targetTokenIds: number[];
+};
+
 type MarketMakerAccountBlocker = {
   entityId: string;
   counterpartyEntityId: string;
@@ -1622,6 +1631,19 @@ export const hasFinalizedMarketMakerCrossOffer = (env: Env, spec: MarketMakerOff
   const route = spec.crossJurisdiction;
   if (!route) return false;
   return Boolean(getCommittedSourceAccountCrossOffer(env, route));
+};
+
+const isCrossQuoteJobDepthComplete = (env: Env, job: CrossQuoteJob): boolean => {
+  const desiredOffers = buildMarketMakerCrossOfferSpecs(
+    env,
+    job.sourceContext,
+    job.targetContext,
+    job.sourceHubs,
+    job.targetHubs,
+    job.sourceTokenIds,
+    job.targetTokenIds,
+  );
+  return desiredOffers.length === 0 || desiredOffers.every(spec => hasFinalizedMarketMakerCrossOffer(env, spec));
 };
 
 type MarketMakerCrossHealthPairExpectation = {
@@ -3106,14 +3128,6 @@ const run = async (): Promise<void> => {
         if (isMarketMakerDepthComplete(health)) return;
       }
 
-      type CrossQuoteJob = {
-        sourceContext: MarketMakerEntityContext;
-        targetContext: MarketMakerEntityContext;
-        sourceHubs: HubProfile[];
-        targetHubs: HubProfile[];
-        sourceTokenIds: number[];
-        targetTokenIds: number[];
-      };
       const crossQuoteJobs: CrossQuoteJob[] = [];
       for (const sourceContext of mmContexts) {
         await yieldMarketMakerApi();
@@ -3141,31 +3155,32 @@ const run = async (): Promise<void> => {
       const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }> = [];
       if (crossQuoteJobs.length > 0) {
         const cursor = mode === 'bootstrap' ? bootstrapCrossCursor : steadyCrossCursor;
-        const jobCount = mode === 'bootstrap'
-          ? crossQuoteJobs.length
-          : Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length);
-        let nextCursor = cursor;
-        for (let offset = 0; offset < jobCount; offset += 1) {
-          const selectedIndex = (cursor + offset) % crossQuoteJobs.length;
-          const selectedJob = crossQuoteJobs[selectedIndex];
-          if (selectedJob) {
-            selectedCrossQuoteJobs.push({ index: selectedIndex, job: selectedJob });
-            nextCursor = (selectedIndex + 1) % crossQuoteJobs.length;
-          }
-        }
         if (mode === 'bootstrap') {
-          bootstrapCrossCursor = nextCursor;
+          for (let offset = 0; offset < crossQuoteJobs.length; offset += 1) {
+            const selectedIndex = (cursor + offset) % crossQuoteJobs.length;
+            const selectedJob = crossQuoteJobs[selectedIndex];
+            if (!selectedJob || isCrossQuoteJobDepthComplete(env, selectedJob)) continue;
+            selectedCrossQuoteJobs.push({ index: selectedIndex, job: selectedJob });
+            bootstrapCrossCursor = selectedIndex;
+            break;
+          }
         } else {
+          const jobCount = Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length);
+          let nextCursor = cursor;
+          for (let offset = 0; offset < jobCount; offset += 1) {
+            const selectedIndex = (cursor + offset) % crossQuoteJobs.length;
+            const selectedJob = crossQuoteJobs[selectedIndex];
+            if (selectedJob) {
+              selectedCrossQuoteJobs.push({ index: selectedIndex, job: selectedJob });
+              nextCursor = (selectedIndex + 1) % crossQuoteJobs.length;
+            }
+          }
           steadyCrossCursor = nextCursor;
         }
       }
       const advanceCrossCursorAfterEnqueue = (index: number): void => {
         const nextCursor = (index + 1) % crossQuoteJobs.length;
-        if (mode === 'bootstrap') {
-          bootstrapCrossCursor = nextCursor;
-        } else {
-          steadyCrossCursor = nextCursor;
-        }
+        if (mode === 'steady') steadyCrossCursor = nextCursor;
       };
       for (const entry of selectedCrossQuoteJobs) {
         const job = entry.job;
@@ -3192,6 +3207,7 @@ const run = async (): Promise<void> => {
           await yieldMarketMakerApi();
           return;
         }
+        if (mode === 'bootstrap' && !isCrossQuoteJobDepthComplete(env, job)) return;
         await yieldMarketMakerApi();
       }
       if (!shouldContinue()) return;
