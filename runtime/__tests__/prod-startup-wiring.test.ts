@@ -155,9 +155,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
     expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
+    expect(mmNode).toContain("MARKET_MAKER_API_YIELD_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'");
     expect(mmNode).toContain('const yieldMarketMakerApi = async (): Promise<void> => {');
-    expect(mmNode).toContain('await new Promise<void>(resolve => setImmediate(resolve));');
+    expect(mmNode).toContain('await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));');
+    expect(mmNode).not.toContain('setImmediate(resolve)');
     expect(mmNode).not.toContain('await sleep(0);');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK'] || '2'");
     expect(mmNode).toContain("MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '2'");
