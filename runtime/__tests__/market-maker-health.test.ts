@@ -35,6 +35,7 @@ test('market maker server health requires full quote depth', () => {
       ['mm-abcdef-1-3-ask-1', {}],
       ['mm-abcdef-2-3-ask-1', {}],
     ]),
+    currentHeight: 1,
     mempool: [],
     pendingFrame: null,
   };
@@ -72,6 +73,7 @@ test('market maker server health is green only at full configured depth', () => 
   }
   const health = getMarketMakerHealth({} as Env, state, () => ({
     swapOffers: offers,
+    currentHeight: 1,
     mempool: [],
     pendingFrame: null,
   } as any));
@@ -80,6 +82,41 @@ test('market maker server health is green only at full configured depth', () => 
   expect(health.expectedOffersPerPair).toBe(20);
   expect(health.expectedOffersPerHub).toBe(60);
   expect(health.hubs[0]?.depthReady).toBe(true);
+});
+
+test('market maker server health does not count pending offers as bootstrap-ready', () => {
+  const state = createMarketMakerServerState();
+  state.entityId = 'mm';
+  state.targetHubIds = ['0x0000000000000000000000000000000000abcdef'];
+  state.tokenIds = [1, 2, 3];
+
+  const pendingOffers = [];
+  for (const pair of buildDefaultEntitySwapPairs(state.tokenIds)) {
+    const pairKey = `${pair.baseTokenId}-${pair.quoteTokenId}`;
+    for (const side of ['ask', 'bid']) {
+      for (let level = 1; level <= 10; level += 1) {
+        pendingOffers.push({
+          type: 'swap_offer',
+          data: { offerId: `mm-abcdef-${pairKey}-${side}-${level}` },
+        });
+      }
+    }
+  }
+
+  const health = getMarketMakerHealth({} as Env, state, () => ({
+    swapOffers: new Map(),
+    currentHeight: 1,
+    mempool: [],
+    pendingFrame: {
+      height: 2,
+      accountTxs: pendingOffers,
+    },
+  } as any));
+
+  expect(health.ok).toBe(false);
+  expect(health.hubs[0]?.offers).toBe(0);
+  expect(health.hubs[0]?.depthReady).toBe(false);
+  expect(health.hubs[0]?.blockers?.[0]?.reason).toBe('pending-frame');
 });
 
 test('market snapshots expose order counts for aggregated price levels', () => {

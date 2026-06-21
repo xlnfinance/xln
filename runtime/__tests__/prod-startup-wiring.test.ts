@@ -122,7 +122,7 @@ describe('production startup wiring', () => {
     expect(runtimeSource).toContain('if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
     expect(runtimeSource).not.toContain('void config;');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
@@ -158,6 +158,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('return unique;');
     expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');
     expect(mmNode).toContain('const hasCrossSpecBootstrapProgress = (');
+    expect(mmNode).toContain('const computeCrossOrderbookPriceTicks = (');
+    expect(mmNode).toContain('priceTicks: amounts.priceTicks');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.entityId, route.orderId)');
     expect(mmNode).toContain('hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId)');
     expect(mmNode).toContain('countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds)');
@@ -218,6 +220,13 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const crossDepthReady = !cross.applicable || (');
     expect(mmNode).toContain('cross.routes.every((route) => route.depthReady)');
     expect(mmNode).toContain('ok: hubsDepthReady && crossDepthReady');
+    expect(mmNode).toContain('countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId)');
+    expect(mmNode).toContain('countCommittedMarketMakerOffersForHubPair(env, mmEntityId, hubEntityId, pair)');
+    expect(mmNode).toContain('blockers: blocker ? [blocker] : []');
+    expect(mmNode).toContain('accountReady && expectedHubOffers > 0');
+    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_INCOMPLETE');
+    expect(mmNode).toContain('BOOTSTRAP_READY_HASH');
+    expect(mmNode).toContain('const health = assertMarketMakerBootstrapFinalized(');
     expect(mmNode).not.toContain('const hubsReady = hubs.length > 0 && hubs.every((entry) => entry.ready);');
     expect(mmNode).not.toContain('ok: hubsReady && crossReady');
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT');
@@ -309,6 +318,9 @@ describe('production startup wiring', () => {
 
     const healthRoute = mmNode.slice(healthRouteStart, controlRouteStart);
     expect(healthRoute).toContain('const cachedHealth = cachedMarketMakerHealth;');
+    expect(healthRoute).toContain("const marketMakerHealth = startupPhase === 'offers-ready'");
+    expect(healthRoute).toContain(': { ...rawMarketMakerHealth, ok: false };');
+    expect(healthRoute).toContain('marketMaker: marketMakerHealth');
     expect(healthRoute).toContain('expectedRoutes: 0');
     expect(healthRoute).not.toContain('getMarketMakerHealth(');
     expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
@@ -316,11 +328,17 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
     expect(mmNode).toContain('if (!isMarketMakerSameDepthComplete(sameHealth)) return sameHealth;');
     expect(mmNode).toContain('return publishMarketMakerHealthSnapshot({ includeCross: true });');
-    expect(mmNode).toContain("refreshBootstrapPhase(publishBootstrapHealthSnapshot());\n      await yieldMarketMakerApi();\n      await driveQuotes('bootstrap');");
+    expect(mmNode).toContain('const fingerprint = buildMarketMakerBootstrapFingerprint(');
+    expect(mmNode).toContain('payload=${safeStringify(fingerprint.payload)}');
+    expect(mmNode).toContain("const beforeDrive = publishBootstrapHealthSnapshot();\n      refreshBootstrapPhase(beforeDrive);\n      if (isMarketMakerDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return true;");
+    expect(mmNode).toContain("await driveQuotes('bootstrap');");
+    expect(mmNode).toContain('if (!hasMarketMakerRuntimeBacklog(env)) return true;');
     expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain("startupPhase = isMarketMakerSameDepthComplete(health)\n        ? 'bootstrap-cross'\n        : 'bootstrap-same-chain';");
     expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain("if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;");
+    expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && isMarketMakerDepthComplete(before) && !hasMarketMakerRuntimeBacklog(env))");
+    expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && isMarketMakerDepthComplete(health) && !hasMarketMakerRuntimeBacklog(env))");
   });
 
   test('market maker quote hot path is producer-only after runtime loop starts', () => {

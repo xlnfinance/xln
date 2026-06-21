@@ -221,6 +221,18 @@ export async function proposeAccountFrame(
               `seq=${accountTx.data.fillSeq} error=${result.error || 'validation_failed'}`,
           );
         }
+        if (accountTx.type === 'pull_lock' && accountTx.data.crossJurisdiction) {
+          throw new Error(
+            `CROSS_J_PULL_LOCK_PROPOSAL_FAILED: pull=${accountTx.data.pullId} ` +
+              `order=${accountTx.data.crossJurisdiction.orderId} error=${result.error || 'validation_failed'}`,
+          );
+        }
+        if (accountTx.type === 'swap_offer' && accountTx.data.crossJurisdiction) {
+          throw new Error(
+            `CROSS_J_SWAP_OFFER_PROPOSAL_FAILED: offer=${accountTx.data.offerId} ` +
+              `error=${result.error || 'validation_failed'}`,
+          );
+        }
         if (isCrossJurisdictionPullResolveTx(accountMachine, accountTx)) {
           throw new Error(
             `CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED: pull=${accountTx.data.pullId} ` +
