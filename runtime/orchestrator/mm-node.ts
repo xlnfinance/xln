@@ -283,20 +283,20 @@ const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT = Math.max(
   1,
-  // Keep the per-input batch bounded. The bootstrap tick budget can be high, but
-  // one oversized EntityInput starves the MM API while runtime consensus digests it.
+  // Keep per-input account work bounded. maxEntityInputsPerFrame caps
+  // EntityInputs, but account consensus still runs all txs inside one input.
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT'] || '4'),
 );
 const MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT = Math.max(
   1,
   Number(
     process.env['MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||
-    '2',
+    '4',
   ),
 );
 const MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '2'),
+  Number(process.env['MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '4'),
 );
 const MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK = Math.max(
   1,
@@ -2558,24 +2558,38 @@ const run = async (): Promise<void> => {
             remainingOffersByEntityId: new Map<string, number>(),
           }
         : undefined;
-      const selectedCrossQuoteJobs: CrossQuoteJob[] = [];
+      const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }> = [];
       if (crossQuoteJobs.length > 0) {
         const routeJobsPerTick = mode === 'bootstrap'
           ? MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK
           : MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK;
         const cursor = mode === 'bootstrap' ? bootstrapCrossCursor : steadyCrossCursor;
         const jobCount = Math.min(routeJobsPerTick, crossQuoteJobs.length);
+        let nextCursor = cursor;
         for (let offset = 0; offset < jobCount; offset += 1) {
-          const selectedJob = crossQuoteJobs[(cursor + offset) % crossQuoteJobs.length];
-          if (selectedJob) selectedCrossQuoteJobs.push(selectedJob);
+          const selectedIndex = (cursor + offset) % crossQuoteJobs.length;
+          const selectedJob = crossQuoteJobs[selectedIndex];
+          if (selectedJob) {
+            selectedCrossQuoteJobs.push({ index: selectedIndex, job: selectedJob });
+            nextCursor = (selectedIndex + 1) % crossQuoteJobs.length;
+          }
         }
         if (mode === 'bootstrap') {
-          bootstrapCrossCursor = (bootstrapCrossCursor + jobCount) % crossQuoteJobs.length;
+          bootstrapCrossCursor = nextCursor;
         } else {
-          steadyCrossCursor = (steadyCrossCursor + jobCount) % crossQuoteJobs.length;
+          steadyCrossCursor = nextCursor;
         }
       }
-      for (const job of selectedCrossQuoteJobs) {
+      const advanceCrossCursorAfterEnqueue = (index: number): void => {
+        const nextCursor = (index + 1) % crossQuoteJobs.length;
+        if (mode === 'bootstrap') {
+          bootstrapCrossCursor = nextCursor;
+        } else {
+          steadyCrossCursor = nextCursor;
+        }
+      };
+      for (const entry of selectedCrossQuoteJobs) {
+        const job = entry.job;
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
         if (await maintainMarketMakerCrossQuotes(
@@ -2597,6 +2611,7 @@ const run = async (): Promise<void> => {
           false,
           shouldContinue,
         )) {
+          advanceCrossCursorAfterEnqueue(entry.index);
           await yieldMarketMakerApi();
           return;
         }

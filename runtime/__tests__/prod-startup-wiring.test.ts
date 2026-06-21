@@ -168,8 +168,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT']");
     expect(mmNode).not.toContain("MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||\n    '30'");
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT * 5');
-    expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||\n    '2'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '2'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||\n    '4'");
+    expect(mmNode).not.toContain("MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT'] ||\n    '2'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '4'");
+    expect(mmNode).not.toContain("MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '2'");
     expect(mmNode).not.toContain("MARKET_MAKER_MAX_NEW_CROSS_DEPTH_REQUESTS_PER_ENTITY_INPUT'] || '30'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '64'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT'] || '1'");
@@ -197,6 +199,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (coverageOnly && coverageGapCount === 0) continue;');
     expect(mmNode).toContain('bootstrapCrossCursor');
     expect(mmNode).toContain('steadyCrossCursor');
+    expect(mmNode).toContain('const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }>');
+    expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index)');
     expect(mmNode).not.toContain("const sameQuoteContexts = mode === 'bootstrap' ? mmContexts.slice(0, 1) : mmContexts;");
     expect(mmNode).toContain('const routeJobsPerTick = mode === \'bootstrap\'');
     expect(mmNode).toContain('MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK');
