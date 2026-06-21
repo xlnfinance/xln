@@ -106,7 +106,7 @@ type JurisdictionConfig = MeshJurisdictionConfig & {
   contracts: NonNullable<MeshJurisdictionConfig['contracts']>;
 };
 
-type HubProfile = {
+export type HubProfile = {
   name: string;
   entityId: string;
   signerId?: string;
@@ -117,7 +117,7 @@ type HubProfile = {
   jurisdictionRef?: string;
 };
 
-type MarketMakerOfferSpec = {
+export type MarketMakerOfferSpec = {
   offerId: string;
   pairId: string;
   hubEntityId: string;
@@ -133,7 +133,7 @@ type MarketMakerConnectivityBudget = {
   remainingTxs: number;
 };
 
-type MarketMakerEntityContext = {
+export type MarketMakerEntityContext = {
   entityId: string;
   signerId: string;
   jurisdictionName: string;
@@ -142,7 +142,7 @@ type MarketMakerEntityContext = {
   jurisdictionRef: string;
 };
 
-type MarketMakerTokenIdsByContext = ReadonlyMap<string, number[]>;
+export type MarketMakerTokenIdsByContext = ReadonlyMap<string, number[]>;
 
 type MarketMakerAccountBlocker = {
   entityId: string;
@@ -191,7 +191,7 @@ type MarketMakerCrossRouteHealth = {
   }>;
 };
 
-type MarketMakerHealth = {
+export type MarketMakerHealth = {
   enabled: boolean;
   ok: boolean;
   entityId: string | null;
@@ -416,7 +416,22 @@ const parseArgs = (): Args => {
   };
 };
 
-const resolvedArgs = parseArgs();
+const defaultArgsForImport = (): Args => ({
+  name: 'MM',
+  seed: 'xln-mesh-mm',
+  signerLabel: 'mm-1',
+  relayUrl: 'ws://127.0.0.1:20002/relay',
+  apiHost: '127.0.0.1',
+  apiPort: 0,
+  directWsUrl: '',
+  rpcUrl: '',
+  rpc2Url: '',
+  rpcUrls: {},
+  meshHubNames: ['H1', 'H2', 'H3'],
+  dbPath: '',
+});
+
+const resolvedArgs = import.meta.main ? parseArgs() : defaultArgsForImport();
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
 const resolveLocalApiUrl = (value: string): string => {
   const raw = String(value || '').trim();
@@ -430,7 +445,7 @@ const resolveLocalApiUrl = (value: string): string => {
   return new URL(raw, apiUrl).toString();
 };
 const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
-if (!directWsUrl) {
+if (import.meta.main && !directWsUrl) {
   throw new Error('[MESH-MM] Missing required --direct-ws-url');
 }
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
@@ -759,7 +774,7 @@ const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): 
   return (ticks / step) * step;
 };
 
-const fitCrossAmountsToOrderbook = (
+export const fitCrossAmountsToOrderbook = (
   sourceJurisdiction: string,
   sourceTokenId: number,
   sourceAmount: bigint,
@@ -798,6 +813,19 @@ const fitCrossAmountsToOrderbook = (
 
   const effectiveQuoteAmount = (quantizedBaseAmount * effectivePriceTicks) / ORDERBOOK_PRICE_SCALE;
   if (effectiveQuoteAmount <= 0n) return null;
+  // Account cross swap_offer recomputes ticks with step=1 from final amounts.
+  // Keep this assert so future wider MM book steps cannot silently diverge.
+  const accountCrossPriceTicks = computeCrossOrderbookPriceTicks(
+    market.sourceIsBase,
+    quantizedBaseAmount,
+    effectiveQuoteAmount,
+    1,
+  );
+  if (accountCrossPriceTicks !== effectivePriceTicks) {
+    throw new Error(
+      `MARKET_MAKER_CROSS_ACCOUNT_PRICE_DIVERGENCE priceTicks=${effectivePriceTicks.toString()} accountTicks=${accountCrossPriceTicks.toString()}`,
+    );
+  }
   return market.sourceIsBase
     ? { sourceAmount: quantizedBaseAmount, targetAmount: effectiveQuoteAmount, priceTicks: effectivePriceTicks }
     : { sourceAmount: effectiveQuoteAmount, targetAmount: quantizedBaseAmount, priceTicks: effectivePriceTicks };
@@ -1017,7 +1045,7 @@ const canonicalizeLocalCrossJurisdictionRoute = (
   return isCrossJurisdictionRouteTwoRuntime(env, canonical) ? canonical : null;
 };
 
-const buildMarketMakerCrossOfferSpecs = (
+export const buildMarketMakerCrossOfferSpecs = (
   env: Env,
   sourceContext: MarketMakerEntityContext,
   targetContext: MarketMakerEntityContext,
@@ -1494,14 +1522,25 @@ const isMatchingCrossOfferRoute = (
   expected: CrossJurisdictionSwapRoute,
 ): boolean => {
   if (!candidate) return false;
+  const candidatePriceTicks = candidate.priceTicks === undefined ? null : BigInt(candidate.priceTicks);
+  const expectedPriceTicks = expected.priceTicks === undefined ? null : BigInt(expected.priceTicks);
+  // routeHash includes the runtime expiry window; regenerated MM specs can roll
+  // that window forward. Readiness binds to route identity and economics here.
   return (
     String(candidate.orderId || '') === String(expected.orderId || '') &&
+    normalizeEntityRef(candidate.makerEntityId) === normalizeEntityRef(expected.makerEntityId) &&
+    normalizeEntityRef(candidate.hubEntityId) === normalizeEntityRef(expected.hubEntityId) &&
+    normalizeEntityRef(candidate.bookOwnerEntityId || '') === normalizeEntityRef(expected.bookOwnerEntityId || '') &&
+    String(candidate.venueId || '') === String(expected.venueId || '') &&
     normalizeEntityRef(candidate.source.entityId) === normalizeEntityRef(expected.source.entityId) &&
     normalizeEntityRef(candidate.source.counterpartyEntityId) === normalizeEntityRef(expected.source.counterpartyEntityId) &&
     normalizeEntityRef(candidate.target.entityId) === normalizeEntityRef(expected.target.entityId) &&
     normalizeEntityRef(candidate.target.counterpartyEntityId) === normalizeEntityRef(expected.target.counterpartyEntityId) &&
     Number(candidate.source.tokenId) === Number(expected.source.tokenId) &&
-    Number(candidate.target.tokenId) === Number(expected.target.tokenId)
+    Number(candidate.target.tokenId) === Number(expected.target.tokenId) &&
+    BigInt(candidate.source.amount) === BigInt(expected.source.amount) &&
+    BigInt(candidate.target.amount) === BigInt(expected.target.amount) &&
+    candidatePriceTicks === expectedPriceTicks
   );
 };
 
@@ -1570,7 +1609,7 @@ const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean
   return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
 };
 
-const hasFinalizedMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean => {
+export const hasFinalizedMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean => {
   const route = spec.crossJurisdiction;
   if (!route) return false;
   return Boolean(getCommittedSourceAccountCrossOffer(env, route));
@@ -1727,7 +1766,7 @@ const buildExpectedMarketMakerCrossRouteGroups = (
   return groups;
 };
 
-const buildMarketMakerCrossHealth = (
+export const buildMarketMakerCrossHealth = (
   env: Env,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
@@ -2085,7 +2124,7 @@ const maintainMarketMakerCrossQuotes = async (
   return false;
 };
 
-const getMarketMakerHealth = (
+export const getMarketMakerHealth = (
   env: Env,
   mmEntityId: string | null,
   hubEntityIds: string[],
@@ -2379,7 +2418,7 @@ const collectCommittedMarketMakerCrossOfferFingerprints = (
   );
 };
 
-const buildMarketMakerBootstrapFingerprint = (
+export const buildMarketMakerBootstrapFingerprint = (
   env: Env,
   contexts: MarketMakerEntityContext[],
   visibleHubs: HubProfile[],
@@ -3260,8 +3299,10 @@ const run = async (): Promise<void> => {
   await new Promise<void>(() => {});
 };
 
-resetMeshJurisdictionsCache();
-run().catch(error => {
-  console.error(`[MESH-MM] FAILED:`, (error as Error).stack || (error as Error).message);
-  process.exit(1);
-});
+if (import.meta.main) {
+  resetMeshJurisdictionsCache();
+  run().catch(error => {
+    console.error(`[MESH-MM] FAILED:`, (error as Error).stack || (error as Error).message);
+    process.exit(1);
+  });
+}
