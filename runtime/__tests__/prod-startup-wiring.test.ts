@@ -170,6 +170,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT'] || '1'");
     expect(mmNode).toContain('type MarketMakerCrossOfferBudget = {');
     expect(mmNode).toContain('const hasMarketMakerAccountBacklog = (');
+    expect(mmNode).toContain('const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {');
+    expect(mmNode).toContain('Boolean(env.runtimeState?.processingPromise)');
+    expect(mmNode).toContain('if (hasMarketMakerRuntimeBacklog(env)) return;');
     expect(mmNode).toContain('const quoteableHubsFor = (context: MarketMakerEntityContext): HubProfile[] =>');
     expect(mmNode).toContain('.filter(profile => !hasMarketMakerAccountBacklog(env, context.entityId, profile.entityId));');
     expect(mmNode).toContain('): Promise<boolean> => {\n  const localCreditInputsByEntity = new Map<string, EntityInput>();');
