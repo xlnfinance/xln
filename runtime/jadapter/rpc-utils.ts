@@ -20,6 +20,7 @@ export type RpcBatchResponse = {
 };
 
 const RPC_CODE_PROBE_TIMEOUT_MS = 10_000;
+export const DEFAULT_RPC_BATCH_TIMEOUT_MS = 5_000;
 
 export const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
   typeof value === 'object' &&
@@ -94,13 +95,29 @@ export const readContractCode = async (
 export const sendRpcBatch = async (
   rpcUrl: string,
   batch: RpcBatchRequest[],
+  timeoutMs = DEFAULT_RPC_BATCH_TIMEOUT_MS,
 ): Promise<Map<number, RpcBatchResponse>> => {
   if (batch.length === 0) return new Map();
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(batch),
-  });
+  const controller = new AbortController();
+  const timeoutHandle = timeoutMs > 0
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  let response: Response;
+  try {
+    response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(batch),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`RPC_BATCH_TIMEOUT:${timeoutMs}`);
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+  }
   if (!response.ok) {
     throw new Error(`RPC_BATCH_HTTP_${response.status}`);
   }

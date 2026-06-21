@@ -61,6 +61,7 @@
   }
   function emitAction(e: Event): void {
     e.stopPropagation();
+    if (actionDisabled) return;
     dispatch('action', { tokenId: actionTokenId });
   }
 </script>
@@ -74,7 +75,7 @@
     </span>
     <span class="amt">{outAmount}</span>
     {#if actionLabel}
-      <span class="act" role="button" tabindex="0" on:click={emitAction} on:keydown={(e) => e.key === 'Enter' && emitAction(e)} class:disabled={actionDisabled}>{actionLabel}</span>
+      <span class="act" role="button" tabindex={actionDisabled ? -1 : 0} on:click={emitAction} on:keydown={(e) => e.key === 'Enter' && emitAction(e)} class:disabled={actionDisabled}>{actionLabel}</span>
     {/if}
     <i class="ti ti-chevron-right chev" aria-hidden="true"></i>
   </button>

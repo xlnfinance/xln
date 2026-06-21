@@ -20,6 +20,7 @@ const CORS_JSON_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': '*',
   'Access-Control-Allow-Headers': '*',
+  'Access-Control-Expose-Headers': 'X-XLN-Proxy-Health-Polled, X-XLN-Proxy-Health-Poll-Ms, X-XLN-Proxy-Upstream-Ms, X-XLN-Proxy-Total-Ms',
   'Content-Type': 'application/json',
 };
 
@@ -46,8 +47,42 @@ const FORBIDDEN_RPC_PROXY_PREFIXES = [
 ];
 
 const MAX_RPC_PROXY_INDEX = 8;
+const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
+const DEFAULT_HUB_API_PROXY_TIMEOUT_MS = 5_000;
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const value = Number(process.env[name] || '');
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+};
+
+const readHubApiProxyTimeoutMs = (): number =>
+  readPositiveIntEnv(
+    'XLN_HUB_API_PROXY_TIMEOUT_MS',
+    readPositiveIntEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_HUB_API_PROXY_TIMEOUT_MS),
+  );
+
+const fetchTextWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ response: Response; text: string }> => {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const text = await response.text();
+    return { response, text };
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`PROXY_UPSTREAM_TIMEOUT:${timeoutMs}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+};
 
 export const resolveRpcProxyIndex = (pathname: string): number | null => {
   const match = String(pathname || '').match(/^\/(?:api\/)?rpc([2-8])?$/);
@@ -100,14 +135,14 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
           );
         }
       }
-      const response = await fetch(upstreamRpcUrl, {
+      const timeoutMs = readPositiveIntEnv('XLN_RPC_PROXY_TIMEOUT_MS', DEFAULT_RPC_PROXY_TIMEOUT_MS);
+      const { response, text } = await fetchTextWithTimeout(upstreamRpcUrl, {
         method: 'POST',
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
         },
         body: bodyText,
-      });
-      const text = await response.text();
+      }, timeoutMs);
       return new Response(text, {
         status: response.status,
         headers: {
@@ -124,6 +159,16 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
   };
 
   const proxyHubApi = async (request: Request, endpoint: ProxyHubEndpoint): Promise<Response> => {
+    const proxyStartedAt = Date.now();
+    let healthPolled = false;
+    let healthPollMs = 0;
+    const proxyHeaders = (extra: Record<string, string> = {}): HeadersInit => ({
+      ...CORS_JSON_HEADERS,
+      'X-XLN-Proxy-Health-Polled': healthPolled ? '1' : '0',
+      'X-XLN-Proxy-Health-Poll-Ms': String(healthPollMs),
+      'X-XLN-Proxy-Total-Ms': String(Date.now() - proxyStartedAt),
+      ...extra,
+    });
     let bodyText = '';
     let bodyJson: { hubEntityId?: string } | null = null;
     try {
@@ -132,13 +177,19 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
     } catch (error) {
       return new Response(safeStringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
         status: 400,
-        headers: CORS_JSON_HEADERS,
+        headers: proxyHeaders(),
       });
     }
 
-    await deps.pollAllHubHealth();
     const requestedHubId = String(bodyJson?.hubEntityId || '').toLowerCase();
-    const child = deps.getHubChildByEntityId(requestedHubId);
+    let child = deps.getHubChildByEntityId(requestedHubId);
+    if (!child) {
+      const pollStartedAt = Date.now();
+      await deps.pollAllHubHealth();
+      healthPolled = true;
+      healthPollMs = Date.now() - pollStartedAt;
+      child = deps.getHubChildByEntityId(requestedHubId);
+    }
     if (!child) {
       return new Response(safeStringify({
         success: false,
@@ -146,25 +197,26 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         code: 'FAUCET_HUB_NOT_FOUND',
       }), {
         status: 404,
-        headers: CORS_JSON_HEADERS,
+        headers: proxyHeaders(),
       });
     }
 
     try {
-      const response = await fetch(`http://${deps.host}:${child.apiPort}${endpoint}`, {
+      const upstreamStartedAt = Date.now();
+      const timeoutMs = readHubApiProxyTimeoutMs();
+      const { response, text } = await fetchTextWithTimeout(`http://${deps.host}:${child.apiPort}${endpoint}`, {
         method: 'POST',
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
         },
         body: bodyText,
-      });
-      const text = await response.text();
+      }, timeoutMs);
       return new Response(text, {
         status: response.status,
-        headers: {
-          ...CORS_JSON_HEADERS,
+        headers: proxyHeaders({
           'content-type': response.headers.get('content-type') || 'application/json',
-        },
+          'X-XLN-Proxy-Upstream-Ms': String(Date.now() - upstreamStartedAt),
+        }),
       });
     } catch (error) {
       return new Response(safeStringify({
@@ -173,7 +225,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         code: 'FAUCET_PROXY_FAILED',
       }), {
         status: 502,
-        headers: CORS_JSON_HEADERS,
+        headers: proxyHeaders(),
       });
     }
   };
@@ -198,13 +250,12 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
     }
 
     try {
-      const response = await fetch(`http://${deps.host}:${child.apiPort}${endpointWithQuery}`, {
+      const { response, text } = await fetchTextWithTimeout(`http://${deps.host}:${child.apiPort}${endpointWithQuery}`, {
         method: 'GET',
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
         },
-      });
-      const text = await response.text();
+      }, readHubApiProxyTimeoutMs());
       return new Response(text, {
         status: response.status,
         headers: {
@@ -239,14 +290,13 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
     }
 
     try {
-      const response = await fetch(`http://${deps.host}:${child.apiPort}${endpointWithQuery}`, {
+      const { response, text } = await fetchTextWithTimeout(`http://${deps.host}:${child.apiPort}${endpointWithQuery}`, {
         method: request.method,
         headers: {
           'content-type': request.headers.get('content-type') || 'application/json',
         },
         ...(bodyText.length > 0 ? { body: bodyText } : {}),
-      });
-      const text = await response.text();
+      }, readHubApiProxyTimeoutMs());
       return new Response(text, {
         status: response.status,
         headers: {

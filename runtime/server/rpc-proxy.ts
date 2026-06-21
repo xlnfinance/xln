@@ -6,12 +6,40 @@ import { pushDebugEvent, type RelayStore } from '../relay-store';
 import { safeStringify } from '../serialization-utils';
 import { getErrorMessage } from '../server-utils';
 
+const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
+
 type RuntimeRpcProxyRequest = {
   req: Request;
   pathname: string;
   env: Env | null;
   relayStore: RelayStore;
   headers: HeadersInit;
+};
+
+const readRpcProxyTimeoutMs = (): number => {
+  const value = Number(process.env['XLN_RPC_PROXY_TIMEOUT_MS'] || '');
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_RPC_PROXY_TIMEOUT_MS;
+};
+
+const fetchTextWithTimeout = async (
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<{ response: Response; text: string }> => {
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, signal: controller.signal });
+    const text = await response.text();
+    return { response, text };
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') {
+      throw new Error(`RPC_PROXY_TIMEOUT:${timeoutMs}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 };
 
 export const handleRuntimeRpcProxy = async ({
@@ -62,14 +90,13 @@ export const handleRuntimeRpcProxy = async ({
         );
       }
     }
-    const rpcRes = await fetch(upstream, {
+    const { response: rpcRes, text: respBody } = await fetchTextWithTimeout(upstream, {
       method: 'POST',
       headers: {
         'content-type': req.headers.get('content-type') || 'application/json',
       },
       body: bodyText,
-    });
-    const respBody = await rpcRes.text();
+    }, readRpcProxyTimeoutMs());
     return new Response(respBody, {
       status: rpcRes.status,
       headers: {
