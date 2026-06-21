@@ -35,6 +35,7 @@ import {
   buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
+  withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
@@ -1728,6 +1729,74 @@ describe('audit fail-fast regressions', () => {
     ]);
 
     await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_PULL_RESOLVE_PROPOSAL_FAILED/);
+    expect(account.mempool).toHaveLength(1);
+  });
+
+  test('proposeAccountFrame throws instead of dropping invalid cross-j swap offer', async () => {
+    const env = createEmptyEnv('cross-swap-offer-propose-failfast');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const left = `0x${'11'.repeat(32)}`;
+    const right = `0x${'22'.repeat(32)}`;
+    const amount = SWAP_LOT_SCALE;
+    const route = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'cross-swap-offer-propose-failfast',
+      makerEntityId: left,
+      hubEntityId: right,
+      source: {
+        jurisdiction: 'stack:testnet',
+        entityId: left,
+        counterpartyEntityId: right,
+        tokenId: 1,
+        amount,
+      },
+      target: {
+        jurisdiction: 'stack:tron',
+        entityId: right,
+        counterpartyEntityId: left,
+        tokenId: 2,
+        amount,
+      },
+      sourcePull: {
+        pullId: 'missing-source-pull',
+        tokenId: 1,
+        amount: -amount,
+        signedAmount: -amount,
+        revealedUntilTimestamp: 60_000,
+        fullHash: `0x${'aa'.repeat(32)}`,
+        partialRoot: `0x${'bb'.repeat(32)}`,
+      },
+      targetPull: {
+        pullId: 'target-pull',
+        tokenId: 2,
+        amount,
+        signedAmount: amount,
+        revealedUntilTimestamp: 60_000,
+        fullHash: `0x${'dd'.repeat(32)}`,
+        partialRoot: `0x${'ee'.repeat(32)}`,
+      },
+      priceTicks: ORDERBOOK_PRICE_SCALE,
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+      expiresAt: 60_000,
+    } as CrossJurisdictionSwapRoute);
+    const account = makeProposalAccount([
+      {
+        type: 'swap_offer',
+        data: {
+          offerId: route.orderId,
+          giveTokenId: 1,
+          giveAmount: amount,
+          wantTokenId: 2,
+          wantAmount: amount,
+          minFillRatio: 0,
+          crossJurisdiction: route,
+        },
+      },
+    ], left, right);
+
+    await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_SWAP_OFFER_PROPOSAL_FAILED/);
     expect(account.mempool).toHaveLength(1);
   });
 

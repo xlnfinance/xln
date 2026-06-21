@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, rmSync, closeSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -22,8 +22,8 @@ type HealthPayload = {
     entityId?: string | null;
     startupPhase?: string | null;
     expectedOffersPerHub?: number;
-    hubs?: Array<{ offers?: number }>;
-    cross?: { ok?: boolean; expectedRoutes?: number };
+    hubs?: Array<{ offers?: number; blockers?: unknown[] }>;
+    cross?: { ok?: boolean; expectedRoutes?: number; routes?: Array<{ blockers?: unknown[] }> };
   };
   custody?: { ok?: boolean };
   bootstrapReserves?: { ok?: boolean; targetMet?: boolean };
@@ -184,8 +184,10 @@ const healthReady = (health: HealthPayload): boolean => {
     expectedOffersPerHub > 0 &&
     offers.length >= 3 &&
     offers.every(offerCount => offerCount >= expectedOffersPerHub) &&
+    (health.marketMaker?.hubs ?? []).every(hub => (hub.blockers ?? []).length === 0) &&
     Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0 &&
     health.marketMaker?.cross?.ok === true &&
+    (health.marketMaker?.cross?.routes ?? []).every(route => (route.blockers ?? []).length === 0) &&
     health.custody?.ok === true &&
     health.bootstrapReserves?.ok === true;
 };
@@ -202,9 +204,11 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
     entity: Boolean(health.marketMaker?.entityId),
     expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? null,
     offers: health.marketMaker?.hubs?.map(hub => hub.offers ?? 0) ?? [],
+    blockers: health.marketMaker?.hubs?.map(hub => hub.blockers?.length ?? 0) ?? [],
     cross: {
       ok: health.marketMaker?.cross?.ok ?? null,
       expectedRoutes: health.marketMaker?.cross?.expectedRoutes ?? null,
+      blockers: health.marketMaker?.cross?.routes?.map(route => route.blockers?.length ?? 0) ?? [],
     },
     startupPhase: health.marketMaker?.startupPhase ?? null,
   },
@@ -295,6 +299,12 @@ const main = async (): Promise<void> => {
   });
 
   await waitForHealth();
+  const serverLog = readFileSync(logPath('server'), 'utf8');
+  const hashMatch = serverLog.match(/BOOTSTRAP_READY_HASH hash=([a-f0-9]{64})/);
+  if (!hashMatch) {
+    throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_HASH_MISSING');
+  }
+  console.log(`[local-prod-smoke] bootstrapHash=${hashMatch[1]}`);
   console.log('[local-prod-smoke] green');
 };
 

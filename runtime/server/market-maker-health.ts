@@ -62,25 +62,12 @@ const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: 
 
 const buildMarketMakerPairs = (tokenIds: number[]): MarketMakerPair[] => buildDefaultEntitySwapPairs(tokenIds);
 
-const collectOfferIdsForAccount = (
-  account:
-    | Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'>
-    | null
-    | undefined,
+const collectCommittedOfferIdsForAccount = (
+  account: Pick<AccountMachine, 'swapOffers'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {
     for (const offerId of account.swapOffers.keys()) ids.add(String(offerId));
-  }
-  for (const tx of account?.mempool || []) {
-    if (tx?.type !== 'swap_offer') continue;
-    const offerId = String(tx?.data?.offerId || '');
-    if (offerId) ids.add(offerId);
-  }
-  for (const tx of account?.pendingFrame?.accountTxs || []) {
-    if (tx?.type !== 'swap_offer') continue;
-    const offerId = String(tx?.data?.offerId || '');
-    if (offerId) ids.add(offerId);
   }
   return ids;
 };
@@ -91,7 +78,7 @@ const countMarketMakerOffersForHub = (
 ): number => {
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
   let count = 0;
-  for (const offerId of collectOfferIdsForAccount(account)) {
+  for (const offerId of collectCommittedOfferIdsForAccount(account)) {
     if (offerId.startsWith(prefix)) count += 1;
   }
   return count;
@@ -104,11 +91,20 @@ const countMarketMakerOffersForHubPair = (
 ): number => {
   const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-${pair.baseTokenId}-${pair.quoteTokenId}-`;
   let count = 0;
-  for (const offerId of collectOfferIdsForAccount(account)) {
+  for (const offerId of collectCommittedOfferIdsForAccount(account)) {
     if (offerId.startsWith(prefix)) count += 1;
   }
   return count;
 };
+
+const accountReady = (
+  account: Pick<AccountMachine, 'status' | 'currentHeight' | 'mempool' | 'pendingFrame'> | null | undefined,
+): boolean =>
+  Boolean(account) &&
+  String(account?.status || 'active') === 'active' &&
+  Number(account?.currentHeight ?? 0) > 0 &&
+  !account?.pendingFrame &&
+  Number(account?.mempool?.length || 0) === 0;
 
 export const getMarketMakerHealth = (
   env: Env | null,
@@ -133,6 +129,14 @@ export const getMarketMakerHealth = (
     offers: number;
     ready: boolean;
     depthReady: boolean;
+    blockers?: Array<{
+      reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool';
+      currentHeight: number | null;
+      pendingFrame: boolean;
+      pendingFrameHeight: number | null;
+      mempoolLength: number;
+      swapOffers: number;
+    }>;
     pairs: Array<{ pairId: string; offers: number; ready: boolean; depthReady: boolean; expectedOffers: number }>;
   }>;
 } => {
@@ -183,6 +187,13 @@ export const getMarketMakerHealth = (
 
   const perHub = hubs.map(hubEntityId => {
     const account = getAccountMachine(env, entityId, hubEntityId);
+    const isAccountReady = accountReady(account);
+    let reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool' | null = null;
+    if (!account) reason = 'missing-account';
+    else if (String(account.status || 'active') !== 'active') reason = 'inactive-account';
+    else if (Number(account.currentHeight ?? 0) <= 0) reason = 'height-zero';
+    else if (account.pendingFrame) reason = 'pending-frame';
+    else if (Number(account.mempool?.length || 0) > 0) reason = 'mempool';
     const offers = countMarketMakerOffersForHub(account, hubEntityId);
     const pairHealth = pairs.map(pair => {
       const pairOffers = countMarketMakerOffersForHubPair(account, hubEntityId, pair);
@@ -190,16 +201,24 @@ export const getMarketMakerHealth = (
       return {
         pairId: pair.pairId,
         offers: pairOffers,
-        ready: expectedPairOffers > 0 && pairOffers > 0,
-        depthReady: expectedPairOffers > 0 && pairOffers >= expectedPairOffers,
+        ready: isAccountReady && expectedPairOffers > 0 && pairOffers > 0,
+        depthReady: isAccountReady && expectedPairOffers > 0 && pairOffers >= expectedPairOffers,
         expectedOffers: expectedPairOffers,
       };
     });
     return {
       hubEntityId,
       offers,
-      ready: expectedOffersPerHub > 0 && pairHealth.every(pair => pair.ready),
-      depthReady: expectedOffersPerHub > 0 && offers >= expectedOffersPerHub && pairHealth.every(pair => pair.depthReady),
+      ready: isAccountReady && expectedOffersPerHub > 0 && pairHealth.every(pair => pair.ready),
+      depthReady: isAccountReady && expectedOffersPerHub > 0 && offers >= expectedOffersPerHub && pairHealth.every(pair => pair.depthReady),
+      blockers: reason ? [{
+        reason,
+        currentHeight: account ? Number(account.currentHeight ?? 0) : null,
+        pendingFrame: Boolean(account?.pendingFrame),
+        pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
+        mempoolLength: Number(account?.mempool?.length || 0),
+        swapOffers: Number(account?.swapOffers?.size || 0),
+      }] : [],
       pairs: pairHealth,
     };
   });
