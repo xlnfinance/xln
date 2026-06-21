@@ -122,8 +122,8 @@ describe('production startup wiring', () => {
     expect(runtimeSource).toContain('if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
     expect(runtimeSource).not.toContain('void config;');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
-    expect(mmNode).not.toContain('MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
-    expect(mmNode).not.toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1'");
+    expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'");
@@ -189,6 +189,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const pushLocalConnectivityTx = (');
     expect(mmNode).toContain('const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<boolean> => {');
     expect(mmNode).toContain('if (await maintainSameContextQuotes(context)) return;');
+    expect(mmNode).toContain('const missingByPair = new Map<string, MarketMakerOfferSpec[]>();');
+    expect(mmNode).toContain('const missingByEntityAndPair = new Map<string, MarketMakerOfferSpec[]>();');
     expect(mmNode).toContain('entityInputs,');
     expect(mmNode).not.toContain('const hasMarketMakerQuoteBacklog = (');
     expect(mmNode).not.toContain('if (hasPendingRuntimeWork(env)) return true;');
@@ -269,6 +271,11 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
     expect(deploy).toContain('local deadline=$((SECONDS + 1800))');
+    expect(deploy).toContain('echo "[deploy] resetting production anvil + runtime state"');
+    expect(deploy).toContain('rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody');
+    expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset');
+    expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset');
+    expect(deploy).not.toContain('preserving production anvil + runtime state');
   });
 
   test('prod diagnose accepts the market maker terminal startup phase', () => {
@@ -307,8 +314,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
     expect(mmNode).toContain('if (!isMarketMakerSameDepthComplete(sameHealth)) return sameHealth;');
     expect(mmNode).toContain('return publishMarketMakerHealthSnapshot({ includeCross: true });');
-    expect(mmNode).toContain("publishBootstrapHealthSnapshot();\n      await yieldMarketMakerApi();\n      await driveQuotes('bootstrap');");
-    expect(mmNode).toContain("startupPhase = 'bootstrap-offers';\n    publishBootstrapHealthSnapshot();");
+    expect(mmNode).toContain("refreshBootstrapPhase(publishBootstrapHealthSnapshot());\n      await yieldMarketMakerApi();\n      await driveQuotes('bootstrap');");
+    expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    publishBootstrapHealthSnapshot();");
+    expect(mmNode).toContain("startupPhase = isMarketMakerSameDepthComplete(health)\n        ? 'bootstrap-cross'\n        : 'bootstrap-same-chain';");
     expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain("if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;");
   });
