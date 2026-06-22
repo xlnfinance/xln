@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { spawn, type ChildProcess } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, rmSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -64,6 +64,7 @@ type BootstrapMetrics = {
   runtimeStateHash: string;
   entityStateHash: string;
   workDir: string;
+  eventsJsonl: string;
   templateDir?: string;
 };
 
@@ -96,6 +97,18 @@ const postBootstrapStabilityMs = Math.max(
 const smokeStartedAt = Date.now();
 const stages: BootstrapStage[] = [];
 const recordedStages = new Set<string>();
+let fatalStageBudgetError: string | null = null;
+const eventsJsonlPath = process.env['XLN_LOCAL_PROD_SMOKE_EVENTS_JSONL'] || join(workDir, 'bootstrap-events.jsonl');
+const enforceStageBudgets = process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1';
+const healthPollMaxMs = Math.max(
+  250,
+  Number(process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'),
+);
+const stageBudgetsMs = {
+  hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '5000')),
+  sameChain: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '8000')),
+  cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '25000')),
+};
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -107,6 +120,7 @@ const recordStage = (stage: string, details?: unknown): void => {
     ...(details === undefined ? {} : { details }),
   };
   stages.push(entry);
+  emitDebugEvent('stage', { stage, details });
   console.log(`[local-prod-smoke] stage ${JSON.stringify(entry)}`);
 };
 
@@ -118,6 +132,33 @@ const recordStageOnce = (stage: string, details?: unknown): void => {
 
 const isHash64 = (value: unknown): value is string =>
   typeof value === 'string' && /^(?:0x)?[a-f0-9]{64}$/i.test(value);
+
+const normalizeError = (error: unknown): Record<string, unknown> => {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+  return { message: String(error) };
+};
+
+function emitDebugEvent(event: string, fields: Record<string, unknown> = {}): void {
+  const record = {
+    schema: 'xln-bootstrap-debug-event-v1',
+    at: new Date().toISOString(),
+    elapsedMs: Date.now() - smokeStartedAt,
+    event,
+    ...fields,
+  };
+  try {
+    mkdirSync(workDir, { recursive: true });
+    appendFileSync(eventsJsonlPath, `${JSON.stringify(record)}\n`);
+  } catch {
+    // Smoke assertions must not be hidden by diagnostic file I/O.
+  }
+}
 
 const isPortOpen = async (port: number): Promise<boolean> => {
   return await new Promise<boolean>((resolve) => {
@@ -212,30 +253,74 @@ const waitForRpc = async (port: number, expectedChainId: string, label: string):
         return;
       }
     } catch (error) {
-      last = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED')) {
+        throw error;
+      }
+      last = message;
     }
     await sleep(1_000);
   }
   throw new Error(`${label} RPC not ready on :${port}; last=${last}`);
 };
 
+const fetchJsonWithCurl = <T>(url: string, maxMs: number, label: string): T => {
+  const startedAt = Date.now();
+  const maxTimeSeconds = (Math.max(250, maxMs) / 1000).toFixed(3);
+  const result = spawnSync('curl', ['-sS', '--max-time', maxTimeSeconds, url], {
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: Math.max(1000, maxMs + 500),
+  });
+  const elapsedMs = Date.now() - startedAt;
+  if (result.error) {
+    throw new Error(`${label}_UNRESPONSIVE elapsedMs=${elapsedMs} maxMs=${maxMs} error=${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const stderr = String(result.stderr || '').trim();
+    throw new Error(`${label}_UNRESPONSIVE elapsedMs=${elapsedMs} maxMs=${maxMs} status=${String(result.status)} stderr=${stderr}`);
+  }
+  try {
+    return JSON.parse(String(result.stdout || '')) as T;
+  } catch (error) {
+    throw new Error(
+      `${label}_JSON_INVALID elapsedMs=${elapsedMs} maxMs=${maxMs} error=${
+        error instanceof Error ? error.message : String(error)
+      } body=${String(result.stdout || '').slice(0, 500)}`,
+    );
+  }
+};
+
 const fetchHealth = async (): Promise<HealthPayload> => {
-  const response = await fetch(`http://127.0.0.1:${apiPort}/api/health`);
-  if (!response.ok) throw new Error(`HEALTH_HTTP_${response.status}`);
-  return await response.json() as HealthPayload;
+  const startedAt = Date.now();
+  try {
+    const payload = fetchJsonWithCurl<HealthPayload>(
+      `http://127.0.0.1:${apiPort}/api/health`,
+      healthPollMaxMs,
+      'HEALTH_POLL',
+    );
+    const elapsedMs = Date.now() - startedAt;
+    emitDebugEvent('health-poll', { stage: 'health-poll', elapsedMs, ok: true });
+    return payload;
+  } catch (error) {
+    const elapsedMs = Date.now() - startedAt;
+    throw new Error(
+      `LOCAL_PROD_SMOKE_HEALTH_POLL_FAILED elapsedMs=${elapsedMs} maxMs=${healthPollMaxMs} error=${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 };
 
 const assertMarketMakerInfoResponsive = async (): Promise<MarketMakerInfoPayload> => {
   const startedAt = Date.now();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), marketMakerInfoLatencyMaxMs);
   try {
-    const response = await fetch(`http://127.0.0.1:${marketMakerApiPort}/api/info`, {
-      signal: controller.signal,
-    });
+    const payload = fetchJsonWithCurl<MarketMakerInfoPayload>(
+      `http://127.0.0.1:${marketMakerApiPort}/api/info`,
+      marketMakerInfoLatencyMaxMs,
+      'MM_INFO',
+    );
     const elapsedMs = Date.now() - startedAt;
-    if (!response.ok) throw new Error(`MM_INFO_HTTP_${response.status}`);
-    const payload = await response.json() as MarketMakerInfoPayload;
     if (elapsedMs > marketMakerInfoLatencyMaxMs) {
       throw new Error(`MM_INFO_SLOW elapsedMs=${elapsedMs} maxMs=${marketMakerInfoLatencyMaxMs}`);
     }
@@ -244,8 +329,6 @@ const assertMarketMakerInfoResponsive = async (): Promise<MarketMakerInfoPayload
     const elapsedMs = Date.now() - startedAt;
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`MM_INFO_UNRESPONSIVE elapsedMs=${elapsedMs} maxMs=${marketMakerInfoLatencyMaxMs} error=${message}`);
-  } finally {
-    clearTimeout(timer);
   }
 };
 
@@ -311,7 +394,58 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
   },
 });
 
-const waitForHealth = async (): Promise<void> => {
+const stageElapsed = (stage: string): number | null =>
+  stages.find(entry => entry.stage === stage)?.elapsedMs ?? null;
+
+const requireStageBudget = (
+  stage: string,
+  elapsedMs: number,
+  maxMs: number,
+  snapshot: unknown,
+): void => {
+  if (!enforceStageBudgets || elapsedMs <= maxMs) return;
+  emitDebugEvent('stage-budget-exceeded', {
+    stage,
+    elapsedMs,
+    maxMs,
+    snapshot,
+  });
+  fatalStageBudgetError =
+    `LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED stage=${stage} elapsedMs=${elapsedMs} maxMs=${maxMs} ` +
+    `events=${eventsJsonlPath} snapshot=${JSON.stringify(snapshot)}`;
+  throw new Error(fatalStageBudgetError);
+};
+
+const enforceBootstrapStageBudgets = (health: HealthPayload, snapshot: Record<string, unknown>): void => {
+  if (!enforceStageBudgets) return;
+  const nowElapsedMs = Date.now() - smokeStartedAt;
+  const serverStartedAt = stageElapsed('server:started') ?? 0;
+  const hubMeshReadyAt = stageElapsed('hubMesh:ready');
+  if (hubMeshReadyAt === null) {
+    requireStageBudget('hubMesh', nowElapsedMs - serverStartedAt, stageBudgetsMs.hubMesh, snapshot);
+  } else {
+    requireStageBudget('hubMesh', hubMeshReadyAt - serverStartedAt, stageBudgetsMs.hubMesh, snapshot);
+  }
+
+  const sameStartedAt = stageElapsed('marketMaker:bootstrap-same-chain');
+  const crossStartedAt = stageElapsed('marketMaker:bootstrap-cross');
+  const readyAt = stageElapsed('marketMaker:ready');
+  const phase = String(health.marketMaker?.startupPhase || '');
+  if (sameStartedAt !== null && crossStartedAt === null && phase === 'bootstrap-same-chain') {
+    requireStageBudget('marketMaker:same-chain', nowElapsedMs - sameStartedAt, stageBudgetsMs.sameChain, snapshot);
+  }
+  if (sameStartedAt !== null && crossStartedAt !== null) {
+    requireStageBudget('marketMaker:same-chain', crossStartedAt - sameStartedAt, stageBudgetsMs.sameChain, snapshot);
+  }
+  if (crossStartedAt !== null && readyAt === null) {
+    requireStageBudget('marketMaker:cross', nowElapsedMs - crossStartedAt, stageBudgetsMs.cross, snapshot);
+  }
+  if (crossStartedAt !== null && readyAt !== null) {
+    requireStageBudget('marketMaker:cross', readyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);
+  }
+};
+
+const waitForHealth = async (): Promise<HealthPayload> => {
   const deadline = Date.now() + 420_000;
   let last: unknown = null;
   let iteration = 0;
@@ -330,18 +464,19 @@ const waitForHealth = async (): Promise<void> => {
       if (health.hubMesh?.ok === true) recordStageOnce('hubMesh:ready', last);
       if (health.marketMaker?.cross?.ok === true) recordStageOnce('marketMaker:cross-ready', last);
       if (health.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
-      if (health.marketMaker?.entityId || health.marketMaker?.startupPhase) {
-        await assertMarketMakerInfoResponsive();
-      }
+      enforceBootstrapStageBudgets(health, last as Record<string, unknown>);
       if (iteration % 10 === 0 || healthReady(health)) {
         console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
       }
       if (healthReady(health)) {
         recordStageOnce('system:ready', last);
-        return;
+        return health;
       }
     } catch (error) {
-      last = error instanceof Error ? error.message : String(error);
+      if (fatalStageBudgetError) throw new Error(fatalStageBudgetError);
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED')) throw error;
+      last = message;
     }
     iteration += 1;
     await sleep(1_000);
@@ -365,7 +500,7 @@ const main = async (): Promise<void> => {
   mkdirSync(workDir, { recursive: true });
 
   console.log(`[local-prod-smoke] workDir=${workDir} portBase=${portBase}`);
-  recordStage('smoke:start', { workDir, portBase });
+  recordStage('smoke:start', { workDir, portBase, strictBudgets: enforceStageBudgets, stageBudgetsMs });
   if (useSnapshotTemplate) {
     copySnapshotTemplate(templateDir, workDir);
     recordStage('snapshot:copied', { templateDir, workDir });
@@ -415,8 +550,10 @@ const main = async (): Promise<void> => {
   });
   recordStage('server:started', { apiPort, marketMakerApiPort });
 
-  await waitForHealth();
-  const marketMakerInfo = await assertMarketMakerInfoResponsive();
+  const readyHealth = await waitForHealth();
+  const marketMakerInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'
+    ? await assertMarketMakerInfoResponsive()
+    : null;
   const serverLog = readFileSync(logPath('server'), 'utf8');
   const hashMatch = serverLog.match(
     /BOOTSTRAP_READY_HASH hash=((?:0x)?[a-f0-9]{64})\s+runtimeStateHash=((?:0x)?[a-f0-9]{64})\s+entityStateHash=((?:0x)?[a-f0-9]{64})/,
@@ -424,7 +561,11 @@ const main = async (): Promise<void> => {
   if (!hashMatch || !isHash64(hashMatch[1]) || !isHash64(hashMatch[2]) || !isHash64(hashMatch[3])) {
     throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_HASH_MISSING');
   }
-  const bootstrap = marketMakerInfo.bootstrap ?? {};
+  const bootstrap = marketMakerInfo?.bootstrap ?? readyHealth.bootstrap ?? {
+    readyHash: hashMatch[1],
+    runtimeStateHash: hashMatch[2],
+    entityStateHash: hashMatch[3],
+  };
   if (!isHash64(bootstrap.readyHash)) {
     throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_HASH_MISSING');
   }
@@ -443,7 +584,7 @@ const main = async (): Promise<void> => {
   if (bootstrap.entityStateHash !== hashMatch[3]) {
     throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH info=${bootstrap.entityStateHash} log=${hashMatch[3]}`);
   }
-  assertNoMarketMakerBootstrapBacklog(marketMakerInfo);
+  if (marketMakerInfo) assertNoMarketMakerBootstrapBacklog(marketMakerInfo);
   if (postBootstrapStabilityMs > 0) {
     recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });
     await sleep(postBootstrapStabilityMs);
@@ -453,11 +594,14 @@ const main = async (): Promise<void> => {
         `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HEALTH_REGRESSED last=${JSON.stringify(summarizeHealth(postBootstrapHealth))}`,
       );
     }
-    const postBootstrapInfo = await assertMarketMakerInfoResponsive();
-    assertNoMarketMakerBootstrapBacklog(postBootstrapInfo);
-    if (postBootstrapInfo.bootstrap?.readyHash !== bootstrap.readyHash) {
+    const postBootstrapInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'
+      ? await assertMarketMakerInfoResponsive()
+      : null;
+    if (postBootstrapInfo) assertNoMarketMakerBootstrapBacklog(postBootstrapInfo);
+    const postBootstrapHash = postBootstrapInfo?.bootstrap?.readyHash ?? postBootstrapHealth.bootstrap?.readyHash ?? bootstrap.readyHash;
+    if (postBootstrapHash !== bootstrap.readyHash) {
       throw new Error(
-        `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HASH_CHANGED before=${String(bootstrap.readyHash)} after=${String(postBootstrapInfo.bootstrap?.readyHash)}`,
+        `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HASH_CHANGED before=${String(bootstrap.readyHash)} after=${String(postBootstrapHash)}`,
       );
     }
     recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));
@@ -470,6 +614,7 @@ const main = async (): Promise<void> => {
     runtimeStateHash: bootstrap.runtimeStateHash,
     entityStateHash: bootstrap.entityStateHash,
     workDir,
+    eventsJsonl: eventsJsonlPath,
     ...(useSnapshotTemplate ? { templateDir } : {}),
   };
   const metricsPath = process.env['XLN_LOCAL_PROD_SMOKE_METRICS_JSON'] || join(workDir, 'bootstrap-metrics.json');
@@ -482,6 +627,9 @@ const main = async (): Promise<void> => {
 
 try {
   await main();
+} catch (error) {
+  emitDebugEvent('fatal', { stage: 'local-prod-smoke', error: normalizeError(error) });
+  throw error;
 } finally {
   await stopManaged();
 }

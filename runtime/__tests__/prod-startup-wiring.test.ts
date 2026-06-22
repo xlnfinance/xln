@@ -240,11 +240,12 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('desiredOffers.every(spec => hasFinalizedMarketMakerCrossOffer(env, spec))');
     expect(mmNode).toContain('const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }>');
     expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index)');
-    expect(mmNode).toContain('bootstrapCrossCursor = selectedIndex;');
+    expect(mmNode).toContain('bootstrapCrossCursor = nextCursor;');
     expect(mmNode).toContain("if (mode === 'steady') steadyCrossCursor = nextCursor;");
     expect(mmNode).toContain("if (mode === 'bootstrap' && !isCrossQuoteJobDepthComplete(env, job)) return;");
-    expect(mmNode).toContain('sourceHubs: [sourceHub],');
-    expect(mmNode).toContain('targetHubs: [targetHub],');
+    expect(mmNode).toContain('sourceHubs,');
+    expect(mmNode).toContain('targetHubs,');
+    expect(mmNode).toContain("if (mode === 'steady') return;");
     expect(mmNode).toContain('!isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true))');
     expect(mmNode).toContain("scope: 'same-chain-all-contexts'");
     expect(mmNode).not.toContain("if (mode !== 'bootstrap') return;");
@@ -415,9 +416,19 @@ describe('production startup wiring', () => {
     const smoke = readFileSync(join(repoRoot, 'runtime/scripts/local-prod-smoke.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const benchmark = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-benchmark.ts'), 'utf8');
+    const soundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
 
     expect(packageJson).toContain('"prod:bootstrap:bench": "bun runtime/scripts/bootstrap-benchmark.ts"');
+    expect(packageJson).toContain('"prod:bootstrap:fresh": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=fresh"');
+    expect(packageJson).toContain('"prod:bootstrap:template": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"');
+    expect(packageJson).toContain('"prod:bootstrap:clone": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"');
+    expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
     expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
+    expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
+    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1'");
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
+    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'");
+    expect(smoke).toContain("emitDebugEvent('health-poll'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR']");
     expect(smoke).toContain('const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {');
     expect(smoke).toContain("recordStage('snapshot:copied', { templateDir, workDir });");
@@ -446,6 +457,24 @@ describe('production startup wiring', () => {
     expect(benchmark).toContain('BOOTSTRAP_BENCH_BOOTSTRAP_HASH_DRIFT');
     expect(benchmark).toContain('BOOTSTRAP_BENCH_ENTITY_HASH_DRIFT');
     expect(benchmark).toContain("runtimeStateHashes: metrics.map(entry => entry.runtimeStateHash)");
+    expect(soundcheck).toContain("type Mode = 'fresh' | 'template' | 'clone' | 'hydrate' | 'all';");
+    expect(soundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS: '1'");
+    expect(soundcheck).toContain('BOOTSTRAP_SOUNDCHECK_CLONE_HASH_DRIFT');
+    expect(soundcheck).toContain('BOOTSTRAP_SOUNDCHECK_HYDRATE_HASH_DRIFT');
+  });
+
+  test('isolated e2e runner fails fast on fatal shard log markers', () => {
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    expect(runner).toContain('/MISSING_SIGNER_KEY/');
+    expect(runner).toContain('/JADAPTER_MISSING/');
+    expect(runner).toContain('/PENDING[-_]FRAME[-_]STALE/');
+    expect(runner).toContain('/MM_READY_TIMEOUT/');
+    expect(runner).toContain('/CROSS_J_[A-Z0-9_:-]*/');
+    expect(runner).toContain('const startFailFastLogMonitor = (');
+    expect(runner).toContain('E2E_FATAL_RUNTIME_LOG marker=');
+    expect(runner).toContain('--- last 80 lines (${logPath}) ---');
+    expect(runner).toContain('shardAbortController.abort();');
+    expect(runner).toContain("child.kill('SIGTERM')");
   });
 
   test('orchestrator health does not enrich cross market snapshots by default', () => {
@@ -496,8 +525,9 @@ describe('production startup wiring', () => {
     expect(driveQuotes).toContain("if (mode !== 'bootstrap') {");
     expect(driveQuotes).toContain('if (await maintainSameContextQuotes(context)) return;');
     expect(driveQuotes).toContain('if (await maintainMarketMakerCrossQuotes(');
-    expect(driveQuotes).toContain('sourceHubs: [sourceHub],');
-    expect(driveQuotes).toContain('targetHubs: [targetHub],');
+    expect(driveQuotes).toContain('sourceHubs,');
+    expect(driveQuotes).toContain('targetHubs,');
+    expect(driveQuotes).toContain("if (mode === 'steady') return;");
     expect(meshCommon).toContain('const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {');
     expect(meshCommon).toContain('export const hasQueuedExtendCredit = (');
   });
