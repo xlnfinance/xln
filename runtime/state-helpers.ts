@@ -283,9 +283,9 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
     }
   }
 
-  if (gossipFallback) return gossipFallback;
-  if (configFallback && (!localKeyReplicaFallback || getCachedSignerPrivateKey(configFallback))) return configFallback;
   if (localKeyReplicaFallback) return localKeyReplicaFallback;
+  if (configFallback && getCachedSignerPrivateKey(configFallback)) return configFallback;
+  if (gossipFallback) return gossipFallback;
   if (configFallback) return configFallback;
 
   throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);

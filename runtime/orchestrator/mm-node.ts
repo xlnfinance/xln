@@ -256,7 +256,7 @@ export type MarketMakerHealth = {
 };
 
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
-const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(25, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '250'));
+const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(25, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'),
@@ -304,9 +304,10 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// Cross bootstrap touches two bilateral account machines per offer. Keep the
-// wave large enough to finish within the per-stage budget, but still bounded so
-// every source account settles its pending frame before the next cross wave.
+// Cross bootstrap touches two bilateral account machines per offer. It may
+// enqueue every source hub group for the active direction in one runtime frame;
+// the bootstrap cursor prevents the reverse direction from starting until the
+// active direction is depth-ready.
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 128;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 256;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
@@ -322,6 +323,10 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
     process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] ||
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK),
   ),
+);
+const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -2091,6 +2096,7 @@ const maintainMarketMakerCrossQuotes = async (
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   shouldContinue: () => boolean = () => true,
+  maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
 ): Promise<boolean> => {
   if (
     sourceHubs.length === 0 ||
@@ -2157,6 +2163,7 @@ const maintainMarketMakerCrossQuotes = async (
     1,
     Math.floor(maxNewOffersTotal),
   );
+  let remainingSourceHubGroups = Math.max(1, Math.floor(maxSourceHubGroups));
   const groupedEntries = Array.from(grouped.entries())
     .sort((left, right) =>
       countCrossPairCoverageGaps(env, right[1]) -
@@ -2232,6 +2239,8 @@ const maintainMarketMakerCrossQuotes = async (
       );
     }
     remainingNewOffers -= missing.length;
+    remainingSourceHubGroups -= 1;
+    if (remainingSourceHubGroups <= 0) break;
   }
 
   const entityInputs = Array.from(entityInputsByEntitySigner.values());
@@ -2855,6 +2864,61 @@ const run = async (): Promise<void> => {
     return publishMarketMakerHealthSnapshot({ includeCross: true });
   };
 
+  const buildAccountStatusDebug = (
+    entityId: string,
+    counterpartyEntityId: string,
+    tokenIds: number[],
+  ): Record<string, unknown> => {
+    const account = getAccountMachine(env, entityId, counterpartyEntityId);
+    const replica = getEntityReplicaById(env, entityId);
+    const summarizeRuntimeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
+      (inputs || []).slice(-10).map(input => ({
+        entityId: String(input.entityId || '').slice(-8),
+        txs: (input.entityTxs || []).map(tx => String(tx?.type || '')),
+      }));
+    return {
+      success: true,
+      entityId,
+      counterpartyEntityId,
+      hasAccount: Boolean(account),
+      ready: Boolean(account && isAccountConsensusReady(account)),
+      currentHeight: Number(account?.currentHeight ?? 0),
+      pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
+      pendingFrameTxs: (account?.pendingFrame?.accountTxs || []).map(tx => String(tx?.type || '')),
+      mempool: Number(account?.mempool?.length ?? 0),
+      mempoolTxs: (account?.mempool || []).map(tx => String(tx?.type || '')),
+      swapOffers: Number(account?.swapOffers?.size || 0),
+      tokens: tokenIds.map(tokenId => ({
+        tokenId,
+        hasDelta: Boolean(account?.deltas?.has(tokenId)),
+        outCapacity: account ? getEntityOutCapacity(account, entityId, tokenId).toString() : '0',
+      })),
+      runtime: {
+        height: Number(env.height ?? 0),
+        timestamp: Number(env.timestamp ?? 0),
+        halted: Boolean(env.runtimeState?.halted),
+        fatalDebugPayload: env.runtimeState?.fatalDebugPayload ?? null,
+        loopActive: Boolean(env.runtimeState?.loopActive),
+        backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
+        runtimeInput: summarizeRuntimeInputs(env.runtimeInput?.entityInputs),
+        runtimeMempool: summarizeRuntimeInputs(env.runtimeMempool?.entityInputs),
+      },
+      replica: replica ? {
+        key: `${String(replica.entityId || '').toLowerCase()}:${String(replica.signerId || '').toLowerCase()}`,
+        entityId: replica.entityId,
+        signerId: replica.signerId,
+        mempool: (replica.mempool || []).map(tx => String(tx?.type || '')),
+        proposalTxs: (replica.proposal?.txs || []).map(tx => String(tx?.type || '')),
+        lockedFrameTxs: (replica.lockedFrame?.txs || []).map(tx => String(tx?.type || '')),
+        messages: (replica.state?.messages || []).slice(-12),
+      } : null,
+      directInput: {
+        lastSeen: lastDirectEntityInput,
+        lastError: lastDirectEntityInputError,
+      },
+    };
+  };
+
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
   nodeLog.info('startup phase', { phase: startupPhase });
   emitBootstrapDebugEvent('startup', { phase: startupPhase });
@@ -2929,6 +2993,31 @@ const run = async (): Promise<void> => {
 
         const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
         if (upgraded !== undefined) return upgraded;
+
+        if (pathname === '/api/account/status' && request.method === 'GET') {
+          const entityId = String(
+            url.searchParams.get('entityId') ||
+            url.searchParams.get('mmEntityId') ||
+            activeMmEntityId ||
+            '',
+          ).toLowerCase();
+          const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
+          if (!entityId || !counterpartyEntityId) {
+            return new Response(safeStringify({
+              success: false,
+              code: 'MM_ACCOUNT_STATUS_BAD_REQUEST',
+              error: 'entityId/mmEntityId and counterpartyEntityId are required',
+            }), { status: 400, headers: JSON_HEADERS });
+          }
+          const tokenIds = String(url.searchParams.get('tokenIds') || '')
+            .split(',')
+            .map(value => Number(value.trim()))
+            .filter(value => Number.isInteger(value) && value > 0);
+          return new Response(
+            safeStringify(buildAccountStatusDebug(entityId, counterpartyEntityId, tokenIds)),
+            { headers: JSON_HEADERS },
+          );
+        }
 
         if (pathname === '/api/info') {
           const includeCrossDebug =
@@ -3480,15 +3569,14 @@ const run = async (): Promise<void> => {
         if (mode === 'bootstrap') emitCrossProgress('scan', crossQuoteJobs);
         const cursor = mode === 'bootstrap' ? bootstrapCrossCursor : steadyCrossCursor;
         if (mode === 'bootstrap') {
-          let nextCursor = cursor;
           for (let offset = 0; offset < crossQuoteJobs.length; offset += 1) {
             const selectedIndex = (cursor + offset) % crossQuoteJobs.length;
             const selectedJob = crossQuoteJobs[selectedIndex];
             if (!selectedJob || isCrossQuoteJobDepthComplete(env, selectedJob)) continue;
             selectedCrossQuoteJobs.push({ index: selectedIndex, job: selectedJob });
-            nextCursor = (selectedIndex + 1) % crossQuoteJobs.length;
+            bootstrapCrossCursor = selectedIndex;
+            break;
           }
-          bootstrapCrossCursor = nextCursor;
         } else {
           const jobCount = Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length);
           let nextCursor = cursor;
@@ -3503,9 +3591,11 @@ const run = async (): Promise<void> => {
           steadyCrossCursor = nextCursor;
         }
       }
-      const advanceCrossCursorAfterEnqueue = (index: number): void => {
+      const advanceCrossCursorAfterEnqueue = (index: number, job: CrossQuoteJob): void => {
         const nextCursor = (index + 1) % crossQuoteJobs.length;
-        if (mode === 'bootstrap') bootstrapCrossCursor = nextCursor;
+        if (mode === 'bootstrap') {
+          bootstrapCrossCursor = isCrossQuoteJobDepthComplete(env, job) ? nextCursor : index;
+        }
         if (mode === 'steady') steadyCrossCursor = nextCursor;
       };
       for (const entry of selectedCrossQuoteJobs) {
@@ -3529,8 +3619,11 @@ const run = async (): Promise<void> => {
             : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
           connectivityBudget,
           shouldContinue,
+          mode === 'bootstrap'
+            ? MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE
+            : Number.MAX_SAFE_INTEGER,
         )) {
-          advanceCrossCursorAfterEnqueue(entry.index);
+          advanceCrossCursorAfterEnqueue(entry.index, job);
           await yieldMarketMakerApi();
           // A cross request starts a bilateral target-lock lifecycle. During
           // bootstrap, launch one per-account settlement wave and wait for

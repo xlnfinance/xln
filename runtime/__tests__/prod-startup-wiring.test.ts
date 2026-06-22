@@ -144,7 +144,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '250'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
@@ -476,6 +476,12 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '128'");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '256'");
+    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'");
+    expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
+    expect(mmNode).toContain('bootstrapCrossCursor = selectedIndex;');
+    expect(mmNode).toContain('bootstrapCrossCursor = isCrossQuoteJobDepthComplete(env, job) ? nextCursor : index;');
+    expect(mmNode).toContain("pathname === '/api/account/status'");
+    expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs || []).map');
     expect(smoke).toContain("const fetchMarketMakerHealth = (): MarketMakerDirectHealthPayload | null => {");
     expect(smoke).toContain("`http://127.0.0.1:${marketMakerApiPort}/api/health`");
     expect(smoke).toContain("emitDebugEvent('mm-health-poll'");
@@ -497,7 +503,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("recordStageOnce('system:ready', last);");
     expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
     expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
-    expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '250'");
+    expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'");
     expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_RUNTIME_HASH_MISMATCH');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH');
@@ -526,16 +532,32 @@ describe('production startup wiring', () => {
 
   test('isolated e2e runner fails fast on fatal shard log markers', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
-    expect(runner).toContain('/MISSING_SIGNER_KEY/');
-    expect(runner).toContain('/JADAPTER_MISSING/');
-    expect(runner).toContain('/PENDING[-_]FRAME[-_]STALE/');
-    expect(runner).toContain('/MM_READY_TIMEOUT/');
-    expect(runner).toContain('/CROSS_J_[A-Z0-9_:-]*/');
+    const fatalHelper = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fatal-log-monitor.ts'), 'utf8');
+    const standaloneMonitor = readFileSync(join(repoRoot, 'runtime/scripts/e2e-fail-fast-monitor.ts'), 'utf8');
+    const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+    const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
+    expect(fatalHelper).toContain('/MISSING_SIGNER_KEY/');
+    expect(fatalHelper).toContain('/JADAPTER_MISSING/');
+    expect(fatalHelper).toContain('/PENDING[-_]FRAME[-_]STALE/');
+    expect(fatalHelper).toContain('/MM_READY_TIMEOUT/');
+    expect(fatalHelper).toContain('/CROSS_J_[A-Z0-9_:-]*/');
+    expect(fatalHelper).toContain('export const E2E_FATAL_LOG_TAIL_LINES = 80;');
     expect(runner).toContain('const startFailFastLogMonitor = (');
+    expect(runner).toContain("import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';");
     expect(runner).toContain('E2E_FATAL_RUNTIME_LOG marker=');
     expect(runner).toContain('--- last 80 lines (${logPath}) ---');
     expect(runner).toContain('shardAbortController.abort();');
     expect(runner).toContain("child.kill('SIGTERM')");
+    expect(runner).toContain('logsDir?: string;');
+    expect(runner).toContain('const releaseRunnerLock = acquireRunnerLock(logsDir);');
+    expect(standaloneMonitor).toContain("const runnerLockPath = join(e2eRoot, '.runner-lock.json');");
+    expect(standaloneMonitor).toContain('findFirstRuntimeFatalLogHit(path, fromLine)');
+    expect(standaloneMonitor).toContain('await stopRunner();');
+    expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGTERM')");
+    expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGKILL')");
+    expect(packageJson).toContain('"test:e2e:monitor": "bun runtime/scripts/e2e-fail-fast-monitor.ts"');
+    expect(releaseGate).toContain("{ name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 240_000 }");
+    expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'fast E2E gate'"));
   });
 
   test('orchestrator health does not enrich cross market snapshots by default', () => {

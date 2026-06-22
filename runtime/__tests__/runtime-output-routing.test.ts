@@ -457,7 +457,7 @@ describe('runtime output routing', () => {
     expect(errors).not.toContain('ROUTE_LOCAL_SIGNER_MISMATCH');
   });
 
-  test('drops unavailable consensus-only signer without treating it as tx-bearing stale signer', () => {
+  test('fails fast on unavailable consensus-only local signer', () => {
     const localEntityId = entityId('78');
     const missingSignerId = runtimeId('79');
     const actualSignerId = runtimeId('7a');
@@ -470,7 +470,7 @@ describe('runtime output routing', () => {
       runtimeState: {},
     } as unknown as Env;
 
-    const result = planEntityOutputs(env, [{
+    expect(() => planEntityOutputs(env, [{
       entityId: localEntityId,
       signerId: missingSignerId,
       proposedFrame: {
@@ -487,13 +487,10 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => actualSignerId,
       resolveRuntimeIdForEntity: () => null,
       resolveRuntimeIdForCrossJurisdictionEntity: () => null,
-    });
+    })).toThrow('ROUTE_LOCAL_SIGNER_MISMATCH');
 
-    expect(result.localOutputs).toEqual([]);
-    expect(result.remoteOutputs).toEqual([]);
-    expect(result.deferredOutputs).toEqual([]);
-    expect(warnings).toContain('ROUTE_CONSENSUS_SIGNER_UNAVAILABLE');
-    expect(errors).not.toContain('ROUTE_LOCAL_SIGNER_MISMATCH');
+    expect(warnings).not.toContain('ROUTE_CONSENSUS_SIGNER_UNAVAILABLE');
+    expect(errors).toContain('ROUTE_LOCAL_SIGNER_MISMATCH');
   });
 
   test('fails fast on inbound tx-bearing P2P input with stale signer', () => {

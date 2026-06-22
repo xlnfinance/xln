@@ -27,6 +27,7 @@
     "notify:fail": "bash ./scripts/notify.sh 'Task failed' 'XLN Agent' 'Check logs' 'Basso'",
     "test:e2e:notify": "bun run test:e2e:fast && bash ./scripts/notify.sh 'E2E fast passed' 'XLN Agent' || bash ./scripts/notify.sh 'E2E fast failed' 'XLN Agent' 'See report' 'Basso'",
     "test:e2e": "bun run test:e2e:fast",
+    "test:e2e:monitor": "bun runtime/scripts/e2e-fail-fast-monitor.ts",
     "test:e2e:fast": "bun runtime/scripts/run-e2e-fast.ts",
     "test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=16 --workers-per-shard=1 --max-mm-concurrency=1 --stack-timeout-ms=300000 --video=retain-on-failure --trace=off --screenshot=only-on-failure --max-failures=1",
     "test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=16 --workers-per-shard=1 --max-mm-concurrency=1 --stack-timeout-ms=300000 --video=retain-on-failure --trace=off --screenshot=only-on-failure --max-failures=1",

@@ -212,14 +212,17 @@ export const planEntityOutputs = (
       }
       if (resolvedSignerId) {
         if (!isTxBearingOutput(output)) {
-          env.warn('network', 'ROUTE_CONSENSUS_SIGNER_UNAVAILABLE', {
+          env.error?.('network', 'ROUTE_LOCAL_SIGNER_MISMATCH', {
             entityId: output.entityId,
             signerId: output.signerId,
             resolvedSignerId,
             hasProposedFrame: Boolean(output.proposedFrame),
             hasHashPrecommits: Boolean(output.hashPrecommits && output.hashPrecommits.size > 0),
           }, output.entityId);
-          continue;
+          throw new Error(
+            `ROUTE_LOCAL_SIGNER_MISMATCH: entity=${output.entityId} signer=${output.signerId} ` +
+            `resolved=${resolvedSignerId} consensusOnly=true`,
+          );
         }
         env.error?.('network', 'ROUTE_LOCAL_SIGNER_MISMATCH', {
           entityId: output.entityId,
