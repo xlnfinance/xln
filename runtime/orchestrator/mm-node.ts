@@ -349,6 +349,10 @@ const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   // carry 1000 txs, and MAX_ACCOUNT_SWAP_OFFERS bounds env-driven depth.
   Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3')),
 );
+const MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE = Math.max(
+  1,
+  Math.min(1000, Number(process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000')),
+);
 const MARKET_MAKER_MAX_LEVELS_PER_PAIR = Math.max(
   1,
   Math.min(
@@ -793,7 +797,7 @@ const buildMarketMakerCrossTokenPairs = (
       pairs.push({ sourceTokenId, targetTokenId });
     }
   }
-  return pairs;
+  return pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE);
 };
 
 const invertPriceTicks = (ticks: bigint): bigint => {
