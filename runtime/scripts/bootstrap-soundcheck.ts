@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 
 type Mode = 'fresh' | 'template' | 'clone' | 'hydrate' | 'all';
 
@@ -24,6 +24,7 @@ type SoundcheckResult = {
   bootstrapHash: string;
   runtimeStateHash: string;
   entityStateHash: string;
+  workDir: string;
   metricsPath: string;
   eventsJsonl?: string;
 };
@@ -122,8 +123,25 @@ const runSmoke = async (
     bootstrapHash: metrics.bootstrapHash,
     runtimeStateHash: metrics.runtimeStateHash,
     entityStateHash: metrics.entityStateHash,
+    workDir: metrics.workDir,
     metricsPath,
     eventsJsonl: metrics.eventsJsonl || eventsJsonl,
+  };
+};
+
+const installTemplateFromResult = (result: SoundcheckResult): SoundcheckResult => {
+  if (!existsSync(result.workDir)) {
+    throw new Error(`BOOTSTRAP_SOUNDCHECK_TEMPLATE_SOURCE_MISSING:${result.workDir}`);
+  }
+  if (existsSync(templateDir)) rmSync(templateDir, { recursive: true, force: true });
+  mkdirSync(dirname(templateDir), { recursive: true });
+  cpSync(result.workDir, templateDir, { recursive: true });
+  return {
+    ...result,
+    mode: 'template',
+    workDir: templateDir,
+    metricsPath: join(templateDir, 'bootstrap-metrics.json'),
+    eventsJsonl: join(templateDir, 'bootstrap-events.jsonl'),
   };
 };
 
@@ -137,11 +155,13 @@ const requireTemplate = (): void => {
   }
 };
 
-const expectedTemplateHash = (): string | null => {
+const expectedTemplateHashes = (): Pick<BootstrapMetrics, 'bootstrapHash' | 'entityStateHash'> | null => {
   const metricsPath = join(templateDir, 'bootstrap-metrics.json');
   if (!existsSync(metricsPath)) return null;
   const metrics = JSON.parse(readFileSync(metricsPath, 'utf8')) as BootstrapMetrics;
-  return isHash64(metrics.bootstrapHash) ? metrics.bootstrapHash : null;
+  return isHash64(metrics.bootstrapHash) && isHash64(metrics.entityStateHash)
+    ? { bootstrapHash: metrics.bootstrapHash, entityStateHash: metrics.entityStateHash }
+    : null;
 };
 
 if (existsSync(outDir) && mode === 'all') rmSync(outDir, { recursive: true, force: true });
@@ -149,34 +169,47 @@ mkdirSync(outDir, { recursive: true });
 
 const results: SoundcheckResult[] = [];
 let index = 0;
+let freshResult: SoundcheckResult | null = null;
 if (mode === 'fresh' || mode === 'all') {
-  results.push(await runSmoke('fresh', index++, {}));
+  freshResult = await runSmoke('fresh', index++, mode === 'all'
+    ? { XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1' }
+    : {});
+  results.push(freshResult);
 }
-if (mode === 'template' || mode === 'all') {
+if (mode === 'all') {
+  if (!freshResult) throw new Error('BOOTSTRAP_SOUNDCHECK_FRESH_RESULT_MISSING');
+  results.push(installTemplateFromResult(freshResult));
+} else if (mode === 'template') {
   results.push(await runSmoke('template', index++, {
-    XLN_LOCAL_PROD_SMOKE_PERSIST_MM: '1',
+    XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1',
   }));
 }
 if (mode === 'clone' || mode === 'all') {
   requireTemplate();
-  const templateHash = expectedTemplateHash();
+  const templateHashes = expectedTemplateHashes();
   const clone = await runSmoke('clone', index++, {
     XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR: templateDir,
   });
-  if (templateHash && clone.bootstrapHash !== templateHash) {
-    throw new Error(`BOOTSTRAP_SOUNDCHECK_CLONE_HASH_DRIFT template=${templateHash} clone=${clone.bootstrapHash}`);
+  if (templateHashes && clone.bootstrapHash !== templateHashes.bootstrapHash) {
+    throw new Error(`BOOTSTRAP_SOUNDCHECK_CLONE_HASH_DRIFT template=${templateHashes.bootstrapHash} clone=${clone.bootstrapHash}`);
+  }
+  if (templateHashes && clone.entityStateHash !== templateHashes.entityStateHash) {
+    throw new Error(`BOOTSTRAP_SOUNDCHECK_CLONE_ENTITY_HASH_DRIFT template=${templateHashes.entityStateHash} clone=${clone.entityStateHash}`);
   }
   results.push(clone);
 }
 if (mode === 'hydrate' || mode === 'all') {
   requireTemplate();
-  const templateHash = expectedTemplateHash();
+  const templateHashes = expectedTemplateHashes();
   const hydrate = await runSmoke('hydrate', index++, {
     XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR: templateDir,
     XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500',
   });
-  if (templateHash && hydrate.bootstrapHash !== templateHash) {
-    throw new Error(`BOOTSTRAP_SOUNDCHECK_HYDRATE_HASH_DRIFT template=${templateHash} hydrate=${hydrate.bootstrapHash}`);
+  if (templateHashes && hydrate.bootstrapHash !== templateHashes.bootstrapHash) {
+    throw new Error(`BOOTSTRAP_SOUNDCHECK_HYDRATE_HASH_DRIFT template=${templateHashes.bootstrapHash} hydrate=${hydrate.bootstrapHash}`);
+  }
+  if (templateHashes && hydrate.entityStateHash !== templateHashes.entityStateHash) {
+    throw new Error(`BOOTSTRAP_SOUNDCHECK_HYDRATE_ENTITY_HASH_DRIFT template=${templateHashes.entityStateHash} hydrate=${hydrate.entityStateHash}`);
   }
   results.push(hydrate);
 }

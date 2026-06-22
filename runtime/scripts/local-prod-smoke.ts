@@ -49,6 +49,13 @@ type MarketMakerInfoPayload = {
   };
 };
 
+type MarketMakerDirectHealthPayload = {
+  ok?: boolean;
+  startupPhase?: string | null;
+  bootstrap?: BootstrapHashInfo;
+  marketMaker?: NonNullable<HealthPayload['marketMaker']>;
+};
+
 type BootstrapStage = {
   stage: string;
   elapsedMs: number;
@@ -84,7 +91,7 @@ const marketMakerApiPort = nodePortBase + 3;
 const workDir = process.env['XLN_LOCAL_PROD_SMOKE_DIR'] || join(tmpdir(), `xln-local-prod-smoke-${portBase}`);
 const templateDir = String(process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR'] || '').trim();
 const useSnapshotTemplate = templateDir.length > 0;
-const persistMarketMakerStorage = useSnapshotTemplate || process.env['XLN_LOCAL_PROD_SMOKE_PERSIST_MM'] === '1';
+const persistMarketMakerStorage = process.env['XLN_LOCAL_PROD_SMOKE_PERSIST_MM'] === '1';
 const children: ManagedProcess[] = [];
 const marketMakerInfoLatencyMaxMs = Math.max(
   250,
@@ -103,6 +110,10 @@ const enforceStageBudgets = process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDG
 const healthPollMaxMs = Math.max(
   250,
   Number(process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'),
+);
+const healthPollIntervalMs = Math.max(
+  100,
+  Number(process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_INTERVAL_MS'] || '250'),
 );
 const stageBudgetsMs = {
   hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '5000')),
@@ -155,8 +166,11 @@ function emitDebugEvent(event: string, fields: Record<string, unknown> = {}): vo
   try {
     mkdirSync(workDir, { recursive: true });
     appendFileSync(eventsJsonlPath, `${JSON.stringify(record)}\n`);
-  } catch {
-    // Smoke assertions must not be hidden by diagnostic file I/O.
+  } catch (error) {
+    console.error(
+      `[local-prod-smoke] DEBUG_EVENT_WRITE_FAILED path=${eventsJsonlPath} ` +
+      `error=${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
@@ -259,7 +273,7 @@ const waitForRpc = async (port: number, expectedChainId: string, label: string):
       }
       last = message;
     }
-    await sleep(1_000);
+    await sleep(healthPollIntervalMs);
   }
   throw new Error(`${label} RPC not ready on :${port}; last=${last}`);
 };
@@ -309,6 +323,25 @@ const fetchHealth = async (): Promise<HealthPayload> => {
         error instanceof Error ? error.message : String(error)
       }`,
     );
+  }
+};
+
+const fetchMarketMakerHealth = (): MarketMakerDirectHealthPayload | null => {
+  try {
+    const payload = fetchJsonWithCurl<MarketMakerDirectHealthPayload>(
+      `http://127.0.0.1:${marketMakerApiPort}/api/health`,
+      healthPollMaxMs,
+      'MM_HEALTH',
+    );
+    emitDebugEvent('mm-health-poll', { stage: 'mm-health-poll', ok: true });
+    return payload;
+  } catch (error) {
+    emitDebugEvent('mm-health-poll', {
+      stage: 'mm-health-poll',
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
   }
 };
 
@@ -364,6 +397,9 @@ const healthReady = (health: HealthPayload): boolean => {
     health.bootstrapReserves?.ok === true;
 };
 
+const summarizeBlockers = (blockers: unknown[] | undefined): unknown[] =>
+  (blockers ?? []).slice(0, 3);
+
 const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
   coreOk: health.coreOk ?? null,
   systemOk: health.systemOk ?? null,
@@ -377,10 +413,12 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
     expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? null,
     offers: health.marketMaker?.hubs?.map(hub => hub.offers ?? 0) ?? [],
     blockers: health.marketMaker?.hubs?.map(hub => hub.blockers?.length ?? 0) ?? [],
+    blockerDetails: health.marketMaker?.hubs?.map(hub => summarizeBlockers(hub.blockers)) ?? [],
     cross: {
       ok: health.marketMaker?.cross?.ok ?? null,
       expectedRoutes: health.marketMaker?.cross?.expectedRoutes ?? null,
       blockers: health.marketMaker?.cross?.routes?.map(route => route.blockers?.length ?? 0) ?? [],
+      blockerDetails: health.marketMaker?.cross?.routes?.map(route => summarizeBlockers(route.blockers)) ?? [],
     },
     startupPhase: health.marketMaker?.startupPhase ?? null,
   },
@@ -393,6 +431,27 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
     lastError: health.reset?.lastError ?? null,
   },
 });
+
+const healthWithDirectMarketMaker = (
+  health: HealthPayload,
+  directHealth: MarketMakerDirectHealthPayload | null,
+): HealthPayload => {
+  if (!directHealth?.marketMaker) return health;
+  return {
+    ...health,
+    ...(directHealth.bootstrap ?? health.bootstrap
+      ? { bootstrap: directHealth.bootstrap ?? health.bootstrap }
+      : {}),
+    marketMaker: {
+      ...directHealth.marketMaker,
+      startupPhase:
+        directHealth.startupPhase ??
+        directHealth.marketMaker.startupPhase ??
+        health.marketMaker?.startupPhase ??
+        null,
+    },
+  };
+};
 
 const stageElapsed = (stage: string): number | null =>
   stages.find(entry => entry.stage === stage)?.elapsedMs ?? null;
@@ -453,8 +512,11 @@ const waitForHealth = async (): Promise<HealthPayload> => {
   while (Date.now() < deadline) {
     try {
       const health = await fetchHealth();
-      last = summarizeHealth(health);
-      const marketMakerPhase = String(health.marketMaker?.startupPhase || '');
+      const directMarketMakerHealth = fetchMarketMakerHealth();
+      const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);
+      last = summarizeHealth(stageHealth);
+      emitDebugEvent('health-snapshot', { stage: 'health-poll', snapshot: last });
+      const marketMakerPhase = String(stageHealth.marketMaker?.startupPhase || '');
       if (marketMakerPhase && marketMakerPhase !== lastMarketMakerPhase) {
         lastMarketMakerPhase = marketMakerPhase;
         recordStage(`marketMaker:${marketMakerPhase}`, last);
@@ -463,13 +525,13 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       if (health.bootstrapReserves?.ok === true) recordStageOnce('bootstrap-reserves:ready', last);
       if (health.hubMesh?.ok === true) recordStageOnce('hubMesh:ready', last);
       if (
-        health.marketMaker?.cross?.ok === true &&
-        Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0
+        stageHealth.marketMaker?.cross?.ok === true &&
+        Number(stageHealth.marketMaker?.cross?.expectedRoutes || 0) > 0
       ) {
         recordStageOnce('marketMaker:cross-ready', last);
       }
-      if (health.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
-      enforceBootstrapStageBudgets(health, last as Record<string, unknown>);
+      if (stageHealth.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
+      enforceBootstrapStageBudgets(stageHealth, last as Record<string, unknown>);
       if (iteration % 10 === 0 || healthReady(health)) {
         console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
       }
@@ -505,7 +567,7 @@ const main = async (): Promise<void> => {
   mkdirSync(workDir, { recursive: true });
 
   console.log(`[local-prod-smoke] workDir=${workDir} portBase=${portBase}`);
-  recordStage('smoke:start', { workDir, portBase, strictBudgets: enforceStageBudgets, stageBudgetsMs });
+  recordStage('smoke:start', { workDir, portBase, strictBudgets: enforceStageBudgets, stageBudgetsMs, healthPollIntervalMs });
   if (useSnapshotTemplate) {
     copySnapshotTemplate(templateDir, workDir);
     recordStage('snapshot:copied', { templateDir, workDir });
@@ -546,8 +608,12 @@ const main = async (): Promise<void> => {
     MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
       process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '1000',
-    MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK: '1000',
+    MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:
+      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '12',
+    MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:
+      process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36',
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
+    ...(useSnapshotTemplate ? { XLN_MARKET_MAKER_DISABLE_RESTORE: '0' } : {}),
     ...(persistMarketMakerStorage ? {
       XLN_MARKET_MAKER_DISABLE_STORAGE: '0',
       XLN_MARKET_MAKER_DISABLE_RESTORE: '0',
@@ -589,6 +655,12 @@ const main = async (): Promise<void> => {
   if (bootstrap.entityStateHash !== hashMatch[3]) {
     throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH info=${bootstrap.entityStateHash} log=${hashMatch[3]}`);
   }
+  emitDebugEvent('bootstrap-hash', {
+    stage: 'bootstrap-ready',
+    hash: bootstrap.readyHash,
+    runtimeStateHash: bootstrap.runtimeStateHash,
+    entityStateHash: bootstrap.entityStateHash,
+  });
   if (marketMakerInfo) assertNoMarketMakerBootstrapBacklog(marketMakerInfo);
   if (postBootstrapStabilityMs > 0) {
     recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });
