@@ -20,6 +20,7 @@ import { normalizeEntityRef } from '../account-key';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { formatEntityId } from '../../utils';
+import type { ApplyEntityTxOptions } from '../apply';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
 
@@ -30,6 +31,9 @@ type CrossJSetupResult = {
 
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
+
+const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
+  options?.mutableFrameState ? entityState : cloneEntityState(entityState);
 
 const pushCrossJOutput = (
   env: Env,
@@ -45,9 +49,10 @@ export const handleRequestCrossJurisdictionSwapEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'requestCrossJurisdictionSwap'>,
+  options?: ApplyEntityTxOptions,
 ): CrossJSetupResult => {
   let route: CrossJurisdictionSwapRoute;
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   try {
     route = withCanonicalCrossJurisdictionRouteHash(
@@ -99,9 +104,10 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'prepareCrossJurisdictionSwap'>,
+  options?: ApplyEntityTxOptions,
 ): CrossJSetupResult => {
   let route: CrossJurisdictionSwapRoute;
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   try {
     route = withCanonicalCrossJurisdictionRouteHash(
@@ -167,9 +173,10 @@ export const handleCommitCrossJurisdictionSwapEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'commitCrossJurisdictionSwap'>,
+  options?: ApplyEntityTxOptions,
 ): CrossJSetupResult => {
   let route: CrossJurisdictionSwapRoute;
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   try {
     route = withCanonicalCrossJurisdictionRouteHash(
@@ -272,9 +279,10 @@ export const handleRegisterCrossJurisdictionSwapEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'registerCrossJurisdictionSwap'>,
+  options?: ApplyEntityTxOptions,
 ): CrossJSetupResult => {
   let route: CrossJurisdictionSwapRoute;
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   try {
     route = withCanonicalCrossJurisdictionRouteHash(
       canonicalizeCrossJurisdictionRouteForKnownEntities(env, newState, entityTx.data.route),

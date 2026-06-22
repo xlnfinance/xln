@@ -8,8 +8,10 @@ import { processOrderbookCancels } from '../entity-tx/handlers/account';
 import { applyEntityInput } from '../entity-consensus';
 import {
   createEmptyEnv,
+  process,
   submitCrossJurisdictionSwap,
 } from '../runtime';
+import { buildCrossJurisdictionSwapSubmission } from '../runtime-jurisdiction-api';
 import { hashHtlcSecret } from '../htlc-utils';
 import type { AccountTx, EntityInput, EntityReplica, JurisdictionEvent } from '../types';
 import { generateLazyEntityId } from '../entity-factory';
@@ -187,6 +189,132 @@ describe('cross-jurisdiction hashledger swap', () => {
       expect(preparedRoute.targetPull.revealedUntilTimestamp - preparedRoute.sourcePull.revealedUntilTimestamp)
         .toBeGreaterThanOrEqual(5_000 + CROSS_J_TARGET_REVEAL_SAFETY_MS);
     });
+
+  test('same source account commits multiple cross swaps from one batched entity frame', async () => {
+    const env = createEmptyEnv('cross-batched-source-account');
+    env.scenarioMode = true;
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        enabled: false,
+      },
+    };
+    env.browserVM = {
+      getDepositoryAddress: () => addr('dd'),
+    } as typeof env.browserVM;
+    setDeltaTransformerAddress(addr('99'));
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    installJurisdictions(env, eth, base);
+
+    const sourceUserSigner = registerTestSigner(env, 'cross-batched-source-account', 'source-user');
+    const sourceHubSigner = registerTestSigner(env, 'cross-batched-source-account', 'source-hub');
+    const targetHubSigner = registerTestSigner(env, 'cross-batched-source-account', 'target-hub');
+    const targetUserSigner = registerTestSigner(env, 'cross-batched-source-account', 'target-user');
+    const sourceUser = generateLazyEntityId([sourceUserSigner], 1n).toLowerCase();
+    const sourceHub = generateLazyEntityId([sourceHubSigner], 1n).toLowerCase();
+    const targetHub = generateLazyEntityId([targetHubSigner], 1n).toLowerCase();
+    const targetUser = generateLazyEntityId([targetUserSigner], 1n).toLowerCase();
+    const makeGenesisState = (
+      entityId: string,
+      signerId: string,
+      jurisdiction: ReturnType<typeof makeJurisdiction>,
+      counterpartyId: string,
+    ) => {
+      const state = makeState(entityId, signerId, jurisdiction, counterpartyId);
+      state.height = 0;
+      return state;
+    };
+    addReplica(env, makeGenesisState(sourceUser, sourceUserSigner, eth, sourceHub), sourceUserSigner);
+    addReplica(env, makeGenesisState(sourceHub, sourceHubSigner, eth, sourceUser), sourceHubSigner);
+    addReplica(env, makeGenesisState(targetHub, targetHubSigner, base, targetUser), targetHubSigner);
+    addReplica(env, makeGenesisState(targetUser, targetUserSigner, base, targetHub), targetUserSigner);
+
+    const submissions = [0, 1, 2].map((index) => buildCrossJurisdictionSwapSubmission(env, {
+      orderId: `cross-batched-source-${index}`,
+      sourceUserEntityId: sourceUser,
+      sourceHubEntityId: sourceHub,
+      targetHubEntityId: targetHub,
+      targetUserEntityId: targetUser,
+      sourceTokenId: 1,
+      sourceAmount: 100n * SWAP_LOT_SCALE,
+      targetTokenId: 1,
+      targetAmount: 90n * SWAP_LOT_SCALE,
+      sourceUserSignerId: sourceUserSigner,
+      sourceHubSignerId: sourceHubSigner,
+      targetHubSignerId: targetHubSigner,
+      targetUserSignerId: targetUserSigner,
+      bookHubSignerId: sourceHubSigner,
+    }));
+    await process(env, [{
+      entityId: sourceUser,
+      signerId: sourceUserSigner,
+      entityTxs: submissions.map(submission => submission.input.entityInputs[0]!.entityTxs![0]!),
+    }]);
+
+    for (let tick = 0; tick < 80; tick += 1) {
+      const mempool = env.runtimeMempool;
+      const queuedEntityTxs = (mempool?.entityInputs ?? []).reduce(
+        (sum, input) => sum + Number(input.entityTxs?.length || 0),
+        0,
+      );
+      const queuedRuntimeTxs = Number(mempool?.runtimeTxs?.length || 0);
+      const queuedJInputs = Number(mempool?.jInputs?.length || 0);
+      const queuedEntityInputs = Number(mempool?.entityInputs?.length || 0);
+      const pendingOutputs = Number(env.pendingNetworkOutputs?.length || 0);
+      if (queuedEntityInputs + queuedEntityTxs + queuedRuntimeTxs + queuedJInputs + pendingOutputs === 0) break;
+      await process(env);
+    }
+
+    const sourceReplica = env.eReplicas.get(`${sourceUser}:${sourceUserSigner}`) as EntityReplica;
+    const sourceAccount = sourceReplica.state.accounts.get(sourceHub);
+    expect(sourceAccount).toBeDefined();
+    const committedOfferIds = new Set(Array.from(sourceAccount!.swapOffers.keys()));
+    if (committedOfferIds.size !== submissions.length) {
+      throw new Error(JSON.stringify({
+        committedOfferIds: Array.from(committedOfferIds),
+        expectedOfferIds: submissions.map(submission => submission.route.orderId),
+        runtimeMempool: {
+          runtimeTxs: env.runtimeMempool?.runtimeTxs?.length ?? 0,
+          entityInputs: env.runtimeMempool?.entityInputs?.map(input => ({
+            entityId: input.entityId,
+            signerId: input.signerId,
+            txs: input.entityTxs?.map(tx => tx.type) ?? [],
+          })) ?? [],
+          jInputs: env.runtimeMempool?.jInputs?.length ?? 0,
+        },
+        accounts: Array.from(env.eReplicas.values()).map(replica => ({
+          entityId: replica.entityId,
+          signerId: replica.signerId,
+          messages: replica.state.messages.slice(-5),
+          swaps: Array.from(replica.state.crossJurisdictionSwaps?.entries?.() ?? []).map(([orderId, route]) => ({
+            orderId,
+            status: route.status,
+          })),
+          accounts: Array.from(replica.state.accounts.entries()).map(([accountId, account]) => ({
+            accountId,
+            height: account.currentHeight,
+            pendingFrame: account.pendingFrame?.accountTxs?.map(tx => tx.type) ?? null,
+            mempool: account.mempool?.map(tx => tx.type) ?? [],
+            swapOffers: Array.from(account.swapOffers.keys()),
+          })),
+        })),
+      }, null, 2));
+    }
+    expect(committedOfferIds).toEqual(new Set(submissions.map(submission => submission.route.orderId)));
+    expect(sourceAccount!.pendingFrame).toBeUndefined();
+    expect(sourceAccount!.mempool).toHaveLength(0);
+
+    for (const replica of env.eReplicas.values()) {
+      for (const account of replica.state.accounts.values()) {
+        expect(account.pendingFrame).toBeUndefined();
+        expect(account.mempool).toHaveLength(0);
+      }
+    }
+  });
 
   test('request rejects route jurisdiction labels that are not bound to the local entity', async () => {
     const env = createEmptyEnv('cross-route-jurisdiction-canonical');

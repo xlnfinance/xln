@@ -106,10 +106,15 @@ export interface ApplyEntityTxResult {
   skippedError?: string;
 }
 
+export interface ApplyEntityTxOptions {
+  mutableFrameState?: boolean;
+}
+
 type EntityTxDispatcher = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTx,
+  options?: ApplyEntityTxOptions,
 ) => Promise<ApplyEntityTxResult> | ApplyEntityTxResult;
 
 const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
@@ -217,27 +222,27 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   setRebalancePolicy: (_env, state, tx) => handleSetRebalancePolicyEntityTx(state, tx as Extract<EntityTx, { type: 'setRebalancePolicy' }>),
   requestCollateral: (_env, state, tx) => handleRequestCollateralEntityTx(state, tx as Extract<EntityTx, { type: 'requestCollateral' }>),
   reopenDisputedAccount: (_env, state, tx) => handleReopenDisputedAccountEntityTx(state, tx as Extract<EntityTx, { type: 'reopenDisputedAccount' }>),
-  pullLock: (env, state, tx) => handlePullLockEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullLock' }>),
-  resolvePull: (env, state, tx) => handleResolvePullEntityTx(env, state, tx as Extract<EntityTx, { type: 'resolvePull' }>),
-  crossPullClose: (env, state, tx) => handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>),
-  cancelPull: (env, state, tx) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'cancelPull' }>),
-  pullCancelExpired: (env, state, tx) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullCancelExpired' }>),
-  requestCrossJurisdictionSwap: (env, state, tx) => handleRequestCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionSwap' }>),
-  prepareCrossJurisdictionSwap: (env, state, tx) => handlePrepareCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'prepareCrossJurisdictionSwap' }>),
-  commitCrossJurisdictionSwap: (env, state, tx) => handleCommitCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'commitCrossJurisdictionSwap' }>),
-  registerCrossJurisdictionSwap: (env, state, tx) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>),
+  pullLock: (env, state, tx, options) => handlePullLockEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullLock' }>, options),
+  resolvePull: (env, state, tx, options) => handleResolvePullEntityTx(env, state, tx as Extract<EntityTx, { type: 'resolvePull' }>, options),
+  crossPullClose: (env, state, tx, options) => handleCrossPullCloseEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossPullClose' }>, options),
+  cancelPull: (env, state, tx, options) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'cancelPull' }>, options),
+  pullCancelExpired: (env, state, tx, options) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullCancelExpired' }>, options),
+  requestCrossJurisdictionSwap: (env, state, tx, options) => handleRequestCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionSwap' }>, options),
+  prepareCrossJurisdictionSwap: (env, state, tx, options) => handlePrepareCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'prepareCrossJurisdictionSwap' }>, options),
+  commitCrossJurisdictionSwap: (env, state, tx, options) => handleCommitCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'commitCrossJurisdictionSwap' }>, options),
+  registerCrossJurisdictionSwap: (env, state, tx, options) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>, options),
   crossJurisdictionFillNotice: (_env, state, tx) => handleCrossJurisdictionFillNoticeEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>),
   requestCrossJurisdictionClear: (env, state, tx) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>),
   crossJurisdictionSalvage: (env, state, tx) => handleCrossJurisdictionSalvageEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>),
   orderbookSweepCrossJurisdiction: (env, state, tx) => handleOrderbookSweepCrossJurisdictionEntityTx(env, state, tx as Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>),
-  admitCrossJurisdictionBookOrder: (env, state, tx) => handleAdmitCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }>),
-  applyCrossJurisdictionBookProgress: (env, state, tx) => handleApplyCrossJurisdictionBookProgressEntityTx(env, state, tx as Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>),
-  removeCrossJurisdictionBookOrder: (env, state, tx) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>),
-  placeSwapOffer: (env, state, tx) => handlePlaceSwapOfferRequest(env, state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>),
-  resolveSwap: (_env, state, tx) => handleResolveSwapRequest(state, tx as Extract<EntityTx, { type: 'resolveSwap' }>),
-  cancelSwapOffer: (_env, state, tx) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'cancelSwapOffer' }>),
-  cancelSwap: (_env, state, tx) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'cancelSwap' }>),
-  proposeCancelSwap: (_env, state, tx) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>),
+  admitCrossJurisdictionBookOrder: (env, state, tx, options) => handleAdmitCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'admitCrossJurisdictionBookOrder' }>, options),
+  applyCrossJurisdictionBookProgress: (env, state, tx, options) => handleApplyCrossJurisdictionBookProgressEntityTx(env, state, tx as Extract<EntityTx, { type: 'applyCrossJurisdictionBookProgress' }>, options),
+  removeCrossJurisdictionBookOrder: (env, state, tx, options) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>, options),
+  placeSwapOffer: (env, state, tx, options) => handlePlaceSwapOfferRequest(env, state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>, options),
+  resolveSwap: (_env, state, tx, options) => handleResolveSwapRequest(state, tx as Extract<EntityTx, { type: 'resolveSwap' }>, options),
+  cancelSwapOffer: (_env, state, tx, options) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'cancelSwapOffer' }>, options),
+  cancelSwap: (_env, state, tx, options) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'cancelSwap' }>, options),
+  proposeCancelSwap: (_env, state, tx, options) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>, options),
   r2e: (_env, state, tx) => handleR2E(state, tx as Extract<EntityTx, { type: 'r2e' }>),
   settleDiffs: (_env, state, tx) => handleSettleDiffsEntityTx(state, tx as Extract<EntityTx, { type: 'settleDiffs' }>),
   prepareDispute: (env, state, tx) => handlePrepareDispute(state, tx as Extract<EntityTx, { type: 'prepareDispute' }>, env),
@@ -249,6 +254,7 @@ export const applyEntityTx = async (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTx,
+  options?: ApplyEntityTxOptions,
 ): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
     logError('ENTITY_TX', `❌ EntityTx is undefined!`);
@@ -260,7 +266,7 @@ export const applyEntityTx = async (
 
     const dispatcher = entityTxDispatchers[String(entityTx.type)];
     if (dispatcher) {
-      return await dispatcher(env, entityState, entityTx);
+      return await dispatcher(env, entityState, entityTx, options);
     }
 
     const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;

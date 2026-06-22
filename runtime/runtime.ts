@@ -16,6 +16,19 @@ const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
 export const RUNTIME_SCHEMA_VERSION = 5;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 
+const RUNTIME_APPLY_PROFILE =
+  nodeProcess?.env?.['XLN_RUNTIME_APPLY_PROFILE'] === '1';
+const RUNTIME_APPLY_SLOW_MS = Math.max(
+  0,
+  Number(nodeProcess?.env?.['XLN_RUNTIME_APPLY_SLOW_MS'] || '500'),
+);
+const RUNTIME_PROCESS_PROFILE =
+  RUNTIME_APPLY_PROFILE || nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
+const RUNTIME_PROCESS_SLOW_MS = Math.max(
+  0,
+  Number(nodeProcess?.env?.['XLN_RUNTIME_PROCESS_SLOW_MS'] || '1000'),
+);
+
 import { getPerfMs, getWallClockMs } from './utils';
 import { listOpenSwapOffers } from './open-swap-offers';
 import { setDeltaTransformerAddress } from './proof-builder';
@@ -1348,7 +1361,6 @@ function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
     resolveSoleLocalSignerForEntity,
     getP2P,
     startRuntimeLoop,
-    processRuntime: (targetEnv) => process(targetEnv),
   };
 }
 
@@ -1600,8 +1612,20 @@ const applyRuntimeInput = async (
     }
 
     const endTime = getPerfMs();
+    const applyElapsedMs = Math.round(endTime - startTime);
+    if (RUNTIME_APPLY_PROFILE || applyElapsedMs >= RUNTIME_APPLY_SLOW_MS) {
+      console.warn('[RUNTIME-PROFILE]', safeStringify({
+        height: env.height,
+        elapsedMs: applyElapsedMs,
+        runtimeTxs: mergedRuntimeTxs.length,
+        entityInputs: appliedEntityInputs.length,
+        entityTxs: appliedEntityInputs.reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0),
+        outputs: entityOutbox.length,
+        jOutputs: jOutbox.length,
+      }));
+    }
     if (DEBUG) {
-      console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
+      console.log(`⏱️  Tick ${env.height - 1} completed in ${applyElapsedMs}ms`);
     }
 
     const appliedRuntimeInput: RuntimeInput = {
@@ -2374,6 +2398,45 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     releaseProcessLock = resolve;
   });
 
+  const processProfileStartMs = getPerfMs();
+  const processProfileMarks: Record<string, number> = {};
+  const processProfileMetrics = {
+    heightBefore: env.height,
+    heightAfter: env.height,
+    runtimeTxs: 0,
+    entityInputs: 0,
+    entityTxs: 0,
+    jInputs: 0,
+    localOutputs: 0,
+    remoteOutputs: 0,
+    deferredOutputs: 0,
+    jOutputs: 0,
+    frameAdvanced: false,
+  };
+  let processProfileOutcome = 'unknown';
+  const markProcessProfile = (label: string): void => {
+    processProfileMarks[label] = Math.round(getPerfMs() - processProfileStartMs);
+  };
+  const logProcessProfile = (): void => {
+    processProfileMetrics.heightAfter = env.height;
+    const elapsedMs = Math.round(getPerfMs() - processProfileStartMs);
+    const hasProfileWork =
+      processProfileMetrics.runtimeTxs > 0 ||
+      processProfileMetrics.entityInputs > 0 ||
+      processProfileMetrics.jInputs > 0 ||
+      processProfileMetrics.localOutputs > 0 ||
+      processProfileMetrics.remoteOutputs > 0 ||
+      processProfileMetrics.jOutputs > 0 ||
+      processProfileMetrics.frameAdvanced;
+    if ((!RUNTIME_PROCESS_PROFILE || !hasProfileWork) && elapsedMs < RUNTIME_PROCESS_SLOW_MS) return;
+    console.warn('[RUNTIME-PROCESS-PROFILE]', safeStringify({
+      outcome: processProfileOutcome,
+      elapsedMs,
+      ...processProfileMetrics,
+      marks: processProfileMarks,
+    }));
+  };
+
   try {
     // IMPORTANT: capture frame baseline only after acquiring the process lock.
     // If captured before waiting on an in-flight tick, we can mis-detect
@@ -2407,13 +2470,19 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       enqueueRuntimeInputs(env, env.networkInbox, undefined, undefined, ingressNow);
       env.networkInbox = [];
     }
+    markProcessProfile('enqueue');
 
-    if (!hasRuntimeWork(env)) return env;
+    if (!hasRuntimeWork(env)) {
+      processProfileOutcome = 'no-work';
+      return env;
+    }
 
     const frameGateNow = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     if (!isRuntimeFrameReady(env, frameGateNow, runtimeDelay)) {
+      processProfileOutcome = 'not-ready';
       return env;
     }
+    markProcessProfile('frameReady');
 
     const state = ensureRuntimeState(env);
     const quietRuntimeLogs = env.quietRuntimeLogs === true;
@@ -2449,6 +2518,13 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       entityInputs: [...mempool.entityInputs],
       ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
     };
+    processProfileMetrics.runtimeTxs = runtimeInput.runtimeTxs.length;
+    processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
+    processProfileMetrics.entityTxs = runtimeInput.entityInputs.reduce(
+      (sum, input) => sum + Number(input.entityTxs?.length || 0),
+      0,
+    );
+    processProfileMetrics.jInputs = runtimeInput.jInputs?.length ?? 0;
     const mempoolQueuedAt = mempool.queuedAt;
     mempool.runtimeTxs = [];
     mempool.entityInputs = [];
@@ -2468,6 +2544,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       state.maxEntityInputsPerFrame ?? 0,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
     );
+    markProcessProfile('mempoolFrame');
     const hasRuntimeInput =
       runtimeInput.runtimeTxs.length > 0 ||
       runtimeInput.entityInputs.length > 0 ||
@@ -2532,6 +2609,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       try {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
         const result = await applyRuntimeInput(env, runtimeInput);
+        markProcessProfile('apply');
         if (!quietRuntimeLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {
           console.log(
             `🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`,
@@ -2556,6 +2634,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
             changedEntityIds.add(entityId);
           }
         }
+        markProcessProfile('fingerprints');
       } catch (error) {
         const quarantineResult = quarantineLiveRuntimeInput(env, runtimeInput, error, quietRuntimeLogs);
         if (quarantineResult) {
@@ -2592,6 +2671,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     );
     const outputsToPlan = readyPendingOutputs.length > 0 ? [...readyPendingOutputs, ...entityOutbox] : entityOutbox;
     const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan, outputRoutingDeps);
+    processProfileMetrics.localOutputs = localOutputs.length;
+    processProfileMetrics.remoteOutputs = remoteOutputs.length;
+    processProfileMetrics.deferredOutputs = deferredOutputs.length;
+    processProfileMetrics.jOutputs = jOutbox.length;
+    markProcessProfile('planOutputs');
     env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
@@ -2609,6 +2693,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     // Only serialized on shutdown/page-unload for reload recovery.
 
     const frameAdvanced = env.height !== frameHeightBeforeTick;
+    processProfileMetrics.frameAdvanced = frameAdvanced;
     if (frameAdvanced) {
       const committedFrameLogs = Array.isArray(env.frameLogs)
         ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
@@ -2635,6 +2720,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       if (!quietRuntimeLogs) {
         console.log(`📸 Snapshot: ${snapshot.meta?.title ?? `Frame ${env.height}`} (${env.history.length} total)`);
       }
+      markProcessProfile('snapshot');
     }
     env.extra = undefined;
 
@@ -2658,6 +2744,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       try {
         const saveOutcome = await saveEnvToDB(env, appliedRuntimeInputForPersistence, entityOutbox);
         if (saveOutcome.staleWriterStopped) {
+          processProfileOutcome = 'stale-writer-stopped';
           clearPendingAuditEvents(env);
           return env;
         }
@@ -2666,6 +2753,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         if (!quietRuntimeLogs) {
           console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
         }
+        markProcessProfile('save');
       } catch (error) {
         clearPendingAuditEvents(env);
         throw error;
@@ -2692,6 +2780,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         throw error;
       }
     }
+    markProcessProfile('recoveryBackup');
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
 
@@ -2708,6 +2797,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         p2p.announceProfilesForEntities(changedLocalEntityIds, 'routing-profile-refresh');
       }
     }
+    markProcessProfile('profileAnnounce');
 
     // 1. Broadcast entity outputs via P2P (fire-and-forget)
     if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true) {
@@ -2723,23 +2813,32 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       waitingPendingOutputs,
       outputRoutingDeps,
     );
+    markProcessProfile('dispatchOutputs');
 
     // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
     await submitRuntimeJOutbox(env, jOutbox, { enqueueRuntimeInputs });
+    markProcessProfile('jOutbox');
 
     state.lastFrameAt = getWallClockMs();
 
     if (env.strictScenario) {
       const { assertRuntimeStateStrict } = await import('./strict-assertions');
       await assertRuntimeStateStrict(env);
+      markProcessProfile('strict');
     }
 
     // CRITICAL: Notify frontend after snapshot is pushed to history
     // Without this, UI (TimeMachine, AccountPanel) never learns about new frames
     notifyEnvChange(env);
+    markProcessProfile('notify');
 
+    processProfileOutcome = 'completed';
     return env;
   } finally {
+    if (processProfileOutcome === 'unknown') {
+      processProfileOutcome = 'thrown';
+    }
+    logProcessProfile();
     processState.processingPromise = null;
     releaseProcessLock();
   }

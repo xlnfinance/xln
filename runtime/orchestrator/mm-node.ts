@@ -256,7 +256,11 @@ export type MarketMakerHealth = {
 };
 
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
-const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(25, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'));
+const MARKET_MAKER_HEALTH_REFRESH_MS = Math.max(
+  250,
+  Number(process.env['MARKET_MAKER_HEALTH_REFRESH_MS'] || '1000'),
+);
+const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(1, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'),
@@ -267,7 +271,7 @@ const MARKET_MAKER_BOOTSTRAP_START_DELAY_MS = Math.max(
 );
 const MARKET_MAKER_RUNTIME_TICK_DELAY_MS = Math.max(
   0,
-  Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'),
+  Number(process.env['MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'),
 );
 const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
   1,
@@ -1134,6 +1138,23 @@ const pushMarketMakerEntityTx = (
   entityTxs.push(tx);
   inputsByEntitySigner.set(key, input);
 };
+
+const mergeMarketMakerEntityInputs = (
+  inputsByEntitySigner: Map<string, EntityInput>,
+  inputs: EntityInput[],
+): void => {
+  for (const input of inputs) {
+    const entityId = String(input.entityId || '');
+    const signerId = String(input.signerId || '');
+    if (!entityId || !signerId) continue;
+    for (const tx of input.entityTxs || []) {
+      pushMarketMakerEntityTx(inputsByEntitySigner, entityId, signerId, tx);
+    }
+  }
+};
+
+const countMarketMakerEntityInputTxs = (inputsByEntitySigner: ReadonlyMap<string, EntityInput>): number =>
+  Array.from(inputsByEntitySigner.values()).reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0);
 
 const resolveEntityRuntimeIdForCrossJ = (env: Env, routeEntityIds: string[], entityId: string): string | null => {
   const target = normalizeEntityRef(entityId);
@@ -2129,6 +2150,7 @@ const maintainMarketMakerCrossQuotes = async (
   shouldContinue: () => boolean = () => true,
   maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
   emitBootstrapWaveEvents = false,
+  deferredEntityInputsByEntitySigner?: Map<string, EntityInput>,
 ): Promise<boolean> => {
   const startedAt = Date.now();
   const direction = `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`;
@@ -2311,6 +2333,10 @@ const maintainMarketMakerCrossQuotes = async (
   const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
   if (nonEmptyEntityInputs.length > 0) {
     if (!shouldContinue()) return false;
+    if (deferredEntityInputsByEntitySigner) {
+      mergeMarketMakerEntityInputs(deferredEntityInputsByEntitySigner, nonEmptyEntityInputs);
+      return true;
+    }
     if (emitBootstrapWaveEvents) {
       emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue', {
         direction,
@@ -2839,6 +2865,9 @@ const run = async (): Promise<void> => {
   let mmContexts: MarketMakerEntityContext[] = [];
   let mmTokenIdsByContext: Map<string, number[]> = new Map();
   let cachedMarketMakerHealth: MarketMakerHealth | null = null;
+  let cachedVisibleHubProfiles: HubProfile[] = [];
+  let cachedAllVisibleHubProfiles: HubProfile[] = [];
+  let cachedHealthResponseJson: string | null = null;
   let bootstrapReadyHash: string | null = null;
   let bootstrapRuntimeStateHash: string | null = null;
   let bootstrapEntityStateHash: string | null = null;
@@ -2898,6 +2927,8 @@ const run = async (): Promise<void> => {
     if (!activeEntityId || !primaryContext) return null;
     const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryContext, profile));
     const allVisibleHubs = readVisibleHubProfiles(env, true);
+    cachedVisibleHubProfiles = visibleHubs;
+    cachedAllVisibleHubProfiles = allVisibleHubs;
     const includeCross = options.includeCross !== false;
     const crossApplicable = mmContexts.length > 1 && allVisibleHubs.some(profile =>
       mmContexts.some(context => sameJurisdiction(context, profile)) &&
@@ -2919,9 +2950,90 @@ const run = async (): Promise<void> => {
     );
   };
 
+  const rebuildCachedHealthResponseJson = (): void => {
+    const primaryContext = mmContexts[0] ?? null;
+    const visibleHubs = cachedVisibleHubProfiles.filter(profile =>
+      primaryContext ? sameJurisdiction(primaryContext, profile) : true,
+    );
+    const allVisibleHubs = cachedAllVisibleHubProfiles;
+    const activeEntityId = activeMmEntityId;
+    const rawMarketMakerHealth = activeEntityId
+      ? (cachedMarketMakerHealth ?? {
+          enabled: true,
+          ok: false,
+          entityId: activeEntityId,
+          expectedOffersPerHub: 0,
+          expectedOffersPerPair: 0,
+          hubs: visibleHubs.map(profile => ({
+            hubEntityId: profile.entityId,
+            offers: 0,
+            ready: false,
+            blockers: [],
+            pairs: [],
+          })),
+          cross: {
+            applicable: allVisibleHubs.length > 0 && mmContexts.length > 1,
+            ok: false,
+            expectedRoutes: 0,
+            expectedOffersPerRoute: 0,
+            expectedOffersPerPair: 0,
+            routes: [],
+          },
+        })
+      : {
+          enabled: true,
+          ok: false,
+          entityId: null,
+          expectedOffersPerHub: 0,
+          expectedOffersPerPair: 0,
+          hubs: [],
+          cross: {
+            applicable: false,
+            ok: false,
+            expectedRoutes: 0,
+            expectedOffersPerRoute: 0,
+            expectedOffersPerPair: 0,
+            routes: [],
+          },
+        };
+    const marketMakerHealth = startupPhase === 'offers-ready'
+      ? rawMarketMakerHealth
+      : { ...rawMarketMakerHealth, ok: false };
+    cachedHealthResponseJson = safeStringify({
+      ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
+      name: resolvedArgs.name,
+      entityId: activeEntityId,
+      runtimeId: String(env.runtimeId || '') || null,
+      relayUrl: resolvedArgs.relayUrl,
+      directWsUrl,
+      apiUrl,
+      startupPhase,
+      p2p: {
+        directPeers: getP2PState(env).directPeers || [],
+        directInput: {
+          lastSeen: lastDirectEntityInput,
+          lastError: lastDirectEntityInputError,
+        },
+      },
+      gossip: {
+        visibleHubNames: visibleHubs.map(profile => profile.name),
+        visibleHubIds: visibleHubs.map(profile => profile.entityId),
+        ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
+      },
+      bootstrap: {
+        readyHash: bootstrapReadyHash,
+        runtimeStateHash: bootstrapRuntimeStateHash,
+        entityStateHash: bootstrapEntityStateHash,
+        readyAt: bootstrapReadyAt,
+      },
+      marketMaker: marketMakerHealth,
+    });
+  };
+
   const publishMarketMakerHealthSnapshot = (options: { includeCross?: boolean } = {}): MarketMakerHealth | null => {
     const health = buildMarketMakerHealthSnapshot(options);
     if (health) cachedMarketMakerHealth = health;
+    rebuildCachedHealthResponseJson();
     return health;
   };
 
@@ -3138,90 +3250,14 @@ const run = async (): Promise<void> => {
         }
 
         if (pathname === '/api/health') {
-          const primaryContext = mmContexts[0] ?? null;
-          const visibleHubs = readVisibleHubProfiles(env).filter(profile =>
-            primaryContext ? sameJurisdiction(primaryContext, profile) : true,
-          );
-          const allVisibleHubs = readVisibleHubProfiles(env, true);
-          const activeEntityId = activeMmEntityId;
-          const cachedHealth = cachedMarketMakerHealth;
-          const rawMarketMakerHealth = activeEntityId
-            ? (cachedHealth ?? {
-                enabled: true,
-                ok: false,
-                entityId: activeEntityId,
-                expectedOffersPerHub: 0,
-                expectedOffersPerPair: 0,
-                hubs: visibleHubs.map(profile => ({
-                  hubEntityId: profile.entityId,
-                  offers: 0,
-                  ready: false,
-                  blockers: [],
-                  pairs: [],
-                })),
-                cross: {
-                  applicable: allVisibleHubs.length > 0 && mmContexts.length > 1,
-                  ok: false,
-                  expectedRoutes: 0,
-                  expectedOffersPerRoute: 0,
-                  expectedOffersPerPair: 0,
-                  routes: [],
-                },
-              })
-            : {
-                enabled: true,
-                ok: false,
-                entityId: null,
-                expectedOffersPerHub: 0,
-                expectedOffersPerPair: 0,
-                hubs: [],
-                cross: {
-                  applicable: false,
-                  ok: false,
-                  expectedRoutes: 0,
-                  expectedOffersPerRoute: 0,
-                  expectedOffersPerPair: 0,
-                  routes: [],
-                },
-              };
-          const marketMakerHealth = startupPhase === 'offers-ready'
-            ? rawMarketMakerHealth
-            : { ...rawMarketMakerHealth, ok: false };
-          const health = {
-            ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
-            name: resolvedArgs.name,
-            entityId: activeEntityId,
-            runtimeId: String(env.runtimeId || '') || null,
-            relayUrl: resolvedArgs.relayUrl,
-            directWsUrl,
-            apiUrl,
-            startupPhase,
-            p2p: {
-              directPeers: getP2PState(env).directPeers || [],
-              directInput: {
-                lastSeen: lastDirectEntityInput,
-                lastError: lastDirectEntityInputError,
-              },
-            },
-            gossip: {
-              visibleHubNames: visibleHubs.map(profile => profile.name),
-              visibleHubIds: visibleHubs.map(profile => profile.entityId),
-              ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
-            },
-            bootstrap: {
-              readyHash: bootstrapReadyHash,
-              runtimeStateHash: bootstrapRuntimeStateHash,
-              entityStateHash: bootstrapEntityStateHash,
-              readyAt: bootstrapReadyAt,
-            },
-            marketMaker: marketMakerHealth,
-          };
-          return new Response(safeStringify(health), { headers: JSON_HEADERS });
+          if (!cachedHealthResponseJson) rebuildCachedHealthResponseJson();
+          return new Response(cachedHealthResponseJson ?? '{}', { headers: JSON_HEADERS });
         }
 
         if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
           shuttingDown = true;
           if (loop) clearInterval(loop);
+          if (healthRefreshLoop) clearInterval(healthRefreshLoop);
           const drained = await waitForRuntimeWorkDrained(env, 10_000);
           if (!drained) {
             console.warn(`[${resolvedArgs.name}] p2p stop timed out waiting for runtime work to drain`);
@@ -3236,6 +3272,7 @@ const run = async (): Promise<void> => {
         if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
           shuttingDown = true;
           if (loop) clearInterval(loop);
+          if (healthRefreshLoop) clearInterval(healthRefreshLoop);
           const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
           if (!drained) {
             console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
@@ -3402,12 +3439,13 @@ const run = async (): Promise<void> => {
   };
   const emitSameQuoteProgress = (reason: string, jobs: SameQuoteJob[], selectedJob?: SameQuoteJob): void => {
     if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
+    const now = Date.now();
+    if (now - lastSameQuoteProgressLogAt < 2_000) return;
     const incomplete = jobs.filter(job => !isSameQuoteJobDepthComplete(env, job));
     const key = incomplete
       .map(job => `${job.context.entityId}:${job.hub.entityId}:${countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId)}`)
       .join('|');
-    const now = Date.now();
-    if (key === lastSameQuoteProgressKey && now - lastSameQuoteProgressLogAt < 2_000) return;
+    if (key === lastSameQuoteProgressKey) return;
     lastSameQuoteProgressKey = key;
     lastSameQuoteProgressLogAt = now;
     emitBootstrapDebugEvent('same-quote-progress', {
@@ -3482,6 +3520,8 @@ const run = async (): Promise<void> => {
   };
   const emitCrossProgress = (reason: string, jobs: CrossQuoteJob[], selectedJob?: CrossQuoteJob): void => {
     if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
+    const now = Date.now();
+    if (now - lastCrossProgressLogAt < 2_000) return;
     const incomplete = jobs.filter(job => !isCrossQuoteJobDepthComplete(env, job));
     const key = incomplete
       .map((job) => {
@@ -3489,8 +3529,7 @@ const run = async (): Promise<void> => {
         return `${String(progress['sourceJurisdiction'])}->${String(progress['targetJurisdiction'])}:${String(progress['finalizedOffers'])}/${String(progress['expectedOffers'])}`;
       })
       .join('|');
-    const now = Date.now();
-    if (key === lastCrossProgressKey && now - lastCrossProgressLogAt < 2_000) return;
+    if (key === lastCrossProgressKey) return;
     lastCrossProgressKey = key;
     lastCrossProgressLogAt = now;
     emitBootstrapDebugEvent('cross-progress', {
@@ -3710,8 +3749,6 @@ const run = async (): Promise<void> => {
             const selectedJob = crossQuoteJobs[selectedIndex];
             if (!selectedJob || isCrossQuoteJobDepthComplete(env, selectedJob)) continue;
             selectedCrossQuoteJobs.push({ index: selectedIndex, job: selectedJob });
-            bootstrapCrossCursor = selectedIndex;
-            break;
           }
         } else {
           const jobCount = Math.min(MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK, crossQuoteJobs.length);
@@ -3734,11 +3771,18 @@ const run = async (): Promise<void> => {
         }
         if (mode === 'steady') steadyCrossCursor = nextCursor;
       };
+      const deferredBootstrapCrossInputs = mode === 'bootstrap'
+        ? new Map<string, EntityInput>()
+        : null;
+      let deferredBootstrapCrossLastIndex = -1;
       for (const entry of selectedCrossQuoteJobs) {
         const job = entry.job;
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
         if (mode === 'bootstrap') emitCrossProgress('selected', crossQuoteJobs, job);
+        const deferredTxsBefore = deferredBootstrapCrossInputs
+          ? countMarketMakerEntityInputTxs(deferredBootstrapCrossInputs)
+          : 0;
         if (await maintainMarketMakerCrossQuotes(
           env,
           job.sourceContext,
@@ -3759,17 +3803,44 @@ const run = async (): Promise<void> => {
             ? MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE
             : Number.MAX_SAFE_INTEGER,
           mode === 'bootstrap',
+          deferredBootstrapCrossInputs ?? undefined,
         )) {
+          const deferredTxsAfter = deferredBootstrapCrossInputs
+            ? countMarketMakerEntityInputTxs(deferredBootstrapCrossInputs)
+            : 0;
+          if (mode === 'bootstrap' && deferredTxsAfter > deferredTxsBefore) {
+            deferredBootstrapCrossLastIndex = entry.index;
+            continue;
+          }
           advanceCrossCursorAfterEnqueue(entry.index, job);
           await yieldMarketMakerApi();
-          // A cross request starts a bilateral target-lock lifecycle. During
-          // bootstrap, launch one per-account settlement wave and wait for
-          // account ACKs before opening more cross routes on the same accounts.
-          if (mode === 'bootstrap') return;
           if (mode === 'steady') return;
         }
-        if (mode === 'bootstrap' && !isCrossQuoteJobDepthComplete(env, job)) return;
+        if (mode === 'bootstrap' && !isCrossQuoteJobDepthComplete(env, job)) {
+          if (deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;
+          return;
+        }
         await yieldMarketMakerApi();
+      }
+      if (mode === 'bootstrap' && deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) {
+        const entityInputs = Array.from(deferredBootstrapCrossInputs.values())
+          .filter(input => (input.entityTxs?.length || 0) > 0);
+        if (entityInputs.length > 0) {
+          emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue', {
+            direction: 'bootstrap-batch',
+            enqueuedEntityInputs: entityInputs.length,
+            enqueuedEntityTxs: entityInputs.reduce((sum, input) => sum + (input.entityTxs?.length || 0), 0),
+          });
+          enqueueRuntimeInput(env, {
+            runtimeTxs: [],
+            entityInputs,
+          });
+          if (deferredBootstrapCrossLastIndex >= 0 && crossQuoteJobs.length > 0) {
+            bootstrapCrossCursor = (deferredBootstrapCrossLastIndex + 1) % crossQuoteJobs.length;
+          }
+          await yieldMarketMakerApi();
+          return;
+        }
       }
       if (!shouldContinue()) return;
       await yieldMarketMakerApi();
@@ -3798,7 +3869,7 @@ const run = async (): Promise<void> => {
     }
   };
 
-  const markOffersReady = async (): Promise<void> => {
+  const markOffersReady = async (finalizedHealth?: MarketMakerHealth | null): Promise<void> => {
     if (startupPhase === 'offers-ready') return;
     const visibleHubs = readVisibleHubProfiles(env, true);
     if (!isAllSameQuoteDepthComplete(visibleHubs)) {
@@ -3818,7 +3889,7 @@ const run = async (): Promise<void> => {
     }
     const health = assertMarketMakerBootstrapFinalized(
       env,
-      publishMarketMakerHealthSnapshot({ includeCross: true }),
+      finalizedHealth ?? publishMarketMakerHealthSnapshot({ includeCross: true }),
     );
     const fingerprint = buildMarketMakerBootstrapFingerprint(
       env,
@@ -3835,6 +3906,8 @@ const run = async (): Promise<void> => {
     bootstrapReadyAt = Date.now();
     await persistBootstrapReadySnapshotIfRequested();
     startupPhase = 'offers-ready';
+    cachedMarketMakerHealth = health;
+    rebuildCachedHealthResponseJson();
     emitBootstrapDebugEvent('ready-hash', {
       hash: fingerprint.hash,
       runtimeStateHash,
@@ -3849,7 +3922,7 @@ const run = async (): Promise<void> => {
     );
   };
 
-  const waitForBootstrapOffers = async (): Promise<boolean> => {
+  const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
     let lastBacklogLogAt = 0;
     const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
@@ -3881,16 +3954,25 @@ const run = async (): Promise<void> => {
       }
     };
     while (!shuttingDown && Date.now() < deadline) {
+      if (hasMarketMakerRuntimeBacklog(env)) {
+        await yieldMarketMakerApi();
+        await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
+        continue;
+      }
       const beforeDrive = publishBootstrapHealthSnapshot();
       refreshBootstrapPhase(beforeDrive);
-      if (isBootstrapDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return true;
+      if (isBootstrapDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return beforeDrive;
       await yieldMarketMakerApi();
       await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
+      if (hasMarketMakerRuntimeBacklog(env)) {
+        await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
+        continue;
+      }
       const health = publishBootstrapHealthSnapshot();
       refreshBootstrapPhase(health);
       if (isBootstrapDepthComplete(health)) {
-        if (!hasMarketMakerRuntimeBacklog(env)) return true;
+        if (!hasMarketMakerRuntimeBacklog(env)) return health;
         const now = Date.now();
         if (now - lastBacklogLogAt >= 5_000) {
           lastBacklogLogAt = now;
@@ -3901,7 +3983,7 @@ const run = async (): Promise<void> => {
       }
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
-    if (shuttingDown) return false;
+    if (shuttingDown) return null;
     const health = publishMarketMakerHealthSnapshot();
     const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
     console.warn(
@@ -3911,11 +3993,28 @@ const run = async (): Promise<void> => {
       health: summarizeMarketMakerHealthForDebug(health),
       visibleHubs: visibleHubs.length,
     });
-    return false;
+    return null;
   };
 
   let loop: ReturnType<typeof setInterval> | null = null;
+  let healthRefreshLoop: ReturnType<typeof setInterval> | null = null;
+  let healthRefreshInFlight = false;
+  const refreshCachedHealth = (): void => {
+    if (shuttingDown || healthRefreshInFlight) return;
+    if (hasMarketMakerRuntimeBacklog(env)) return;
+    healthRefreshInFlight = true;
+    try {
+      if (startupPhase === 'offers-ready') {
+        publishMarketMakerHealthSnapshot({ includeCross: true });
+      } else {
+        publishBootstrapHealthSnapshot();
+      }
+    } finally {
+      healthRefreshInFlight = false;
+    }
+  };
   const runQuoteMaintenance = async (): Promise<void> => {
+    if (hasMarketMakerRuntimeBacklog(env)) return;
     if (startupPhase === 'offers-ready') {
       publishMarketMakerHealthSnapshot({ includeCross: true });
       return;
@@ -3925,7 +4024,7 @@ const run = async (): Promise<void> => {
       : publishBootstrapHealthSnapshot();
     if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;
     if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(before) && !hasMarketMakerRuntimeBacklog(env)) {
-      await markOffersReady();
+      await markOffersReady(before);
       return;
     }
     await driveQuotes();
@@ -3933,7 +4032,7 @@ const run = async (): Promise<void> => {
       ? publishMarketMakerHealthSnapshot({ includeCross: true })
       : publishBootstrapHealthSnapshot();
     if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(health) && !hasMarketMakerRuntimeBacklog(env)) {
-      await markOffersReady();
+      await markOffersReady(health);
     }
   };
   const failQuoteLoop = (error: unknown): void => {
@@ -3942,6 +4041,7 @@ const run = async (): Promise<void> => {
     emitBootstrapDebugEvent('fatal', { error: message });
     console.error(`[MM] quote loop failed; shutting down:`, message);
     if (loop) clearInterval(loop);
+    if (healthRefreshLoop) clearInterval(healthRefreshLoop);
     process.exit(1);
   };
   const startQuoteLoop = (): void => {
@@ -3951,8 +4051,19 @@ const run = async (): Promise<void> => {
       void runQuoteMaintenance().catch(failQuoteLoop);
     }, MARKET_MAKER_QUOTE_LOOP_MS);
   };
+  const startHealthRefreshLoop = (): void => {
+    if (healthRefreshLoop) return;
+    healthRefreshLoop = setInterval(() => {
+      try {
+        refreshCachedHealth();
+      } catch (error) {
+        failQuoteLoop(error);
+      }
+    }, MARKET_MAKER_HEALTH_REFRESH_MS);
+  };
   startupPhase = 'runtime-ready';
   publishMarketMakerHealthSnapshot({ includeCross: false });
+  startHealthRefreshLoop();
   emitBootstrapDebugEvent('phase', { phase: startupPhase });
   console.log(
     `[MESH-MM] RUNTIME_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
@@ -3964,9 +4075,9 @@ const run = async (): Promise<void> => {
     startupPhase = 'bootstrap-same-chain';
     publishBootstrapHealthSnapshot();
     emitBootstrapDebugEvent('phase', { phase: startupPhase });
-    if (await waitForBootstrapOffers()) {
-      await markOffersReady();
-      publishMarketMakerHealthSnapshot({ includeCross: true });
+    const bootstrapHealth = await waitForBootstrapOffers();
+    if (bootstrapHealth) {
+      await markOffersReady(bootstrapHealth);
     } else {
       startupPhase = 'bootstrap-degraded';
       emitBootstrapDebugEvent('phase', { phase: startupPhase });
@@ -3980,6 +4091,7 @@ const run = async (): Promise<void> => {
     shutdownStarted = true;
     shuttingDown = true;
     if (loop) clearInterval(loop);
+    if (healthRefreshLoop) clearInterval(healthRefreshLoop);
     try {
       const idle = await stopRuntimeLoopAndWait(env, 10_000);
       if (!idle) {

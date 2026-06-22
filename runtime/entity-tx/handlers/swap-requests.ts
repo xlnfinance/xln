@@ -10,6 +10,7 @@ import {
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionRouteTransition,
 } from '../cross-jurisdiction-helpers';
+import type { ApplyEntityTxOptions } from '../apply';
 
 type SwapRequestResult = {
   newState: EntityState;
@@ -19,6 +20,9 @@ type SwapRequestResult = {
 
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
+
+const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
+  options?.mutableFrameState ? entityState : cloneEntityState(entityState);
 
 const wakeEntity = (state: EntityState, outputs: EntityInput[]): void => {
   const firstValidator = state.config.validators[0];
@@ -31,8 +35,9 @@ export const handlePlaceSwapOfferRequest = (
   env: Env,
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'placeSwapOffer' }>,
+  options?: ApplyEntityTxOptions,
 ): SwapRequestResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
   const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio, crossJurisdiction } =
@@ -82,8 +87,9 @@ export const handlePlaceSwapOfferRequest = (
 export const handleResolveSwapRequest = (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'resolveSwap' }>,
+  options?: ApplyEntityTxOptions,
 ): SwapRequestResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
   const {
@@ -139,8 +145,9 @@ export const handleResolveSwapRequest = (
 export const handleCancelSwapRequest = (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwap' }>,
+  options?: ApplyEntityTxOptions,
 ): SwapRequestResult => {
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
   const { counterpartyEntityId, offerId } = entityTx.data;

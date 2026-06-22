@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { join } from 'path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { deriveAccountWatchSeed } from '../account-watch-seed';
 import { generateLazyEntityId } from '../entity-factory';
 import { converge } from '../scenarios/helpers';
 import { serializeTaggedJson } from '../serialization-utils';
@@ -313,6 +314,12 @@ const logStats = (label: string, stats: DocStats): void => {
   );
 };
 
+const requireWatchSeed = (watchSeeds: ReadonlyMap<string, string>, entityId: string): string => {
+  const watchSeed = watchSeeds.get(entityId);
+  if (!watchSeed) throw new Error(`BENCH_WATCH_SEED_MISSING:${entityId}`);
+  return watchSeed;
+};
+
 async function main() {
   const accounts = parsePositiveInt(getArg('--accounts', '1024'), 1024);
   const importBatch = parsePositiveInt(getArg('--import-batch', '512'), 512);
@@ -416,6 +423,19 @@ async function main() {
   const openStartedAt = getPerfMs();
   for (let offset = 0; offset < users.length; offset += openBatch) {
     const slice = users.slice(offset, offset + openBatch);
+    const watchSeeds = new Map<string, string>();
+    for (const user of slice) {
+      watchSeeds.set(
+        user.entityId,
+        deriveAccountWatchSeed({
+          runtimeSeed: seed,
+          runtimeId,
+          entityId: hub.entityId,
+          counterpartyId: user.entityId,
+          timestamp: env.timestamp,
+        }),
+      );
+    }
     const openInputs: RoutedEntityInput[] = [
       ...slice.map((user) => ({
         entityId: user.entityId,
@@ -427,6 +447,7 @@ async function main() {
               targetEntityId: hub.entityId,
               tokenId,
               creditAmount,
+              watchSeed: requireWatchSeed(watchSeeds, user.entityId),
             },
           },
         ],
@@ -440,6 +461,7 @@ async function main() {
             targetEntityId: user.entityId,
             tokenId,
             creditAmount,
+            watchSeed: requireWatchSeed(watchSeeds, user.entityId),
           },
         })),
       },
