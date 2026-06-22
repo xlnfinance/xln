@@ -429,7 +429,7 @@ const enforceBootstrapStageBudgets = (health: HealthPayload, snapshot: Record<st
 
   const sameStartedAt = stageElapsed('marketMaker:bootstrap-same-chain');
   const crossStartedAt = stageElapsed('marketMaker:bootstrap-cross');
-  const readyAt = stageElapsed('marketMaker:ready');
+  const crossReadyAt = stageElapsed('marketMaker:cross-ready');
   const phase = String(health.marketMaker?.startupPhase || '');
   if (sameStartedAt !== null && crossStartedAt === null && phase === 'bootstrap-same-chain') {
     requireStageBudget('marketMaker:same-chain', nowElapsedMs - sameStartedAt, stageBudgetsMs.sameChain, snapshot);
@@ -437,11 +437,11 @@ const enforceBootstrapStageBudgets = (health: HealthPayload, snapshot: Record<st
   if (sameStartedAt !== null && crossStartedAt !== null) {
     requireStageBudget('marketMaker:same-chain', crossStartedAt - sameStartedAt, stageBudgetsMs.sameChain, snapshot);
   }
-  if (crossStartedAt !== null && readyAt === null) {
+  if (crossStartedAt !== null && crossReadyAt === null) {
     requireStageBudget('marketMaker:cross', nowElapsedMs - crossStartedAt, stageBudgetsMs.cross, snapshot);
   }
-  if (crossStartedAt !== null && readyAt !== null) {
-    requireStageBudget('marketMaker:cross', readyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);
+  if (crossStartedAt !== null && crossReadyAt !== null) {
+    requireStageBudget('marketMaker:cross', crossReadyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);
   }
 };
 
@@ -462,7 +462,12 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       if (health.custody?.ok === true) recordStageOnce('custody:ready', last);
       if (health.bootstrapReserves?.ok === true) recordStageOnce('bootstrap-reserves:ready', last);
       if (health.hubMesh?.ok === true) recordStageOnce('hubMesh:ready', last);
-      if (health.marketMaker?.cross?.ok === true) recordStageOnce('marketMaker:cross-ready', last);
+      if (
+        health.marketMaker?.cross?.ok === true &&
+        Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0
+      ) {
+        recordStageOnce('marketMaker:cross-ready', last);
+      }
       if (health.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
       enforceBootstrapStageBudgets(health, last as Record<string, unknown>);
       if (iteration % 10 === 0 || healthReady(health)) {
