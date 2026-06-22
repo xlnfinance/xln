@@ -459,6 +459,14 @@ if (!directWsUrl) {
 }
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
+const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
+  0,
+  Number(process.env['HUB_RUNTIME_TICK_DELAY_MS'] || process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1'),
+);
+const HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
+  1,
+  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60'),
+);
 
 const envFlagEnabled = (value: unknown): boolean => {
   const normalized = String(value ?? '').trim().toLowerCase();
@@ -1390,7 +1398,10 @@ const run = async (): Promise<void> => {
   const env = await main(resolvedArgs.seed);
   configureHubRuntimeLogging(env);
   prewarmLocalHubSignerKeys();
-  startRuntimeLoop(env);
+  startRuntimeLoop(env, {
+    tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
+    maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+  });
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
   let bootstrap: { entityId: string; signerId: string } | null = null;

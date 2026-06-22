@@ -277,6 +277,10 @@ const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
   1,
   Number(process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'),
 );
+const MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60'),
+);
 const MARKET_MAKER_API_YIELD_MS = Math.max(
   1,
   Number(process.env['MARKET_MAKER_API_YIELD_MS'] || '1'),
@@ -2859,6 +2863,7 @@ const run = async (): Promise<void> => {
   startRuntimeLoop(env, {
     tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
     maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
+    maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
   });
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;

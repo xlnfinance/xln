@@ -401,13 +401,14 @@ const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthP
     });
     return payload;
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     emitDebugEvent('mm-health-poll', {
       stage: 'mm-health-poll',
       durationMs: Date.now() - startedAt,
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
     });
-    return null;
+    throw new Error(`LOCAL_PROD_SMOKE_MM_HEALTH_FAILED error=${message}`);
   }
 };
 
@@ -611,6 +612,7 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED')) throw error;
       if (message.includes('LOCAL_PROD_SMOKE_FATAL_LOG')) throw error;
+      if (message.includes('LOCAL_PROD_SMOKE_MM_HEALTH_FAILED')) throw error;
       last = message;
     }
     iteration += 1;
@@ -673,8 +675,13 @@ const main = async (): Promise<void> => {
     PUBLIC_RPC: `http://127.0.0.1:${apiPort}/rpc`,
     XLN_MIN_DISK_FREE_BYTES: '1',
     MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1',
+    XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1',
+    XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:
+      process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60',
     MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
       process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000',
+    MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:
+      process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60',
     MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10',
     MARKET_MAKER_CROSS_LEVELS_PER_PAIR: process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3',
     MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:
