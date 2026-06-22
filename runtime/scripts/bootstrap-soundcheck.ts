@@ -15,6 +15,7 @@ type BootstrapMetrics = {
   entityStateHash: string;
   workDir: string;
   eventsJsonl?: string;
+  marketMakerEventsJsonl?: string;
   templateDir?: string;
 };
 
@@ -27,6 +28,7 @@ type SoundcheckResult = {
   workDir: string;
   metricsPath: string;
   eventsJsonl?: string;
+  marketMakerEventsJsonl?: string;
 };
 
 const repoRoot = process.cwd();
@@ -126,6 +128,7 @@ const runSmoke = async (
     workDir: metrics.workDir,
     metricsPath,
     eventsJsonl: metrics.eventsJsonl || eventsJsonl,
+    ...(metrics.marketMakerEventsJsonl ? { marketMakerEventsJsonl: metrics.marketMakerEventsJsonl } : {}),
   };
 };
 
@@ -142,6 +145,7 @@ const installTemplateFromResult = (result: SoundcheckResult): SoundcheckResult =
     workDir: templateDir,
     metricsPath: join(templateDir, 'bootstrap-metrics.json'),
     eventsJsonl: join(templateDir, 'bootstrap-events.jsonl'),
+    marketMakerEventsJsonl: join(templateDir, 'mm-bootstrap-events.jsonl'),
   };
 };
 
