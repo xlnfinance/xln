@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
+import { deriveAccountWatchSeed } from '../account-watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account-crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
@@ -27,6 +28,7 @@ import {
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
   waitForRuntimeWorkDrained,
+  persistRestoredEnvToDB,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   listPersistedCheckpointHeights,
@@ -289,16 +291,16 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
   MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
 );
-// Cross bootstrap touches two bilateral account machines per offer. Keep each
-// account wave below stale-frame territory while still filling one 45-offer
-// entity frame across the three hub accounts.
+// Cross bootstrap touches two bilateral account machines per offer. A source
+// account must settle its pending frame before the next cross request on that
+// account, otherwise prod can trip stale-frame detection while waiting on ACKs.
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '15'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '12'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '45'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -1364,6 +1366,14 @@ const ensureMarketMakerHubConnectivity = async (
   budget: MarketMakerConnectivityBudget,
 ): Promise<boolean> => {
   const localCreditInputsByEntity = new Map<string, EntityInput>();
+  const deriveMarketMakerAccountWatchSeed = (counterpartyId: string): string =>
+    deriveAccountWatchSeed({
+      runtimeSeed: env.runtimeSeed ?? '',
+      runtimeId: env.runtimeId ?? null,
+      entityId: mmEntityId,
+      counterpartyId,
+      timestamp: 0,
+    });
   const pushLocalConnectivityTx = (
     entityId: string,
     signerId: string,
@@ -1393,6 +1403,7 @@ const ensureMarketMakerHubConnectivity = async (
           type: 'openAccount' as const,
           data: {
             targetEntityId: hubEntityId,
+            watchSeed: deriveMarketMakerAccountWatchSeed(hubEntityId),
             tokenId: openTokenId,
             creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
           },
@@ -2708,6 +2719,8 @@ const run = async (): Promise<void> => {
   let bootstrapRuntimeStateHash: string | null = null;
   let bootstrapEntityStateHash: string | null = null;
   let bootstrapReadyAt: number | null = null;
+  let bootstrapCrossStarted = false;
+  let bootstrapReadySnapshotPersisted = false;
   type DirectEntityInputDebug = {
     at: number;
     fromRuntimeId: string;
@@ -2754,7 +2767,10 @@ const run = async (): Promise<void> => {
 
   const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {
     const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });
-    if (!isMarketMakerSameDepthComplete(sameHealth) || !isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true))) {
+    const sameDepthComplete =
+      isMarketMakerSameDepthComplete(sameHealth) &&
+      isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));
+    if (!bootstrapCrossStarted && !sameDepthComplete) {
       return sameHealth;
     }
     return publishMarketMakerHealthSnapshot({ includeCross: true });
@@ -3325,7 +3341,27 @@ const run = async (): Promise<void> => {
     }
   };
 
-  const markOffersReady = (): void => {
+  const persistBootstrapReadySnapshotIfRequested = async (): Promise<void> => {
+    if (bootstrapReadySnapshotPersisted) return;
+    if (!envFlagEnabled(process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'])) return;
+    const previousRuntimeConfig = env.runtimeConfig;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        enabled: true,
+      },
+    };
+    try {
+      await persistRestoredEnvToDB(env);
+      bootstrapReadySnapshotPersisted = true;
+      console.log(`[MESH-MM] BOOTSTRAP_READY_SNAPSHOT_PERSISTED height=${env.height}`);
+    } finally {
+      env.runtimeConfig = previousRuntimeConfig;
+    }
+  };
+
+  const markOffersReady = async (): Promise<void> => {
     if (startupPhase === 'offers-ready') return;
     const visibleHubs = readVisibleHubProfiles(env, true);
     if (!isAllSameQuoteDepthComplete(visibleHubs)) {
@@ -3360,6 +3396,7 @@ const run = async (): Promise<void> => {
     bootstrapRuntimeStateHash = runtimeStateHash;
     bootstrapEntityStateHash = entityStateHash;
     bootstrapReadyAt = Date.now();
+    await persistBootstrapReadySnapshotIfRequested();
     startupPhase = 'offers-ready';
     console.log(
       `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash} payload=${safeStringify(fingerprint.payload)}`,
@@ -3374,9 +3411,15 @@ const run = async (): Promise<void> => {
     let lastBacklogLogAt = 0;
     const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
       if (isBootstrapDepthComplete(health)) return;
-      startupPhase = isMarketMakerSameDepthComplete(health) && isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true))
-        ? 'bootstrap-cross'
-        : 'bootstrap-same-chain';
+      const sameDepthComplete =
+        isMarketMakerSameDepthComplete(health) &&
+        isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));
+      if (sameDepthComplete || bootstrapCrossStarted) {
+        bootstrapCrossStarted = true;
+        startupPhase = 'bootstrap-cross';
+        return;
+      }
+      startupPhase = 'bootstrap-same-chain';
     };
     while (!shuttingDown && Date.now() < deadline) {
       const beforeDrive = publishBootstrapHealthSnapshot();
@@ -3417,7 +3460,7 @@ const run = async (): Promise<void> => {
       : publishBootstrapHealthSnapshot();
     if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;
     if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(before) && !hasMarketMakerRuntimeBacklog(env)) {
-      markOffersReady();
+      await markOffersReady();
       return;
     }
     await driveQuotes();
@@ -3425,7 +3468,7 @@ const run = async (): Promise<void> => {
       ? publishMarketMakerHealthSnapshot({ includeCross: true })
       : publishBootstrapHealthSnapshot();
     if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(health) && !hasMarketMakerRuntimeBacklog(env)) {
-      markOffersReady();
+      await markOffersReady();
     }
   };
   const failQuoteLoop = (error: unknown): void => {
@@ -3454,7 +3497,7 @@ const run = async (): Promise<void> => {
     startupPhase = 'bootstrap-same-chain';
     publishBootstrapHealthSnapshot();
     if (await waitForBootstrapOffers()) {
-      markOffersReady();
+      await markOffersReady();
       publishMarketMakerHealthSnapshot({ includeCross: true });
     } else {
       startupPhase = 'bootstrap-degraded';
