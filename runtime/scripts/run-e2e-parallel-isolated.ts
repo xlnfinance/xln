@@ -320,6 +320,11 @@ const tail = (path: string, lines = 60): string => {
 };
 
 const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
+  /MISSING_SIGNER_KEY/,
+  /JADAPTER_MISSING/,
+  /PENDING[-_]FRAME[-_]STALE/,
+  /MM_READY_TIMEOUT/,
+  /CROSS_J_[A-Z0-9_:-]*/,
   /J_SUBMIT_FATAL/,
   /RUNTIME_LOOP_HALTED/,
   /RUNTIME_LOOP_ERROR/,
@@ -346,6 +351,65 @@ const findRuntimeFatalLogLines = (path: string, maxLines = 12): string[] => {
     if (out.length >= maxLines) break;
   }
   return out;
+};
+
+type FatalLogHit = {
+  pattern: string;
+  lineNumber: number;
+  line: string;
+};
+
+const findFirstRuntimeFatalLogHit = (path: string, fromLine = 0): FatalLogHit | null => {
+  let text = '';
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  const lines = text.split('\n');
+  for (let i = Math.max(0, fromLine); i < lines.length; i += 1) {
+    const line = lines[i] || '';
+    const pattern = RUNTIME_FATAL_LOG_PATTERNS.find(candidate => candidate.test(line));
+    if (!pattern) continue;
+    return {
+      pattern: String(pattern),
+      lineNumber: i + 1,
+      line: line.slice(0, 500),
+    };
+  }
+  return null;
+};
+
+const startFailFastLogMonitor = (
+  logPath: string,
+  onFatal: (message: string) => void,
+): (() => void) => {
+  let stopped = false;
+  let scannedLines = 0;
+  const scan = (): void => {
+    if (stopped) return;
+    const hit = findFirstRuntimeFatalLogHit(logPath, scannedLines);
+    if (hit) {
+      stopped = true;
+      onFatal(
+        `E2E_FATAL_RUNTIME_LOG marker=${hit.pattern} file=${logPath} line=${hit.lineNumber}\n` +
+        `${hit.lineNumber}: ${hit.line}\n` +
+        `--- last 80 lines (${logPath}) ---\n${tail(logPath, 80)}`,
+      );
+      return;
+    }
+    try {
+      scannedLines = readFileSync(logPath, 'utf8').split('\n').length;
+    } catch {
+      scannedLines = 0;
+    }
+  };
+  const interval = setInterval(scan, 500);
+  scan();
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+  };
 };
 
 const flushLog = async (log: ReturnType<typeof createWriteStream>, marker: string): Promise<void> => {
@@ -1360,6 +1424,11 @@ const runShard = async (
   let api: ManagedChildProcess | null = null;
   let vite: ManagedChildProcess | null = null;
   let teardownReason: string | null = null;
+  const shardAbortController = new AbortController();
+  const forwardOuterAbort = (): void => shardAbortController.abort();
+  signal?.addEventListener('abort', forwardOuterAbort, { once: true });
+  if (signal?.aborted) shardAbortController.abort();
+  let stopFatalMonitor: (() => void) | null = null;
   const rpcPort = args.basePort + shard * 20 + 0;
   const rpc2Port = args.basePort + shard * 20 + 1;
   const apiPort = args.basePort + shard * 20 + 2;
@@ -1390,10 +1459,21 @@ const runShard = async (
     log.write(`[timing] ${phase}=${ms}ms${warn ? ` (>${args.phaseWarnMs}ms)` : ''}\n`);
   };
   const throwIfAborted = (): void => {
-    if (signal?.aborted) throw new Error('E2E_ABORTED_AFTER_FIRST_FAILURE');
+    if (teardownReason?.startsWith('E2E_FATAL_RUNTIME_LOG')) throw new Error(teardownReason);
+    if (shardAbortController.signal.aborted || signal?.aborted) throw new Error('E2E_ABORTED_AFTER_FIRST_FAILURE');
   };
 
   try {
+    stopFatalMonitor = startFailFastLogMonitor(logPath, (message) => {
+      if (!teardownReason) teardownReason = message;
+      log.write(`[runner] fail-fast monitor hit -> aborting shard\n${message}\n`);
+      shardAbortController.abort();
+      for (const child of [api, vite, anvil, anvil2]) {
+        try {
+          if (child?.exitCode === null) child.kill('SIGTERM');
+        } catch {}
+      }
+    });
     log.write(`shard=${shard}/${totalShards}\nrpc=${rpcUrl}\nrpc2=${rpc2Url}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`);
     throwIfAborted();
 
@@ -1618,7 +1698,7 @@ const runShard = async (
       },
       log,
       timeoutMs: args.testTimeoutMs,
-      signal,
+      signal: shardAbortController.signal,
     });
     markPhase('playwright', playwrightStart);
 
@@ -1678,7 +1758,7 @@ const runShard = async (
       phaseMs,
     };
   } catch (error) {
-    teardownReason = formatErrorForLog(error);
+    teardownReason = teardownReason || formatErrorForLog(error);
     try {
       await captureShardFailureForensics({
         logsDir,
@@ -1701,6 +1781,8 @@ const runShard = async (
       error: teardownReason,
     };
   } finally {
+    stopFatalMonitor?.();
+    signal?.removeEventListener('abort', forwardOuterAbort);
     if (teardownReason && api && api.exitCode === null) {
       const teardownLabel = phaseMs.apiHealthy > 0 ? 'shard teardown' : 'startup failure';
       const normalizedReason = teardownReason.replace(/\n/g, '\n[runner]   ');
