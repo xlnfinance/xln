@@ -465,7 +465,7 @@ const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
 );
 const HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
   1,
-  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60'),
+  Number(process.env['HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'),
 );
 
 const envFlagEnabled = (value: unknown): boolean => {
