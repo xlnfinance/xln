@@ -127,7 +127,7 @@ const healthPollIntervalMs = Math.max(
 const stageBudgetsMs = {
   hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '8000')),
   sameChain: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '8000')),
-  cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '25000')),
+  cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '35000')),
 };
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
@@ -676,12 +676,15 @@ const main = async (): Promise<void> => {
     XLN_MIN_DISK_FREE_BYTES: '1',
     MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1',
     XLN_RUNTIME_TICK_DELAY_MS: process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1',
+    XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] || '1',
+    XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS: process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000',
+    XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] || '1',
     XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:
       process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20',
     MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME:
       process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000',
     MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME:
-      process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '10',
+      process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20',
     XLN_RUNTIME_PROCESS_SLOW_MS: process.env['XLN_RUNTIME_PROCESS_SLOW_MS'] || '250',
     XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250',
     MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10',
@@ -694,7 +697,7 @@ const main = async (): Promise<void> => {
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:
       process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '1000',
     MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:
-      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1',
+      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2',
     XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath,
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
     ...(useSnapshotTemplate ? {

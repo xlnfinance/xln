@@ -30,13 +30,16 @@ describe('production startup wiring', () => {
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
     expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-1}');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
+    expect(script).toContain('export XLN_HUB_BOOTSTRAP_PAUSE_STORAGE=${XLN_HUB_BOOTSTRAP_PAUSE_STORAGE:-1}');
+    expect(script).toContain('export XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS=${XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS:-60000}');
+    expect(script).toContain('export XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT=${XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT:-1}');
     expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-10}');
     expect(script).toContain('export MARKET_MAKER_CROSS_LEVELS_PER_PAIR=${MARKET_MAKER_CROSS_LEVELS_PER_PAIR:-3}');
     expect(script).toContain(
       'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1000}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-1}',
+      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-2}',
     );
     expect(script).toContain(
       'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-10}',
@@ -100,6 +103,9 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '');");
     expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
+    expect(orchestrator).toContain("const HUB_BOOTSTRAP_PAUSE_STORAGE = process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] ?? '1';");
+    expect(orchestrator).toContain("process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000'");
+    expect(orchestrator).toContain('XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
     expect(runtimeEntityRouting).toContain('deps.startRuntimeLoop(env);');
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
@@ -109,6 +115,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0'");
     expect(orchestrator).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1'");
     expect(orchestrator).toContain("XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '1'");
+    expect(orchestrator).toContain("XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] ?? '1'");
     expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_MARKET_MAKER_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
     expect(orchestrator).toContain('const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {');
     expect(orchestrator).toContain('deriveMarketMakerEntityId(signerId, toMarketMakerEntityJurisdictionConfig(jurisdiction))');
@@ -141,6 +148,16 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(hubNode).toContain('env.quietRuntimeLogs = true;');
     expect(hubNode).toContain('configureHubRuntimeLogging(env);');
+    expect(hubNode).toContain('persistRestoredEnvToDB');
+    expect(hubNode).toContain('const configureHubBootstrapStorage = (env: Env): void => {');
+    expect(hubNode).toContain("if (!envFlagEnabled(process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'])) return;");
+    expect(hubNode).toContain('env.runtimeState.persistencePaused = true;');
+    expect(hubNode).toContain('configureHubBootstrapStorage(env);');
+    expect(hubNode).toContain("pathname === '/api/control/runtime/persist-ready-snapshot'");
+    expect(hubNode).toContain('await stopRuntimeLoopAndWait(env, 30_000);');
+    expect(hubNode).toContain('await persistRestoredEnvToDB(env);');
+    expect(hubNode).toContain('startRuntimeLoop(env, {');
+    expect(hubNode).toContain('BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
     expect(hubNode).toContain("import { prewarmSignerLabels } from '../account-crypto';");
     expect(hubNode).toContain('const buildLocalHubSignerLabels = (): string[] => {');
     expect(hubNode).toContain('const prewarmLocalHubSignerKeys = (): void => {');
@@ -177,7 +194,7 @@ describe('production startup wiring', () => {
     expect(runtimeSource).not.toContain('void config;');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '10'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
     expect(hubNode).toContain("process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1'");
@@ -236,7 +253,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
     expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
-    expect(mmNode).toContain("MARKET_MAKER_API_YIELD_MS'] || '1'");
+    expect(mmNode).toContain("MARKET_MAKER_API_YIELD_MS'] || '5'");
     expect(mmNode).toContain('const yieldMarketMakerApi = async (): Promise<void> => {');
     expect(mmNode).toContain('await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));');
     expect(mmNode).not.toContain('const emitCrossProgress =');
@@ -548,6 +565,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('marketMakerEventsJsonl: marketMakerEventsJsonlPath');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '8000'");
+    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '35000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
     expect(smoke).toContain("requireStageBudget('marketMaker:cross', crossReadyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);");
@@ -572,8 +590,8 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '10'");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '1000'");
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
-    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'");
+    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
     expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
     expect(mmNode).toContain("direction: 'bootstrap-batch'");
@@ -609,14 +627,24 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('rmSync(args.dbRoot, { recursive: true, force: true });');
     expect(orchestrator).toContain('PRESERVE_STATE_DB_ROOT_MISSING');
     expect(orchestrator).toContain('PRESERVE_STATE_JURISDICTIONS_MISSING');
+    expect(orchestrator).toContain('const postJsonExpectOk = async <T extends ControlOkResponse>');
+    expect(orchestrator).toContain("payload?.ok !== true");
+    expect(orchestrator).toContain('const persistHubReadySnapshots = async (): Promise<void> => {');
+    expect(orchestrator).toContain('reset_persist_ready_snapshots');
+    expect(orchestrator).toContain('/api/control/runtime/persist-ready-snapshot');
+    expect(orchestrator).toContain('await persistHubReadySnapshots();');
+    expect(orchestrator.indexOf('await persistHubReadySnapshots();')).toBeLessThan(orchestrator.indexOf("finishTiming('reset_total', resetTotalStartedAt);"));
     expect(smoke).toContain("recordStage(`marketMaker:${marketMakerPhase}`, last);");
     expect(smoke).toContain("recordStageOnce('system:ready', last);");
     expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
     expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
+    expect(smoke).toContain("XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] || '1'");
+    expect(smoke).toContain("XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS: process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000'");
+    expect(smoke).toContain("XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] || '1'");
     expect(smoke).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'");
     expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
-    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '10'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'");
     expect(smoke).toContain("XLN_RUNTIME_PROCESS_SLOW_MS: process.env['XLN_RUNTIME_PROCESS_SLOW_MS'] || '250'");
     expect(smoke).toContain("XLN_ENTITY_FRAME_SLOW_MS: process.env['XLN_ENTITY_FRAME_SLOW_MS'] || '250'");
     expect(smoke).toContain('throw new Error(`LOCAL_PROD_SMOKE_MM_HEALTH_FAILED error=${message}`);');
