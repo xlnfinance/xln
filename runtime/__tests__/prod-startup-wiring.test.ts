@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
+import {
+  E2E_FATAL_LOG_TAIL_LINES,
+  findFirstRuntimeFatalLogHit,
+  tailLog,
+} from '../scripts/e2e-fatal-log-monitor';
 
 const repoRoot = process.cwd();
 
@@ -443,6 +449,11 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
     expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
     expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
+    expect(smoke).toContain("findFirstRuntimeFatalLogHit");
+    expect(smoke).toContain("const assertNoFatalChildLogs = (stage: string): void => {");
+    expect(smoke).toContain("emitDebugEvent('fatal-log-hit'");
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_FATAL_LOG');
+    expect(smoke).toContain("assertNoFatalChildLogs('health-poll');");
     expect(mmNode).toContain("schema: 'xln-market-maker-bootstrap-debug-event-v1'");
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL']");
     expect(orchestrator).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:');
@@ -562,6 +573,25 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"test:e2e:monitor": "bun runtime/scripts/e2e-fail-fast-monitor.ts"');
     expect(releaseGate).toContain("{ name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 240_000 }");
     expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'fast E2E gate'"));
+  });
+
+  test('fatal log monitor reports the concrete marker line and last 80 log lines', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'xln-fatal-log-monitor-'));
+    const path = join(dir, 'e2e-shard-00.log');
+    try {
+      const lines = Array.from({ length: 90 }, (_, index) => `line ${index + 1}`);
+      lines.push('[MM:err] PENDING-FRAME-STALE: Account with abcd h4 for 31s');
+      lines.push('line 92 after fatal');
+      writeFileSync(path, `${lines.join('\n')}\n`);
+
+      const hit = findFirstRuntimeFatalLogHit(path, 0);
+      expect(hit?.pattern).toBe('/PENDING[-_]FRAME[-_]STALE/');
+      expect(hit?.lineNumber).toBe(91);
+      expect(hit?.line).toContain('PENDING-FRAME-STALE');
+      expect(tailLog(path, E2E_FATAL_LOG_TAIL_LINES)).toContain('line 92 after fatal');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('orchestrator health does not enrich cross market snapshots by default', () => {
