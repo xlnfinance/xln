@@ -70,6 +70,7 @@ import {
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
   waitForRuntimeWorkDrained,
+  persistRestoredEnvToDB,
   getEntityJAdapter,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
@@ -491,6 +492,13 @@ const prewarmLocalHubSignerKeys = (): void => {
 const configureHubRuntimeLogging = (env: Env): void => {
   if (envFlagEnabled(process.env['XLN_HUB_VERBOSE_RUNTIME_LOGS'])) return;
   env.quietRuntimeLogs = true;
+};
+
+const configureHubBootstrapStorage = (env: Env): void => {
+  if (!envFlagEnabled(process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'])) return;
+  env.runtimeState = env.runtimeState ?? {};
+  env.runtimeState.persistencePaused = true;
+  console.log(`[MESH-HUB] BOOTSTRAP_STORAGE_PAUSED name=${resolvedArgs.name}`);
 };
 
 const resolveOperatorAppUrl = (): string => {
@@ -1397,6 +1405,7 @@ const run = async (): Promise<void> => {
   const runtimeBootStartedAt = startTiming('runtime_boot');
   const env = await main(resolvedArgs.seed);
   configureHubRuntimeLogging(env);
+  configureHubBootstrapStorage(env);
   prewarmLocalHubSignerKeys();
   startRuntimeLoop(env, {
     tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
@@ -1558,6 +1567,9 @@ const run = async (): Promise<void> => {
           apiUrl,
           relayUrl: resolvedArgs.relayUrl,
           directWsUrl,
+          storage: {
+            persistencePaused: Boolean(env.runtimeState?.persistencePaused),
+          },
         }), { headers });
       }
 
@@ -1655,6 +1667,45 @@ const run = async (): Promise<void> => {
           console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
         }
         return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: true }), { headers });
+      }
+
+      if (pathname === '/api/control/runtime/persist-ready-snapshot' && request.method === 'POST') {
+        env.runtimeState = env.runtimeState ?? {};
+        const previousPaused = Boolean(env.runtimeState.persistencePaused);
+        env.runtimeState.persistencePaused = true;
+        const runtimeIdle = await stopRuntimeLoopAndWait(env, 30_000);
+        if (!runtimeIdle) {
+          env.runtimeState.persistencePaused = previousPaused;
+          return new Response(safeStringify({
+            ok: false,
+            code: 'HUB_READY_SNAPSHOT_RUNTIME_NOT_IDLE',
+            runtimeHeight: Number(env.height ?? 0),
+          }), { status: 503, headers });
+        }
+        try {
+          await persistRestoredEnvToDB(env);
+          env.runtimeState.persistencePaused = false;
+          startRuntimeLoop(env, {
+            tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
+            maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+          });
+          console.log(`[MESH-HUB] BOOTSTRAP_READY_SNAPSHOT_PERSISTED name=${resolvedArgs.name} height=${env.height}`);
+          return new Response(safeStringify({
+            ok: true,
+            runtimeIdle: true,
+            height: Number(env.height ?? 0),
+            wasPaused: previousPaused,
+            persistencePaused: Boolean(env.runtimeState?.persistencePaused),
+          }), { headers });
+        } catch (error) {
+          env.runtimeState.persistencePaused = true;
+          return new Response(safeStringify({
+            ok: false,
+            code: 'HUB_READY_SNAPSHOT_PERSIST_FAILED',
+            error: error instanceof Error ? error.message : String(error),
+            runtimeHeight: Number(env.height ?? 0),
+          }), { status: 500, headers });
+        }
       }
 
       if (pathname === '/api/jurisdictions') {

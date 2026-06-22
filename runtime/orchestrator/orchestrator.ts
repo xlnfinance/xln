@@ -129,6 +129,11 @@ const marketMakerReadyRestartLimit = Math.max(
   0,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
 );
+const HUB_BOOTSTRAP_PAUSE_STORAGE = process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] ?? '1';
+const HUB_READY_SNAPSHOT_TIMEOUT_MS = Math.max(
+  5_000,
+  Math.floor(Number(process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000')),
+);
 const relayUrl = args.relayUrl;
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
@@ -160,6 +165,7 @@ const timings: TimingMap = {
   reset_wait_hubs: { startedAt: null, completedAt: null, ms: null },
   reset_market_maker: { startedAt: null, completedAt: null, ms: null },
   reset_custody: { startedAt: null, completedAt: null, ms: null },
+  reset_persist_ready_snapshots: { startedAt: null, completedAt: null, ms: null },
 };
 
 const resetState: ResetState = {
@@ -280,6 +286,11 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const meshLog = createStructuredLogger('mesh.orchestrator');
 
+const envFlagEnabled = (value: unknown): boolean => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+};
+
 const pushChildLogLines = (target: string[], chunk: Buffer | string): void => {
   const text = chunk.toString();
   for (const rawLine of text.split(/\r?\n/)) {
@@ -392,6 +403,38 @@ const postJson = async (url: string, timeoutMs = 1_000): Promise<void> => {
     // best effort before hard stop
   } finally {
     if (timer) clearTimeout(timer);
+  }
+};
+
+type ControlOkResponse = {
+  ok?: boolean;
+  error?: string;
+  code?: string;
+  [key: string]: unknown;
+};
+
+const postJsonExpectOk = async <T extends ControlOkResponse>(url: string, timeoutMs: number): Promise<T> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { method: 'POST', signal: controller.signal });
+    const bodyText = await response.text().catch(() => '');
+    let payload: ControlOkResponse | null = null;
+    if (bodyText.trim()) {
+      try {
+        payload = JSON.parse(bodyText) as ControlOkResponse;
+      } catch {
+        payload = { error: bodyText.slice(0, 500) };
+      }
+    }
+    if (!response.ok || payload?.ok !== true) {
+      throw new Error(`CONTROL_POST_FAILED url=${url} status=${response.status} payload=${safeStringify(payload)}`);
+    }
+    return payload as T;
+  } catch (error) {
+    throw new Error(`CONTROL_POST_FAILED url=${url} error=${serializeError(error)}`);
+  } finally {
+    clearTimeout(timer);
   }
 };
 
@@ -767,6 +810,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
       XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1',
       XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000',
+      XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: HUB_BOOTSTRAP_PAUSE_STORAGE,
       XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn',
     }),
   });
@@ -845,6 +889,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0',
       XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1',
       XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '1',
+      XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'] ?? '1',
       XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:
         process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] ??
         join(marketMakerChild.dbPath, 'bootstrap-events.jsonl'),
@@ -1196,7 +1241,8 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     reserveEntities.length >= HUB_NAMES.length &&
     reserveEntities.every((entity) => entity.targetMet);
   const coreOk = storage.ok && hubsOnline && hubMeshOk;
-  const systemOk = coreOk && mmOk && custodyOk && bootstrapReservesOk;
+  const resetOk = !resetState.inProgress && (!resetState.lastError || resetState.resolvedAt !== null);
+  const systemOk = coreOk && resetOk && mmOk && custodyOk && bootstrapReservesOk;
   if (!resetState.inProgress && resetState.lastError && coreOk && !resetState.resolvedAt) {
     resetState.resolvedAt = Date.now();
   }
@@ -1204,6 +1250,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     storage.ok ? null : 'storage',
     hubsOnline ? null : 'hubs',
     hubMeshOk ? null : 'hubMesh',
+    resetOk ? null : 'reset',
     mmOk ? null : 'marketMaker',
     custodyOk ? null : 'custody',
     bootstrapReservesOk ? null : 'bootstrapReserves',
@@ -1562,6 +1609,28 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   throw new Error(`${child.name}_JURISDICTIONS_TIMEOUT path=${shardJurisdictionsPath}`);
 };
 
+const persistHubReadySnapshots = async (): Promise<void> => {
+  if (!envFlagEnabled(HUB_BOOTSTRAP_PAUSE_STORAGE)) return;
+  const startedAt = startTiming('reset_persist_ready_snapshots');
+  try {
+    const results = await Promise.all(hubChildren.map(async (child) => {
+      const payload = await postJsonExpectOk(
+        `http://${args.host}:${child.apiPort}/api/control/runtime/persist-ready-snapshot`,
+        HUB_READY_SNAPSHOT_TIMEOUT_MS,
+      );
+      return {
+        name: child.name,
+        height: payload['height'] ?? null,
+        wasPaused: payload['wasPaused'] ?? null,
+        persistencePaused: payload['persistencePaused'] ?? null,
+      };
+    }));
+    console.log(`[MESH] HUB_READY_SNAPSHOTS_PERSISTED ${safeStringify(results)}`);
+  } finally {
+    finishTiming('reset_persist_ready_snapshots', startedAt);
+  }
+};
+
 const runReset = async (options: { enableMarketMaker: boolean } = { enableMarketMaker: args.mmEnabled }): Promise<void> => {
   resetState.inProgress = true;
   resetState.lastError = null;
@@ -1664,6 +1733,8 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     if (marketMakerReady) await marketMakerReady;
     if (marketMakerBootstrapError) throw marketMakerBootstrapError;
     if (custodyBootstrapError) throw custodyBootstrapError;
+
+    await persistHubReadySnapshots();
 
     finishTiming('reset_total', resetTotalStartedAt);
     resetState.completedAt = Date.now();
