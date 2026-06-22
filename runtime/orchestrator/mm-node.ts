@@ -254,7 +254,7 @@ export type MarketMakerHealth = {
 };
 
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
-const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(25, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'));
+const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(25, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '250'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'),
