@@ -152,3 +152,58 @@ test('enqueueEntityInput prefers open direct transport over relay', () => {
   expect(directSent[0]?.timestamp).toBe(5678);
   expect(relaySent).toHaveLength(0);
 });
+
+test('enqueueEntityInput uses relay when direct transport is not authoritative for entity inputs', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const relaySent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
+  const directSent: unknown[] = [];
+
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInput: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+      relaySent.push({ to, input, timestamp });
+      return true;
+    },
+  };
+  const directClient = {
+    isOpen: () => true,
+    isConnecting: () => false,
+    sendEntityInput: () => {
+      directSent.push(true);
+      return true;
+    },
+  };
+
+  p2p.env = {
+    warn: () => undefined,
+  };
+  p2p.preferRelayForEntityInput = true;
+  p2p.sendDebugEvent = () => true;
+  p2p.ensureRelayConnectionsForEntity = () => undefined;
+  p2p.prefetchProfilesForInput = () => undefined;
+  p2p.getDirectPeerEndpoint = () => 'wss://hub.example/direct';
+  p2p.ensureDirectClientForRuntime = () => undefined;
+  p2p.directClients = new Map([[TARGET_RUNTIME_ID, directClient]]);
+  p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
+  p2p.directClientErrors = new Map();
+  p2p.clients = [relayClient];
+  p2p.pendingByRuntime = new Map();
+
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [{
+      type: 'accountInput',
+      data: {
+        fromEntityId: SOURCE_ENTITY_ID,
+        toEntityId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      },
+    }],
+  };
+
+  expect(p2p.enqueueEntityInput(TARGET_RUNTIME_ID, input, 6789)).toBe(true);
+  expect(relaySent).toHaveLength(1);
+  expect(relaySent[0]?.to).toBe(TARGET_RUNTIME_ID);
+  expect(relaySent[0]?.timestamp).toBe(6789);
+  expect(directSent).toHaveLength(0);
+});

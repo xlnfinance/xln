@@ -1490,8 +1490,11 @@ const run = async (): Promise<void> => {
     },
   });
   env.runtimeState = env.runtimeState ?? {};
-  env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
-    directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
+  env.runtimeState.directEntityInputDispatch =
+    process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'
+      ? (targetRuntimeId, input, ingressTimestamp) =>
+          directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp)
+      : null;
   const handleRadapterWsMessage = (ws: HubServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;
     try {
@@ -2170,6 +2173,7 @@ const run = async (): Promise<void> => {
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
+    preferRelayForEntityInput: true,
     advertiseEntityIds: hubBootstraps.map((entry) => entry.entityId),
     isHub: true,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
