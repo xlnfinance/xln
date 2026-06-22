@@ -565,7 +565,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('marketMakerEventsJsonl: marketMakerEventsJsonlPath');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '8000'");
-    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '35000'");
+    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '25000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
     expect(smoke).toContain("requireStageBudget('marketMaker:cross', crossReadyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);");
