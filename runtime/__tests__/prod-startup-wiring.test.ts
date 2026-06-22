@@ -239,11 +239,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_API_YIELD_MS'] || '1'");
     expect(mmNode).toContain('const yieldMarketMakerApi = async (): Promise<void> => {');
     expect(mmNode).toContain('await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));');
-    const crossProgressBody = extractSourceBlock(mmNode, 'const emitCrossProgress =', 'const isBootstrapDepthComplete =');
-    expect(crossProgressBody.indexOf('if (now - lastCrossProgressLogAt < 2_000) return;')).toBeLessThan(
-      crossProgressBody.indexOf('const incomplete = jobs.filter(job => !isCrossQuoteJobDepthComplete(env, job));'),
-    );
-    const sameProgressBody = extractSourceBlock(mmNode, 'const emitSameQuoteProgress =', 'const describeCrossQuoteJobProgress =');
+    expect(mmNode).not.toContain('const emitCrossProgress =');
+    expect(mmNode).not.toContain('const describeCrossQuoteJobProgress =');
+    expect(mmNode).not.toContain('const isCrossQuoteJobDepthComplete =');
+    const sameProgressBody = extractSourceBlock(mmNode, 'const emitSameQuoteProgress =', 'const isBootstrapDepthComplete =');
     expect(sameProgressBody.indexOf('if (now - lastSameQuoteProgressLogAt < 2_000) return;')).toBeLessThan(
       sameProgressBody.indexOf('const incomplete = jobs.filter(job => !isSameQuoteJobDepthComplete(env, job));'),
     );
@@ -262,7 +261,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const hasMarketMakerAccountBacklog = (');
     expect(mmNode).toContain('const hasMarketMakerRuntimeBacklog = (env: Env): boolean => {');
     expect(mmNode).toContain('Boolean(env.runtimeState?.processingPromise)');
-    expect(mmNode).toContain('if (hasMarketMakerRuntimeBacklog(env)) return;');
+    expect(mmNode).toContain('if (hasMarketMakerRuntimeBacklog(env)) return false;');
     expect(mmNode).toContain('type SameQuoteJob = {');
     expect(mmNode).toContain('const isSameQuoteJobDepthComplete = (env: Env, job: SameQuoteJob): boolean => {');
     expect(mmNode).toContain('const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] => {');
@@ -295,32 +294,30 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('const primarySameReady =');
     expect(mmNode).toContain('const primarySameDepthReady = isMarketMakerSameDepthComplete(healthBeforeQuotes);');
     expect(mmNode).not.toContain("if (mode !== 'bootstrap' || !primarySameDepthReady) {");
-    expect(mmNode).toContain('if (!primarySameDepthReady || !isAllSameQuoteDepthComplete(visibleHubs)) return;');
+    expect(mmNode).toContain('if (!primarySameDepthReady || !isAllSameQuoteDepthComplete(visibleHubs)) return false;');
     expect(mmNode).not.toContain('const reserveCrossOfferBudget = (');
     expect(mmNode).not.toContain('remainingOffersTotal: MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK');
     expect(mmNode).toContain('route.source.counterpartyEntityId');
     expect(mmNode).not.toContain('coverageOnly');
     expect(mmNode).toContain('bootstrapCrossCursor');
     expect(mmNode).toContain('steadyCrossCursor');
-    expect(mmNode).toContain('const isCrossQuoteJobDepthComplete = (env: Env, job: CrossQuoteJob): boolean => {');
-    expect(mmNode).toContain('desiredOffers.every(spec => hasFinalizedMarketMakerCrossOffer(env, spec))');
     expect(mmNode).toContain('const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }>');
-    expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index, job)');
+    expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index)');
     expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
     expect(mmNode).toContain("direction: 'bootstrap-batch'");
-    expect(mmNode).toContain('if (deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
+    expect(mmNode).toContain('if (mode === \'bootstrap\' && deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK");
     expect(mmNode).toContain('let bootstrapCrossStarted = false;');
     expect(mmNode).toContain('if (sameDepthComplete || bootstrapCrossStarted)');
     expect(mmNode).toContain("startupPhase = 'bootstrap-cross';");
-    expect(mmNode).toContain("if (mode === 'steady') return;");
-    expect(mmNode).toContain('bootstrapCrossCursor = isCrossQuoteJobDepthComplete(env, job) ? nextCursor : index;');
+    expect(mmNode).toContain("if (mode === 'steady') return true;");
+    expect(mmNode).toContain('bootstrapCrossCursor = nextCursor;');
     expect(mmNode).toContain("if (mode === 'steady') steadyCrossCursor = nextCursor;");
-    expect(mmNode).toContain('if (deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
+    expect(mmNode).toContain('if (mode === \'bootstrap\' && deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
     expect(mmNode).toContain('sourceHubs,');
     expect(mmNode).toContain('targetHubs,');
-    expect(mmNode).toContain("if (mode === 'steady') return;");
+    expect(mmNode).toContain("if (mode === 'steady') return true;");
     expect(mmNode).toContain('isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));');
     expect(mmNode).toContain("scope: 'same-chain-all-contexts'");
     expect(mmNode).not.toContain("if (mode !== 'bootstrap') return;");
@@ -465,11 +462,12 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('bootstrapEntityStateHash = entityStateHash;');
     expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
     expect(mmNode).toContain('payload=${safeStringify(fingerprint.payload)}');
-    expect(mmNode).toContain("const beforeDrive = publishBootstrapHealthSnapshot();\n      refreshBootstrapPhase(beforeDrive);\n      if (bootstrapCrossStarted) {");
-    expect(mmNode).toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
-    expect(mmNode).toContain('return completionBeforeDrive;');
-    expect(mmNode).toContain("await driveQuotes('bootstrap');");
-    expect(mmNode).toContain('if (!hasMarketMakerRuntimeBacklog(env)) return completionHealth;');
+    expect(mmNode).toContain('const canCheckBootstrapCompletion = (): boolean =>');
+    expect(mmNode).toContain('!hasBootstrapCrossAccountBacklog(readVisibleHubProfiles(env, true));');
+    expect(mmNode).not.toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
+    expect(mmNode).toContain("const enqueued = await driveQuotes('bootstrap');");
+    expect(mmNode).toContain('if (!enqueued && canCheckBootstrapCompletion()) {');
+    expect(mmNode).toContain('if (isBootstrapDepthComplete(completionHealth)) return completionHealth;');
     expect(mmNode).toContain('const bootstrapHealth = await waitForBootstrapOffers();');
     expect(mmNode).toContain('await markOffersReady(bootstrapHealth);');
     expect(mmNode).not.toContain("await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });");
@@ -477,8 +475,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const sameDepthComplete =\n        isMarketMakerSameDepthComplete(health) &&\n        isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));');
     expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain("if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;");
-    expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {");
-    expect(mmNode).toContain('const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;');
+    expect(mmNode).not.toContain("if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {");
+    expect(mmNode).not.toContain('const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;');
+    expect(mmNode).toContain("const enqueued = await driveQuotes();");
+    expect(mmNode).toContain('if (startupPhase !== \'offers-ready\' && !enqueued && canCheckBootstrapCompletion()) {');
     expect(mmNode).toContain('await markOffersReady(completionHealth);');
   });
 
@@ -536,7 +536,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:');
     expect(orchestrator).toContain("join(marketMakerChild.dbPath, 'bootstrap-events.jsonl')");
     expect(mmNode).toContain("emitBootstrapDebugEvent('same-quote-progress'");
-    expect(mmNode).toContain("emitBootstrapDebugEvent('cross-progress'");
+    expect(mmNode).not.toContain("emitBootstrapDebugEvent('cross-progress'");
     expect(mmNode).toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue'");
     expect(mmNode).toContain('deferredBootstrapCrossInputs ?? undefined');
     expect(mmNode).toContain("direction: 'bootstrap-batch'");
@@ -576,7 +576,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
     expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
     expect(mmNode).toContain("direction: 'bootstrap-batch'");
-    expect(mmNode).toContain('bootstrapCrossCursor = isCrossQuoteJobDepthComplete(env, job) ? nextCursor : index;');
+    expect(mmNode).toContain('bootstrapCrossCursor = nextCursor;');
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).toContain("if (!bootstrapCrossStarted) {\n          bootstrapCrossStarted = true;\n          startupPhase = 'bootstrap-cross';");
     expect(mmNode.indexOf("if (!bootstrapCrossStarted) {\n          bootstrapCrossStarted = true;\n          startupPhase = 'bootstrap-cross';")).toBeLessThan(
@@ -753,11 +753,11 @@ describe('production startup wiring', () => {
     expect(driveQuotes).toContain('.slice(0, MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE)');
     expect(driveQuotes).not.toContain('const hubEntityIds = [job.hub.entityId];');
     expect(driveQuotes).toContain("if (mode !== 'bootstrap') {");
-    expect(driveQuotes).toContain('if (await maintainSameContextQuotes(context)) return;');
+    expect(driveQuotes).toContain('if (await maintainSameContextQuotes(context)) return true;');
     expect(driveQuotes).toContain('if (await maintainMarketMakerCrossQuotes(');
     expect(driveQuotes).toContain('sourceHubs,');
     expect(driveQuotes).toContain('targetHubs,');
-    expect(driveQuotes).toContain("if (mode === 'steady') return;");
+    expect(driveQuotes).toContain("if (mode === 'steady') return true;");
     expect(meshCommon).toContain('const queuedEntityTxsFor = (env: Env, targetEntityId: string): EntityTx[] => {');
     expect(meshCommon).toContain('export const hasQueuedExtendCredit = (');
   });

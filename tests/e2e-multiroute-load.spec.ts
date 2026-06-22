@@ -393,7 +393,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     const users: Record<UserName, Entity> = {} as Record<UserName, Entity>;
     for (const name of userNames) {
       const mnemonic = MULTIROUTE_MNEMONICS[name];
-      const entity = await createRuntimeIdentity(pageFor(name), name, mnemonic);
+      const entity = await createRuntimeIdentity(pageFor(name), name, mnemonic, { fresh: true });
       await waitForEntityAdvertised(pageFor(name), entity.entityId);
       users[name] = { entityId: entity.entityId, signerId: entity.signerId, label: name, mnemonic };
       console.log(`[E2E] ${name}: ${entity.entityId.slice(0, 14)}`);
