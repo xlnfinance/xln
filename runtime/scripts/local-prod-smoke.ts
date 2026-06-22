@@ -367,7 +367,26 @@ const fetchHealth = async (): Promise<HealthPayload> => {
   }
 };
 
-const fetchMarketMakerHealth = (): MarketMakerDirectHealthPayload | null => {
+const directMarketMakerHealthPhases = new Set([
+  'bootstrap-same-chain',
+  'bootstrap-cross',
+  'offers-ready',
+  'bootstrap-degraded',
+]);
+
+const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>
+  directMarketMakerHealthPhases.has(String(health.marketMaker?.startupPhase || ''));
+
+const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthPayload | null => {
+  if (!shouldFetchMarketMakerHealth(health)) {
+    emitDebugEvent('mm-health-poll', {
+      stage: 'mm-health-poll',
+      ok: false,
+      skipped: true,
+      startupPhase: health.marketMaker?.startupPhase ?? null,
+    });
+    return null;
+  }
   const startedAt = Date.now();
   try {
     const payload = fetchJsonWithCurl<MarketMakerDirectHealthPayload>(
@@ -560,7 +579,7 @@ const waitForHealth = async (): Promise<HealthPayload> => {
     try {
       assertNoFatalChildLogs('health-poll');
       const health = await fetchHealth();
-      const directMarketMakerHealth = fetchMarketMakerHealth();
+      const directMarketMakerHealth = fetchMarketMakerHealth(health);
       const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);
       last = summarizeHealth(stageHealth);
       emitDebugEvent('health-snapshot', { stage: 'health-poll', snapshot: last });

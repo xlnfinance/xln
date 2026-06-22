@@ -208,6 +208,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('MARKET_MAKER_BOOTSTRAP_CROSS_ROUTE_JOBS_PER_TICK');
     expect(mmNode).toContain("MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CONNECTIVITY_MAX_TXS_PER_TICK'] || '1000'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE'] || '1'");
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT');
     expect(mmNode).not.toContain('type MarketMakerCrossOfferBudget = {');
     expect(mmNode).toContain('const hasMarketMakerAccountBacklog = (');
@@ -228,8 +229,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<boolean> => {');
     expect(mmNode).toContain('const orderedIncompleteJobs: SameQuoteJob[] = [];');
     expect(mmNode).toContain('const jobsByContext = new Map<string, {');
-    expect(mmNode).toContain('const runnableHubEntityIds = entry.jobs');
+    expect(mmNode).toContain('const runnableHubEntityIdsFor = (entry: { context: MarketMakerEntityContext; jobs: SameQuoteJob[] }): string[] =>');
     expect(mmNode).toContain('.filter(hubEntityId => !hasMarketMakerAccountBacklog(env, entry.context.entityId, hubEntityId))');
+    expect(mmNode).toContain('.slice(0, MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE)');
     expect(mmNode).not.toContain('if (hasMarketMakerAccountBacklog(env, job.context.entityId, job.hub.entityId)) return;');
     expect(mmNode).not.toContain('const hubEntityIds = [job.hub.entityId];');
     expect(mmNode).toContain('if (await maintainMarketMakerQuotes(');
@@ -504,10 +506,16 @@ describe('production startup wiring', () => {
     );
     expect(mmNode).toContain("pathname === '/api/account/status'");
     expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs || []).map');
-    expect(smoke).toContain("const fetchMarketMakerHealth = (): MarketMakerDirectHealthPayload | null => {");
+    expect(smoke).toContain("const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>");
+    expect(smoke).toContain("'bootstrap-same-chain'");
+    expect(smoke).toContain("'bootstrap-cross'");
+    expect(smoke).toContain("const fetchMarketMakerHealth = (health: HealthPayload): MarketMakerDirectHealthPayload | null => {");
+    expect(smoke).toContain('if (!shouldFetchMarketMakerHealth(health)) {');
+    expect(smoke).toContain('skipped: true');
     expect(smoke).toContain("`http://127.0.0.1:${marketMakerApiPort}/api/health`");
     expect(smoke).toContain("emitDebugEvent('mm-health-poll'");
     expect(smoke).toContain('durationMs: Date.now() - startedAt');
+    expect(smoke).toContain('const directMarketMakerHealth = fetchMarketMakerHealth(health);');
     expect(smoke).toContain('const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);');
     expect(smoke).toContain('const summarizeBlockers = (blockers: unknown[] | undefined): unknown[] =>');
     expect(smoke).toContain('blockerDetails: health.marketMaker?.cross?.routes?.map(route => summarizeBlockers(route.blockers)) ?? []');
@@ -647,7 +655,8 @@ describe('production startup wiring', () => {
     expect(driveQuotes).toContain('if (await ensureMarketMakerHubConnectivity(');
     expect(driveQuotes).toContain('const orderedIncompleteJobs: SameQuoteJob[] = [];');
     expect(driveQuotes).toContain('const jobsByContext = new Map<string, {');
-    expect(driveQuotes).toContain('runnableHubEntityIds,');
+    expect(driveQuotes).toContain('const runnableHubEntityIdsFor = (entry: { context: MarketMakerEntityContext; jobs: SameQuoteJob[] }): string[] =>');
+    expect(driveQuotes).toContain('.slice(0, MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE)');
     expect(driveQuotes).not.toContain('const hubEntityIds = [job.hub.entityId];');
     expect(driveQuotes).toContain("if (mode !== 'bootstrap') {");
     expect(driveQuotes).toContain('if (await maintainSameContextQuotes(context)) return;');
