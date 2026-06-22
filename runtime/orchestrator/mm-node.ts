@@ -2,7 +2,6 @@
 
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { cpus } from 'node:os';
 import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
@@ -305,19 +304,11 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// Cross bootstrap touches two bilateral account machines per offer. Keep the
-// wave bounded by source hub groups so each account frame remains atomic while
-// the MM API gets scheduler boundaries between heavy cross frames. These are
-// scheduler wave sizes, not data limits: high-core local runs keep large waves,
-// while 1-vCPU prod hosts avoid one cross frame monopolizing the event loop.
-const MARKET_MAKER_BOOTSTRAP_CPU_COUNT = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CPU_COUNT'] || cpus().length || 1),
-);
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK =
-  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 8 : 128;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK =
-  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 16 : 256;
+// Cross bootstrap is a book-construction phase. Keep the scheduler permissive
+// enough to build the full book in one entity/account frame when consensus can
+// accept it; responsiveness comes from frame boundaries and explicit API yields.
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 1000;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 1000;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
   Number(
@@ -334,7 +325,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
