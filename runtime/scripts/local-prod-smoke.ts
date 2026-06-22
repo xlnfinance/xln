@@ -5,6 +5,11 @@ import { appendFileSync, cpSync, existsSync, mkdirSync, openSync, rmSync, closeS
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import {
+  E2E_FATAL_LOG_TAIL_LINES,
+  findFirstRuntimeFatalLogHit,
+  tailLog,
+} from './e2e-fatal-log-monitor';
 
 type ManagedProcess = {
   name: string;
@@ -106,6 +111,7 @@ const smokeStartedAt = Date.now();
 const stages: BootstrapStage[] = [];
 const recordedStages = new Set<string>();
 let fatalStageBudgetError: string | null = null;
+const fatalLogScannedLinesByPath = new Map<string, number>();
 const eventsJsonlPath = process.env['XLN_LOCAL_PROD_SMOKE_EVENTS_JSONL'] || join(workDir, 'bootstrap-events.jsonl');
 const marketMakerEventsJsonlPath =
   process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || join(workDir, 'mm-bootstrap-events.jsonl');
@@ -204,6 +210,37 @@ const assertPortsFree = async (ports: number[]): Promise<void> => {
 
 const logPath = (name: string): string => join(workDir, `${name}.log`);
 
+const assertNoFatalChildLogs = (stage: string): void => {
+  for (const child of children) {
+    const path = logPath(child.name);
+    const fromLine = fatalLogScannedLinesByPath.get(path) ?? 0;
+    const hit = findFirstRuntimeFatalLogHit(path, fromLine);
+    if (hit) {
+      const tail = tailLog(path, E2E_FATAL_LOG_TAIL_LINES);
+      emitDebugEvent('fatal-log-hit', {
+        stage,
+        process: child.name,
+        file: path,
+        lineNumber: hit.lineNumber,
+        pattern: hit.pattern,
+        line: hit.line,
+        tail,
+      });
+      throw new Error(
+        `LOCAL_PROD_SMOKE_FATAL_LOG marker=${hit.pattern} process=${child.name} ` +
+        `file=${path} line=${hit.lineNumber} events=${eventsJsonlPath}\n` +
+        `${hit.lineNumber}: ${hit.line}\n` +
+        `--- last ${E2E_FATAL_LOG_TAIL_LINES} lines (${path}) ---\n${tail}`,
+      );
+    }
+    try {
+      fatalLogScannedLinesByPath.set(path, readFileSync(path, 'utf8').split('\n').length);
+    } catch {
+      fatalLogScannedLinesByPath.set(path, 0);
+    }
+  }
+};
+
 const startManaged = (name: string, command: string, args: string[], env: Record<string, string>): void => {
   mkdirSync(workDir, { recursive: true });
   const out = openSync(logPath(name), 'a');
@@ -276,6 +313,7 @@ const waitForRpc = async (port: number, expectedChainId: string, label: string):
       }
       last = message;
     }
+    assertNoFatalChildLogs(`rpc:${label.toLowerCase()}`);
     await sleep(healthPollIntervalMs);
   }
   throw new Error(`${label} RPC not ready on :${port}; last=${last}`);
@@ -520,6 +558,7 @@ const waitForHealth = async (): Promise<HealthPayload> => {
   let lastMarketMakerPhase: string | null = null;
   while (Date.now() < deadline) {
     try {
+      assertNoFatalChildLogs('health-poll');
       const health = await fetchHealth();
       const directMarketMakerHealth = fetchMarketMakerHealth();
       const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);
@@ -552,6 +591,7 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       if (fatalStageBudgetError) throw new Error(fatalStageBudgetError);
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED')) throw error;
+      if (message.includes('LOCAL_PROD_SMOKE_FATAL_LOG')) throw error;
       last = message;
     }
     iteration += 1;
