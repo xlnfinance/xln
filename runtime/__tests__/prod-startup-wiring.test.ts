@@ -152,8 +152,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 100 : 1000');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK)');
-    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 2 : 8');
-    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 4 : 16');
+    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 128;');
+    expect(mmNode).toContain('const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 256;');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
     expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
@@ -448,6 +448,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:');
     expect(orchestrator).toContain("join(marketMakerChild.dbPath, 'bootstrap-events.jsonl')");
     expect(mmNode).toContain("emitBootstrapDebugEvent('same-quote-progress'");
+    expect(mmNode).toContain("emitBootstrapDebugEvent('cross-progress'");
     expect(mmNode).toContain('BOOTSTRAP_DEBUG_EVENT_WRITE_FAILED');
     expect(smoke).toContain('DEBUG_EVENT_WRITE_FAILED');
     expect(smoke).toContain("const marketMakerEventsJsonlPath =");
@@ -472,9 +473,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: '0'");
     expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_RESTORE: '0'");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:");
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '8'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '128'");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:");
-    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '16'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '256'");
     expect(smoke).toContain("const fetchMarketMakerHealth = (): MarketMakerDirectHealthPayload | null => {");
     expect(smoke).toContain("`http://127.0.0.1:${marketMakerApiPort}/api/health`");
     expect(smoke).toContain("emitDebugEvent('mm-health-poll'");

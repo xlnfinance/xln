@@ -311,15 +311,11 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// Cross bootstrap touches two bilateral account machines per offer. A source
-// account must settle its pending frame before the next cross request on that
-// account, otherwise prod can trip stale-frame detection while waiting on ACKs.
-// Single-core demo hosts need smaller scheduler waves to keep the MM HTTP API
-// responsive while a runtime/account frame is processed atomically.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK =
-  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 2 : 8;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK =
-  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 4 : 16;
+// Cross bootstrap touches two bilateral account machines per offer. Keep the
+// wave large enough to finish within the per-stage budget, but still bounded so
+// every source account settles its pending frame before the next cross wave.
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 128;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 256;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
   Number(
@@ -3204,6 +3200,8 @@ const run = async (): Promise<void> => {
   let steadyCrossCursor = 0;
   let lastSameQuoteProgressLogAt = 0;
   let lastSameQuoteProgressKey = '';
+  let lastCrossProgressLogAt = 0;
+  let lastCrossProgressKey = '';
   const hubsForContext = (visibleHubs: HubProfile[], context: MarketMakerEntityContext): HubProfile[] =>
     visibleHubs
       .filter(profile => sameJurisdiction(context, profile))
@@ -3262,6 +3260,89 @@ const run = async (): Promise<void> => {
       reason,
       selected: selectedJob ? describeSameQuoteJobProgress(selectedJob) : null,
       incomplete: incomplete.slice(0, 8).map(describeSameQuoteJobProgress),
+      incompleteCount: incomplete.length,
+    });
+  };
+  const describeCrossQuoteJobProgress = (job: CrossQuoteJob): Record<string, unknown> => {
+    const specs = buildMarketMakerCrossOfferSpecs(
+      env,
+      job.sourceContext,
+      job.targetContext,
+      job.sourceHubs,
+      job.targetHubs,
+      job.sourceTokenIds,
+      job.targetTokenIds,
+    );
+    const routeGroups = new Map<string, {
+      sourceHubEntityId: string;
+      targetHubEntityId: string;
+      expected: number;
+      finalized: number;
+      visible: number;
+      pending: number;
+    }>();
+    const pendingBySource = new Map<string, Set<string>>();
+    const pendingFor = (entityId: string): Set<string> => {
+      const normalized = normalizeEntityRef(entityId);
+      const cached = pendingBySource.get(normalized);
+      if (cached) return cached;
+      const pending = collectPendingCrossRequestOrderIds(env, normalized);
+      pendingBySource.set(normalized, pending);
+      return pending;
+    };
+    for (const spec of specs) {
+      const route = spec.crossJurisdiction;
+      if (!route) continue;
+      const key = `${route.source.counterpartyEntityId}->${route.target.entityId}`;
+      const group = routeGroups.get(key) ?? {
+        sourceHubEntityId: route.source.counterpartyEntityId,
+        targetHubEntityId: route.target.entityId,
+        expected: 0,
+        finalized: 0,
+        visible: 0,
+        pending: 0,
+      };
+      group.expected += 1;
+      if (hasFinalizedMarketMakerCrossOffer(env, spec)) group.finalized += 1;
+      if (hasMarketMakerCrossOffer(env, spec)) group.visible += 1;
+      if (pendingFor(route.source.entityId).has(route.orderId)) group.pending += 1;
+      routeGroups.set(key, group);
+    }
+    return {
+      sourceJurisdiction: job.sourceContext.jurisdictionName,
+      targetJurisdiction: job.targetContext.jurisdictionName,
+      sourceHubs: job.sourceHubs.map(hub => hub.entityId),
+      targetHubs: job.targetHubs.map(hub => hub.entityId),
+      expectedOffers: specs.length,
+      finalizedOffers: specs.filter(spec => hasFinalizedMarketMakerCrossOffer(env, spec)).length,
+      visibleOffers: specs.filter(spec => hasMarketMakerCrossOffer(env, spec)).length,
+      routes: Array.from(routeGroups.values())
+        .sort((left, right) =>
+          left.finalized - right.finalized ||
+          left.visible - right.visible ||
+          compareStableText(left.sourceHubEntityId, right.sourceHubEntityId) ||
+          compareStableText(left.targetHubEntityId, right.targetHubEntityId),
+        )
+        .slice(0, 8),
+    };
+  };
+  const emitCrossProgress = (reason: string, jobs: CrossQuoteJob[], selectedJob?: CrossQuoteJob): void => {
+    if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
+    const incomplete = jobs.filter(job => !isCrossQuoteJobDepthComplete(env, job));
+    const key = incomplete
+      .map((job) => {
+        const progress = describeCrossQuoteJobProgress(job);
+        return `${String(progress['sourceJurisdiction'])}->${String(progress['targetJurisdiction'])}:${String(progress['finalizedOffers'])}/${String(progress['expectedOffers'])}`;
+      })
+      .join('|');
+    const now = Date.now();
+    if (key === lastCrossProgressKey && now - lastCrossProgressLogAt < 2_000) return;
+    lastCrossProgressKey = key;
+    lastCrossProgressLogAt = now;
+    emitBootstrapDebugEvent('cross-progress', {
+      reason,
+      selected: selectedJob ? describeCrossQuoteJobProgress(selectedJob) : null,
+      incomplete: incomplete.slice(0, 4).map(describeCrossQuoteJobProgress),
       incompleteCount: incomplete.length,
     });
   };
@@ -3403,6 +3484,7 @@ const run = async (): Promise<void> => {
       }
       const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }> = [];
       if (crossQuoteJobs.length > 0) {
+        if (mode === 'bootstrap') emitCrossProgress('scan', crossQuoteJobs);
         const cursor = mode === 'bootstrap' ? bootstrapCrossCursor : steadyCrossCursor;
         if (mode === 'bootstrap') {
           let nextCursor = cursor;
@@ -3437,6 +3519,7 @@ const run = async (): Promise<void> => {
         const job = entry.job;
         await yieldMarketMakerApi();
         if (!shouldContinue()) return;
+        if (mode === 'bootstrap') emitCrossProgress('selected', crossQuoteJobs, job);
         if (await maintainMarketMakerCrossQuotes(
           env,
           job.sourceContext,
