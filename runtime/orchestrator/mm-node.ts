@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
 import { createHash } from 'node:crypto';
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { cpus } from 'node:os';
+import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
@@ -294,13 +297,26 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // Cross bootstrap touches two bilateral account machines per offer. A source
 // account must settle its pending frame before the next cross request on that
 // account, otherwise prod can trip stale-frame detection while waiting on ACKs.
+// Single-core demo hosts need smaller scheduler waves to keep the MM HTTP API
+// responsive while a runtime/account frame is processed atomically.
+const MARKET_MAKER_BOOTSTRAP_CPU_COUNT = Math.max(1, cpus().length || 1);
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK =
+  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 2 : 8;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK =
+  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 4 : 16;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '8'),
+  Number(
+    process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] ||
+      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK),
+  ),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '16'),
+  Number(
+    process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] ||
+      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK),
+  ),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -327,6 +343,28 @@ const MARKET_MAKER_MAX_LEVELS_PER_PAIR = Math.max(
     Number(process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'),
   ),
 );
+const MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL = String(
+  process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '',
+).trim();
+
+const emitMarketMakerBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void => {
+  if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
+  const record = {
+    schema: 'xln-market-maker-bootstrap-debug-event-v1',
+    at: new Date().toISOString(),
+    event,
+    ...fields,
+  };
+  try {
+    mkdirSync(dirname(MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL), { recursive: true });
+    appendFileSync(MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL, `${safeStringify(record)}\n`);
+  } catch (error) {
+    console.error(
+      `[MESH-MM] BOOTSTRAP_DEBUG_EVENT_WRITE_FAILED path=${MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL} ` +
+      `error=${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+};
 const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   60_000,
   Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
@@ -2732,6 +2770,42 @@ const run = async (): Promise<void> => {
   let lastDirectEntityInput: DirectEntityInputDebug | null = null;
   let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
 
+  const summarizeMarketMakerHealthForDebug = (health: MarketMakerHealth | null): Record<string, unknown> | null => {
+    if (!health) return null;
+    const accountBlockers = [
+      ...health.hubs.flatMap(hub => hub.blockers),
+      ...health.cross.routes.flatMap(route => route.blockers),
+    ].slice(0, 16);
+    return {
+      ok: health.ok,
+      offers: health.hubs.map(hub => hub.offers),
+      hubBlockers: health.hubs.map(hub => hub.blockers.length),
+      cross: {
+        ok: health.cross.ok,
+        expectedRoutes: health.cross.expectedRoutes,
+        offers: health.cross.routes.map(route => route.offers),
+        blockers: health.cross.routes.map(route => route.blockers.length),
+      },
+      account: accountBlockers,
+      pendingFrame: accountBlockers.some(blocker =>
+        typeof blocker === 'object' &&
+        blocker !== null &&
+        (blocker as { pendingFrame?: unknown }).pendingFrame === true,
+      ),
+    };
+  };
+
+  const emitBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void => {
+    emitMarketMakerBootstrapDebugEvent(event, {
+      stage: startupPhase,
+      entity: activeMmEntityId,
+      runtimeId: String(env.runtimeId || ''),
+      height: env.height,
+      backlog: getMarketMakerRuntimeBacklogSnapshot(env, { includeQueuedEntityInputs: true }),
+      ...fields,
+    });
+  };
+
   const buildMarketMakerHealthSnapshot = (options: { includeCross?: boolean } = {}): MarketMakerHealth | null => {
     const primaryContext = mmContexts[0] ?? null;
     const activeEntityId = activeMmEntityId;
@@ -2778,6 +2852,7 @@ const run = async (): Promise<void> => {
 
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
   nodeLog.info('startup phase', { phase: startupPhase });
+  emitBootstrapDebugEvent('startup', { phase: startupPhase });
 
   const directRuntimeWs = createDirectRuntimeWsRoute({
     runtimeId: String(env.runtimeId || ''),
@@ -3398,6 +3473,12 @@ const run = async (): Promise<void> => {
     bootstrapReadyAt = Date.now();
     await persistBootstrapReadySnapshotIfRequested();
     startupPhase = 'offers-ready';
+    emitBootstrapDebugEvent('ready-hash', {
+      hash: fingerprint.hash,
+      runtimeStateHash,
+      entityStateHash,
+      health: summarizeMarketMakerHealthForDebug(health),
+    });
     console.log(
       `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash} payload=${safeStringify(fingerprint.payload)}`,
     );
@@ -3416,10 +3497,26 @@ const run = async (): Promise<void> => {
         isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));
       if (sameDepthComplete || bootstrapCrossStarted) {
         bootstrapCrossStarted = true;
-        startupPhase = 'bootstrap-cross';
+        if (startupPhase !== 'bootstrap-cross') {
+          startupPhase = 'bootstrap-cross';
+          emitBootstrapDebugEvent('phase', {
+            phase: startupPhase,
+            health: summarizeMarketMakerHealthForDebug(health),
+          });
+        } else {
+          startupPhase = 'bootstrap-cross';
+        }
         return;
       }
-      startupPhase = 'bootstrap-same-chain';
+      if (startupPhase !== 'bootstrap-same-chain') {
+        startupPhase = 'bootstrap-same-chain';
+        emitBootstrapDebugEvent('phase', {
+          phase: startupPhase,
+          health: summarizeMarketMakerHealthForDebug(health),
+        });
+      } else {
+        startupPhase = 'bootstrap-same-chain';
+      }
     };
     while (!shuttingDown && Date.now() < deadline) {
       const beforeDrive = publishBootstrapHealthSnapshot();
@@ -3435,7 +3532,9 @@ const run = async (): Promise<void> => {
         const now = Date.now();
         if (now - lastBacklogLogAt >= 5_000) {
           lastBacklogLogAt = now;
-          console.warn(`[MESH-MM] BOOTSTRAP_WAIT_BACKLOG ${safeStringify(getMarketMakerRuntimeBacklogSnapshot(env))}`);
+          const backlog = getMarketMakerRuntimeBacklogSnapshot(env);
+          emitBootstrapDebugEvent('backlog', { backlog });
+          console.warn(`[MESH-MM] BOOTSTRAP_WAIT_BACKLOG ${safeStringify(backlog)}`);
         }
       }
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
@@ -3446,6 +3545,10 @@ const run = async (): Promise<void> => {
     console.warn(
       `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify((health?.hubs ?? []).map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))} cross=${safeStringify({ expectedRoutes: health?.cross.expectedRoutes ?? 0, routes: (health?.cross.routes ?? []).map(route => ({ sourceHubEntityId: route.sourceHubEntityId, targetHubEntityId: route.targetHubEntityId, offers: route.offers, ready: route.ready })) })}`,
     );
+    emitBootstrapDebugEvent('timeout', {
+      health: summarizeMarketMakerHealthForDebug(health),
+      visibleHubs: visibleHubs.length,
+    });
     return false;
   };
 
@@ -3474,6 +3577,7 @@ const run = async (): Promise<void> => {
   const failQuoteLoop = (error: unknown): void => {
     if (shuttingDown) return;
     const message = error instanceof Error ? error.message : String(error);
+    emitBootstrapDebugEvent('fatal', { error: message });
     console.error(`[MM] quote loop failed; shutting down:`, message);
     if (loop) clearInterval(loop);
     process.exit(1);
@@ -3487,6 +3591,7 @@ const run = async (): Promise<void> => {
   };
   startupPhase = 'runtime-ready';
   publishMarketMakerHealthSnapshot({ includeCross: false });
+  emitBootstrapDebugEvent('phase', { phase: startupPhase });
   console.log(
     `[MESH-MM] RUNTIME_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
@@ -3496,11 +3601,13 @@ const run = async (): Promise<void> => {
     if (shuttingDown) return;
     startupPhase = 'bootstrap-same-chain';
     publishBootstrapHealthSnapshot();
+    emitBootstrapDebugEvent('phase', { phase: startupPhase });
     if (await waitForBootstrapOffers()) {
       await markOffersReady();
       publishMarketMakerHealthSnapshot({ includeCross: true });
     } else {
       startupPhase = 'bootstrap-degraded';
+      emitBootstrapDebugEvent('phase', { phase: startupPhase });
       startQuoteLoop();
     }
   })().catch(failQuoteLoop);

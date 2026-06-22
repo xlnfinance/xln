@@ -8,7 +8,7 @@ This directory contains the browser-facing tests and shared Playwright helpers. 
 | --- | --- | --- |
 | L1 unit/component | Pure or near-pure runtime/frontend/native checks with no browser stack. Use for orderbook, serialization, storage projections, recovery builders, guards. | `bun test runtime/__tests__ tests/unit tests/frontend native/__tests__` |
 | L2 runtime scenarios | Deterministic runtime behavior through scenario execution, including non-network and isolated RPC/relay paths. Use when behavior crosses entity/account/jurisdiction boundaries. | `bun run test:scenarios:parallel:isolated` |
-| L3 browser e2e | Real user flows in Playwright against isolated local stacks. Use for clicks, onboarding, payments, swaps, disputes, recovery, custody. | `bun run test:e2e:fast` |
+| L3 browser e2e | Real user flows in Playwright against isolated local stacks. Use as a release gate after L1/L2 are green, not as the first debugger for a known narrow failure. | `bun run test:e2e:fast` |
 | L4 contracts | Solidity jurisdiction contracts and runtime/contract proof compatibility. | `bun run test:contracts:full` |
 
 ## Daily Commands
@@ -52,8 +52,9 @@ cd jurisdictions && bunx hardhat test --grep DeltaTransformer
 
 ## Policy
 
-- Prefer the full e2e flow first when adding a user-visible feature.
+- Start with the smallest executable probe that can fail: L1 for local logic, L2 scenario/soundcheck for bootstrap/runtime issues, then L3 browser e2e as the release gate.
 - After a slow e2e exposes a bug, add the shortest deterministic regression below it: runtime scenario if the bug crosses machines, unit/component if the bug is local.
+- For bootstrap bugs, use `bun run prod:bootstrap:fresh`, `bun run prod:bootstrap:clone`, or `bun run prod:bootstrap:hydrate` before any full e2e rerun. Inspect `bootstrap-events.jsonl` and `mm-bootstrap-events.jsonl` with `jq`.
 - Keep Playwright assertions user-visible where possible. Use runtime debug reads only to prove consensus, persistence, or chain state that the UI cannot faithfully expose.
 - Do not add silent skips. `runtime/__tests__/test-skip-discipline.test.ts` enforces this.
 - Always run `bun run check` before reporting completion.

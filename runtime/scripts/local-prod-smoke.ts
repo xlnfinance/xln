@@ -72,6 +72,7 @@ type BootstrapMetrics = {
   entityStateHash: string;
   workDir: string;
   eventsJsonl: string;
+  marketMakerEventsJsonl: string;
   templateDir?: string;
 };
 
@@ -106,6 +107,8 @@ const stages: BootstrapStage[] = [];
 const recordedStages = new Set<string>();
 let fatalStageBudgetError: string | null = null;
 const eventsJsonlPath = process.env['XLN_LOCAL_PROD_SMOKE_EVENTS_JSONL'] || join(workDir, 'bootstrap-events.jsonl');
+const marketMakerEventsJsonlPath =
+  process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || join(workDir, 'mm-bootstrap-events.jsonl');
 const enforceStageBudgets = process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1';
 const healthPollMaxMs = Math.max(
   250,
@@ -618,6 +621,7 @@ const main = async (): Promise<void> => {
       process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '8',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:
       process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '16',
+    XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath,
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
     ...(useSnapshotTemplate ? { XLN_MARKET_MAKER_DISABLE_RESTORE: '0' } : {}),
     ...(persistMarketMakerStorage ? {
@@ -698,6 +702,7 @@ const main = async (): Promise<void> => {
     entityStateHash: bootstrap.entityStateHash,
     workDir,
     eventsJsonl: eventsJsonlPath,
+    marketMakerEventsJsonl: marketMakerEventsJsonlPath,
     ...(useSnapshotTemplate ? { templateDir } : {}),
   };
   const metricsPath = process.env['XLN_LOCAL_PROD_SMOKE_METRICS_JSON'] || join(workDir, 'bootstrap-metrics.json');

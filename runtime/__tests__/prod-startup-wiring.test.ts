@@ -150,8 +150,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '8'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '16'");
+    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 2 : 8');
+    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 4 : 16');
+    expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
+    expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
     expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '6'");
@@ -436,7 +438,13 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
     expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
     expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
+    expect(mmNode).toContain("schema: 'xln-market-maker-bootstrap-debug-event-v1'");
+    expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL']");
+    expect(mmNode).toContain('BOOTSTRAP_DEBUG_EVENT_WRITE_FAILED');
     expect(smoke).toContain('DEBUG_EVENT_WRITE_FAILED');
+    expect(smoke).toContain("const marketMakerEventsJsonlPath =");
+    expect(smoke).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath');
+    expect(smoke).toContain('marketMakerEventsJsonl: marketMakerEventsJsonlPath');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
@@ -500,6 +508,7 @@ describe('production startup wiring', () => {
     expect(soundcheck).toContain('results.push(installTemplateFromResult(freshResult));');
     expect(soundcheck).toContain("XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1'");
     expect(soundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS: '1'");
+    expect(soundcheck).toContain('marketMakerEventsJsonl: metrics.marketMakerEventsJsonl');
     expect(soundcheck).toContain('BOOTSTRAP_SOUNDCHECK_CLONE_HASH_DRIFT');
     expect(soundcheck).toContain('BOOTSTRAP_SOUNDCHECK_CLONE_ENTITY_HASH_DRIFT');
     expect(soundcheck).toContain('BOOTSTRAP_SOUNDCHECK_HYDRATE_HASH_DRIFT');
@@ -549,7 +558,7 @@ describe('production startup wiring', () => {
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
     const driveStart = mmNode.indexOf("const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady')");
-    const markReadyStart = mmNode.indexOf('const markOffersReady = (): void => {');
+    const markReadyStart = mmNode.indexOf('const markOffersReady = async (): Promise<void> => {');
     expect(ensureStart).toBeGreaterThan(0);
     expect(readyStart).toBeGreaterThan(ensureStart);
     expect(driveStart).toBeGreaterThan(readyStart);
