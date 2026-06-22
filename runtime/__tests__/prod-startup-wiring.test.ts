@@ -25,6 +25,9 @@ describe('production startup wiring', () => {
     expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-1}');
     expect(script).toContain('export MARKET_MAKER_CROSS_LEVELS_PER_PAIR=${MARKET_MAKER_CROSS_LEVELS_PER_PAIR:-1}');
     expect(script).toContain(
+      'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1}',
+    );
+    expect(script).toContain(
       'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-1}',
     );
     expect(script).toContain(
@@ -174,6 +177,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK)');
     expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
+    expect(mmNode).toContain("MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
+    expect(mmNode).toContain('pairs.slice(0, MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE)');
     expect(mmNode).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '6'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '6'");
@@ -548,6 +553,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
     expect(smoke).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
     expect(smoke).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR: process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_RUNTIME_HASH_MISMATCH');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH');
     expect(smoke).toContain("emitDebugEvent('bootstrap-hash'");
