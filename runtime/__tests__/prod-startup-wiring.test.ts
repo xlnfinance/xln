@@ -552,6 +552,20 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('--mesh-hub-identities-json');
   });
 
+  test('hub and market maker route consensus entity inputs through relay, not direct ws best-effort', () => {
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const p2p = readFileSync(join(repoRoot, 'runtime/networking/p2p.ts'), 'utf8');
+
+    expect(p2p).toContain('preferRelayForEntityInput?: boolean;');
+    expect(p2p).toContain('if (this.preferRelayForEntityInput) {');
+    expect(p2p).toContain("transport: 'relay'");
+    expect(hubNode).toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
+    expect(mmNode).toContain("process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'");
+    expect(hubNode).toContain('preferRelayForEntityInput: true');
+    expect(mmNode).toContain('preferRelayForEntityInput: true');
+  });
+
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     expect(hubNode).toContain("import { getTokenIdsForJurisdiction } from '../account-utils';");

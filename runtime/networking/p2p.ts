@@ -39,6 +39,7 @@ export type P2PConfig = {
   relayUrls?: string[];
   wsUrl?: string | null;
   allowDirectClients?: boolean;
+  preferRelayForEntityInput?: boolean;
   seedRuntimeIds?: string[];
   runtimeId?: string;
   signerId?: string;
@@ -54,6 +55,7 @@ type RuntimeP2POptions = {
   relayUrls?: string[];
   wsUrl?: string | null;
   allowDirectClients?: boolean;
+  preferRelayForEntityInput?: boolean;
   seedRuntimeIds?: string[];
   advertiseEntityIds?: string[];
   isHub?: boolean;
@@ -154,6 +156,7 @@ export class RuntimeP2P {
   private relayUrls: string[];
   private wsUrl: string | null;
   private allowDirectClients: boolean;
+  private preferRelayForEntityInput: boolean;
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private gossipPollMs: number;
@@ -182,6 +185,7 @@ export class RuntimeP2P {
     this.relayUrls = uniqueTransportValues(options.relayUrls || [DEFAULT_RELAY_URL]);
     this.wsUrl = normalizeOptionalWsUrl(options.wsUrl);
     this.allowDirectClients = options.allowDirectClients !== false;
+    this.preferRelayForEntityInput = options.preferRelayForEntityInput === true;
     this.seedRuntimeIds = uniqueTransportValues(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
@@ -206,6 +210,9 @@ export class RuntimeP2P {
     if (config.allowDirectClients !== undefined && this.allowDirectClients !== (config.allowDirectClients !== false)) {
       this.allowDirectClients = config.allowDirectClients !== false;
       if (!this.allowDirectClients) this.closeDirectClients();
+    }
+    if (config.preferRelayForEntityInput !== undefined) {
+      this.preferRelayForEntityInput = config.preferRelayForEntityInput === true;
     }
     if (config.seedRuntimeIds) {
       this.seedRuntimeIds = uniqueTransportValues(config.seedRuntimeIds);
@@ -578,6 +585,12 @@ export class RuntimeP2P {
     client: RuntimeWsClient | null;
     transport: 'direct' | 'relay';
   } {
+    if (this.preferRelayForEntityInput) {
+      return {
+        client: this.getActiveClient(),
+        transport: 'relay',
+      };
+    }
     const hasDirectEndpoint = this.hasDirectPeerEndpoint(runtimeId);
     if (hasDirectEndpoint) {
       this.ensureDirectClientForRuntime(runtimeId);

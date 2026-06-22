@@ -2784,8 +2784,11 @@ const run = async (): Promise<void> => {
     },
   });
   env.runtimeState = env.runtimeState ?? {};
-  env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
-    directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
+  env.runtimeState.directEntityInputDispatch =
+    process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'
+      ? (targetRuntimeId, input, ingressTimestamp) =>
+          directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp)
+      : null;
   const handleRadapterWsMessage = (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;
     try {
@@ -3078,6 +3081,7 @@ const run = async (): Promise<void> => {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
     allowDirectClients: false,
+    preferRelayForEntityInput: true,
     advertiseEntityIds: mmContexts.map(context => context.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });
