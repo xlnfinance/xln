@@ -279,7 +279,7 @@ const MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME = Math.max(
 );
 const MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'),
+  Number(process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '12'),
 );
 const MARKET_MAKER_API_YIELD_MS = Math.max(
   1,
@@ -319,7 +319,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // Cross bootstrap builds full depth, but each wave is bounded to one source
 // account settlement batch. Remote account proposals are atomic and must not be
 // split after construction, so the scheduler is the correct frame boundary.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 10;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 12;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 1000;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
@@ -337,7 +337,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -2196,21 +2196,45 @@ const maintainMarketMakerCrossQuotes = async (
     );
     let remainingSourceHubGroups = Math.max(1, Math.floor(maxSourceHubGroups));
     let desiredOffersSeen = 0;
-    const sortedSourceHubs = [...sourceHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
     const sortedTargetHubs = [...targetHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
+    const sourceHubScans = [...sourceHubs]
+      .map(sourceHub => {
+        const specs = buildMarketMakerCrossOfferSpecs(
+          env,
+          sourceContext,
+          targetContext,
+          [sourceHub],
+          sortedTargetHubs,
+          sourceTokenIds,
+          targetTokenIds,
+        );
+        return {
+          sourceHub,
+          specs,
+          coverageGaps: countCrossPairCoverageGaps(env, specs),
+          progress: countCrossSpecBootstrapProgress(env, specs, getPendingCrossRequestOrderIds),
+        };
+      })
+      .sort((left, right) =>
+        right.coverageGaps - left.coverageGaps ||
+        left.progress - right.progress ||
+        compareStableText(left.sourceHub.entityId, right.sourceHub.entityId),
+      );
 
     emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start', {
       direction,
-      groupedSourceHubs: sortedSourceHubs.length,
+      groupedSourceHubs: sourceHubScans.length,
       groupedTargetHubs: sortedTargetHubs.length,
       remainingNewOffers,
       remainingSourceHubGroups,
     });
 
-    for (const sourceHub of sortedSourceHubs) {
+    for (const scan of sourceHubScans) {
       await yieldMarketMakerApi();
       if (!shouldContinue()) return false;
       if (remainingNewOffers <= 0 || remainingSourceHubGroups <= 0) break;
+      if (scan.specs.length === 0) continue;
+      const sourceHub = scan.sourceHub;
       const sourceHubEntityId = sourceHub.entityId;
       const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
       if (!account) continue;
@@ -2221,37 +2245,40 @@ const maintainMarketMakerCrossQuotes = async (
       const perAccountLimit = Math.max(1, Math.floor(maxOffersPerAccount));
       let selectedForSourceHub = 0;
       let candidateCount = 0;
-      for (const targetHub of sortedTargetHubs) {
+      const specs = scan.specs.filter(spec => {
+        const route = spec.crossJurisdiction;
+        if (!route) return false;
+        const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);
+        if (!targetAccount) return false;
+        if (String(targetAccount.status || 'active') !== 'active') return false;
+        return isAccountConsensusReady(targetAccount);
+      });
+      desiredOffersSeen += specs.length;
+      if (specs.length === 0) continue;
+      const specsByTargetHub = new Map<string, MarketMakerOfferSpec[]>();
+      for (const spec of specs) {
+        const targetHubEntityId = normalizeEntityRef(spec.crossJurisdiction?.target.entityId || '');
+        const arr = specsByTargetHub.get(targetHubEntityId) ?? [];
+        arr.push(spec);
+        specsByTargetHub.set(targetHubEntityId, arr);
+      }
+      const sortedTargetHubEntries = [...specsByTargetHub.entries()]
+        .sort((left, right) => compareStableText(left[0], right[0]));
+      for (const [, targetSpecs] of sortedTargetHubEntries) {
         await yieldMarketMakerApi();
         if (!shouldContinue()) return false;
         if (remainingNewOffers <= 0 || selectedForSourceHub >= perAccountLimit) break;
-        const targetAccount = getAccountMachine(env, targetContext.entityId, targetHub.entityId);
-        if (!targetAccount) continue;
-        if (String(targetAccount.status || 'active') !== 'active') continue;
-        if (!isAccountConsensusReady(targetAccount)) continue;
-
-        const specs = buildMarketMakerCrossOfferSpecs(
-          env,
-          sourceContext,
-          targetContext,
-          [sourceHub],
-          [targetHub],
-          sourceTokenIds,
-          targetTokenIds,
-        );
-        desiredOffersSeen += specs.length;
-        if (specs.length === 0) continue;
 
         const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
-        const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);
-        const progressByPair = countCrossSpecBootstrapProgressByPair(env, specs, getPendingCrossRequestOrderIds);
+        const visibleByPair = countCrossSpecVisibleOffersByPair(env, targetSpecs);
+        const progressByPair = countCrossSpecBootstrapProgressByPair(env, targetSpecs, getPendingCrossRequestOrderIds);
         const allowedNewOffers = Math.min(
           perAccountLimit - selectedForSourceHub,
           remainingOpenSlots,
           remainingNewOffers,
         );
         if (allowedNewOffers <= 0) continue;
-        const missingCandidates = specs
+        const missingCandidates = targetSpecs
           .filter(spec =>
             spec.crossJurisdiction &&
             !existingOfferIds.has(spec.offerId) &&
@@ -3794,6 +3821,10 @@ const run = async (): Promise<void> => {
           });
           await yieldMarketMakerApi();
         }
+        if (hasBootstrapCrossAccountBacklog(visibleHubs)) {
+          await yieldMarketMakerApi();
+          return false;
+        }
       }
 
       const crossQuoteJobs: CrossQuoteJob[] = [];
@@ -3952,6 +3983,7 @@ const run = async (): Promise<void> => {
 
   const markOffersReady = async (finalizedHealth?: MarketMakerHealth | null): Promise<void> => {
     if (startupPhase === 'offers-ready') return;
+    const finalizeStartedAt = Date.now();
     const visibleHubs = readVisibleHubProfiles(env, true);
     if (!isAllSameQuoteDepthComplete(visibleHubs)) {
       throw new Error(`MARKET_MAKER_BOOTSTRAP_INCOMPLETE: ${safeStringify({
@@ -3968,10 +4000,17 @@ const run = async (): Promise<void> => {
           })),
       })}`);
     }
+    const assertStartedAt = Date.now();
     const health = assertMarketMakerBootstrapFinalized(
       env,
       finalizedHealth ?? publishMarketMakerHealthSnapshot({ includeCross: true }),
     );
+    emitBootstrapDebugEvent('finalize-step', {
+      step: 'assert-finalized',
+      durationMs: Date.now() - assertStartedAt,
+    });
+    await yieldMarketMakerApi();
+    const fingerprintStartedAt = Date.now();
     const fingerprint = buildMarketMakerBootstrapFingerprint(
       env,
       mmContexts,
@@ -3979,13 +4018,29 @@ const run = async (): Promise<void> => {
       mmTokenIdsByContext,
       health,
     );
+    emitBootstrapDebugEvent('finalize-step', {
+      step: 'fingerprint',
+      durationMs: Date.now() - fingerprintStartedAt,
+    });
+    await yieldMarketMakerApi();
+    const hashStartedAt = Date.now();
     const runtimeStateHash = computeCanonicalStateHashFromEnv(env);
     const entityStateHash = buildMarketMakerBootstrapEntityStateHash(env);
+    emitBootstrapDebugEvent('finalize-step', {
+      step: 'canonical-hashes',
+      durationMs: Date.now() - hashStartedAt,
+    });
     bootstrapReadyHash = fingerprint.hash;
     bootstrapRuntimeStateHash = runtimeStateHash;
     bootstrapEntityStateHash = entityStateHash;
     bootstrapReadyAt = Date.now();
+    await yieldMarketMakerApi();
+    const persistStartedAt = Date.now();
     await persistBootstrapReadySnapshotIfRequested();
+    emitBootstrapDebugEvent('finalize-step', {
+      step: 'persist-ready-snapshot',
+      durationMs: Date.now() - persistStartedAt,
+    });
     startupPhase = 'offers-ready';
     cachedMarketMakerHealth = health;
     rebuildCachedHealthResponseJson();
@@ -3994,6 +4049,7 @@ const run = async (): Promise<void> => {
       runtimeStateHash,
       entityStateHash,
       health: summarizeMarketMakerHealthForDebug(health),
+      finalizeDurationMs: Date.now() - finalizeStartedAt,
     });
     console.log(
       `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}`,
@@ -4009,6 +4065,7 @@ const run = async (): Promise<void> => {
   const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
     let lastBacklogLogAt = 0;
+    let bootstrapCompletionCheckArmed = false;
     const refreshBootstrapPhase = (health: MarketMakerHealth | null): void => {
       if (isBootstrapDepthComplete(health)) return;
       const sameDepthComplete =
@@ -4039,6 +4096,7 @@ const run = async (): Promise<void> => {
     };
     while (!shuttingDown && Date.now() < deadline) {
       if (hasMarketMakerRuntimeBacklog(env)) {
+        bootstrapCompletionCheckArmed = false;
         await yieldMarketMakerApi();
         await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
         continue;
@@ -4046,17 +4104,30 @@ const run = async (): Promise<void> => {
       const beforeDrive = publishBootstrapHealthSnapshot();
       refreshBootstrapPhase(beforeDrive);
       await yieldMarketMakerApi();
+      if (bootstrapCompletionCheckArmed && canCheckBootstrapCompletion()) {
+        const completionStartedAt = Date.now();
+        const completionHealth = buildBootstrapCompletionHealth();
+        emitBootstrapDebugEvent('completion-health', {
+          durationMs: Date.now() - completionStartedAt,
+          health: summarizeMarketMakerHealthForDebug(completionHealth),
+        });
+        await yieldMarketMakerApi();
+        if (isBootstrapDepthComplete(completionHealth)) return completionHealth;
+        bootstrapCompletionCheckArmed = false;
+      }
       const enqueued = await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
+      if (enqueued) bootstrapCompletionCheckArmed = false;
       if (hasMarketMakerRuntimeBacklog(env)) {
+        bootstrapCompletionCheckArmed = false;
         await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
         continue;
       }
       const health = publishBootstrapHealthSnapshot();
       refreshBootstrapPhase(health);
       if (!enqueued && canCheckBootstrapCompletion()) {
-        const completionHealth = buildBootstrapCompletionHealth();
-        if (isBootstrapDepthComplete(completionHealth)) return completionHealth;
+        bootstrapCompletionCheckArmed = true;
+        await yieldMarketMakerApi();
         const now = Date.now();
         if (now - lastBacklogLogAt >= 5_000) {
           lastBacklogLogAt = now;
