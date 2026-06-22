@@ -11,6 +11,14 @@ import {
 
 const repoRoot = process.cwd();
 
+const extractSourceBlock = (source: string, marker: string, nextMarker: string): string => {
+  const start = source.indexOf(marker);
+  expect(start).toBeGreaterThanOrEqual(0);
+  const end = source.indexOf(nextMarker, start + marker.length);
+  expect(end).toBeGreaterThan(start);
+  return source.slice(start, end);
+};
+
 describe('production startup wiring', () => {
   test('start-server exposes the secondary Tron RPC to the orchestrator and children', () => {
     const script = readFileSync(join(repoRoot, 'scripts/start-server.sh'), 'utf8');
@@ -22,24 +30,25 @@ describe('production startup wiring', () => {
     expect(script).toContain('--rpc2-url "$ANVIL_RPC2"');
     expect(script).toContain('export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-1}');
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
-    expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-1}');
-    expect(script).toContain('export MARKET_MAKER_CROSS_LEVELS_PER_PAIR=${MARKET_MAKER_CROSS_LEVELS_PER_PAIR:-1}');
+    expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-10}');
+    expect(script).toContain('export MARKET_MAKER_CROSS_LEVELS_PER_PAIR=${MARKET_MAKER_CROSS_LEVELS_PER_PAIR:-3}');
     expect(script).toContain(
-      'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1}',
+      'export MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE=${MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:-1000}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-1}',
+      'export MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE=${MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE:-1000}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-5}',
+      'export MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK=${MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:-1000}',
     );
     expect(script).toContain(
-      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-5}',
+      'export MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK=${MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:-1000}',
     );
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime-entity-routing.ts'), 'utf8');
+    const runtimeMainSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
     expect(orchestratorConfig).toContain("const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;");
     expect(orchestrator).toContain('const relayUrl = args.relayUrl;');
@@ -62,6 +71,11 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const mmOk = !args.mmEnabled');
     expect(orchestrator).toContain('marketMakerActive &&');
     const waitForMarketMakerReady = orchestrator.slice(orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'));
+    const waitForMarketMakerReadyEnd = waitForMarketMakerReady.indexOf('const waitForHubSelfReady = async (child: HubChild): Promise<void> => {');
+    expect(waitForMarketMakerReadyEnd).toBeGreaterThan(0);
+    const waitForMarketMakerReadyBody = waitForMarketMakerReady.slice(0, waitForMarketMakerReadyEnd);
+    expect(waitForMarketMakerReadyBody).toContain('const health = computeAggregatedHealth();');
+    expect(waitForMarketMakerReadyBody).not.toContain('buildAggregatedHealthResponse()');
     expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
       waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
     );
@@ -87,8 +101,11 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
     expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
-    expect(runtimeEntityRouting).toContain('const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>');
-    expect(runtimeEntityRouting).toContain("runtimeProcess.exit(1);");
+    expect(runtimeEntityRouting).toContain('deps.startRuntimeLoop(env);');
+    expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
+    expect(runtimeEntityRouting).not.toContain('queueMicrotask(() =>');
+    expect(runtimeMainSource).toContain('const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>');
+    expect(runtimeMainSource).toContain("runtimeProcess.exit(1);");
     expect(orchestrator).toContain("XLN_STORAGE_SYNC_WRITES: process.env['XLN_STORAGE_SYNC_WRITES'] ?? '0'");
     expect(orchestrator).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: process.env['XLN_MARKET_MAKER_DISABLE_STORAGE'] ?? '1'");
     expect(orchestrator).toContain("XLN_DISABLE_RUNTIME_RESTORE: process.env['XLN_MARKET_MAKER_DISABLE_RESTORE'] ?? process.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? '1'");
@@ -156,7 +173,7 @@ describe('production startup wiring', () => {
     expect(runtimeSource).toContain('mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];');
     expect(runtimeSource).toContain('if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true)');
     expect(runtimeSource).not.toContain('void config;');
-    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
+    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('const pushMarketMakerEntityTx = (');
@@ -164,7 +181,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
@@ -211,10 +228,18 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const visibleByPair = countCrossSpecVisibleOffersByPair(env, specs);');
     expect(mmNode).toContain('countCrossPairCoverageGaps(env, right[1]) -');
     expect(mmNode).toContain('(visibleByPair.get(left.pairId) || 0) - (visibleByPair.get(right.pairId) || 0)');
-    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '10'");
+    expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_API_YIELD_MS'] || '1'");
     expect(mmNode).toContain('const yieldMarketMakerApi = async (): Promise<void> => {');
     expect(mmNode).toContain('await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));');
+    const crossProgressBody = extractSourceBlock(mmNode, 'const emitCrossProgress =', 'const isBootstrapDepthComplete =');
+    expect(crossProgressBody.indexOf('if (now - lastCrossProgressLogAt < 2_000) return;')).toBeLessThan(
+      crossProgressBody.indexOf('const incomplete = jobs.filter(job => !isCrossQuoteJobDepthComplete(env, job));'),
+    );
+    const sameProgressBody = extractSourceBlock(mmNode, 'const emitSameQuoteProgress =', 'const describeCrossQuoteJobProgress =');
+    expect(sameProgressBody.indexOf('if (now - lastSameQuoteProgressLogAt < 2_000) return;')).toBeLessThan(
+      sameProgressBody.indexOf('const incomplete = jobs.filter(job => !isSameQuoteJobDepthComplete(env, job));'),
+    );
     expect(mmNode).not.toContain('setImmediate(resolve)');
     expect(mmNode).not.toContain('await sleep(0);');
     expect(mmNode).toContain("MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK'] || '1000'");
@@ -274,17 +299,18 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('desiredOffers.every(spec => hasFinalizedMarketMakerCrossOffer(env, spec))');
     expect(mmNode).toContain('const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }>');
     expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index, job)');
-    expect(mmNode).toContain('A cross request starts a bilateral target-lock lifecycle.');
-    expect(mmNode).toContain('launch one per-account settlement wave and wait for');
-    expect(mmNode).toContain('account ACKs before opening more cross routes on the same accounts');
+    expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
+    expect(mmNode).toContain("direction: 'bootstrap-batch'");
+    expect(mmNode).toContain('if (deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
+    expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK");
     expect(mmNode).toContain('let bootstrapCrossStarted = false;');
     expect(mmNode).toContain('if (sameDepthComplete || bootstrapCrossStarted)');
     expect(mmNode).toContain("startupPhase = 'bootstrap-cross';");
-    expect(mmNode).toContain("if (mode === 'bootstrap') return;");
+    expect(mmNode).toContain("if (mode === 'steady') return;");
     expect(mmNode).toContain('bootstrapCrossCursor = isCrossQuoteJobDepthComplete(env, job) ? nextCursor : index;');
     expect(mmNode).toContain("if (mode === 'steady') steadyCrossCursor = nextCursor;");
-    expect(mmNode).toContain("if (mode === 'bootstrap' && !isCrossQuoteJobDepthComplete(env, job)) return;");
+    expect(mmNode).toContain('if (deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
     expect(mmNode).toContain('sourceHubs,');
     expect(mmNode).toContain('targetHubs,');
     expect(mmNode).toContain("if (mode === 'steady') return;");
@@ -400,12 +426,21 @@ describe('production startup wiring', () => {
     expect(controlRouteStart).toBeGreaterThan(healthRouteStart);
 
     const healthRoute = mmNode.slice(healthRouteStart, controlRouteStart);
-    expect(healthRoute).toContain('const cachedHealth = cachedMarketMakerHealth;');
-    expect(healthRoute).toContain("const marketMakerHealth = startupPhase === 'offers-ready'");
-    expect(healthRoute).toContain(': { ...rawMarketMakerHealth, ok: false };');
-    expect(healthRoute).toContain('marketMaker: marketMakerHealth');
-    expect(healthRoute).toContain('expectedRoutes: 0');
+    expect(healthRoute).toContain('if (!cachedHealthResponseJson) rebuildCachedHealthResponseJson();');
+    expect(healthRoute).toContain("return new Response(cachedHealthResponseJson ?? '{}', { headers: JSON_HEADERS });");
+    expect(healthRoute).not.toContain('safeStringify(');
+    expect(healthRoute).not.toContain('readVisibleHubProfiles(');
     expect(healthRoute).not.toContain('getMarketMakerHealth(');
+    const healthBuilderStart = mmNode.indexOf('const rebuildCachedHealthResponseJson = (): void => {');
+    const publishHealthStart = mmNode.indexOf('const publishMarketMakerHealthSnapshot');
+    expect(healthBuilderStart).toBeGreaterThan(0);
+    expect(publishHealthStart).toBeGreaterThan(healthBuilderStart);
+    const healthBuilder = mmNode.slice(healthBuilderStart, publishHealthStart);
+    expect(healthBuilder).toContain("const marketMakerHealth = startupPhase === 'offers-ready'");
+    expect(healthBuilder).toContain(': { ...rawMarketMakerHealth, ok: false };');
+    expect(healthBuilder).toContain('marketMaker: marketMakerHealth');
+    expect(healthBuilder).toContain('expectedRoutes: 0');
+    expect(healthBuilder).toContain('cachedHealthResponseJson = safeStringify({');
     expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
     expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
@@ -422,9 +457,12 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('bootstrapEntityStateHash = entityStateHash;');
     expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
     expect(mmNode).toContain('payload=${safeStringify(fingerprint.payload)}');
-    expect(mmNode).toContain("const beforeDrive = publishBootstrapHealthSnapshot();\n      refreshBootstrapPhase(beforeDrive);\n      if (isBootstrapDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return true;");
+    expect(mmNode).toContain("const beforeDrive = publishBootstrapHealthSnapshot();\n      refreshBootstrapPhase(beforeDrive);\n      if (isBootstrapDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return beforeDrive;");
     expect(mmNode).toContain("await driveQuotes('bootstrap');");
-    expect(mmNode).toContain('if (!hasMarketMakerRuntimeBacklog(env)) return true;');
+    expect(mmNode).toContain('if (!hasMarketMakerRuntimeBacklog(env)) return health;');
+    expect(mmNode).toContain('const bootstrapHealth = await waitForBootstrapOffers();');
+    expect(mmNode).toContain('await markOffersReady(bootstrapHealth);');
+    expect(mmNode).not.toContain("await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });");
     expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain('const sameDepthComplete =\n        isMarketMakerSameDepthComplete(health) &&\n        isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));');
     expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
@@ -469,6 +507,12 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"prod:bootstrap:template": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"');
     expect(packageJson).toContain('"prod:bootstrap:clone": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"');
     expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
+    expect(soundcheck).toContain("import { createConnection } from 'node:net';");
+    expect(soundcheck).toContain('const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];');
+    expect(soundcheck).toContain('const findPortBaseForIndex = async (index: number): Promise<number>');
+    expect(soundcheck).toContain('if (explicitPortBase) throw new Error(`BOOTSTRAP_SOUNDCHECK_PORT_BLOCK_BUSY:${requested}`);');
+    expect(soundcheck).toContain('throw new Error(`BOOTSTRAP_SOUNDCHECK_NO_FREE_PORT_BLOCK:${requested}`);');
+    expect(soundcheck).toContain('const runPortBase = await findPortBaseForIndex(index);');
     expect(smoke).toContain("schema: 'xln-local-prod-bootstrap-benchmark-v1'");
     expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
     expect(smoke).toContain("findFirstRuntimeFatalLogHit");
@@ -483,19 +527,22 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("emitBootstrapDebugEvent('same-quote-progress'");
     expect(mmNode).toContain("emitBootstrapDebugEvent('cross-progress'");
     expect(mmNode).toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue'");
-    expect(mmNode).toContain('mode === \'bootstrap\',\n        )) {');
+    expect(mmNode).toContain('deferredBootstrapCrossInputs ?? undefined');
+    expect(mmNode).toContain("direction: 'bootstrap-batch'");
     expect(mmNode).toContain('BOOTSTRAP_DEBUG_EVENT_WRITE_FAILED');
     expect(smoke).toContain('DEBUG_EVENT_WRITE_FAILED');
     expect(smoke).toContain("const marketMakerEventsJsonlPath =");
     expect(smoke).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL: marketMakerEventsJsonlPath');
     expect(smoke).toContain('marketMakerEventsJsonl: marketMakerEventsJsonlPath');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1'");
+    expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '8000'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
     expect(smoke).toContain("requireStageBudget('marketMaker:cross', crossReadyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);");
     expect(smoke).toContain('Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_INTERVAL_MS'] || '250'");
+    expect(smoke).toContain('await sleep(healthPollIntervalMs);');
     expect(smoke).toContain("emitDebugEvent('health-poll'");
     expect(smoke).toContain("emitDebugEvent('health-snapshot'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR']");
@@ -503,7 +550,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('const copySnapshotTemplate = (sourceDir: string, targetDir: string): void => {');
     expect(smoke).toContain("recordStage('snapshot:copied', { templateDir, workDir });");
     expect(smoke).toContain("XLN_MESH_PRESERVE_STATE_ON_RESET: '1'");
-    expect(smoke).toContain("...(useSnapshotTemplate ? { XLN_MARKET_MAKER_DISABLE_RESTORE: '0' } : {})");
+    expect(smoke).toContain("...(useSnapshotTemplate ? {");
+    expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: '0'");
+    expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_RESTORE: '0'");
     expect(smoke).toContain("...(persistMarketMakerStorage ? {");
     expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_STORAGE: '0'");
     expect(smoke).toContain("XLN_MARKET_MAKER_DISABLE_RESTORE: '0'");
@@ -514,8 +563,10 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'");
     expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
-    expect(mmNode).toContain('bootstrapCrossCursor = selectedIndex;');
+    expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
+    expect(mmNode).toContain("direction: 'bootstrap-batch'");
     expect(mmNode).toContain('bootstrapCrossCursor = isCrossQuoteJobDepthComplete(env, job) ? nextCursor : index;');
+    expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).toContain("if (!bootstrapCrossStarted) {\n          bootstrapCrossStarted = true;\n          startupPhase = 'bootstrap-cross';");
     expect(mmNode.indexOf("if (!bootstrapCrossStarted) {\n          bootstrapCrossStarted = true;\n          startupPhase = 'bootstrap-cross';")).toBeLessThan(
       mmNode.indexOf('const crossQuoteJobs: CrossQuoteJob[] = [];'),
@@ -538,7 +589,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("persistRestoredEnvToDB");
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT']");
     expect(mmNode).toContain('BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
-    expect(mmNode).toContain('const markOffersReady = async (): Promise<void> => {');
+    expect(mmNode).toContain('const markOffersReady = async (finalizedHealth?: MarketMakerHealth | null): Promise<void> => {');
     expect(mmNode).toContain('await persistBootstrapReadySnapshotIfRequested();');
     expect(orchestrator).toContain("const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';");
     expect(orchestrator).toContain('} else if (existsSync(args.dbRoot)) {');
@@ -549,7 +600,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("recordStageOnce('system:ready', last);");
     expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
     expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
-    expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '25'");
+    expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
     expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
     expect(smoke).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
     expect(smoke).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR: process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
@@ -571,6 +622,7 @@ describe('production startup wiring', () => {
     expect(soundcheck).toContain("if (mode === 'all') {");
     expect(soundcheck).toContain('results.push(installTemplateFromResult(freshResult));');
     expect(soundcheck).toContain("XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1'");
+    expect(soundcheck).not.toContain('XLN_LOCAL_PROD_SMOKE_PERSIST_MM');
     expect(soundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS: '1'");
     expect(soundcheck).toContain('marketMakerEventsJsonl: metrics.marketMakerEventsJsonl');
     expect(soundcheck).toContain('BOOTSTRAP_SOUNDCHECK_CLONE_HASH_DRIFT');
@@ -605,6 +657,14 @@ describe('production startup wiring', () => {
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGTERM')");
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGKILL')");
     expect(packageJson).toContain('"test:e2e:monitor": "bun runtime/scripts/e2e-fail-fast-monitor.ts"');
+    expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
+    expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
+    expect(runner).toContain('excludeMarketMaker: hasFlag');
+    expect(runner).toContain('marketMakerOnly: hasFlag');
+    expect(runner).toContain('expandedTargets = expandedTargets.filter(entry => !entry.requireMarketMaker);');
+    expect(runner).toContain('expandedTargets = expandedTargets.filter(entry => entry.requireMarketMaker);');
+    expect(runner).not.toContain("XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] || '1'");
+    expect(runner).toContain("...(process.env['XLN_MIN_DISK_FREE_BYTES']");
     expect(releaseGate).toContain("{ name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 240_000 }");
     expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'fast E2E gate'"));
   });
@@ -657,7 +717,7 @@ describe('production startup wiring', () => {
     const ensureStart = mmNode.indexOf('const ensureMarketMakerHubConnectivity = async (');
     const readyStart = mmNode.indexOf('const isMarketMakerConnectivityReady = (');
     const driveStart = mmNode.indexOf("const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady')");
-    const markReadyStart = mmNode.indexOf('const markOffersReady = async (): Promise<void> => {');
+    const markReadyStart = mmNode.indexOf('const markOffersReady = async (finalizedHealth?: MarketMakerHealth | null): Promise<void> => {');
     expect(ensureStart).toBeGreaterThan(0);
     expect(readyStart).toBeGreaterThan(ensureStart);
     expect(driveStart).toBeGreaterThan(readyStart);

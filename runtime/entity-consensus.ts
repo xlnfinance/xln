@@ -17,8 +17,9 @@ import type {
   HashType,
   JInput,
 } from './types';
-import { DEBUG, HEAVY_LOGS, formatEntityDisplay, log } from './utils';
+import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from './utils';
 import { compareStableText, safeStringify } from './serialization-utils';
+import { nodeProcess } from './runtime-platform';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
 import {
   addMessages,
@@ -78,6 +79,15 @@ import {
 import { cloneCrossJurisdictionAccountTxRoute } from './cross-jurisdiction';
 import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
 export { mergeEntityInputs } from './entity-input-merge';
+
+const ENTITY_FRAME_PROFILE =
+  nodeProcess?.env?.['XLN_ENTITY_FRAME_PROFILE'] === '1' ||
+  nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' ||
+  nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
+const ENTITY_FRAME_SLOW_MS = Math.max(
+  0,
+  Number(nodeProcess?.env?.['XLN_ENTITY_FRAME_SLOW_MS'] || '1000'),
+);
 export { createEntityFrameHash } from './entity-consensus-frame';
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
 const entityLog = createStructuredLogger('entity');
@@ -1314,6 +1324,12 @@ export const applyEntityFrame = async (
     context: string;
   }>;
 }> => {
+  const frameProfileStartMs = getPerfMs();
+  const frameProfileMarks: Record<string, number> = {};
+  const frameProfileTxTotals = new Map<string, { count: number; elapsedMs: number }>();
+  const markFrameProfile = (label: string): void => {
+    frameProfileMarks[label] = Math.round(getPerfMs() - frameProfileStartMs);
+  };
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
   if (shouldLogFullPayloads()) {
     entityTxs.forEach((tx, index) => {
@@ -1323,6 +1339,7 @@ export const applyEntityFrame = async (
 
   // Work on a clone so failed frame construction cannot leak mutations.
   let currentEntityState = cloneEntityState(entityState);
+  markFrameProfile('clone');
 
   // Validators receive the proposer's frame timestamp; proposers use env.timestamp.
   // HTLC timelocks and lockIds must see this before handlers run.
@@ -1346,6 +1363,7 @@ export const applyEntityFrame = async (
   // Reordering batched txs can change bilateral account state transitions
   // (e.g., openAccount + accountInput ACK in same frame).
   for (const entityTx of entityTxs) {
+    const txProfileStartMs = getPerfMs();
     const {
       newState,
       outputs,
@@ -1357,7 +1375,7 @@ export const applyEntityFrame = async (
       swapCancelRequests,
       swapOffersCancelled,
       skippedError,
-    } = await applyEntityTx(env, currentEntityState, entityTx);
+    } = await applyEntityTx(env, currentEntityState, entityTx, { mutableFrameState: true });
     if (skippedError) {
       throw new Error(`ENTITY_FRAME_TX_FAILED: type=${String(entityTx.type)} error=${skippedError}`);
     }
@@ -1492,7 +1510,13 @@ export const applyEntityFrame = async (
       }
     }
     drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
+    const txElapsedMs = Math.round(getPerfMs() - txProfileStartMs);
+    const txProfile = frameProfileTxTotals.get(entityTx.type) ?? { count: 0, elapsedMs: 0 };
+    txProfile.count += 1;
+    txProfile.elapsedMs += txElapsedMs;
+    frameProfileTxTotals.set(entityTx.type, txProfile);
   }
+  markFrameProfile('entityTxLoop');
 
   // === APPLY AGGREGATED PURE EVENTS ===
 
@@ -1506,6 +1530,10 @@ export const applyEntityFrame = async (
     applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled);
   }
 
+  let orderbookMatched = false;
+  let orderbookMempoolOps = 0;
+  let orderbookBookUpdates = 0;
+  let orderbookCrossFills = 0;
   const hasPersistedCrossJurisdictionBook = Boolean(
     currentEntityState.orderbookExt &&
     Array.from(currentEntityState.orderbookExt.books?.keys?.() || []).some(pairId =>
@@ -1554,6 +1582,10 @@ export const applyEntityFrame = async (
     });
 
     const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch);
+    orderbookMatched = true;
+    orderbookMempoolOps = matchResult.mempoolOps.length;
+    orderbookBookUpdates = matchResult.bookUpdates.length;
+    orderbookCrossFills = matchResult.crossJurisdictionFills.length;
 
     // Orderbook matching returns pure mempoolOps/book updates. Applying the
     // returned account txs here is still orchestrator-owned mutation of the
@@ -1746,6 +1778,7 @@ export const applyEntityFrame = async (
       });
     }
   }
+  markFrameProfile('orderbook');
 
   // 3. Process swap cancel requests through hub orderbook
   if (allSwapCancelRequests.length > 0) {
@@ -1799,11 +1832,13 @@ export const applyEntityFrame = async (
       }
     }
   }
+  markFrameProfile('cancels');
 
   // Hash before account proposals so proposer and validators commit to the same
   // deterministic entity state.
   drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
   const deterministicState = cloneEntityState(currentEntityState);
+  markFrameProfile('deterministicClone');
 
   const { proposeAccountFrame } = await import('./account-consensus');
 
@@ -1906,6 +1941,34 @@ export const applyEntityFrame = async (
         }
       }
     }
+  }
+  markFrameProfile('accountProposals');
+
+  const frameElapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
+  if (ENTITY_FRAME_PROFILE || frameElapsedMs >= ENTITY_FRAME_SLOW_MS) {
+    console.warn('[ENTITY-FRAME-PROFILE]', safeStringify({
+      entity: String(currentEntityState.entityId || '').slice(-8),
+      elapsedMs: frameElapsedMs,
+      txs: entityTxs.length,
+      txTypes: Array.from(new Set(entityTxs.map(tx => tx.type))).slice(0, 16),
+      accountsToPropose: accountsToProposeFrames.length,
+      outputs: allOutputs.length,
+      jOutputs: allJOutputs.length,
+      collectedHashes: collectedHashes.length,
+      swapOffersCreated: allSwapOffersCreated.length,
+      swapCancels: allSwapCancelRequests.length + allSwapOffersCancelled.length,
+      hasOrderbookExt: Boolean(currentEntityState.orderbookExt),
+      hasPersistedCrossJurisdictionBook,
+      orderbookMatched,
+      orderbookMempoolOps,
+      orderbookBookUpdates,
+      orderbookCrossFills,
+      marks: frameProfileMarks,
+      txTypeTotals: Array.from(frameProfileTxTotals.entries())
+        .map(([type, value]) => ({ type, ...value }))
+        .sort((left, right) => right.elapsedMs - left.elapsedMs)
+        .slice(0, 16),
+    }));
   }
 
   return {

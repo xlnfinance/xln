@@ -12,8 +12,17 @@ import {
 import { safeStringify } from './serialization-utils';
 import type { EntityInput, EntityReplica, Env, JInput, RoutedEntityInput } from './types';
 import { validateEntityOutput } from './validation-utils';
-import { DEBUG } from './utils';
+import { nodeProcess } from './runtime-platform';
+import { DEBUG, getPerfMs } from './utils';
 import { logError } from './logger';
+
+const ENTITY_INPUT_PROFILE =
+  nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' ||
+  nodeProcess?.env?.['XLN_RUNTIME_PROCESS_PROFILE'] === '1';
+const ENTITY_INPUT_SLOW_MS = Math.max(
+  0,
+  Number(nodeProcess?.env?.['XLN_ENTITY_INPUT_SLOW_MS'] || '1000'),
+);
 
 export interface RuntimeEntityInputApplyResult {
   entityOutbox: RoutedEntityInput[];
@@ -52,8 +61,11 @@ export const applyMergedEntityInputs = async (
   const appliedEntityInputs: RoutedEntityInput[] = [];
   const jOutbox: JInput[] = [...initialJOutbox];
   const { isReplay, routingDeps } = options;
+  const profileStartedAt = getPerfMs();
+  const profiledInputs: Array<Record<string, unknown>> = [];
 
   for (const entityInput of mergedInputs) {
+    const inputProfileStartedAt = getPerfMs();
     if (isReplay) {
       console.log(
         `[REPLAY][RUNTIME] merged input entity=${String(entityInput.entityId).slice(-8)} ` +
@@ -170,6 +182,20 @@ export const applyMergedEntityInputs = async (
     }
 
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
+    const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
+    if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
+      profiledInputs.push({
+        elapsedMs: inputElapsedMs,
+        entity: String(entityInput.entityId || '').slice(-8),
+        signer: actualSignerId.slice(-8),
+        txs: Number(entityInput.entityTxs?.length || 0),
+        txTypes: Array.from(new Set((entityInput.entityTxs || []).map(tx => tx.type))).slice(0, 8),
+        proposedFrame: Boolean(entityInput.proposedFrame),
+        hashPrecommits: Number(entityInput.hashPrecommits?.size || 0),
+        outputs: result.outputs.length,
+        jOutputs: result.jOutputs.length,
+      });
+    }
     appliedEntityInputs.push(result.appliedInput);
     env.eReplicas.set(replicaKey, result.nextReplica);
     entityOutbox.push(...result.outputs);
@@ -186,6 +212,7 @@ export const applyMergedEntityInputs = async (
     entityOutbox.push(...deferredOutputs);
 
     for (const entityInput of mergeEntityInputs(immediateCrossJOutputs)) {
+      const inputProfileStartedAt = getPerfMs();
       const actualSignerId = entityInput.signerId.trim();
       const replicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
       assertRuntimeIngress(
@@ -213,6 +240,21 @@ export const applyMergedEntityInputs = async (
         actualSignerId,
         isReplay,
       );
+      const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
+      if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
+        profiledInputs.push({
+          elapsedMs: inputElapsedMs,
+          entity: String(entityInput.entityId || '').slice(-8),
+          signer: actualSignerId.slice(-8),
+          txs: Number(entityInput.entityTxs?.length || 0),
+          txTypes: Array.from(new Set((entityInput.entityTxs || []).map(tx => tx.type))).slice(0, 8),
+          proposedFrame: Boolean(entityInput.proposedFrame),
+          hashPrecommits: Number(entityInput.hashPrecommits?.size || 0),
+          immediateCrossJ: true,
+          outputs: result.outputs.length,
+          jOutputs: result.jOutputs.length,
+        });
+      }
       appliedEntityInputs.push(result.appliedInput);
       env.eReplicas.set(replicaKey, result.nextReplica);
       entityOutbox.push(...result.outputs);
@@ -221,6 +263,21 @@ export const applyMergedEntityInputs = async (
         jOutbox.push(...result.jOutputs);
       }
     }
+  }
+
+  const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
+  if (ENTITY_INPUT_PROFILE || elapsedMs >= ENTITY_INPUT_SLOW_MS) {
+    console.warn('[ENTITY-INPUTS-PROFILE]', safeStringify({
+      height: env.height,
+      elapsedMs,
+      mergedInputs: mergedInputs.length,
+      appliedInputs: appliedEntityInputs.length,
+      outputs: entityOutbox.length,
+      jOutputs: jOutbox.length,
+      slowInputs: profiledInputs
+        .sort((left, right) => Number(right['elapsedMs'] || 0) - Number(left['elapsedMs'] || 0))
+        .slice(0, 16),
+    }));
   }
 
   return { entityOutbox, appliedEntityInputs, jOutbox };

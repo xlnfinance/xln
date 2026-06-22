@@ -5,10 +5,6 @@ import { extractCrossJurisdictionRouteFromTx } from './cross-jurisdiction-bounda
 import { normalizeRuntimeId } from './networking/runtime-id';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
-type RuntimeProcessLike = {
-  env?: Record<string, string | undefined>;
-  exit?: (code?: number) => never;
-};
 
 export type RuntimeEntityRoutingDeps = {
   ensureRuntimeState(env: Env): RuntimeState;
@@ -25,17 +21,10 @@ export type RuntimeEntityRoutingDeps = {
   resolveSoleLocalSignerForEntity(env: Env, entityId: string): string | null;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
   startRuntimeLoop(env: Env): void;
-  processRuntime(env: Env): Promise<unknown>;
 };
 
 const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
 const RUNTIME_HINT_TTL_MS = 60_000;
-
-const getRuntimeProcessGlobal = (): RuntimeProcessLike | null =>
-  ((globalThis as typeof globalThis & { process?: RuntimeProcessLike }).process ?? null);
-
-const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>
-  String(runtimeProcess?.env?.['XLN_RUNTIME_EXIT_ON_FATAL'] || '').trim() === '1';
 
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   const runtimeId = normalizeRuntimeId(String(profile?.runtimeId || ''));
@@ -232,9 +221,7 @@ export const handleInboundP2PEntityInput = (
   // still be untrusted here; applyRuntimeInput registers these hints only after
   // the strict two-runtime topology check passes.
 
-  const runtimeState = deps.ensureRuntimeState(env) as RuntimeState & {
-    inboundP2PProcessScheduled?: boolean;
-  };
+  const runtimeState = deps.ensureRuntimeState(env);
   if (runtimeState.halted && !env.scenarioMode) {
     const payload = { fromRuntimeId: from, entityId: input.entityId, txTypes };
     if ((input.entityTxs?.length ?? 0) > 0) {
@@ -252,34 +239,6 @@ export const handleInboundP2PEntityInput = (
 
   if (!runtimeState.loopActive && !env.scenarioMode) {
     deps.startRuntimeLoop(env);
-  }
-  if (!runtimeState.inboundP2PProcessScheduled && !env.scenarioMode) {
-    runtimeState.inboundP2PProcessScheduled = true;
-    queueMicrotask(() => {
-      runtimeState.inboundP2PProcessScheduled = false;
-      void deps.processRuntime(env).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        const stack = error instanceof Error ? error.stack : undefined;
-        runtimeState.halted = true;
-        runtimeState.fatalDebugPayload = {
-          message,
-          ...(stack ? { stack } : {}),
-          height: Math.max(0, env.height ?? 0),
-          timestamp: Math.max(0, env.timestamp ?? 0),
-        };
-        env.error?.('network', 'INBOUND_ENTITY_PROCESS_FAILED', {
-          message,
-          ...(stack ? { stack } : {}),
-          entityId: input.entityId,
-          signerId: input.signerId,
-          txTypes,
-        }, input.entityId);
-        const runtimeProcess = getRuntimeProcessGlobal();
-        if (shouldExitOnRuntimeFatal(runtimeProcess) && runtimeProcess?.exit) {
-          runtimeProcess.exit(1);
-        }
-      });
-    });
   }
 };
 

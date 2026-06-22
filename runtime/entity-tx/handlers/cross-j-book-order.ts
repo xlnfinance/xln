@@ -34,9 +34,12 @@ import {
   normalizeSwapOfferForOrderbook,
   type SwapOfferEvent,
 } from './account/orderbook-offers';
+import type { ApplyEntityTxOptions } from '../apply';
 
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
+const stateForEntityTx = (entityState: EntityState, options?: ApplyEntityTxOptions): EntityState =>
+  options?.mutableFrameState ? entityState : cloneEntityState(entityState);
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const crossBookQtyLots = (baseAmount: bigint): bigint =>
@@ -107,8 +110,9 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTx & { type: 'admitCrossJurisdictionBookOrder' },
+  options?: ApplyEntityTxOptions,
 ) => {
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
   const now = deterministicEntityTimestamp(newState, env);
   const bookOwner = crossJurisdictionBookOwnerRef(route);
@@ -279,8 +283,9 @@ export const handleApplyCrossJurisdictionBookProgressEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: CrossJurisdictionBookProgressTx,
+  options?: ApplyEntityTxOptions,
 ) => {
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const changed = applyCrossJurisdictionBookProgressToState(env, newState, entityTx.data);
   if (changed) {
     addMessage(newState, `🌉 Cross-j book progress ${entityTx.data.orderId}${entityTx.data.reason ? `: ${entityTx.data.reason}` : ''}`);
@@ -292,8 +297,9 @@ export const handleRemoveCrossJurisdictionBookOrderEntityTx = (
   env: Env,
   entityState: EntityState,
   entityTx: EntityTx & { type: 'removeCrossJurisdictionBookOrder' },
+  options?: ApplyEntityTxOptions,
 ) => {
-  const newState = cloneEntityState(entityState);
+  const newState = stateForEntityTx(entityState, options);
   const now = deterministicEntityTimestamp(newState, env);
   const removed = removeCrossJurisdictionBookOrderByRouteId(
     env,

@@ -52,6 +52,8 @@ type CliArgs = {
   pwProject?: string | undefined;
   pwFiles: string[];
   includeAllSpecs: boolean;
+  excludeMarketMaker: boolean;
+  marketMakerOnly: boolean;
   skipBuild: boolean;
   prewaitHealth: 'reset' | 'http' | 'full';
 };
@@ -235,6 +237,8 @@ const parseArgs = (): CliArgs => {
     pwProject,
     pwFiles,
     includeAllSpecs: hasFlag('all') || hasFlag('include-all') || process.env['E2E_ALL'] === '1',
+    excludeMarketMaker: hasFlag('exclude-market-maker') || hasFlag('no-market-maker-heavy'),
+    marketMakerOnly: hasFlag('market-maker-only') || hasFlag('only-market-maker-heavy'),
     skipBuild: args.includes('--skip-build'),
     prewaitHealth:
       prewaitHealthRaw === 'http' || prewaitHealthRaw === 'full' || prewaitHealthRaw === 'reset'
@@ -1510,6 +1514,9 @@ const runShard = async (
           ANVIL_RPC2: rpc2Url,
           XLN_SKIP_STALE_REAP: '1',
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
+          ...(process.env['XLN_MIN_DISK_FREE_BYTES']
+            ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }
+            : {}),
         }),
       },
     );
@@ -1794,6 +1801,18 @@ async function main(): Promise<void> {
       expandedTargets = expandedTargets.filter(matchesGrep);
       if (expandedTargets.length === 0) {
         throw new Error(`No isolated test targets matched --pw-grep=${args.pwGrep}`);
+      }
+    }
+    if (args.excludeMarketMaker) {
+      expandedTargets = expandedTargets.filter(entry => !entry.requireMarketMaker);
+      if (expandedTargets.length === 0) {
+        throw new Error('No isolated test targets remain after --exclude-market-maker');
+      }
+    }
+    if (args.marketMakerOnly) {
+      expandedTargets = expandedTargets.filter(entry => entry.requireMarketMaker);
+      if (expandedTargets.length === 0) {
+        throw new Error('No isolated test targets remain after --market-maker-only');
       }
     }
     const tasks: RunTask[] = expandedTargets.map((entry, index, entries) => ({

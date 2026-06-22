@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { dirname, join, resolve } from 'node:path';
 
 type Mode = 'fresh' | 'template' | 'clone' | 'hydrate' | 'all';
@@ -67,6 +68,41 @@ const templateDir = resolve(
   join(repoRoot, '.logs', 'bootstrap-template', 'current'),
 );
 const portBase = positiveInteger(argValue('port-base') || process.env['XLN_BOOTSTRAP_SOUNDCHECK_PORT_BASE'] || null, 19700);
+const explicitPortBase = Boolean(argValue('port-base') || process.env['XLN_BOOTSTRAP_SOUNDCHECK_PORT_BASE']);
+const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];
+
+const isPortOpen = async (port: number): Promise<boolean> => {
+  return await new Promise<boolean>((resolvePort) => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    socket.setTimeout(500);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolvePort(true);
+    });
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolvePort(false);
+    });
+    socket.once('error', () => resolvePort(false));
+  });
+};
+
+const isPortBlockFree = async (candidateBase: number): Promise<boolean> => {
+  for (const offset of localProdSmokePortOffsets) {
+    if (await isPortOpen(candidateBase + offset)) return false;
+  }
+  return true;
+};
+
+const findPortBaseForIndex = async (index: number): Promise<number> => {
+  const requested = portBase + index * 100;
+  if (await isPortBlockFree(requested)) return requested;
+  if (explicitPortBase) throw new Error(`BOOTSTRAP_SOUNDCHECK_PORT_BLOCK_BUSY:${requested}`);
+  for (let candidate = requested + 300; candidate <= 59000; candidate += 100) {
+    if (await isPortBlockFree(candidate)) return candidate;
+  }
+  throw new Error(`BOOTSTRAP_SOUNDCHECK_NO_FREE_PORT_BLOCK:${requested}`);
+};
 
 const requireMetrics = (metrics: BootstrapMetrics, label: string): void => {
   if (!isHash64(metrics.bootstrapHash)) throw new Error(`BOOTSTRAP_SOUNDCHECK_${label}_BOOTSTRAP_HASH_INVALID`);
@@ -85,7 +121,7 @@ const runSmoke = async (
   const runDir = label === 'template' ? templateDir : join(outDir, label);
   const metricsPath = join(runDir, 'bootstrap-metrics.json');
   const eventsJsonl = join(runDir, 'bootstrap-events.jsonl');
-  const runPortBase = portBase + index * 100;
+  const runPortBase = await findPortBaseForIndex(index);
   console.log(`[bootstrap-soundcheck] mode=${label} portBase=${runPortBase} dir=${runDir}`);
   if (label === 'template' && existsSync(runDir)) rmSync(runDir, { recursive: true, force: true });
   mkdirSync(runDir, { recursive: true });
@@ -176,7 +212,9 @@ let index = 0;
 let freshResult: SoundcheckResult | null = null;
 if (mode === 'fresh' || mode === 'all') {
   freshResult = await runSmoke('fresh', index++, mode === 'all'
-    ? { XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1' }
+    ? {
+      XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT: '1',
+    }
     : {});
   results.push(freshResult);
 }

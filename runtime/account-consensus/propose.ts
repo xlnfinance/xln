@@ -6,7 +6,7 @@
 import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../types';
 import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCommittedTxsFromMempool } from '../state-helpers';
 import { isLeft } from '../account-utils';
-import { formatEntityId, HEAVY_LOGS } from '../utils';
+import { formatEntityId, getPerfMs, HEAVY_LOGS } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from '../validation-utils';
 import { processAccountTx } from '../account-tx/apply';
@@ -27,6 +27,21 @@ import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccoun
 import { getReplicaByEntityId } from '../replica-utils';
 
 const accountLog = createStructuredLogger('account');
+const ACCOUNT_PROPOSAL_PROFILE =
+  typeof process !== 'undefined' && process.env?.['XLN_ACCOUNT_PROPOSAL_PROFILE'] === '1';
+const ACCOUNT_PROPOSAL_SLOW_MS = Math.max(
+  0,
+  Number(typeof process !== 'undefined' ? process.env?.['XLN_ACCOUNT_PROPOSAL_SLOW_MS'] || '250' : '250'),
+);
+
+const shouldUseOptimisticProposalBatch = (txs: readonly AccountTx[]): boolean =>
+  txs.length > 1 &&
+  txs.every((tx) =>
+    tx.type === 'swap_resolve' ||
+    tx.type === 'cross_swap_fill_ack' ||
+    tx.type === 'pull_lock' ||
+    tx.type === 'swap_offer',
+  );
 
 const isCrossJurisdictionPullResolveTx = (
   accountMachine: AccountMachine,
@@ -49,6 +64,11 @@ export async function proposeAccountFrame(
   skipNonceIncrement: boolean = false,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
 ): Promise<ProposeAccountFrameResult> {
+  const profileStartMs = getPerfMs();
+  const profileMarks: Record<string, number> = {};
+  const markProfile = (name: string): void => {
+    profileMarks[name] = Math.round(getPerfMs() - profileStartMs);
+  };
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -183,9 +203,7 @@ export async function proposeAccountFrame(
     }
   };
 
-  const canOptimisticallyValidateBatch =
-    proposalWindow.length > 1 &&
-    proposalWindow.every((tx) => tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack');
+  const canOptimisticallyValidateBatch = shouldUseOptimisticProposalBatch(proposalWindow);
   let optimisticBatchFailed = false;
   if (canOptimisticallyValidateBatch) {
     const optimisticMachine = cloneAccountMachine(accountMachine);
@@ -204,6 +222,7 @@ export async function proposeAccountFrame(
       for (const { tx, result } of optimisticResults) collectSuccessfulTx(tx, result);
     }
   }
+  markProfile('validated');
 
   if (!canOptimisticallyValidateBatch || optimisticBatchFailed) {
     if (optimisticBatchFailed) {
@@ -327,6 +346,7 @@ export async function proposeAccountFrame(
   };
 
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
+  markProfile('frameHash');
 
   let newFrame: AccountFrame;
   try {
@@ -403,6 +423,7 @@ export async function proposeAccountFrame(
       events,
     };
   }
+  markProfile('proof');
 
   // Build both hankos in one signer-key/precheck pass. They remain separate
   // hankos over separate hashes; batching here only removes duplicated local
@@ -412,6 +433,7 @@ export async function proposeAccountFrame(
     newFrame.stateHash,
     disputeHash,
   ]);
+  markProfile('sign');
   if (!frameHanko) {
     return { success: false, error: 'Failed to build frame hanko', events };
   }
@@ -516,5 +538,18 @@ export async function proposeAccountFrame(
     hashesToSign,
   };
   if (failedHtlcLocks.length > 0) finalResult.failedHtlcLocks = failedHtlcLocks;
+  const profileTotalMs = Math.round(getPerfMs() - profileStartMs);
+  if (ACCOUNT_PROPOSAL_PROFILE || profileTotalMs >= ACCOUNT_PROPOSAL_SLOW_MS) {
+    console.warn('[ACCOUNT-PROFILE]', safeStringify({
+      entity: signingEntityId.slice(-8),
+      counterparty: counterparty.slice(-8),
+      height: newFrame.height,
+      txs: newFrame.accountTxs.length,
+      txTypes: Array.from(new Set(newFrame.accountTxs.map((tx) => tx.type))).sort(),
+      optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
+      totalMs: profileTotalMs,
+      marks: profileMarks,
+    }));
+  }
   return finalResult;
 }

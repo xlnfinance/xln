@@ -37,11 +37,24 @@ type DebugEntity = {
   };
 };
 
+type HubAccountStatus = {
+  success?: boolean;
+  ready?: boolean;
+  currentHeight?: number;
+  pendingFrameHeight?: number | null;
+  mempool?: number;
+  tokens?: Array<{
+    tokenId?: number;
+    hubOutCapacity?: string;
+  }>;
+};
+
 const baseUrl = String(process.env.PROD_BASE_URL || process.env.E2E_BASE_URL || 'https://xln.finance')
   .replace(/\/+$/, '');
 const headless = process.env.HEADFUL !== '1';
 const tokenSymbol = String(process.env.PROD_FAUCET_SYMBOL || 'USDC').trim().toUpperCase();
 const label = `prod-proof-${Date.now()}`;
+const fetchTimeoutMs = Math.max(500, Number(process.env.PROD_FAUCET_FETCH_TIMEOUT_MS || '5000'));
 
 process.env.E2E_BASE_URL = baseUrl;
 process.env.E2E_API_BASE_URL = baseUrl;
@@ -56,14 +69,26 @@ const { gotoApp, createRuntimeIdentity } = await import('../tests/utils/e2e-demo
 const { connectRuntimeToHubWithCredit } = await import('../tests/utils/e2e-connect');
 const { getHealth } = await import('../tests/utils/e2e-baseline');
 
-async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, {
-    headers: { accept: 'application/json' },
-  });
-  if (!response.ok) {
-    throw new Error(`${path} failed: ${response.status} ${await response.text().catch(() => '')}`);
+async function fetchJson<T>(path: string, timeoutMs = fetchTimeoutMs): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}${path}`, {
+      headers: { accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`${path} failed: ${response.status} ${await response.text().catch(() => '')}`);
+    }
+    return await response.json() as T;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${path} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  return await response.json() as T;
 }
 
 async function getTokenId(symbol: string): Promise<number> {
@@ -95,6 +120,44 @@ async function resolvePrimaryHubId(health: HealthPayload | null): Promise<string
     throw new Error('Primary hub id is missing from /api/health and /api/debug/entities');
   }
   return hub.entityId;
+}
+
+async function readHubAccountStatus(
+  hubEntityId: string,
+  counterpartyEntityId: string,
+  tokenId: number,
+): Promise<HubAccountStatus> {
+  const query = new URLSearchParams({
+    hubEntityId,
+    counterpartyEntityId,
+    tokenIds: String(tokenId),
+  });
+  return await fetchJson<HubAccountStatus>(`/api/hub/account-status?${query.toString()}`);
+}
+
+function summarizeHubAccountStatus(status: HubAccountStatus | null): Record<string, unknown> | null {
+  if (!status) return null;
+  return {
+    success: status.success === true,
+    ready: status.ready === true,
+    currentHeight: Number(status.currentHeight ?? 0),
+    pendingFrameHeight: status.pendingFrameHeight ?? null,
+    mempool: Number(status.mempool ?? 0),
+    tokens: (status.tokens || []).map(token => ({
+      tokenId: token.tokenId,
+      hubOutCapacity: token.hubOutCapacity ?? null,
+    })),
+  };
+}
+
+function readHubOutCapacity(status: HubAccountStatus | null, tokenId: number): bigint | null {
+  const token = (status?.tokens || []).find((candidate) => Number(candidate.tokenId) === tokenId);
+  if (!token?.hubOutCapacity) return null;
+  try {
+    return BigInt(token.hubOutCapacity);
+  } catch {
+    return null;
+  }
 }
 
 async function readRenderedAccountTokenOut(page: import('playwright').Page, hubId: string, symbol: string): Promise<number> {
@@ -201,15 +264,54 @@ try {
   if (!Number.isFinite(baselineOut)) {
     throw new Error(`Could not read rendered ${tokenSymbol} out capacity before faucet`);
   }
+  const baselineServerStatus = await readHubAccountStatus(hubId, identity.entityId, tokenId).catch((error) => {
+    throw new Error(`Baseline /api/hub/account-status failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  const baselineServerHeight = Number(baselineServerStatus.currentHeight ?? 0);
+  const baselineServerCapacity = readHubOutCapacity(baselineServerStatus, tokenId);
 
   clickEpochMs = Date.now();
   await faucetButton.click();
 
   let clickToVisibleFeedbackMs: number | null = null;
+  let clickToServerAccountReadyMs: number | null = null;
+  let clickToServerCapacityChangedMs: number | null = null;
   let clickToDomVisibleMs: number | null = null;
+  let lastServerStatusPollAt = 0;
+  let serverAccountReadyStatus: HubAccountStatus | null = null;
+  let serverCapacityChangedStatus: HubAccountStatus | null = null;
+  let serverAccountStatusError: string | null = null;
+  let finalServerStatus: HubAccountStatus | null = null;
   let finalOut = Number.NaN;
   const deadline = clickEpochMs + 15_000;
   while (Date.now() <= deadline) {
+    if (
+      (clickToServerAccountReadyMs === null || clickToServerCapacityChangedMs === null) &&
+      Date.now() - lastServerStatusPollAt >= 250
+    ) {
+      lastServerStatusPollAt = Date.now();
+      try {
+        const status = await readHubAccountStatus(hubId, identity.entityId, tokenId);
+        const height = Number(status.currentHeight ?? 0);
+        const capacity = readHubOutCapacity(status, tokenId);
+        if (clickToServerAccountReadyMs === null && status.ready === true && height >= baselineServerHeight) {
+          clickToServerAccountReadyMs = Date.now() - clickEpochMs;
+          serverAccountReadyStatus = status;
+        }
+        if (
+          clickToServerCapacityChangedMs === null &&
+          status.ready === true &&
+          baselineServerCapacity !== null &&
+          capacity !== null &&
+          capacity !== baselineServerCapacity
+        ) {
+          clickToServerCapacityChangedMs = Date.now() - clickEpochMs;
+          serverCapacityChangedStatus = status;
+        }
+      } catch (error) {
+        serverAccountStatusError = error instanceof Error ? error.message : String(error);
+      }
+    }
     const [buttonState, renderedOut] = await Promise.all([
       row.evaluate((element) => {
         const buttons = Array.from(element.querySelectorAll('button'));
@@ -228,14 +330,15 @@ try {
     }
     if (Number.isFinite(renderedOut) && renderedOut > baselineOut) {
       finalOut = renderedOut;
-      clickToDomVisibleMs = Date.now() - clickEpochMs;
-      break;
+      if (clickToDomVisibleMs === null) clickToDomVisibleMs = Date.now() - clickEpochMs;
+      if (clickToServerCapacityChangedMs !== null) break;
     }
     await page.waitForTimeout(25);
   }
   if (!Number.isFinite(finalOut) || clickToDomVisibleMs === null) {
     throw new Error(`Timed out waiting for rendered ${tokenSymbol} out capacity to exceed ${baselineOut}`);
   }
+  finalServerStatus = await readHubAccountStatus(hubId, identity.entityId, tokenId).catch(() => null);
   await page.waitForTimeout(250);
 
   const apiTrafficAfterClick = traffic
@@ -259,8 +362,12 @@ try {
     tokenSymbol,
     tokenId,
     baselineOut,
+    baselineServerStatus: summarizeHubAccountStatus(baselineServerStatus),
+    baselineServerCapacity: baselineServerCapacity?.toString() ?? null,
     finalOut,
     gained: finalOut - baselineOut,
+    finalServerStatus: summarizeHubAccountStatus(finalServerStatus),
+    finalServerCapacity: readHubOutCapacity(finalServerStatus, tokenId)?.toString() ?? null,
     clickToVisibleFeedbackMs,
     clickToFaucetRequestMs: faucetRequestStartedAt === null ? null : faucetRequestStartedAt - clickEpochMs,
     faucetApiRoundtripMs:
@@ -271,6 +378,11 @@ try {
     faucetProxyUpstreamMs,
     faucetProxyTotalMs,
     faucetRequestId: faucetResponseBody?.requestId ?? null,
+    clickToServerAccountReadyMs,
+    clickToServerCapacityChangedMs,
+    serverAccountReadyStatus: summarizeHubAccountStatus(serverAccountReadyStatus),
+    serverCapacityChangedStatus: summarizeHubAccountStatus(serverCapacityChangedStatus),
+    serverAccountStatusError,
     clickToDomVisibleMs,
     apiRequestsAfterClick: apiTrafficAfterClick.length,
     endpointCounts,

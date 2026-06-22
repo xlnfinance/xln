@@ -1400,21 +1400,15 @@ const buildAggregatedHealthResponse = async (
     return health;
   }
 
-  const degraded = health.degraded.filter((entry) => entry !== 'custody');
-  const systemOk = health.coreOk &&
-    health.marketMaker.ok === true &&
-    health.bootstrapReserves.ok === true;
-
-  return {
+  const nextHealth = {
     ...health,
-    systemOk,
-    degraded,
     custody: {
       ...health.custody,
       ok: true,
       entityId: liveEntityId,
     },
   };
+  return recomputeHealthWithMarketMaker(nextHealth, nextHealth.marketMaker);
 };
 
 const waitForHubBaseline = async (): Promise<void> => {
@@ -1497,7 +1491,7 @@ const waitForMarketMakerReady = async (): Promise<void> => {
   let restartAttempts = 0;
   while (Date.now() < deadline) {
     await pollMarketMakerHealth();
-    const health = await buildAggregatedHealthResponse();
+    const health = computeAggregatedHealth();
     const exitedHub = getExitedHubChild();
     if (exitedHub) {
       throw new Error(
@@ -1530,7 +1524,7 @@ const waitForMarketMakerReady = async (): Promise<void> => {
     await delay(250);
   }
   throw new Error(
-    `MM_READY_TIMEOUT phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify((await buildAggregatedHealthResponse()).marketMaker)}`,
+    `MM_READY_TIMEOUT phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify(computeAggregatedHealth().marketMaker)}`,
   );
 };
 
