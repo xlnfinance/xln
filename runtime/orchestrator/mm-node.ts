@@ -3522,43 +3522,98 @@ const run = async (): Promise<void> => {
       if (mode === 'bootstrap') {
         const sameQuoteJobs = buildSameQuoteJobs(visibleHubs);
         emitSameQuoteProgress('scan', sameQuoteJobs);
+        const orderedIncompleteJobs: SameQuoteJob[] = [];
         for (let offset = 0; offset < sameQuoteJobs.length; offset += 1) {
           const selectedIndex = (bootstrapSameCursor + offset) % sameQuoteJobs.length;
           const job = sameQuoteJobs[selectedIndex];
           if (!job || isSameQuoteJobDepthComplete(env, job)) continue;
-          bootstrapSameCursor = selectedIndex;
-          emitSameQuoteProgress('selected', sameQuoteJobs, job);
+          orderedIncompleteJobs.push(job);
+        }
+        if (orderedIncompleteJobs.length > 0) {
+          const jobsByContext = new Map<string, {
+            context: MarketMakerEntityContext;
+            tokenIds: number[];
+            jobs: SameQuoteJob[];
+          }>();
+          for (const job of orderedIncompleteJobs) {
+            const key = marketMakerContextKey(job.context);
+            const entry = jobsByContext.get(key) ?? {
+              context: job.context,
+              tokenIds: job.tokenIds,
+              jobs: [],
+            };
+            entry.jobs.push(job);
+            jobsByContext.set(key, entry);
+          }
+          const groupedEntries = Array.from(jobsByContext.values())
+            .sort((left, right) =>
+              compareStableText(left.context.jurisdictionName, right.context.jurisdictionName) ||
+              compareStableText(left.context.entityId, right.context.entityId),
+            );
+
+          let enqueuedConnectivity = false;
+          for (const entry of groupedEntries) {
+            const runnableHubEntityIds = entry.jobs
+              .map(job => job.hub.entityId)
+              .filter(hubEntityId => !hasMarketMakerAccountBacklog(env, entry.context.entityId, hubEntityId))
+              .sort(compareStableText);
+            if (runnableHubEntityIds.length === 0) continue;
+            const selectedJob = entry.jobs.find(job => runnableHubEntityIds.includes(job.hub.entityId)) ?? entry.jobs[0]!;
+            bootstrapSameCursor = sameQuoteJobs.indexOf(selectedJob);
+            emitSameQuoteProgress('selected', sameQuoteJobs, selectedJob);
+            await yieldMarketMakerApi();
+            if (!shouldContinue()) return;
+            if (await ensureMarketMakerHubConnectivity(
+              env,
+              entry.context.entityId,
+              entry.context.signerId,
+              runnableHubEntityIds,
+              entry.tokenIds,
+              connectivityBudget,
+            )) {
+              enqueuedConnectivity = true;
+            }
+          }
+          if (enqueuedConnectivity) {
+            await yieldMarketMakerApi();
+            return;
+          }
+
+          let enqueuedQuotes = false;
+          for (const entry of groupedEntries) {
+            const runnableHubEntityIds = entry.jobs
+              .map(job => job.hub.entityId)
+              .filter(hubEntityId => !hasMarketMakerAccountBacklog(env, entry.context.entityId, hubEntityId))
+              .sort(compareStableText);
+            if (runnableHubEntityIds.length === 0) continue;
+            const selectedJob = entry.jobs.find(job => runnableHubEntityIds.includes(job.hub.entityId)) ?? entry.jobs[0]!;
+            bootstrapSameCursor = sameQuoteJobs.indexOf(selectedJob);
+            emitSameQuoteProgress('selected', sameQuoteJobs, selectedJob);
+            await yieldMarketMakerApi();
+            if (!shouldContinue()) return;
+            if (await maintainMarketMakerQuotes(
+              env,
+              entry.context.entityId,
+              entry.context.signerId,
+              runnableHubEntityIds,
+              entry.tokenIds,
+              MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK,
+              MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK,
+              connectivityBudget,
+              shouldContinue,
+            )) {
+              enqueuedQuotes = true;
+            }
+          }
+          if (enqueuedQuotes) {
+            await yieldMarketMakerApi();
+            return;
+          }
+          if (orderedIncompleteJobs.some(job =>
+            !hasMarketMakerAccountBacklog(env, job.context.entityId, job.hub.entityId),
+          )) return;
           await yieldMarketMakerApi();
-          if (!shouldContinue()) return;
-          if (hasMarketMakerAccountBacklog(env, job.context.entityId, job.hub.entityId)) return;
-          const hubEntityIds = [job.hub.entityId];
-          if (await ensureMarketMakerHubConnectivity(
-            env,
-            job.context.entityId,
-            job.context.signerId,
-            hubEntityIds,
-            job.tokenIds,
-            connectivityBudget,
-          )) {
-            await yieldMarketMakerApi();
-            return;
-          }
-          if (!shouldContinue()) return;
-          if (await maintainMarketMakerQuotes(
-            env,
-            job.context.entityId,
-            job.context.signerId,
-            hubEntityIds,
-            job.tokenIds,
-            MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK,
-            MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK,
-            connectivityBudget,
-            shouldContinue,
-          )) {
-            await yieldMarketMakerApi();
-            return;
-          }
-          if (!isSameQuoteJobDepthComplete(env, job)) return;
+          return;
         }
       }
 

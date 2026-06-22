@@ -226,8 +226,12 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('): Promise<boolean> => {\n  const localCreditInputsByEntity = new Map<string, EntityInput>();');
     expect(mmNode).toContain('const pushLocalConnectivityTx = (');
     expect(mmNode).toContain('const maintainSameContextQuotes = async (context: MarketMakerEntityContext): Promise<boolean> => {');
-    expect(mmNode).toContain('if (hasMarketMakerAccountBacklog(env, job.context.entityId, job.hub.entityId)) return;');
-    expect(mmNode).toContain('const hubEntityIds = [job.hub.entityId];');
+    expect(mmNode).toContain('const orderedIncompleteJobs: SameQuoteJob[] = [];');
+    expect(mmNode).toContain('const jobsByContext = new Map<string, {');
+    expect(mmNode).toContain('const runnableHubEntityIds = entry.jobs');
+    expect(mmNode).toContain('.filter(hubEntityId => !hasMarketMakerAccountBacklog(env, entry.context.entityId, hubEntityId))');
+    expect(mmNode).not.toContain('if (hasMarketMakerAccountBacklog(env, job.context.entityId, job.hub.entityId)) return;');
+    expect(mmNode).not.toContain('const hubEntityIds = [job.hub.entityId];');
     expect(mmNode).toContain('if (await maintainMarketMakerQuotes(');
     expect(mmNode).toContain("if (mode !== 'bootstrap') {");
     expect(mmNode).toContain('const entityInputsByEntitySigner = new Map<string, EntityInput>();');
@@ -641,7 +645,10 @@ describe('production startup wiring', () => {
     expect(driveQuotes).not.toContain('settleRuntimeFor(');
     expect(driveQuotes).toContain('await yieldMarketMakerApi();');
     expect(driveQuotes).toContain('if (await ensureMarketMakerHubConnectivity(');
-    expect(driveQuotes).toContain('const hubEntityIds = [job.hub.entityId];');
+    expect(driveQuotes).toContain('const orderedIncompleteJobs: SameQuoteJob[] = [];');
+    expect(driveQuotes).toContain('const jobsByContext = new Map<string, {');
+    expect(driveQuotes).toContain('runnableHubEntityIds,');
+    expect(driveQuotes).not.toContain('const hubEntityIds = [job.hub.entityId];');
     expect(driveQuotes).toContain("if (mode !== 'bootstrap') {");
     expect(driveQuotes).toContain('if (await maintainSameContextQuotes(context)) return;');
     expect(driveQuotes).toContain('if (await maintainMarketMakerCrossQuotes(');
