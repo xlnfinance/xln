@@ -150,8 +150,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '45'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '1000'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '15'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '45'");
     expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
     expect(mmNode).not.toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '6'");
@@ -242,6 +242,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index)');
     expect(mmNode).toContain('A cross request starts a bilateral target-lock lifecycle.');
     expect(mmNode).toContain('one per-account settlement wave');
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK");
     expect(mmNode).toContain("if (mode === 'bootstrap') return;");
     expect(mmNode).toContain('bootstrapCrossCursor = nextCursor;');
     expect(mmNode).toContain("if (mode === 'steady') steadyCrossCursor = nextCursor;");
@@ -430,6 +431,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS'] === '1'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
+    expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
+    expect(smoke).toContain("requireStageBudget('marketMaker:cross', crossReadyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);");
+    expect(smoke).toContain('Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'");
     expect(smoke).toContain("emitDebugEvent('health-poll'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR']");
