@@ -3044,13 +3044,7 @@ const run = async (): Promise<void> => {
 
   const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {
     const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });
-    const sameDepthComplete =
-      isMarketMakerSameDepthComplete(sameHealth) &&
-      isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));
-    if (!bootstrapCrossStarted && !sameDepthComplete) {
-      return sameHealth;
-    }
-    return publishMarketMakerHealthSnapshot({ includeCross: true });
+    return sameHealth;
   };
 
   const buildAccountStatusDebug = (
@@ -3546,6 +3540,14 @@ const run = async (): Promise<void> => {
   };
   const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>
     isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true)) && isMarketMakerDepthComplete(health);
+  let bootstrapCompletionHealthHeight = -1;
+  let bootstrapCompletionHealth: MarketMakerHealth | null = null;
+  const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {
+    if (bootstrapCompletionHealthHeight === env.height) return bootstrapCompletionHealth;
+    bootstrapCompletionHealthHeight = env.height;
+    bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
+    return bootstrapCompletionHealth;
+  };
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<void> => {
     if (shuttingDown) return;
     if (loopInFlight) return;
@@ -3702,9 +3704,9 @@ const run = async (): Promise<void> => {
         }
       }
       if (mode === 'bootstrap') {
-        const health = buildMarketMakerHealthSnapshot();
         if (!primarySameDepthReady || !isAllSameQuoteDepthComplete(visibleHubs)) return;
-        if (isBootstrapDepthComplete(health)) return;
+        const health = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : healthBeforeQuotes;
+        if (bootstrapCrossStarted && isBootstrapDepthComplete(health)) return;
         if (!bootstrapCrossStarted) {
           bootstrapCrossStarted = true;
           startupPhase = 'bootstrap-cross';
@@ -3966,7 +3968,12 @@ const run = async (): Promise<void> => {
       }
       const beforeDrive = publishBootstrapHealthSnapshot();
       refreshBootstrapPhase(beforeDrive);
-      if (isBootstrapDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return beforeDrive;
+      if (bootstrapCrossStarted) {
+        const completionBeforeDrive = buildBootstrapCompletionHealth();
+        if (isBootstrapDepthComplete(completionBeforeDrive) && !hasMarketMakerRuntimeBacklog(env)) {
+          return completionBeforeDrive;
+        }
+      }
       await yieldMarketMakerApi();
       await driveQuotes('bootstrap');
       await yieldMarketMakerApi();
@@ -3976,8 +3983,9 @@ const run = async (): Promise<void> => {
       }
       const health = publishBootstrapHealthSnapshot();
       refreshBootstrapPhase(health);
-      if (isBootstrapDepthComplete(health)) {
-        if (!hasMarketMakerRuntimeBacklog(env)) return health;
+      const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;
+      if (isBootstrapDepthComplete(completionHealth)) {
+        if (!hasMarketMakerRuntimeBacklog(env)) return completionHealth;
         const now = Date.now();
         if (now - lastBacklogLogAt >= 5_000) {
           lastBacklogLogAt = now;
@@ -4028,16 +4036,22 @@ const run = async (): Promise<void> => {
       ? publishMarketMakerHealthSnapshot({ includeCross: true })
       : publishBootstrapHealthSnapshot();
     if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;
-    if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(before) && !hasMarketMakerRuntimeBacklog(env)) {
-      await markOffersReady(before);
-      return;
+    if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {
+      const completionBefore = buildBootstrapCompletionHealth();
+      if (isBootstrapDepthComplete(completionBefore) && !hasMarketMakerRuntimeBacklog(env)) {
+        await markOffersReady(completionBefore);
+        return;
+      }
     }
     await driveQuotes();
     const health = startupPhase === 'offers-ready'
       ? publishMarketMakerHealthSnapshot({ includeCross: true })
       : publishBootstrapHealthSnapshot();
-    if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(health) && !hasMarketMakerRuntimeBacklog(env)) {
-      await markOffersReady(health);
+    if (startupPhase !== 'offers-ready') {
+      const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;
+      if (isBootstrapDepthComplete(completionHealth) && !hasMarketMakerRuntimeBacklog(env)) {
+        await markOffersReady(completionHealth);
+      }
     }
   };
   const failQuoteLoop = (error: unknown): void => {
