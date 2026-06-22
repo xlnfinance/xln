@@ -304,10 +304,9 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// Cross bootstrap touches two bilateral account machines per offer. It may
-// enqueue every source hub group for the active direction in one runtime frame;
-// the bootstrap cursor prevents the reverse direction from starting until the
-// active direction is depth-ready.
+// Cross bootstrap touches two bilateral account machines per offer. Keep the
+// wave bounded by source hub groups so each account frame remains atomic while
+// the MM API gets scheduler boundaries between heavy cross frames.
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 128;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 256;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
@@ -326,7 +325,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -3534,6 +3533,15 @@ const run = async (): Promise<void> => {
         const health = buildMarketMakerHealthSnapshot();
         if (!primarySameDepthReady || !isAllSameQuoteDepthComplete(visibleHubs)) return;
         if (isBootstrapDepthComplete(health)) return;
+        if (!bootstrapCrossStarted) {
+          bootstrapCrossStarted = true;
+          startupPhase = 'bootstrap-cross';
+          emitBootstrapDebugEvent('phase', {
+            phase: startupPhase,
+            health: summarizeMarketMakerHealthForDebug(health),
+          });
+          await yieldMarketMakerApi();
+        }
       }
 
       const crossQuoteJobs: CrossQuoteJob[] = [];

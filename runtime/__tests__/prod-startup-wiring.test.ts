@@ -476,10 +476,14 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '128'");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '256'");
-    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'");
+    expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '2'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
     expect(mmNode).toContain('bootstrapCrossCursor = selectedIndex;');
     expect(mmNode).toContain('bootstrapCrossCursor = isCrossQuoteJobDepthComplete(env, job) ? nextCursor : index;');
+    expect(mmNode).toContain("if (!bootstrapCrossStarted) {\n          bootstrapCrossStarted = true;\n          startupPhase = 'bootstrap-cross';");
+    expect(mmNode.indexOf("if (!bootstrapCrossStarted) {\n          bootstrapCrossStarted = true;\n          startupPhase = 'bootstrap-cross';")).toBeLessThan(
+      mmNode.indexOf('const crossQuoteJobs: CrossQuoteJob[] = [];'),
+    );
     expect(mmNode).toContain("pathname === '/api/account/status'");
     expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs || []).map');
     expect(smoke).toContain("const fetchMarketMakerHealth = (): MarketMakerDirectHealthPayload | null => {");
