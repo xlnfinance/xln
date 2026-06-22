@@ -70,7 +70,7 @@ wait_for_rpc_chain() {
   local deadline=$((SECONDS + 60))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
-    body="$(curl -sS -X POST -H 'Content-Type: application/json' \
+    body="$(curl --max-time 10 -sS -X POST -H 'Content-Type: application/json' \
       --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
       "$rpc_url" || true)"
     if printf '%s' "$body" | grep -q "\"result\":\"$expected_chain_hex\""; then
@@ -87,7 +87,7 @@ wait_for_public_rpc_chain() {
   local deadline="$3"
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
-    body="$(curl -ksS -X POST -H 'Content-Type: application/json' \
+    body="$(curl --max-time 10 -ksS -X POST -H 'Content-Type: application/json' \
       --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
       "https://xln.finance${path}" || true)"
     if printf '%s' "$body" | grep -q "\"result\":\"$expected_chain_hex\""; then
@@ -104,7 +104,7 @@ wait_for_public_rpc_placeholder() {
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
     local status
-    body="$(curl -ksS -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
+    body="$(curl --max-time 10 -ksS -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' \
       --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
       "https://xln.finance${path}" || true)"
     status="$(printf '%s' "$body" | tail -1)"
@@ -124,7 +124,7 @@ wait_for_main_stack() {
   local deadline=$((SECONDS + 1800))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
-    body="$(curl -fsS http://127.0.0.1:8080/api/health || true)"
+    body="$(curl --max-time 10 -fsS http://127.0.0.1:8080/api/health || true)"
     if [ -n "$body" ] && node -e '
       const payload = JSON.parse(process.argv[1]);
       const ok =
@@ -153,7 +153,7 @@ wait_for_http_status() {
   local deadline="$3"
   while [ "$SECONDS" -lt "$deadline" ]; do
     local status
-    status="$(curl -ksS -o /dev/null -w '%{http_code}' "$url" || true)"
+    status="$(curl --max-time 10 -ksS -o /dev/null -w '%{http_code}' "$url" || true)"
     if [ "$status" = "$expected_status" ]; then
       return 0
     fi
@@ -168,7 +168,7 @@ wait_for_http_content_type() {
   local deadline="$3"
   while [ "$SECONDS" -lt "$deadline" ]; do
     local headers
-    headers="$(curl -ksSI "$url" || true)"
+    headers="$(curl --max-time 10 -ksSI "$url" || true)"
     if printf '%s' "$headers" | grep -iq "^content-type: .*${expected_substring}"; then
       return 0
     fi
@@ -261,7 +261,7 @@ wait_for_http_json_field() {
   local deadline="$3"
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
-    body="$(curl -fsS "$url" || true)"
+    body="$(curl --max-time 10 -fsS "$url" || true)"
     if [ -n "$body" ] && node -e "
       const payload = JSON.parse(process.argv[1]);
       const ok = (() => { ${js_expr} })();
@@ -280,7 +280,7 @@ wait_for_http_json_field_insecure() {
   local deadline="$3"
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
-    body="$(curl -kfsS "$url" || true)"
+    body="$(curl --max-time 10 -kfsS "$url" || true)"
     if [ -n "$body" ] && node -e "
       const payload = JSON.parse(process.argv[1]);
       const ok = (() => { ${js_expr} })();

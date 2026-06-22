@@ -286,20 +286,36 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
 );
+const MARKET_MAKER_BOOTSTRAP_CPU_COUNT = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CPU_COUNT'] || cpus().length || 1),
+);
+// These are scheduler wave sizes, not data limits. Keep steady-state throughput
+// generous, but on one-core demo hosts avoid a single bootstrap account frame
+// monopolizing the JS event loop long enough to make health/API probes time out.
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK =
+  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 100 : 1000;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK =
+  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 100 : 1000;
 const MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
-  MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'),
+  2,
+  Number(
+    process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] ||
+      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK),
+  ),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
-  MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
+  4,
+  Number(
+    process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] ||
+      String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
+  ),
 );
 // Cross bootstrap touches two bilateral account machines per offer. A source
 // account must settle its pending frame before the next cross request on that
 // account, otherwise prod can trip stale-frame detection while waiting on ACKs.
 // Single-core demo hosts need smaller scheduler waves to keep the MM HTTP API
 // responsive while a runtime/account frame is processed atomically.
-const MARKET_MAKER_BOOTSTRAP_CPU_COUNT = Math.max(1, cpus().length || 1);
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK =
   MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 2 : 8;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK =
@@ -3186,6 +3202,8 @@ const run = async (): Promise<void> => {
   let bootstrapSameCursor = 0;
   let bootstrapCrossCursor = 0;
   let steadyCrossCursor = 0;
+  let lastSameQuoteProgressLogAt = 0;
+  let lastSameQuoteProgressKey = '';
   const hubsForContext = (visibleHubs: HubProfile[], context: MarketMakerEntityContext): HubProfile[] =>
     visibleHubs
       .filter(profile => sameJurisdiction(context, profile))
@@ -3210,6 +3228,42 @@ const run = async (): Promise<void> => {
   const isAllSameQuoteDepthComplete = (visibleHubs: HubProfile[]): boolean => {
     const sameQuoteJobs = buildSameQuoteJobs(visibleHubs);
     return sameQuoteJobs.length > 0 && sameQuoteJobs.every(job => isSameQuoteJobDepthComplete(env, job));
+  };
+  const describeSameQuoteJobProgress = (job: SameQuoteJob): Record<string, unknown> => {
+    const account = getAccountMachine(env, job.context.entityId, job.hub.entityId);
+    return {
+      mmEntityId: job.context.entityId,
+      jurisdiction: job.context.jurisdictionName,
+      hubEntityId: job.hub.entityId,
+      tokenIds: job.tokenIds,
+      committedOffers: countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId),
+      expectedOffers: buildMarketMakerOfferSpecs([job.hub.entityId], job.tokenIds).length,
+      account: account
+        ? {
+            height: Number(account.currentHeight ?? 0),
+            pendingFrame: Boolean(account.pendingFrame),
+            mempoolLength: Number(account.mempool?.length || 0),
+          }
+        : null,
+      blocker: describeMarketMakerSameHubBlocker(env, job.context.entityId, job.hub.entityId),
+    };
+  };
+  const emitSameQuoteProgress = (reason: string, jobs: SameQuoteJob[], selectedJob?: SameQuoteJob): void => {
+    if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
+    const incomplete = jobs.filter(job => !isSameQuoteJobDepthComplete(env, job));
+    const key = incomplete
+      .map(job => `${job.context.entityId}:${job.hub.entityId}:${countCommittedMarketMakerOffersForHub(env, job.context.entityId, job.hub.entityId)}`)
+      .join('|');
+    const now = Date.now();
+    if (key === lastSameQuoteProgressKey && now - lastSameQuoteProgressLogAt < 2_000) return;
+    lastSameQuoteProgressKey = key;
+    lastSameQuoteProgressLogAt = now;
+    emitBootstrapDebugEvent('same-quote-progress', {
+      reason,
+      selected: selectedJob ? describeSameQuoteJobProgress(selectedJob) : null,
+      incomplete: incomplete.slice(0, 8).map(describeSameQuoteJobProgress),
+      incompleteCount: incomplete.length,
+    });
   };
   const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>
     isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true)) && isMarketMakerDepthComplete(health);
@@ -3240,11 +3294,13 @@ const run = async (): Promise<void> => {
 
       if (mode === 'bootstrap') {
         const sameQuoteJobs = buildSameQuoteJobs(visibleHubs);
+        emitSameQuoteProgress('scan', sameQuoteJobs);
         for (let offset = 0; offset < sameQuoteJobs.length; offset += 1) {
           const selectedIndex = (bootstrapSameCursor + offset) % sameQuoteJobs.length;
           const job = sameQuoteJobs[selectedIndex];
           if (!job || isSameQuoteJobDepthComplete(env, job)) continue;
           bootstrapSameCursor = selectedIndex;
+          emitSameQuoteProgress('selected', sameQuoteJobs, job);
           await yieldMarketMakerApi();
           if (!shouldContinue()) return;
           if (hasMarketMakerAccountBacklog(env, job.context.entityId, job.hub.entityId)) return;

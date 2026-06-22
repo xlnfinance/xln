@@ -148,8 +148,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
+    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK');
+    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 100 : 1000');
+    expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK)');
+    expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK)');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 2 : 8');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 4 : 16');
     expect(mmNode).toContain('String(MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK)');
@@ -328,6 +330,9 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2');
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
+    expect(deploy).toContain('curl --max-time 10 -fsS http://127.0.0.1:8080/api/health');
+    expect(deploy).toContain('curl --max-time 10 -fsS "$url"');
+    expect(deploy).toContain('curl --max-time 10 -sS -X POST');
     expect(deploy).toContain('location ~ ^/rpc[2-8]$');
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
@@ -376,7 +381,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
     expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
-    expect(mmNode).toContain('!isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true))');
+    expect(mmNode).toContain('if (!bootstrapCrossStarted && !sameDepthComplete)');
     expect(mmNode).toContain('return publishMarketMakerHealthSnapshot({ includeCross: true });');
     expect(mmNode).toContain("import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';");
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string => {');
@@ -393,7 +398,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("await driveQuotes('bootstrap');");
     expect(mmNode).toContain('if (!hasMarketMakerRuntimeBacklog(env)) return true;');
     expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    publishBootstrapHealthSnapshot();");
-    expect(mmNode).toContain("startupPhase = isMarketMakerSameDepthComplete(health) && isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true))");
+    expect(mmNode).toContain('const sameDepthComplete =\n        isMarketMakerSameDepthComplete(health) &&\n        isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));');
     expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain("if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;");
     expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(before) && !hasMarketMakerRuntimeBacklog(env))");
@@ -440,6 +445,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("schema: 'xln-bootstrap-debug-event-v1'");
     expect(mmNode).toContain("schema: 'xln-market-maker-bootstrap-debug-event-v1'");
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL']");
+    expect(orchestrator).toContain('XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL:');
+    expect(orchestrator).toContain("join(marketMakerChild.dbPath, 'bootstrap-events.jsonl')");
+    expect(mmNode).toContain("emitBootstrapDebugEvent('same-quote-progress'");
     expect(mmNode).toContain('BOOTSTRAP_DEBUG_EVENT_WRITE_FAILED');
     expect(smoke).toContain('DEBUG_EVENT_WRITE_FAILED');
     expect(smoke).toContain("const marketMakerEventsJsonlPath =");
