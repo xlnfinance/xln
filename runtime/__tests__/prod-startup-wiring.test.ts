@@ -177,11 +177,11 @@ describe('production startup wiring', () => {
     expect(runtimeSource).not.toContain('void config;');
     expect(mmNode).toContain("MARKET_MAKER_RUNTIME_TICK_DELAY_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
-    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60'");
+    expect(mmNode).toContain("MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'");
     expect(mmNode).toContain('maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
     expect(hubNode).toContain("process.env['XLN_RUNTIME_TICK_DELAY_MS'] || '1'");
-    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60'");
+    expect(hubNode).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'");
     expect(hubNode).toContain('maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME');
     expect(mmNode).toContain('const pushMarketMakerEntityTx = (');
     expect(mmNode).toContain('const entityInputsByEntitySigner = new Map<string, EntityInput>();');
@@ -608,9 +608,9 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
     expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
-    expect(smoke).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60'");
+    expect(smoke).toContain("process.env['XLN_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'");
     expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000'");
-    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '60'");
+    expect(smoke).toContain("process.env['MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME'] || '20'");
     expect(smoke).toContain('throw new Error(`LOCAL_PROD_SMOKE_MM_HEALTH_FAILED error=${message}`);');
     expect(smoke).toContain("if (message.includes('LOCAL_PROD_SMOKE_MM_HEALTH_FAILED')) throw error;");
     expect(smoke).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR: process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
