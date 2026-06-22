@@ -150,7 +150,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
+    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '45'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '1000'");
     expect(mmNode).toContain("MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3'");
     expect(mmNode).toContain("MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '10'");
@@ -240,6 +240,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('desiredOffers.every(spec => hasFinalizedMarketMakerCrossOffer(env, spec))');
     expect(mmNode).toContain('const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }>');
     expect(mmNode).toContain('advanceCrossCursorAfterEnqueue(entry.index)');
+    expect(mmNode).toContain('A cross request starts a bilateral target-lock lifecycle.');
+    expect(mmNode).toContain('one per-account settlement wave');
+    expect(mmNode).toContain("if (mode === 'bootstrap') return;");
     expect(mmNode).toContain('bootstrapCrossCursor = nextCursor;');
     expect(mmNode).toContain("if (mode === 'steady') steadyCrossCursor = nextCursor;");
     expect(mmNode).toContain("if (mode === 'bootstrap' && !isCrossQuoteJobDepthComplete(env, job)) return;");
