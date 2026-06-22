@@ -290,11 +290,11 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
   Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
-  2,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'),
+  1,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '45'),
 );
 const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
-  2,
+  1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '1000'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
@@ -3280,6 +3280,7 @@ const run = async (): Promise<void> => {
       }
       const advanceCrossCursorAfterEnqueue = (index: number): void => {
         const nextCursor = (index + 1) % crossQuoteJobs.length;
+        if (mode === 'bootstrap') bootstrapCrossCursor = nextCursor;
         if (mode === 'steady') steadyCrossCursor = nextCursor;
       };
       for (const entry of selectedCrossQuoteJobs) {
@@ -3305,8 +3306,11 @@ const run = async (): Promise<void> => {
         )) {
           advanceCrossCursorAfterEnqueue(entry.index);
           await yieldMarketMakerApi();
+          // A cross request starts a bilateral target-lock lifecycle. During
+          // bootstrap, launch one per-account settlement wave and wait for
+          // account ACKs before opening more cross routes on the same accounts.
+          if (mode === 'bootstrap') return;
           if (mode === 'steady') return;
-          continue;
         }
         if (mode === 'bootstrap' && !isCrossQuoteJobDepthComplete(env, job)) return;
         await yieldMarketMakerApi();
