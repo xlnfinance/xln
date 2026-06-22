@@ -486,6 +486,35 @@ describe('audit fail-fast regressions', () => {
     expect(resolveEntityProposerId(env, entityId, 'audit')).toBe(actualSignerId);
   });
 
+  test('local signer resolution prefers an available local signer over stale gossip board fallback', () => {
+    const env = createEmptyEnv('local-signer-resolution-stale-gossip');
+    env.scenarioMode = false;
+    env.quietRuntimeLogs = true;
+    const { entityId, signerId: actualSignerId } = registerLazySigner('local-signer-resolution-stale-gossip', 'actual');
+    const staleGossipSignerId = `0x${'9b'.repeat(20)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(actualSignerId);
+    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+      entityId,
+      signerId: actualSignerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    });
+    env.gossip = {
+      getProfiles: () => [{
+        entityId,
+        metadata: {
+          board: {
+            validators: [{ signerId: staleGossipSignerId }],
+          },
+        },
+      }],
+    } as Env['gossip'];
+
+    expect(resolveEntityProposerId(env, entityId, 'audit')).toBe(actualSignerId);
+  });
+
   test('remote signer resolution trusts gossip board over imported replica signer fallback', () => {
     const env = createEmptyEnv('remote-signer-resolution-gossip-board');
     env.scenarioMode = false;

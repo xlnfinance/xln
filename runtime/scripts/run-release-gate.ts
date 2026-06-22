@@ -76,6 +76,7 @@ const ciSteps: GateStep[] = [
   { name: 'security audit pack', command: 'bun run security:audit-pack', timeoutMs: 30_000 },
   { name: 'storage WAL smoke', command: 'bun run test:persistence:cli', timeoutMs: 120_000 },
   { name: 'watchtower smoke', command: 'bun run test:watchtower:smoke', timeoutMs: 120_000 },
+  { name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 240_000 },
   { name: 'fast E2E gate', command: 'bun run test:e2e:fast', timeoutMs: 900_000 },
 ];
 

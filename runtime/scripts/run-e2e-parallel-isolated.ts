@@ -31,6 +31,7 @@ import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deriveQaTestDescription, deriveQaTestHandle } from '../qa/report';
 import { compareStableText } from '../serialization-utils';
+import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
 
 type CliArgs = {
   shards: number;
@@ -104,6 +105,7 @@ type RunnerLockPayload = {
   pid: number;
   startedAt: number;
   cwd: string;
+  logsDir?: string;
 };
 
 type AsyncLimiter = {
@@ -261,12 +263,13 @@ const pidIsAlive = (pid: number): boolean => {
   }
 };
 
-const acquireRunnerLock = (): (() => void) => {
+const acquireRunnerLock = (logsDir: string): (() => void) => {
   mkdirSync(resolve(process.cwd(), '.logs', 'e2e-parallel'), { recursive: true });
   const current: RunnerLockPayload = {
     pid: process.pid,
     startedAt: Date.now(),
     cwd: process.cwd(),
+    logsDir,
   };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -310,76 +313,6 @@ const tsTag = (): string => {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${ms}`;
 };
 
-const tail = (path: string, lines = 60): string => {
-  try {
-    const text = readFileSync(path, 'utf8');
-    return text.split('\n').slice(-lines).join('\n');
-  } catch {
-    return '(unable to read log tail)';
-  }
-};
-
-const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
-  /MISSING_SIGNER_KEY/,
-  /JADAPTER_MISSING/,
-  /PENDING[-_]FRAME[-_]STALE/,
-  /MM_READY_TIMEOUT/,
-  /CROSS_J_[A-Z0-9_:-]*/,
-  /J_SUBMIT_FATAL/,
-  /RUNTIME_LOOP_HALTED/,
-  /RUNTIME_LOOP_ERROR/,
-  /staticCall revert/,
-  /processBatch failed/,
-  /batch from .* FAILED/,
-  /Runtime loop error/,
-  /ENTITY_FRAME_TX_FAILED/,
-];
-
-const findRuntimeFatalLogLines = (path: string, maxLines = 12): string[] => {
-  let text = '';
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch {
-    return [];
-  }
-  const out: string[] = [];
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i] || '';
-    if (!RUNTIME_FATAL_LOG_PATTERNS.some(pattern => pattern.test(line))) continue;
-    out.push(`${i + 1}: ${line.slice(0, 500)}`);
-    if (out.length >= maxLines) break;
-  }
-  return out;
-};
-
-type FatalLogHit = {
-  pattern: string;
-  lineNumber: number;
-  line: string;
-};
-
-const findFirstRuntimeFatalLogHit = (path: string, fromLine = 0): FatalLogHit | null => {
-  let text = '';
-  try {
-    text = readFileSync(path, 'utf8');
-  } catch {
-    return null;
-  }
-  const lines = text.split('\n');
-  for (let i = Math.max(0, fromLine); i < lines.length; i += 1) {
-    const line = lines[i] || '';
-    const pattern = RUNTIME_FATAL_LOG_PATTERNS.find(candidate => candidate.test(line));
-    if (!pattern) continue;
-    return {
-      pattern: String(pattern),
-      lineNumber: i + 1,
-      line: line.slice(0, 500),
-    };
-  }
-  return null;
-};
-
 const startFailFastLogMonitor = (
   logPath: string,
   onFatal: (message: string) => void,
@@ -394,7 +327,7 @@ const startFailFastLogMonitor = (
       onFatal(
         `E2E_FATAL_RUNTIME_LOG marker=${hit.pattern} file=${logPath} line=${hit.lineNumber}\n` +
         `${hit.lineNumber}: ${hit.line}\n` +
-        `--- last 80 lines (${logPath}) ---\n${tail(logPath, 80)}`,
+        `--- last 80 lines (${logPath}) ---\n${tailLog(logPath, 80)}`,
       );
       return;
     }
@@ -1801,8 +1734,8 @@ const runShard = async (
 
 async function main(): Promise<void> {
   const args = parseArgs();
-  const releaseRunnerLock = acquireRunnerLock();
   const logsDir = resolve(process.cwd(), '.logs', 'e2e-parallel', tsTag());
+  const releaseRunnerLock = acquireRunnerLock(logsDir);
   mkdirSync(logsDir, { recursive: true });
 
   console.log('\n' + '='.repeat(72));
@@ -1978,7 +1911,7 @@ async function main(): Promise<void> {
     if (failed.length > 0) {
       for (const f of failed) {
         console.log(`\n--- shard ${f.shard} (tail: ${f.logPath}) ---`);
-        console.log(tail(f.logPath, 80));
+        console.log(tailLog(f.logPath, 80));
       }
       process.exit(1);
     }
