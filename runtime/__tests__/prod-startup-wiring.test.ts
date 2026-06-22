@@ -451,8 +451,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
     expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
-    expect(mmNode).toContain('if (!bootstrapCrossStarted && !sameDepthComplete)');
-    expect(mmNode).toContain('return publishMarketMakerHealthSnapshot({ includeCross: true });');
+    expect(mmNode).toContain('return sameHealth;');
+    expect(mmNode).toContain('const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {');
+    expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });');
     expect(mmNode).toContain("import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';");
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string => {');
     expect(mmNode).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
@@ -464,9 +465,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('bootstrapEntityStateHash = entityStateHash;');
     expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
     expect(mmNode).toContain('payload=${safeStringify(fingerprint.payload)}');
-    expect(mmNode).toContain("const beforeDrive = publishBootstrapHealthSnapshot();\n      refreshBootstrapPhase(beforeDrive);\n      if (isBootstrapDepthComplete(beforeDrive) && !hasMarketMakerRuntimeBacklog(env)) return beforeDrive;");
+    expect(mmNode).toContain("const beforeDrive = publishBootstrapHealthSnapshot();\n      refreshBootstrapPhase(beforeDrive);\n      if (bootstrapCrossStarted) {");
+    expect(mmNode).toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
+    expect(mmNode).toContain('return completionBeforeDrive;');
     expect(mmNode).toContain("await driveQuotes('bootstrap');");
-    expect(mmNode).toContain('if (!hasMarketMakerRuntimeBacklog(env)) return health;');
+    expect(mmNode).toContain('if (!hasMarketMakerRuntimeBacklog(env)) return completionHealth;');
     expect(mmNode).toContain('const bootstrapHealth = await waitForBootstrapOffers();');
     expect(mmNode).toContain('await markOffersReady(bootstrapHealth);');
     expect(mmNode).not.toContain("await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });");
@@ -474,8 +477,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const sameDepthComplete =\n        isMarketMakerSameDepthComplete(health) &&\n        isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));');
     expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain("if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;");
-    expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(before) && !hasMarketMakerRuntimeBacklog(env))");
-    expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && isBootstrapDepthComplete(health) && !hasMarketMakerRuntimeBacklog(env))");
+    expect(mmNode).toContain("if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {");
+    expect(mmNode).toContain('const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;');
+    expect(mmNode).toContain('await markOffersReady(completionHealth);');
   });
 
   test('market maker info route keeps cross debug opt-in off the hot path', () => {
