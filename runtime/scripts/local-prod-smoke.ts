@@ -327,17 +327,23 @@ const fetchHealth = async (): Promise<HealthPayload> => {
 };
 
 const fetchMarketMakerHealth = (): MarketMakerDirectHealthPayload | null => {
+  const startedAt = Date.now();
   try {
     const payload = fetchJsonWithCurl<MarketMakerDirectHealthPayload>(
       `http://127.0.0.1:${marketMakerApiPort}/api/health`,
       healthPollMaxMs,
       'MM_HEALTH',
     );
-    emitDebugEvent('mm-health-poll', { stage: 'mm-health-poll', ok: true });
+    emitDebugEvent('mm-health-poll', {
+      stage: 'mm-health-poll',
+      durationMs: Date.now() - startedAt,
+      ok: true,
+    });
     return payload;
   } catch (error) {
     emitDebugEvent('mm-health-poll', {
       stage: 'mm-health-poll',
+      durationMs: Date.now() - startedAt,
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -609,9 +615,9 @@ const main = async (): Promise<void> => {
       process.env['MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME'] || '1000',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '1000',
     MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:
-      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '12',
+      process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '8',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:
-      process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '36',
+      process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK'] || '16',
     ...(useSnapshotTemplate ? { XLN_MESH_PRESERVE_STATE_ON_RESET: '1' } : {}),
     ...(useSnapshotTemplate ? { XLN_MARKET_MAKER_DISABLE_RESTORE: '0' } : {}),
     ...(persistMarketMakerStorage ? {
