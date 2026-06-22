@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync } from '../account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
@@ -170,6 +170,52 @@ describe('runtime ingress timestamp', () => {
 
     await process(env);
     expect(env.runtimeMempool?.entityInputs.map(input => input.entityId)).toEqual(entityIds.slice(2));
+    expect(env.runtimeMempool?.queuedAt).toBe(1_000);
+
+    await process(env);
+    expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
+    expect(env.runtimeMempool?.queuedAt).toBeUndefined();
+  });
+
+  test('runtime tx frame cap splits oversized entity input FIFO without dropping queuedAt', async () => {
+    const env = createIsolatedEnv('runtime-entity-tx-frame-cap');
+    env.quietRuntimeLogs = true;
+    env.scenarioMode = true;
+    env.timestamp = 1_000;
+    env.runtimeState = {
+      loopActive: false,
+      halted: false,
+      maxEntityTxsPerFrame: 2,
+    };
+
+    const signerLabel = '1';
+    const signerAddress = deriveSignerAddressSync(env.runtimeSeed!, signerLabel).toLowerCase();
+    registerSignerKey(signerAddress, deriveSignerKeySync(env.runtimeSeed!, signerLabel));
+    const signerId = signerAddress;
+    const entityId = generateLazyEntityId([signerAddress], 1n);
+    env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
+    const txs = Array.from({ length: 5 }, (_, index) => ({
+      type: 'profile-update' as const,
+      data: {
+        profile: {
+          entityId,
+          name: `tx-${index + 1}`,
+        },
+      },
+    }));
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{ entityId, signerId, entityTxs: txs }],
+    });
+
+    await process(env);
+    expect(env.runtimeMempool?.entityInputs).toHaveLength(1);
+    expect(env.runtimeMempool?.entityInputs[0]?.entityTxs?.map(tx => tx.data.profile.name)).toEqual(['tx-3', 'tx-4', 'tx-5']);
+    expect(env.runtimeMempool?.queuedAt).toBe(1_000);
+
+    await process(env);
+    expect(env.runtimeMempool?.entityInputs[0]?.entityTxs?.map(tx => tx.data.profile.name)).toEqual(['tx-5']);
     expect(env.runtimeMempool?.queuedAt).toBe(1_000);
 
     await process(env);

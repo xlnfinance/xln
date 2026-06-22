@@ -571,6 +571,7 @@ export interface Env {
     persistencePaused?: boolean;
     lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
     maxEntityInputsPerFrame?: number;
+    maxEntityTxsPerFrame?: number;
     processingPromise?: Promise<void> | null;
     p2p?: RuntimeP2P | null | undefined;
     pendingP2PConfig?: RuntimeP2PConfigLike | null;

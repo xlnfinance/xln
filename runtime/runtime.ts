@@ -701,6 +701,78 @@ const applyEntityInputFrameCap = (
   return true;
 };
 
+const entityInputHasNonTxPayload = (input: EntityInput): boolean =>
+  Boolean(input.proposedFrame || (input.hashPrecommits && input.hashPrecommits.size > 0));
+
+const applyEntityTxFrameCap = (
+  runtimeInput: RuntimeInput,
+  mempool: RuntimeInput,
+  runtimeState: NonNullable<Env['runtimeState']>,
+  maxEntityTxsPerFrame: number,
+  timestamp: number,
+): boolean => {
+  const frameLimit = Math.max(0, Math.floor(Number(maxEntityTxsPerFrame)));
+  if (frameLimit <= 0) return false;
+
+  let selectedTxs = 0;
+  let changed = false;
+  const frameInputs: EntityInput[] = [];
+  const deferredInputs: EntityInput[] = [];
+
+  for (const input of runtimeInput.entityInputs) {
+    const txs = input.entityTxs ?? [];
+    const txCount = txs.length;
+    const nonTxPayload = entityInputHasNonTxPayload(input);
+
+    if (changed) {
+      deferredInputs.push(input);
+      continue;
+    }
+
+    if (txCount === 0) {
+      frameInputs.push(input);
+      continue;
+    }
+
+    const remaining = frameLimit - selectedTxs;
+    if (remaining <= 0) {
+      deferredInputs.push(input);
+      changed = true;
+      continue;
+    }
+
+    if (txCount <= remaining) {
+      frameInputs.push(input);
+      selectedTxs += txCount;
+      continue;
+    }
+
+    if (nonTxPayload) {
+      if (frameInputs.length === 0) {
+        frameInputs.push(input);
+        selectedTxs += txCount;
+      } else {
+        deferredInputs.push(input);
+      }
+      changed = true;
+      continue;
+    }
+
+    frameInputs.push({ ...input, entityTxs: txs.slice(0, remaining) });
+    deferredInputs.push({ ...input, entityTxs: txs.slice(remaining) });
+    selectedTxs += remaining;
+    changed = true;
+  }
+
+  if (!changed) return false;
+
+  runtimeInput.entityInputs = frameInputs;
+  mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
+  mempool.queuedAt = mempool.queuedAt ?? timestamp;
+  runtimeState.clockPrimed = true;
+  return true;
+};
+
 const getRuntimeWakeDeps = (): RuntimeWakeDeps => ({
   ensureRuntimeState,
   ensureRuntimeMempool,
@@ -903,7 +975,7 @@ const quarantineLiveRuntimeInput = (
  *   3. broadcast — J-batch execution + E-output P2P dispatch (side effects)
  *   4. sleep     — configurable delay (0 = no wait, just yield)
  */
-export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxEntityInputsPerFrame?: number }): () => void {
+export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxEntityInputsPerFrame?: number; maxEntityTxsPerFrame?: number }): () => void {
   if (env.scenarioMode) return () => {};
   const state = ensureRuntimeState(env);
   if (config?.maxEntityInputsPerFrame !== undefined) {
@@ -912,6 +984,14 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxE
       state.maxEntityInputsPerFrame = Math.max(1, Math.floor(configuredMaxEntityInputs));
     } else {
       delete state.maxEntityInputsPerFrame;
+    }
+  }
+  if (config?.maxEntityTxsPerFrame !== undefined) {
+    const configuredMaxEntityTxs = Number(config.maxEntityTxsPerFrame);
+    if (Number.isFinite(configuredMaxEntityTxs)) {
+      state.maxEntityTxsPerFrame = Math.max(1, Math.floor(configuredMaxEntityTxs));
+    } else {
+      delete state.maxEntityTxsPerFrame;
     }
   }
   if (state.halted) return state.stopLoop ?? (() => {});
@@ -2537,12 +2617,24 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       state,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
     );
+    applyEntityTxFrameCap(
+      runtimeInput,
+      mempool,
+      state,
+      state.maxEntityTxsPerFrame ?? 0,
+      mempoolQueuedAt ?? (env.timestamp ?? 0),
+    );
     applyEntityInputFrameCap(
       runtimeInput,
       mempool,
       state,
       state.maxEntityInputsPerFrame ?? 0,
       mempoolQueuedAt ?? (env.timestamp ?? 0),
+    );
+    processProfileMetrics.entityInputs = runtimeInput.entityInputs.length;
+    processProfileMetrics.entityTxs = runtimeInput.entityInputs.reduce(
+      (sum, input) => sum + Number(input.entityTxs?.length || 0),
+      0,
     );
     markProcessProfile('mempoolFrame');
     const hasRuntimeInput =
