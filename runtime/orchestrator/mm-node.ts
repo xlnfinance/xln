@@ -2,7 +2,6 @@
 
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { cpus } from 'node:os';
 import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
@@ -286,17 +285,11 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '1000'),
 );
-const MARKET_MAKER_BOOTSTRAP_CPU_COUNT = Math.max(
-  1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CPU_COUNT'] || cpus().length || 1),
-);
-// These are scheduler wave sizes, not data limits. Keep steady-state throughput
-// generous, but on one-core demo hosts avoid a single bootstrap account frame
-// monopolizing the JS event loop long enough to make health/API probes time out.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK =
-  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 100 : 1000;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK =
-  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 100 : 1000;
+// These are scheduler wave sizes, not data limits. Same-chain bootstrap must
+// fill full books in one account/entity wave when possible; progress/yielding
+// happens at runtime frame boundaries, not via tiny producer caps.
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK = 1000;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK = 1000;
 const MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
   Number(
