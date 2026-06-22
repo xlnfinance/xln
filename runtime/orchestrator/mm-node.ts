@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
+import { cpus } from 'node:os';
 import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
@@ -306,9 +307,17 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 // Cross bootstrap touches two bilateral account machines per offer. Keep the
 // wave bounded by source hub groups so each account frame remains atomic while
-// the MM API gets scheduler boundaries between heavy cross frames.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 128;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 256;
+// the MM API gets scheduler boundaries between heavy cross frames. These are
+// scheduler wave sizes, not data limits: high-core local runs keep large waves,
+// while 1-vCPU prod hosts avoid one cross frame monopolizing the event loop.
+const MARKET_MAKER_BOOTSTRAP_CPU_COUNT = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CPU_COUNT'] || cpus().length || 1),
+);
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK =
+  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 8 : 128;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK =
+  MARKET_MAKER_BOOTSTRAP_CPU_COUNT <= 2 ? 16 : 256;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
   Number(
@@ -1737,6 +1746,30 @@ export const hasFinalizedMarketMakerCrossOffer = (env: Env, spec: MarketMakerOff
   return Boolean(getCommittedSourceAccountCrossOffer(env, route));
 };
 
+type MarketMakerCrossBootstrapWaveDebug = {
+  direction: string;
+  sourceHubEntityId?: string;
+  candidateCount?: number;
+  selectedCount?: number;
+  desiredOffers?: number;
+  groupedSourceHubs?: number;
+  enqueuedEntityInputs?: number;
+  enqueuedEntityTxs?: number;
+  durationMs?: number;
+  remainingNewOffers?: number;
+  remainingSourceHubGroups?: number;
+};
+
+const emitMarketMakerCrossBootstrapWaveEvent = (
+  event: string,
+  fields: MarketMakerCrossBootstrapWaveDebug,
+): void => {
+  emitMarketMakerBootstrapDebugEvent(event, {
+    stage: 'bootstrap-cross',
+    ...fields,
+  });
+};
+
 const isCrossQuoteJobDepthComplete = (env: Env, job: CrossQuoteJob): boolean => {
   const desiredOffers = buildMarketMakerCrossOfferSpecs(
     env,
@@ -2096,7 +2129,10 @@ const maintainMarketMakerCrossQuotes = async (
   connectivityBudget: MarketMakerConnectivityBudget = { remainingTxs: MARKET_MAKER_CONNECTIVITY_MAX_TXS_PER_TICK },
   shouldContinue: () => boolean = () => true,
   maxSourceHubGroups = Number.MAX_SAFE_INTEGER,
+  emitBootstrapWaveEvents = false,
 ): Promise<boolean> => {
+  const startedAt = Date.now();
+  const direction = `${sourceContext.jurisdictionName}->${targetContext.jurisdictionName}`;
   if (
     sourceHubs.length === 0 ||
     targetHubs.length === 0 ||
@@ -2171,6 +2207,15 @@ const maintainMarketMakerCrossQuotes = async (
       countCrossSpecBootstrapProgress(env, right[1], getPendingCrossRequestOrderIds) ||
       compareStableText(left[0], right[0]),
     );
+  if (emitBootstrapWaveEvents) {
+    emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start', {
+      direction,
+      desiredOffers: desiredOffers.length,
+      groupedSourceHubs: groupedEntries.length,
+      remainingNewOffers,
+      remainingSourceHubGroups,
+    });
+  }
 
   for (const [sourceHubEntityId, specs] of groupedEntries) {
     await yieldMarketMakerApi();
@@ -2218,12 +2263,33 @@ const maintainMarketMakerCrossQuotes = async (
         compareStableText(left.pairId, right.pairId) ||
         compareStableText(left.offerId, right.offerId),
       );
+    if (emitBootstrapWaveEvents) {
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-source-hub', {
+        direction,
+        sourceHubEntityId,
+        candidateCount: missingCandidates.length,
+        remainingNewOffers,
+        remainingSourceHubGroups,
+        durationMs: Date.now() - startedAt,
+      });
+    }
     const missing: MarketMakerOfferSpec[] = [];
     for (const spec of missingCandidates) {
       if (missing.length >= allowedNewOffers) break;
       missing.push(spec);
     }
     if (missing.length === 0) continue;
+    if (emitBootstrapWaveEvents) {
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-select', {
+        direction,
+        sourceHubEntityId,
+        candidateCount: missingCandidates.length,
+        selectedCount: missing.length,
+        remainingNewOffers,
+        remainingSourceHubGroups,
+        durationMs: Date.now() - startedAt,
+      });
+    }
 
     for (const spec of missing) {
       const route = spec.crossJurisdiction!;
@@ -2246,6 +2312,14 @@ const maintainMarketMakerCrossQuotes = async (
   const nonEmptyEntityInputs = entityInputs.filter(input => (input.entityTxs?.length || 0) > 0);
   if (nonEmptyEntityInputs.length > 0) {
     if (!shouldContinue()) return false;
+    if (emitBootstrapWaveEvents) {
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-enqueue', {
+        direction,
+        enqueuedEntityInputs: nonEmptyEntityInputs.length,
+        enqueuedEntityTxs: nonEmptyEntityInputs.reduce((sum, input) => sum + (input.entityTxs?.length || 0), 0),
+        durationMs: Date.now() - startedAt,
+      });
+    }
     enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: nonEmptyEntityInputs,
@@ -3630,6 +3704,7 @@ const run = async (): Promise<void> => {
           mode === 'bootstrap'
             ? MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE
             : Number.MAX_SAFE_INTEGER,
+          mode === 'bootstrap',
         )) {
           advanceCrossCursorAfterEnqueue(entry.index, job);
           await yieldMarketMakerApi();
