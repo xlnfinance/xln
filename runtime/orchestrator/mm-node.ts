@@ -316,10 +316,10 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
       String(MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK),
   ),
 );
-// Cross bootstrap is a book-construction phase. Keep the scheduler permissive
-// enough to build the full book in one entity/account frame when consensus can
-// accept it; responsiveness comes from frame boundaries and explicit API yields.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 1000;
+// Cross bootstrap builds full depth, but each wave is bounded to one source
+// account settlement batch. Remote account proposals are atomic and must not be
+// split after construction, so the scheduler is the correct frame boundary.
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 10;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 1000;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
@@ -337,7 +337,7 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK = Math.max(
 );
 const MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1000'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'),
 );
 const MARKET_MAKER_STEADY_CROSS_ROUTE_JOBS_PER_TICK = Math.max(
   1,
@@ -3893,7 +3893,7 @@ const run = async (): Promise<void> => {
             : 0;
           if (mode === 'bootstrap' && deferredTxsAfter > deferredTxsBefore) {
             deferredBootstrapCrossLastIndex = entry.index;
-            continue;
+            break;
           }
           advanceCrossCursorAfterEnqueue(entry.index);
           await yieldMarketMakerApi();
@@ -3996,8 +3996,11 @@ const run = async (): Promise<void> => {
       health: summarizeMarketMakerHealthForDebug(health),
     });
     console.log(
-      `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash} payload=${safeStringify(fingerprint.payload)}`,
+      `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}`,
     );
+    if (envFlagEnabled(process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD'])) {
+      console.log(`[MESH-MM] BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}`);
+    }
     console.log(
       `[MESH-MM] OFFERS_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
     );
