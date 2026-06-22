@@ -290,6 +290,10 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // happens at runtime frame boundaries, not via tiny producer caps.
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK = 1000;
 const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK = 1000;
+const MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE = Math.max(
+  1,
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE'] || '1'),
+);
 const MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
   Number(
@@ -3550,13 +3554,15 @@ const run = async (): Promise<void> => {
               compareStableText(left.context.jurisdictionName, right.context.jurisdictionName) ||
               compareStableText(left.context.entityId, right.context.entityId),
             );
-
-          let enqueuedConnectivity = false;
-          for (const entry of groupedEntries) {
-            const runnableHubEntityIds = entry.jobs
+          const runnableHubEntityIdsFor = (entry: { context: MarketMakerEntityContext; jobs: SameQuoteJob[] }): string[] =>
+            entry.jobs
               .map(job => job.hub.entityId)
               .filter(hubEntityId => !hasMarketMakerAccountBacklog(env, entry.context.entityId, hubEntityId))
               .sort(compareStableText);
+
+          let enqueuedConnectivity = false;
+          for (const entry of groupedEntries) {
+            const runnableHubEntityIds = runnableHubEntityIdsFor(entry);
             if (runnableHubEntityIds.length === 0) continue;
             const selectedJob = entry.jobs.find(job => runnableHubEntityIds.includes(job.hub.entityId)) ?? entry.jobs[0]!;
             bootstrapSameCursor = sameQuoteJobs.indexOf(selectedJob);
@@ -3581,10 +3587,8 @@ const run = async (): Promise<void> => {
 
           let enqueuedQuotes = false;
           for (const entry of groupedEntries) {
-            const runnableHubEntityIds = entry.jobs
-              .map(job => job.hub.entityId)
-              .filter(hubEntityId => !hasMarketMakerAccountBacklog(env, entry.context.entityId, hubEntityId))
-              .sort(compareStableText);
+            const runnableHubEntityIds = runnableHubEntityIdsFor(entry)
+              .slice(0, MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE);
             if (runnableHubEntityIds.length === 0) continue;
             const selectedJob = entry.jobs.find(job => runnableHubEntityIds.includes(job.hub.entityId)) ?? entry.jobs[0]!;
             bootstrapSameCursor = sameQuoteJobs.indexOf(selectedJob);
