@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText } from '../serialization-utils';
@@ -1598,7 +1598,15 @@ export const resolveQaArtifactPath = async (runId: string, relativePath: string)
   if (!fileStat?.isFile()) {
     throw new Error('QA_ARTIFACT_NOT_FOUND');
   }
-  return absolutePath;
+  const realRunDir = await realpath(runDir).catch(() => null);
+  const realArtifactPath = await realpath(absolutePath).catch(() => null);
+  if (!realRunDir || !realArtifactPath) {
+    throw new Error('QA_ARTIFACT_NOT_FOUND');
+  }
+  if (!realArtifactPath.startsWith(`${realRunDir}/`) && realArtifactPath !== realRunDir) {
+    throw new Error('INVALID_QA_ARTIFACT_PATH');
+  }
+  return realArtifactPath;
 };
 
 export const makeQaArtifactUrl = (runId: string, relativePath: string): string =>
@@ -1695,7 +1703,15 @@ export const resolveQaStoryScreenshotPath = async (
   if (!fileStat?.isFile() || !STORY_IMAGE_EXTENSIONS.has(extname(absolutePath).toLowerCase())) {
     throw new Error('QA_STORY_IMAGE_NOT_FOUND');
   }
-  return absolutePath;
+  const realRoot = await realpath(root).catch(() => null);
+  const realImagePath = await realpath(absolutePath).catch(() => null);
+  if (!realRoot || !realImagePath) {
+    throw new Error('QA_STORY_IMAGE_NOT_FOUND');
+  }
+  if (!realImagePath.startsWith(`${realRoot}/`) && realImagePath !== realRoot) {
+    throw new Error('INVALID_QA_STORY_IMAGE_PATH');
+  }
+  return realImagePath;
 };
 
 export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'perf' | 'shards'> & {

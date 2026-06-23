@@ -313,7 +313,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [ ] Unit: regression threshold math against same code hash and previous HEAD.
 - [ ] Unit: UTC formatter and runId timezone round-trip.
 - [ ] Unit: `sanitizeE2ETarget` invalid target, self-target, null byte, traversal.
-- [ ] Unit: `resolveQaArtifactPath` traversal and symlink escape rejection.
+- [x] Unit: `resolveQaArtifactPath` traversal and symlink escape rejection.
 - [ ] Unit: `listQaHistory` hot path is SQLite-only after backfill.
 - [ ] Unit: run payload strips `perf.samples`.
 - [x] API: QA read token can list runs/artifacts but cannot restart.
