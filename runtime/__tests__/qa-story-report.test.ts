@@ -755,6 +755,37 @@ test('qa restart audit ledger writes start and finish evidence', () => {
   expect(row?.actorKeyId).toBe('actor-test');
 });
 
+test('qa restart audit output hides absolute server paths', () => {
+  const auditId = `test-audit-path-${Date.now()}`;
+  const absoluteLogPath = resolve(process.cwd(), '.logs', 'qa-restarts', 'absolute-fixture.log');
+  insertQaRestartAudit({
+    auditId,
+    status: 'started',
+    actorKeyId: 'actor-test',
+    scope: 'admin',
+    operatorId: 'operator-test',
+    action: 'restart-run',
+    target: 'tests/e2e-fixture.spec.ts',
+    title: 'fixture',
+    reason: 'verify path redaction',
+    expectedGitHead: 'expected-head',
+    actualGitHead: 'actual-head',
+    gitBranch: 'main',
+    codeHash: 'code-hash',
+    dirty: false,
+    startedAt: Date.now(),
+    finishedAt: null,
+    pid: 123,
+    exitCode: null,
+    logPath: absoluteLogPath,
+    requestIp: '127.0.0.1',
+    userAgent: 'bun-test',
+  });
+  const row = listQaRestartAudit(50).find(candidate => candidate.auditId === auditId);
+  expect(row?.logPath).toBe('.logs/qa-restarts/absolute-fixture.log');
+  expect(row?.logPath).not.toContain(process.cwd());
+});
+
 test('qa restart run is explicitly disabled without operator flag', async () => {
   await withQaAuthEnv(async () => {
     const previous = process.env['XLN_QA_RESTART_ALLOWED'];
@@ -808,6 +839,9 @@ test('qa restart rejects concurrent run without spawning a second heavy e2e proc
           deps,
         );
         expect(first?.status).toBe(202);
+        const firstPayload = await first!.json() as { restart?: { logPath?: string } };
+        expect(firstPayload.restart?.logPath).toContain('.logs/qa-restarts/');
+        expect(firstPayload.restart?.logPath).not.toContain(process.cwd());
         expect(spawned.length).toBe(1);
 
         const second = await maybeHandleQaRequest(

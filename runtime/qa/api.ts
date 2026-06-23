@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import {
@@ -108,6 +108,20 @@ const qaRestartWatchdogMs = (): number => {
 const qaRestartKillGraceMs = (): number => {
   const raw = Number(process.env['XLN_QA_RESTART_KILL_GRACE_MS'] || '10000');
   return Number.isFinite(raw) ? Math.max(500, Math.floor(raw)) : 10000;
+};
+
+const publicQaPath = (filePath: string): string => {
+  const raw = String(filePath || '').trim();
+  if (!raw) return '';
+  const normalized = raw.replace(/\\/g, '/');
+  if (!isAbsolute(raw)) {
+    return normalized.replace(/^\.?\//, '');
+  }
+  const cwdRelative = relative(process.cwd(), raw).replace(/\\/g, '/');
+  if (cwdRelative && !cwdRelative.startsWith('../') && cwdRelative !== '..') return cwdRelative;
+  const logIndex = normalized.indexOf('/.logs/');
+  if (logIndex >= 0) return normalized.slice(logIndex + 1);
+  return basename(raw);
 };
 
 const QA_REQUIRED_RESTART_ENV_KEYS = [
@@ -385,7 +399,7 @@ const rowToRestartAuditEntry = (row: Record<string, unknown>): QaRestartAuditEnt
   finishedAt: nullableNumber(row['finished_at']),
   pid: nullableNumber(row['pid']),
   exitCode: nullableNumber(row['exit_code']),
-  logPath: String(row['log_path'] || ''),
+  logPath: publicQaPath(String(row['log_path'] || '')),
   requestIp: typeof row['request_ip'] === 'string' ? row['request_ip'] : null,
   userAgent: typeof row['user_agent'] === 'string' ? row['user_agent'] : null,
 });
@@ -940,6 +954,7 @@ export async function maybeHandleQaRequest(
       const logRoot = resolve(process.cwd(), '.logs', 'qa-restarts');
       mkdirSync(logRoot, { recursive: true });
       const logPath = join(logRoot, `${startedAt}-${intent.target.replace(/[^a-zA-Z0-9]+/g, '-')}.log`);
+      const publicLogPath = publicQaPath(logPath);
       const auditId = buildAuditId(startedAt, auth, intent.target, intent.title);
       insertQaRestartAudit({
         auditId,
@@ -960,7 +975,7 @@ export async function maybeHandleQaRequest(
         finishedAt: null,
         pid: null,
         exitCode: null,
-        logPath,
+        logPath: publicLogPath,
         requestIp: requestIp(request),
         userAgent: userAgent(request),
       });
@@ -1024,7 +1039,7 @@ export async function maybeHandleQaRequest(
         target: intent.target,
         title: intent.title,
         command: ['bun', ...command],
-        logPath,
+        logPath: publicLogPath,
         timeoutMs,
         watchdogAt,
         killGraceMs,
