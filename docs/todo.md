@@ -74,12 +74,14 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Apply to health, QA runs, bootstrap stages, restart state, remote adapter, and benchmarks.
   - Tests: API schema rejects missing `severity`/`reason` for release runs.
 
-- [ ] Add failure class per shard/run.
+- [x] Add failure class per shard/run.
   - Impact: high.
   - Classes: `assertion`, `infra`, `timeout`, `flake`, `crash`, `security`, `unknown`.
   - Fix: derive from phase failure, fatal markers, Playwright result, console/page errors, and history at same code hash.
   - UI: filter by failure class; default-select first blocking failure.
   - Tests: infra boot failure is not rendered as assertion regression.
+  - Status: done. Runner writes `failureClass` per shard and `failureClasses` per run; legacy manifests derive the field on read. QA cockpit shows class chips on run rows and shard detail, failure inbox clicks set the active class filter, and manual class chips filter both run list and inbox. Loading or opening a failure selects the first failed shard matching the active class before falling back to the first failed shard.
+  - Evidence: unit covers timeout/assertion/infra/passed classifier behavior. Focused QA cockpit e2e verifies `assertion` filtering, run row chips, inbox narrowing, and shard detail class chips.
 
 - [ ] Fix numeric signer key cache isolation by runtime seed.
   - Impact: high.

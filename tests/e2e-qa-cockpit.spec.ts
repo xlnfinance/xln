@@ -576,6 +576,15 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('failing shard');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('performance');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('SLOWER');
+    await expect(page.getByTestId('qa-failure-class-filter')).toContainText('assertion');
+    await page.getByTestId('qa-failure-class-filter').getByRole('button', { name: 'assertion' }).click();
+    await expect(page.getByTestId('qa-run-row')).toHaveCount(1);
+    await expect(page.getByTestId('qa-run-row').first()).toContainText('assertion');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('1 / 3 reasons');
+    await expect(page.getByTestId('qa-failure-inbox')).not.toContainText('Browser health failed');
+    await page.getByTestId('qa-failure-class-filter').getByRole('button', { name: 'all' }).click();
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('3 / 3 reasons');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
     await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('UX Screenshot Gallery');
     await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('desktop payment composer');
     await expect(page.getByTestId('qa-ux-gallery')).toBeVisible();

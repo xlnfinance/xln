@@ -321,6 +321,7 @@
     | 'network'
     | 'operations'
     | 'unknown';
+  type QaFailureClassFilter = QaFailureClass | 'all';
   type QaFailureInboxItem = {
     id: string;
     severity: QaFailureSeverity;
@@ -360,6 +361,7 @@
   let activeView = $state<QaView>('gallery');
   let runSortKey = $state<RunSortKey>('date-desc');
   let shardSortKey = $state<ShardSortKey>('index');
+  let selectedFailureClass = $state<QaFailureClassFilter>('all');
   let autoRefresh = $state(true);
   let qaTokenInput = $state('');
   let qaAuthLabel = $state('locked');
@@ -413,12 +415,19 @@
   ));
   const retentionReady = $derived(Boolean(qaCanPlanRestart && retentionConfirm.trim() === 'DELETE_OLDER_THAN_30_DAYS' && !retentionBusy));
   const historyBackfillReady = $derived(Boolean(qaCanPlanRestart && !historyBackfillBusy));
-  const sortedRuns = $derived([...runs].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
+  const filteredRuns = $derived(runs.filter(run => runMatchesFailureClass(run, selectedFailureClass)));
+  const sortedRuns = $derived([...filteredRuns].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedHistory = $derived([...history].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedShardEntries = $derived((selectedRun?.shards ?? [])
     .map((shard, index) => ({ shard, index }))
     .sort((a, b) => compareShardsForSort(a, b, shardSortKey)));
   const failureInbox = $derived(buildFailureInbox(runs, restartAudit));
+  const filteredFailureInbox = $derived(
+    selectedFailureClass === 'all'
+      ? failureInbox
+      : failureInbox.filter(item => item.failureClass === selectedFailureClass),
+  );
+  const failureClassOptions = $derived(buildFailureClassOptions(runs, failureInbox));
   const verdict = $derived(buildVerdictSummary(latestRun, failureInbox));
   const uxGalleryStories = $derived([
     ...stories.filter(story => story.curated),
@@ -530,6 +539,26 @@
     return 'unknown';
   }
 
+  function runMatchesFailureClass(run: QaSummary, failureClass: QaFailureClassFilter): boolean {
+    if (failureClass === 'all') return true;
+    if ((run.failureClasses ?? []).includes(failureClass)) return true;
+    const health = browserHealth(run);
+    if (failureClass === 'performance') return run.benchmark?.status === 'slower' || run.benchmark?.status === 'mixed';
+    if (failureClass === 'network') return health.networkFailureCount > 0 || health.httpErrorCount > 0;
+    if (failureClass === 'browser') return health.issueCount > 0 && health.networkFailureCount === 0 && health.httpErrorCount === 0;
+    if (failureClass === 'unknown') return run.status === 'failed' && (run.failureClasses ?? []).length === 0;
+    return false;
+  }
+
+  function buildFailureClassOptions(runRows: QaSummary[], inbox: QaFailureInboxItem[]): QaFailureClass[] {
+    const classes = new Set<QaFailureClass>();
+    for (const run of runRows) {
+      for (const failureClass of run.failureClasses ?? []) classes.add(failureClass);
+    }
+    for (const item of inbox) classes.add(item.failureClass);
+    return [...classes].sort((a, b) => a.localeCompare(b));
+  }
+
   function runFailureItem(run: QaSummary): QaFailureInboxItem | null {
     if (run.status !== 'failed' && run.failedShards <= 0) return null;
     const detail = run.failingTargets.length > 0 ? run.failingTargets.join(' · ') : `run ${run.runId}`;
@@ -614,11 +643,16 @@
   }
 
   async function openFailure(item: QaFailureInboxItem): Promise<void> {
+    selectedFailureClass = item.failureClass;
     if (!item.runId) {
       activeView = 'history';
       return;
     }
     activeView = 'e2e';
+    if (item.runId === selectedRunId && selectedRun) {
+      selectedShardIndex = pickDefaultShard(selectedRun, item.failureClass);
+      return;
+    }
     await selectRun(item.runId);
   }
 
@@ -683,9 +717,20 @@
     return parts.length >= 2 ? `${parts[0]} ${parts[1]}` : run.runId;
   }
 
-  function pickDefaultShard(run: QaRun): number {
+  function pickDefaultShard(run: QaRun, failureClass: QaFailureClassFilter = selectedFailureClass): number {
+    const classIndex = failureClass === 'all'
+      ? -1
+      : run.shards.findIndex((shard) => shard.status === 'failed' && shard.failureClass === failureClass);
+    if (classIndex >= 0) return classIndex;
     const failedIndex = run.shards.findIndex((shard) => shard.status === 'failed');
     return failedIndex >= 0 ? failedIndex : 0;
+  }
+
+  function setFailureClassFilter(failureClass: QaFailureClassFilter): void {
+    selectedFailureClass = failureClass;
+    if (selectedRun) {
+      selectedShardIndex = pickDefaultShard(selectedRun, failureClass);
+    }
   }
 
   function requestedRunIdFromUrl(): string {
@@ -1115,9 +1160,35 @@
       </select>
     </label>
 
+    {#if failureClassOptions.length > 0}
+      <div class="failure-filter" data-testid="qa-failure-class-filter">
+        <span>Failure class</span>
+        <div class="filter-chips">
+          <button
+            type="button"
+            class:active={selectedFailureClass === 'all'}
+            onclick={() => setFailureClassFilter('all')}
+          >
+            all
+          </button>
+          {#each failureClassOptions as failureClass}
+            <button
+              type="button"
+              class:active={selectedFailureClass === failureClass}
+              onclick={() => setFailureClassFilter(failureClass)}
+            >
+              {failureClass}
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     <div class="run-list">
       {#if loadingRuns && runs.length === 0}
         <div class="empty">Loading runs…</div>
+      {:else if sortedRuns.length === 0}
+        <div class="empty">No runs for {selectedFailureClass}</div>
       {:else}
         {#each sortedRuns as run}
           <button
@@ -1236,12 +1307,32 @@
         <div class="suite-list-head">
           <div>
             <div class="eyebrow">Failure Inbox</div>
-            <h3>{failureInbox.length} reasons</h3>
+            <h3>{filteredFailureInbox.length} / {failureInbox.length} reasons</h3>
           </div>
           <span class="chip warn">latest first</span>
         </div>
+        {#if failureClassOptions.length > 0}
+          <div class="filter-chips inline" data-testid="qa-failure-inbox-filter">
+            <button
+              type="button"
+              class:active={selectedFailureClass === 'all'}
+              onclick={() => setFailureClassFilter('all')}
+            >
+              all
+            </button>
+            {#each failureClassOptions as failureClass}
+              <button
+                type="button"
+                class:active={selectedFailureClass === failureClass}
+                onclick={() => setFailureClassFilter(failureClass)}
+              >
+                {failureClass}
+              </button>
+            {/each}
+          </div>
+        {/if}
         <div class="failure-list">
-          {#each failureInbox.slice(0, 6) as item}
+          {#each filteredFailureInbox.slice(0, 6) as item}
             <button type="button" onclick={() => openFailure(item)} data-testid="qa-failure-item">
               <strong class:fail={item.severity === 'FAIL'}>{item.severity}</strong>
               <span>{item.failureClass}</span>
@@ -1954,6 +2045,50 @@
     background: rgba(0, 0, 0, 0.22);
     font: inherit;
     font-size: 0.82rem;
+  }
+
+  .failure-filter {
+    display: grid;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .failure-filter > span {
+    color: #9b978a;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .filter-chips.inline {
+    margin-bottom: 0.35rem;
+  }
+
+  .filter-chips button {
+    min-height: 30px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 999px;
+    padding: 0 0.65rem;
+    color: #c8c2b6;
+    background: rgba(255, 255, 255, 0.04);
+    font: inherit;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+
+  .filter-chips button.active {
+    border-color: rgba(255, 146, 132, 0.38);
+    color: #ffb1a6;
+    background: rgba(255, 146, 132, 0.1);
+    font-weight: 800;
   }
 
   .trend-pill {
