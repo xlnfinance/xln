@@ -446,7 +446,14 @@
 
   function formatDate(timestamp: number | null | undefined): string {
     if (!timestamp) return 'n/a';
-    return new Date(timestamp).toLocaleString();
+    const d = new Date(timestamp);
+    if (Number.isNaN(d.getTime())) return 'n/a';
+    const p2 = (n: number): string => String(n).padStart(2, '0');
+    return [
+      `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`,
+      `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`,
+      'UTC',
+    ].join(' ');
   }
 
   function formatMs(ms: number | null | undefined): string {

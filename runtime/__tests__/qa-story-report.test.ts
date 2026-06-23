@@ -15,6 +15,7 @@ import {
 import {
   classifyQaShardFailure,
   compareQaBenchmarkRuns,
+  formatQaRunIdUtc,
   QA_HISTORY_DB_PATH,
   listQaStoryScreenshots,
   purgeQaRunsOlderThan,
@@ -166,6 +167,11 @@ test('qa benchmark comparison flags sharp runtime deltas', () => {
   expect(higherHostLoadOnly.metrics.find(metric => metric.metric === 'peakLoad1')?.verdict).toBe('slower');
   expect(higherHostLoadOnly.reason).toContain('host load');
   expect(higherHostLoadOnly.likelyCauses).toContain('host load increased without app timing regression');
+});
+
+test('qa run id formatter uses UTC fields', () => {
+  expect(formatQaRunIdUtc(Date.UTC(2026, 5, 23, 0, 1, 2, 3))).toBe('20260623-000102-003');
+  expect(formatQaRunIdUtc(Date.UTC(2026, 5, 23, 23, 59, 59, 999))).toBe('20260623-235959-999');
 });
 
 test('qa shard failure classifier maps operator failure classes', () => {

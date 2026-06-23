@@ -402,23 +402,23 @@ const parseRunIdTimestamp = (runId: string): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const FUTURE_RUN_SKEW_MS = 60_000;
-
-const formatLocalRunIdUpperBound = (timestamp: number): string => {
+export const formatQaRunIdUtc = (timestamp: number): string => {
   const d = new Date(timestamp);
   const p2 = (n: number): string => String(n).padStart(2, '0');
   const p3 = (n: number): string => String(n).padStart(3, '0');
   return [
-    `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}`,
-    `${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`,
-    p3(d.getMilliseconds()),
+    `${d.getUTCFullYear()}${p2(d.getUTCMonth() + 1)}${p2(d.getUTCDate())}`,
+    `${p2(d.getUTCHours())}${p2(d.getUTCMinutes())}${p2(d.getUTCSeconds())}`,
+    p3(d.getUTCMilliseconds()),
   ].join('-');
 };
 
+const FUTURE_RUN_SKEW_MS = 60_000;
+
 const compareQaRunIdsForOperator = (a: string, b: string, now = Date.now()): number => {
-  const latestLocalRunId = formatLocalRunIdUpperBound(now + FUTURE_RUN_SKEW_MS);
-  const aFuture = compareStableText(a, latestLocalRunId) > 0;
-  const bFuture = compareStableText(b, latestLocalRunId) > 0;
+  const latestUtcRunId = formatQaRunIdUtc(now + FUTURE_RUN_SKEW_MS);
+  const aFuture = compareStableText(a, latestUtcRunId) > 0;
+  const bFuture = compareStableText(b, latestUtcRunId) > 0;
   if (aFuture !== bFuture) return aFuture ? 1 : -1;
   return compareStableText(b, a);
 };
