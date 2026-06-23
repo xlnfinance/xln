@@ -3,6 +3,7 @@
     buildQaScenarioCues,
     qaScenarioCueIndexAt,
     qaScenarioDescription,
+    qaScenarioFailureCueIndex,
     qaScenarioTimelineMs,
     qaScenarioTitle,
     qaScenarioUsesVideoClock,
@@ -31,6 +32,8 @@
     description: string | null;
     target: string | null;
     title: string | null;
+    error?: string | null;
+    logTail?: string | null;
     phaseMs: QaScenarioPhaseMs | null;
     timelineSteps?: QaScenarioStep[];
     slowSteps: QaScenarioStep[];
@@ -40,9 +43,10 @@
   type Props = {
     runId: string;
     shard: QaShard;
+    failureCueFocusKey?: string;
   };
 
-  let { runId, shard }: Props = $props();
+  let { runId, shard, failureCueFocusKey = '' }: Props = $props();
 
   let videoElement = $state<HTMLVideoElement | null>(null);
   let fullscreenHost = $state<HTMLElement | null>(null);
@@ -55,6 +59,7 @@
   let trackBlobUrl = $state<string | null>(null);
   let imageBlobUrls = $state<Record<string, string>>({});
   let selectedKey = $state('');
+  let appliedFailureCueFocusKey = $state('');
 
   function revokeObjectUrlAfterMediaDetach(url: string): void {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -87,12 +92,14 @@
   );
   const activeCueIndex = $derived(qaScenarioCueIndexAt(cues, playbackMs));
   const activeCue = $derived<QaScenarioCue | null>(cues[activeCueIndex] ?? cues[0] ?? null);
+  const failureCueIndex = $derived(qaScenarioFailureCueIndex(shard, cues));
   const playbackPct = $derived(timelineMs > 0 ? Math.min(100, Math.max(0, (playbackMs / timelineMs) * 100)) : 0);
 
   $effect(() => {
     const nextKey = `${runId}:${shard.shard}`;
     if (nextKey === selectedKey) return;
     selectedKey = nextKey;
+    appliedFailureCueFocusKey = '';
     currentTimeSec = 0;
     durationSec = 0;
     fullscreenError = null;
@@ -175,6 +182,19 @@
     };
   });
 
+  $effect(() => {
+    const key = failureCueFocusKey;
+    const cue = failureCueIndex >= 0 ? cues[failureCueIndex] : null;
+    if (!key || key === appliedFailureCueFocusKey || !cue) return;
+    currentTimeSec = cue.startMs / 1000;
+    if (!videoBlobUrl || !videoElement) return;
+    if (durationSec <= 0) {
+      videoElement.load();
+      return;
+    }
+    if (seekToCue(cue)) appliedFailureCueFocusKey = key;
+  });
+
   function formatTime(ms: number): string {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
     const minutes = Math.floor(totalSeconds / 60);
@@ -195,16 +215,22 @@
     durationSec = Number.isFinite(videoElement.duration) ? videoElement.duration : 0;
   }
 
-  function seekToCue(cue: QaScenarioCue): void {
-    if (!videoElement) return;
+  function seekToCue(cue: QaScenarioCue): boolean {
+    if (!videoElement) return false;
     const safeTimelineMs = timelineMs > 0 ? timelineMs : cue.endMs;
     const videoDuration = Number.isFinite(videoElement.duration) ? videoElement.duration : 0;
-    videoElement.currentTime = usesVideoClock
-      ? cue.startMs / 1000
-      : videoDuration > 0
-      ? (cue.startMs / safeTimelineMs) * videoDuration
-      : cue.startMs / 1000;
-    syncVideoClock();
+    try {
+      videoElement.currentTime = usesVideoClock
+        ? cue.startMs / 1000
+        : videoDuration > 0
+        ? (cue.startMs / safeTimelineMs) * videoDuration
+        : cue.startMs / 1000;
+      syncVideoClock();
+      return true;
+    } catch (error) {
+      mediaError = error instanceof Error ? error.message : String(error);
+      return false;
+    }
   }
 
   function imageSrc(image: QaArtifact): string {
@@ -277,7 +303,7 @@
           data-testid="qa-video-player"
           class="video-player"
           controls
-          preload="none"
+          preload="metadata"
           src={videoBlobUrl}
           onloadedmetadata={syncVideoClock}
           ontimeupdate={syncVideoClock}
@@ -340,7 +366,9 @@
         <button
           class="transcript-cue"
           class:active={index === activeCueIndex}
+          class:failure={index === failureCueIndex}
           aria-current={index === activeCueIndex ? 'step' : undefined}
+          data-failure-cue={index === failureCueIndex ? 'true' : undefined}
           data-testid="qa-subtitle-cue"
           onclick={() => seekToCue(cue)}
         >
@@ -602,6 +630,14 @@
   .transcript-cue.active {
     border-color: rgba(216, 175, 79, 0.62);
     background: rgba(216, 175, 79, 0.12);
+  }
+
+  .transcript-cue.failure {
+    border-color: rgba(239, 91, 91, 0.55);
+  }
+
+  .transcript-cue.failure.active {
+    background: rgba(239, 91, 91, 0.14);
   }
 
   .transcript-cue time {

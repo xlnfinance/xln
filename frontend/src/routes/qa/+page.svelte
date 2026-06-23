@@ -370,6 +370,8 @@
   let runSortKey = $state<RunSortKey>('date-desc');
   let shardSortKey = $state<ShardSortKey>('index');
   let selectedFailureClass = $state<QaFailureClassFilter>('all');
+  let failureCueFocusKey = $state('');
+  let failureCueFocusSeq = $state(0);
   let autoRefresh = $state(true);
   let qaTokenInput = $state('');
   let qaAuthLabel = $state('locked');
@@ -667,9 +669,11 @@
     if (item.runId === selectedRunId && selectedRun) {
       selectedShardIndex = pickDefaultShard(selectedRun, item.failureClass);
       rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
+      focusFailureCue(item, selectedRun, selectedShardIndex);
       return;
     }
     await selectRun(item.runId);
+    if (selectedRun) focusFailureCue(item, selectedRun, selectedShardIndex);
   }
 
   function finiteSortValue(value: number | null | undefined, fallback: number): number {
@@ -740,6 +744,13 @@
     if (classIndex >= 0) return classIndex;
     const failedIndex = run.shards.findIndex((shard) => shard.status === 'failed');
     return failedIndex >= 0 ? failedIndex : 0;
+  }
+
+  function focusFailureCue(item: QaFailureInboxItem, run: QaRun, shardIndex: number): void {
+    const shard = run.shards[shardIndex];
+    if (!shard || shard.status !== 'failed') return;
+    failureCueFocusSeq += 1;
+    failureCueFocusKey = `${item.id}:${run.runId}:${shard.shard}:${failureCueFocusSeq}`;
   }
 
   function shardNumberFromUrl(): number | null {
@@ -1861,7 +1872,11 @@
 
           <div class="detail-layout">
             <div class="media-panel">
-              <QaScenarioPlayer runId={selectedRun.runId} shard={selectedShard} />
+              <QaScenarioPlayer
+                runId={selectedRun.runId}
+                shard={selectedShard}
+                failureCueFocusKey={failureCueFocusKey}
+              />
             </div>
 
             <div class="info-panel">
