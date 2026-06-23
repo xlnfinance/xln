@@ -2362,11 +2362,29 @@ test('swap keeps a within-band wide limit as a resting order instead of filling 
       accountRef.counterpartyId,
     );
     await timedStep('swap.configure_resting_buy', () => configureRestingBuyFromBestAsk(page, { maxQuote: 25 }));
-    await capturePageScreenshot(page, testInfo, 'swap-form-filled-resting-limit-desktop.png');
+    await capturePageScreenshot(page, testInfo, 'swap-form-filled-resting-limit-desktop.png', {
+      fullPage: false,
+      ux: {
+        title: 'desktop resting limit form',
+        group: 'Swap',
+        description: 'Limit order configured inside the current orderbook band.',
+        platform: 'desktop',
+        tags: ['swap', 'limit-order'],
+      },
+    });
     await placeButton.click();
 
     await expect(page.getByTestId('swap-open-order-row').first()).toBeVisible({ timeout: 30_000 });
-    await capturePageScreenshot(page, testInfo, 'swap-resting-order-open-desktop.png');
+    await capturePageScreenshot(page, testInfo, 'swap-resting-order-open-desktop.png', {
+      fullPage: false,
+      ux: {
+        title: 'desktop open resting order',
+        group: 'Swap',
+        description: 'Open order row after a resting limit order is placed.',
+        platform: 'desktop',
+        tags: ['swap', 'open-order'],
+      },
+    });
     await expect
       .poll(async () => await readPositiveSwapResolveCount(
         page,

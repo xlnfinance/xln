@@ -224,6 +224,10 @@ export type QaStoryScreenshot = {
   source: QaStorySource;
   title: string;
   group: string;
+  description: string | null;
+  platform: string | null;
+  tags: string[];
+  curated: boolean;
   name: string;
   relativePath: string;
   sizeBytes: number;
@@ -232,6 +236,14 @@ export type QaStoryScreenshot = {
   runId?: string;
   shard?: number;
   status?: QaShardManifest['status'];
+};
+
+type QaUxScreenshotMetadata = {
+  title: string | null;
+  group: string | null;
+  description: string | null;
+  platform: string | null;
+  tags: string[];
 };
 
 const MIME_TYPES: Record<string, string> = {
@@ -973,6 +985,27 @@ const storyGroup = (name: string): string => {
   return firstToken;
 };
 
+const readUxScreenshotMetadata = async (imagePath: string): Promise<QaUxScreenshotMetadata | null> => {
+  const metadataPath = `${imagePath}.json`;
+  if (!existsSync(metadataPath)) return null;
+  try {
+    const parsed = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>;
+    const title = asNullableString(parsed['title']);
+    const group = asNullableString(parsed['group']);
+    const description = asNullableString(parsed['description']);
+    const platform = asNullableString(parsed['platform']);
+    const rawTags = Array.isArray(parsed['tags']) ? parsed['tags'] : [];
+    const tags = rawTags
+      .map((tag) => String(tag || '').trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    if (!title && !group && !description && !platform && tags.length === 0) return null;
+    return { title, group, description, platform, tags };
+  } catch {
+    return null;
+  }
+};
+
 export const makeQaStoryImageUrl = (source: QaStorySource, relativePath: string): string =>
   `/api/qa/story-image?source=${encodeURIComponent(source)}&path=${encodeURIComponent(relativePath)}`;
 
@@ -1196,11 +1229,16 @@ const walkStoryScreenshots = async (
     if (!STORY_IMAGE_EXTENSIONS.has(extname(entry.name).toLowerCase())) continue;
     const fileStat = await stat(absolutePath);
     const relativePath = absolutePath.slice(baseDir.length + 1);
+    const metadata = await readUxScreenshotMetadata(absolutePath);
     out.push({
       id: `e2e-screenshots:${relativePath}`,
       source: 'e2e-screenshots',
-      title: storyTitle(entry.name),
-      group: storyGroup(entry.name),
+      title: metadata?.title ?? storyTitle(entry.name),
+      group: metadata?.group ?? storyGroup(entry.name),
+      description: metadata?.description ?? null,
+      platform: metadata?.platform ?? null,
+      tags: metadata?.tags ?? [],
+      curated: Boolean(metadata),
       name: entry.name,
       relativePath,
       sizeBytes: fileStat.size,
@@ -1434,11 +1472,17 @@ const listQaRunStoryScreenshots = async (runLimit: number): Promise<QaStoryScree
     for (const shard of run.shards) {
       const imageArtifacts = (shard.artifacts ?? []).filter(artifact => artifact.kind === 'image');
       for (const artifact of imageArtifacts) {
+        const absoluteImagePath = join(QA_LOGS_ROOT, run.runId, artifact.relativePath);
+        const metadata = await readUxScreenshotMetadata(absoluteImagePath);
         stories.push({
           id: `qa-run:${run.runId}:${artifact.relativePath}`,
           source: 'qa-run',
-          title: storyTitle(artifact.name),
-          group: shard.handle || shard.title || `shard-${shard.shard}`,
+          title: metadata?.title ?? storyTitle(artifact.name),
+          group: metadata?.group ?? shard.handle ?? shard.title ?? `shard-${shard.shard}`,
+          description: metadata?.description ?? shard.description ?? null,
+          platform: metadata?.platform ?? null,
+          tags: metadata?.tags ?? [],
+          curated: Boolean(metadata),
           name: artifact.name,
           relativePath: artifact.relativePath,
           sizeBytes: artifact.sizeBytes,

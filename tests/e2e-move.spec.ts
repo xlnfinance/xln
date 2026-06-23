@@ -1037,10 +1037,28 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await expect(page.getByTestId('move-allow-panel')).toHaveCount(0);
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
-        await capturePageScreenshot(page, testInfo, 'move-batch-route-summary-desktop.png');
+        await capturePageScreenshot(page, testInfo, 'move-batch-route-summary-desktop.png', {
+          fullPage: false,
+          ux: {
+            title: 'desktop on-chain batch route',
+            group: 'On-chain Batch',
+            description: 'External to reserve route summary before adding a move to batch.',
+            platform: 'desktop',
+            tags: ['move', 'batch', 'external-reserve'],
+          },
+        });
         await page.getByTestId('move-confirm').first().click();
         await waitForMoveActionToSettle(page);
-        await capturePageScreenshot(page, testInfo, 'move-batch-queued-desktop.png');
+        await capturePageScreenshot(page, testInfo, 'move-batch-queued-desktop.png', {
+          fullPage: false,
+          ux: {
+            title: 'desktop on-chain batch queued',
+            group: 'On-chain Batch',
+            description: 'Move operation queued into a J-batch before broadcast.',
+            platform: 'desktop',
+            tags: ['move', 'batch', 'j-batch'],
+          },
+        });
         await broadcastDraftBatch(page, asLocalEntityRef(alice!), EXTERNAL_BATCH_TIMEOUT_MS);
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),

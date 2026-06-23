@@ -6,6 +6,7 @@ import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-
 import { connectHub } from './utils/e2e-connect';
 import { getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
 import { startDisputeFromManageUi } from './utils/e2e-account-workspace';
+import { capturePageScreenshot } from './utils/e2e-screenshots';
 import { deriveDelta } from '../runtime/account-utils';
 
 const TOKEN_ID_USDC = 1;
@@ -1156,7 +1157,7 @@ async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<vo
 }
 
 test.describe('debt ledger', () => {
-  test('creates one mirrored debt on both sides after dispute finalize', async ({ browser }) => {
+  test('creates one mirrored debt on both sides after dispute finalize', async ({ browser }, testInfo) => {
     test.setTimeout(LONG_E2E ? 360_000 : 240_000);
     const step = (label: string) => console.log(`[debt-e2e] ${label}`);
 
@@ -1226,6 +1227,17 @@ test.describe('debt ledger', () => {
         intervals: [500, 1000, 1500],
       })
       .toBe('ready');
+    await openAccountWorkspaceTab(alicePage, 'history');
+    await capturePageScreenshot(alicePage, testInfo, 'dispute-active-history-desktop.png', {
+      fullPage: false,
+      ux: {
+        title: 'desktop active dispute history',
+        group: 'Disputes',
+        description: 'Account history while a dispute is active and waiting for finality.',
+        platform: 'desktop',
+        tags: ['dispute', 'history'],
+      },
+    });
 
     const timeoutBlock = disputeState.disputeTimeout;
     await waitForBlock(alicePage, timeoutBlock);
@@ -1243,6 +1255,17 @@ test.describe('debt ledger', () => {
         intervals: [500, 1000, 1500],
       })
       .toBe(false);
+    await openAccountWorkspaceTab(alicePage, 'history');
+    await capturePageScreenshot(alicePage, testInfo, 'dispute-finalized-history-desktop.png', {
+      fullPage: false,
+      ux: {
+        title: 'desktop finalized dispute history',
+        group: 'Disputes',
+        description: 'History after the dispute finalizes and debt evidence is mirrored.',
+        platform: 'desktop',
+        tags: ['dispute', 'history', 'debt'],
+      },
+    });
 
     step('wait-debt-mirror');
     const mirrored = await waitForMirroredDebtSnapshots(
