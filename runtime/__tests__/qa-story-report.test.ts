@@ -578,6 +578,89 @@ test('qa run report preserves timeline order and derives slow steps', async () =
   }
 });
 
+test('qa run endpoint strips perf samples and exposes raw timeseries separately', async () => {
+  const runId = '20260623-000124-778';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  const sample = {
+    ts: Date.UTC(2026, 5, 23, 0, 1, 24),
+    load1: 1.5,
+    load5: 1.25,
+    load15: 1.1,
+    freeMemBytes: 900_000_000,
+    totalMemBytes: 2_000_000_000,
+    runnerRssBytes: 240_000_000,
+    children: [{
+      name: 'playwright',
+      pid: 4242,
+      cpuPct: 37,
+      memPct: 3,
+      rssKb: 512_000,
+    }],
+  };
+  const run: QaRunManifest = benchmarkRun(runId, 900, 700, 'perf-samples-code', 'perf-samples-head');
+  run.perf = {
+    ...run.perf!,
+    sampleCount: 1,
+    samples: [sample],
+  };
+  run.shards[0] = {
+    ...run.shards[0]!,
+    perf: {
+      ...run.perf,
+      samples: [sample],
+    },
+  };
+
+  await rm(runDir, { recursive: true, force: true });
+  try {
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, 'manifest.json'), `${JSON.stringify(run)}\n`);
+
+    await withQaAuthEnv(async () => {
+      const runResponse = await maybeHandleQaRequest(
+        qaRequest(`http://127.0.0.1:8080/api/qa/run?runId=${runId}`),
+        '/api/qa/run',
+        JSON_HEADERS,
+      );
+      expect(runResponse?.status).toBe(200);
+      const runPayload = await runResponse!.json() as {
+        ok?: boolean;
+        run?: {
+          perf?: { sampleCount?: number; samples?: unknown[] };
+          shards?: Array<{ perf?: { sampleCount?: number; samples?: unknown[] } }>;
+        };
+      };
+      expect(runPayload.ok).toBe(true);
+      expect(runPayload.run?.perf?.sampleCount).toBe(1);
+      expect(runPayload.run?.perf?.samples).toBeUndefined();
+      expect(runPayload.run?.shards?.[0]?.perf?.sampleCount).toBe(1);
+      expect(runPayload.run?.shards?.[0]?.perf?.samples).toBeUndefined();
+
+      const perfResponse = await maybeHandleQaRequest(
+        qaRequest(`http://127.0.0.1:8080/api/qa/run/perf?runId=${runId}`),
+        '/api/qa/run/perf',
+        JSON_HEADERS,
+      );
+      expect(perfResponse?.status).toBe(200);
+      const perfPayload = await perfResponse!.json() as {
+        ok?: boolean;
+        perf?: { sampleCount?: number; samples?: unknown[] };
+        samples?: unknown[];
+        shards?: Array<{ perf?: { sampleCount?: number; samples?: unknown[] }; samples?: unknown[] }>;
+      };
+      expect(perfPayload.ok).toBe(true);
+      expect(perfPayload.perf?.sampleCount).toBe(1);
+      expect(perfPayload.perf?.samples).toBeUndefined();
+      expect(perfPayload.samples).toHaveLength(1);
+      expect(perfPayload.shards?.[0]?.perf?.sampleCount).toBe(1);
+      expect(perfPayload.shards?.[0]?.perf?.samples).toBeUndefined();
+      expect(perfPayload.shards?.[0]?.samples).toHaveLength(1);
+    });
+  } finally {
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
 test('qa history endpoint reads only sqlite and does not backfill manifests on poll', async () => {
   const runId = '20260623-000123-777';
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);

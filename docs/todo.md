@@ -212,11 +212,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `/api/qa/retention` requires admin POST and exact confirm `DELETE_OLDER_THAN_30_DAYS`; History tab exposes the disabled-by-default control and result count.
   - Evidence: unit deletes only a controlled fake run older than cutoff; focused QA cockpit e2e verifies disabled state, exact confirm, POST, and result rendering.
 
-- [ ] Strip `perf.samples` from default `/api/qa/run` payload.
+- [x] Strip `perf.samples` from default `/api/qa/run` payload.
   - Impact: high.
-  - Current issue: per-second samples are shipped and mostly discarded by UI.
-  - Fix: summary in run payload; raw timeseries via `/api/qa/run/perf?runId=...` only when chart opens.
-  - Tests: run payload excludes `perf.samples`; perf endpoint returns samples.
+  - Current issue: per-second samples were shipped and mostly discarded by UI.
+  - Status: done. `/api/qa/runs` and `/api/qa/run` now serialize perf summaries without raw `samples`; `/api/qa/run/perf?runId=...` returns raw run and shard samples only when requested.
+  - Evidence: unit asserts default run payload strips run/shard samples while the perf endpoint returns the raw timeseries; QA cockpit fixture now mirrors the lean run contract.
 
 - [ ] Add ETag or shared polling store for QA/health data.
   - Impact: medium.

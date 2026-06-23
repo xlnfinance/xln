@@ -16,7 +16,9 @@ import {
   readQaRun,
   resolveQaArtifactPath,
   resolveQaStoryScreenshotPath,
+  stripQaRunPerfSamples,
   summarizeQaRun,
+  summarizeQaPerf,
   type QaCodeFingerprint,
   type QaStorySource,
 } from './report';
@@ -902,7 +904,44 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
         safeStringify({
           ok: true,
           qaAuth: authInfo,
-          run: enrichQaRunUrls(run),
+          run: stripQaRunPerfSamples(enrichQaRunUrls(run)),
+        }),
+        {
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-store',
+          },
+        },
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 404, headers });
+    }
+  }
+
+  if (pathname === '/api/qa/run/perf' && request.method === 'GET') {
+    const url = new URL(request.url);
+    const runId = String(url.searchParams.get('runId') || '').trim();
+    if (!runId) {
+      return new Response(safeStringify({ ok: false, error: 'runId is required' }), { status: 400, headers });
+    }
+    try {
+      const run = await readQaRun(runId);
+      const runPerf = run.perf ?? null;
+      return new Response(
+        safeStringify({
+          ok: true,
+          qaAuth: authInfo,
+          runId: run.runId,
+          perf: runPerf ? summarizeQaPerf(runPerf) : null,
+          samples: runPerf?.samples ?? [],
+          shards: run.shards.map(shard => ({
+            shard: shard.shard,
+            handle: shard.handle,
+            title: shard.title,
+            perf: shard.perf ? summarizeQaPerf(shard.perf) : null,
+            samples: shard.perf?.samples ?? [],
+          })),
         }),
         {
           headers: {

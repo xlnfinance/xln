@@ -67,7 +67,6 @@ const QA_FIXTURE_RUN = {
     maxRunnerRssBytes: 240_000_000,
     maxChildCpuPct: 44.2,
     maxChildRssKb: 812_000,
-    samples: [],
   },
   browserHealth: QA_FIXTURE_BROWSER_HEALTH,
   benchmark: {
