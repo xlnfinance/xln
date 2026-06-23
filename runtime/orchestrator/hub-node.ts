@@ -521,6 +521,11 @@ const resolveOperatorAppUrl = (): string => {
 const buildRuntimeInspectUrl = (env: Env): string | null => {
   const seed = resolveRuntimeAdapterAuthSeed(env);
   if (!seed) return null;
+  const runtimeAdapterUrl = new URL(directWsUrl);
+  runtimeAdapterUrl.port = String(resolvedArgs.apiPort);
+  runtimeAdapterUrl.pathname = '/rpc';
+  runtimeAdapterUrl.search = '';
+  runtimeAdapterUrl.hash = '';
   const token = deriveRuntimeAdapterCapabilityToken(seed, 'read', Date.now() + 60 * 60 * 1_000, {
     audience: resolveRuntimeAdapterAuthAudience(env),
     keyId: String(resolvedArgs.name || 'hub').toLowerCase(),
@@ -528,7 +533,7 @@ const buildRuntimeInspectUrl = (env: Env): string | null => {
   });
   const url = new URL(resolveOperatorAppUrl());
   url.searchParams.set('runtime', 'remote');
-  url.searchParams.set('ws', directWsUrl);
+  url.searchParams.set('ws', runtimeAdapterUrl.toString());
   url.searchParams.set('token', token);
   return url.toString();
 };

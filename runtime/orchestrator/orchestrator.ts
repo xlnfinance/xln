@@ -4,11 +4,12 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { deriveSignerAddressSync } from '../account-crypto';
+import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import {
   startCustodySupport,
   stopManagedChild,
@@ -86,6 +87,7 @@ import {
 import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
 import {
+  HUB_MESH_CREDIT_AMOUNT,
   MARKET_MAKER_CREDIT_AMOUNT,
   deriveMarketMakerEntityId,
   type MarketMakerEntityJurisdictionConfig,
@@ -249,6 +251,124 @@ const buildPublicDirectWsUrl = (publicPort: number): string => {
 };
 
 let custodySupport: CustodySupportState | null = null;
+
+type RuntimeImportManifestEntry = {
+  label: string;
+  access: 'read' | 'admin';
+  wsUrl: string;
+  token: string;
+};
+
+type RuntimeImportManifest = {
+  v: 1;
+  issuedAt: number;
+  expiresAt: number;
+  entries: RuntimeImportManifestEntry[];
+};
+
+const RUNTIME_IMPORT_HASH_PARAM = 'runtime-import';
+const runtimeImportAccess = String(process.env['XLN_RUNTIME_IMPORT_ACCESS'] || 'read').trim().toLowerCase() === 'admin'
+  ? 'admin'
+  : 'read';
+const runtimeImportTokenTtlMs = Math.max(
+  60_000,
+  Math.floor(Number(process.env['XLN_RUNTIME_IMPORT_TOKEN_TTL_MS'] || String(60 * 60 * 1_000))),
+);
+const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH']?.trim()
+  || join(args.dbRoot, 'runtime-import-manifest.json');
+
+const buildPublicRuntimeRpcUrl = (apiPort: number): string => {
+  const url = new URL(args.publicWsBaseUrl);
+  url.port = String(apiPort);
+  url.pathname = '/rpc';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+};
+
+const encodeBase64UrlJson = (value: unknown): string =>
+  Buffer.from(safeStringify(value), 'utf8').toString('base64url');
+
+const deriveRuntimeImportToken = (
+  seed: string,
+  access: 'read' | 'admin',
+  audience: string,
+  keyId: string,
+  expiresAt: number,
+): string => deriveRuntimeAdapterCapabilityToken(
+  seed,
+  access === 'admin' ? 'full' : 'read',
+  expiresAt,
+  {
+    audience,
+    keyId,
+    tokenId: `bulk-${keyId}-${expiresAt}`,
+  },
+);
+
+const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string => {
+  const url = new URL(args.walletUrl);
+  url.hash = `${RUNTIME_IMPORT_HASH_PARAM}=${encodeBase64UrlJson(manifest)}`;
+  return url.toString();
+};
+
+const runtimeIdFromChild = (child: HubChild | MarketMakerChild): string =>
+  String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim().toLowerCase();
+
+const buildRuntimeImportManifest = (): RuntimeImportManifest | null => {
+  const issuedAt = Date.now();
+  const expiresAt = issuedAt + runtimeImportTokenTtlMs;
+  const entries: RuntimeImportManifestEntry[] = [];
+  for (const child of hubChildren) {
+    const runtimeId = runtimeIdFromChild(child);
+    if (!runtimeId) continue;
+    entries.push({
+      label: child.name,
+      access: runtimeImportAccess,
+      wsUrl: buildPublicRuntimeRpcUrl(child.apiPort),
+      token: deriveRuntimeImportToken(child.authSeed, runtimeImportAccess, runtimeId, child.name.toLowerCase(), expiresAt),
+    });
+  }
+  const marketMakerRuntimeId = runtimeIdFromChild(marketMakerChild);
+  if (args.mmEnabled && marketMakerRuntimeId) {
+    entries.push({
+      label: marketMakerChild.name,
+      access: runtimeImportAccess,
+      wsUrl: buildPublicRuntimeRpcUrl(marketMakerChild.apiPort),
+      token: deriveRuntimeImportToken(marketMakerChild.authSeed, runtimeImportAccess, marketMakerRuntimeId, 'mm', expiresAt),
+    });
+  }
+  if (args.custodyEnabled && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
+    entries.push({
+      label: 'Custody',
+      access: runtimeImportAccess,
+      wsUrl: buildPublicRuntimeRpcUrl(args.custodyDaemonPort),
+      token: deriveRuntimeImportToken(
+        custodySupport.daemonAuthSeed,
+        runtimeImportAccess,
+        custodySupport.daemonAuthAudience,
+        'custody',
+        expiresAt,
+      ),
+    });
+  }
+  return entries.length > 0 ? { v: 1, issuedAt, expiresAt, entries } : null;
+};
+
+const publishRuntimeImportManifest = (): void => {
+  const manifest = buildRuntimeImportManifest();
+  if (!manifest) return;
+  const importUrl = buildRuntimeImportUrl(manifest);
+  mkdirSync(dirname(runtimeImportManifestPath), { recursive: true });
+  writeFileSync(
+    runtimeImportManifestPath,
+    `${safeStringify({ importUrl, manifest })}\n`,
+    { encoding: 'utf8', mode: 0o600 },
+  );
+  console.log(
+    `[MESH] RUNTIME_IMPORT_URL count=${manifest.entries.length} access=${runtimeImportAccess} path=${runtimeImportManifestPath} url=${importUrl}`,
+  );
+};
 
 let resetPromise: Promise<void> | null = null;
 const CHILD_GRACEFUL_SHUTDOWN_MS = 20_000;
@@ -1082,7 +1202,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     .map(hub => hub.entityId.toLowerCase())
     .filter(entityId => entityId.length > 0);
 
-  const pairSet = new Map<string, { left: string; right: string; ok: boolean }>();
+  const pairSet = new Map<string, { left: string; right: string; ok: boolean; expectedCreditAmount: string }>();
   const directLinkMap = new Map<string, { fromRuntimeId: string; toRuntimeId: string; endpoint: string }>();
   for (const child of hubChildren) {
     const left = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();
@@ -1094,6 +1214,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
         left: [left, right].sort()[0]!,
         right: [left, right].sort()[1]!,
         ok: pair.ready === true,
+        expectedCreditAmount: HUB_MESH_CREDIT_AMOUNT.toString(),
       });
     }
     const fromRuntimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').toLowerCase();
@@ -1735,6 +1856,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     if (custodyBootstrapError) throw custodyBootstrapError;
 
     await persistHubReadySnapshots();
+    publishRuntimeImportManifest();
 
     finishTiming('reset_total', resetTotalStartedAt);
     resetState.completedAt = Date.now();
