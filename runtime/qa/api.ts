@@ -6,6 +6,7 @@ import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import {
   QA_HISTORY_DB_PATH,
+  backfillQaHistoryFromLogs,
   enrichQaRunUrls,
   listQaHistory,
   listQaRuns,
@@ -604,7 +605,11 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
   if (!pathname.startsWith('/api/qa/')) return null;
 
   const requiredScope: QaAuthScope =
-    (pathname === '/api/qa/restart' || pathname === '/api/qa/retention') && request.method === 'POST'
+    (
+      pathname === '/api/qa/restart' ||
+      pathname === '/api/qa/retention' ||
+      pathname === '/api/qa/history/backfill'
+    ) && request.method === 'POST'
       ? 'admin'
       : 'read';
   const auth = requireQaScope(request, requiredScope, headers);
@@ -635,6 +640,28 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
         safeStringify({ ok: true, qaAuth: authInfo, history, restart: restartStatus(), restartAllowed }),
         { headers: { ...headers, 'Cache-Control': 'no-store' } },
       );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 500, headers });
+    }
+  }
+
+  if (pathname === '/api/qa/history/backfill' && request.method === 'POST') {
+    try {
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const confirm = String(body?.['confirm'] || '').trim();
+      if (confirm !== 'BACKFILL_QA_HISTORY') {
+        return new Response(safeStringify({ ok: false, error: 'QA_HISTORY_BACKFILL_CONFIRM_REQUIRED' }), {
+          status: 400,
+          headers,
+        });
+      }
+      const limitRaw = Number(body?.['limit'] ?? 500);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(2_000, Math.floor(limitRaw))) : 500;
+      const result = await backfillQaHistoryFromLogs(limit);
+      return new Response(safeStringify({ ok: true, qaAuth: authInfo, result }), {
+        headers: { ...headers, 'Cache-Control': 'no-store' },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return new Response(safeStringify({ ok: false, error: message }), { status: 500, headers });

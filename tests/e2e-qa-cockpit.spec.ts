@@ -476,6 +476,21 @@ test.describe('QA cockpit scenario player', () => {
         }),
       });
     });
+    await page.route('**/api/qa/history/backfill', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          result: {
+            scannedRuns: 12,
+            recordedRuns: 12,
+            failedRuns: [],
+          },
+        }),
+      });
+    });
     await page.route('**/api/qa/artifact?**', async (route) => {
       const requestUrl = new URL(route.request().url());
       const artifactPath = requestUrl.searchParams.get('path') || '';
@@ -535,6 +550,10 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-history')).toContainText('SLOWER +25.0%');
     await expect(page.getByTestId('qa-history')).toContainText('regulator-auditor');
     await expect(page.getByTestId('qa-history')).toContainText('verify evidence playback');
+    await expect(page.getByTestId('qa-history-backfill-card')).toContainText('Backfill History Index');
+    await expect(page.getByTestId('qa-history-backfill')).toBeEnabled();
+    await page.getByTestId('qa-history-backfill').click();
+    await expect(page.getByTestId('qa-history-backfill-result')).toContainText('scanned 12 / recorded 12 / failed 0');
     await expect(page.getByTestId('qa-retention-card')).toContainText('Delete Runs Older Than 30 Days');
     await expect(page.getByTestId('qa-retention-purge')).toBeDisabled();
     await page.getByPlaceholder('DELETE_OLDER_THAN_30_DAYS').fill('DELETE_OLDER_THAN_30_DAYS');

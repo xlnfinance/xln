@@ -199,11 +199,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 ## p2 performance and scale
 
-- [ ] Make `listQaHistory` pure SELECT on the hot path.
+- [x] Make `listQaHistory` pure SELECT on the hot path.
   - Impact: high.
-  - Current issue: history endpoint re-reads and upserts manifests from disk on every poll.
-  - Fix: record history once at run completion. Add explicit one-shot backfill endpoint/command for legacy runs.
-  - Tests: `/api/qa/history` does not read manifest files in hot path.
+  - Current issue: history endpoint re-read and upserted manifests from disk on every poll.
+  - Status: done. `/api/qa/history` is now SQLite SELECT-only; run completion still records history once; legacy manifest ingestion moved to explicit admin POST `/api/qa/history/backfill` with confirm `BACKFILL_QA_HISTORY`.
+  - UI: History tab has a disabled-without-admin `Backfill History Index` maintenance action and result counters.
+  - Evidence: unit first failed on implicit manifest backfill, then passed with GET-only history and explicit admin backfill; focused QA cockpit e2e verifies the visible backfill action/result.
 
 - [x] Add manual retention cleanup for old QA runs.
   - Impact: medium.
