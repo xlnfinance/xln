@@ -316,8 +316,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [ ] Add artifact sensitivity classification.
   - Artifacts: public, internal, secret-bearing. Secret-bearing artifacts require admin scope or are unavailable in regulator export.
 
-- [ ] Hide absolute server paths from operator UI.
-  - Return relative artifact/log IDs, not raw filesystem paths.
+- [x] Hide absolute server paths from operator UI.
+  - Status: done. Restart active status and restart audit rows now expose relative `.logs/...` IDs, not `/Users/...` or other host paths; legacy absolute DB rows are normalized on read.
+  - Evidence: unit writes a legacy absolute restart log path and asserts the API-facing audit row hides `process.cwd()`; live restart response also exposes only `.logs/qa-restarts/...`.
 
 - [x] Add restart cooldown and watchdog.
   - Status: done. Restart run now has explicit single-flight 409, post-finish cooldown 429, watchdog timeout, SIGTERM then SIGKILL grace, manual admin abort endpoint, and orphaned audit reconciliation for stale `started` rows.

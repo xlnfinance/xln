@@ -235,7 +235,7 @@
 
   type QaRestartAuditEntry = {
     auditId: string;
-    status: 'started' | 'finished' | 'spawn_error';
+    status: 'started' | 'finished' | 'spawn_error' | 'watchdog_timeout' | 'aborted' | 'orphaned';
     actorKeyId: string;
     scope: 'read' | 'admin';
     operatorId: string;
@@ -1612,7 +1612,10 @@
         </div>
         <div class="restart-audit-table">
           {#each restartAudit as row}
-            <article class:bad={row.status === 'spawn_error' || (row.exitCode !== null && row.exitCode !== 0)} class:ok={row.status === 'finished' && row.exitCode === 0}>
+            <article
+              class:bad={row.status === 'spawn_error' || row.status === 'watchdog_timeout' || row.status === 'aborted' || row.status === 'orphaned' || (row.exitCode !== null && row.exitCode !== 0)}
+              class:ok={row.status === 'finished' && row.exitCode === 0}
+            >
               <strong>{row.status}</strong>
               <span>{formatDate(row.startedAt)}</span>
               <span>{row.operatorId}</span>
