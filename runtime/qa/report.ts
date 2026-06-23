@@ -98,6 +98,8 @@ export type QaBrowserHealthSummary = {
   httpErrorCount: number;
 };
 
+export type QaFailureClass = 'assertion' | 'infra' | 'timeout' | 'flake' | 'crash' | 'security' | 'unknown';
+
 export type QaBenchmarkStatus = 'ok' | 'faster' | 'slower' | 'mixed' | 'insufficient';
 
 export type QaBenchmarkMetricDelta = {
@@ -146,6 +148,7 @@ export type QaShardManifest = {
   logRelativePath: string | null;
   logTail: string | null;
   error: string | null;
+  failureClass: QaFailureClass | null;
   phaseMs: QaPhaseTimings | null;
   perf?: QaPerfSummary;
   browserIssues?: QaBrowserIssue[];
@@ -171,6 +174,7 @@ export type QaRunManifest = {
   totalShards: number;
   passedShards: number;
   failedShards: number;
+  failureClasses?: QaFailureClass[];
   args?: Record<string, unknown> | null;
   shards: QaShardManifest[];
 };
@@ -182,6 +186,10 @@ export type QaShardView = Omit<QaShardManifest, 'perf'> & {
 export type QaRunView = Omit<QaRunManifest, 'perf' | 'shards'> & {
   perf?: QaPerfSummaryView;
   shards: QaShardView[];
+};
+
+type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'logTail'> & {
+  browserIssues?: QaBrowserIssue[];
 };
 
 export const QA_LOGS_ROOT = resolve(process.cwd(), '.logs', 'e2e-parallel');
@@ -333,6 +341,50 @@ export const summarizeQaBrowserIssues = (issues: readonly QaBrowserIssue[]): QaB
 
 export const summarizeQaRunBrowserHealth = (run: Pick<QaRunManifest, 'shards'>): QaBrowserHealthSummary =>
   summarizeQaBrowserIssues(run.shards.flatMap(shard => normalizeQaBrowserIssues(shard.browserIssues)));
+
+const classifyQaFailureText = (value: string): QaFailureClass | null => {
+  const lower = value.toLowerCase();
+  if (!lower.trim()) return null;
+  if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('timeoutexceeded')) return 'timeout';
+  if (lower.includes('e2e_fatal_runtime_log') || lower.includes('segmentation fault') || lower.includes('page crashed') || lower.includes('sigsegv')) return 'crash';
+  if (lower.includes('unauthorized') || lower.includes('forbidden') || lower.includes('token') || lower.includes('secret') || lower.includes('cors')) return 'security';
+  if (lower.includes('flake') || lower.includes('retry')) return 'flake';
+  if (
+    lower.includes('health') ||
+    lower.includes('anvil') ||
+    lower.includes('vite') ||
+    lower.includes('boot') ||
+    lower.includes('spawn') ||
+    lower.includes('econnrefused') ||
+    lower.includes('net::') ||
+    lower.includes('request failed') ||
+    lower.includes('http 5')
+  ) return 'infra';
+  if (lower.includes('expect(') || lower.includes('expected:') || lower.includes('assert') || lower.includes('matcherresult')) return 'assertion';
+  return null;
+};
+
+export const classifyQaShardFailure = (options: {
+  status: QaShardManifest['status'];
+  error?: string | null;
+  logTail?: string | null;
+  browserIssues?: QaBrowserIssue[];
+}): QaFailureClass | null => {
+  if (options.status !== 'failed') return null;
+  const browserIssues = normalizeQaBrowserIssues(options.browserIssues);
+  const textClass = classifyQaFailureText([
+    options.error ?? '',
+    options.logTail ?? '',
+    ...browserIssues.map(issue => `${issue.type} ${issue.status ?? ''} ${issue.message} ${issue.url ?? ''}`),
+  ].join('\n'));
+  if (textClass) return textClass;
+  if (browserIssues.some(issue => issue.type === 'requestfailed' || issue.type === 'http')) return 'infra';
+  if (browserIssues.some(issue => issue.type === 'pageerror')) return 'crash';
+  return 'unknown';
+};
+
+export const summarizeQaFailureClasses = (shards: readonly QaShardFailureInput[]): QaFailureClass[] =>
+  Array.from(new Set(shards.flatMap(shard => classifyQaShardFailure(shard) ?? []))).sort(compareStableText);
 
 const parseRunIdTimestamp = (runId: string): number | null => {
   const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/.exec(runId);
@@ -1362,6 +1414,8 @@ const collectLegacyShard = async (
     await walkArtifacts(runDir, resultsDir, artifacts);
     sortArtifacts(artifacts);
   }
+  const logTail = logText ? shortTail(logText) : null;
+  const error = status === 'failed' ? shortTail(logText, 40) : null;
 
   return {
     shard,
@@ -1371,8 +1425,9 @@ const collectLegacyShard = async (
     title,
     requireMarketMaker: metadata?.requireMarketMaker ?? null,
     logRelativePath: existsSync(logPath) ? logRelativePath : null,
-    logTail: logText ? shortTail(logText) : null,
-    error: status === 'failed' ? shortTail(logText, 40) : null,
+    logTail,
+    error,
+    failureClass: classifyQaShardFailure({ status, error, logTail, browserIssues }),
     phaseMs,
     browserIssues,
     browserHealth: summarizeQaBrowserIssues(browserIssues),
@@ -1408,6 +1463,7 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
   const failedShards = shards.filter(shard => shard.status === 'failed').length;
   const totalMs = null;
   const browserHealth = summarizeQaRunBrowserHealth({ shards });
+  const failureClasses = summarizeQaFailureClasses(shards);
 
   return {
     manifestVersion: 1,
@@ -1419,6 +1475,7 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
     totalShards: shards.length,
     passedShards,
     failedShards,
+    failureClasses,
     args: null,
     browserHealth,
     shards,
@@ -1470,6 +1527,8 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
             ? parseQaTimelineSteps(logText).slice(0, 80)
             : [];
         const browserIssues = normalizeQaBrowserIssues(shard.browserIssues);
+        const logTail = shard.logTail ?? (logText ? shortTail(logText) : null);
+        const error = shard.error ?? null;
         return {
           ...shard,
           target,
@@ -1479,15 +1538,27 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           artifacts: sortArtifacts([...(shard.artifacts ?? [])]),
           browserIssues,
           browserHealth: summarizeQaBrowserIssues(browserIssues),
+          error,
+          failureClass: shard.failureClass ?? classifyQaShardFailure({
+            status: shard.status,
+            error,
+            logTail,
+            browserIssues,
+          }),
           timelineSteps,
           slowSteps: Array.isArray(shard.slowSteps) && shard.slowSteps.length > 0
             ? shard.slowSteps
             : timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, 12),
-          logTail: shard.logTail ?? (logText ? shortTail(logText) : null),
+          logTail,
         };
       }),
     );
-    return { ...parsed, browserHealth: parsed.browserHealth ?? summarizeQaRunBrowserHealth({ shards }), shards };
+    return {
+      ...parsed,
+      browserHealth: parsed.browserHealth ?? summarizeQaRunBrowserHealth({ shards }),
+      failureClasses: parsed.failureClasses ?? summarizeQaFailureClasses(shards),
+      shards,
+    };
   }
   return await buildLegacyManifest(runId, runDir);
 };
@@ -1640,6 +1711,7 @@ export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'perf' |
   totalShards: run.totalShards,
   passedShards: run.passedShards,
   failedShards: run.failedShards,
+  failureClasses: run.failureClasses ?? summarizeQaFailureClasses(run.shards),
   args: run.args ?? null,
   failingTargets: run.shards
     .filter(shard => shard.status === 'failed')

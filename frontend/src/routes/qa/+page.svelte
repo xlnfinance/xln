@@ -29,6 +29,7 @@
     totalShards: number;
     passedShards: number;
     failedShards: number;
+    failureClasses?: QaFailureClass[];
     args?: Record<string, unknown> | null;
     failingTargets: string[];
   };
@@ -64,6 +65,8 @@
   type QaSlowStep = {
     label: string;
     ms: number;
+    startMs?: number;
+    endMs?: number;
   };
 
   type QaShard = {
@@ -78,6 +81,7 @@
     logRelativePath: string | null;
     logTail: string | null;
     error: string | null;
+    failureClass?: QaFailureClass | null;
     phaseMs: {
       preflight: number;
       anvilBoot: number;
@@ -110,6 +114,7 @@
     totalShards: number;
     passedShards: number;
     failedShards: number;
+    failureClasses?: QaFailureClass[];
     args?: Record<string, unknown> | null;
     shards: QaShard[];
   };
@@ -304,7 +309,18 @@
     | 'playwright-slow';
   type QaVerdictStatus = 'PASS' | 'DEGRADED' | 'FAIL' | 'UNKNOWN';
   type QaFailureSeverity = 'FAIL' | 'DEGRADED' | 'WARN';
-  type QaFailureClass = 'assertion' | 'infra' | 'timeout' | 'performance' | 'browser' | 'network' | 'operations' | 'unknown';
+  type QaFailureClass =
+    | 'assertion'
+    | 'infra'
+    | 'timeout'
+    | 'flake'
+    | 'crash'
+    | 'security'
+    | 'performance'
+    | 'browser'
+    | 'network'
+    | 'operations'
+    | 'unknown';
   type QaFailureInboxItem = {
     id: string;
     severity: QaFailureSeverity;
@@ -505,9 +521,12 @@
 
   function classifyFailureText(value: string): QaFailureClass {
     const lower = value.toLowerCase();
-    if (lower.includes('timeout') || lower.includes('timed out')) return 'timeout';
-    if (lower.includes('boot') || lower.includes('health') || lower.includes('anvil') || lower.includes('vite')) return 'infra';
-    if (lower.includes('expect') || lower.includes('assert')) return 'assertion';
+    if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('timeoutexceeded')) return 'timeout';
+    if (lower.includes('page crashed') || lower.includes('sigsegv') || lower.includes('fatal runtime')) return 'crash';
+    if (lower.includes('unauthorized') || lower.includes('forbidden') || lower.includes('token') || lower.includes('cors')) return 'security';
+    if (lower.includes('flake') || lower.includes('retry')) return 'flake';
+    if (lower.includes('boot') || lower.includes('health') || lower.includes('anvil') || lower.includes('vite') || lower.includes('econnrefused') || lower.includes('http 5')) return 'infra';
+    if (lower.includes('expect') || lower.includes('assert') || lower.includes('expected:')) return 'assertion';
     return 'unknown';
   }
 
@@ -517,7 +536,7 @@
     return {
       id: `run-fail:${run.runId}`,
       severity: 'FAIL',
-      failureClass: classifyFailureText(detail),
+      failureClass: run.failureClasses?.[0] ?? classifyFailureText(detail),
       title: `${run.failedShards || 1} failing shard`,
       detail,
       runId: run.runId,
@@ -1124,6 +1143,13 @@
               <span>test {formatMs(run.timing?.avgShardMs)}</span>
               <span class:warn={browserHealth(run).errorCount > 0}>browser {formatBrowserHealth(browserHealth(run))}</span>
             </div>
+            {#if (run.failureClasses ?? []).length > 0}
+              <div class="artifact-chips failure-class-row" data-testid="qa-run-failure-classes">
+                {#each run.failureClasses ?? [] as failureClass}
+                  <span class="fail-chip">{failureClass}</span>
+                {/each}
+              </div>
+            {/if}
             {#if run.failingTargets.length > 0}
               <div class="run-row-failures">{run.failingTargets.join(' · ')}</div>
             {/if}
@@ -1590,6 +1616,9 @@
                 <span class:muted={artifactCount(shard, 'image') === 0}>{plural(artifactCount(shard, 'image'), 'screenshot', 'screenshots')}</span>
                 <span class:muted={artifactCount(shard, 'trace') === 0}>{plural(artifactCount(shard, 'trace'), 'trace', 'traces')}</span>
                 <span class:warn={shardBrowserHealth(shard).errorCount > 0} class:muted={shardBrowserHealth(shard).issueCount === 0}>browser {formatBrowserHealth(shardBrowserHealth(shard))}</span>
+                {#if shard.failureClass}
+                  <span class="fail-chip">{shard.failureClass}</span>
+                {/if}
                 {#if shard.logRelativePath}
                   <span>Log</span>
                 {/if}
@@ -1617,6 +1646,9 @@
                 <span class:muted={artifactCount(selectedShard, 'image') === 0}>{plural(artifactCount(selectedShard, 'image'), 'screenshot', 'screenshots')}</span>
                 <span class:muted={artifactCount(selectedShard, 'trace') === 0}>{plural(artifactCount(selectedShard, 'trace'), 'trace', 'traces')}</span>
                 <span class:warn={shardBrowserHealth(selectedShard).errorCount > 0} class:muted={shardBrowserHealth(selectedShard).issueCount === 0}>browser {formatBrowserHealth(shardBrowserHealth(selectedShard))}</span>
+                {#if selectedShard.failureClass}
+                  <span class="fail-chip">{selectedShard.failureClass}</span>
+                {/if}
                 {#if selectedShard.logRelativePath}
                   <span>log</span>
                 {/if}
@@ -2678,6 +2710,17 @@
     border-color: rgba(255, 255, 255, 0.07);
     background: rgba(255, 255, 255, 0.025);
     color: #6f6b61;
+  }
+
+  .artifact-chips span.fail-chip {
+    border-color: rgba(255, 146, 132, 0.32);
+    background: rgba(255, 146, 132, 0.08);
+    color: #ffb1a6;
+    font-weight: 800;
+  }
+
+  .failure-class-row {
+    margin-top: 0.45rem;
   }
 
   .detail-layout {
