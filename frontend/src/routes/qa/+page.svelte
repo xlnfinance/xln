@@ -241,6 +241,28 @@
     | 'bootstrap-slow'
     | 'playwright-fast'
     | 'playwright-slow';
+  type QaVerdictStatus = 'PASS' | 'DEGRADED' | 'FAIL' | 'UNKNOWN';
+  type QaFailureSeverity = 'FAIL' | 'DEGRADED' | 'WARN';
+  type QaFailureClass = 'assertion' | 'infra' | 'timeout' | 'performance' | 'operations' | 'unknown';
+  type QaFailureInboxItem = {
+    id: string;
+    severity: QaFailureSeverity;
+    failureClass: QaFailureClass;
+    title: string;
+    detail: string;
+    runId: string | null;
+    createdAt: number;
+  };
+  type QaVerdictSummary = {
+    status: QaVerdictStatus;
+    reason: string;
+    activeCount: number;
+    latestRunId: string | null;
+    latestAt: number | null;
+    gitHead: string | null;
+    codeHash: string | null;
+    dirty: boolean;
+  };
 
   let runs = $state<QaSummary[]>([]);
   let catalog = $state<QaCatalogEntry[]>([]);
@@ -311,6 +333,8 @@
   const sortedShardEntries = $derived((selectedRun?.shards ?? [])
     .map((shard, index) => ({ shard, index }))
     .sort((a, b) => compareShardsForSort(a, b, shardSortKey)));
+  const failureInbox = $derived(buildFailureInbox(runs, restartAudit));
+  const verdict = $derived(buildVerdictSummary(latestRun, failureInbox));
 
   function applyQaAuth(payload: { qaAuth?: QaAuthInfo } | null | undefined): void {
     const auth = payload?.qaAuth;
@@ -355,6 +379,91 @@
   function formatPct(value: number | null | undefined): string {
     if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a';
     return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+  }
+
+  function classifyFailureText(value: string): QaFailureClass {
+    const lower = value.toLowerCase();
+    if (lower.includes('timeout') || lower.includes('timed out')) return 'timeout';
+    if (lower.includes('boot') || lower.includes('health') || lower.includes('anvil') || lower.includes('vite')) return 'infra';
+    if (lower.includes('expect') || lower.includes('assert')) return 'assertion';
+    return 'unknown';
+  }
+
+  function runFailureItem(run: QaSummary): QaFailureInboxItem | null {
+    if (run.status !== 'failed' && run.failedShards <= 0) return null;
+    const detail = run.failingTargets.length > 0 ? run.failingTargets.join(' · ') : `run ${run.runId}`;
+    return {
+      id: `run-fail:${run.runId}`,
+      severity: 'FAIL',
+      failureClass: classifyFailureText(detail),
+      title: `${run.failedShards || 1} failing shard`,
+      detail,
+      runId: run.runId,
+      createdAt: run.createdAt,
+    };
+  }
+
+  function benchmarkFailureItem(run: QaSummary): QaFailureInboxItem | null {
+    const status = run.benchmark?.status;
+    if (status !== 'slower' && status !== 'mixed') return null;
+    return {
+      id: `bench:${run.runId}`,
+      severity: 'DEGRADED',
+      failureClass: 'performance',
+      title: benchmarkLabel(status),
+      detail: run.benchmark?.reason || 'Performance regression',
+      runId: run.runId,
+      createdAt: run.createdAt,
+    };
+  }
+
+  function restartFailureItem(row: QaRestartAuditEntry): QaFailureInboxItem | null {
+    const failed = row.status === 'spawn_error' || (row.exitCode !== null && row.exitCode !== 0);
+    if (!failed) return null;
+    return {
+      id: `restart:${row.auditId}`,
+      severity: 'FAIL',
+      failureClass: 'operations',
+      title: 'Restart failed',
+      detail: `${row.operatorId}: ${row.reason}`,
+      runId: null,
+      createdAt: row.startedAt,
+    };
+  }
+
+  function buildFailureInbox(runRows: QaSummary[], auditRows: QaRestartAuditEntry[]): QaFailureInboxItem[] {
+    const runItems = runRows.flatMap((run) => [runFailureItem(run), benchmarkFailureItem(run)].filter(Boolean) as QaFailureInboxItem[]);
+    const restartItems = auditRows.map(restartFailureItem).filter(Boolean) as QaFailureInboxItem[];
+    return [...runItems, ...restartItems].sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
+  }
+
+  function buildVerdictSummary(run: QaSummary | null, inbox: QaFailureInboxItem[]): QaVerdictSummary {
+    if (!run) {
+      return { status: 'UNKNOWN', reason: 'No QA runs yet', activeCount: inbox.length, latestRunId: null, latestAt: null, gitHead: null, codeHash: null, dirty: false };
+    }
+    const latestIssues = inbox.filter(item => item.runId === run.runId || item.failureClass === 'operations');
+    const hardFail = run.status === 'failed' || latestIssues.some(item => item.severity === 'FAIL');
+    const degraded = run.benchmark?.status === 'slower' || run.benchmark?.status === 'mixed' || run.code?.dirty === true || latestIssues.length > 0;
+    const status: QaVerdictStatus = hardFail ? 'FAIL' : degraded ? 'DEGRADED' : 'PASS';
+    return {
+      status,
+      reason: latestIssues[0]?.detail || run.benchmark?.reason || (run.code?.dirty ? 'Current worktree is dirty' : 'Latest QA run is green'),
+      activeCount: latestIssues.length,
+      latestRunId: run.runId,
+      latestAt: run.createdAt,
+      gitHead: run.code?.gitHead ?? null,
+      codeHash: run.code?.codeHash ?? null,
+      dirty: run.code?.dirty === true,
+    };
+  }
+
+  async function openFailure(item: QaFailureInboxItem): Promise<void> {
+    if (!item.runId) {
+      activeView = 'history';
+      return;
+    }
+    activeView = 'e2e';
+    await selectRun(item.runId);
   }
 
   function finiteSortValue(value: number | null | undefined, fallback: number): number {
@@ -853,6 +962,52 @@
       <button class:active={activeView === 'benchmarks'} onclick={() => (activeView = 'benchmarks')}>Benchmarks</button>
       <button class:active={activeView === 'history'} onclick={() => (activeView = 'history')}>History</button>
     </nav>
+
+    <section
+      class="verdict-banner"
+      class:pass={verdict.status === 'PASS'}
+      class:degraded={verdict.status === 'DEGRADED'}
+      class:fail={verdict.status === 'FAIL'}
+      data-testid="qa-verdict-banner"
+    >
+      <div>
+        <div class="eyebrow">System Verdict</div>
+        <h2>{verdict.status}</h2>
+        <p>{verdict.reason}</p>
+      </div>
+      <div class="verdict-meta">
+        <span>{verdict.activeCount} active reasons</span>
+        <code title={verdict.gitHead ?? ''}>head {shortHash(verdict.gitHead)}</code>
+        <code title={verdict.codeHash ?? ''}>code {shortHash(verdict.codeHash)}</code>
+        {#if verdict.dirty}<span>dirty</span>{/if}
+        <span>{formatDate(verdict.latestAt)}</span>
+      </div>
+    </section>
+
+    {#if failureInbox.length > 0}
+      <section class="failure-inbox" data-testid="qa-failure-inbox">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">Failure Inbox</div>
+            <h3>{failureInbox.length} reasons</h3>
+          </div>
+          <span class="chip warn">latest first</span>
+        </div>
+        <div class="failure-list">
+          {#each failureInbox.slice(0, 6) as item}
+            <button type="button" onclick={() => openFailure(item)} data-testid="qa-failure-item">
+              <strong class:fail={item.severity === 'FAIL'}>{item.severity}</strong>
+              <span>{item.failureClass}</span>
+              <div>
+                <b>{item.title}</b>
+                <small>{item.detail}</small>
+              </div>
+              <time>{formatDate(item.createdAt)}</time>
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     {#if error}
       <div class="error-banner">{error}</div>
@@ -1617,6 +1772,8 @@
   }
 
   .admin-card,
+  .verdict-banner,
+  .failure-inbox,
   .restart-plan {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
@@ -1624,6 +1781,86 @@
     padding: 1rem;
     display: grid;
     gap: 1rem;
+  }
+
+  .verdict-banner {
+    position: sticky;
+    top: 3.6rem;
+    z-index: 4;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    border-left-width: 4px;
+    backdrop-filter: blur(12px);
+  }
+
+  .verdict-banner.pass {
+    border-left-color: #3fb950;
+  }
+
+  .verdict-banner.degraded {
+    border-left-color: #d8af4f;
+  }
+
+  .verdict-banner.fail {
+    border-left-color: #ff7b72;
+  }
+
+  .verdict-banner h2 {
+    font-size: 1.8rem;
+  }
+
+  .verdict-meta {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+    max-width: 520px;
+    color: #b7b1a4;
+    font-size: 0.8rem;
+  }
+
+  .verdict-meta span,
+  .verdict-meta code {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 0.28rem 0.5rem;
+    background: rgba(0, 0, 0, 0.18);
+  }
+
+  .failure-list {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .failure-list button {
+    display: grid;
+    grid-template-columns: 90px 110px minmax(0, 1fr) minmax(140px, auto);
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 54px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 0.7rem;
+    color: inherit;
+    background: rgba(0, 0, 0, 0.16);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .failure-list button:hover {
+    border-color: rgba(216, 175, 79, 0.45);
+  }
+
+  .failure-list b,
+  .failure-list small {
+    display: block;
+    overflow-wrap: anywhere;
+  }
+
+  .failure-list strong.fail {
+    color: #ff9284;
   }
 
   .scenario-frame {
@@ -2047,14 +2284,25 @@
 
     .detail-layout,
     .auth-strip,
+    .verdict-banner,
     .restart-confirm-grid,
     .summary-grid,
     .metric-stack {
       grid-template-columns: 1fr;
     }
 
+    .verdict-banner {
+      position: static;
+    }
+
+    .verdict-meta {
+      justify-content: flex-start;
+      max-width: none;
+    }
+
     .history-table article,
     .history-table.compact article,
+    .failure-list button,
     .restart-audit-table article {
       grid-template-columns: 1fr;
       align-items: start;

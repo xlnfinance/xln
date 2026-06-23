@@ -361,11 +361,17 @@ test.describe('QA cockpit scenario player', () => {
     await page.goto('/qa');
     await expect(page.getByRole('heading', { name: 'Test Cockpit' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('qa-test-tabs')).toBeVisible();
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('DEGRADED');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('wall time +25%');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('performance');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('SLOWER');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await page.getByTestId('qa-run-sort').selectOption('stack-fast');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
     await page.getByTestId('qa-run-sort').selectOption('date-desc');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
+    await page.getByTestId('qa-failure-item').first().click();
+    await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/);
 
     await page.goto(`/qa?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}`);
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/, { timeout: 30_000 });
