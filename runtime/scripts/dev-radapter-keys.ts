@@ -39,6 +39,8 @@ const readArg = (name: string, fallback?: string): string | undefined => {
   return args[index + 1] || fallback;
 };
 
+const hasFlag = (name: string): boolean => args.includes(name);
+
 const requireNumberArg = (name: string): number => {
   const value = Number(readArg(name));
   if (!Number.isInteger(value) || value <= 0) {
@@ -53,6 +55,7 @@ const webPort = requireNumberArg('--web-port');
 const apiPort = requireNumberArg('--api-port');
 const outPath = resolve(readArg('--out', './db/dev/radapter-keys.json')!);
 const envOutPath = resolve(readArg('--env-out', './db/dev/radapter-keys.env')!);
+const suppressUrlLog = hasFlag('--suppress-url-log');
 const issuedAt = Date.now();
 const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
 
@@ -136,10 +139,12 @@ writeFileSync(
 chmodSync(outPath, 0o600);
 chmodSync(envOutPath, 0o600);
 
-console.log('');
-console.log('Open this URL to auto-import all dev runtimes:');
-console.log(`  ${importUrl}`);
-console.log('');
+if (!suppressUrlLog) {
+  console.log('');
+  console.log('Open this URL to auto-import all dev runtimes:');
+  console.log(`  ${importUrl}`);
+  console.log('');
+}
 console.log(`XLN dev radapter keys written to ${outPath}`);
 console.log(`Runtime auth env written to ${envOutPath}`);
 console.log('');

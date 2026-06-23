@@ -8,6 +8,7 @@ export type RuntimeImportLogInput = {
   importUrl: string;
   access: 'read' | 'admin';
   manifestPath: string;
+  exposeUrl?: boolean;
 };
 
 const sanitizeLogValue = (value: string): string =>
@@ -28,6 +29,7 @@ export const redactRuntimeImportWalletUrl = redactTokenBearingUrlForLog;
 
 export const buildRuntimeImportLogLine = (input: RuntimeImportLogInput): string => {
   const labels = input.manifest.entries.map(entry => sanitizeLogValue(entry.label)).join(',');
+  const walletUrl = input.exposeUrl ? input.importUrl : redactRuntimeImportWalletUrl(input.importUrl);
   return [
     '[MESH] RUNTIME_IMPORT_READY',
     `count=${input.manifest.entries.length}`,
@@ -35,6 +37,6 @@ export const buildRuntimeImportLogLine = (input: RuntimeImportLogInput): string 
     `path=${sanitizeLogValue(input.manifestPath)}`,
     `expiresAt=${input.manifest.expiresAt}`,
     `labels=${labels}`,
-    `wallet=${redactRuntimeImportWalletUrl(input.importUrl)}`,
+    `wallet=${walletUrl}`,
   ].join(' ');
 };

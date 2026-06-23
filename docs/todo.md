@@ -40,13 +40,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [x] Redact runtime import token URL from orchestrator logs.
   - Impact: critical.
-  - Status: done. Runtime import stdout logs count/access/path/expiry/labels/wallet only; hub inspect URLs are logged without query/hash secrets.
-  - Evidence: unit asserts no `runtime-import=`, `xlnra1.`, token strings, or base64 manifest in log lines. Focused browser e2e imported mesh/custody/MM runtimes and the new run logs had no `runtime-import=` or `xlnra1.` outside the local secret manifest.
+  - Status: done. Runtime import stdout logs redact token-bearing URLs by default; `bun run dev` is the explicit local exception via `XLN_RUNTIME_IMPORT_LOG_URL=1` so the operator gets one clickable bootstrap link. Hub inspect URLs are still logged without query/hash secrets.
+  - Evidence: unit asserts default log lines contain no `runtime-import=`, `xlnra1.`, token strings, or base64 manifest; a separate unit asserts the full URL is exposed only when explicitly requested. Focused browser e2e imported mesh/custody/MM runtimes from the manifest.
 
 - [x] Replace per-runtime paste links with one-click `runtimeList` auto-import.
   - Impact: critical.
-  - Status: done. Dev radapter keys print one `/app?runtimeList=...` URL with ready read tokens; orchestrator writes the same query-based import URL. `/app` parses the query, fills the import textarea, strips token params from the address bar, validates every host, and imports automatically without confirm or browser-runtime choice.
-  - Evidence: focused unit asserts one printed app link, no `key=paste`, read/admin manifests, and ready tokens. Focused browser e2e now expects `runtimeList=`, no `runtime-import=`, no confirm button, then verifies mesh/custody/MM runtimes are imported and live.
+  - Status: done. `bun run dev` suppresses the early keygen URL and lets the orchestrator print the single final `/app?runtimeList=...` link after H1/H2/H3/MM/Custody are bootstrapped with real runtimeId-bound tokens. `/app` strips token params, validates every host, stores the imports, activates the first runtime, and reloads without rendering the textarea/confirm screen on the success path.
+  - Evidence: focused unit asserts standalone keygen still can print one app link and dev-mode can suppress that early URL. Focused browser e2e expects `runtimeList=`, no `runtime-import=`, no bulk import screen, no textarea, no confirm button, then verifies mesh/custody/MM runtimes are imported and live.
 
 - [x] Move manual Remote Manager out of the main app dropdowns.
   - Impact: high.
