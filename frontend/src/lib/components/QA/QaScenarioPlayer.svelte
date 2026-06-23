@@ -5,6 +5,7 @@
     qaScenarioDescription,
     qaScenarioTimelineMs,
     qaScenarioTitle,
+    qaScenarioUsesVideoClock,
     tenWordScenarioSummary,
     type QaScenarioCue,
     type QaScenarioPhaseMs,
@@ -50,6 +51,7 @@
   let fullscreenError = $state<string | null>(null);
   let mediaError = $state<string | null>(null);
   let videoBlobUrl = $state<string | null>(null);
+  let trackBlobUrl = $state<string | null>(null);
   let imageBlobUrls = $state<Record<string, string>>({});
   let selectedKey = $state('');
 
@@ -59,14 +61,22 @@
     null
   );
   const selectedImages = $derived(shard.artifacts.filter(artifact => artifact.kind === 'image' && artifact.url));
+  const selectedTrack = $derived(
+    shard.artifacts.find(artifact => artifact.name === 'cues.vtt' && artifact.url) ??
+    shard.artifacts.find(artifact => artifact.contentType.startsWith('text/vtt') && artifact.url) ??
+    null
+  );
   const selectedImageKey = $derived(selectedImages.map(image => image.url).filter(Boolean).join('|'));
   const scenarioTitle = $derived(qaScenarioTitle(shard));
   const scenarioDescription = $derived(qaScenarioDescription(shard));
   const shortDescription = $derived(tenWordScenarioSummary(scenarioDescription));
   const cues = $derived(buildQaScenarioCues(shard));
   const timelineMs = $derived(qaScenarioTimelineMs(cues));
+  const usesVideoClock = $derived(qaScenarioUsesVideoClock(cues));
   const playbackMs = $derived(
-    durationSec > 0 && timelineMs > 0
+    usesVideoClock
+      ? currentTimeSec * 1000
+      : durationSec > 0 && timelineMs > 0
       ? Math.min(timelineMs, (currentTimeSec / durationSec) * timelineMs)
       : currentTimeSec * 1000,
   );
@@ -99,6 +109,30 @@
           return;
         }
         videoBlobUrl = url;
+      })
+      .catch((error) => {
+        if (!cancelled) mediaError = error instanceof Error ? error.message : String(error);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  });
+
+  $effect(() => {
+    const sourceUrl = selectedTrack?.url ?? '';
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    trackBlobUrl = null;
+    if (!sourceUrl) return;
+    void fetchQaBlobUrl(sourceUrl)
+      .then((url) => {
+        objectUrl = url;
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        trackBlobUrl = url;
       })
       .catch((error) => {
         if (!cancelled) mediaError = error instanceof Error ? error.message : String(error);
@@ -160,7 +194,9 @@
     if (!videoElement) return;
     const safeTimelineMs = timelineMs > 0 ? timelineMs : cue.endMs;
     const videoDuration = Number.isFinite(videoElement.duration) ? videoElement.duration : 0;
-    videoElement.currentTime = videoDuration > 0
+    videoElement.currentTime = usesVideoClock
+      ? cue.startMs / 1000
+      : videoDuration > 0
       ? (cue.startMs / safeTimelineMs) * videoDuration
       : cue.startMs / 1000;
     syncVideoClock();
@@ -242,7 +278,11 @@
           ontimeupdate={syncVideoClock}
           onseeked={syncVideoClock}
           onplay={syncVideoClock}
-        ></video>
+        >
+          {#if trackBlobUrl}
+            <track kind="subtitles" label="Scenario transcript" srclang="en" src={trackBlobUrl} default data-testid="qa-video-track" />
+          {/if}
+        </video>
         {#if activeCue}
           <div class="subtitle-overlay" data-testid="qa-live-subtitle">
             <strong>{activeCue.title}</strong>

@@ -53,11 +53,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 ## p1 trust and correctness
 
-- [ ] Replace fake video transcript sync with real in-browser cue timestamps.
+- [x] Replace fake video transcript sync with real in-browser cue timestamps.
   - Impact: high.
   - Current issue: scenario cues are synthesized from phase durations and linearly mapped to video duration. Setup phases that are not in the Playwright video can appear as subtitles over wallet footage.
   - Fix: record cue timestamps from browser/test markers relative to video start. Store `cues.json` and generate WebVTT. Keep infra setup phases in a separate setup strip, not in video subtitles.
   - Tests: browser E2E asserts a cue text matches the actual video step window; WebVTT loads; cue click seeks to expected video time.
+  - Status: done. `timedStep()` now emits `[E2E-CUE]` markers with video-relative `startMs/endMs`; the runner writes `qa-cues/cues.json` and `qa-cues/cues.vtt`, and the manifest parser keeps legacy duration-only logs as fallback. QA Scenario Player uses video-clock cues directly and excludes setup phases from subtitles when real cues exist.
+  - Evidence: unit covers cue parsing/replacement; focused QA cockpit browser test verifies real offset text, protected WebVTT track loading, no setup phase subtitles, cue click seek, video artifact loading, and zero browser issues.
 
 - [x] Capture browser console errors, page errors, failed requests, and HTTP 4xx/5xx per shard.
   - Impact: high.

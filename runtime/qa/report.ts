@@ -8,6 +8,8 @@ import { compareStableText } from '../serialization-utils';
 export type QaSlowStep = {
   label: string;
   ms: number;
+  startMs?: number;
+  endMs?: number;
 };
 
 export type QaArtifactKind = 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other';
@@ -267,6 +269,7 @@ const MIME_TYPES: Record<string, string> = {
   '.json': 'application/json; charset=utf-8',
   '.log': 'text/plain; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
+  '.vtt': 'text/vtt; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -986,6 +989,7 @@ const detectArtifactKind = (name: string): QaArtifactKind => {
   if (lower.endsWith('.webm')) return 'video';
   if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image';
   if (lower.endsWith('.zip')) return 'trace';
+  if (lower.endsWith('.vtt')) return 'text';
   if (lower.endsWith('.json')) return 'json';
   if (lower.endsWith('.log') || lower.endsWith('.txt')) return 'text';
   if (lower.endsWith('.tar') || lower.endsWith('.gz')) return 'archive';
@@ -1163,22 +1167,50 @@ const readTargetsMetadata = async (runDir: string): Promise<Map<number, QaTarget
   return out;
 };
 
-const parseTimelineSteps = (text: string): QaSlowStep[] => {
+export const parseQaTimelineSteps = (text: string): QaSlowStep[] => {
   const out: QaSlowStep[] = [];
-  const re = /\[(E2E-TIMING|MESH-TIMING)\]\s+(.+?)\s+(\d+)ms/g;
-  let match: RegExpExecArray | null = null;
-  while ((match = re.exec(text)) !== null) {
-    const prefix = String(match[1] || '').trim();
-    const label = `${prefix}:${String(match[2] || '').trim()}`;
-    const ms = Number(match[3] || '0');
+  const pendingTimingByLabel = new Map<string, number>();
+  const cueRe = /^\[(E2E-CUE|MESH-CUE)\]\s+(.+?)\s+start=(\d+)ms\s+end=(\d+)ms\s+duration=(\d+)ms(?:\s.*)?$/;
+  const timingRe = /^\[(E2E-TIMING|MESH-TIMING)\]\s+(.+?)\s+(\d+)ms(?:\s.*)?$/;
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    const cue = cueRe.exec(line);
+    if (cue) {
+      const prefix = cue[1] === 'MESH-CUE' ? 'MESH-TIMING' : 'E2E-TIMING';
+      const label = `${prefix}:${String(cue[2] || '').trim()}`;
+      const startMs = Number(cue[3] || '0');
+      const endMs = Number(cue[4] || '0');
+      const ms = Number(cue[5] || '0');
+      if (!label || !Number.isFinite(startMs) || !Number.isFinite(endMs) || !Number.isFinite(ms)) continue;
+      const step = {
+        label,
+        ms: Math.max(0, Math.floor(ms)),
+        startMs: Math.max(0, Math.floor(startMs)),
+        endMs: Math.max(Math.max(0, Math.floor(startMs)), Math.floor(endMs)),
+      };
+      const pendingIndex = pendingTimingByLabel.get(label);
+      if (pendingIndex !== undefined && out[pendingIndex]?.startMs === undefined) {
+        out[pendingIndex] = step;
+      } else {
+        out.push(step);
+      }
+      pendingTimingByLabel.delete(label);
+      continue;
+    }
+
+    const timing = timingRe.exec(line);
+    if (!timing) continue;
+    const label = `${String(timing[1] || '').trim()}:${String(timing[2] || '').trim()}`;
+    const ms = Number(timing[3] || '0');
     if (!label || !Number.isFinite(ms)) continue;
-    out.push({ label, ms });
+    pendingTimingByLabel.set(label, out.length);
+    out.push({ label, ms: Math.max(0, Math.floor(ms)) });
   }
   return out;
 };
 
-const parseSlowSteps = (text: string): QaSlowStep[] => {
-  const out = parseTimelineSteps(text);
+export const parseQaSlowSteps = (text: string): QaSlowStep[] => {
+  const out = parseQaTimelineSteps(text);
   return out.sort((a, b) => b.ms - a.ms);
 };
 
@@ -1314,8 +1346,8 @@ const collectLegacyShard = async (
   const resultsDir = join(runDir, `test-results-shard-${shard}`);
   const logText = existsSync(logPath) ? await readFile(logPath, 'utf8') : '';
   const phaseMs = parsePhaseTimings(logText);
-  const timelineSteps = parseTimelineSteps(logText).slice(0, 80);
-  const slowSteps = parseSlowSteps(logText).slice(0, 12);
+  const timelineSteps = parseQaTimelineSteps(logText).slice(0, 80);
+  const slowSteps = parseQaSlowSteps(logText).slice(0, 12);
   const browserIssues: QaBrowserIssue[] = [];
   const artifacts: QaArtifact[] = [];
   const metadata = targetMetadata.get(shard) ?? null;
@@ -1435,7 +1467,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
         const timelineSteps = Array.isArray(shard.timelineSteps) && shard.timelineSteps.length > 0
           ? shard.timelineSteps
           : logText
-            ? parseTimelineSteps(logText).slice(0, 80)
+            ? parseQaTimelineSteps(logText).slice(0, 80)
             : [];
         const browserIssues = normalizeQaBrowserIssues(shard.browserIssues);
         return {

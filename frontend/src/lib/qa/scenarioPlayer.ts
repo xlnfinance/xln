@@ -10,6 +10,8 @@ export type QaScenarioPhaseMs = {
 export type QaScenarioStep = {
   label: string;
   ms: number;
+  startMs?: number;
+  endMs?: number;
 };
 
 export type QaScenarioShardLike = {
@@ -32,6 +34,7 @@ export type QaScenarioCue = {
   title: string;
   text: string;
   meta: string;
+  timebase: 'video' | 'synthetic';
 };
 
 type PhaseKey = keyof QaScenarioPhaseMs;
@@ -80,6 +83,9 @@ const formatMs = (ms: number): string => {
   return `${Math.round(ms)}ms`;
 };
 
+const formatTimeRange = (startMs: number, endMs: number): string =>
+  `${formatMs(startMs)}-${formatMs(endMs)}`;
+
 const pushCue = (
   cues: QaScenarioCue[],
   cursorMs: number,
@@ -97,8 +103,36 @@ const pushCue = (
     title,
     text,
     meta,
+    timebase: 'synthetic',
   });
   return cursorMs + safeDuration;
+};
+
+const hasVideoTiming = (step: QaScenarioStep): boolean =>
+  Number.isFinite(Number(step.startMs)) &&
+  Number.isFinite(Number(step.endMs)) &&
+  Number(step.endMs) >= Number(step.startMs);
+
+const pushVideoCue = (
+  cues: QaScenarioCue[],
+  step: QaScenarioStep,
+): void => {
+  const startMs = Math.max(0, Math.floor(Number(step.startMs ?? 0)));
+  const durationMs = Math.max(0, Math.floor(Number(step.ms || 0)));
+  const rawEndMs = Math.floor(Number(step.endMs ?? startMs + durationMs));
+  const endMs = Math.max(startMs, rawEndMs);
+  const label = cleanTimingLabel(step.label);
+  const title = capitalize(tenWordScenarioSummary(label).split(' ').slice(0, 4).join(' ')) || 'Browser Step';
+  const id = `${cues.length}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'cue'}`;
+  cues.push({
+    id,
+    startMs,
+    endMs,
+    title,
+    text: `${capitalize(label)} completed in ${formatMs(durationMs)}.`,
+    meta: `${formatTimeRange(startMs, endMs)} / ${formatMs(durationMs)}`,
+    timebase: 'video',
+  });
 };
 
 export function tenWordScenarioSummary(value: string | null | undefined): string {
@@ -126,6 +160,16 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
   const cues: QaScenarioCue[] = [];
   let cursorMs = 0;
   const description = qaScenarioDescription(shard);
+  const steps = (shard.timelineSteps && shard.timelineSteps.length > 0 ? shard.timelineSteps : shard.slowSteps)
+    .filter(step => Number.isFinite(step.ms) && step.ms > 0)
+    .slice(0, 48);
+  const videoSteps = steps.filter(hasVideoTiming);
+
+  if (videoSteps.length > 0) {
+    for (const step of videoSteps) pushVideoCue(cues, step);
+    return cues;
+  }
+
   cursorMs = pushCue(cues, cursorMs, 1200, 'Scenario', description, shard.handle || `shard-${shard.shard}`);
 
   const phaseMs = shard.phaseMs;
@@ -136,10 +180,6 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
       cursorMs = pushCue(cues, cursorMs, durationMs, phase.title, phase.text, formatMs(durationMs));
     }
   }
-
-  const steps = (shard.timelineSteps && shard.timelineSteps.length > 0 ? shard.timelineSteps : shard.slowSteps)
-    .filter(step => Number.isFinite(step.ms) && step.ms > 0)
-    .slice(0, 48);
 
   if (steps.length > 0) {
     for (const step of steps) {
@@ -182,6 +222,10 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
 
 export function qaScenarioTimelineMs(cues: QaScenarioCue[]): number {
   return cues.reduce((max, cue) => Math.max(max, cue.endMs), 0);
+}
+
+export function qaScenarioUsesVideoClock(cues: QaScenarioCue[]): boolean {
+  return cues.some(cue => cue.timebase === 'video');
 }
 
 export function qaScenarioCueIndexAt(cues: QaScenarioCue[], positionMs: number): number {

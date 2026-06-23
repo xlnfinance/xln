@@ -35,6 +35,7 @@ import {
   deriveQaTestDescription,
   deriveQaTestHandle,
   normalizeQaBrowserIssues,
+  parseQaTimelineSteps,
   recordQaRunHistory,
   summarizeQaBrowserIssues,
   summarizeQaRunBrowserHealth,
@@ -42,6 +43,7 @@ import {
   type QaArtifactKind,
   type QaBrowserIssue,
   type QaRunManifest,
+  type QaSlowStep,
 } from '../qa/report';
 import { compareStableText } from '../serialization-utils';
 import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
@@ -553,22 +555,9 @@ const assertRunnerPreflight = async (): Promise<void> => {
   await import(resolve(process.cwd(), 'runtime', 'jadapter', 'browservm.ts'));
 };
 
-type StepTiming = { label: string; ms: number };
-
-const parseStepTimings = (path: string): StepTiming[] => {
+const parseStepTimings = (path: string): QaSlowStep[] => {
   try {
-    const text = readFileSync(path, 'utf8');
-    const out: StepTiming[] = [];
-    const re = /\[(E2E-TIMING|MESH-TIMING)\]\s+(.+?)\s+(\d+)ms/g;
-    let match: RegExpExecArray | null = null;
-    while ((match = re.exec(text)) !== null) {
-      const prefix = String(match[1] || '').trim();
-      const label = `${prefix}:${String(match[2] || '').trim()}`;
-      const ms = Number(match[3] || '0');
-      if (!label || !Number.isFinite(ms)) continue;
-      out.push({ label, ms });
-    }
-    return out;
+    return parseQaTimelineSteps(readFileSync(path, 'utf8'));
   } catch {
     return [];
   }
@@ -579,6 +568,7 @@ const detectArtifactKind = (name: string): QaArtifactKind => {
   if (lower.endsWith('.webm')) return 'video';
   if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image';
   if (lower.endsWith('.zip')) return 'trace';
+  if (lower.endsWith('.vtt')) return 'text';
   if (lower.endsWith('.json')) return 'json';
   if (lower.endsWith('.log') || lower.endsWith('.txt')) return 'text';
   if (lower.endsWith('.tar') || lower.endsWith('.gz')) return 'archive';
@@ -591,6 +581,7 @@ const detectArtifactContentType = (name: string): string => {
   if (lower.endsWith('.png')) return 'image/png';
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
   if (lower.endsWith('.zip')) return 'application/zip';
+  if (lower.endsWith('.vtt')) return 'text/vtt; charset=utf-8';
   if (lower.endsWith('.json')) return 'application/json; charset=utf-8';
   if (lower.endsWith('.log') || lower.endsWith('.txt')) return 'text/plain; charset=utf-8';
   return 'application/octet-stream';
@@ -635,6 +626,52 @@ const collectShardArtifacts = (
 
   walk(resultsDir);
   return artifacts.sort((a, b) => artifactKindRank(a.kind) - artifactKindRank(b.kind) || compareStableText(a.name, b.name));
+};
+
+const formatWebVttTime = (ms: number): string => {
+  const safeMs = Math.max(0, Math.floor(ms));
+  const hours = Math.floor(safeMs / 3_600_000);
+  const minutes = Math.floor((safeMs % 3_600_000) / 60_000);
+  const seconds = Math.floor((safeMs % 60_000) / 1000);
+  const millis = safeMs % 1000;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
+};
+
+const cleanCueText = (label: string): string =>
+  String(label || '')
+    .replace(/^(E2E-TIMING|MESH-TIMING):/i, '')
+    .replace(/[_./:-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const writeShardCueArtifacts = (logsDir: string, shard: number, steps: QaSlowStep[]): void => {
+  const cues = steps
+    .filter(step => Number.isFinite(Number(step.startMs)) && Number.isFinite(Number(step.endMs)))
+    .map((step, index) => ({
+      id: `cue-${String(index + 1).padStart(2, '0')}`,
+      label: step.label,
+      text: cleanCueText(step.label) || step.label,
+      startMs: Math.max(0, Math.floor(Number(step.startMs))),
+      endMs: Math.max(0, Math.floor(Number(step.endMs))),
+      durationMs: Math.max(0, Math.floor(Number(step.ms))),
+    }))
+    .filter(cue => cue.endMs >= cue.startMs);
+  if (cues.length === 0) return;
+
+  const dir = join(logsDir, `test-results-shard-${shard}`, 'qa-cues');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'cues.json'), `${JSON.stringify({ cues }, null, 2)}\n`);
+  const vtt = [
+    'WEBVTT',
+    '',
+    ...cues.flatMap((cue) => [
+      cue.id,
+      `${formatWebVttTime(cue.startMs)} --> ${formatWebVttTime(cue.endMs)}`,
+      cue.text,
+      '',
+    ]),
+  ].join('\n');
+  writeFileSync(join(dir, 'cues.vtt'), vtt);
 };
 
 const readShardLastRunStatus = (logsDir: string, shard: number): 'passed' | 'failed' | 'unknown' => {
@@ -691,6 +728,7 @@ const writeRunManifest = (
     .map(result => {
       const timelineSteps = parseStepTimings(result.logPath).slice(0, 80);
       const slowSteps = timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, 12);
+      writeShardCueArtifacts(logsDir, result.shard, timelineSteps);
       const artifacts = collectShardArtifacts(logsDir, result.shard);
       const browserIssues = readShardBrowserIssues(logsDir, result.shard);
       return {
@@ -1935,6 +1973,7 @@ const runShard = async (
         E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
         E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
         E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),
+        E2E_PLAYWRIGHT_STARTED_AT_MS: String(playwrightStart),
         E2E_FAST: process.env['E2E_FAST'] ?? '1',
         E2E_ISOLATED_STACK: '1',
         E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
