@@ -58,7 +58,7 @@ const QA_FIXTURE_RUN = {
   runId: QA_FIXTURE_RUN_ID,
   createdAt: Date.UTC(2026, 5, 23, 23, 59, 59, 999),
   completedAt: Date.UTC(2026, 5, 24, 0, 0, 7, 199),
-  status: 'passed',
+  status: 'failed',
   totalMs: 7_200,
   timing: QA_FIXTURE_TIMING,
   code: {
@@ -107,13 +107,14 @@ const QA_FIXTURE_RUN = {
     likelyCauses: ['code hash changed', 'git HEAD changed', 'largest delta: wall time +25%'],
   },
   totalShards: 1,
-  passedShards: 1,
-  failedShards: 0,
+  passedShards: 0,
+  failedShards: 1,
+  failureClasses: ['assertion'],
   args: { fixture: 'qa-cockpit-scenario-player' },
   shards: [
     {
       shard: 1,
-      status: 'passed',
+      status: 'failed',
       durationMs: 7_200,
       handle: 'qa.cockpit-fixture',
       description: 'Fixture run records a wallet scenario with synced transcript and video playback.',
@@ -121,8 +122,9 @@ const QA_FIXTURE_RUN = {
       title: 'QA cockpit fixture records playback transcript',
       requireMarketMaker: false,
       logRelativePath: 'e2e-shard-01.log',
-      logTail: null,
-      error: null,
+      logTail: 'Expected: scenario playback to render active cue\nReceived: no active cue',
+      error: 'Expected: scenario playback to render active cue',
+      failureClass: 'assertion',
       phaseMs: {
         preflight: 100,
         anvilBoot: 200,
@@ -202,7 +204,7 @@ const QA_FIXTURE_RUN = {
 const QA_FIXTURE_SUMMARY = {
   ...QA_FIXTURE_RUN,
   shards: undefined,
-  failingTargets: [],
+  failingTargets: ['qa.cockpit-fixture'],
 };
 
 const QA_FAST_SUMMARY = {
@@ -214,6 +216,9 @@ const QA_FAST_SUMMARY = {
   totalMs: 4_000,
   timing: QA_FAST_TIMING,
   browserHealth: QA_CLEAN_BROWSER_HEALTH,
+  passedShards: 1,
+  failedShards: 0,
+  failureClasses: [],
   code: {
     ...QA_FIXTURE_RUN.code,
     gitHead: '95174ad2c2d9d8db1d7f07b6f4a4e9ec0c000000',
@@ -264,7 +269,7 @@ const QA_HISTORY = [
     runId: QA_FIXTURE_RUN_ID,
     createdAt: QA_FIXTURE_RUN.createdAt,
     completedAt: QA_FIXTURE_RUN.completedAt,
-    status: 'passed',
+    status: QA_FIXTURE_RUN.status,
     totalMs: QA_FIXTURE_RUN.totalMs,
     totalShards: QA_FIXTURE_RUN.totalShards,
     passedShards: QA_FIXTURE_RUN.passedShards,
@@ -564,9 +569,11 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByRole('heading', { name: 'Test Cockpit' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('qa-test-tabs')).toBeVisible();
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('FAIL');
-    await expect(page.getByTestId('qa-verdict-banner')).toContainText('1 browser errors');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('qa.cockpit-fixture');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('browser');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('assertion');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('failing shard');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('performance');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('SLOWER');
     await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('UX Screenshot Gallery');
@@ -579,6 +586,7 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('Disputes');
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('History');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
+    await expect(page.getByTestId('qa-run-row').first()).toContainText('assertion');
     await page.getByTestId('qa-run-sort').selectOption('stack-fast');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
     await page.getByTestId('qa-run-sort').selectOption('date-desc');
@@ -636,10 +644,12 @@ test.describe('QA cockpit scenario player', () => {
 
     const videoShard = page.getByTestId('qa-suite-row').first();
     await expect(videoShard).toHaveAttribute('data-has-video', 'true');
+    await expect(videoShard).toContainText('assertion');
     await videoShard.click();
 
     const watchPanel = page.getByTestId('qa-watch-panel');
     await expect(page.getByTestId('qa-browser-health')).toContainText('Unhandled promise rejection');
+    await expect(page.locator('.detail-artifacts')).toContainText('assertion');
     await expect(page.getByTestId('qa-browser-health')).toContainText('HTTP 404');
     await expect(watchPanel).toBeVisible();
     await expect(page.getByTestId('qa-video-player')).toBeVisible();

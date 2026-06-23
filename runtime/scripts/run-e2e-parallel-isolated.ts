@@ -32,11 +32,13 @@ import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   compareQaRunWithHistory,
+  classifyQaShardFailure,
   deriveQaTestDescription,
   deriveQaTestHandle,
   normalizeQaBrowserIssues,
   parseQaTimelineSteps,
   recordQaRunHistory,
+  summarizeQaFailureClasses,
   summarizeQaBrowserIssues,
   summarizeQaRunBrowserHealth,
   type QaArtifact,
@@ -731,12 +733,13 @@ const writeRunManifest = (
       writeShardCueArtifacts(logsDir, result.shard, timelineSteps);
       const artifacts = collectShardArtifacts(logsDir, result.shard);
       const browserIssues = readShardBrowserIssues(logsDir, result.shard);
+      const lastRunStatus = readShardLastRunStatus(logsDir, result.shard);
+      const status = lastRunStatus === 'unknown' ? result.status : lastRunStatus;
+      const logTail = tailLog(result.logPath);
+      const error = result.error ?? null;
       return {
         shard: result.shard,
-        status:
-          readShardLastRunStatus(logsDir, result.shard) === 'unknown'
-            ? result.status
-            : readShardLastRunStatus(logsDir, result.shard),
+        status,
         durationMs: result.durationMs,
         handle: deriveQaTestHandle(result.target, result.title),
         description: deriveQaTestDescription(result.target, result.title),
@@ -744,14 +747,15 @@ const writeRunManifest = (
         title: result.title || readShardTitle(logsDir, result.shard),
         requireMarketMaker: result.requireMarketMaker,
         requireCustody: result.requireCustody,
-        error: result.error ?? null,
+        error,
+        failureClass: classifyQaShardFailure({ status, error, logTail, browserIssues }),
         phaseMs: result.phaseMs,
         perf: result.perf,
         browserIssues,
         browserHealth: summarizeQaBrowserIssues(browserIssues),
         timelineSteps,
         logRelativePath: result.logPath.slice(logsDir.length + 1),
-        logTail: tailLog(result.logPath),
+        logTail,
         slowSteps,
         artifacts,
         hasVideo: artifacts.some(artifact => artifact.kind === 'video'),
@@ -774,6 +778,7 @@ const writeRunManifest = (
     totalShards: shards.length,
     passedShards,
     failedShards,
+    failureClasses: summarizeQaFailureClasses(shards),
     args: {
       shards: args.shards,
       basePort: args.basePort,

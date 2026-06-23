@@ -13,6 +13,7 @@ import {
   type QaRestartAuditEntry,
 } from '../qa/api';
 import {
+  classifyQaShardFailure,
   compareQaBenchmarkRuns,
   QA_HISTORY_DB_PATH,
   listQaStoryScreenshots,
@@ -125,6 +126,7 @@ const benchmarkRun = (
     logRelativePath: null,
     logTail: null,
     error: null,
+    failureClass: null,
     phaseMs: {
       preflight: 0,
       anvilBoot: 0,
@@ -158,6 +160,34 @@ test('qa benchmark comparison flags sharp runtime deltas', () => {
   expect(lowerLoadOnly.status).toBe('ok');
   expect(lowerLoadOnly.metrics.find(metric => metric.metric === 'peakLoad1')?.verdict).toBe('faster');
   expect(lowerLoadOnly.reason).toContain('Timing within thresholds');
+});
+
+test('qa shard failure classifier maps operator failure classes', () => {
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    error: 'Timeout 5000ms exceeded',
+  })).toBe('timeout');
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    logTail: 'Expected: 1\nReceived: 2',
+  })).toBe('assertion');
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    browserIssues: [{
+      type: 'http',
+      severity: 'error',
+      message: 'HTTP 502 from runtime API',
+      url: 'http://127.0.0.1:8080/health',
+      method: 'GET',
+      status: 502,
+      testId: 'health',
+      timestamp: Date.UTC(2026, 5, 23),
+    }],
+  })).toBe('infra');
+  expect(classifyQaShardFailure({
+    status: 'passed',
+    logTail: 'Timeout 5000ms exceeded',
+  })).toBeNull();
 });
 
 test('qa stories catalog indexes real e2e screenshots', async () => {
