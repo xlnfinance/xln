@@ -93,11 +93,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Runner writes `failureClass` per shard and `failureClasses` per run; legacy manifests derive the field on read. QA cockpit shows class chips on run rows and shard detail, failure inbox clicks set the active class filter, and manual class chips filter both run list and inbox. Loading or opening a failure selects the first failed shard matching the active class before falling back to the first failed shard.
   - Evidence: unit covers timeout/assertion/infra/passed classifier behavior. Focused QA cockpit e2e verifies `assertion` filtering, run row chips, inbox narrowing, and shard detail class chips.
 
-- [ ] Fix radapter admin-state e2e height stalling after control mutation.
+- [x] Fix radapter admin-state e2e height stalling after control mutation.
   - Impact: high.
-  - Current issue: broad `tests/e2e-radapter-remote.spec.ts` run on 2026-06-23 failed `admin remote runtime control advances live state and exposes past frames`: expected height to advance after profile mutation, but `beforeHeight=18` and `after.height=18`.
-  - Constraints: do not mask by weakening the assertion. The admin write should produce an event/frame first, then the remote view should observe the advanced persisted height.
-  - Tests: reproduce with focused grep for the admin-state test, then add an L1/L2 wait/assertion around the control mutation event source before broad radapter e2e.
+  - Status: done. The admin-control test now uses explicit awaited Playwright-side polling and returns the proven post-write probe as the assertion source; it no longer relies on an async `waitForFunction` predicate that could let the final read race the Svelte view update.
+  - Root cause: broad split runs exposed a readiness race in the test harness. The adapter head/frame could be updated while `window.isolatedEnv` was still one Svelte view refresh behind, producing `beforeHeight=18` and `after.height=18` in the final assertion.
+  - Evidence: focused admin-control e2e passes. Broad `tests/e2e-radapter-remote.spec.ts` now passes `5/5`, including the previously failing shard 2 admin-control test.
 
 - [ ] Fix numeric signer key cache isolation by runtime seed.
   - Impact: high.

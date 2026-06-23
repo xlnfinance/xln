@@ -247,7 +247,7 @@
     const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
     const payload = runtimeImportPayloadFromParams(params);
     if (!payload) return null;
-    return applyRemoteRuntimeImportPayload(payload, 'hash', false);
+    return applyRemoteRuntimeImportPayload(payload, 'hash', true);
   }
 
   function stripRemoteRuntimeParams(): void {
@@ -625,22 +625,8 @@
     <div class="remote-login-screen" data-testid="remote-runtime-bulk-import-screen">
       <section class="remote-login-card remote-login-card--wide">
         <div class="remote-kicker">Remote runtimes</div>
-        <h2>{pendingRemoteRuntimeImport.autoImport && !remoteRuntimeImportError ? 'Importing runtime hosts' : 'Import runtime hosts'}</h2>
-        <p>
-          {pendingRemoteRuntimeImport.autoImport
-            ? 'Each host is being opened, authenticated, and read before it is added.'
-            : 'Review the capability list, then confirm. Each host is opened, authenticated, and read before it is added.'}
-        </p>
-        <label class="remote-token-input remote-import-textarea">
-          <span>Capability lines</span>
-          <textarea
-            data-testid="remote-runtime-import-textarea"
-            autocomplete="off"
-            spellcheck="false"
-            bind:value={remoteRuntimeImportText}
-            placeholder="H1 | read | ws://localhost:8090/rpc | xlnra1..."
-          ></textarea>
-        </label>
+        <h2>{remoteRuntimeImportError ? 'Runtime import failed' : 'Importing runtime hosts'}</h2>
+        <p>Each host is opened, authenticated, and read before it is added.</p>
         {#if remoteRuntimeImportRows.length > 0}
           <div class="remote-import-table" data-testid="remote-runtime-import-status">
             {#each remoteRuntimeImportRows as row (row.index)}
@@ -660,19 +646,10 @@
         {#if remoteRuntimeImportError}
           <p class="remote-token-error" data-testid="remote-runtime-import-error">{remoteRuntimeImportError}</p>
         {/if}
-        {#if !pendingRemoteRuntimeImport.autoImport || remoteRuntimeImportError}
+        {#if remoteRuntimeImportError}
           <div class="remote-actions">
-            <button
-              class="primary"
-              data-testid="remote-runtime-import-confirm"
-              disabled={remoteRuntimeImporting}
-              onclick={acceptRemoteRuntimeImport}
-            >
-              {remoteRuntimeImporting ? 'Checking...' : 'Confirm import'}
-            </button>
-            {#if !pendingRemoteRuntimeImport.autoImport}
-              <button class="secondary" disabled={remoteRuntimeImporting} onclick={useLocalBrowserRuntime}>Cancel</button>
-            {/if}
+            <a class="primary" href="/radapter/manage">Manage remotes</a>
+            <button class="secondary" disabled={remoteRuntimeImporting} onclick={useLocalBrowserRuntime}>Use local runtime</button>
           </div>
         {/if}
       </section>
@@ -852,13 +829,6 @@
     line-height: 1.5;
   }
 
-  .remote-import-textarea textarea {
-    min-height: 180px;
-    resize: vertical;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    line-height: 1.45;
-  }
-
   .remote-import-table {
     display: grid;
     gap: 8px;
@@ -971,8 +941,7 @@
     letter-spacing: 0.08em;
   }
 
-  .remote-token-input input,
-  .remote-token-input textarea {
+  .remote-token-input input {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 22%, transparent);
@@ -997,12 +966,17 @@
     flex-wrap: wrap;
   }
 
-  .remote-actions button {
+  .remote-actions button,
+  .remote-actions a {
     min-height: 42px;
     padding: 0 14px;
     border-radius: 7px;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     font-weight: 800;
+    text-decoration: none;
   }
 
   .remote-actions .primary {

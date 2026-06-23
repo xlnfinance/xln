@@ -37,6 +37,20 @@ type RuntimeImportSummary = {
   }>;
 };
 
+type AdminControlProbe = {
+  ok: boolean;
+  latestHeight: number;
+  frameHeight: number;
+  envHeight: number;
+  frameName: string;
+  envName: string;
+  accountCount: number;
+  historyLength: number;
+  historyHeights: number[];
+  reason?: string;
+  error?: string;
+};
+
 const capabilityToken = (seed: string, role: 'read' | 'full', expiresAtMs: number, rawAudience: string): string => {
   const level = role === 'read' ? 'inspect' : 'admin';
   const audience = String(rawAudience || 'xln-runtime').toLowerCase();
@@ -54,6 +68,106 @@ const capabilityToken = (seed: string, role: 'read' | 'full', expiresAtMs: numbe
     Buffer.from(tokenId, 'utf8').toString('base64url'),
     signature,
   ].join('.');
+};
+
+const readAdminControlProbe = async (
+  page: import('@playwright/test').Page,
+  args: { hubId: string; minHeight: number; expectedName: string },
+): Promise<AdminControlProbe> => {
+  return await page.evaluate(async ({ hubId, minHeight, expectedName }) => {
+    try {
+      const view = window as typeof window & {
+        isolatedEnv?: {
+          height?: number;
+          history?: Array<{ height?: number }>;
+          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string }; accounts?: Map<string, unknown> } }>;
+        };
+        __xlnRuntimeAdapter?: {
+          read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
+        };
+      };
+      const adapter = view.__xlnRuntimeAdapter;
+      if (!adapter) return {
+        ok: false,
+        latestHeight: 0,
+        frameHeight: 0,
+        envHeight: 0,
+        frameName: '',
+        envName: '',
+        accountCount: 0,
+        historyLength: 0,
+        historyHeights: [],
+        reason: 'adapter-missing',
+      };
+      type Head = { latestHeight?: number };
+      type ViewFrame = {
+        height?: number;
+        activeEntity?: { core?: { profile?: { name?: string } } } | null;
+      };
+      const head = await adapter.read<Head>('head');
+      const latestHeight = Number(head.latestHeight || 0);
+      const frame = latestHeight > minHeight
+        ? await adapter.read<ViewFrame>('view-frame', {
+            atHeight: latestHeight,
+            entityId: hubId,
+            accountsLimit: 1,
+            booksLimit: 1,
+          })
+        : null;
+      const env = view.isolatedEnv;
+      const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
+      const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
+      const history = env?.history ?? [];
+      const frameName = String(frame?.activeEntity?.core?.profile?.name || '');
+      const envName = String(replica?.state?.profile?.name || '');
+      const envHeight = Number(env?.height || 0);
+      const frameHeight = Number(frame?.height || 0);
+      const ok = latestHeight > minHeight &&
+        frameName === expectedName &&
+        envHeight >= latestHeight &&
+        envName === expectedName;
+      return {
+        ok,
+        latestHeight,
+        frameHeight,
+        envHeight,
+        frameName,
+        envName,
+        accountCount: Number(replica?.state?.accounts?.size || 0),
+        historyLength: history.length,
+        historyHeights: history.map((item) => Number(item.height || 0)),
+        ...(ok ? {} : { reason: 'not-ready' }),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        latestHeight: 0,
+        frameHeight: 0,
+        envHeight: 0,
+        frameName: '',
+        envName: '',
+        accountCount: 0,
+        historyLength: 0,
+        historyHeights: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }, args);
+};
+
+const waitForAdminControlProbe = async (
+  page: import('@playwright/test').Page,
+  args: { hubId: string; minHeight: number; expectedName: string },
+  timeoutMs = 90_000,
+): Promise<AdminControlProbe> => {
+  const startedAt = Date.now();
+  let lastProbe: AdminControlProbe | null = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    lastProbe = await readAdminControlProbe(page, args);
+    if (lastProbe.ok) return lastProbe;
+    await page.waitForTimeout(50);
+  }
+  throw new Error(`REMOTE_ADMIN_CONTROL_STATE_TIMEOUT:${JSON.stringify(lastProbe)}`);
 };
 
 const hubRpcUrl = (hubOffset: number): string => {
@@ -442,72 +556,19 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(controlResult.beforeHeight).toBeGreaterThanOrEqual(activeH1Before.height);
   expect(controlResult.sendHeight).toBeGreaterThanOrEqual(controlResult.beforeHeight);
 
-  await page.waitForFunction(
-    async ({ hubId, minHeight, expectedName }) => {
-      const view = window as typeof window & {
-        isolatedEnv?: {
-          height?: number;
-          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string } } }>;
-        };
-        __xlnRuntimeAdapter?: {
-          read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
-        };
-      };
-      const adapter = view.__xlnRuntimeAdapter;
-      if (!adapter) return false;
-      type Head = { latestHeight?: number };
-      type ViewFrame = { activeEntity?: { core?: { profile?: { name?: string } } } | null };
-      const head = await adapter.read<Head>('head');
-      const latestHeight = Number(head.latestHeight || 0);
-      if (latestHeight <= minHeight) return false;
-      const frame = await adapter.read<ViewFrame>('view-frame', {
-        atHeight: latestHeight,
-        entityId: hubId,
-        accountsLimit: 1,
-        booksLimit: 1,
-      });
-      if (String(frame.activeEntity?.core?.profile?.name || '') !== expectedName) return false;
-      const env = view.isolatedEnv;
-      const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
-      const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
-      return Number(env?.height || 0) >= latestHeight &&
-        String(replica?.state?.profile?.name || '') === expectedName;
-    },
+  const after = await waitForAdminControlProbe(
+    page,
     { hubId: h1, minHeight: controlResult.beforeHeight, expectedName: nextProfileName },
-    { timeout: 90_000 },
+    90_000,
   );
 
-  const after = await page.evaluate((hubId) => {
-    const view = window as typeof window & {
-      isolatedEnv?: {
-        height?: number;
-        history?: Array<{
-          height?: number;
-          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string } } }>;
-        }>;
-        eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string }; accounts?: Map<string, unknown> } }>;
-      };
-    };
-    const env = view.isolatedEnv;
-    const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
-    const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
-    const history = env?.history ?? [];
-    return {
-      height: Number(env?.height || 0),
-      profileName: String(replica?.state?.profile?.name || ''),
-      accountCount: Number(replica?.state?.accounts?.size || 0),
-      historyLength: history.length,
-      historyHeights: history.map((frame) => Number(frame.height || 0)),
-    };
-  }, h1);
-
-  expect(after.height).toBeGreaterThan(controlResult.beforeHeight);
-  expect(after.profileName).toBe(nextProfileName);
+  expect(after.envHeight).toBeGreaterThan(controlResult.beforeHeight);
+  expect(after.envName).toBe(nextProfileName);
   expect(after.accountCount).toBeLessThanOrEqual(10);
   expect(after.historyLength).toBeGreaterThanOrEqual(2);
   expect(after.historyLength).toBeLessThanOrEqual(12);
   expect(after.historyHeights).toContain(controlResult.beforeHeight);
-  expect(after.historyHeights).toContain(after.height);
+  expect(after.historyHeights).toContain(after.envHeight);
 
   const frameProbe = await page.evaluate(async ({ entityId, beforeHeight, afterHeight }) => {
     const adapter = (window as typeof window & {
@@ -549,11 +610,11 @@ test('admin remote runtime control advances live state and exposes past frames',
   }, {
     entityId: h1,
     beforeHeight: controlResult.beforeHeight,
-    afterHeight: after.height,
+    afterHeight: after.envHeight,
   });
 
   expect(frameProbe.beforeHeight).toBe(controlResult.beforeHeight);
-  expect(frameProbe.afterHeight).toBe(after.height);
+  expect(frameProbe.afterHeight).toBe(after.envHeight);
   expect(frameProbe.beforeName).toBe(activeH1Before.profileName);
   expect(frameProbe.beforeName).not.toBe(nextProfileName);
   expect(frameProbe.afterName).toBe(nextProfileName);
