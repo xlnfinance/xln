@@ -40,7 +40,7 @@ export type RequiredBrowserVM = {
   getTokenRegistry: () => JTokenInfo[];
   getTokenAddress: (symbol: string) => string | null;
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
-  approveErc20: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
+  approveErc20: JAdapter['approveErc20'];
   reserveToReserve?: (from: string, to: string, tokenId: number, amount: bigint) => Promise<unknown[]>;
   debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<unknown[]>;
   captureStateRoot?: () => Promise<Uint8Array>;

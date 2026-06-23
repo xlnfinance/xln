@@ -284,9 +284,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Decision: for token calls, invalid result should identify bad token and degrade that token, not 500 the whole dashboard, unless release gate requires fail-fast.
   - Tests: non-contract token returns structured token error.
 
-- [ ] Align stale `RequiredBrowserVM.approveErc20` type.
+- [x] Align stale `RequiredBrowserVM.approveErc20` type.
   - Impact: low.
   - Current issue: helper type says `Promise<string>` while core adapter returns `Promise<JEvent[]>`.
+  - Status: done. Scenario helper now derives `approveErc20` from `JAdapter['approveErc20']`, so return type/options cannot drift from the adapter contract again.
+  - Evidence: runtime TypeScript gate covers the helper/interface alignment.
   - Fix: update scenario helper type and decide whether callers apply returned deltas or intentionally discard them.
   - Tests: TypeScript catches incompatible adapter.
 
