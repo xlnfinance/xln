@@ -38,6 +38,7 @@ import {
   formatQaRunIdUtc,
   normalizeQaBrowserIssues,
   parseQaTimelineSteps,
+  redactQaSecretText,
   recordQaRunHistory,
   summarizeQaFailureClasses,
   summarizeQaBrowserIssues,
@@ -733,8 +734,8 @@ const writeRunManifest = (
       const browserIssues = readShardBrowserIssues(logsDir, result.shard);
       const lastRunStatus = readShardLastRunStatus(logsDir, result.shard);
       const status = lastRunStatus === 'unknown' ? result.status : lastRunStatus;
-      const logTail = tailLog(result.logPath);
-      const error = result.error ?? null;
+      const logTail = redactQaSecretText(tailLog(result.logPath));
+      const error = result.error ? redactQaSecretText(result.error) : null;
       return {
         shard: result.shard,
         status,

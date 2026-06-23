@@ -20,6 +20,7 @@ import {
   listQaStoryScreenshots,
   purgeQaRunsOlderThan,
   readQaRun,
+  redactQaSecretText,
   recordQaRunHistory,
   resolveQaArtifactPath,
   resolveQaStoryScreenshotPath,
@@ -256,6 +257,105 @@ test('qa artifact resolver rejects symlink escape from run directory', async () 
   } finally {
     await rm(runDir, { recursive: true, force: true });
     await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test('qa secret redactor masks runtime tokens and labeled secrets', () => {
+  const raw = [
+    'Authorization: Bearer bearer-secret-123456789',
+    'x-xln-qa-token: qa-secret-token-123456',
+    'remote=xlnra1.remote-secret-token',
+    'link=/wallet?runtime-import=encoded-secret&readToken=read-secret',
+    'rpc=https://user:password@example.invalid/rpc',
+    'PRIVATE_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'mnemonic="abandon abandon abandon secret"',
+    '{"adminToken":"json-admin-token-123456"}',
+  ].join('\n');
+  const redacted = redactQaSecretText(raw);
+
+  for (const secret of [
+    'bearer-secret-123456789',
+    'qa-secret-token-123456',
+    'remote-secret-token',
+    'encoded-secret',
+    'read-secret',
+    'user:password',
+    '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    'abandon abandon abandon secret',
+    'json-admin-token-123456',
+  ]) {
+    expect(redacted).not.toContain(secret);
+  }
+  expect(redacted).toContain('[REDACTED]');
+});
+
+test('qa run and text artifact surfaces redact stored secrets', async () => {
+  const runId = '20000101-000002-126';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  const secretLog = [
+    'Expected wallet import to fail',
+    'Authorization: Bearer bearer-secret-123456789',
+    'remote=xlnra1.remote-secret-token',
+    'link=/wallet?runtime-import=encoded-secret&readToken=read-secret',
+    'PRIVATE_KEY=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  ].join('\n');
+  const manifest = benchmarkRun(runId, 1000, 800);
+  const shard = {
+    ...manifest.shards[0],
+    shard: 1,
+    status: 'failed' as const,
+    logRelativePath: 'e2e-shard-01.log',
+    logTail: secretLog,
+    error: secretLog,
+    artifacts: [{
+      name: 'secret.log',
+      relativePath: 'secret.log',
+      sizeBytes: secretLog.length,
+      kind: 'text' as const,
+      contentType: 'text/plain; charset=utf-8',
+    }],
+  };
+
+  await rm(runDir, { recursive: true, force: true });
+  try {
+    await mkdir(runDir, { recursive: true });
+    await writeFile(join(runDir, 'e2e-shard-01.log'), secretLog);
+    await writeFile(join(runDir, 'secret.log'), secretLog);
+    await writeFile(join(runDir, 'manifest.json'), `${JSON.stringify({
+      ...manifest,
+      status: 'failed',
+      totalShards: 1,
+      passedShards: 0,
+      failedShards: 1,
+      shards: [shard],
+    })}\n`);
+
+    const run = await readQaRun(runId);
+    const runSurface = `${run.shards[0].logTail}\n${run.shards[0].error}`;
+    expect(runSurface).toContain('[REDACTED]');
+    expect(runSurface).not.toContain('bearer-secret-123456789');
+    expect(runSurface).not.toContain('remote-secret-token');
+    expect(runSurface).not.toContain('encoded-secret');
+    expect(runSurface).not.toContain('read-secret');
+    expect(runSurface).not.toContain('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+
+    await withQaAuthEnv(async () => {
+      const response = await maybeHandleQaRequest(
+        qaRequest(`http://127.0.0.1:8080/api/qa/artifact?runId=${runId}&path=secret.log`),
+        '/api/qa/artifact',
+        JSON_HEADERS,
+      );
+      expect(response?.status).toBe(200);
+      const artifactText = await response!.text();
+      expect(artifactText).toContain('[REDACTED]');
+      expect(artifactText).not.toContain('bearer-secret-123456789');
+      expect(artifactText).not.toContain('remote-secret-token');
+      expect(artifactText).not.toContain('encoded-secret');
+      expect(artifactText).not.toContain('read-secret');
+      expect(artifactText).not.toContain('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    });
+  } finally {
+    await rm(runDir, { recursive: true, force: true });
   }
 });
 
