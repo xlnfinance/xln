@@ -989,6 +989,52 @@ describe('production startup wiring', () => {
     }
   });
 
+  test('entity-scoped hub proxy never falls back to an arbitrary healthy hub', async () => {
+    const entityId = `0x${'12'.repeat(32)}`;
+    let pollCalls = 0;
+    let healthyHubCalls = 0;
+    const handlers = createOrchestratorProxyHandlers({
+      host: '127.0.0.1',
+      defaultRpcUrl: '',
+      pollAllHubHealth: async () => {
+        pollCalls += 1;
+      },
+      getHubChildByEntityId: () => null,
+      getHealthyHub: () => {
+        healthyHubCalls += 1;
+        return { apiPort: 19399 } as any;
+      },
+    });
+
+    const response = await handlers.proxyEntityHubApi(new Request('http://xln.local/api/external-wallet/snapshot', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entityId }),
+    }), '/api/external-wallet/snapshot');
+    const body = await response.json() as { code?: string; error?: string };
+
+    expect(response.status).toBe(404);
+    expect(body.code).toBe('ENTITY_HUB_PROXY_ENTITY_NOT_FOUND');
+    expect(body.error).toContain(entityId);
+    expect(pollCalls).toBe(1);
+    expect(healthyHubCalls).toBe(0);
+    expect(response.headers.get('x-xln-proxy-health-polled')).toBe('1');
+  });
+
+  test('RPC watcher pauses during persistence quiesce instead of entering j-event ingress', () => {
+    const rpc = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+    const pauseHelper = rpc.indexOf('const isJEventIngressPaused = (activeEnv: Env): boolean =>');
+    const earlyPause = rpc.indexOf("pauseJEventWatcherForQuiesce({ step: 'before-block-number' });");
+    const batchPause = rpc.indexOf("step: 'before-process-event-batch'");
+    const processBatch = rpc.indexOf("processEventBatch(events, activeEnv, blockNum, blockHash, txCounter, 'rpc');");
+
+    expect(pauseHelper).toBeGreaterThan(0);
+    expect(rpc).toContain("event: 'j_watch_paused_persistence_quiescing'");
+    expect(earlyPause).toBeGreaterThan(pauseHelper);
+    expect(batchPause).toBeGreaterThan(pauseHelper);
+    expect(batchPause).toBeLessThan(processBatch);
+  });
+
   test('hub account-status proxy skips health polling when cached child mapping is known', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const routeStart = orchestrator.indexOf("if (pathname === '/api/hub/account-status' && request.method === 'GET')");

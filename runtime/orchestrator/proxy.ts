@@ -258,7 +258,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
 
     const requestedEntityId = String(bodyJson?.entityId || '').toLowerCase();
     let child = deps.getHubChildByEntityId(requestedEntityId);
-    let routedByEntity = true;
+    const routedByEntity = true;
     if (!child) {
       const pollStartedAt = Date.now();
       await deps.pollAllHubHealth();
@@ -267,12 +267,12 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
       child = deps.getHubChildByEntityId(requestedEntityId);
     }
     if (!child) {
-      routedByEntity = false;
-      child = deps.getHealthyHub();
-    }
-    if (!child) {
-      return new Response(safeStringify({ success: false, error: 'No healthy hub API available', code: 'ENTITY_HUB_PROXY_NO_HEALTHY_HUB' }), {
-        status: 503,
+      return new Response(safeStringify({
+        success: false,
+        error: `Entity hub not found for entityId=${requestedEntityId || 'missing'}`,
+        code: 'ENTITY_HUB_PROXY_ENTITY_NOT_FOUND',
+      }), {
+        status: 404,
         headers: proxyHeaders(),
       });
     }

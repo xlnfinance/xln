@@ -13,6 +13,10 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
+    title: 'health admin consolidates bootstrap QA and runtime adapter panels',
+  },
+  {
+    file: 'tests/e2e-radapter-remote.spec.ts',
     title: 'admin remote runtime control advances live state and exposes past frames',
   },
   {

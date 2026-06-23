@@ -83,6 +83,23 @@ const createJsonResponse = (
     headers,
   });
 
+const requireSnapshotBigInt = (value: unknown, label: string): bigint => {
+  if (typeof value !== 'bigint') {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:${label}`);
+  }
+  return value;
+};
+
+const assertSnapshotArrayLength = (values: unknown, expected: number, label: string): void => {
+  if (!Array.isArray(values) || values.length !== expected) {
+    throw new Error(
+      `EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:${label}:expected=${expected}:actual=${
+        Array.isArray(values) ? values.length : 'non-array'
+      }`,
+    );
+  }
+};
+
 const createFaucetLock = (): FaucetLock => ({
   locked: false,
   queue: [],
@@ -567,6 +584,9 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         includeNativeBalance: true,
         blockTag: blockNumber,
       });
+      assertSnapshotArrayLength(snapshot.tokenBalances, requestedTokenAddresses.length, 'tokenBalances');
+      assertSnapshotArrayLength(snapshot.allowances, (allowances ?? []).length, 'allowances');
+      const nativeBalance = requireSnapshotBigInt(snapshot.nativeBalance, 'nativeBalance');
       const transactionHash = [
         'external-wallet-snapshot',
         blockNumber,
@@ -584,20 +604,23 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         return {
           tokenAddress: normalizedAddress,
           ...(typeof tokenId === 'number' ? { tokenId } : {}),
-          balance: (snapshot.tokenBalances[index] ?? 0n).toString(),
+          balance: requireSnapshotBigInt(snapshot.tokenBalances[index], `tokenBalance:${normalizedAddress}`).toString(),
         };
       });
       const allowancePayload = (allowances ?? []).map((entry, index) => ({
         tokenAddress: ethers.getAddress(entry.tokenAddress).toLowerCase(),
         spender: ethers.getAddress(entry.spender).toLowerCase(),
-        allowance: (snapshot.allowances[index] ?? 0n).toString(),
+        allowance: requireSnapshotBigInt(
+          snapshot.allowances[index],
+          `allowance:${entry.tokenAddress}:${entry.spender}`,
+        ).toString(),
       }));
       const jEvent: JEvent = {
         name: 'ExternalWalletSnapshot',
         args: {
           entityId,
           owner: normalizedOwner,
-          nativeBalance: (snapshot.nativeBalance ?? 0n).toString(),
+          nativeBalance: nativeBalance.toString(),
           tokenBalances,
           allowances: allowancePayload,
         },
@@ -613,7 +636,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         blockNumber,
         blockHash: block.hash,
         transactionHash,
-        nativeBalance: (snapshot.nativeBalance ?? 0n).toString(),
+        nativeBalance: nativeBalance.toString(),
         tokenBalances,
         allowances: allowancePayload,
       });

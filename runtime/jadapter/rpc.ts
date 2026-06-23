@@ -46,10 +46,14 @@ import {
 } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import {
+  collectRelevantJEventReplicaKeys,
   getWatcherStartBlock,
   processEventBatch,
+  rememberPendingWatcherJBlock,
+  resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
+  type PendingWatcherJBlockMap,
   type RawJEvent,
   type RawJEventArgs,
 } from './watcher';
@@ -108,6 +112,35 @@ export type ExternalWalletTrackedOwnerCursor = {
 const normalizeTrackedKey = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
+const rpcErrorText = (error: unknown): string => {
+  if (error instanceof Error) {
+    const err = error as Error & {
+      code?: unknown;
+      shortMessage?: unknown;
+      info?: unknown;
+      cause?: unknown;
+    };
+    return [
+      err.message,
+      err.code,
+      err.shortMessage,
+      err.info,
+      err.cause,
+    ].map((value) => {
+      try {
+        return typeof value === 'string' ? value : JSON.stringify(value);
+      } catch {
+        return String(value);
+      }
+    }).filter(Boolean).join(' ');
+  }
+  return String(error);
+};
+
+export const isTransientRpcUnavailableError = (error: unknown): boolean =>
+  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|PROXY_UPSTREAM_TIMEOUT|502 Bad Gateway/i
+    .test(rpcErrorText(error));
+
 export const shouldEmitExternalWalletBalanceDelta = (
   tracked: Pick<ExternalWalletTrackedOwnerCursor, 'watchAfterBlock' | 'balanceAfterBlockByToken'>,
   tokenAddress: string,
@@ -116,7 +149,7 @@ export const shouldEmitExternalWalletBalanceDelta = (
   const normalizedToken = normalizeTrackedKey(tokenAddress);
   if (!normalizedToken || !tracked.balanceAfterBlockByToken.has(normalizedToken)) return false;
   const baselineBlock = tracked.balanceAfterBlockByToken.get(normalizedToken) ?? 0;
-  return blockNumber > Math.max(tracked.watchAfterBlock, baselineBlock);
+  return blockNumber > Math.max(baselineBlock, tracked.watchAfterBlock || 0);
 };
 
 export const shouldEmitExternalWalletAllowanceDelta = (
@@ -131,7 +164,7 @@ export const shouldEmitExternalWalletAllowanceDelta = (
   const key = `${normalizedToken}:${normalizedSpender}`;
   if (!tracked.allowanceAfterBlockByKey.has(key)) return false;
   const baselineBlock = tracked.allowanceAfterBlockByKey.get(key) ?? 0;
-  return blockNumber > Math.max(tracked.watchAfterBlock, baselineBlock);
+  return blockNumber > Math.max(baselineBlock, tracked.watchAfterBlock || 0);
 };
 
 /**
@@ -189,14 +222,7 @@ export async function createRpcAdapter(
     error instanceof Error ? error.message : String(error)
   );
   const isTransientRpcUnavailable = (error: unknown): boolean => {
-    const message = watcherErrorMessage(error);
-    const code = error instanceof Error && 'code' in error
-      ? String((error as Error & { code?: unknown }).code || '')
-      : '';
-    return [
-      code,
-      message,
-    ].some((value) => /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed/i.test(value));
+    return isTransientRpcUnavailableError(error);
   };
   const watcherErrorDetails = (error: unknown): Record<string, unknown> => {
     if (!(error instanceof Error)) return { raw: String(error) };
@@ -1755,6 +1781,7 @@ export async function createRpcAdapter(
       lastTransientWatcherLogAt = 0;
       txCounter.value = 0;
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
+      const pendingWatcherJBlocks: PendingWatcherJBlockMap = new Map();
       const watchPollMs = BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
       const startBlock = getWatcherStartBlock(env, addresses.depository);
@@ -1973,6 +2000,30 @@ export async function createRpcAdapter(
           });
         }
       };
+      const readCommittedWatcherCursor = (activeEnv: Env): number =>
+        Math.max(0, getWatcherStartBlock(activeEnv, addresses.depository) - 1);
+      const commitScannedWatcherCursor = (activeEnv: Env, candidateCursor: number): number => {
+        const currentCursor = readCommittedWatcherCursor(activeEnv);
+        const resolvedCursor = resolveCommittedWatcherCursor(
+          activeEnv,
+          pendingWatcherJBlocks,
+          candidateCursor,
+          currentCursor,
+        );
+        if (resolvedCursor > currentCursor) {
+          updateWatcherJurisdictionCursor(activeEnv, resolvedCursor, addresses.depository);
+        }
+        return resolvedCursor;
+      };
+      const isJEventIngressPaused = (activeEnv: Env): boolean =>
+        !!activeEnv.runtimeState?.persistenceQuiescing && !activeEnv.scenarioMode;
+      const pauseJEventWatcherForQuiesce = (details: Record<string, unknown>): void => {
+        emitWatcherDebug({
+          event: 'j_watch_paused_persistence_quiescing',
+          lastSyncedBlock,
+          ...details,
+        });
+      };
       if (watcherFatalError) {
         emitWatcherDebug({
           event: 'j_watch_fatal_already_halted',
@@ -1991,10 +2042,15 @@ export async function createRpcAdapter(
         pollInFlight = (async () => {
           const activeEnv = watcherEnv;
           if (!activeEnv) return;
+          if (isJEventIngressPaused(activeEnv)) {
+            pauseJEventWatcherForQuiesce({ step: 'before-block-number' });
+            return;
+          }
           pollStep = 'eth_blockNumber';
           const currentBlock = parseInt(await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []), 16);
           const safeToBlock = currentBlock - confirmationDepth;
           if (safeToBlock <= 0) return;
+          commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
           if (lastSyncedBlock >= safeToBlock) return;
 
           const fromBlock = lastSyncedBlock + 1;
@@ -2125,6 +2181,15 @@ export async function createRpcAdapter(
             }
 
             if (rawEvents.length > 0) {
+              if (isJEventIngressPaused(activeEnv)) {
+                pauseJEventWatcherForQuiesce({
+                  step: 'before-process-event-batch',
+                  fromBlock,
+                  toBlock: safeToBlock,
+                  rawEventCount: rawEvents.length,
+                });
+                return;
+              }
               const eventCounts: Record<string, number> = {};
               for (const e of rawEvents) {
                 eventCounts[e.name] = (eventCounts[e.name] || 0) + 1;
@@ -2139,7 +2204,9 @@ export async function createRpcAdapter(
               for (const [blockNum, events] of byBlock) {
                 const blockHash = events[0]?.blockHash ?? '0x0';
                 pollStep = `processEventBatch:${blockNum}`;
+                const relevantReplicaKeys = collectRelevantJEventReplicaKeys(activeEnv, events);
                 processEventBatch(events, activeEnv, blockNum, blockHash, txCounter, 'rpc');
+                rememberPendingWatcherJBlock(pendingWatcherJBlocks, blockNum, relevantReplicaKeys);
               }
 
               emitWatcherDebug({
@@ -2155,7 +2222,7 @@ export async function createRpcAdapter(
             }
             lastSyncedBlock = safeToBlock;
             consecutiveTransientWatcherFailures = 0;
-            updateWatcherJurisdictionCursor(activeEnv, lastSyncedBlock, addresses.depository);
+            commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
             return;
           }
 
@@ -2169,7 +2236,7 @@ export async function createRpcAdapter(
 
           lastSyncedBlock = safeToBlock;
           consecutiveTransientWatcherFailures = 0;
-          updateWatcherJurisdictionCursor(activeEnv, lastSyncedBlock, addresses.depository);
+          commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
         })().catch((error: unknown) => {
           const message = watcherErrorMessage(error);
           if (watcherStopping) {

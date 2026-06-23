@@ -225,6 +225,54 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   await expect(page.getByRole('button', { name: /^H3$/ })).toBeVisible();
 });
 
+test('health admin consolidates bootstrap QA and runtime adapter panels', async ({ page }) => {
+  await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const apiPort = Number(new URL(API_BASE_URL).port);
+  const wsUrl = hubRpcUrl(10);
+  const hubInfoResponse = await page.request.get(`http://127.0.0.1:${apiPort + 10}/api/info`);
+  expect(hubInfoResponse.ok()).toBe(true);
+  const hubInfo = await hubInfoResponse.json().catch(() => ({}));
+  const audience = String(hubInfo.runtimeId || '').toLowerCase();
+  expect(audience.length).toBeGreaterThan(0);
+  const readKey = capabilityToken('xln-e2e-h1', 'read', Date.now() + 60 * 60 * 1_000, audience);
+
+  await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('body')).toContainText('xln health admin', { timeout: 30_000 });
+  await expect(page.locator('#bootstrap')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#qa-runs')).toBeVisible();
+  await expect(page.locator('#runtime-adapter')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Open cockpit' })).toHaveAttribute('href', '/qa');
+  await expect(page.getByRole('link', { name: 'Open inspector' })).toHaveAttribute('href', '/radapter');
+
+  const adapterPanel = page.locator('#runtime-adapter');
+  await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill(wsUrl);
+  await adapterPanel.locator('input[placeholder="read/admin token"]').fill(readKey);
+  await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect(adapterPanel).toContainText('connected', { timeout: 30_000 });
+  await expect(adapterPanel).toContainText('inspect', { timeout: 30_000 });
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('#runtime-adapter');
+    const text = panel?.textContent || '';
+    return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
+  }, null, { timeout: 30_000 });
+
+  await page.goto(`${API_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(readKey)}`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await expect(page.getByRole('heading', { name: 'Runtime Adapter Inspector' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#runtime-adapter')).toContainText('connected', { timeout: 30_000 });
+  await expect(page.locator('#runtime-adapter')).toContainText('inspect', { timeout: 30_000 });
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('#runtime-adapter');
+    const text = panel?.textContent || '';
+    return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
+  }, null, { timeout: 30_000 });
+
+  await page.goto(`${API_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(/\/health$/);
+  await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: 30_000 });
+});
+
 test('admin remote runtime control advances live state and exposes past frames', async ({ page }) => {
   await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });

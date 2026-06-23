@@ -151,6 +151,8 @@ export type EventBatchCounter = {
   };
 };
 
+export type PendingWatcherJBlockMap = Map<number, Set<string>>;
+
 const findWatcherJurisdictionReplica = (env: Env, depositoryAddress?: string) => {
   const replicas = Array.from(env?.jReplicas?.values?.() || []);
   if (replicas.length === 0) return null;
@@ -176,9 +178,23 @@ const findWatcherJurisdictionReplica = (env: Env, depositoryAddress?: string) =>
 
 export function getWatcherStartBlock(env: Env, depositoryAddress?: string): number {
   const replica = findWatcherJurisdictionReplica(env, depositoryAddress);
-  const blockNumber = Number(replica?.blockNumber ?? 0n);
+  const replicaBlockNumber = Number(replica?.blockNumber ?? 0n);
+  const signerBlockNumber = getMinimumCommittedSignerJHeight(env);
+  const blockNumber = signerBlockNumber === null
+    ? replicaBlockNumber
+    : Math.min(replicaBlockNumber, signerBlockNumber);
   if (!Number.isFinite(blockNumber) || blockNumber < 0) return 1;
   return Math.max(1, Math.floor(blockNumber) + 1);
+}
+
+export function getMinimumCommittedSignerJHeight(env: Env): number | null {
+  let minHeight: number | null = null;
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const height = Number(replica?.state?.lastFinalizedJHeight ?? 0);
+    if (!Number.isFinite(height) || height <= 0) continue;
+    minHeight = minHeight === null ? Math.floor(height) : Math.min(minHeight, Math.floor(height));
+  }
+  return minHeight;
 }
 
 export function updateWatcherJurisdictionCursor(
@@ -191,6 +207,13 @@ export function updateWatcherJurisdictionCursor(
   if (!Number.isFinite(blockNumber) || blockNumber < 0) return;
   replica.blockNumber = BigInt(Math.floor(blockNumber));
 }
+
+const assertJEventIngressOpen = (env: Env, label: string): void => {
+  if (env.runtimeState?.persistenceQuiescing && !env.scenarioMode) {
+    env.error?.('jurisdiction', 'J_EVENT_INGRESS_QUIESCING', { label });
+    throw new Error(`J_EVENT_INGRESS_QUIESCING:${label}`);
+  }
+};
 
 /**
  * Check if a raw event is a canonical j-event.
@@ -256,6 +279,91 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
   }
 }
 
+export function collectRelevantJEventReplicaKeys(env: Env, rawEvents: RawJEvent[]): string[] {
+  const canonical = rawEvents.filter(isCanonicalEvent);
+  if (canonical.length === 0) return [];
+
+  const replicaKeys = new Set<string>();
+  for (const [replicaKey, replica] of env.eReplicas?.entries?.() || []) {
+    const [entityIdFromKey] = replicaKey.split(':');
+    const entityId = String(replica?.state?.entityId || replica?.entityId || entityIdFromKey || '').toLowerCase();
+    if (!entityId) continue;
+    if (canonical.some((event) => isEventRelevantToEntity(event, entityId))) {
+      replicaKeys.add(replicaKey);
+    }
+  }
+
+  return [...replicaKeys].sort();
+}
+
+export function areJEventReplicaKeysFinalizedThrough(env: Env, replicaKeys: Iterable<string>, blockNumber: number): boolean {
+  const targetBlock = Math.floor(Number(blockNumber));
+  if (!Number.isFinite(targetBlock) || targetBlock < 0) return false;
+
+  for (const replicaKey of replicaKeys) {
+    const replica = env.eReplicas?.get(replicaKey);
+    if (!replica) return false;
+    const finalizedHeight = Number(replica.state?.lastFinalizedJHeight ?? 0);
+    if (!Number.isFinite(finalizedHeight) || finalizedHeight < targetBlock) return false;
+  }
+
+  return true;
+}
+
+export function rememberPendingWatcherJBlock(
+  pending: PendingWatcherJBlockMap,
+  blockNumber: number,
+  replicaKeys: Iterable<string>,
+): void {
+  const block = Math.floor(Number(blockNumber));
+  if (!Number.isFinite(block) || block < 0) return;
+  let entry: Set<string> | null = null;
+  for (const replicaKey of replicaKeys) {
+    if (!replicaKey) continue;
+    if (!entry) {
+      entry = pending.get(block) ?? new Set<string>();
+      pending.set(block, entry);
+    }
+    entry.add(replicaKey);
+  }
+}
+
+export function resolveCommittedWatcherCursor(
+  env: Env,
+  pending: PendingWatcherJBlockMap,
+  candidateCursor: number,
+  currentCursor: number,
+): number {
+  const candidate = Math.max(0, Math.floor(Number(candidateCursor)));
+  let resolved = Math.max(0, Math.floor(Number(currentCursor)));
+  if (!Number.isFinite(candidate) || !Number.isFinite(resolved)) return 0;
+  if (candidate <= resolved) return resolved;
+
+  const pendingBlocks = [...pending.keys()].sort((left, right) => left - right);
+  for (const block of pendingBlocks) {
+    if (block <= resolved) {
+      pending.delete(block);
+      continue;
+    }
+    if (block > candidate) break;
+
+    const replicaKeys = pending.get(block);
+    if (!replicaKeys || replicaKeys.size === 0) {
+      pending.delete(block);
+      continue;
+    }
+
+    if (!areJEventReplicaKeysFinalizedThrough(env, replicaKeys, block)) {
+      return Math.max(resolved, block - 1);
+    }
+
+    pending.delete(block);
+    resolved = block;
+  }
+
+  return Math.max(resolved, candidate);
+}
+
 /**
  * Convert a raw event to j_event format(s) for j-events.ts handler.
  * Returns ARRAY because AccountSettled can contain multiple settlements for same entity.
@@ -280,20 +388,26 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
         ? args['tokenBalances'].map((entry) => {
             const record = entry as Record<string, unknown>;
             const tokenId = record['tokenId'];
+            if (record['balance'] === undefined) {
+              throw new Error('EXTERNAL_WALLET_SNAPSHOT_BALANCE_MISSING');
+            }
             return {
               tokenAddress: String(record['tokenAddress'] ?? ''),
               ...(tokenId !== undefined ? { tokenId: Number(tokenId) } : {}),
-              balance: String(record['balance'] ?? '0'),
+              balance: String(record['balance']),
             };
           })
         : [];
       const allowances = Array.isArray(args['allowances'])
         ? args['allowances'].map((entry) => {
             const record = entry as Record<string, unknown>;
+            if (record['allowance'] === undefined) {
+              throw new Error('EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_MISSING');
+            }
             return {
               tokenAddress: String(record['tokenAddress'] ?? ''),
               spender: String(record['spender'] ?? ''),
-              allowance: String(record['allowance'] ?? '0'),
+              allowance: String(record['allowance']),
             };
           })
         : [];
@@ -632,6 +746,7 @@ function enqueueRawJEventsToRuntime(
 
 export function applyJEventsToEnv(env: Env, events: JEvent[], label = 'J-EVENTS'): void {
   if (!events || events.length === 0) return;
+  assertJEventIngressOpen(env, label);
   const rawEvents: RawJEvent[] = events
     .filter((event): event is JEvent & { name: string; args?: Record<string, unknown> } => typeof event?.name === 'string')
     .map((event) => ({
@@ -684,6 +799,7 @@ export function processEventBatch(
   // Filter to canonical events only
   const canonical = rawEvents.filter(isCanonicalEvent);
   if (canonical.length === 0) return;
+  assertJEventIngressOpen(env, adapterLabel);
 
   // De-duplicate watcher re-scans using canonical log identity.
   const dedup = (() => {

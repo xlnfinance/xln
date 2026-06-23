@@ -219,4 +219,64 @@ describe('external wallet API faucet transaction gate', () => {
       provider.destroy();
     }
   });
+
+  test('wallet snapshot endpoint rejects incomplete adapter snapshots instead of zero-filling', async () => {
+    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    Object.assign(provider, {
+      getBlockNumber: async () => 88,
+      getBlock: async () => ({ hash: `0x${'88'.repeat(32)}` }),
+    });
+    const observed: unknown[] = [];
+    const makeApi = (snapshot: { nativeBalance: bigint | null; tokenBalances: bigint[]; allowances: bigint[] }) => {
+      const adapter = {
+        ...makeBrowserVmAdapter(provider),
+        readWalletSnapshot: async () => snapshot,
+      } as unknown as JAdapter;
+      return createExternalWalletApi({
+        ...makeContext(adapter, async () => false),
+        getTokenCatalog: async () => [{
+          symbol: 'USDC',
+          address: '0x1111111111111111111111111111111111111111',
+          decimals: 18,
+          tokenId: 3,
+        }],
+        observeExternalWalletSnapshot: (events) => observed.push(...events),
+      });
+    };
+    const request = () => new Request('http://localhost/api/external-wallet/snapshot', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        entityId: `0x${'44'.repeat(32)}`,
+        owner: USER_ADDRESS,
+        allowances: [{
+          tokenAddress: '0x1111111111111111111111111111111111111111',
+          spender: '0x0000000000000000000000000000000000000002',
+        }],
+      }),
+    });
+
+    try {
+      const shortArrayResponse = await makeApi({
+        nativeBalance: 5n,
+        tokenBalances: [],
+        allowances: [7n],
+      }).handleWalletSnapshot(request());
+      const shortArrayBody = await shortArrayResponse.json() as { error?: string };
+      expect(shortArrayResponse.status).toBe(500);
+      expect(shortArrayBody.error).toContain('EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:tokenBalances');
+
+      const missingNativeResponse = await makeApi({
+        nativeBalance: null,
+        tokenBalances: [9n],
+        allowances: [7n],
+      }).handleWalletSnapshot(request());
+      const missingNativeBody = await missingNativeResponse.json() as { error?: string };
+      expect(missingNativeResponse.status).toBe(500);
+      expect(missingNativeBody.error).toContain('EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:nativeBalance');
+      expect(observed).toHaveLength(0);
+    } finally {
+      provider.destroy();
+    }
+  });
 });

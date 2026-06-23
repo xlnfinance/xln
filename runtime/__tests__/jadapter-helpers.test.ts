@@ -1,11 +1,22 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  isTransientRpcUnavailableError,
   readRequiredRpcBatchBigInt,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
 } from '../jadapter/rpc';
-import { getWatcherStartBlock, processEventBatch, updateWatcherJurisdictionCursor } from '../jadapter/watcher';
+import {
+  applyJEventsToEnv,
+  collectRelevantJEventReplicaKeys,
+  getWatcherStartBlock,
+  getMinimumCommittedSignerJHeight,
+  processEventBatch,
+  rawEventToJEvents,
+  rememberPendingWatcherJBlock,
+  resolveCommittedWatcherCursor,
+  updateWatcherJurisdictionCursor,
+} from '../jadapter/watcher';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, Env, JReplica } from '../types';
 
@@ -82,24 +93,116 @@ describe('jadapter helper cursors', () => {
       .toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT/);
   });
 
-  test('external wallet watcher never emits ERC20 deltas without a committed baseline key', () => {
+  test('external wallet watcher gates deltas by committed per-key baselines only', () => {
     const tokenA = `0x${'61'.repeat(20)}`;
     const tokenB = `0x${'62'.repeat(20)}`;
     const spenderA = `0x${'71'.repeat(20)}`;
     const spenderB = `0x${'72'.repeat(20)}`;
     const tracked = {
       entityId: `0x${'51'.repeat(32)}`,
-      watchAfterBlock: 10,
-      balanceAfterBlockByToken: new Map([[tokenA, 8]]),
-      allowanceAfterBlockByKey: new Map([[`${tokenA}:${spenderA}`, 8]]),
+      watchAfterBlock: 100,
+      balanceAfterBlockByToken: new Map([[tokenA, 80]]),
+      allowanceAfterBlockByKey: new Map([[`${tokenA}:${spenderA}`, 80]]),
     };
 
-    expect(shouldEmitExternalWalletBalanceDelta(tracked, tokenA, 11)).toBe(true);
-    expect(shouldEmitExternalWalletBalanceDelta(tracked, tokenA, 10)).toBe(false);
-    expect(shouldEmitExternalWalletBalanceDelta(tracked, tokenB, 11)).toBe(false);
-    expect(shouldEmitExternalWalletAllowanceDelta(tracked, tokenA, spenderA, 11)).toBe(true);
-    expect(shouldEmitExternalWalletAllowanceDelta(tracked, tokenA, spenderA, 10)).toBe(false);
-    expect(shouldEmitExternalWalletAllowanceDelta(tracked, tokenA, spenderB, 11)).toBe(false);
+    expect(shouldEmitExternalWalletBalanceDelta(tracked, tokenA, 90)).toBe(false);
+    expect(shouldEmitExternalWalletBalanceDelta(tracked, tokenA, 101)).toBe(true);
+    expect(shouldEmitExternalWalletBalanceDelta(tracked, tokenA, 80)).toBe(false);
+    expect(shouldEmitExternalWalletBalanceDelta(tracked, tokenB, 101)).toBe(false);
+    expect(shouldEmitExternalWalletAllowanceDelta(tracked, tokenA, spenderA, 90)).toBe(false);
+    expect(shouldEmitExternalWalletAllowanceDelta(tracked, tokenA, spenderA, 101)).toBe(true);
+    expect(shouldEmitExternalWalletAllowanceDelta(tracked, tokenA, spenderA, 80)).toBe(false);
+    expect(shouldEmitExternalWalletAllowanceDelta(tracked, tokenA, spenderB, 101)).toBe(false);
+  });
+
+  test('RPC proxy upstream timeout is transient for the watcher', () => {
+    const error = new Error(
+      'server response 502 Bad Gateway (responseBody={"error":"PROXY_UPSTREAM_TIMEOUT:5000"}, code=SERVER_ERROR)',
+    ) as Error & { code?: string; info?: unknown };
+    error.code = 'SERVER_ERROR';
+    error.info = {
+      requestUrl: 'https://localhost:20364/rpc',
+      responseStatus: '502 Bad Gateway',
+      responseBody: '{"error":"PROXY_UPSTREAM_TIMEOUT:5000","upstream":"http://localhost:20360/"}',
+    };
+
+    expect(isTransientRpcUnavailableError(error)).toBe(true);
+    expect(isTransientRpcUnavailableError(new Error('EXTERNAL_WALLET_BASELINE_MISSING'))).toBe(false);
+  });
+
+  test('j-event ingress rejects during persistence quiesce before cursor or dedup mutation', () => {
+    const env = createEmptyEnv('jadapter-quiesce-ingress');
+    env.runtimeState = { persistenceQuiescing: true } as Env['runtimeState'];
+    const entityId = `0x${'44'.repeat(32)}`;
+    const owner = `0x${'55'.repeat(20)}`;
+    const txCounter = { value: 0 } as { value: number; _seenLogs?: unknown };
+
+    expect(() => processEventBatch(
+      [{
+        name: 'ExternalWalletSnapshot',
+        args: {
+          entityId,
+          owner,
+          nativeBalance: '1',
+          tokenBalances: [],
+          allowances: [],
+        },
+        blockNumber: 7,
+        blockHash: `0x${'66'.repeat(32)}`,
+        transactionHash: `0x${'77'.repeat(32)}`,
+      }],
+      env,
+      7,
+      `0x${'66'.repeat(32)}`,
+      txCounter,
+      'test-quiesce',
+    )).toThrow(/J_EVENT_INGRESS_QUIESCING:test-quiesce/);
+
+    expect(txCounter._seenLogs).toBeUndefined();
+    expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
+    expect(env.runtimeState?.externalWalletWatchOwners).toBeUndefined();
+
+    expect(() => applyJEventsToEnv(env, [{
+      name: 'ExternalWalletSnapshot',
+      args: {
+        entityId,
+        owner,
+        nativeBalance: '1',
+        tokenBalances: [],
+        allowances: [],
+      },
+      blockNumber: 8,
+      blockHash: `0x${'68'.repeat(32)}`,
+      transactionHash: 'external-wallet-snapshot:8',
+    }], 'manual-snapshot')).toThrow(/J_EVENT_INGRESS_QUIESCING:manual-snapshot/);
+
+    expect(env.runtimeMempool?.entityInputs ?? []).toHaveLength(0);
+    expect(env.runtimeState?.externalWalletWatchOwners).toBeUndefined();
+  });
+
+  test('external wallet snapshot normalization rejects missing financial fields', () => {
+    const entityId = `0x${'44'.repeat(32)}`;
+    const owner = `0x${'55'.repeat(20)}`;
+    const tokenAddress = `0x${'61'.repeat(20)}`;
+    const spender = `0x${'71'.repeat(20)}`;
+
+    expect(() => rawEventToJEvents({
+      name: 'ExternalWalletSnapshot',
+      args: {
+        entityId,
+        owner,
+        tokenBalances: [{ tokenAddress }],
+      },
+    } as any, entityId)).toThrow(/EXTERNAL_WALLET_SNAPSHOT_BALANCE_MISSING/);
+
+    expect(() => rawEventToJEvents({
+      name: 'ExternalWalletSnapshot',
+      args: {
+        entityId,
+        owner,
+        allowances: [{ tokenAddress, spender }],
+      },
+    } as any, entityId)).toThrow(/EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_MISSING/);
   });
 
   test('uses matching jReplica blockNumber as watcher cursor source', () => {
@@ -134,6 +237,69 @@ describe('jadapter helper cursors', () => {
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(101);
     updateWatcherJurisdictionCursor(env, 120, '0xaaa');
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(121);
+  });
+
+  test('watcher start block is capped by committed signer j-blocks when present', () => {
+    const env = makeCursorEnv('jadapter-cursor-signer-jblock', [
+      makeJReplica('Arrakis', 120n, '0xaaa'),
+    ], 'Arrakis');
+    const entityId = `0x${'64'.repeat(32)}`;
+    const left = makeReplica(entityId, '1', true);
+    const right = makeReplica(entityId, '2', false);
+    left.state.lastFinalizedJHeight = 40;
+    right.state.lastFinalizedJHeight = 45;
+    env.eReplicas.set(`${entityId}:1`, left);
+    env.eReplicas.set(`${entityId}:2`, right);
+
+    expect(getMinimumCommittedSignerJHeight(env)).toBe(40);
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(41);
+
+    updateWatcherJurisdictionCursor(env, 30, '0xaaa');
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(31);
+
+    updateWatcherJurisdictionCursor(env, 200, '0xaaa');
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(41);
+  });
+
+  test('watcher cursor waits for relevant signer replicas to finalize their j-block', () => {
+    const env = createEmptyEnv('jadapter-cursor-pending-jblock');
+    const entityId = `0x${'65'.repeat(32)}`;
+    const proposerSignerId = '1';
+    const validatorSignerId = '2';
+    const proposer = makeReplica(entityId, proposerSignerId, true);
+    const validator = makeReplica(entityId, validatorSignerId, false);
+    proposer.state.lastFinalizedJHeight = 8;
+    validator.state.lastFinalizedJHeight = 8;
+    env.eReplicas.set(`${entityId}:${proposerSignerId}`, proposer);
+    env.eReplicas.set(`${entityId}:${validatorSignerId}`, validator);
+
+    const rawEvents = [{
+      name: 'ReserveUpdated',
+      args: {
+        entity: entityId,
+        tokenId: 2,
+        newBalance: 123n,
+      },
+      blockNumber: 10,
+      blockHash: `0x${'66'.repeat(32)}`,
+      transactionHash: `0x${'77'.repeat(32)}`,
+      logIndex: 0,
+    }];
+    const replicaKeys = collectRelevantJEventReplicaKeys(env, rawEvents);
+    const pending = new Map<number, Set<string>>();
+
+    expect(replicaKeys).toEqual([`${entityId}:${proposerSignerId}`, `${entityId}:${validatorSignerId}`]);
+    rememberPendingWatcherJBlock(pending, 10, replicaKeys);
+    expect(resolveCommittedWatcherCursor(env, pending, 20, 8)).toBe(9);
+    expect(pending.has(10)).toBe(true);
+
+    proposer.state.lastFinalizedJHeight = 10;
+    expect(resolveCommittedWatcherCursor(env, pending, 20, 9)).toBe(9);
+    expect(pending.has(10)).toBe(true);
+
+    validator.state.lastFinalizedJHeight = 10;
+    expect(resolveCommittedWatcherCursor(env, pending, 20, 9)).toBe(20);
+    expect(pending.has(10)).toBe(false);
   });
 
   test('processEventBatch fans out canonical events to every registered replica through runtime ingress', () => {
