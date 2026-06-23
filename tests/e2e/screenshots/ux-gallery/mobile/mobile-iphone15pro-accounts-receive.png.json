@@ -1,0 +1,12 @@
+{
+  "title": "mobile receive request",
+  "group": "Payments",
+  "description": "User prepares a receive invoice for inbound liquidity.",
+  "platform": "mobile",
+  "tags": [
+    "payment",
+    "invoice"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

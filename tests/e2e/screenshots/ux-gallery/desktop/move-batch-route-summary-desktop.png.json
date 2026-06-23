@@ -1,0 +1,13 @@
+{
+  "title": "desktop on-chain batch route",
+  "group": "On-chain Batch",
+  "description": "External to reserve route summary before adding a move to batch.",
+  "platform": "desktop",
+  "tags": [
+    "move",
+    "batch",
+    "external-reserve"
+  ],
+  "sourceTest": "move tab covers all routed paths on isolated runtimes",
+  "project": "chromium"
+}

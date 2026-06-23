@@ -1,0 +1,13 @@
+{
+  "title": "desktop on-chain batch queued",
+  "group": "On-chain Batch",
+  "description": "Move operation queued into a J-batch before broadcast.",
+  "platform": "desktop",
+  "tags": [
+    "move",
+    "batch",
+    "j-batch"
+  ],
+  "sourceTest": "move tab covers all routed paths on isolated runtimes",
+  "project": "chromium"
+}

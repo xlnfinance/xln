@@ -1,0 +1,12 @@
+{
+  "title": "desktop swap token picker",
+  "group": "Swap",
+  "description": "Token selector with balances during swap preparation.",
+  "platform": "desktop",
+  "tags": [
+    "swap",
+    "token-picker"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

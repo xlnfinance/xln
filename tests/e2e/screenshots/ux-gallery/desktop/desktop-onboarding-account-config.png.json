@@ -1,0 +1,12 @@
+{
+  "title": "desktop account configuration",
+  "group": "Onboarding",
+  "description": "Recovery and account setup screen before entering the wallet.",
+  "platform": "desktop",
+  "tags": [
+    "onboarding",
+    "recovery"
+  ],
+  "sourceTest": "ui screenshot smoke captures onboarding screens",
+  "project": "chromium"
+}

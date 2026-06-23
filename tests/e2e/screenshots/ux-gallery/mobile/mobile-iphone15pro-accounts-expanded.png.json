@@ -1,0 +1,12 @@
+{
+  "title": "mobile account capacity detail",
+  "group": "Accounts",
+  "description": "Expanded account row showing directional credit capacity.",
+  "platform": "mobile",
+  "tags": [
+    "accounts",
+    "capacity"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

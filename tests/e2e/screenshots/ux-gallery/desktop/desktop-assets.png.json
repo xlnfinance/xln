@@ -1,0 +1,12 @@
+{
+  "title": "desktop assets ledger",
+  "group": "Portfolio",
+  "description": "Portfolio ledger with external, reserve, and account balances.",
+  "platform": "desktop",
+  "tags": [
+    "assets",
+    "balances"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

@@ -1,0 +1,12 @@
+{
+  "title": "desktop dispute controls",
+  "group": "Disputes",
+  "description": "Account management panel for preparing and starting a dispute.",
+  "platform": "desktop",
+  "tags": [
+    "dispute",
+    "account"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

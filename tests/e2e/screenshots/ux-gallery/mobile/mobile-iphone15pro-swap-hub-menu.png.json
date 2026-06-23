@@ -1,0 +1,12 @@
+{
+  "title": "mobile swap hub menu",
+  "group": "Swap",
+  "description": "Hub selector showing available market-making venues.",
+  "platform": "mobile",
+  "tags": [
+    "swap",
+    "hub"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

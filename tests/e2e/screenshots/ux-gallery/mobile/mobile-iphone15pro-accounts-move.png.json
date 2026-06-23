@@ -1,0 +1,12 @@
+{
+  "title": "mobile asset move ticket",
+  "group": "On-chain Batch",
+  "description": "Move ticket for reserve, collateral, and external token flows.",
+  "platform": "mobile",
+  "tags": [
+    "move",
+    "batch"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

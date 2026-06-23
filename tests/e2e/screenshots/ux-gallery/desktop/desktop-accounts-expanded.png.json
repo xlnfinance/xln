@@ -1,0 +1,12 @@
+{
+  "title": "desktop account capacity detail",
+  "group": "Accounts",
+  "description": "Expanded account row showing directional credit capacity.",
+  "platform": "desktop",
+  "tags": [
+    "accounts",
+    "capacity"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

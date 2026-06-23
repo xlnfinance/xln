@@ -171,9 +171,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [x] Add e2e UX screenshot gallery for design audits.
   - Impact: high.
-  - Status: done. Curated e2e screenshots now write PNG plus JSON metadata under `ux-gallery/{desktop,mobile}` inside Playwright artifacts; `/api/qa/stories` reads metadata and the QA cockpit shows a top preview plus full `UX Gallery` tab.
-  - Coverage: screenshot smoke generated 26 curated PNGs and 26 metadata sidecars across onboarding, assets, accounts, payment, receive, swap menus, move, and settings. Move/swap/dispute flows are annotated for on-chain batch, resting order, active dispute, finalized dispute, and history screenshots when those e2e paths run.
-  - Evidence: focused QA cockpit e2e verifies preview/full gallery rendering; focused screenshot e2e generated 26 curated screenshots.
+  - Status: done. Curated e2e screenshots now write PNG plus JSON metadata both into Playwright artifacts and the static repo gallery at `tests/e2e/screenshots/ux-gallery/{desktop,mobile}`; `/api/qa/stories` reads metadata and QA cockpit opens on `UX Gallery` by default.
+  - Coverage: focused screenshot + move e2e generated 33 curated PNGs and 33 metadata sidecars across onboarding, assets, accounts, payment, receive, cross-chain swap menus, on-chain batch compose/queue/history, dispute controls, history, and settings.
+  - Evidence: unit enforces at least 20 curated screens and required groups `Payments`, `Swap`, `On-chain Batch`, `Disputes`, `History`; focused QA cockpit e2e verifies default gallery rendering, counts, and categories.
 
 - [ ] Make `/health` read only its dedicated health surface.
   - Impact: medium.

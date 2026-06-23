@@ -262,10 +262,33 @@ async function captureAccountWorkspaces(
   await expect(page.getByTestId('move-confirm').first()).toBeVisible({ timeout: 20_000 });
   await captureUxPage(page, output, `${prefix}-accounts-move.png`, {
     title: `${platform} asset move ticket`,
-    group: 'Move',
+    group: 'On-chain Batch',
     description: uxDescription('Move ticket for reserve, collateral, and external token flows.'),
     platform,
     tags: ['move', 'batch'],
+  });
+
+  await openAccountWorkspaceTab(page, 'history');
+  await expect(page.locator('.history-card').first()).toBeVisible({ timeout: 20_000 });
+  await captureUxPage(page, output, `${prefix}-accounts-history.png`, {
+    title: `${platform} on-chain batch history`,
+    group: 'History',
+    description: uxDescription('History view for finalized and pending on-chain account batches.'),
+    platform,
+    tags: ['history', 'batch'],
+  });
+
+  await openAccountWorkspaceTab(page, 'configure');
+  const disputeTab = page.locator('[data-testid="configure-tab-dispute"]:visible').first();
+  await expect(disputeTab).toBeVisible({ timeout: 20_000 });
+  await disputeTab.click();
+  await expect(page.locator('[data-testid="configure-dispute-prepare"]:visible, [data-testid="configure-dispute-start"]:visible').first()).toBeVisible({ timeout: 20_000 });
+  await captureUxPage(page, output, `${prefix}-accounts-dispute-controls.png`, {
+    title: `${platform} dispute controls`,
+    group: 'Disputes',
+    description: uxDescription('Account management panel for preparing and starting a dispute.'),
+    platform,
+    tags: ['dispute', 'account'],
   });
 }
 

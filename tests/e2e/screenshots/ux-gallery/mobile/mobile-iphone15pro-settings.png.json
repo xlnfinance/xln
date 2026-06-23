@@ -1,0 +1,11 @@
+{
+  "title": "mobile wallet settings",
+  "group": "Settings",
+  "description": "Wallet settings and display controls for the runtime.",
+  "platform": "mobile",
+  "tags": [
+    "settings"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}
