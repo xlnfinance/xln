@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { Activity, Camera, Database, Network, RefreshCw, ShieldCheck, Siren, Zap } from 'lucide-svelte';
   import BootstrapLive from '$lib/components/Health/BootstrapLive.svelte';
+  import QaCockpitEmbedPanel from '$lib/components/Health/QaCockpitEmbedPanel.svelte';
   import QaRunsPanel from '$lib/components/Health/QaRunsPanel.svelte';
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
@@ -706,6 +707,9 @@
     <button class:active={activeSection === 'qa-runs'} onclick={() => jumpTo('qa-runs')}>
       <Activity size={15} /> QA Runs
     </button>
+    <button class:active={activeSection === 'qa-cockpit'} onclick={() => jumpTo('qa-cockpit')}>
+      <ShieldCheck size={15} /> Cockpit
+    </button>
     <button class:active={activeSection === 'runtime-adapter'} onclick={() => jumpTo('runtime-adapter')}>
       <Database size={15} /> Adapter
     </button>
@@ -737,6 +741,7 @@
     <div class="panel error">{error}</div>
     <div class="admin-stack">
       <QaRunsPanel />
+      <QaCockpitEmbedPanel />
       <RuntimeAdapterPanel />
     </div>
   {:else if health}
@@ -834,6 +839,7 @@
 
     <div class="admin-stack">
       <QaRunsPanel />
+      <QaCockpitEmbedPanel />
       <RuntimeAdapterPanel />
     </div>
 
