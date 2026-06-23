@@ -25,6 +25,7 @@ import {
 import { safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { DeliverableEntityInput, Env } from './types';
 import { createExternalWalletApi } from './api/external-wallet-api';
+import { applyJEventsToEnv } from './jadapter/watcher';
 import { maybeHandleQaRequest } from './qa/api';
 import { createJAdapter, createXlnJsonRpcProvider, type JAdapter } from './jadapter';
 import type { JAdapterConfig } from './jadapter/types';
@@ -197,6 +198,10 @@ const externalWalletApi = createExternalWalletApi({
     if (!globalJAdapter?.fundSignerWallet) return false;
     await globalJAdapter.fundSignerWallet(address, amount);
     return true;
+  },
+  observeExternalWalletSnapshot: (events, label) => {
+    if (!serverEnv) throw new Error('Runtime env not initialized');
+    applyJEventsToEnv(serverEnv, events, label);
   },
 });
 
@@ -634,6 +639,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   // Token catalog (for UI token list + deposits)
   if (pathname === '/api/tokens') {
     return await externalWalletApi.handleTokens();
+  }
+
+  if (pathname === '/api/external-wallet/snapshot' && req.method === 'POST') {
+    return await externalWalletApi.handleWalletSnapshot(req);
   }
 
   // ============================================================================

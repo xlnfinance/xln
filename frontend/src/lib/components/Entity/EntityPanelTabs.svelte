@@ -23,7 +23,7 @@
     type DraftBatchReserveIssue,
   } from '@xln/runtime/j-batch';
   import type { Tab, EntityReplica } from '$lib/types/ui';
-  import { getXLN, resolveConfiguredApiBase } from '../../stores/xlnStore';
+  import { getXLN, resolveConfiguredApiBase, setXlnEnvironment } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
   import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
@@ -1185,6 +1185,12 @@
     return findReplicaForTab(replicas, entityId, signerId);
   }
 
+  function getCurrentLiveEntityReplica(): EntityReplica | null {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
+    const signerId = String(currentSignerId || tab.signerId || '').trim();
+    return (entityId ? findLiveReplicaForEntity(entityId, signerId) : null) ?? replica;
+  }
+
   // Get replica
   $: {
     if (tab.entityId && tab.signerId) {
@@ -1376,6 +1382,7 @@
   let onchainReserves: Map<number, bigint> = new Map();
   let pendingReserveFaucets: PendingReserveFaucet[] = [];
   let pendingOffchainFaucets: PendingOffchainFaucet[] = [];
+  let assetFaucetSubmitting = false;
   $: pendingOffchainFaucetKeys = new Set(
     pendingOffchainFaucets.map(req => faucetPendingKey(req.hubEntityId, req.tokenId)),
   );
@@ -1396,6 +1403,25 @@
     decimals: number;
     tokenId: number;
   }
+
+  type ExternalAllowanceRead = { tokenAddress: string; spender: string };
+  type ExternalWalletReadResult = {
+    nativeBalance: bigint;
+    balances: bigint[];
+    allowanceValues: bigint[];
+  };
+  type ExternalWalletSnapshotResponse = {
+    success?: boolean;
+    entityId?: string;
+    owner?: string;
+    blockNumber?: number;
+    blockHash?: string;
+    transactionHash?: string;
+    nativeBalance?: string;
+    tokenBalances?: Array<{ tokenAddress?: string; tokenId?: number; balance?: string }>;
+    allowances?: Array<{ tokenAddress?: string; spender?: string; allowance?: string }>;
+    error?: string;
+  };
 
   function normalizeOptionalTokenId(value: unknown): number | undefined {
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
@@ -1488,6 +1514,7 @@
   let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
   let resolvingAssetAutoC2R = false;
   let externalFetchInFlight: Promise<void> | null = null;
+  let externalWalletStateSyncKey = '';
   let externalTokenCatalogCacheKey = '';
   let externalTokenCatalogCache: ExternalToken[] | null = null;
   let selectedExternalToReserveToken: ReserveTransferAsset | null = null;
@@ -1737,13 +1764,20 @@
     const approvalAmount = mode === 'max'
       ? MaxUint256
       : parsePositiveAssetAmount(moveAllowanceAmount, token);
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId) throw new Error('Active entity missing for allowance approval');
+    if (typeof token.tokenId !== 'number') throw new Error(`Token id missing for ${token.symbol} allowance approval`);
     moveExecuting = true;
     moveAllowanceSubmittingMode = mode;
     moveProgressLabel = `Approving ${token.symbol} allowance`;
     try {
       await ensureMoveAllowanceOwnerGas(jadapter, owner);
       moveProgressLabel = `Approving ${token.symbol} allowance`;
-      await jadapter.approveErc20(privKey, token.address, spender, approvalAmount);
+      const approvalEvents = await jadapter.approveErc20(privKey, token.address, spender, approvalAmount, {
+        entityId,
+        tokenId: token.tokenId,
+      });
+      await applyCanonicalJEventsToActiveEnv(approvalEvents, `move-allowance-${token.symbol}`);
       const confirmedAllowance = await jadapter.getErc20Allowance(token.address, owner, spender);
       if (confirmedAllowance < approvalAmount) {
         throw new Error(
@@ -1964,6 +1998,7 @@
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
+      await applyCanonicalJEventsToActiveEnv(result.events ?? [], `reserve-faucet-${tokenMeta.symbol}`);
 
       pendingReserveFaucets = [...pendingReserveFaucets, {
         tokenId: tokenMeta.tokenId,
@@ -2156,7 +2191,15 @@
     return next;
   }
 
-  $: onchainReserves = buildOnchainReserves(replica?.state?.reserves, externalTokens);
+  $: {
+    activeEnv;
+    envRevision;
+    replica;
+    currentSignerId;
+    tab.entityId;
+    tab.signerId;
+    onchainReserves = buildOnchainReserves(getCurrentLiveEntityReplica()?.state?.reserves, externalTokens);
+  }
   $: {
     if (pendingAssetBridgeSync && !resolvingAssetBridgeSync) {
       const currentReserve = onchainReserves.get(pendingAssetBridgeSync.tokenId) ?? 0n;
@@ -2254,9 +2297,12 @@
     return findLocalAccountByCounterparty(entityId, replica.state.accounts, workspaceAccountId);
   })();
   $: accountSpendableByToken = (() => {
+    activeEnv;
+    envRevision;
     const totals = new Map<number, bigint>();
-    const accounts = replica?.state?.accounts;
-    const entityId = String(replica?.state?.entityId || tab.entityId || '').toLowerCase();
+    const currentReplica = getCurrentLiveEntityReplica();
+    const accounts = currentReplica?.state?.accounts;
+    const entityId = String(currentReplica?.state?.entityId || tab.entityId || '').toLowerCase();
     if (!accounts || !entityId || !activeXlnFunctions?.deriveDelta) return totals;
     for (const [counterpartyId, account] of accounts.entries()) {
       if (!(account?.deltas instanceof Map)) continue;
@@ -2497,8 +2543,140 @@
     }
   }
 
+  function readExternalWalletState(
+    tokenList: ExternalToken[],
+    owner: string,
+    allowanceReads: ExternalAllowanceRead[],
+  ): ExternalWalletReadResult | null {
+    const externalWallet = getCurrentLiveEntityReplica()?.state?.externalWallet;
+    if (!externalWallet) return null;
+    const ownerKey = String(owner || '').trim().toLowerCase();
+    const balancesByToken = externalWallet.balances?.get?.(ownerKey);
+    if (!balancesByToken) return null;
+    const nativeRecord = balancesByToken.get(ZeroAddress.toLowerCase());
+    if (!nativeRecord) return null;
+    const balances = tokenList.map((token) => {
+      const tokenKey = String(token.address || '').trim().toLowerCase();
+      const record = balancesByToken.get(tokenKey);
+      if (!record) return null;
+      return record.balance;
+    });
+    if (balances.some((balance) => balance === null)) return null;
+    const allowancesBySpender = externalWallet.allowances?.get?.(ownerKey);
+    const allowanceValues = allowanceReads.map((read) => {
+      const key = `${String(read.tokenAddress || '').trim().toLowerCase()}:${String(read.spender || '').trim().toLowerCase()}`;
+      const record = allowancesBySpender?.get(key);
+      if (!record) return null;
+      return record.allowance;
+    });
+    if (allowanceValues.some((allowance) => allowance === null)) return null;
+    return {
+      nativeBalance: nativeRecord?.balance ?? 0n,
+      balances: balances as bigint[],
+      allowanceValues: allowanceValues as bigint[],
+    };
+  }
+
+  async function applyCanonicalJEventsToActiveEnv(
+    events: NonNullable<FaucetApiResult['events']>,
+    label: string,
+  ): Promise<void> {
+    if (!events || events.length === 0) return;
+    const env = getRuntimeEnv(activeEnv);
+    if (!env) return;
+    const xln = await getXLN();
+    xln.applyJEventsToEnv?.(env, events, label);
+    xln.startRuntimeLoop?.(env);
+    await xln.process(env, undefined, 0);
+    setXlnEnvironment(env);
+  }
+
+  async function requestExternalWalletSnapshot(
+    entityId: string,
+    owner: string,
+    tokenList: ExternalToken[],
+    allowanceReads: ExternalAllowanceRead[],
+  ): Promise<ExternalWalletReadResult> {
+    const requestApiBase = resolveApiBase();
+    const response = await fetch(`${requestApiBase}/api/external-wallet/snapshot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        entityId,
+        owner,
+        tokenAddresses: tokenList.map((token) => token.address).filter((address) => isAddress(address)),
+        allowances: allowanceReads,
+      }),
+    });
+    const data = await readJsonResponse<ExternalWalletSnapshotResponse>(response);
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || `External wallet snapshot failed (${response.status})`);
+    }
+    const env = getRuntimeEnv(activeEnv);
+    if (env && data.blockNumber !== undefined && data.blockHash && data.transactionHash) {
+      const xln = await getXLN();
+      xln.applyJEventsToEnv?.(env, [{
+        name: 'ExternalWalletSnapshot',
+        args: {
+          entityId: data.entityId ?? entityId,
+          owner: data.owner ?? owner,
+          nativeBalance: String(data.nativeBalance ?? '0'),
+          tokenBalances: data.tokenBalances ?? [],
+          allowances: data.allowances ?? [],
+        },
+        blockNumber: Number(data.blockNumber),
+        blockHash: data.blockHash,
+        transactionHash: data.transactionHash,
+      }], 'external-wallet-snapshot-ui');
+      xln.startRuntimeLoop?.(env);
+      await xln.process(env, undefined, 0);
+      setXlnEnvironment(env);
+    }
+    const balanceByToken = new Map(
+      (data.tokenBalances ?? []).map((entry) => [
+        String(entry.tokenAddress || '').trim().toLowerCase(),
+        BigInt(String(entry.balance ?? '0')),
+      ]),
+    );
+    const allowanceByKey = new Map(
+      (data.allowances ?? []).map((entry) => [
+        `${String(entry.tokenAddress || '').trim().toLowerCase()}:${String(entry.spender || '').trim().toLowerCase()}`,
+        BigInt(String(entry.allowance ?? '0')),
+      ]),
+    );
+    return {
+      nativeBalance: BigInt(String(data.nativeBalance ?? '0')),
+      balances: tokenList.map((token) => balanceByToken.get(String(token.address || '').trim().toLowerCase()) ?? 0n),
+      allowanceValues: allowanceReads.map((read) =>
+        allowanceByKey.get(`${String(read.tokenAddress || '').trim().toLowerCase()}:${String(read.spender || '').trim().toLowerCase()}`) ?? 0n
+      ),
+    };
+  }
+
+  function buildExternalWalletStateSyncSignature(): string {
+    const ownerKey = String(resolveSelfEoaAddress() || '').trim().toLowerCase();
+    const externalWallet = getCurrentLiveEntityReplica()?.state?.externalWallet;
+    if (!ownerKey || !externalWallet) return '';
+    const balancesByToken = externalWallet.balances?.get?.(ownerKey);
+    const allowancesBySpender = externalWallet.allowances?.get?.(ownerKey);
+    if (!balancesByToken && !allowancesBySpender) return '';
+    const balances = balancesByToken
+      ? [...balancesByToken.entries()]
+          .map(([token, record]) => `${token}:${record.balance.toString()}:${record.jHeight}:${record.transactionHash}`)
+          .sort()
+          .join(',')
+      : '';
+    const allowances = allowancesBySpender
+      ? [...allowancesBySpender.entries()]
+          .map(([key, record]) => `${key}:${record.allowance.toString()}:${record.jHeight}:${record.transactionHash}`)
+          .sort()
+          .join(',')
+      : '';
+    return `${ownerKey}|${balances}|${allowances}`;
+  }
+
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
-  async function fetchExternalTokens() {
+  async function fetchExternalTokens(forceSnapshot = false) {
     if (externalFetchInFlight) {
       return await externalFetchInFlight;
     }
@@ -2525,17 +2703,20 @@
         const envAtStart = getRuntimeEnv(activeEnv);
         const jadapter = envAtStart ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;
         const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);
-        const allowanceToken = moveAllowanceRouteEnabled
-          ? tokenList.find((token) =>
-              String(token.symbol || '').trim().toUpperCase() === String(moveAssetSymbol || '').trim().toUpperCase() &&
-              isAddress(token.address) &&
-              token.address !== ZeroAddress,
-            ) ?? null
-          : null;
+        const entityId = resolveSelfEntityId();
         const spender = String(jadapter?.addresses?.depository || '').trim();
-        const allowanceReads = allowanceToken && isAddress(spender) && spender !== ZeroAddress
-          ? [{ tokenAddress: allowanceToken.address, spender }]
+        const allowanceReads = moveAllowanceRouteEnabled && isAddress(spender) && spender !== ZeroAddress
+          ? tokenList
+              .filter((token) => isAddress(token.address) && token.address !== ZeroAddress)
+              .map((token) => ({ tokenAddress: token.address, spender }))
           : [];
+        const selectedAllowanceIndex = allowanceReads.findIndex((read) => {
+          const selected = tokenList.find((token) =>
+            String(token.symbol || '').trim().toUpperCase() === String(moveAssetSymbol || '').trim().toUpperCase() &&
+            String(token.address || '').trim().toLowerCase() === String(read.tokenAddress || '').trim().toLowerCase()
+          );
+          return Boolean(selected);
+        });
         if (moveAllowanceRouteEnabled) {
           moveAllowanceLoading = allowanceReads.length > 0 && moveAllowanceRaw === null;
           moveAllowanceError = null;
@@ -2545,34 +2726,20 @@
         let balances: bigint[] = tokenList.map(() => 0n);
         let allowanceValues: bigint[] = [];
 
-        if (jadapter?.readWalletSnapshot) {
-          const snapshot = await jadapter.readWalletSnapshot({
-            owner,
-            tokenAddresses: tokenList.map((token) => token.address),
-            allowances: allowanceReads,
-            includeNativeBalance: true,
-          });
-          nativeBalance = snapshot.nativeBalance ?? 0n;
-          balances = snapshot.tokenBalances;
-          allowanceValues = snapshot.allowances;
+        const observed = !forceSnapshot
+          ? readExternalWalletState(tokenList, owner, allowanceReads)
+          : null;
+        if (observed) {
+          nativeBalance = observed.nativeBalance;
+          balances = observed.balances;
+          allowanceValues = observed.allowanceValues;
+        } else if (entityId) {
+          const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads);
+          nativeBalance = snapshot.nativeBalance;
+          balances = snapshot.balances;
+          allowanceValues = snapshot.allowanceValues;
         } else {
-          if (jadapter?.provider && typeof jadapter.provider.getBalance === 'function') {
-            try {
-              nativeBalance = await jadapter.provider.getBalance(owner);
-            } catch (err) {
-              console.warn('[EntityPanel] Failed to fetch native ETH balance:', err);
-            }
-          }
-          if (jadapter?.getErc20Balances) {
-            balances = await jadapter.getErc20Balances(tokenList.map((token) => token.address), owner);
-          }
-          if (allowanceReads.length > 0 && jadapter?.getErc20Allowance) {
-            allowanceValues = [await jadapter.getErc20Allowance(
-              allowanceReads[0]!.tokenAddress,
-              owner,
-              allowanceReads[0]!.spender,
-            )];
-          }
+          throw new Error('Active entity missing for external wallet snapshot');
         }
 
         balances.forEach((balance: bigint, idx: number) => {
@@ -2594,7 +2761,7 @@
             ...tokenList,
           ]);
           if (moveAllowanceRouteEnabled) {
-            moveAllowanceRaw = allowanceReads.length > 0 ? (allowanceValues[0] ?? 0n) : null;
+            moveAllowanceRaw = selectedAllowanceIndex >= 0 ? (allowanceValues[selectedAllowanceIndex] ?? 0n) : null;
             moveAllowanceError = null;
             moveAllowanceLoading = false;
           }
@@ -2653,7 +2820,9 @@
       }
       sendAssetAmount = '';
       toasts.success(`Sent ${token.symbol}`);
-      void fetchExternalTokens();
+      if (token.address === ZeroAddress) {
+        void fetchExternalTokens(true);
+      }
     } finally {
       sendingExternalToken = null;
     }
@@ -3632,7 +3801,9 @@
 
       toasts.success(`Received ${amount} ${tokenSymbol} in external!`);
 
-      void fetchExternalTokens();
+      if (isEth) {
+        void fetchExternalTokens(true);
+      }
     } catch (err) {
       console.error('[EntityPanel] External faucet failed:', err);
       toasts.error(`External faucet failed: ${(err as Error).message}`);
@@ -3640,29 +3811,51 @@
   }
 
   async function submitAssetFaucet(target: 'external' | 'reserve' | 'account'): Promise<void> {
-    if (target === 'external') {
-      await faucetExternalTokens(faucetAssetSymbol);
-      return;
-    }
-    const token = getFaucetReserveTokenMeta(faucetAssetSymbol);
-    if (!token) {
-      toasts.error('Reserve faucet supports ERC20 assets only');
-      return;
-    }
-    if (target === 'account') {
-      const firstAccountId = firstFaucetAccountId;
-      if (!firstAccountId) {
-        toasts.error('Open an account first');
+    if (assetFaucetSubmitting) return;
+    assetFaucetSubmitting = true;
+    try {
+      if (target === 'external') {
+        await faucetExternalTokens(faucetAssetSymbol);
         return;
       }
-      await faucetOffchain(firstAccountId, token.tokenId);
-      return;
+      const token = getFaucetReserveTokenMeta(faucetAssetSymbol);
+      if (!token) {
+        toasts.error('Reserve faucet supports ERC20 assets only');
+        return;
+      }
+      if (target === 'account') {
+        const firstAccountId = firstFaucetAccountId;
+        if (!firstAccountId) {
+          toasts.error('Open an account first');
+          return;
+        }
+        await faucetOffchain(firstAccountId, token.tokenId);
+        return;
+      }
+      await faucetReserves(token.tokenId, token.symbol);
+    } finally {
+      assetFaucetSubmitting = false;
     }
-    await faucetReserves(token.tokenId, token.symbol);
   }
 
   function refreshBalances(): void {
-    void fetchExternalTokens();
+    void fetchExternalTokens(true);
+  }
+
+  $: {
+    activeEnv;
+    envRevision;
+    replica;
+    currentSignerId;
+    tab.entityId;
+    tab.signerId;
+    const nextExternalWalletStateSyncKey = buildExternalWalletStateSyncSignature();
+    if (nextExternalWalletStateSyncKey !== externalWalletStateSyncKey) {
+      externalWalletStateSyncKey = nextExternalWalletStateSyncKey;
+      if (nextExternalWalletStateSyncKey && externalTokens.length > 0 && !externalFetchInFlight) {
+        void fetchExternalTokens();
+      }
+    }
   }
 
   async function handleResetEverything(): Promise<void> {
@@ -3701,12 +3894,6 @@
         clearExternalBalancePoller();
         if (signerId) {
           void fetchExternalTokens();
-          if (activeIsLive) {
-            externalBalancePollTimer = window.setInterval(() => {
-              if (document.visibilityState === 'hidden') return;
-              void fetchExternalTokens();
-            }, refreshMs);
-          }
         } else {
           externalTokens = [];
           externalTokensLoading = false;
@@ -5002,8 +5189,8 @@
               <p class="muted asset-ledger-note">External, reserve, and account balances.</p>
             </div>
             <div class="header-actions">
-              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances()} disabled={externalTokensLoading}>
-                {externalTokensLoading ? '...' : 'Refresh'}
+              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances()} disabled={externalTokensLoading || assetFaucetSubmitting}>
+                {externalTokensLoading || assetFaucetSubmitting ? '...' : 'Refresh'}
               </button>
             </div>
           </div>
@@ -5015,7 +5202,7 @@
                   <option value={row.symbol}>{row.symbol}</option>
                 {/each}
               </select>
-              <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')}>
+              <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')} disabled={assetFaucetSubmitting}>
                 External
               </button>
               {#if faucetSupportsReserve}
@@ -5023,6 +5210,7 @@
                   class="btn-table-action deposit"
                   data-testid={`reserve-faucet-${faucetAssetSymbol}`}
                   on:click={() => submitAssetFaucet('reserve')}
+                  disabled={assetFaucetSubmitting}
                   title="Faucet reserve"
                 >
                   Reserve
@@ -5033,6 +5221,7 @@
                   class="btn-table-action faucet"
                   data-testid={`account-faucet-${faucetAssetSymbol}`}
                   on:click={() => submitAssetFaucet('account')}
+                  disabled={assetFaucetSubmitting}
                   title="Faucet first account"
                 >
                   Account

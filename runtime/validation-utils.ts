@@ -696,6 +696,50 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     throw new FinancialDataCorruptionError(`${context}.accounts must be a Map`);
   }
 
+  if (obj['externalWallet'] !== undefined) {
+    const externalWallet = validateObject(obj['externalWallet'], `${context}.externalWallet`);
+    validateMapInstance(externalWallet['balances'], `${context}.externalWallet.balances`);
+    validateMapInstance(externalWallet['allowances'], `${context}.externalWallet.allowances`);
+    for (const [owner, balances] of (externalWallet['balances'] as Map<unknown, unknown>).entries()) {
+      if (typeof owner !== 'string') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet.balances owner must be string`, { owner });
+      }
+      validateMapInstance(balances, `${context}.externalWallet.balances[${owner}]`);
+      for (const [tokenKey, record] of (balances as Map<unknown, unknown>).entries()) {
+        if (typeof tokenKey !== 'string') {
+          throw new FinancialDataCorruptionError(`${context}.externalWallet balance token key must be string`, { tokenKey });
+        }
+        const balanceRecord = validateObject(record, `${context}.externalWallet.balances[${owner}][${tokenKey}]`);
+        if (typeof balanceRecord['tokenAddress'] !== 'string') {
+          throw new FinancialDataCorruptionError(`${context}.externalWallet balance tokenAddress must be string`);
+        }
+        if (typeof balanceRecord['balance'] !== 'bigint') {
+          throw new FinancialDataCorruptionError(`${context}.externalWallet balance must be bigint`);
+        }
+        validateNumber(balanceRecord['jHeight'], `${context}.externalWallet balance jHeight`);
+      }
+    }
+    for (const [owner, allowances] of (externalWallet['allowances'] as Map<unknown, unknown>).entries()) {
+      if (typeof owner !== 'string') {
+        throw new FinancialDataCorruptionError(`${context}.externalWallet.allowances owner must be string`, { owner });
+      }
+      validateMapInstance(allowances, `${context}.externalWallet.allowances[${owner}]`);
+      for (const [allowanceKey, record] of (allowances as Map<unknown, unknown>).entries()) {
+        if (typeof allowanceKey !== 'string') {
+          throw new FinancialDataCorruptionError(`${context}.externalWallet allowance key must be string`, { allowanceKey });
+        }
+        const allowanceRecord = validateObject(record, `${context}.externalWallet.allowances[${owner}][${allowanceKey}]`);
+        if (typeof allowanceRecord['tokenAddress'] !== 'string' || typeof allowanceRecord['spender'] !== 'string') {
+          throw new FinancialDataCorruptionError(`${context}.externalWallet allowance addresses must be strings`);
+        }
+        if (typeof allowanceRecord['allowance'] !== 'bigint') {
+          throw new FinancialDataCorruptionError(`${context}.externalWallet allowance must be bigint`);
+        }
+        validateNumber(allowanceRecord['jHeight'], `${context}.externalWallet allowance jHeight`);
+      }
+    }
+  }
+
   // Financial invariant: reserves must be keyed by numeric tokenId and valued by bigint.
   // Do not tolerate string token keys in live state; decode boundaries must canonicalize before this.
   for (const [tokenId, amount] of obj['reserves'].entries()) {

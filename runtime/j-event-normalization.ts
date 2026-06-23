@@ -15,6 +15,13 @@ const normalizeEntity = (value: unknown): string | null => {
   return trimmed.toLowerCase();
 };
 
+const normalizeAddress = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(trimmed)) return null;
+  return trimmed;
+};
+
 const normalizeBigNumberish = (value: unknown): string | null => {
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'number') {
@@ -68,6 +75,93 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     const newBalance = normalizeBigNumberish(data['newBalance']);
     if (!entity || tokenId === null || newBalance === null) return null;
     return { ...meta, type, data: { entity, tokenId, newBalance } };
+  }
+
+  if (type === 'ExternalWalletSnapshot') {
+    const entityId = normalizeEntity(data['entityId']);
+    const owner = normalizeAddress(data['owner']);
+    if (!entityId || !owner) return null;
+    const nativeBalance = data['nativeBalance'] === undefined
+      ? null
+      : normalizeBigNumberish(data['nativeBalance']);
+    if (data['nativeBalance'] !== undefined && nativeBalance === null) return null;
+    const tokenBalancesRaw = Array.isArray(data['tokenBalances']) ? data['tokenBalances'] : [];
+    const tokenBalances: Array<{ tokenAddress: string; tokenId?: number; balance: string }> = [];
+    for (const rawEntry of tokenBalancesRaw) {
+      const entry = toRecord(rawEntry);
+      if (!entry) return null;
+      const tokenAddress = normalizeAddress(entry['tokenAddress']);
+      const balance = normalizeBigNumberish(entry['balance']);
+      const tokenId = normalizeInt(entry['tokenId']);
+      if (!tokenAddress || balance === null) return null;
+      tokenBalances.push({
+        tokenAddress,
+        ...(tokenId !== null ? { tokenId } : {}),
+        balance,
+      });
+    }
+    const allowancesRaw = Array.isArray(data['allowances']) ? data['allowances'] : [];
+    const allowances: Array<{ tokenAddress: string; spender: string; allowance: string }> = [];
+    for (const rawEntry of allowancesRaw) {
+      const entry = toRecord(rawEntry);
+      if (!entry) return null;
+      const tokenAddress = normalizeAddress(entry['tokenAddress']);
+      const spender = normalizeAddress(entry['spender']);
+      const allowance = normalizeBigNumberish(entry['allowance']);
+      if (!tokenAddress || !spender || allowance === null) return null;
+      allowances.push({ tokenAddress, spender, allowance });
+    }
+    tokenBalances.sort((left, right) =>
+      left.tokenAddress.localeCompare(right.tokenAddress) ||
+      (left.tokenId ?? -1) - (right.tokenId ?? -1) ||
+      left.balance.localeCompare(right.balance)
+    );
+    allowances.sort((left, right) =>
+      left.tokenAddress.localeCompare(right.tokenAddress) ||
+      left.spender.localeCompare(right.spender) ||
+      left.allowance.localeCompare(right.allowance)
+    );
+    return {
+      ...meta,
+      type,
+      data: {
+        entityId,
+        owner,
+        ...(nativeBalance !== null ? { nativeBalance } : {}),
+        ...(tokenBalances.length > 0 ? { tokenBalances } : {}),
+        ...(allowances.length > 0 ? { allowances } : {}),
+      },
+    };
+  }
+
+  if (type === 'ExternalWalletDelta') {
+    const entityId = normalizeEntity(data['entityId']);
+    const owner = normalizeAddress(data['owner']);
+    const tokenAddress = normalizeAddress(data['tokenAddress']);
+    const tokenId = normalizeInt(data['tokenId']);
+    const balanceDelta = data['balanceDelta'] === undefined
+      ? null
+      : normalizeBigNumberish(data['balanceDelta']);
+    const spender = data['spender'] === undefined ? null : normalizeAddress(data['spender']);
+    const allowance = data['allowance'] === undefined ? null : normalizeBigNumberish(data['allowance']);
+    if (!entityId || !owner || !tokenAddress) return null;
+    const hasBalanceDelta = data['balanceDelta'] !== undefined;
+    const hasAllowance = data['allowance'] !== undefined || data['spender'] !== undefined;
+    if (hasBalanceDelta && balanceDelta === null) return null;
+    if (hasAllowance && (!spender || allowance === null)) return null;
+    if (!hasBalanceDelta && !hasAllowance) return null;
+    return {
+      ...meta,
+      type,
+      data: {
+        entityId,
+        owner,
+        tokenAddress,
+        ...(tokenId !== null ? { tokenId } : {}),
+        ...(hasBalanceDelta ? { balanceDelta: balanceDelta! } : {}),
+        ...(hasAllowance ? { spender: spender!, allowance: allowance! } : {}),
+      },
+    };
   }
 
   if (type === 'SecretRevealed') {

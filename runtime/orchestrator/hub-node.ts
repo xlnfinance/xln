@@ -55,6 +55,7 @@ import {
   handleLendingStateRequest,
 } from '../server/lending';
 import { handleRuntimeActivityRequest } from '../server/activity-api';
+import { waitForRecentReserveUpdatedEvent } from '../server/reserve-faucet';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -1484,6 +1485,7 @@ const run = async (): Promise<void> => {
     faucetTokenTargetUnits: FAUCET_TOKEN_TARGET_UNITS,
     emitDebugEvent: () => {},
     fundBrowserVmWallet: async () => false,
+    observeExternalWalletSnapshot: (events, label) => applyJEventsToEnv(env, events, label),
   });
 
   const directRuntimeWs = createDirectRuntimeWsRoute({
@@ -1672,10 +1674,23 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/control/runtime/persist-ready-snapshot' && request.method === 'POST') {
         env.runtimeState = env.runtimeState ?? {};
         const previousPaused = Boolean(env.runtimeState.persistencePaused);
+        const wasLoopActive = Boolean(env.runtimeState.loopActive);
         env.runtimeState.persistencePaused = true;
+        env.runtimeState.persistenceQuiescing = true;
+        const restoreRuntimeAfterSnapshotFailure = (): void => {
+          env.runtimeState = env.runtimeState ?? {};
+          env.runtimeState.persistencePaused = previousPaused;
+          env.runtimeState.persistenceQuiescing = false;
+          if (wasLoopActive) {
+            startRuntimeLoop(env, {
+              tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
+              maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+            });
+          }
+        };
         const runtimeIdle = await stopRuntimeLoopAndWait(env, 30_000);
         if (!runtimeIdle) {
-          env.runtimeState.persistencePaused = previousPaused;
+          restoreRuntimeAfterSnapshotFailure();
           return new Response(safeStringify({
             ok: false,
             code: 'HUB_READY_SNAPSHOT_RUNTIME_NOT_IDLE',
@@ -1685,6 +1700,7 @@ const run = async (): Promise<void> => {
         try {
           await persistRestoredEnvToDB(env);
           env.runtimeState.persistencePaused = false;
+          env.runtimeState.persistenceQuiescing = false;
           startRuntimeLoop(env, {
             tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
             maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
@@ -1698,7 +1714,7 @@ const run = async (): Promise<void> => {
             persistencePaused: Boolean(env.runtimeState?.persistencePaused),
           }), { headers });
         } catch (error) {
-          env.runtimeState.persistencePaused = true;
+          restoreRuntimeAfterSnapshotFailure();
           return new Response(safeStringify({
             ok: false,
             code: 'HUB_READY_SNAPSHOT_PERSIST_FAILED',
@@ -1816,6 +1832,10 @@ const run = async (): Promise<void> => {
         return await externalWalletApi.handleTokens();
       }
 
+      if (pathname === '/api/external-wallet/snapshot' && request.method === 'POST') {
+        return await externalWalletApi.handleWalletSnapshot(request);
+      }
+
       if (pathname === '/api/faucet/erc20' && request.method === 'POST') {
         return await externalWalletApi.handleErc20Faucet(request);
       }
@@ -1924,6 +1944,19 @@ const run = async (): Promise<void> => {
             headers,
           });
         }
+        const reserveEvent = await waitForRecentReserveUpdatedEvent(env, userEntityId, tokenId, expectedMin);
+        if (!reserveEvent) {
+          return new Response(safeStringify({
+            error: 'RESERVE_EVENT_MISSING',
+            entityId: userEntityId,
+            tokenId,
+            expectedMin: expectedMin.toString(),
+            updatedReserve: updatedReserve.toString(),
+          }), {
+            status: 500,
+            headers,
+          });
+        }
         return new Response(safeStringify({
           success: true,
           type: 'reserve',
@@ -1931,6 +1964,7 @@ const run = async (): Promise<void> => {
           tokenId,
           from: readyBootstrap.entityId,
           to: userEntityId,
+          events: [reserveEvent],
         }), { headers });
       }
 

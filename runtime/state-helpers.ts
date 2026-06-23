@@ -295,6 +295,23 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
 
+const cloneExternalWalletState = (
+  state: NonNullable<EntityState['externalWallet']>,
+): NonNullable<EntityState['externalWallet']> => ({
+  balances: new Map(
+    Array.from(state.balances.entries()).map(([owner, balances]) => [
+      owner,
+      new Map(Array.from(balances.entries()).map(([key, value]) => [key, { ...value }])),
+    ]),
+  ),
+  allowances: new Map(
+    Array.from(state.allowances.entries()).map(([owner, allowances]) => [
+      owner,
+      new Map(Array.from(allowances.entries()).map(([key, value]) => [key, { ...value }])),
+    ]),
+  ),
+});
+
 const cloneDebtEntry = (entry: DebtEntry): DebtEntry => ({
   ...entry,
   updates: entry.updates.map((update) => ({ ...update })),
@@ -516,6 +533,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
         cloneAccountMachine(account, forSnapshot), // forSnapshot excludes clonedForValidation
       ]),
     ),
+    ...(entityState.externalWallet ? { externalWallet: cloneExternalWalletState(entityState.externalWallet) } : {}),
     deferredAccountProposals: cloneMap(entityState.deferredAccountProposals || new Map()),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
     ...(entityState.jBatchState ? { jBatchState: cloneJBatchState(entityState.jBatchState) } : {}),

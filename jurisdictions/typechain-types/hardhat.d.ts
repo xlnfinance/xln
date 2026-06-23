@@ -146,6 +146,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IEntityProvider__factory>;
     getContractFactory(
+      name: "EntityProviderSupplyHarness",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.EntityProviderSupplyHarness__factory>;
+    getContractFactory(
       name: "HashLadderHarness",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.HashLadderHarness__factory>;
@@ -328,6 +332,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.IEntityProvider>;
     getContractAt(
+      name: "EntityProviderSupplyHarness",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.EntityProviderSupplyHarness>;
+    getContractAt(
       name: "HashLadderHarness",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -481,6 +490,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IEntityProvider>;
     deployContract(
+      name: "EntityProviderSupplyHarness",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.EntityProviderSupplyHarness>;
+    deployContract(
       name: "HashLadderHarness",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.HashLadderHarness>;
@@ -662,6 +675,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IEntityProvider>;
+    deployContract(
+      name: "EntityProviderSupplyHarness",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.EntityProviderSupplyHarness>;
     deployContract(
       name: "HashLadderHarness",
       args: any[],

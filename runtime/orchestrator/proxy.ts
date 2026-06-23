@@ -8,6 +8,9 @@ type ProxyHubEndpoint =
   | '/api/lending/borrow'
   | '/api/lending/repay';
 
+type ProxyEntityHubEndpoint =
+  | '/api/external-wallet/snapshot';
+
 type OrchestratorProxyDeps = {
   host: string;
   defaultRpcUrl: string;
@@ -230,6 +233,80 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
     }
   };
 
+  const proxyEntityHubApi = async (request: Request, endpoint: ProxyEntityHubEndpoint): Promise<Response> => {
+    const proxyStartedAt = Date.now();
+    let healthPolled = false;
+    let healthPollMs = 0;
+    const proxyHeaders = (extra: Record<string, string> = {}): HeadersInit => ({
+      ...CORS_JSON_HEADERS,
+      'X-XLN-Proxy-Health-Polled': healthPolled ? '1' : '0',
+      'X-XLN-Proxy-Health-Poll-Ms': String(healthPollMs),
+      'X-XLN-Proxy-Total-Ms': String(Date.now() - proxyStartedAt),
+      ...extra,
+    });
+    let bodyText = '';
+    let bodyJson: { entityId?: string } | null = null;
+    try {
+      bodyText = await request.text();
+      bodyJson = bodyText ? JSON.parse(bodyText) as { entityId?: string } : {};
+    } catch (error) {
+      return new Response(safeStringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
+        status: 400,
+        headers: proxyHeaders(),
+      });
+    }
+
+    const requestedEntityId = String(bodyJson?.entityId || '').toLowerCase();
+    let child = deps.getHubChildByEntityId(requestedEntityId);
+    let routedByEntity = true;
+    if (!child) {
+      const pollStartedAt = Date.now();
+      await deps.pollAllHubHealth();
+      healthPolled = true;
+      healthPollMs = Date.now() - pollStartedAt;
+      child = deps.getHubChildByEntityId(requestedEntityId);
+    }
+    if (!child) {
+      routedByEntity = false;
+      child = deps.getHealthyHub();
+    }
+    if (!child) {
+      return new Response(safeStringify({ success: false, error: 'No healthy hub API available', code: 'ENTITY_HUB_PROXY_NO_HEALTHY_HUB' }), {
+        status: 503,
+        headers: proxyHeaders(),
+      });
+    }
+
+    try {
+      const upstreamStartedAt = Date.now();
+      const timeoutMs = readHubApiProxyTimeoutMs();
+      const { response, text } = await fetchTextWithTimeout(`http://${deps.host}:${child.apiPort}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'content-type': request.headers.get('content-type') || 'application/json',
+        },
+        body: bodyText,
+      }, timeoutMs);
+      return new Response(text, {
+        status: response.status,
+        headers: proxyHeaders({
+          'content-type': response.headers.get('content-type') || 'application/json',
+          'X-XLN-Proxy-Upstream-Ms': String(Date.now() - upstreamStartedAt),
+          'X-XLN-Proxy-Routed-By-Entity': routedByEntity ? '1' : '0',
+        }),
+      });
+    } catch (error) {
+      return new Response(safeStringify({
+        success: false,
+        error: serializeError(error),
+        code: 'ENTITY_HUB_PROXY_FAILED',
+      }), {
+        status: 502,
+        headers: proxyHeaders(),
+      });
+    }
+  };
+
   const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Promise<Response> => {
     await deps.pollAllHubHealth();
     let requestedHubId = '';
@@ -315,6 +392,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
   return {
     proxyAnyHubGet,
     proxyAnyHubRequest,
+    proxyEntityHubApi,
     proxyHubApi,
     proxyRpc,
   };

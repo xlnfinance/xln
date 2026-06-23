@@ -622,4 +622,52 @@ describe('runtime output routing', () => {
     expect(errors).toContain('INBOUND_ENTITY_RUNTIME_HALTED');
     expect(enqueued).toHaveLength(0);
   });
+
+  test('fails fast before enqueueing inbound P2P input during persistence quiesce', () => {
+    const localEntityId = entityId('81');
+    const signerId = runtimeId('82');
+    const errors: string[] = [];
+    const enqueued: RoutedEntityInput[] = [];
+    let startCalls = 0;
+    const env = {
+      runtimeId: runtimeId('11'),
+      eReplicas: new Map([[`${localEntityId}:${signerId}`, { entityId: localEntityId, signerId }]]),
+      runtimeState: { entityRuntimeHints: new Map(), loopActive: false, persistenceQuiescing: true },
+      warn: () => {},
+      info: () => {},
+      error: (_scope: string, code: string) => errors.push(code),
+    } as unknown as Env;
+
+    expect(() => handleInboundP2PEntityInput(env, runtimeId('12'), {
+      runtimeId: runtimeId('11'),
+      entityId: localEntityId,
+      signerId,
+      entityTxs: [{
+        type: 'accountInput',
+        data: {
+          fromEntityId: entityId('83'),
+          toEntityId: localEntityId,
+          height: 1,
+        },
+      } as any],
+    }, {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      enqueueRuntimeInputs: (_targetEnv, inputs) => {
+        enqueued.push(...(inputs ?? []));
+      },
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => true,
+      hasLocalSignerForEntitySigner: () => true,
+      resolveSoleLocalSignerForEntity: () => signerId,
+      getP2P: () => null,
+      startRuntimeLoop: () => {
+        startCalls += 1;
+      },
+      processRuntime: async () => undefined,
+    })).toThrow(/INBOUND_ENTITY_RUNTIME_QUIESCING/);
+
+    expect(errors).toContain('INBOUND_ENTITY_RUNTIME_QUIESCING');
+    expect(enqueued).toHaveLength(0);
+    expect(startCalls).toBe(0);
+  });
 });

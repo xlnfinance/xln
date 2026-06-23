@@ -3974,6 +3974,7 @@ const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayIn
 // JAdapter - Unified J-Machine interface (replaces old evms/ and jurisdiction/)
 export { createJAdapter } from './jadapter';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from './jadapter';
+export { applyJEventsToEnv } from './jadapter/watcher';
 export {
   getActiveJAdapter,
   getEntityJAdapter,

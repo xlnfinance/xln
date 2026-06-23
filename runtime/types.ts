@@ -329,6 +329,27 @@ export interface PendingCrossJurisdictionFillAck {
   reason?: string;
 }
 
+export type ExternalWalletBalanceRecord = {
+  tokenAddress: string;
+  tokenId?: number;
+  balance: bigint;
+  jHeight: number;
+  transactionHash?: string;
+};
+
+export type ExternalWalletAllowanceRecord = {
+  tokenAddress: string;
+  spender: string;
+  allowance: bigint;
+  jHeight: number;
+  transactionHash?: string;
+};
+
+export type ExternalWalletState = {
+  balances: Map<string, Map<string, ExternalWalletBalanceRecord>>;
+  allowances: Map<string, Map<string, ExternalWalletAllowanceRecord>>;
+};
+
 /**
  * Liveness sync - empty block observation to prove chain is alive.
  * Required every JBLOCK_LIVENESS_INTERVAL blocks even if no events.
@@ -350,6 +371,10 @@ export interface EntityState {
   // Never persist or pass string token keys through live state.
   reserves: Map<number, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
   accounts: Map<string, AccountMachine>; // canonicalKey "left:right" -> account state
+  // External EOA balances/allowances observed through finalized J snapshots.
+  // Keyed by owner EOA, then token/spender keys, so multi-validator entities
+  // keep one deterministic map instead of signer-local side-channel state.
+  externalWallet?: ExternalWalletState;
   // Account frame scheduling (accounts blocked by pendingFrame, retried on next ACK)
   deferredAccountProposals?: Map<string, true>;
   // 🔭 J-machine tracking (JBlock consensus)
@@ -569,6 +594,7 @@ export interface Env {
     wakeRequested?: boolean;
     clockPrimed?: boolean;
     persistencePaused?: boolean;
+    persistenceQuiescing?: boolean;
     lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
     maxEntityInputsPerFrame?: number;
     maxEntityTxsPerFrame?: number;
@@ -598,6 +624,14 @@ export interface Env {
       mirrorToConsole?: boolean;
     };
     pendingAuditEvents?: Array<Record<string, unknown>>;
+    recentJEvents?: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      blockNumber: number;
+      blockHash: string;
+      transactionHash: string;
+      observedAt: number;
+    }>;
     quarantinedRuntimeInputs?: Array<{
       id: string;
       height: number;
@@ -637,6 +671,7 @@ export interface Env {
       runtimeId: string;
       seenAt: number;
     }>;
+    externalWalletWatchOwners?: Map<string, Map<string, number>>;
     watcherDedupCounter?: import('./jadapter/watcher').EventBatchCounter;
     directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number) => boolean) | null;
     /**
