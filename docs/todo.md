@@ -181,6 +181,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Curated e2e screenshots now write PNG plus JSON metadata both into Playwright artifacts and the static repo gallery at `tests/e2e/screenshots/ux-gallery/{desktop,mobile}`; `/api/qa/stories` reads metadata and QA cockpit opens on `UX Gallery` by default.
   - Coverage: focused screenshot + move e2e generated 33 curated PNGs and 33 metadata sidecars across onboarding, assets, accounts, payment, receive, cross-chain swap menus, on-chain batch compose/queue/history, dispute controls, history, and settings.
   - Evidence: unit enforces at least 20 curated screens and required groups `Payments`, `Swap`, `On-chain Batch`, `Disputes`, `History`; focused QA cockpit e2e verifies default gallery rendering, counts, and categories.
+  - Revalidated: run `20260623-200141-886` regenerated 30 gallery artifacts on HEAD `20aa9c0d`; QA cockpit run `20260623-200321-059` passed gallery visibility.
 
 - [ ] Make `/health` read only its dedicated health surface.
   - Impact: medium.
