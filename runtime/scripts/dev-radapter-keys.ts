@@ -10,6 +10,20 @@ type DevRuntime = {
   portOffset: number;
 };
 
+type RuntimeImportManifestEntry = {
+  label: string;
+  access: 'read' | 'admin';
+  wsUrl: string;
+  token: string;
+};
+
+type RuntimeImportManifest = {
+  v: 1;
+  issuedAt: number;
+  expiresAt: number;
+  entries: RuntimeImportManifestEntry[];
+};
+
 const RUNTIMES: DevRuntime[] = [
   { name: 'H1', portOffset: 10 },
   { name: 'H2', portOffset: 11 },
@@ -39,30 +53,75 @@ const webPort = requireNumberArg('--web-port');
 const apiPort = requireNumberArg('--api-port');
 const outPath = resolve(readArg('--out', './db/dev/radapter-keys.json')!);
 const envOutPath = resolve(readArg('--env-out', './db/dev/radapter-keys.env')!);
-const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+const issuedAt = Date.now();
+const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
+
+const buildAppUrl = (wsUrl: string, token: string): string =>
+  `https://localhost:${webPort}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(token)}`;
+
+const formatRuntimeImportLines = (manifest: RuntimeImportManifest): string =>
+  manifest.entries.map(entry => `${entry.label} | ${entry.access} | ${entry.wsUrl} | ${entry.token}`).join('\n');
+
+const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string =>
+  `https://localhost:${webPort}/app?runtimeList=${encodeURIComponent(formatRuntimeImportLines(manifest))}`;
 
 const seeds: Record<string, string> = {};
 const entries = RUNTIMES.map(runtime => {
   const seed = randomBytes(32).toString('hex');
   seeds[runtime.name] = seed;
   const wsUrl = `ws://localhost:${apiPort + runtime.portOffset}/rpc`;
-  const appUrl =
-    `https://localhost:${webPort}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&key=paste`;
+  const inspectToken = deriveRuntimeAdapterCapabilityToken(seed, 'read', expiresAt, {
+    keyId: `dev-${runtime.name.toLowerCase()}-read`,
+  });
+  const adminToken = deriveRuntimeAdapterCapabilityToken(seed, 'full', expiresAt, {
+    keyId: `dev-${runtime.name.toLowerCase()}-admin`,
+  });
   return {
     name: runtime.name,
     wsUrl,
-    appUrl,
+    appUrl: buildAppUrl(wsUrl, inspectToken),
+    adminAppUrl: buildAppUrl(wsUrl, adminToken),
     authSeed: seed,
-    inspectToken: deriveRuntimeAdapterCapabilityToken(seed, 'read', expiresAt, {
-      keyId: `dev-${runtime.name.toLowerCase()}`,
-    }),
+    inspectToken,
+    adminToken,
   };
 });
+
+const readImportManifest: RuntimeImportManifest = {
+  v: 1,
+  issuedAt,
+  expiresAt,
+  entries: entries.map(entry => ({
+    label: entry.name,
+    access: 'read',
+    wsUrl: entry.wsUrl,
+    token: entry.inspectToken,
+  })),
+};
+
+const adminImportManifest: RuntimeImportManifest = {
+  v: 1,
+  issuedAt,
+  expiresAt,
+  entries: entries.map(entry => ({
+    label: entry.name,
+    access: 'admin',
+    wsUrl: entry.wsUrl,
+    token: entry.adminToken,
+  })),
+};
+
+const importUrl = buildRuntimeImportUrl(readImportManifest);
+const adminImportUrl = buildRuntimeImportUrl(adminImportManifest);
 
 const payload = {
   generatedAt: new Date().toISOString(),
   expiresAt,
   note: 'Local dev secrets. This file is under db/ and must not be committed.',
+  importUrl,
+  adminImportUrl,
+  importManifest: readImportManifest,
+  adminImportManifest,
   entries,
 };
 
@@ -78,10 +137,9 @@ chmodSync(outPath, 0o600);
 chmodSync(envOutPath, 0o600);
 
 console.log('');
+console.log('Open this URL to auto-import all dev runtimes:');
+console.log(`  ${importUrl}`);
+console.log('');
 console.log(`XLN dev radapter keys written to ${outPath}`);
 console.log(`Runtime auth env written to ${envOutPath}`);
-console.log('Open these URLs, then paste inspectToken from the key file when prompted:');
-for (const entry of entries) {
-  console.log(`  ${entry.name}: ${entry.appUrl}`);
-}
 console.log('');

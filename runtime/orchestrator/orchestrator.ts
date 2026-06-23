@@ -267,7 +267,6 @@ type RuntimeImportManifest = {
   entries: RuntimeImportManifestEntry[];
 };
 
-const RUNTIME_IMPORT_HASH_PARAM = 'runtime-import';
 const runtimeImportAccess = String(process.env['XLN_RUNTIME_IMPORT_ACCESS'] || 'read').trim().toLowerCase() === 'admin'
   ? 'admin'
   : 'read';
@@ -286,9 +285,6 @@ const buildPublicRuntimeRpcUrl = (apiPort: number): string => {
   url.hash = '';
   return url.toString();
 };
-
-const encodeBase64UrlJson = (value: unknown): string =>
-  Buffer.from(safeStringify(value), 'utf8').toString('base64url');
 
 const deriveRuntimeImportToken = (
   seed: string,
@@ -309,7 +305,11 @@ const deriveRuntimeImportToken = (
 
 const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string => {
   const url = new URL(args.walletUrl);
-  url.hash = `${RUNTIME_IMPORT_HASH_PARAM}=${encodeBase64UrlJson(manifest)}`;
+  const lines = manifest.entries
+    .map(entry => `${entry.label} | ${entry.access} | ${entry.wsUrl} | ${entry.token}`)
+    .join('\n');
+  url.searchParams.set('runtimeList', lines);
+  url.hash = '';
   return url.toString();
 };
 
