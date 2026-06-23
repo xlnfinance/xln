@@ -48,6 +48,7 @@ import {
   handleRuntimeAdapterMessage,
   type RuntimeAdapterSocket,
 } from '../radapter/server';
+import { redactTokenBearingUrlForLog } from './runtime-import-log';
 import {
   handleLendingBorrowRequest,
   handleLendingOfferRequest,
@@ -2502,7 +2503,7 @@ const run = async (): Promise<void> => {
   try {
     const inspectUrl = buildRuntimeInspectUrl(env);
     if (inspectUrl) {
-      console.log(`[MESH-HUB] INSPECT_URL name=${resolvedArgs.name} url=${inspectUrl}`);
+      console.log(`[MESH-HUB] INSPECT_URL name=${resolvedArgs.name} url=${redactTokenBearingUrlForLog(inspectUrl)}`);
     }
   } catch (error) {
     console.warn(

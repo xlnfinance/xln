@@ -12,6 +12,7 @@
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=on-first-retry --max-failures=1
  */
 
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import {
   cpSync,
@@ -25,11 +26,19 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { availableParallelism } from 'node:os';
+import { availableParallelism, freemem, loadavg, totalmem } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
-import { deriveQaTestDescription, deriveQaTestHandle } from '../qa/report';
+import {
+  compareQaRunWithHistory,
+  deriveQaTestDescription,
+  deriveQaTestHandle,
+  recordQaRunHistory,
+  type QaArtifact,
+  type QaArtifactKind,
+  type QaRunManifest,
+} from '../qa/report';
 import { compareStableText } from '../serialization-utils';
 import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
 
@@ -76,6 +85,7 @@ type RunResult = {
     playwright: number;
   };
   error?: string;
+  perf: QaPerfSummary;
 };
 
 type RunTask = {
@@ -94,6 +104,47 @@ type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
 const RESET_CONFIRMATION = 'RESET_MESH_STATE';
 
+type QaCodeFingerprint = {
+  gitHead: string | null;
+  gitBranch: string | null;
+  gitStatus: string;
+  dirty: boolean;
+  codeHash: string;
+  computedAt: number;
+  trackedFileCount: number;
+  trackedBytes: number;
+};
+
+type QaPerfChildSample = {
+  name: string;
+  pid: number;
+  cpuPct: number;
+  memPct: number;
+  rssKb: number;
+};
+
+type QaPerfSample = {
+  ts: number;
+  load1: number;
+  load5: number;
+  load15: number;
+  freeMemBytes: number;
+  totalMemBytes: number;
+  runnerRssBytes: number;
+  children: QaPerfChildSample[];
+};
+
+type QaPerfSummary = {
+  sampleCount: number;
+  avgLoad1: number;
+  peakLoad1: number;
+  minFreeMemBytes: number;
+  maxRunnerRssBytes: number;
+  maxChildCpuPct: number;
+  maxChildRssKb: number;
+  samples: QaPerfSample[];
+};
+
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === 'object' && value !== null;
 
@@ -104,6 +155,139 @@ const arrayOf = (record: JsonRecord, key: string): unknown[] =>
 
 const recordArrayOf = (record: JsonRecord, key: string): JsonRecord[] =>
   arrayOf(record, key).filter(isRecord);
+
+const spawnText = (cmd: string, args: string[]): string => {
+  const result = spawnSync(cmd, args, {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) return '';
+  return String(result.stdout || '').trim();
+};
+
+const computeCodeFingerprint = (): QaCodeFingerprint => {
+  const gitHead = spawnText('git', ['rev-parse', 'HEAD']) || null;
+  const gitBranch = spawnText('git', ['rev-parse', '--abbrev-ref', 'HEAD']) || null;
+  const gitStatus = spawnText('git', ['status', '--short', '--untracked-files=all']);
+  const sourceRaw = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'pipe',
+    encoding: 'buffer',
+  });
+  if (sourceRaw.status !== 0) {
+    throw new Error(`GIT_LS_FILES_FAILED:${String(sourceRaw.stderr || '').trim()}`);
+  }
+  const files = Buffer.from(sourceRaw.stdout)
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean)
+    .sort(compareStableText);
+  const hash = createHash('sha256');
+  let trackedBytes = 0;
+  for (const file of files) {
+    const absolutePath = resolve(process.cwd(), file);
+    if (!existsSync(absolutePath)) continue;
+    const data = readFileSync(absolutePath);
+    trackedBytes += data.length;
+    hash.update(file);
+    hash.update('\0');
+    hash.update(data);
+    hash.update('\0');
+  }
+  return {
+    gitHead,
+    gitBranch,
+    gitStatus,
+    dirty: gitStatus.length > 0,
+    codeHash: hash.digest('hex'),
+    computedAt: Date.now(),
+    trackedFileCount: files.length,
+    trackedBytes,
+  };
+};
+
+const emptyPerfSummary = (): QaPerfSummary => ({
+  sampleCount: 0,
+  avgLoad1: 0,
+  peakLoad1: 0,
+  minFreeMemBytes: 0,
+  maxRunnerRssBytes: 0,
+  maxChildCpuPct: 0,
+  maxChildRssKb: 0,
+  samples: [],
+});
+
+const readChildPerf = (name: string, pid: number | undefined): QaPerfChildSample | null => {
+  if (!pid || pid <= 0) return null;
+  const result = spawnSync('ps', ['-p', String(pid), '-o', '%cpu=,%mem=,rss='], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) return null;
+  const parts = String(result.stdout || '').trim().split(/\s+/).map(Number);
+  if (parts.length < 3 || parts.some((part) => !Number.isFinite(part))) return null;
+  return {
+    name,
+    pid,
+    cpuPct: parts[0]!,
+    memPct: parts[1]!,
+    rssKb: parts[2]!,
+  };
+};
+
+const summarizePerfSamples = (samples: QaPerfSample[]): QaPerfSummary => {
+  if (samples.length === 0) return emptyPerfSummary();
+  const childSamples = samples.flatMap(sample => sample.children);
+  const avgLoad1 = samples.reduce((sum, sample) => sum + sample.load1, 0) / samples.length;
+  const peakLoad1 = samples.reduce((max, sample) => Math.max(max, sample.load1), 0);
+  const minFreeMemBytes = samples.reduce((min, sample) => Math.min(min, sample.freeMemBytes), Number.MAX_SAFE_INTEGER);
+  const maxRunnerRssBytes = samples.reduce((max, sample) => Math.max(max, sample.runnerRssBytes), 0);
+  const maxChildCpuPct = childSamples.reduce((max, sample) => Math.max(max, sample.cpuPct), 0);
+  const maxChildRssKb = childSamples.reduce((max, sample) => Math.max(max, sample.rssKb), 0);
+  return {
+    sampleCount: samples.length,
+    avgLoad1: Math.round(avgLoad1 * 100) / 100,
+    peakLoad1: Math.round(peakLoad1 * 100) / 100,
+    minFreeMemBytes,
+    maxRunnerRssBytes,
+    maxChildCpuPct: Math.round(maxChildCpuPct * 100) / 100,
+    maxChildRssKb,
+    samples,
+  };
+};
+
+const startPerfMonitor = (
+  getChildren: () => Array<{ name: string; pid: number | undefined }>,
+): { stop: () => QaPerfSummary } => {
+  const samples: QaPerfSample[] = [];
+  const sample = (): void => {
+    const [load1 = 0, load5 = 0, load15 = 0] = loadavg();
+    samples.push({
+      ts: Date.now(),
+      load1,
+      load5,
+      load15,
+      freeMemBytes: freemem(),
+      totalMemBytes: totalmem(),
+      runnerRssBytes: process.memoryUsage().rss,
+      children: getChildren()
+        .map(child => readChildPerf(child.name, child.pid))
+        .filter((child): child is QaPerfChildSample => child !== null),
+    });
+  };
+  sample();
+  const timer = setInterval(sample, 1000);
+  return {
+    stop: () => {
+      clearInterval(timer);
+      sample();
+      return summarizePerfSamples(samples);
+    },
+  };
+};
 
 type RunnerLockPayload = {
   pid: number;
@@ -386,7 +570,7 @@ const parseStepTimings = (path: string): StepTiming[] => {
   }
 };
 
-const detectArtifactKind = (name: string): 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other' => {
+const detectArtifactKind = (name: string): QaArtifactKind => {
   const lower = name.toLowerCase();
   if (lower.endsWith('.webm')) return 'video';
   if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image';
@@ -408,7 +592,7 @@ const detectArtifactContentType = (name: string): string => {
   return 'application/octet-stream';
 };
 
-const artifactKindRank = (kind: string): number => {
+const artifactKindRank = (kind: QaArtifactKind): number => {
   if (kind === 'video') return 0;
   if (kind === 'image') return 1;
   if (kind === 'trace') return 2;
@@ -421,11 +605,10 @@ const artifactKindRank = (kind: string): number => {
 const collectShardArtifacts = (
   logsDir: string,
   shard: number,
-): Array<{ name: string; relativePath: string; sizeBytes: number; kind: string; contentType: string }> => {
+): QaArtifact[] => {
   const resultsDir = join(logsDir, `test-results-shard-${shard}`);
   if (!existsSync(resultsDir)) return [];
-  const artifacts: Array<{ name: string; relativePath: string; sizeBytes: number; kind: string; contentType: string }> =
-    [];
+  const artifacts: QaArtifact[] = [];
 
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -476,14 +659,14 @@ const writeRunManifest = (
   results: RunResult[],
   totalMs: number,
   createdAt: number,
-): void => {
+  codeFingerprint: QaCodeFingerprint,
+): QaRunManifest => {
   const shards = results
     .slice()
     .sort((a, b) => a.shard - b.shard)
     .map(result => {
-      const slowSteps = parseStepTimings(result.logPath)
-        .sort((a, b) => b.ms - a.ms)
-        .slice(0, 12);
+      const timelineSteps = parseStepTimings(result.logPath).slice(0, 80);
+      const slowSteps = timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, 12);
       const artifacts = collectShardArtifacts(logsDir, result.shard);
       return {
         shard: result.shard,
@@ -500,7 +683,10 @@ const writeRunManifest = (
         requireCustody: result.requireCustody,
         error: result.error ?? null,
         phaseMs: result.phaseMs,
+        perf: result.perf,
+        timelineSteps,
         logRelativePath: result.logPath.slice(logsDir.length + 1),
+        logTail: tailLog(result.logPath),
         slowSteps,
         artifacts,
         hasVideo: artifacts.some(artifact => artifact.kind === 'video'),
@@ -509,13 +695,16 @@ const writeRunManifest = (
     });
   const passedShards = shards.filter(shard => shard.status === 'passed').length;
   const failedShards = shards.filter(shard => shard.status === 'failed').length;
-  const manifest = {
+  const status: QaRunManifest['status'] = failedShards > 0 ? 'failed' : 'passed';
+  const manifest: QaRunManifest = {
     manifestVersion: 1,
     runId: logsDir.split('/').at(-1) || logsDir,
     createdAt,
     completedAt: Date.now(),
-    status: failedShards > 0 ? 'failed' : 'passed',
+    status,
     totalMs,
+    code: codeFingerprint,
+    perf: summarizePerfSamples(shards.flatMap(shard => shard.perf.samples ?? [])),
     totalShards: shards.length,
     passedShards,
     failedShards,
@@ -534,7 +723,39 @@ const writeRunManifest = (
     },
     shards,
   };
+  manifest.benchmark = compareQaRunWithHistory(manifest);
   writeFileSync(join(logsDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+  recordQaRunHistory(manifest, logsDir);
+  return manifest;
+};
+
+type QaRunBenchmark = NonNullable<QaRunManifest['benchmark']>;
+
+const formatBenchmarkMetric = (metric: QaRunBenchmark['metrics'][number]): string =>
+  `${metric.label} ${metric.deltaPct > 0 ? '+' : ''}${metric.deltaPct}% (${metric.baseline}->${metric.current}${metric.unit})`;
+
+const printBenchmarkComparison = (benchmark: QaRunManifest['benchmark']): void => {
+  if (!benchmark) return;
+  console.log('-'.repeat(72));
+  console.log(`Benchmark: ${benchmark.status.toUpperCase()} suite=${benchmark.suiteLabel}`);
+  if (benchmark.comparedRunId) {
+    console.log(
+      `Compared : ${benchmark.comparedRunId} ` +
+      `head=${benchmark.comparedGitHead?.slice(0, 12) ?? 'n/a'} ` +
+      `code=${benchmark.comparedCodeHash?.slice(0, 16) ?? 'n/a'}`,
+    );
+  }
+  console.log(`Reason   : ${benchmark.reason}`);
+  const important = benchmark.metrics
+    .filter(metric => metric.verdict !== 'ok')
+    .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct))
+    .slice(0, 6);
+  if (important.length > 0) {
+    console.log(`Deltas   : ${important.map(formatBenchmarkMetric).join(' | ')}`);
+  }
+  if (benchmark.likelyCauses.length > 0) {
+    console.log(`Causes   : ${benchmark.likelyCauses.join(' | ')}`);
+  }
 };
 
 const publishQaRunIfConfigured = (logsDir: string): void => {
@@ -1208,6 +1429,8 @@ const runCmd = async (
     log?: ReturnType<typeof createWriteStream>;
     timeoutMs?: number;
     signal?: AbortSignal | undefined;
+    onSpawn?: (pid: number) => void;
+    onExit?: () => void;
   },
 ): Promise<number | null> => {
   const proc = spawn(cmd, args, {
@@ -1215,6 +1438,7 @@ const runCmd = async (
     env: sanitizeChildEnv(opts.env ?? process.env),
     cwd: opts.cwd,
   });
+  if (proc.pid) opts.onSpawn?.(proc.pid);
 
   proc.stdout.on('data', chunk => opts.log?.write(chunk.toString()));
   proc.stderr.on('data', chunk => opts.log?.write(chunk.toString()));
@@ -1247,6 +1471,7 @@ const runCmd = async (
   if (timeout) clearTimeout(timeout);
   if (abortKillTimer) clearTimeout(abortKillTimer);
   opts.signal?.removeEventListener('abort', abortChild);
+  opts.onExit?.();
   return code;
 };
 
@@ -1380,6 +1605,7 @@ const runShard = async (
   let anvil2: ManagedChildProcess | null = null;
   let api: ManagedChildProcess | null = null;
   let vite: ManagedChildProcess | null = null;
+  let playwrightPid: number | undefined;
   let teardownReason: string | null = null;
   const shardAbortController = new AbortController();
   const forwardOuterAbort = (): void => shardAbortController.abort();
@@ -1421,6 +1647,19 @@ const runShard = async (
   const throwIfAborted = (): void => {
     if (teardownReason?.startsWith('E2E_FATAL_RUNTIME_LOG')) throw new Error(teardownReason);
     if (shardAbortController.signal.aborted || signal?.aborted) throw new Error('E2E_ABORTED_AFTER_FIRST_FAILURE');
+  };
+  const perfMonitor = startPerfMonitor(() => [
+    { name: 'anvil', pid: anvil?.pid },
+    { name: 'anvil2', pid: anvil2?.pid },
+    { name: 'api', pid: api?.pid },
+    { name: 'vite', pid: vite?.pid },
+    { name: 'playwright', pid: playwrightPid },
+  ]);
+  let perfStopped = false;
+  const finishResult = (result: Omit<RunResult, 'perf'>): RunResult => {
+    const perf = perfStopped ? emptyPerfSummary() : perfMonitor.stop();
+    perfStopped = true;
+    return { ...result, perf };
   };
 
   try {
@@ -1676,6 +1915,12 @@ const runShard = async (
       log,
       timeoutMs: args.testTimeoutMs,
       signal: shardAbortController.signal,
+      onSpawn: (pid) => {
+        playwrightPid = pid;
+      },
+      onExit: () => {
+        playwrightPid = undefined;
+      },
     });
     markPhase('playwright', playwrightStart);
 
@@ -1687,7 +1932,7 @@ const runShard = async (
         apiUrl,
         log,
       });
-      return {
+      return finishResult({
         shard,
         status: 'failed',
         durationMs: Date.now() - startedAt,
@@ -1698,7 +1943,7 @@ const runShard = async (
         requireCustody: task.requireCustody,
         phaseMs,
         error: teardownReason,
-      };
+      });
     }
 
     await delay(250);
@@ -1712,7 +1957,7 @@ const runShard = async (
         apiUrl,
         log,
       });
-      return {
+      return finishResult({
         shard,
         status: 'failed',
         durationMs: Date.now() - startedAt,
@@ -1723,10 +1968,10 @@ const runShard = async (
         requireCustody: task.requireCustody,
         phaseMs,
         error: teardownReason,
-      };
+      });
     }
 
-    return {
+    return finishResult({
       shard,
       status: 'passed',
       durationMs: Date.now() - startedAt,
@@ -1736,7 +1981,7 @@ const runShard = async (
       requireMarketMaker: task.requireMarketMaker,
       requireCustody: task.requireCustody,
       phaseMs,
-    };
+    });
   } catch (error) {
     teardownReason = teardownReason || formatErrorForLog(error);
     try {
@@ -1749,7 +1994,7 @@ const runShard = async (
     } catch {
       // Best effort only.
     }
-    return {
+    return finishResult({
       shard,
       status: 'failed',
       durationMs: Date.now() - startedAt,
@@ -1760,8 +2005,12 @@ const runShard = async (
       requireCustody: task.requireCustody,
       phaseMs,
       error: teardownReason,
-    };
+    });
   } finally {
+    if (!perfStopped) {
+      perfMonitor.stop();
+      perfStopped = true;
+    }
     stopFatalMonitor?.();
     signal?.removeEventListener('abort', forwardOuterAbort);
     if (teardownReason && api && api.exitCode === null) {
@@ -1785,6 +2034,7 @@ async function main(): Promise<void> {
   const logsDir = resolve(process.cwd(), '.logs', 'e2e-parallel', tsTag());
   const releaseRunnerLock = acquireRunnerLock(logsDir);
   mkdirSync(logsDir, { recursive: true });
+  const codeFingerprint = computeCodeFingerprint();
 
   console.log('\n' + '='.repeat(72));
   console.log('E2E Parallel Runner (isolated stack per shard)');
@@ -1798,6 +2048,8 @@ async function main(): Promise<void> {
   console.log(`Phase warn ms: ${args.phaseWarnMs}`);
   console.log(`Prewait health: ${args.prewaitHealth}`);
   console.log(`Artifacts    : video=${args.videoMode}, trace=${args.traceMode}, screenshot=${args.screenshotMode}`);
+  console.log(`Git HEAD     : ${codeFingerprint.gitHead?.slice(0, 12) ?? 'unknown'}${codeFingerprint.dirty ? ' dirty' : ''}`);
+  console.log(`Code hash    : ${codeFingerprint.codeHash.slice(0, 16)}`);
   console.log(`Logs     : ${logsDir}`);
   console.log('='.repeat(72) + '\n');
 
@@ -1945,7 +2197,7 @@ async function main(): Promise<void> {
     const totalMs = Date.now() - startedAt;
     const completedResults = results.filter((result): result is RunResult => Boolean(result));
     const failed = completedResults.filter(r => r.status === 'failed');
-    writeRunManifest(logsDir, args, completedResults, totalMs, startedAt);
+    const manifest = writeRunManifest(logsDir, args, completedResults, totalMs, startedAt, codeFingerprint);
     publishQaRunIfConfigured(logsDir);
 
     console.log('\n' + '='.repeat(72));
@@ -1968,7 +2220,10 @@ async function main(): Promise<void> {
     }
     console.log('-'.repeat(72));
     console.log(`Total wall time: ${(totalMs / 1000).toFixed(1)}s (${totalMs}ms)`);
+    console.log(`Git HEAD: ${codeFingerprint.gitHead ?? 'unknown'}`);
+    console.log(`Code hash: ${codeFingerprint.codeHash}`);
     console.log(`Logs: ${logsDir}`);
+    printBenchmarkComparison(manifest.benchmark);
 
     if (failed.length > 0) {
       for (const f of failed) {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { qaFetch } from '$lib/qa/apiClient';
 
   type QaSummary = {
     runId: string;
@@ -53,7 +54,7 @@
       error = null;
     }
     try {
-      const response = await fetch(`/api/qa/runs?limit=${Math.max(1, Math.floor(limit))}`, { cache: 'no-store' });
+      const response = await qaFetch(`/api/qa/runs?limit=${Math.max(1, Math.floor(limit))}`, { cache: 'no-store' });
       const payload = await response.json() as { ok?: boolean; runs?: QaSummary[]; error?: string };
       if (!response.ok || !payload.ok || !Array.isArray(payload.runs)) {
         throw new Error(payload.error || `QA runs HTTP ${response.status}`);

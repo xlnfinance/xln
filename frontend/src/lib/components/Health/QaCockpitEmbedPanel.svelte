@@ -22,6 +22,7 @@
       title="QA Cockpit"
       src="/qa?embed=1"
       loading="lazy"
+      allowfullscreen
     ></iframe>
   {:else}
     <div class="qa-cockpit-placeholder">

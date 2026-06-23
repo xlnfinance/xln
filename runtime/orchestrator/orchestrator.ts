@@ -97,6 +97,7 @@ import {
   resolveSecondaryJurisdictions,
   type MeshJurisdictionConfig,
 } from './mesh-jurisdictions';
+import { buildRuntimeImportLogLine } from './runtime-import-log';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -365,9 +366,12 @@ const publishRuntimeImportManifest = (): void => {
     `${safeStringify({ importUrl, manifest })}\n`,
     { encoding: 'utf8', mode: 0o600 },
   );
-  console.log(
-    `[MESH] RUNTIME_IMPORT_URL count=${manifest.entries.length} access=${runtimeImportAccess} path=${runtimeImportManifestPath} url=${importUrl}`,
-  );
+  console.log(buildRuntimeImportLogLine({
+    manifest,
+    importUrl,
+    access: runtimeImportAccess,
+    manifestPath: runtimeImportManifestPath,
+  }));
 };
 
 let resetPromise: Promise<void> | null = null;
