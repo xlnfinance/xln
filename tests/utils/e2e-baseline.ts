@@ -18,6 +18,7 @@ export type E2EHubMeshPairHealth = {
   left?: string;
   right?: string;
   ok?: boolean;
+  expectedCreditAmount?: string;
 };
 
 export type E2EHubMeshHealth = {
@@ -110,6 +111,13 @@ export type E2EHealthResponse = {
   reset?: E2EResetHealth;
   hubMesh?: E2EHubMeshHealth;
   marketMaker?: E2EMarketMakerHealth;
+  custody?: {
+    enabled?: boolean;
+    ok?: boolean;
+    entityId?: string | null;
+    daemonPort?: number | null;
+    servicePort?: number | null;
+  };
   bootstrapReserves?: E2EBootstrapReserveHealth;
   hubs?: E2EHubHealth[];
 };
@@ -120,6 +128,7 @@ export type E2EBaselineOptions = {
   pollMs?: number;
   requireHubMesh?: boolean;
   requireMarketMaker?: boolean;
+  requireCustody?: boolean;
   minHubCount?: number;
   autoResetGraceMs?: number;
   forceReset?: boolean;
@@ -213,6 +222,7 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
           left: pair.left ?? null,
           right: pair.right ?? null,
           ok: pair.ok ?? false,
+          expectedCreditAmount: pair.expectedCreditAmount ?? null,
         })),
       },
       marketMaker: {
@@ -271,6 +281,13 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
           })),
         })),
       },
+      custody: {
+        enabled: health.custody?.enabled ?? false,
+        ok: health.custody?.ok ?? false,
+        entityId: health.custody?.entityId ?? null,
+        daemonPort: health.custody?.daemonPort ?? null,
+        servicePort: health.custody?.servicePort ?? null,
+      },
       hubs: (health.hubs ?? []).map((hub) => ({
         entityId: hub.entityId,
         name: hub.name ?? null,
@@ -296,6 +313,10 @@ const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2E
     if (health.marketMaker?.ok !== true) return false;
   } else if (health.marketMaker?.enabled === true) {
     return false;
+  }
+  if (options.requireCustody) {
+    if (health.custody?.enabled !== true) return false;
+    if (health.custody?.ok !== true) return false;
   }
   if (!health.bootstrapReserves?.ok) return false;
   return true;
@@ -450,6 +471,7 @@ export const ensureE2EBaseline = async (
     pollMs: options.pollMs ?? DEFAULT_POLL_MS,
     requireHubMesh: options.requireHubMesh ?? true,
     requireMarketMaker: options.requireMarketMaker ?? false,
+    requireCustody: options.requireCustody ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
     forceReset: options.forceReset ?? false,
@@ -469,6 +491,7 @@ export const ensureE2EBaseline = async (
       pollMs: resolved.pollMs,
       requireHubMesh: resolved.requireHubMesh,
       requireMarketMaker: resolved.requireMarketMaker,
+      requireCustody: resolved.requireCustody,
       minHubCount: resolved.minHubCount,
       autoResetGraceMs: resolved.timeoutMs,
       forceReset: true,
@@ -489,6 +512,7 @@ export const ensureE2EBaseline = async (
       pollMs: resolved.pollMs,
       requireHubMesh: resolved.requireHubMesh,
       requireMarketMaker: resolved.requireMarketMaker,
+      requireCustody: resolved.requireCustody,
       minHubCount: resolved.minHubCount,
       autoResetGraceMs: remainingTimeoutMs,
     });
@@ -509,6 +533,7 @@ export const resetProdServer = async (
     pollMs: options.pollMs ?? DEFAULT_POLL_MS,
     requireHubMesh: options.requireHubMesh ?? true,
     requireMarketMaker: options.requireMarketMaker ?? false,
+    requireCustody: options.requireCustody ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
     forceReset: options.forceReset ?? false,
@@ -552,6 +577,7 @@ export const resetProdServer = async (
           confirm: RESET_CONFIRMATION,
           requireMarketMaker: options.requireMarketMaker ?? false,
           enableMarketMaker: options.requireMarketMaker ?? false,
+          requireCustody: options.requireCustody ?? false,
         };
         const coldResponse = await api.post(`${resetBaseUrl}/api/reset`, {
           data: resetBody,

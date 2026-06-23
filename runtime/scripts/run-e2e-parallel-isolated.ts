@@ -66,6 +66,7 @@ type RunResult = {
   target: string;
   title: string;
   requireMarketMaker: boolean;
+  requireCustody: boolean;
   phaseMs: {
     preflight: number;
     anvilBoot: number;
@@ -82,6 +83,7 @@ type RunTask = {
   totalShards: number;
   pwTargets: string[];
   requireMarketMaker: boolean;
+  requireCustody: boolean;
   usePlaywrightShard: boolean;
   title?: string | undefined;
   grep?: string | undefined;
@@ -495,6 +497,7 @@ const writeRunManifest = (
         target: result.target,
         title: result.title || readShardTitle(logsDir, result.shard),
         requireMarketMaker: result.requireMarketMaker,
+        requireCustody: result.requireCustody,
         error: result.error ?? null,
         phaseMs: result.phaseMs,
         logRelativePath: result.logPath.slice(logsDir.length + 1),
@@ -581,6 +584,7 @@ const publishQaRunIfConfigured = (logsDir: string): void => {
 type PlaywrightTarget = {
   target: string;
   requireMarketMaker: boolean;
+  requireCustody: boolean;
   title?: string;
   grep?: string;
 };
@@ -618,6 +622,7 @@ const collectSpecsFromSuite = (suite: unknown, out: Array<{ title: string; file?
 const listDynamicPlaywrightTargets = (
   file: string,
   requiresMarketMaker: (file: string, title?: string) => boolean,
+  requiresCustody: (file: string, title?: string) => boolean,
 ): PlaywrightTarget[] => {
   const env = {
     ...process.env,
@@ -654,6 +659,7 @@ const listDynamicPlaywrightTargets = (
   return specs.map(spec => ({
     target: file,
     requireMarketMaker: requiresMarketMaker(file, spec.title),
+    requireCustody: requiresCustody(file, spec.title),
     title: spec.title,
     grep: escapeRegExp(spec.title),
   }));
@@ -743,6 +749,10 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
     if (block !== null) return /requireMarketMaker\s*:\s*true/.test(block);
     return false;
   };
+  const requiresCustody = (file: string, title?: string, testBlock?: string): boolean => {
+    const block = testBlock ?? (title ? findStaticTestBlock(sourcePathForTarget(file), title) : null);
+    return block !== null && /requireCustody\s*:\s*true/.test(block);
+  };
 
   for (const file of pwFiles) {
     const explicitTitleTarget = file.match(/^(.+\.spec\.ts)::(.+)$/);
@@ -752,6 +762,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
       out.push({
         target: sourceFile,
         requireMarketMaker: requiresMarketMaker(sourceFile, title),
+        requireCustody: requiresCustody(sourceFile, title),
         title,
         grep: escapeRegExp(title),
       });
@@ -768,6 +779,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
       out.push({
         target: file,
         requireMarketMaker: requiresMarketMaker(file),
+        requireCustody: requiresCustody(file),
         title: file,
       });
       continue;
@@ -788,6 +800,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
         out.push({
           target: file,
           requireMarketMaker: requiresMarketMaker(file, title, block.text),
+          requireCustody: requiresCustody(file, title, block.text),
           title,
           grep: escapeRegExp(title),
         });
@@ -799,7 +812,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
       braceDepth = updateBraceDepth(line, braceDepth);
     }
     if (added === 0) {
-      out.push(...listDynamicPlaywrightTargets(file, requiresMarketMaker));
+      out.push(...listDynamicPlaywrightTargets(file, requiresMarketMaker, requiresCustody));
     }
   }
   return out;
@@ -1049,6 +1062,7 @@ const waitForServerHealthy = async (
   apiUrl: string,
   timeoutMs: number,
   requireMarketMaker = false,
+  requireCustody = false,
 ): Promise<HealthPayload> => {
   const deadline = Date.now() + timeoutMs;
   let lastHealth: HealthPayload | null = null;
@@ -1062,6 +1076,7 @@ const waitForServerHealthy = async (
         const reset = recordOrEmpty(body['reset']);
         const hubMesh = recordOrEmpty(body['hubMesh']);
         const marketMaker = recordOrEmpty(body['marketMaker']);
+        const custody = recordOrEmpty(body['custody']);
         const bootstrapReserves = recordOrEmpty(body['bootstrapReserves']);
         const resetDone = reset['inProgress'] !== true;
         const meshReady = hubMesh['ok'] === true;
@@ -1070,8 +1085,11 @@ const waitForServerHealthy = async (
           ? mmEnabled && marketMaker['ok'] === true
           : (mmEnabled ? marketMaker['ok'] === true : true);
         const reservesReady = bootstrapReserves['ok'] === true;
+        const custodyReady = requireCustody
+          ? custody['enabled'] === true && custody['ok'] === true
+          : true;
         const hasTs = typeof body['timestamp'] === 'number';
-        if (hasTs && resetDone && meshReady && mmReady && reservesReady) return body;
+        if (hasTs && resetDone && meshReady && mmReady && reservesReady && custodyReady) return body;
       } else {
         lastError = `status=${res.status}`;
       }
@@ -1091,6 +1109,7 @@ const waitForServerHealthy = async (
           reset: lastHealth['reset'] || null,
           hubMesh: lastHealth['hubMesh'] || null,
           marketMaker: lastHealth['marketMaker'] || null,
+          custody: lastHealth['custody'] || null,
           bootstrapReserves: lastHealth['bootstrapReserves'] || null,
           hubs: recordArrayOf(lastHealth, 'hubs')
             .map((h) => ({
@@ -1112,6 +1131,7 @@ const hardResetShardBaseline = async (
   apiUrl: string,
   timeoutMs: number,
   requireMarketMaker: boolean,
+  requireCustody: boolean,
 ): Promise<HealthPayload> => {
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -1138,13 +1158,13 @@ const hardResetShardBaseline = async (
       throw new Error(`SHARD_BASELINE_RESET_FAILED status=${response.status} body=${body.slice(0, 800)}`);
     }
     const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
-    return await waitForServerHealthy(apiUrl, remainingMs, requireMarketMaker);
+    return await waitForServerHealthy(apiUrl, remainingMs, requireMarketMaker, requireCustody);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`SHARD_BASELINE_RESET_TIMEOUT api=${apiUrl} timeoutMs=${timeoutMs}`);
     }
     throw new Error(
-      `SHARD_BASELINE_RESET_ERROR api=${apiUrl} timeoutMs=${timeoutMs} requireMarketMaker=${requireMarketMaker} cause=${formatErrorForLog(error)}`,
+      `SHARD_BASELINE_RESET_ERROR api=${apiUrl} timeoutMs=${timeoutMs} requireMarketMaker=${requireMarketMaker} requireCustody=${requireCustody} cause=${formatErrorForLog(error)}`,
     );
   } finally {
     clearTimeout(timer);
@@ -1370,11 +1390,14 @@ const runShard = async (
   const rpc2Port = args.basePort + shard * 20 + 1;
   const apiPort = args.basePort + shard * 20 + 2;
   const webPort = args.basePort + shard * 20 + 4;
+  const custodyPort = args.basePort + shard * 20 + 7;
+  const custodyDaemonPort = args.basePort + shard * 20 + 8;
   const rpcUrl = `http://127.0.0.1:${rpcPort}`;
   const rpc2Url = `http://127.0.0.1:${rpc2Port}`;
   const apiUrl = `http://127.0.0.1:${apiPort}`;
   const webUrl = `https://localhost:${webPort}`;
   const dbPath = join(logsDir, `db-e2e-shard-${shard}`);
+  const runtimeImportManifestPath = join(dbPath, 'runtime-import-manifest.json');
   // Keep anvil's live state outside orchestrator dbRoot. Reset intentionally rm -rf's dbRoot.
   const anvilStatePath = join(logsDir, `anvil-state-shard-${shard}.json`);
   const anvil2StatePath = join(logsDir, `anvil2-state-shard-${shard}.json`);
@@ -1504,6 +1527,17 @@ const runShard = async (
         '--allow-reset',
         ...(args.prewaitHealth === 'reset' ? ['--defer-initial-reset'] : []),
         ...(task.requireMarketMaker ? ['--mm'] : []),
+        ...(task.requireCustody ? [
+          '--custody',
+          '--custody-port',
+          String(custodyPort),
+          '--custody-daemon-port',
+          String(custodyDaemonPort),
+          '--custody-db-root',
+          join(dbPath, 'custody'),
+          '--wallet-url',
+          `${webUrl}/app`,
+        ] : []),
       ],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -1513,6 +1547,7 @@ const runShard = async (
           ANVIL_RPC: rpcUrl,
           ANVIL_RPC2: rpc2Url,
           XLN_SKIP_STALE_REAP: '1',
+          XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
           ...(process.env['XLN_MIN_DISK_FREE_BYTES']
             ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }
@@ -1532,16 +1567,16 @@ const runShard = async (
         const queueMs = resetStartedAt - resetQueuedAt;
         if (queueMs > 0) log.write(`[timing] resetQueue=${queueMs}ms\n`);
         throwIfAborted();
-        baselineHealth = await hardResetShardBaseline(apiUrl, args.stackTimeoutMs, task.requireMarketMaker);
+        baselineHealth = await hardResetShardBaseline(apiUrl, args.stackTimeoutMs, task.requireMarketMaker, task.requireCustody);
       });
       await resetLimiter.drain();
       const remainingHealthMs = Math.max(1_000, args.stackTimeoutMs - (Date.now() - resetQueuedAt));
-      baselineHealth = await waitForServerHealthy(apiUrl, remainingHealthMs, task.requireMarketMaker);
+      baselineHealth = await waitForServerHealthy(apiUrl, remainingHealthMs, task.requireMarketMaker, task.requireCustody);
       markPhase('apiHealthy', resetQueuedAt);
       throwIfAborted();
     } else if (args.prewaitHealth === 'full') {
       const healthStart = Date.now();
-      baselineHealth = await waitForServerHealthy(apiUrl, args.stackTimeoutMs, task.requireMarketMaker);
+      baselineHealth = await waitForServerHealthy(apiUrl, args.stackTimeoutMs, task.requireMarketMaker, task.requireCustody);
       markPhase('apiHealthy', healthStart);
       throwIfAborted();
     } else {
@@ -1631,10 +1666,12 @@ const runShard = async (
         E2E_ANVIL_RPC2: rpc2Url,
         E2E_RESET_BASE_URL: apiUrl,
         E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
+        E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
         E2E_FAST: process.env['E2E_FAST'] ?? '1',
         E2E_ISOLATED_STACK: '1',
         E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
         XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
+        XLN_INCLUDE_CUSTODY: task.requireCustody ? '1' : '0',
       },
       log,
       timeoutMs: args.testTimeoutMs,
@@ -1658,6 +1695,7 @@ const runShard = async (
         target: task.pwTargets[0] || `shard-${task.shard}`,
         title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
         requireMarketMaker: task.requireMarketMaker,
+        requireCustody: task.requireCustody,
         phaseMs,
         error: teardownReason,
       };
@@ -1682,6 +1720,7 @@ const runShard = async (
         target: task.pwTargets[0] || `shard-${task.shard}`,
         title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
         requireMarketMaker: task.requireMarketMaker,
+        requireCustody: task.requireCustody,
         phaseMs,
         error: teardownReason,
       };
@@ -1695,6 +1734,7 @@ const runShard = async (
       target: task.pwTargets[0] || `shard-${task.shard}`,
       title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
       requireMarketMaker: task.requireMarketMaker,
+      requireCustody: task.requireCustody,
       phaseMs,
     };
   } catch (error) {
@@ -1717,6 +1757,7 @@ const runShard = async (
       target: task.pwTargets[0] || `shard-${task.shard}`,
       title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
       requireMarketMaker: task.requireMarketMaker,
+      requireCustody: task.requireCustody,
       phaseMs,
       error: teardownReason,
     };
@@ -1820,6 +1861,7 @@ async function main(): Promise<void> {
       totalShards: entries.length,
       pwTargets: [entry.target],
       requireMarketMaker: entry.requireMarketMaker,
+      requireCustody: entry.requireCustody,
       usePlaywrightShard: false,
       title: entry.title,
       grep: entry.grep,
@@ -1834,6 +1876,7 @@ async function main(): Promise<void> {
           handle: deriveQaTestHandle(task.pwTargets[0], task.title || task.pwTargets[0]),
           description: deriveQaTestDescription(task.pwTargets[0], task.title || task.pwTargets[0]),
           requireMarketMaker: task.requireMarketMaker,
+          requireCustody: task.requireCustody,
           grep: task.grep,
         })),
         null,

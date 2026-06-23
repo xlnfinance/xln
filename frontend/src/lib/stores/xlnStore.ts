@@ -16,6 +16,7 @@ import type {
   RoutedEntityInput,
   RuntimeInput,
   RuntimeAdapter,
+  RuntimeAdapterAuthLevel,
   RuntimeAdapterConfig,
   RuntimeAdapterStatus,
   RuntimeAdapterViewFrame,
@@ -594,20 +595,26 @@ const upsertRuntimeSnapshot = (
   env: Env,
   config: RuntimeAdapterConfig,
   status: RuntimeAdapterStatus,
+  authLevel: RuntimeAdapterAuthLevel | null = null,
 ): void => {
   const runtimeId = String(env.runtimeId || '').toLowerCase();
   if (!runtimeId) return;
   const viewEnv = createRuntimeViewEnv(unwrapLiveRuntimeEnv(env) ?? env);
   runtimes.update((map) => {
     const updated = new Map(map);
+    const existing = updated.get(runtimeId);
+    const remoteAccess = authLevel === 'admin' ? 'admin' : 'read';
     updated.set(runtimeId, {
+      ...existing,
       id: runtimeId,
       type: config.mode === 'remote' ? 'remote' : 'local',
-      label: config.mode === 'remote' ? `Remote ${config.wsUrl || 'runtime'}` : 'Embedded runtime',
+      label: existing?.label || (config.mode === 'remote' ? `Remote ${config.wsUrl || 'runtime'}` : 'Embedded runtime'),
       env: viewEnv,
+      ...(config.wsUrl ? { wsUrl: config.wsUrl } : {}),
       ...(config.seed ? { seed: config.seed } : {}),
       ...(config.authKey ? { apiKey: config.authKey } : {}),
-      permissions: config.mode === 'remote' && !config.authKey ? 'read' : 'write',
+      ...(config.mode === 'remote' ? { remoteAccess } : {}),
+      permissions: config.mode === 'remote' ? (authLevel === 'admin' ? 'write' : 'read') : 'write',
       status: status === 'connected' ? 'connected' : status === 'connecting' ? 'syncing' : status,
       lastSynced: Date.now(),
     });
@@ -738,7 +745,7 @@ export const refreshRuntimeAdapterEnvironment = async (): Promise<Env | null> =>
     setXlnEnvironment(env);
     history.set(env.history || []);
     currentHeight.set(env.height);
-    upsertRuntimeSnapshot(env, activeRuntimeAdapterConfig, adapter.status);
+    upsertRuntimeSnapshot(env, activeRuntimeAdapterConfig, adapter.status, adapter.authLevel);
     appRuntimeAdapterStatus.set(adapter.status);
     return env;
   })();
@@ -770,6 +777,7 @@ export async function initializeXLN(): Promise<Env> {
 
     // Store XLN instance separately for function access
     xlnInstance.set(xln);
+    runtimeOperations.hydrateRemoteRuntimeImports();
 
     const adapterConfig = resolveAppRuntimeAdapterConfig();
     activeRuntimeAdapterConfig = adapterConfig;
@@ -790,7 +798,7 @@ export async function initializeXLN(): Promise<Env> {
         appRuntimeAdapterStatus.set(status);
         const currentEnv = get(xlnEnvironment);
         if (currentEnv && activeRuntimeAdapterConfig) {
-          upsertRuntimeSnapshot(currentEnv, activeRuntimeAdapterConfig, status);
+          upsertRuntimeSnapshot(currentEnv, activeRuntimeAdapterConfig, status, adapter.authLevel);
         }
         if (status === 'connected') {
           void refreshRuntimeAdapterEnvironment().catch((refreshError) => {
@@ -810,7 +818,7 @@ export async function initializeXLN(): Promise<Env> {
         history.set(env.history || []);
         currentHeight.set(env.height);
         appRuntimeAdapterStatus.set(adapter.status);
-        upsertRuntimeSnapshot(env, adapterConfig, adapter.status);
+        upsertRuntimeSnapshot(env, adapterConfig, adapter.status, adapter.authLevel);
         const message = initialRemoteError instanceof Error ? initialRemoteError.message : String(initialRemoteError);
         console.warn('[XLN] Remote runtime adapter is not ready yet; will reconnect', message);
       }

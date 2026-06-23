@@ -309,7 +309,7 @@ export type AggregatedHealth = {
   hubMesh: {
     ok: boolean;
     hubIds: string[];
-    pairs: Array<{ left: string; right: string; ok: boolean }>;
+    pairs: Array<{ left: string; right: string; ok: boolean; expectedCreditAmount: string }>;
     direct: {
       openLinkCount: number;
       links: Array<{ fromRuntimeId: string; toRuntimeId: string; endpoint: string }>;
@@ -414,6 +414,10 @@ export type CustodySupportState = {
   custodyChild: ManagedChild;
   identity: ManagedIdentity;
   hubIds: string[];
+  custodyBaseUrl: string;
+  daemonAuthSeed: string;
+  daemonAuthAudience: string;
+  daemonAuthKey: string;
 };
 
 export type ManagedRuntimeSpec = {

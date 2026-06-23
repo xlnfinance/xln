@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
+  import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte';
   import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import {
     activeRuntimeId as activeStoreRuntimeId,
@@ -250,9 +251,10 @@
     open = false;
   }
 
-  function handleDeleteRuntime(event: MouseEvent, runtimeId: string) {
+  function handleDeleteRuntime(event: MouseEvent, group: RuntimeSummary) {
     event.stopPropagation();
-    dispatch('deleteRuntime', { runtimeId });
+    if (group.source === 'remote') runtimeOperations.disconnect(group.runtimeId);
+    else dispatch('deleteRuntime', { runtimeId: group.runtimeId });
     open = false;
   }
 
@@ -328,8 +330,8 @@
               </span>
               <span class="status-badge {group.status}">{group.status}</span>
             </button>
-            {#if allowDeleteRuntime}
-              <button class="runtime-delete" on:click={(event) => handleDeleteRuntime(event, group.runtimeId)} title="Delete runtime">
+            {#if group.source === 'remote' || allowDeleteRuntime}
+              <button class="runtime-delete" on:click={(event) => handleDeleteRuntime(event, group)} title={group.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}>
                 ×
               </button>
             {/if}
@@ -371,9 +373,17 @@
           {/if}
         </section>
       {/each}
-    </div>
+	    </div>
 
-    <div class="menu-footer">
+	    <div class="remote-manager-block">
+	      <div class="remote-manager-title">
+	        <span>Remote manager</span>
+	        <span>{Array.from($runtimeEntries.values()).filter((runtime) => runtime.type === 'remote').length}/100</span>
+	      </div>
+	      <RemoteRuntimeManager on:imported={() => open = false} />
+	    </div>
+
+	    <div class="menu-footer">
       {#if allowAddJurisdiction}
         <button class="add-runtime-btn" on:click={handleAddJurisdiction}>+ Add Jurisdiction</button>
       {/if}
@@ -566,6 +576,26 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+
+  .remote-manager-block {
+    margin-top: 6px;
+    border: 1px solid #292524;
+    border-radius: 12px;
+    background: #141210;
+    overflow: hidden;
+  }
+
+  .remote-manager-title {
+    padding: 9px 12px 0;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: #a8a29e;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0;
   }
 
   .runtime-group {

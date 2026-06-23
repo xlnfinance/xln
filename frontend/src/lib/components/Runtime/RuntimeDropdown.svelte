@@ -4,7 +4,9 @@
    * Uses unified Dropdown base component.
   */
   import { createEventDispatcher } from 'svelte';
+  import { Compass, Plus, Trash2 } from 'lucide-svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
+  import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte';
   import {
     activeRuntime as activeVaultRuntime,
     allRuntimes as allVaultRuntimes,
@@ -120,9 +122,13 @@
     isOpen = false;
   }
 
-  function handleDeleteRuntime(event: MouseEvent, runtimeId: string) {
-    event.stopPropagation(); // Don't trigger select
-    dispatch('deleteRuntime', { runtimeId });
+  function handleDeleteRuntime(event: MouseEvent, runtime: RuntimeEntry) {
+    event.stopPropagation();
+    if (runtime.source === 'remote') {
+      runtimeOperations.disconnect(runtime.id);
+    } else {
+      dispatch('deleteRuntime', { runtimeId: runtime.id });
+    }
     isOpen = false;
   }
 
@@ -138,10 +144,10 @@
   }
 </script>
 
-<Dropdown bind:open={isOpen} minWidth={320} maxWidth={560}>
-  <span slot="trigger" class="trigger-content">
-    <span class="conn-dot {connStatus}"></span>
-    <span class="trigger-icon">🧭</span>
+<Dropdown bind:open={isOpen} minWidth={360} maxWidth={640}>
+  <span slot="trigger" class="trigger-content" data-testid="runtime-dropdown-trigger">
+    <span class="conn-dot {currentRuntime?.source === 'remote' ? runtimeAdapterDotStatus : connStatus}"></span>
+    <Compass class="trigger-icon" size={14} />
     <span class="trigger-text">{runtimeLabel(currentRuntime)}</span>
     <span class="trigger-arrow" class:open={isOpen}>▼</span>
   </span>
@@ -162,13 +168,13 @@
           <span class="conn-dot {runtime.id === currentRuntime?.id ? runtime.status : 'inactive'}"></span>
           <span class="menu-label" title={runtime.title}>{runtime.label}</span>
           <span class="menu-meta">{runtime.meta}</span>
-          {#if allowDelete && runtime.source === 'browser'}
+          {#if runtime.source === 'remote' || (allowDelete && runtime.source === 'browser')}
             <button
               class="delete-btn"
-              on:click={(e) => handleDeleteRuntime(e, runtime.id)}
-              title="Delete runtime"
+              on:click={(e) => handleDeleteRuntime(e, runtime)}
+              title={runtime.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}
             >
-              ×
+              <Trash2 size={12} />
             </button>
           {/if}
         </div>
@@ -178,9 +184,17 @@
     {#if allowAdd}
       <div class="menu-divider"></div>
       <button class="menu-item add-item" on:click={handleAddRuntime}>
+        <Plus size={13} />
         <span class="menu-label">{addLabel}</span>
       </button>
     {/if}
+
+    <div class="menu-divider"></div>
+    <div class="manager-title">
+      <span>Remote manager</span>
+      <span>{remoteRuntimes.length}/100</span>
+    </div>
+    <RemoteRuntimeManager on:imported={() => isOpen = false} />
 
     <!-- Relay Status -->
     <div class="menu-divider"></div>
@@ -225,8 +239,8 @@
   }
 
   .trigger-icon {
-    font-size: 14px;
     flex-shrink: 0;
+    color: #9ca3af;
   }
 
   .trigger-text {
@@ -305,8 +319,6 @@
     border: 1px solid rgba(255, 59, 48, 0.2);
     border-radius: 3px;
     color: rgba(255, 59, 48, 0.5);
-    font-size: 16px;
-    line-height: 1;
     cursor: pointer;
     transition: all 0.15s;
     display: flex;
@@ -330,6 +342,19 @@
 
   .add-item {
     color: #7aa8ff;
+    align-items: center;
+  }
+
+  .manager-title {
+    padding: 6px 12px 2px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: #a1a1aa;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0;
   }
 
   .empty-state {

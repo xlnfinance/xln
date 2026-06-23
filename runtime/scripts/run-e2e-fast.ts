@@ -12,6 +12,14 @@ const FAST_E2E_TARGETS = [
     title: 'remote /app opens an existing hub runtime through radapter',
   },
   {
+    file: 'tests/e2e-radapter-remote.spec.ts',
+    title: 'runtime dropdown manager attaches a remote radapter by token',
+  },
+  {
+    file: 'tests/e2e-radapter-remote.spec.ts',
+    title: 'bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser',
+  },
+  {
     file: 'tests/e2e-pay-deeplink.spec.ts',
     title: 'restores runtime and opens the pay screen from hash params',
   },

@@ -1,4 +1,4 @@
-import type { BookState } from '../orderbook';
+import type { BookState, BookOrderState, PriceBucketState, PriceLevelState } from '../orderbook';
 import type { EntityReplica, EntityState, Env } from '../types';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
@@ -396,6 +396,126 @@ const loadRequiredEntityViewPage = async (
   return stored;
 };
 
+const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => ({
+  ...doc,
+  mempool: [],
+  pendingSignatures: [],
+  swapOffers: new Map(),
+  swapOrderHistory: undefined,
+  swapClosedOrders: undefined,
+});
+
+const compactBookSideForView = (
+  bucketIds: readonly bigint[],
+  buckets: ReadonlyMap<string, PriceBucketState>,
+  orderSource: ReadonlyMap<string, BookOrderState>,
+  maxLevels: number,
+  maxOrdersPerLevel: number,
+): {
+  bucketIds: bigint[];
+  buckets: Map<string, PriceBucketState>;
+  orders: Map<string, BookOrderState>;
+  levels: number;
+} => {
+  const nextBucketIds: bigint[] = [];
+  const nextBuckets = new Map<string, PriceBucketState>();
+  const nextOrders = new Map<string, BookOrderState>();
+  let levels = 0;
+
+  for (const bucketId of bucketIds) {
+    if (levels >= maxLevels) break;
+    const sourceBucket = buckets.get(String(bucketId));
+    if (!sourceBucket) continue;
+    const nextPrices: bigint[] = [];
+    const nextLevels = new Map<string, PriceLevelState>();
+    for (const priceTicks of sourceBucket.pricesAsc) {
+      if (levels >= maxLevels) break;
+      const sourceLevel = sourceBucket.levels.get(String(priceTicks));
+      if (!sourceLevel) continue;
+      const selectedOrderIds: string[] = [];
+      let totalQtyLots = 0n;
+      for (const orderId of sourceLevel.orderIds) {
+        if (selectedOrderIds.length >= maxOrdersPerLevel) break;
+        const order = orderSource.get(orderId);
+        if (!order || order.qtyLots <= 0n) continue;
+        selectedOrderIds.push(orderId);
+        nextOrders.set(orderId, order);
+        totalQtyLots += order.qtyLots;
+      }
+      if (selectedOrderIds.length === 0) continue;
+      nextPrices.push(priceTicks);
+      nextLevels.set(String(priceTicks), {
+        priceTicks: sourceLevel.priceTicks,
+        orderIds: selectedOrderIds,
+        totalQtyLots,
+      });
+      levels += 1;
+    }
+    if (nextLevels.size > 0) {
+      nextBucketIds.push(bucketId);
+      nextBuckets.set(String(bucketId), {
+        bucketId: sourceBucket.bucketId,
+        pricesAsc: nextPrices,
+        levels: nextLevels,
+      });
+    }
+  }
+
+  return { bucketIds: nextBucketIds, buckets: nextBuckets, orders: nextOrders, levels };
+};
+
+const compactBookStateForView = (book: BookState, maxLevelsPerSide = 5, maxOrdersPerLevel = 20): BookState => {
+  const bids = compactBookSideForView(
+    book.bidBucketIdsDesc,
+    book.bidBuckets,
+    book.orders,
+    maxLevelsPerSide,
+    maxOrdersPerLevel,
+  );
+  const asks = compactBookSideForView(
+    book.askBucketIdsAsc,
+    book.askBuckets,
+    book.orders,
+    maxLevelsPerSide,
+    maxOrdersPerLevel,
+  );
+  return {
+    params: book.params,
+    orders: new Map([...bids.orders, ...asks.orders]),
+    bidBuckets: bids.buckets,
+    askBuckets: asks.buckets,
+    bidBucketIdsDesc: bids.bucketIds,
+    askBucketIdsAsc: asks.bucketIds,
+    nextSeq: book.nextSeq,
+    tradeCount: book.tradeCount,
+    tradeQtySum: book.tradeQtySum,
+    eventHash: book.eventHash,
+  };
+};
+
+const compactViewPageForRemote = (view: {
+  core: StorageEntityCoreDoc;
+  accounts: RuntimeAdapterAccountPage;
+  books: RuntimeAdapterBookPage;
+}): {
+  core: StorageEntityCoreDoc;
+  accounts: RuntimeAdapterAccountPage;
+  books: RuntimeAdapterBookPage;
+} => ({
+  core: view.core,
+  accounts: {
+    ...view.accounts,
+    items: view.accounts.items.map(compactAccountDocForView),
+  },
+  books: {
+    ...view.books,
+    items: view.books.items.map((item) => ({
+      pairId: item.pairId,
+      book: compactBookStateForView(item.book),
+    })),
+  },
+});
+
 const projectViewFrame = async (
   ctx: RuntimeAdapterResolveContext,
   query?: RuntimeAdapterReadQuery,
@@ -451,12 +571,13 @@ const projectViewFrame = async (
   const stored = isCurrentHeight
     ? projectLiveEntityViewPage(ctx, activeEntityId, storedQuery)
     : await loadRequiredEntityViewPage(ctx, activeEntityId, height, storedQuery);
-  const fallbackJurisdiction = jurisdictionSummary(stored.core.config?.jurisdiction);
+  const compactStored = compactViewPageForRemote(stored);
+  const fallbackJurisdiction = jurisdictionSummary(compactStored.core.config?.jurisdiction);
   const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
     entityId: activeEntityId,
-    label: String(stored.core.profile?.name || '').trim() || activeEntityId,
-    height: Math.max(0, Math.floor(Number(stored.core.height ?? height))),
-    ...(stored.core.profile?.isHub === true || Boolean(stored.core.orderbookHubProfile) ? { isHub: true } : {}),
+    label: String(compactStored.core.profile?.name || '').trim() || activeEntityId,
+    height: Math.max(0, Math.floor(Number(compactStored.core.height ?? height))),
+    ...(compactStored.core.profile?.isHub === true || Boolean(compactStored.core.orderbookHubProfile) ? { isHub: true } : {}),
     ...(fallbackJurisdiction ? { jurisdiction: fallbackJurisdiction } : {}),
   };
 
@@ -467,9 +588,9 @@ const projectViewFrame = async (
     activeEntityId,
     activeEntity: {
       summary,
-      core: stored.core,
-      accounts: stored.accounts,
-      books: stored.books,
+      core: compactStored.core,
+      accounts: compactStored.accounts,
+      books: compactStored.books,
     },
   };
 };

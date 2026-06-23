@@ -26,6 +26,16 @@
     isInactiveTabStandby
   } from '$lib/utils/activeTabLock';
   import { normalizeWsUrl } from '$lib/utils/wsUrl';
+  import {
+    REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+    REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
+    formatRemoteRuntimeImportLines,
+    parseRemoteRuntimeImportPayload,
+    parseRemoteRuntimeImportText,
+    persistRemoteRuntimeImports,
+    type StoredRemoteRuntimeImportEntry,
+  } from '$lib/utils/remoteRuntimeImport';
+  import { validateRemoteRuntimeEntry } from '$lib/utils/remoteRuntimeValidation';
 
   let { children } = $props();
 
@@ -38,8 +48,14 @@
   let scenarioPreviewMode = $state(false);
   let currentHash = $state('');
   let pendingRemoteRuntime = $state<RemoteRuntimeRequest | null>(null);
+  let pendingRemoteRuntimeImport = $state<RemoteRuntimeImportRequest | null>(null);
   let remoteRuntimeAuthInput = $state('');
   let remoteRuntimeAuthError = $state('');
+  let remoteRuntimeImportText = $state('');
+  let remoteRuntimeImportError = $state('');
+  let remoteRuntimeImportStatus = $state('');
+  let remoteRuntimeImportRows = $state<RemoteRuntimeImportRow[]>([]);
+  let remoteRuntimeImporting = $state(false);
   const pageSearch = $derived(browser ? $page.url.search : '');
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
   const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';
@@ -56,6 +72,20 @@
     hostKind: 'localhost' | 'server';
     acceptKey: string;
     requiresAuthPaste?: boolean;
+  };
+
+  type RemoteRuntimeImportRequest = {
+    source: 'hash';
+    initialError?: string;
+  };
+
+  type RemoteRuntimeImportRow = {
+    index: number;
+    label: string;
+    access: 'read' | 'admin';
+    wsUrl: string;
+    status: 'pending' | 'checking' | 'connected' | 'error';
+    detail: string;
   };
 
   type HashRouteState = {
@@ -177,6 +207,40 @@
     };
   }
 
+  function readRemoteRuntimeImportRequestFromHash(): RemoteRuntimeImportRequest | null {
+    if (!browser) return null;
+    const hash = readCurrentHash().trim();
+    if (!hash) return null;
+    const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+    const payload = String(
+      params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) ||
+      params.get('runtimes') ||
+      params.get('remote-runtimes') ||
+      '',
+    ).trim();
+    if (!payload) return null;
+    try {
+      const entries = parseRemoteRuntimeImportPayload(payload);
+      remoteRuntimeImportText = formatRemoteRuntimeImportLines(entries);
+      remoteRuntimeImportRows = entries.map((entry, index) => ({
+        index,
+        label: entry.label,
+        access: entry.access,
+        wsUrl: entry.wsUrl,
+        status: 'pending',
+        detail: 'waiting',
+      }));
+      remoteRuntimeImportError = '';
+      return { source: 'hash' };
+    } catch (error) {
+      remoteRuntimeImportText = payload;
+      remoteRuntimeImportRows = [];
+      const message = error instanceof Error ? error.message : String(error);
+      remoteRuntimeImportError = message;
+      return { source: 'hash', initialError: message };
+    }
+  }
+
   function stripRemoteRuntimeParams(): void {
     if (!browser) return;
     const url = new URL(window.location.href);
@@ -185,6 +249,14 @@
     }
     const next = `${url.pathname}${url.search}${url.hash}`;
     history.replaceState(null, '', next || '/app');
+  }
+
+  function stripRemoteRuntimeImportHash(): void {
+    if (!browser) return;
+    const url = new URL(window.location.href);
+    url.hash = '';
+    history.replaceState(null, '', `${url.pathname}${url.search}`);
+    syncHashLocation();
   }
 
   function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {
@@ -227,9 +299,79 @@
     window.location.reload();
   }
 
+  function setRemoteRuntimeImportRow(index: number, patch: Partial<RemoteRuntimeImportRow>): void {
+    remoteRuntimeImportRows = remoteRuntimeImportRows.map((row) =>
+      row.index === index ? { ...row, ...patch } : row,
+    );
+  }
+
+  function persistActiveRemoteRuntime(entry: StoredRemoteRuntimeImportEntry): void {
+    localStorage.setItem('xln-runtime-adapter-mode', 'remote');
+    localStorage.setItem('xln-runtime-adapter-ws', entry.wsUrl);
+    localStorage.removeItem('xln-runtime-adapter-key');
+    sessionStorage.setItem('xln-runtime-adapter-key', entry.token);
+  }
+
+  async function acceptRemoteRuntimeImport(): Promise<void> {
+    if (remoteRuntimeImporting) return;
+    remoteRuntimeImporting = true;
+    remoteRuntimeImportError = '';
+    remoteRuntimeImportStatus = 'Parsing import list';
+    try {
+      const entries = parseRemoteRuntimeImportText(remoteRuntimeImportText);
+      remoteRuntimeImportRows = entries.map((entry, index) => ({
+        index,
+        label: entry.label,
+        access: entry.access,
+        wsUrl: entry.wsUrl,
+        status: 'pending',
+        detail: 'waiting',
+      }));
+      const importedAt = Date.now();
+      const validated: StoredRemoteRuntimeImportEntry[] = [];
+      for (const [index, entry] of entries.entries()) {
+        remoteRuntimeImportStatus = `Checking ${entry.label || entry.wsUrl}`;
+        validated.push(await validateRemoteRuntimeEntry(entry, {
+          index,
+          importedAt,
+          onProgress: (progress) => setRemoteRuntimeImportRow(progress.index, {
+            status: progress.status,
+            detail: progress.detail,
+          }),
+        }));
+      }
+      if (validated.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_EMPTY');
+      const persisted = persistRemoteRuntimeImports(validated, { merge: true });
+      sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY, JSON.stringify({
+        ok: true,
+        importedAt,
+        count: validated.length,
+        total: persisted.length,
+        entries: validated.map(entry => ({
+          label: entry.label,
+          access: entry.access,
+          wsUrl: entry.wsUrl,
+          runtimeId: entry.runtimeId,
+          height: entry.height,
+          entityCount: entry.entityCount,
+        })),
+      }));
+      persistActiveRemoteRuntime(validated[0]!);
+      stripRemoteRuntimeImportHash();
+      window.location.reload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      remoteRuntimeImportError = message;
+      remoteRuntimeImportStatus = 'Import failed';
+    } finally {
+      remoteRuntimeImporting = false;
+    }
+  }
+
   function useLocalBrowserRuntime(): void {
     localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
     stripRemoteRuntimeParams();
+    stripRemoteRuntimeImportHash();
     window.location.reload();
   }
 
@@ -362,6 +504,16 @@
     void (async () => {
       if (await ensureCurrentDeployVersion()) return;
       if (await maybeHandleResetHash()) return;
+      const remoteImportRequest = readRemoteRuntimeImportRequestFromHash();
+      if (remoteImportRequest) {
+        pendingRemoteRuntimeImport = remoteImportRequest;
+        stripRemoteRuntimeImportHash();
+        activeTabLockReady = true;
+        hasActiveTabLock = false;
+        isLoading.set(false);
+        error.set(null);
+        return;
+      }
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
       if (remoteRequest?.requiresAuthPaste || (remoteRequest && !remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest))) {
         pendingRemoteRuntime = remoteRequest;
@@ -428,7 +580,57 @@
 </svelte:head>
 
 {#if activeTabLockReady && !hasActiveTabLock}
-  {#if pendingRemoteRuntime}
+  {#if pendingRemoteRuntimeImport}
+    <div class="remote-login-screen" data-testid="remote-runtime-bulk-import-screen">
+      <section class="remote-login-card remote-login-card--wide">
+        <div class="remote-kicker">Remote runtimes</div>
+        <h2>Import runtime hosts</h2>
+        <p>
+          Review the capability list, then confirm. Each host is opened, authenticated, and read before it is added.
+        </p>
+        <label class="remote-token-input remote-import-textarea">
+          <span>Capability lines</span>
+          <textarea
+            data-testid="remote-runtime-import-textarea"
+            autocomplete="off"
+            spellcheck="false"
+            bind:value={remoteRuntimeImportText}
+            placeholder="H1 | read | ws://localhost:8090/rpc | xlnra1..."
+          ></textarea>
+        </label>
+        {#if remoteRuntimeImportRows.length > 0}
+          <div class="remote-import-table" data-testid="remote-runtime-import-status">
+            {#each remoteRuntimeImportRows as row (row.index)}
+              <div class="remote-import-row" class:error={row.status === 'error'} class:connected={row.status === 'connected'}>
+                <span class="remote-import-status-dot {row.status}"></span>
+                <span class="remote-import-label">{row.label}</span>
+                <span class="remote-import-access">{row.access}</span>
+                <span class="remote-import-host" title={row.wsUrl}>{row.wsUrl}</span>
+                <span class="remote-import-detail">{row.detail}</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if remoteRuntimeImportStatus}
+          <p class="remote-token-info">{remoteRuntimeImportStatus}</p>
+        {/if}
+        {#if remoteRuntimeImportError}
+          <p class="remote-token-error" data-testid="remote-runtime-import-error">{remoteRuntimeImportError}</p>
+        {/if}
+        <div class="remote-actions">
+          <button
+            class="primary"
+            data-testid="remote-runtime-import-confirm"
+            disabled={remoteRuntimeImporting}
+            onclick={acceptRemoteRuntimeImport}
+          >
+            {remoteRuntimeImporting ? 'Checking...' : 'Confirm import'}
+          </button>
+          <button class="secondary" disabled={remoteRuntimeImporting} onclick={useLocalBrowserRuntime}>Use browser runtime</button>
+        </div>
+      </section>
+    </div>
+  {:else if pendingRemoteRuntime}
     <div class="remote-login-screen" data-testid="remote-runtime-login-screen">
       <section class="remote-login-card">
         <div class="remote-kicker">Remote runtime</div>
@@ -593,6 +795,10 @@
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
   }
 
+  .remote-login-card--wide {
+    width: min(880px, 100%);
+  }
+
   .remote-kicker {
     margin-bottom: 10px;
     color: var(--theme-accent, #facc15);
@@ -611,6 +817,80 @@
     margin: 0 0 18px;
     color: var(--theme-text-secondary, rgba(232, 232, 232, 0.72));
     line-height: 1.5;
+  }
+
+  .remote-import-textarea textarea {
+    min-height: 180px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    line-height: 1.45;
+  }
+
+  .remote-import-table {
+    display: grid;
+    gap: 8px;
+    margin: 0 0 16px;
+  }
+
+  .remote-import-row {
+    display: grid;
+    grid-template-columns: 12px minmax(70px, 0.8fr) 58px minmax(180px, 1.3fr) minmax(110px, 1fr);
+    gap: 10px;
+    align-items: center;
+    min-height: 38px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    font-size: 12px;
+  }
+
+  .remote-import-row.connected {
+    border-color: rgba(68, 214, 44, 0.22);
+  }
+
+  .remote-import-row.error {
+    border-color: rgba(255, 107, 107, 0.34);
+  }
+
+  .remote-import-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.26);
+  }
+
+  .remote-import-status-dot.checking {
+    background: #facc15;
+  }
+
+  .remote-import-status-dot.connected {
+    background: #44d62c;
+  }
+
+  .remote-import-status-dot.error {
+    background: #ff6b6b;
+  }
+
+  .remote-import-label,
+  .remote-import-access,
+  .remote-import-host,
+  .remote-import-detail {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .remote-import-access {
+    color: var(--theme-accent, #facc15);
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .remote-token-info {
+    color: var(--theme-text-secondary, rgba(232, 232, 232, 0.72));
+    font-size: 13px;
   }
 
   .runtime-mode-list {
@@ -697,7 +977,8 @@
     letter-spacing: 0.08em;
   }
 
-  .remote-token-input input {
+  .remote-token-input input,
+  .remote-token-input textarea {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 22%, transparent);
@@ -745,6 +1026,15 @@
   @media (max-width: 540px) {
     .runtime-mode-list {
       grid-template-columns: 1fr;
+    }
+
+    .remote-import-row {
+      grid-template-columns: 12px minmax(0, 1fr) 58px;
+    }
+
+    .remote-import-host,
+    .remote-import-detail {
+      grid-column: 2 / 4;
     }
   }
 
