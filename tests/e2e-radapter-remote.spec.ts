@@ -225,7 +225,7 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   await expect(page.getByRole('button', { name: /^H3$/ })).toBeVisible();
 });
 
-test('health admin consolidates bootstrap QA and runtime adapter panels', async ({ page }) => {
+test('health admin keeps QA evidence link-only and runtime adapter local', async ({ page }) => {
   await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const apiPort = Number(new URL(API_BASE_URL).port);
   const wsUrl = hubRpcUrl(10);
@@ -235,18 +235,24 @@ test('health admin consolidates bootstrap QA and runtime adapter panels', async 
   const audience = String(hubInfo.runtimeId || '').toLowerCase();
   expect(audience.length).toBeGreaterThan(0);
   const readKey = capabilityToken('xln-e2e-h1', 'read', Date.now() + 60 * 60 * 1_000, audience);
+  const qaApiRequests: string[] = [];
+  await page.route('**/api/qa/**', async (route) => {
+    qaApiRequests.push(route.request().url());
+    await route.abort('blockedbyclient');
+  });
 
   await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('body')).toContainText('xln health admin', { timeout: 30_000 });
   await expect(page.locator('#bootstrap')).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('#qa-runs')).toBeVisible();
   const cockpitPanel = page.locator('#qa-cockpit');
   await expect(cockpitPanel).toBeVisible();
-  await expect(cockpitPanel.getByRole('link', { name: 'Open full' })).toHaveAttribute('href', '/qa');
-  await cockpitPanel.getByRole('button', { name: 'Embed cockpit' }).click();
-  await expect(page.frameLocator('iframe[title="QA Cockpit"]').getByRole('heading', { name: 'Test Cockpit' })).toBeVisible({ timeout: 30_000 });
+  await expect(cockpitPanel).toContainText('QA Evidence');
+  await expect(cockpitPanel.getByRole('link', { name: 'Open QA cockpit' })).toHaveAttribute('href', '/qa');
+  await expect(cockpitPanel.getByRole('link', { name: 'UX gallery' })).toHaveAttribute('href', '/qa');
+  await expect(page.locator('#qa-runs')).toHaveCount(0);
+  await expect(page.locator('iframe[title="QA Cockpit"]')).toHaveCount(0);
+  expect(qaApiRequests, '/health must not read /api/qa; QA cockpit owns that surface').toEqual([]);
   await expect(page.locator('#runtime-adapter')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open cockpit' })).toHaveAttribute('href', '/qa');
   await expect(page.getByRole('link', { name: 'Open inspector' })).toHaveAttribute('href', '/radapter');
 
   const adapterPanel = page.locator('#runtime-adapter');

@@ -13,7 +13,7 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
-    title: 'health admin consolidates bootstrap QA and runtime adapter panels',
+    title: 'health admin keeps QA evidence link-only and runtime adapter local',
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
