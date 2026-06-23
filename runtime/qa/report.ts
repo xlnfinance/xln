@@ -746,6 +746,15 @@ const openQaHistoryDb = (): Database => {
 const toNullableNumber = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
+const stripQaHistoryPerfSamples = (run: QaRunManifest): QaRunManifest => ({
+  ...run,
+  ...(run.perf ? { perf: { ...run.perf, samples: [] } } : {}),
+  shards: run.shards.map(shard => ({
+    ...shard,
+    ...(shard.perf ? { perf: { ...shard.perf, samples: [] } } : {}),
+  })),
+});
+
 export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void => {
   const timing = summarizeQaRunTiming(run);
   const browserHealth = run.browserHealth ?? summarizeQaRunBrowserHealth(run);
@@ -883,7 +892,7 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
       $apiHealthyMs: timing.apiHealthyMs,
       $playwrightMs: timing.playwrightMs,
       $logsDir: logsDir,
-      $manifestJson: JSON.stringify(run),
+      $manifestJson: JSON.stringify(stripQaHistoryPerfSamples(run)),
     });
   } finally {
     db.close();

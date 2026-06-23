@@ -232,6 +232,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `/api/qa/runs` and `/api/qa/run` now serialize perf summaries without raw `samples`; `/api/qa/run/perf?runId=...` returns raw run and shard samples only when requested.
   - Evidence: unit asserts default run payload strips run/shard samples while the perf endpoint returns the raw timeseries; QA cockpit fixture now mirrors the lean run contract.
 
+- [x] Strip `perf.samples` from QA history `manifest_json`.
+  - Impact: medium.
+  - Current issue: SQLite history rows stored the full per-second sample arrays even though benchmark comparison and run ledger only need summaries.
+  - Status: done. `recordQaRunHistory()` persists sample-stripped run/shard perf blobs; raw samples remain in the run-dir manifest and `/api/qa/run/perf` path.
+  - Evidence: unit reads SQLite `manifest_json` directly and verifies run/shard `sampleCount` is retained while `samples` is empty.
+
 - [x] Add ETag or shared polling store for QA/health data.
   - Impact: medium.
   - Current issue: multiple panels polled overlapping endpoints every 15 seconds and re-downloaded unchanged JSON.
