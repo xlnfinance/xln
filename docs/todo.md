@@ -312,13 +312,14 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [ ] Unit: severity classifier and failure-class classifier.
 - [ ] Unit: regression threshold math against same code hash and previous HEAD.
 - [ ] Unit: UTC formatter and runId timezone round-trip.
-- [ ] Unit: `sanitizeE2ETarget` invalid target, self-target, null byte, traversal.
+- [x] API: restart target sanitizer rejects invalid target, self-target, null byte, and traversal.
 - [x] Unit: `resolveQaArtifactPath` traversal and symlink escape rejection.
 - [ ] Unit: `listQaHistory` hot path is SQLite-only after backfill.
 - [ ] Unit: run payload strips `perf.samples`.
 - [x] API: QA read token can list runs/artifacts but cannot restart.
 - [x] API: admin restart requires operator id, reason, expected HEAD, and confirm.
-- [ ] API: restart disabled returns 403; concurrent restart returns 409; invalid mode returns 400.
+- [x] API: restart disabled returns 403 and invalid mode returns 400.
+- [ ] API: concurrent restart returns 409 without spawning a heavy real e2e run.
 - [x] API: artifact endpoints are same-origin and token-gated.
 - [x] API: audit row written for restart start and updated on finish.
 - [ ] E2E: `/qa?runId=...` deep-link selects exact run and video shard.

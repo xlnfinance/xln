@@ -392,6 +392,46 @@ test('qa api requires read token and admin token for restart operations', async 
   });
 });
 
+test('qa restart plan rejects invalid mode and unsafe targets', async () => {
+  await withQaAuthEnv(async () => {
+    const invalidMode = await maybeHandleQaRequest(
+      qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=bogus', {
+        method: 'POST',
+        body: JSON.stringify({
+          target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
+          title: 'QA cockpit fixture records playback transcript',
+        }),
+      }, QA_ADMIN_TOKEN),
+      '/api/qa/restart',
+      JSON_HEADERS,
+    );
+    expect(invalidMode?.status).toBe(400);
+    expect((await invalidMode!.json() as { error?: string }).error).toBe('QA_RESTART_MODE_INVALID');
+
+    const unsafeTargets = [
+      ['traversal', 'tests/../runtime/secret.spec.ts', 'INVALID_QA_RESTART_TARGET'],
+      ['null-byte', 'tests/e2e-safe.spec.ts\0', 'INVALID_QA_RESTART_TARGET'],
+      ['self-target', 'tests/e2e-qa-cockpit.spec.ts', 'QA_RESTART_SELF_TARGET_DENIED'],
+    ] as const;
+
+    for (const [, target, expectedError] of unsafeTargets) {
+      const response = await maybeHandleQaRequest(
+        qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=plan', {
+          method: 'POST',
+          body: JSON.stringify({
+            target,
+            title: 'Unsafe restart target fixture',
+          }),
+        }, QA_ADMIN_TOKEN),
+        '/api/qa/restart',
+        JSON_HEADERS,
+      );
+      expect(response?.status).toBe(400);
+      expect((await response!.json() as { error?: string }).error).toBe(expectedError);
+    }
+  });
+});
+
 test('qa read endpoints support ETag revalidation', async () => {
   await withQaAuthEnv(async () => {
     const first = await maybeHandleQaRequest(
