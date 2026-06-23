@@ -13,6 +13,10 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
+    title: 'admin remote runtime control advances live state and exposes past frames',
+  },
+  {
+    file: 'tests/e2e-radapter-remote.spec.ts',
     title: 'runtime dropdown manager attaches a remote radapter by token',
   },
   {

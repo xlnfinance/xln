@@ -5,6 +5,7 @@ import type {
   RuntimeAdapterConfig,
   RuntimeAdapterReadQuery,
   RuntimeAdapterStatus,
+  RuntimeInput,
 } from '@xln/runtime/xln-api';
 import { RemoteRuntimeAdapter } from '@xln/runtime/radapter/remote';
 import { getEnv, getXLN, setXlnEnvironment } from './xlnStore';
@@ -42,11 +43,11 @@ export const connectRuntimeAdapter = async (config: RuntimeAdapterConfig): Promi
       registerEnvChangeCallback: (env, cb) => xln.registerEnvChangeCallback(env, cb),
       buildReadContext: (env) => ({
         readHead: () => xln.readPersistedStorageHead(env),
-	        readFrame: (height) => xln.readPersistedStorageFrameRecord(env, height),
-	        listCheckpoints: () => xln.listPersistedCheckpointHeights(env),
-	        loadEntityState: (entityId, height) => xln.loadEntityStateFromStorageDb(env, entityId, height),
-	        loadEntityAccountDoc: (entityId, counterpartyId, height) => xln.loadEntityAccountDocFromStorageDb(env, entityId, counterpartyId, height),
-	        loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
+        readFrame: (height) => xln.readPersistedStorageFrameRecord(env, height),
+        listCheckpoints: () => xln.listPersistedCheckpointHeights(env),
+        loadEntityState: (entityId, height) => xln.loadEntityStateFromStorageDb(env, entityId, height),
+        loadEntityAccountDoc: (entityId, counterpartyId, height) => xln.loadEntityAccountDocFromStorageDb(env, entityId, counterpartyId, height),
+        loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
         listEntityIdsAtHeight: (height) => xln.listPersistedEntityIdsAtHeight(env, height),
       }),
     });
@@ -79,6 +80,36 @@ export const runtimeAdapterRead = async <T = unknown>(
   if (!adapter) throw new Error('Runtime adapter is not connected');
   return adapter.read<T>(path, query);
 };
+
+export const runtimeAdapterSend = async (input: RuntimeInput): Promise<{ height: number }> => {
+  const adapter = get(runtimeAdapter);
+  if (!adapter) throw new Error('Runtime adapter is not connected');
+  return adapter.send(input);
+};
+
+const exposeRuntimeAdapterDebugSurface = (): void => {
+  if (typeof window === 'undefined') return;
+  const host = window.location.hostname;
+  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return;
+  Object.defineProperty(window, '__xlnRuntimeAdapter', {
+    configurable: true,
+    enumerable: false,
+    get: () => ({
+      read: runtimeAdapterRead,
+      send: runtimeAdapterSend,
+      status: () => {
+        const adapter = get(runtimeAdapter);
+        return {
+          connected: adapter?.status === 'connected',
+          height: Math.max(0, Math.floor(Number(adapter?.currentHeight || 0))),
+          authLevel: adapter?.authLevel ?? null,
+        };
+      },
+    }),
+  });
+};
+
+exposeRuntimeAdapterDebugSurface();
 
 export const createRuntimeReadStore = <T = unknown>(
   path: string,
