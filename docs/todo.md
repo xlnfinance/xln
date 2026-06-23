@@ -10,6 +10,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - ideas2: 945/1000. Grounded in current code and strongest on auth, CORS, restart audit trail, verdict banner, regression detection, and API contract gaps.
 - ideas3: 970/1000. Best audit. Finds the highest-risk concrete issues: fake video transcript sync, unauthenticated QA API, full env passed into restart child, history re-ingest on every poll, perf sample payload bloat, timezone mismatch.
 - runtime-audit4: 965/1000. Strong code-path audit across reserve faucet, remote runtime token logging, watcher cursor clamp, external-wallet baseline, approveErc20 type drift, remote orderbook depth, and strict `0x` snapshot handling.
+- intern1: 940/1000. Strong dead-weight and reorg audit. Highest-value findings are the BrowserVM half-dead fallback, duplicated reserve faucet handler, `recentJEvents` evidence race, externalWallet living in consensus hot-path plumbing, and `EntityPanelTabs.svelte` god-file risk.
 - combined target spec: 955/1000. Direction is correct: central-bank admin cockpit needs trust evidence, not just a prettier test page.
 
 ## p0 ship blockers
@@ -42,12 +43,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Runtime import stdout logs count/access/path/expiry/labels/wallet only; hub inspect URLs are logged without query/hash secrets.
   - Evidence: unit asserts no `runtime-import=`, `xlnra1.`, token strings, or base64 manifest in log lines. Focused browser e2e imported mesh/custody/MM runtimes and the new run logs had no `runtime-import=` or `xlnra1.` outside the local secret manifest.
 
-- [ ] Fix reserve faucet missing-event invariant.
+- [x] Fix reserve faucet missing-event invariant.
   - Impact: high.
-  - Current issue: faucet can return `500 RESERVE_EVENT_MISSING` after `getReserves()` confirms the money moved.
+  - Current issue: faucet could return `500 RESERVE_EVENT_MISSING` after `getReserves()` confirmed the money moved.
   - Product decision: this should not be downgraded to best-effort. The event should arrive in runtime before application; if reserve grew without a recent event, that is an invariant bug.
-  - Fix: identify why `recentJEvents` can be missing/evicted for an applied reserve update and repair the event/runtime ordering or evidence retention.
-  - Tests: two-jurisdiction concurrent reserve faucet test proves the event is present for the matching jurisdiction/entity/token and unrelated jurisdiction activity cannot hide it.
+  - Root cause: watcher-fed canonical J-events were enqueued/applied through `processEventBatch` without being recorded in recent evidence, and the global 1,000-event ring could be displaced by unrelated jurisdiction traffic.
+  - Status: done. Submitted J-events and watcher-ingress J-events now share one evidence recorder; `ReserveUpdated` is also indexed by `entityId:tokenId`, so unrelated traffic cannot hide the matching reserve event.
+  - Evidence: L1 failed before fix, then passed: two-jurisdiction watcher reserve evidence survives 1,100 unrelated reserve events and still rejects `expectedMin` above the matching event.
 
 ## p1 trust and correctness
 
@@ -77,17 +79,41 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - UI: filter by failure class; default-select first blocking failure.
   - Tests: infra boot failure is not rendered as assertion regression.
 
+- [ ] Fix numeric signer key cache isolation by runtime seed.
+  - Impact: high.
+  - Current issue: numeric signer private keys are cached by `signerId` only. Two test/runtime envs in one Bun process with different `runtimeSeed` and signer `2` can reuse the wrong private key and trigger `LAZY_HANKO_SELF_MISMATCH`.
+  - Constraint: consensus/crypto path; require explicit design approval before changing. Candidate fix is cache numeric derivations by `(seed fingerprint, signerId)` while keeping registered EOA keys keyed by address.
+  - Tests: two envs with different seeds and same numeric signer process frames in one Bun process without cache cross-contamination.
+
 - [ ] Scope watcher start-block clamp to the watcher's own jurisdiction/depository.
   - Impact: high.
   - Current issue: minimum finalized J height is taken across all entity replicas, so an unrelated entity/jurisdiction can drag a watcher backward and cause re-scan storms.
   - Fix: compute min height only for entities whose depository/jurisdiction matches the watcher.
   - Tests: two-jurisdiction env with low unrelated entity does not lower watcher cursor.
 
+- [ ] Consolidate the duplicated reserve faucet implementation.
+  - Impact: high.
+  - Current issue: `runtime/server/reserve-faucet.ts` is the canonical handler, but `runtime/orchestrator/hub-node.ts` still has a stale inline `/api/faucet/reserve` copy with old wait helpers.
+  - Fix: hub-node should call `handleReserveFaucet()` with its local deps and delete the inline wait/reserve helper copy.
+  - Tests: hub-node reserve faucet route returns the same success/error payloads as the main server path.
+
+- [ ] Decide BrowserVM adapter fate: delete dead stack or restore a real adapter.
+  - Impact: high.
+  - Current issue: `mode: 'browservm'` can be selected as a fallback while `createBrowserVMAdapter()` always throws.
+  - Fix: either remove BrowserVM mode branches and dead provider stack, or implement a real adapter with startup tests.
+  - Tests: no startup fallback can reach a throw-only adapter; if retained, BrowserVM smoke test deploys and watches events.
+
 - [ ] Fix external-wallet snapshot baseline to use confirmed block, not tip.
   - Impact: medium.
   - Current issue: snapshot block can be reorged out on non-anvil RPC. This is display state, not consensus state, but still wrong evidence.
   - Fix: snapshot at `currentBlock - confirmationDepth`, include `sourceHeight`, `sourceHash`, and `finalityDepth`.
   - Tests: snapshot uses safe block; UI shows source height/hash.
+
+- [ ] Move display-only `externalWallet` state out of consensus hot-path entity state.
+  - Impact: medium-high.
+  - Current issue: external wallet state is cloned/validated/persisted with EntityState even though it is excluded from the frame hash.
+  - Fix: move it to `env.runtimeState` or a dedicated side store keyed by entityId, with explicit source height/hash/finality metadata.
+  - Tests: entity frame hash remains unchanged by wallet display deltas; wallet panel still renders from side-store snapshots.
 
 - [ ] Fix runId/timezone model.
   - Impact: medium.
@@ -158,6 +184,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Current issue: health embed passes `embed=1`, but route does not honor it.
   - Fix: embed mode hides sidebar/heavy nested iframe controls and shows compact cockpit teaser, or remove the param.
   - Tests: embedded cockpit has no nested iframe-in-iframe layout.
+
+- [ ] Split `EntityPanelTabs.svelte` into tab-owned components.
+  - Impact: medium-high.
+  - Current issue: the file is over 8k lines and keeps absorbing unrelated feature diffs.
+  - Fix: move Accounts, Reserves, Swaps, J-events, External Wallet, and remote/runtime sections into `Entity/tabs/*.svelte` with a thin parent and shared typed stores.
+  - Tests: smoke each tab with existing fixtures; no behavior change in active entity selection.
 
 ## p2 performance and scale
 

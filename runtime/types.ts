@@ -632,6 +632,14 @@ export interface Env {
       transactionHash: string;
       observedAt: number;
     }>;
+    recentReserveUpdatedEvents?: Map<string, {
+      name: 'ReserveUpdated';
+      args: Record<string, unknown>;
+      blockNumber: number;
+      blockHash: string;
+      transactionHash: string;
+      observedAt: number;
+    }>;
     quarantinedRuntimeInputs?: Array<{
       id: string;
       height: number;

@@ -15,6 +15,7 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
+import { rememberRecentJEvents } from '../j-event-evidence';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CANONICAL J-EVENTS (Single Source of Truth — must match Depository.sol)
@@ -657,6 +658,7 @@ function enqueueRawJEventsToRuntime(
   }
 
   const entityInputs: EntityInput[] = [];
+  const evidenceEventsByLog = new Map<string, RawJEvent>();
   for (const { entityId, signerId, events } of eventsByReplica.values()) {
     const jEvents = events.flatMap((event) => rawEventToJEvents(event, entityId));
     if (jEvents.length === 0) continue;
@@ -731,12 +733,21 @@ function enqueueRawJEventsToRuntime(
       ],
     });
 
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index]!;
+      const key = event.transactionHash
+        ? `${event.transactionHash.toLowerCase()}:${event.logIndex ?? event.name}:${index}`
+        : `${event.blockHash ?? blockHash}:${event.name}:${index}`;
+      evidenceEventsByLog.set(key, event);
+    }
+
     if (logBatch) {
       console.log(`   📮 [JAdapter:${adapterLabel}] → ${entityId.slice(-4)} (${jEvents.length} events)`);
     }
   }
 
   if (entityInputs.length === 0) return;
+  rememberRecentJEvents(env, [...evidenceEventsByLog.values()]);
   enqueueRuntimeInput(env, {
     timestamp: env.timestamp ?? 0,
     runtimeTxs: [],
