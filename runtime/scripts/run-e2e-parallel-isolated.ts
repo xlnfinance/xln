@@ -35,6 +35,7 @@ import {
   classifyQaShardFailure,
   deriveQaTestDescription,
   deriveQaTestHandle,
+  formatQaRunIdUtc,
   normalizeQaBrowserIssues,
   parseQaTimelineSteps,
   recordQaRunHistory,
@@ -505,10 +506,7 @@ const acquireRunnerLock = (logsDir: string): (() => void) => {
 };
 
 const tsTag = (): string => {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
-  const ms = String(d.getMilliseconds()).padStart(3, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${ms}`;
+  return formatQaRunIdUtc(Date.now());
 };
 
 const startFailFastLogMonitor = (

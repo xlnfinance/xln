@@ -119,11 +119,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Fix: move it to `env.runtimeState` or a dedicated side store keyed by entityId, with explicit source height/hash/finality metadata.
   - Tests: entity frame hash remains unchanged by wallet display deltas; wallet panel still renders from side-store snapshots.
 
-- [ ] Fix runId/timezone model.
+- [x] Fix runId/timezone model.
   - Impact: medium.
   - Current issue: runId is local-time based while legacy parsing assumes UTC. UI uses locale string without timezone.
   - Fix: generate run IDs in UTC or stop deriving timestamps from run IDs when manifest has epoch. Render `YYYY-MM-DD HH:mm:ss UTC`, with local time only as hover/secondary.
   - Tests: runId timestamp round trip is deterministic across timezones.
+  - Status: done. QA e2e run IDs now use UTC fields through `formatQaRunIdUtc()`, legacy parsing remains UTC, and QA cockpit renders timestamps as fixed `YYYY-MM-DD HH:mm:ss UTC` instead of browser locale strings.
+  - Evidence: unit covers UTC runId formatting around midnight; focused QA cockpit e2e fixture asserts visible UTC timestamp text in the verdict banner.
 
 ## p1 product and UX
 
