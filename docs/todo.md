@@ -158,6 +158,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Compare current run vs previous same code hash, previous same HEAD, and last green on main.
   - Metrics: wall time, phase time, peak load, child CPU, runner RSS, artifact bytes, new failing handles.
   - UI: `REGRESSION` badge with percent deltas and threshold reason.
+  - Partial shipped: comparator ignores `peakLoad1` as a sole blocking regression when wall/shard/browser phase, child CPU, and RSS stay within thresholds. Host load remains visible as a metric and likely cause so noisy machines do not create false `SLOWER` run status.
   - Tests: `+25% totalMs`, `+30% RSS`, or new failing handle produces WARN/FAIL.
 
 - [ ] Add phase-time waterfall per shard.

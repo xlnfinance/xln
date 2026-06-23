@@ -160,6 +160,12 @@ test('qa benchmark comparison flags sharp runtime deltas', () => {
   expect(lowerLoadOnly.status).toBe('ok');
   expect(lowerLoadOnly.metrics.find(metric => metric.metric === 'peakLoad1')?.verdict).toBe('faster');
   expect(lowerLoadOnly.reason).toContain('Timing within thresholds');
+
+  const higherHostLoadOnly = compareQaBenchmarkRuns(benchmarkRun('higher-host-load', 1000, 800, 'same-code', 'same-head', 3), baseline);
+  expect(higherHostLoadOnly.status).toBe('ok');
+  expect(higherHostLoadOnly.metrics.find(metric => metric.metric === 'peakLoad1')?.verdict).toBe('slower');
+  expect(higherHostLoadOnly.reason).toContain('host load');
+  expect(higherHostLoadOnly.likelyCauses).toContain('host load increased without app timing regression');
 });
 
 test('qa shard failure classifier maps operator failure classes', () => {
