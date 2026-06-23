@@ -829,6 +829,89 @@ test('qa run report preserves timeline order and derives slow steps', async () =
   }
 });
 
+test('readQaRun trusts complete manifest without opening shard logs', async () => {
+  const runId = '20260623-000125-779';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  await rm(runDir, { recursive: true, force: true });
+  try {
+    await mkdir(runDir, { recursive: true });
+    await mkdir(join(runDir, 'e2e-shard-00.log'));
+    const storedStep = { label: 'stored manifest cue', ms: 321 };
+    const base = benchmarkRun(runId, 1234, 900);
+    const manifest: QaRunManifest = {
+      ...base,
+      shards: [{
+        ...base.shards[0]!,
+        logRelativePath: 'e2e-shard-00.log',
+        logTail: 'stored manifest tail',
+        timelineSteps: [storedStep],
+        slowSteps: [storedStep],
+      }],
+    };
+    await writeFile(join(runDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+    const run = await readQaRun(runId);
+    expect(run.shards[0]?.logTail).toBe('stored manifest tail');
+    expect(run.shards[0]?.timelineSteps).toEqual([storedStep]);
+    expect(run.shards[0]?.slowSteps).toEqual([storedStep]);
+  } finally {
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test('qa runs endpoint reads SQLite summaries without requiring run logs', async () => {
+  const createdAt = Date.now() - 2_000;
+  const runId = formatQaRunIdUtc(createdAt);
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  await rm(runDir, { recursive: true, force: true });
+  deleteQaHistoryRows([runId]);
+  try {
+    const base = benchmarkRun(runId, 2345, 1200);
+    const run: QaRunManifest = {
+      ...base,
+      createdAt,
+      completedAt: createdAt + 2345,
+      status: 'failed',
+      passedShards: 0,
+      failedShards: 1,
+      failureClasses: ['assertion'],
+      shards: [{
+        ...base.shards[0]!,
+        status: 'failed',
+        error: 'Expected canonical ledger failure',
+        failureClass: 'assertion',
+        logRelativePath: 'e2e-shard-00.log',
+        logTail: 'stored summary tail',
+        timelineSteps: [{ label: 'stored summary cue', ms: 111 }],
+        slowSteps: [{ label: 'stored summary cue', ms: 111 }],
+      }],
+    };
+    recordQaRunHistory(run, runDir);
+    await rm(runDir, { recursive: true, force: true });
+
+    await withQaAuthEnv(async () => {
+      const response = await maybeHandleQaRequest(
+        qaRequest('http://127.0.0.1:8080/api/qa/runs?limit=50'),
+        '/api/qa/runs',
+        JSON_HEADERS,
+      );
+      expect(response?.status).toBe(200);
+      const payload = await response!.json() as {
+        ok?: boolean;
+        runs?: Array<{ runId?: string; status?: string; failingTargets?: string[]; timing?: { playwrightMs?: number | null } }>;
+      };
+      expect(payload.ok).toBe(true);
+      const summary = payload.runs?.find(item => item.runId === runId);
+      expect(summary?.status).toBe('failed');
+      expect(summary?.failingTargets).toEqual(['qa cockpit']);
+      expect(summary?.timing?.playwrightMs).toBe(1200);
+    });
+  } finally {
+    deleteQaHistoryRows([runId]);
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
 test('qa run endpoint strips perf samples and exposes raw timeseries separately', async () => {
   const runId = '20260623-000124-778';
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
