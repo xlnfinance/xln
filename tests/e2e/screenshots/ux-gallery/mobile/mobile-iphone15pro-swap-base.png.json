@@ -1,0 +1,12 @@
+{
+  "title": "mobile swap ticket",
+  "group": "Swap",
+  "description": "Prepared cross-chain swap ticket with live orderbook depth.",
+  "platform": "mobile",
+  "tags": [
+    "swap",
+    "orderbook"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

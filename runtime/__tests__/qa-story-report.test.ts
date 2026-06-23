@@ -170,6 +170,20 @@ test('qa stories catalog indexes real e2e screenshots', async () => {
   expect(e2eStory?.sizeBytes ?? 0).toBeGreaterThan(0);
 });
 
+test('qa curated ux gallery covers core operator surfaces', async () => {
+  const stories = await listQaStoryScreenshots(120);
+  const curated = stories.filter(story => story.curated);
+  const platforms = new Set(curated.map(story => story.platform));
+  const groups = new Set(curated.map(story => story.group));
+
+  expect(curated.length).toBeGreaterThanOrEqual(20);
+  expect(platforms.has('desktop')).toBe(true);
+  expect(platforms.has('mobile')).toBe(true);
+  for (const group of ['Payments', 'Swap', 'On-chain Batch', 'Disputes', 'History']) {
+    expect(groups.has(group), `missing curated UX group ${group}`).toBe(true);
+  }
+});
+
 test('qa story image resolver rejects path traversal', async () => {
   await expect(resolveQaStoryScreenshotPath('e2e-screenshots', '../package.json')).rejects.toThrow(
     'INVALID_QA_STORY_IMAGE_PATH',

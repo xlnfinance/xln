@@ -1,0 +1,13 @@
+{
+  "title": "desktop on-chain batch history",
+  "group": "History",
+  "description": "Confirmed on-chain batch history after broadcasting an external reserve move.",
+  "platform": "desktop",
+  "tags": [
+    "history",
+    "batch",
+    "confirmed"
+  ],
+  "sourceTest": "move tab covers all routed paths on isolated runtimes",
+  "project": "chromium"
+}

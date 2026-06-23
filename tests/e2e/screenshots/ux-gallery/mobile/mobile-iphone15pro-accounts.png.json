@@ -1,0 +1,12 @@
+{
+  "title": "mobile accounts overview",
+  "group": "Accounts",
+  "description": "Hub account list with balances and counterparty capacity.",
+  "platform": "mobile",
+  "tags": [
+    "accounts",
+    "credit"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

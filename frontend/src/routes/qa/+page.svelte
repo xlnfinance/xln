@@ -341,7 +341,7 @@
   let actionError = $state<string | null>(null);
   let restartPlan = $state<string[]>([]);
   let restartAllowed = $state(false);
-  let activeView = $state<QaView>('e2e');
+  let activeView = $state<QaView>('gallery');
   let runSortKey = $state<RunSortKey>('date-desc');
   let shardSortKey = $state<ShardSortKey>('index');
   let autoRefresh = $state(true);
@@ -409,6 +409,9 @@
     ...stories.filter(story => !story.curated),
   ]);
   const uxGalleryGroups = $derived(Array.from(new Set(uxGalleryStories.map(story => story.group))));
+  const uxGalleryCuratedCount = $derived(uxGalleryStories.filter(story => story.curated).length);
+  const uxGalleryDesktopCount = $derived(uxGalleryStories.filter(story => story.platform === 'desktop').length);
+  const uxGalleryMobileCount = $derived(uxGalleryStories.filter(story => story.platform === 'mobile').length);
 
   function applyQaAuth(payload: { qaAuth?: QaAuthInfo } | null | undefined): void {
     const auth = payload?.qaAuth;
@@ -1152,9 +1155,9 @@
     </section>
 
     <nav class="qa-tabs" data-testid="qa-test-tabs">
+      <button class:active={activeView === 'gallery'} onclick={() => (activeView = 'gallery')}>UX Gallery</button>
       <button class:active={activeView === 'e2e'} onclick={() => (activeView = 'e2e')}>E2E Runs</button>
       <button class:active={activeView === 'scenarios'} onclick={() => (activeView = 'scenarios')}>Scenario Player</button>
-      <button class:active={activeView === 'gallery'} onclick={() => (activeView = 'gallery')}>UX Gallery</button>
       <button class:active={activeView === 'suites'} onclick={() => (activeView = 'suites')}>Suites</button>
       <button class:active={activeView === 'benchmarks'} onclick={() => (activeView = 'benchmarks')}>Benchmarks</button>
       <button class:active={activeView === 'history'} onclick={() => (activeView = 'history')}>History</button>
@@ -1186,7 +1189,7 @@
         <div class="suite-list-head">
           <div>
             <div class="eyebrow">UX Screenshot Gallery</div>
-            <h3>{uxGalleryStories.filter(story => story.curated).length || uxGalleryStories.length} curated screens</h3>
+            <h3>{uxGalleryCuratedCount || uxGalleryStories.length} curated screens</h3>
           </div>
           <button class="mini-action" type="button" onclick={() => (activeView = 'gallery')}>Open gallery</button>
         </div>
@@ -1261,7 +1264,12 @@
             <h2>UX Gallery</h2>
             <p>{uxGalleryStories.length} screenshots from e2e runs and curated fixtures.</p>
           </div>
-          <span class="chip">{uxGalleryGroups.length} groups</span>
+          <div class="artifact-chips" data-testid="qa-ux-gallery-count">
+            <span>{uxGalleryCuratedCount || uxGalleryStories.length} curated</span>
+            <span>{uxGalleryDesktopCount} desktop</span>
+            <span>{uxGalleryMobileCount} mobile</span>
+            <span>{uxGalleryGroups.length} groups</span>
+          </div>
         </div>
         {#if loadingMeta && uxGalleryStories.length === 0}
           <div class="empty">Loading screenshots...</div>

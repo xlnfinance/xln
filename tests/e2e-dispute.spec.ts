@@ -19,6 +19,7 @@ import {
   openAccountWorkspaceTab,
   startDisputeFromManageUi,
 } from './utils/e2e-account-workspace';
+import { capturePageScreenshot } from './utils/e2e-screenshots';
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -1260,7 +1261,7 @@ test.describe('E2E Dispute Flow', () => {
 
   // Scenario: trigger a dispute from the entity workspace, observe reserve returning after finalize,
   // then continue with post-dispute R2R/R2C/C2R coverage and confirm reload restores the final state.
-  test('entity workspace dispute lifecycle returns reserve', async ({ page }) => {
+  test('entity workspace dispute lifecycle returns reserve', async ({ page }, testInfo) => {
     test.setTimeout(LONG_E2E ? 420_000 : 300_000);
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
@@ -1332,6 +1333,17 @@ test.describe('E2E Dispute Flow', () => {
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
     });
     expect(disputedState.activeDispute, 'dispute must become active after disputeStart broadcast').toBe(true);
+    await ensureAccountWorkspaceVisible(page, undefined, accountRef.entityId);
+    await capturePageScreenshot(page, testInfo, 'dispute-active-desktop.png', {
+      fullPage: false,
+      ux: {
+        title: 'desktop active dispute',
+        group: 'Disputes',
+        description: 'Account list after a dispute start batch is confirmed on-chain.',
+        platform: 'desktop',
+        tags: ['dispute', 'batch', 'active'],
+      },
+    });
 
     const currentChainBlock = await readCurrentChainBlock(page);
     expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
@@ -1436,6 +1448,16 @@ test.describe('E2E Dispute Flow', () => {
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
       await expect(disputedRow).toContainText('Finalized disputed account');
       await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toBeVisible();
+      await capturePageScreenshot(page, testInfo, 'dispute-finalized-history-desktop.png', {
+        fullPage: false,
+        ux: {
+          title: 'desktop finalized dispute',
+          group: 'Disputes',
+          description: 'Reloaded wallet shows the finalized disputed account and recovery action.',
+          platform: 'desktop',
+          tags: ['dispute', 'history', 'reload'],
+        },
+      });
     });
     await timedStep('dispute.reload_assert_batch_history', async () => {
       await expect.poll(async () => {

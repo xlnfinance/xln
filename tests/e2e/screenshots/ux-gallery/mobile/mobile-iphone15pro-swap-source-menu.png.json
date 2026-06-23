@@ -1,0 +1,12 @@
+{
+  "title": "mobile swap source picker",
+  "group": "Swap",
+  "description": "Source account menu while preparing a routed swap.",
+  "platform": "mobile",
+  "tags": [
+    "swap",
+    "account-picker"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

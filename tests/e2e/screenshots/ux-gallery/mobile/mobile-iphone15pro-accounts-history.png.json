@@ -1,0 +1,12 @@
+{
+  "title": "mobile on-chain batch history",
+  "group": "History",
+  "description": "History view for finalized and pending on-chain account batches.",
+  "platform": "mobile",
+  "tags": [
+    "history",
+    "batch"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

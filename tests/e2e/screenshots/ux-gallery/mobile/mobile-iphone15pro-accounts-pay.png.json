@@ -1,0 +1,12 @@
+{
+  "title": "mobile payment composer",
+  "group": "Payments",
+  "description": "User prepares a payment from an open hub account.",
+  "platform": "mobile",
+  "tags": [
+    "payment",
+    "account"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}

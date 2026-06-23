@@ -142,6 +142,21 @@ async function openMoveTab(page: Page): Promise<void> {
   await expect(page.getByTestId('move-committed-line').first()).toBeVisible({ timeout: 20_000 });
 }
 
+async function openAccountsTab(page: Page): Promise<void> {
+  const tab = page.getByTestId('tab-accounts').first();
+  await expect(tab).toBeVisible({ timeout: 20_000 });
+  await tab.click();
+  await expect(page.getByTestId('account-list-wrapper').first()).toBeVisible({ timeout: 20_000 });
+}
+
+async function openAccountBatchHistory(page: Page): Promise<void> {
+  await openAccountsTab(page);
+  const historyTab = page.locator('[data-testid="account-workspace-tab-history"]:visible').first();
+  await expect(historyTab).toBeVisible({ timeout: 20_000 });
+  await historyTab.click();
+  await expect(page.locator('.history-card').first()).toBeVisible({ timeout: 20_000 });
+}
+
 async function expectMoveAssetSelector(page: Page): Promise<void> {
   const select = page.getByTestId('move-asset-symbol').first();
   await expect(select).toBeVisible({ timeout: 20_000 });
@@ -1075,6 +1090,17 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
           MaxUint256,
           EXTERNAL_BATCH_TIMEOUT_MS,
         );
+        await openAccountBatchHistory(page);
+        await capturePageScreenshot(page, testInfo, 'move-batch-history-desktop.png', {
+          fullPage: false,
+          ux: {
+            title: 'desktop on-chain batch history',
+            group: 'History',
+            description: 'Confirmed on-chain batch history after broadcasting an external reserve move.',
+            platform: 'desktop',
+            tags: ['history', 'batch', 'confirmed'],
+          },
+        });
       });
       const afterExternalRaw = await getRpcExternalBalanceRaw(page, symbol, aliceEoa);
       const afterReserveRaw = await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol);

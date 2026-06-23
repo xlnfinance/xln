@@ -1,0 +1,12 @@
+{
+  "title": "mobile swap route menu",
+  "group": "Swap",
+  "description": "Route selector for cross-chain liquidity paths.",
+  "platform": "mobile",
+  "tags": [
+    "swap",
+    "route"
+  ],
+  "sourceTest": "ui screenshot smoke captures desktop and mobile main tabs",
+  "project": "chromium"
+}
