@@ -12,8 +12,10 @@ import {
   listQaRuns,
   listQaStoryScreenshots,
   purgeQaRunsOlderThan,
+  isQaTextArtifactPath,
   qaArtifactContentType,
   readQaRun,
+  redactQaSecretText,
   resolveQaArtifactPath,
   resolveQaStoryScreenshotPath,
   stripQaRunPerfSamples,
@@ -973,6 +975,11 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
     }
     try {
       const absolutePath = await resolveQaArtifactPath(runId, relativePath);
+      if (isQaTextArtifactPath(absolutePath)) {
+        return new Response(redactQaSecretText(await Bun.file(absolutePath).text()), {
+          headers: mediaHeaders(absolutePath),
+        });
+      }
       return new Response(Bun.file(absolutePath), {
         headers: mediaHeaders(absolutePath),
       });

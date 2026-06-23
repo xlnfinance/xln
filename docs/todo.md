@@ -288,8 +288,10 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 ## security backlog
 
-- [ ] Add token redaction to log tail/artifact rendering.
+- [x] Add token redaction to log tail/artifact rendering.
   - Redact bearer tokens, `xlnra1.`, private keys, mnemonics, auth seeds, RPC URLs with credentials, and token-bearing import URLs.
+  - Status: done. QA manifests now store redacted `logTail/error`, legacy reads redact old raw tails, and `/api/qa/artifact` redacts text/json/vtt/log responses while leaving binary media byte-for-byte.
+  - Evidence: unit covers direct redactor cases plus a real QA run fixture where manifest tail, error, and text artifact all hide stored secrets.
 
 - [ ] Add artifact sensitivity classification.
   - Artifacts: public, internal, secret-bearing. Secret-bearing artifacts require admin scope or are unavailable in regulator export.

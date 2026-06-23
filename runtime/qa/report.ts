@@ -294,6 +294,40 @@ const QA_BROWSER_ISSUE_SEVERITIES = new Set<QaBrowserIssueSeverity>(['error', 'w
 const asNullableString = (value: unknown): string | null =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 
+const QA_SECRET_LABEL_PATTERN = String.raw`(?:authorization|x-xln-qa-token|xln_qa_read_token|xln_qa_admin_token|adminToken|readToken|accessToken|refreshToken|privateKey|private_key|mnemonic|authSeed|auth_seed|seed|apiKey|api_key|secret|token)`;
+const QA_SECRET_QUOTED_FIELD_PATTERN = new RegExp(
+  String.raw`(["']${QA_SECRET_LABEL_PATTERN}["']\s*:\s*)(["'])(.*?)\2`,
+  'gi',
+);
+const QA_SECRET_QUOTED_VALUE_PATTERN = new RegExp(
+  String.raw`\b(${QA_SECRET_LABEL_PATTERN}\s*[:=]\s*)(["'])(.*?)\2`,
+  'gi',
+);
+const QA_SECRET_BARE_VALUE_PATTERN = new RegExp(
+  String.raw`\b(${QA_SECRET_LABEL_PATTERN}\s*[:=]\s*)[^"'\s,;)}\]]+`,
+  'gi',
+);
+
+export const redactQaSecretText = (value: string): string => {
+  const secret = '[REDACTED]';
+  return value
+    .replace(/\b((?:https?|wss?):\/\/)[^\s/@:]+:[^\s/@]+@/gi, `$1${secret}@`)
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, `$1${secret}`)
+    .replace(/\bxlnra1\.[A-Za-z0-9._~+/=-]+/g, `xlnra1.${secret}`)
+    .replace(
+      /([?&#](?:runtime-import|remote-runtimes|xlnRemoteRuntimes|token|adminToken|readToken|access_token|refresh_token|privateKey|mnemonic|seed|secret)=)[^&#\s"')]+/gi,
+      `$1${secret}`,
+    )
+    .replace(QA_SECRET_QUOTED_FIELD_PATTERN, (_match, prefix: string, quote: string) => `${prefix}${quote}${secret}${quote}`)
+    .replace(QA_SECRET_QUOTED_VALUE_PATTERN, (_match, prefix: string, quote: string) => `${prefix}${quote}${secret}${quote}`)
+    .replace(QA_SECRET_BARE_VALUE_PATTERN, `$1${secret}`);
+};
+
+export const isQaTextArtifactPath = (filePath: string): boolean => {
+  const contentType = detectContentType(basename(filePath));
+  return contentType.startsWith('text/') || contentType.startsWith('application/json');
+};
+
 const asFiniteNumber = (value: unknown): number | null => {
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
@@ -1420,8 +1454,8 @@ const collectLegacyShard = async (
     await walkArtifacts(runDir, resultsDir, artifacts);
     sortArtifacts(artifacts);
   }
-  const logTail = logText ? shortTail(logText) : null;
-  const error = status === 'failed' ? shortTail(logText, 40) : null;
+  const logTail = logText ? redactQaSecretText(shortTail(logText)) : null;
+  const error = status === 'failed' ? redactQaSecretText(shortTail(logText, 40)) : null;
 
   return {
     shard,
@@ -1533,8 +1567,8 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
             ? parseQaTimelineSteps(logText).slice(0, 80)
             : [];
         const browserIssues = normalizeQaBrowserIssues(shard.browserIssues);
-        const logTail = shard.logTail ?? (logText ? shortTail(logText) : null);
-        const error = shard.error ?? null;
+        const logTail = shard.logTail ? redactQaSecretText(shard.logTail) : logText ? redactQaSecretText(shortTail(logText)) : null;
+        const error = shard.error ? redactQaSecretText(shard.error) : null;
         return {
           ...shard,
           target,
