@@ -35,6 +35,18 @@ const toWebSocketBuffer = (bytes: Uint8Array): ArrayBuffer => {
   return buffer;
 };
 
+const recordOrNull = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+const heightFromPayload = (payload: unknown): number => {
+  const record = recordOrNull(payload);
+  if (!record) return 0;
+  const direct = Math.max(0, Math.floor(Number(record['latestHeight'] ?? record['height'] ?? 0)));
+  const head = recordOrNull(record['head']);
+  const headHeight = Math.max(0, Math.floor(Number(head?.['latestHeight'] ?? 0)));
+  return Math.max(direct, headHeight);
+};
+
 export class RemoteRuntimeAdapter implements RuntimeAdapter {
   readonly mode = 'remote' as const;
 
@@ -115,6 +127,15 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     for (const cb of this.statusCbs) cb(status);
   }
 
+  private noteHeight(height: unknown, options: { notifyWhenUnchanged?: boolean } = {}): void {
+    const next = Math.max(0, Math.floor(Number(height || 0)));
+    const changed = next > this.height;
+    if (changed) this.height = next;
+    if (changed || options.notifyWhenUnchanged === true) {
+      for (const cb of this.changeCbs) cb(this.height);
+    }
+  }
+
   private async openSocket(): Promise<void> {
     const wsUrl = this.config?.wsUrl;
     if (!wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
@@ -182,8 +203,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!this.config?.authKey) return;
     const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number }>({ op: 'auth', key: this.config.authKey });
     this.level = response.authLevel;
-    this.height = Math.max(this.height, Math.floor(Number(response.currentHeight || 0)));
-    for (const cb of this.changeCbs) cb(this.height);
+    this.noteHeight(response.currentHeight);
   }
 
   private handleMessage(raw: unknown): void {
@@ -198,8 +218,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     }
 
     if ('op' in message && message.op === 'tick') {
-      this.height = Math.max(this.height, Math.floor(Number(message.height || 0)));
-      for (const cb of this.changeCbs) cb(this.height);
+      this.noteHeight(message.height, { notifyWhenUnchanged: true });
       return;
     }
 
@@ -208,6 +227,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!pending) return;
     this.pending.delete(message.inReplyTo);
     if (message.ok) {
+      this.noteHeight(heightFromPayload(message.payload));
       pending.resolve(message.payload);
     } else {
       pending.reject(new RuntimeAdapterError(message.error.code, message.error.message, message.error.retryable));
