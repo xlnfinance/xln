@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './global-setup';
 import { Interface, formatUnits, parseUnits } from 'ethers';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL } from './utils/e2e-baseline';
 import {

@@ -57,11 +57,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Fix: record cue timestamps from browser/test markers relative to video start. Store `cues.json` and generate WebVTT. Keep infra setup phases in a separate setup strip, not in video subtitles.
   - Tests: browser E2E asserts a cue text matches the actual video step window; WebVTT loads; cue click seeks to expected video time.
 
-- [ ] Capture browser console errors, page errors, failed requests, and HTTP 4xx/5xx per shard.
+- [x] Capture browser console errors, page errors, failed requests, and HTTP 4xx/5xx per shard.
   - Impact: high.
-  - Current issue: manifest has log tail/error, but not browser observability.
-  - Fix: collect `consoleErrors[]`, `consoleWarnings[]`, `pageErrors[]`, `networkFailures[]`, `httpErrors[]`. Add badges in shard row and a Browser Health panel.
-  - Tests: fixture with console error marks shard failed or WARN per policy; network 502 appears in UI; no errors stays green.
+  - Status: done. Playwright specs import the shared QA fixture, which records unexpected console warnings/errors, `pageerror`, failed non-benign requests, and HTTP 4xx/5xx into shard JSONL. The isolated runner folds this into manifest `browserIssues` and `browserHealth`, history SQLite counters, run rows, verdict, failure inbox, and shard Browser Health panel.
+  - Policy: benign local analytics warnings and navigation/static `net::ERR_ABORTED` cancellations are filtered; page errors, HTTP 5xx, and real failed fetch/xhr/network issues remain blocking.
+  - Evidence: unit covers browser issue normalization/history counts; focused QA cockpit e2e fixture shows FAIL from browser health and a clean real focused run records browserHealth 0/0/0/0.
 
 - [ ] Add unified severity model.
   - Impact: high.
@@ -101,8 +101,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - UI: sticky top banner with `SYSTEM PASS/DEGRADED/FAIL`, failing surface count, last run UTC, git HEAD, code hash, dirty flag, regression status, browser error count.
   - Drill-down: clicking a reason filters runs/shards to exact evidence.
-  - Partial shipped: `/qa` now has a sticky `PASS/DEGRADED/FAIL/UNKNOWN` banner with reason count, git HEAD, code hash, dirty flag, and latest run time.
-  - Remaining: browser error count and backend schema-backed severity.
+  - Partial shipped: `/qa` now has a sticky `PASS/DEGRADED/FAIL/UNKNOWN` banner with reason count, git HEAD, code hash, dirty flag, latest run time, benchmark regression, and browser health failures.
+  - Remaining: backend schema-backed severity.
   - Tests: failed fixture shows FAIL banner and selects failing shard.
 
 - [ ] Build canonical run ledger.
@@ -139,8 +139,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Inputs: fatal runtime markers, browser/page errors, network failures, phase budget breaches, restart failures.
   - UI: one page/list of latest failure causes linking directly to shard, log tail, video time, artifact.
-  - Partial shipped: initial inbox covers failed runs, benchmark regressions, and failed restart audit rows.
-  - Remaining: browser/page/network/HTTP errors, fatal log line linking, phase budget breaches, and video-time deep links.
+  - Partial shipped: initial inbox covers failed runs, browser/page/network/HTTP health, benchmark regressions, and failed restart audit rows.
+  - Remaining: fatal log line linking, phase budget breaches, and video-time deep links.
   - Tests: fatal marker fixture maps to exact shard and log line.
 
 - [ ] Make `/health` read only its dedicated health surface.
@@ -166,6 +166,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Current issue: history endpoint re-reads and upserts manifests from disk on every poll.
   - Fix: record history once at run completion. Add explicit one-shot backfill endpoint/command for legacy runs.
   - Tests: `/api/qa/history` does not read manifest files in hot path.
+
+- [x] Add manual retention cleanup for old QA runs.
+  - Impact: medium.
+  - Product decision: store all runs by default. Add a manual admin action to delete run logs/history older than 30 days when explicitly requested.
+  - Status: done. `/api/qa/retention` requires admin POST and exact confirm `DELETE_OLDER_THAN_30_DAYS`; History tab exposes the disabled-by-default control and result count.
+  - Evidence: unit deletes only a controlled fake run older than cutoff; focused QA cockpit e2e verifies disabled state, exact confirm, POST, and result rendering.
 
 - [ ] Strip `perf.samples` from default `/api/qa/run` payload.
   - Impact: high.

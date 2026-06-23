@@ -10,6 +10,7 @@ import {
   listQaHistory,
   listQaRuns,
   listQaStoryScreenshots,
+  purgeQaRunsOlderThan,
   qaArtifactContentType,
   readQaRun,
   resolveQaArtifactPath,
@@ -602,7 +603,10 @@ const readRestartIntent = async (
 export async function maybeHandleQaRequest(request: Request, pathname: string, headers: JsonHeaders): Promise<Response | null> {
   if (!pathname.startsWith('/api/qa/')) return null;
 
-  const requiredScope: QaAuthScope = pathname === '/api/qa/restart' && request.method === 'POST' ? 'admin' : 'read';
+  const requiredScope: QaAuthScope =
+    (pathname === '/api/qa/restart' || pathname === '/api/qa/retention') && request.method === 'POST'
+      ? 'admin'
+      : 'read';
   const auth = requireQaScope(request, requiredScope, headers);
   if (auth instanceof Response) return auth;
   const authInfo = qaAuthPayload(auth);
@@ -650,6 +654,26 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
     return new Response(safeStringify({ ok: true, qaAuth: authInfo, audit }), {
       headers: { ...headers, 'Cache-Control': 'no-store' },
     });
+  }
+
+  if (pathname === '/api/qa/retention' && request.method === 'POST') {
+    try {
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const confirm = String(body?.['confirm'] || '').trim();
+      if (confirm !== 'DELETE_OLDER_THAN_30_DAYS') {
+        return new Response(safeStringify({ ok: false, error: 'QA_RETENTION_CONFIRM_REQUIRED' }), {
+          status: 400,
+          headers,
+        });
+      }
+      const result = purgeQaRunsOlderThan(30);
+      return new Response(safeStringify({ ok: true, qaAuth: authInfo, result }), {
+        headers: { ...headers, 'Cache-Control': 'no-store' },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 500, headers });
+    }
   }
 
   if (pathname === '/api/qa/restart' && request.method === 'POST') {

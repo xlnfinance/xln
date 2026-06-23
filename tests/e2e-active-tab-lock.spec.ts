@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from './global-setup';
 import { APP_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 
 async function openApp(page: Page, path: string): Promise<void> {

@@ -1,4 +1,4 @@
-import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from './global-setup';
 import { Wallet } from 'ethers';
 import {
   getRenderedOutboundForAccount,

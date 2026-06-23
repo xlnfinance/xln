@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './global-setup';
 
 test.describe('visual scenario player', () => {
   test('opens hub-collapse player, scrubs time, switches scenarios, and previews in wallet', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { expect, test, devices, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, devices, type BrowserContext, type Page } from './global-setup';
 
 type FailureEntry = {
   url: string;

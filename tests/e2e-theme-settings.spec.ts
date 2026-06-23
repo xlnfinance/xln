@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './global-setup';
 import { Wallet } from 'ethers';
 import {
   gotoApp as gotoSharedApp,

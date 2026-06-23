@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './global-setup';
 
 const QA_FIXTURE_RUN_ID = '20260623-235959-999';
 const QA_FAST_RUN_ID = '20260623-225959-888';
@@ -17,6 +17,20 @@ const QA_FAST_TIMING = {
   bootstrapMs: 900,
   apiHealthyMs: 250,
   playwrightMs: 3_100,
+};
+const QA_CLEAN_BROWSER_HEALTH = {
+  issueCount: 0,
+  errorCount: 0,
+  warningCount: 0,
+  networkFailureCount: 0,
+  httpErrorCount: 0,
+};
+const QA_FIXTURE_BROWSER_HEALTH = {
+  issueCount: 3,
+  errorCount: 1,
+  warningCount: 2,
+  networkFailureCount: 0,
+  httpErrorCount: 1,
 };
 const QA_FIXTURE_WEBM = Buffer.from(
   'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAITEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEjTbuMU6uEHFO7a1OsggH97AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjIuMy4xMDBXQYxMYXZmNjIuMy4xMDBEiYhAXgAAAAAAABZUrmvIrgEAAAAAAAA/14EBc8WIrVSOo5G6X2+cgQAitZyDdW5kiIEAhoVWX1ZQOYOBASPjg4QCYloA4JCwgRC6gRCagQJVsIRVuYEBElTDZ0B/c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2Mi4zLjEwMHNz2mPAi2PFiK1UjqORul9vZ8ilRaOHRU5DT0RFUkSHmExhdmM2Mi4xMS4xMDAgbGlidnB4LXZwOWfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDAuMTIwMDAwMDAwAB9DtnXQ54EAo6GBAACAgkmDQgAA8AD2ADgkHBhCAAAwYAAAEL///YsqAACjk4EAKACGAECSnABJQAADIAAAQkCjk4EAUACGAECSnABKwAADIAAAQkAcU7trkbuPs4EAt4r3gQHxggGo8IED',
@@ -51,6 +65,7 @@ const QA_FIXTURE_RUN = {
     maxChildRssKb: 812_000,
     samples: [],
   },
+  browserHealth: QA_FIXTURE_BROWSER_HEALTH,
   benchmark: {
     status: 'slower',
     suiteKey: 'fixture-suite',
@@ -101,6 +116,39 @@ const QA_FIXTURE_RUN = {
         viteBoot: 500,
         playwright: 5_700,
       },
+      browserIssues: [
+        {
+          type: 'pageerror',
+          severity: 'error',
+          message: 'Unhandled promise rejection while opening scenario playback',
+          url: 'https://localhost:8080/qa',
+          method: null,
+          status: null,
+          testId: 'chromium :: tests/e2e-qa-cockpit-fixture.spec.ts :: QA cockpit fixture',
+          timestamp: Date.UTC(2026, 5, 24, 0, 0, 2),
+        },
+        {
+          type: 'console',
+          severity: 'warning',
+          message: 'Slow scenario subtitle hydration',
+          url: 'https://localhost:8080/qa',
+          method: null,
+          status: null,
+          testId: 'chromium :: tests/e2e-qa-cockpit-fixture.spec.ts :: QA cockpit fixture',
+          timestamp: Date.UTC(2026, 5, 24, 0, 0, 3),
+        },
+        {
+          type: 'http',
+          severity: 'warning',
+          message: 'HTTP 404',
+          url: 'https://localhost:8080/favicon.ico',
+          method: 'GET',
+          status: 404,
+          testId: 'chromium :: tests/e2e-qa-cockpit-fixture.spec.ts :: QA cockpit fixture',
+          timestamp: Date.UTC(2026, 5, 24, 0, 0, 4),
+        },
+      ],
+      browserHealth: QA_FIXTURE_BROWSER_HEALTH,
       timelineSteps: [
         { label: 'E2E-TIMING:open wallet cockpit', ms: 900 },
         { label: 'E2E-TIMING:select recorded shard', ms: 1_100 },
@@ -142,6 +190,7 @@ const QA_FAST_SUMMARY = {
   status: 'passed',
   totalMs: 4_000,
   timing: QA_FAST_TIMING,
+  browserHealth: QA_CLEAN_BROWSER_HEALTH,
   code: {
     ...QA_FIXTURE_RUN.code,
     gitHead: '95174ad2c2d9d8db1d7f07b6f4a4e9ec0c000000',
@@ -213,6 +262,11 @@ const QA_HISTORY = [
     benchmarkStatus: QA_FIXTURE_RUN.benchmark.status,
     benchmarkDeltaPct: 25,
     benchmarkComparedRunId: QA_FIXTURE_RUN.benchmark.comparedRunId,
+    browserIssueCount: QA_FIXTURE_BROWSER_HEALTH.issueCount,
+    browserErrorCount: QA_FIXTURE_BROWSER_HEALTH.errorCount,
+    browserWarningCount: QA_FIXTURE_BROWSER_HEALTH.warningCount,
+    networkFailureCount: QA_FIXTURE_BROWSER_HEALTH.networkFailureCount,
+    httpErrorCount: QA_FIXTURE_BROWSER_HEALTH.httpErrorCount,
   },
   {
     runId: QA_FAST_RUN_ID,
@@ -239,6 +293,11 @@ const QA_HISTORY = [
     benchmarkStatus: 'ok',
     benchmarkDeltaPct: 0,
     benchmarkComparedRunId: null,
+    browserIssueCount: 0,
+    browserErrorCount: 0,
+    browserWarningCount: 0,
+    networkFailureCount: 0,
+    httpErrorCount: 0,
   },
 ];
 
@@ -345,6 +404,23 @@ test.describe('QA cockpit scenario player', () => {
         }),
       });
     });
+    await page.route('**/api/qa/retention', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          result: {
+            retentionDays: 30,
+            cutoff: Date.UTC(2026, 4, 25),
+            deletedRunIds: ['20260401-000000-000'],
+            deletedLogDirs: 1,
+            deletedHistoryRows: 1,
+          },
+        }),
+      });
+    });
     await page.route('**/api/qa/artifact?**', async (route) => {
       await route.fulfill({
         status: 200,
@@ -361,8 +437,10 @@ test.describe('QA cockpit scenario player', () => {
     await page.goto('/qa');
     await expect(page.getByRole('heading', { name: 'Test Cockpit' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('qa-test-tabs')).toBeVisible();
-    await expect(page.getByTestId('qa-verdict-banner')).toContainText('DEGRADED');
-    await expect(page.getByTestId('qa-verdict-banner')).toContainText('wall time +25%');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('FAIL');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('1 browser errors');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('browser');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('performance');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('SLOWER');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
@@ -384,13 +462,21 @@ test.describe('QA cockpit scenario player', () => {
     await page.getByRole('button', { name: 'Benchmarks' }).click();
     await expect(page.getByTestId('qa-benchmarks')).toContainText('Swap Runtime TPS');
     await expect(page.getByTestId('qa-benchmarks')).toContainText('cpu 44.2%');
+    await expect(page.getByTestId('qa-benchmarks')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-benchmarks')).toContainText('SLOWER +25.0%');
     await page.getByRole('button', { name: 'History' }).click();
     await expect(page.getByTestId('qa-history')).toContainText('head 95174ad2c2d');
     await expect(page.getByTestId('qa-history')).toContainText('code b4e0f2401f81');
+    await expect(page.getByTestId('qa-history')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-history')).toContainText('SLOWER +25.0%');
     await expect(page.getByTestId('qa-history')).toContainText('regulator-auditor');
     await expect(page.getByTestId('qa-history')).toContainText('verify evidence playback');
+    await expect(page.getByTestId('qa-retention-card')).toContainText('Delete Runs Older Than 30 Days');
+    await expect(page.getByTestId('qa-retention-purge')).toBeDisabled();
+    await page.getByPlaceholder('DELETE_OLDER_THAN_30_DAYS').fill('DELETE_OLDER_THAN_30_DAYS');
+    await expect(page.getByTestId('qa-retention-purge')).toBeEnabled();
+    await page.getByTestId('qa-retention-purge').click();
+    await expect(page.getByTestId('qa-retention-result')).toContainText('deleted 1 log dirs / 1 history rows');
     await page.getByTestId('qa-history-sort').selectOption('stack-fast');
     await expect(page.getByTestId('qa-history-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
     await page.getByTestId('qa-history-sort').selectOption('date-desc');
@@ -398,6 +484,8 @@ test.describe('QA cockpit scenario player', () => {
     await page.getByRole('button', { name: 'E2E Runs' }).click();
     await expect(page.locator('.run-summary')).toContainText('Benchmark');
     await expect(page.locator('.run-summary')).toContainText('wall time +25%');
+    await expect(page.locator('.run-summary')).toContainText('Browser Health');
+    await expect(page.locator('.run-summary')).toContainText('1 err / 2 warn');
 
     const previewCards = page.getByTestId('scenario-preview-card');
     await expect(previewCards.first()).toBeVisible({ timeout: 30_000 });
@@ -407,6 +495,8 @@ test.describe('QA cockpit scenario player', () => {
     await videoShard.click();
 
     const watchPanel = page.getByTestId('qa-watch-panel');
+    await expect(page.getByTestId('qa-browser-health')).toContainText('Unhandled promise rejection');
+    await expect(page.getByTestId('qa-browser-health')).toContainText('HTTP 404');
     await expect(watchPanel).toBeVisible();
     await expect(page.getByTestId('qa-video-player')).toBeVisible();
     await expect(page.getByTestId('qa-video-player')).toHaveAttribute('src', /^blob:/);

@@ -1,4 +1,4 @@
-import { devices, expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, type BrowserContext, type Page } from './global-setup';
 import { ensureE2EBaseline, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';

@@ -24,6 +24,7 @@
     timing?: QaRunTimingSummary;
     code?: QaCodeFingerprint;
     perf?: QaPerfSummary;
+    browserHealth?: QaBrowserHealthSummary;
     benchmark?: QaBenchmarkComparison;
     totalShards: number;
     passedShards: number;
@@ -67,6 +68,8 @@
       playwright: number;
     } | null;
     perf?: QaPerfSummary;
+    browserIssues?: QaBrowserIssue[];
+    browserHealth?: QaBrowserHealthSummary;
     timelineSteps?: QaSlowStep[];
     slowSteps: QaSlowStep[];
     artifacts: QaArtifact[];
@@ -83,6 +86,7 @@
     totalMs: number | null;
     code?: QaCodeFingerprint;
     perf?: QaPerfSummary;
+    browserHealth?: QaBrowserHealthSummary;
     benchmark?: QaBenchmarkComparison;
     totalShards: number;
     passedShards: number;
@@ -110,6 +114,25 @@
     maxRunnerRssBytes: number;
     maxChildCpuPct: number;
     maxChildRssKb: number;
+  };
+
+  type QaBrowserIssue = {
+    type: 'console' | 'pageerror' | 'requestfailed' | 'http';
+    severity: 'error' | 'warning';
+    message: string;
+    url: string | null;
+    method: string | null;
+    status: number | null;
+    testId: string | null;
+    timestamp: number;
+  };
+
+  type QaBrowserHealthSummary = {
+    issueCount: number;
+    errorCount: number;
+    warningCount: number;
+    networkFailureCount: number;
+    httpErrorCount: number;
   };
 
   type QaRunTimingSummary = {
@@ -174,6 +197,11 @@
     benchmarkStatus: QaBenchmarkComparison['status'] | null;
     benchmarkDeltaPct: number | null;
     benchmarkComparedRunId: string | null;
+    browserIssueCount: number;
+    browserErrorCount: number;
+    browserWarningCount: number;
+    networkFailureCount: number;
+    httpErrorCount: number;
     avgShardMs: number | null;
     maxShardMs: number | null;
     bootstrapMs: number | null;
@@ -221,6 +249,14 @@
     };
   };
 
+  type QaRetentionPurgeResult = {
+    retentionDays: number;
+    cutoff: number;
+    deletedRunIds: string[];
+    deletedLogDirs: number;
+    deletedHistoryRows: number;
+  };
+
   type QaView = 'e2e' | 'scenarios' | 'suites' | 'benchmarks' | 'history';
   type RunSortKey =
     | 'date-desc'
@@ -243,7 +279,7 @@
     | 'playwright-slow';
   type QaVerdictStatus = 'PASS' | 'DEGRADED' | 'FAIL' | 'UNKNOWN';
   type QaFailureSeverity = 'FAIL' | 'DEGRADED' | 'WARN';
-  type QaFailureClass = 'assertion' | 'infra' | 'timeout' | 'performance' | 'operations' | 'unknown';
+  type QaFailureClass = 'assertion' | 'infra' | 'timeout' | 'performance' | 'browser' | 'network' | 'operations' | 'unknown';
   type QaFailureInboxItem = {
     id: string;
     severity: QaFailureSeverity;
@@ -291,6 +327,9 @@
   let restartExpectedGitHead = $state('');
   let restartCodeHash = $state('');
   let restartDirty = $state(false);
+  let retentionConfirm = $state('');
+  let retentionBusy = $state(false);
+  let retentionResult = $state<QaRetentionPurgeResult | null>(null);
 
   const selectedShard = $derived(
     selectedRun?.shards?.[selectedShardIndex] ?? null,
@@ -328,6 +367,7 @@
     restartConfirm.trim() === 'RUN' &&
     restartExpectedGitHead.trim(),
   ));
+  const retentionReady = $derived(Boolean(qaCanPlanRestart && retentionConfirm.trim() === 'DELETE_OLDER_THAN_30_DAYS' && !retentionBusy));
   const sortedRuns = $derived([...runs].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedHistory = $derived([...history].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedShardEntries = $derived((selectedRun?.shards ?? [])
@@ -357,6 +397,51 @@
   function formatCount(run: QaSummary | QaRun | null): string {
     if (!run) return '0/0';
     return `${run.passedShards}/${run.totalShards}`;
+  }
+
+  function emptyBrowserHealth(): QaBrowserHealthSummary {
+    return { issueCount: 0, errorCount: 0, warningCount: 0, networkFailureCount: 0, httpErrorCount: 0 };
+  }
+
+  function browserHealth(run: QaSummary | QaRun | null | undefined): QaBrowserHealthSummary {
+    return run?.browserHealth ?? emptyBrowserHealth();
+  }
+
+  function browserHealthFromHistory(row: QaHistoryEntry): QaBrowserHealthSummary {
+    return {
+      issueCount: row.browserIssueCount,
+      errorCount: row.browserErrorCount,
+      warningCount: row.browserWarningCount,
+      networkFailureCount: row.networkFailureCount,
+      httpErrorCount: row.httpErrorCount,
+    };
+  }
+
+  function formatBrowserHealth(health: QaBrowserHealthSummary | null | undefined): string {
+    const value = health ?? emptyBrowserHealth();
+    if (value.issueCount <= 0) return 'clean';
+    return `${value.errorCount} err / ${value.warningCount} warn`;
+  }
+
+  function browserIssueDetail(health: QaBrowserHealthSummary): string {
+    return `${health.errorCount} browser errors, ${health.warningCount} warnings, ${health.networkFailureCount} network failures, ${health.httpErrorCount} HTTP responses`;
+  }
+
+  function shardBrowserHealth(shard: QaShard | null | undefined): QaBrowserHealthSummary {
+    if (shard?.browserHealth) return shard.browserHealth;
+    const issues = shard?.browserIssues ?? [];
+    return {
+      issueCount: issues.length,
+      errorCount: issues.filter(issue => issue.severity === 'error').length,
+      warningCount: issues.filter(issue => issue.severity === 'warning').length,
+      networkFailureCount: issues.filter(issue => issue.type === 'requestfailed').length,
+      httpErrorCount: issues.filter(issue => issue.type === 'http').length,
+    };
+  }
+
+  function browserIssueLabel(issue: QaBrowserIssue): string {
+    const status = issue.status ? ` ${issue.status}` : '';
+    return `${issue.type}${status}`;
   }
 
   function shortHash(value: string | null | undefined, len = 12): string {
@@ -417,6 +502,21 @@
     };
   }
 
+  function browserFailureItem(run: QaSummary): QaFailureInboxItem | null {
+    const health = browserHealth(run);
+    if (health.issueCount <= 0) return null;
+    const severity: QaFailureSeverity = health.errorCount > 0 ? 'FAIL' : 'WARN';
+    return {
+      id: `browser:${run.runId}`,
+      severity,
+      failureClass: health.networkFailureCount > 0 || health.httpErrorCount > 0 ? 'network' : 'browser',
+      title: health.errorCount > 0 ? 'Browser health failed' : 'Browser warnings',
+      detail: browserIssueDetail(health),
+      runId: run.runId,
+      createdAt: run.createdAt,
+    };
+  }
+
   function restartFailureItem(row: QaRestartAuditEntry): QaFailureInboxItem | null {
     const failed = row.status === 'spawn_error' || (row.exitCode !== null && row.exitCode !== 0);
     if (!failed) return null;
@@ -432,7 +532,7 @@
   }
 
   function buildFailureInbox(runRows: QaSummary[], auditRows: QaRestartAuditEntry[]): QaFailureInboxItem[] {
-    const runItems = runRows.flatMap((run) => [runFailureItem(run), benchmarkFailureItem(run)].filter(Boolean) as QaFailureInboxItem[]);
+    const runItems = runRows.flatMap((run) => [runFailureItem(run), browserFailureItem(run), benchmarkFailureItem(run)].filter(Boolean) as QaFailureInboxItem[]);
     const restartItems = auditRows.map(restartFailureItem).filter(Boolean) as QaFailureInboxItem[];
     return [...runItems, ...restartItems].sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
   }
@@ -780,6 +880,31 @@
     }
   }
 
+  async function purgeOldQaRuns(): Promise<void> {
+    if (!retentionReady) return;
+    retentionBusy = true;
+    actionError = null;
+    retentionResult = null;
+    try {
+      const response = await qaFetch('/api/qa/retention', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: retentionConfirm.trim() }),
+      });
+      const payload = await response.json() as { ok?: boolean; result?: QaRetentionPurgeResult; error?: string };
+      if (!response.ok || !payload.ok || !payload.result) {
+        throw new Error(payload.error || 'Failed to purge old QA runs');
+      }
+      retentionResult = payload.result;
+      retentionConfirm = '';
+      await Promise.all([loadRuns(false), loadMeta()]);
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err);
+    } finally {
+      retentionBusy = false;
+    }
+  }
+
   async function openProtectedArtifact(url: string | null | undefined): Promise<void> {
     const cleanUrl = String(url || '').trim();
     if (!cleanUrl) return;
@@ -924,6 +1049,7 @@
               <span>boot {formatMs(run.timing?.bootstrapMs)}</span>
               <span>pw {formatMs(run.timing?.playwrightMs)}</span>
               <span>test {formatMs(run.timing?.avgShardMs)}</span>
+              <span class:warn={browserHealth(run).errorCount > 0}>browser {formatBrowserHealth(browserHealth(run))}</span>
             </div>
             {#if run.failingTargets.length > 0}
               <div class="run-row-failures">{run.failingTargets.join(' · ')}</div>
@@ -1092,6 +1218,7 @@
               <span>{formatMs(row.totalMs)}</span>
               <span>load {row.peakLoad1 ?? 'n/a'}</span>
               <span>cpu {row.maxChildCpuPct ?? 'n/a'}%</span>
+              <span class:warn={row.browserErrorCount > 0}>browser {formatBrowserHealth(browserHealthFromHistory(row))}</span>
               <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
                 {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
               </span>
@@ -1139,6 +1266,7 @@
               <span>{formatDate(row.createdAt)}</span>
               <span>{formatMs(row.totalMs)}</span>
               <span>{row.passedShards}/{row.totalShards}</span>
+              <span class:warn={row.browserErrorCount > 0}>browser {formatBrowserHealth(browserHealthFromHistory(row))}</span>
               <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
                 {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
               </span>
@@ -1148,6 +1276,31 @@
             </article>
           {/each}
         </div>
+        <section class="retention-card" data-testid="qa-retention-card">
+          <div>
+            <div class="eyebrow">Maintenance</div>
+            <h3>Delete Runs Older Than 30 Days</h3>
+            <p>Manual cleanup only. New runs and current audit history stay untouched.</p>
+          </div>
+          <label>
+            <span>confirm phrase</span>
+            <input bind:value={retentionConfirm} autocomplete="off" placeholder="DELETE_OLDER_THAN_30_DAYS" />
+          </label>
+          <button
+            class="mini-action danger"
+            disabled={!retentionReady}
+            title={qaCanPlanRestart ? 'Deletes QA run logs and history rows older than 30 days' : 'Admin QA token required'}
+            onclick={purgeOldQaRuns}
+            data-testid="qa-retention-purge"
+          >
+            {retentionBusy ? 'Deleting...' : 'Delete old runs'}
+          </button>
+          {#if retentionResult}
+            <small data-testid="qa-retention-result">
+              deleted {retentionResult.deletedLogDirs} log dirs / {retentionResult.deletedHistoryRows} history rows
+            </small>
+          {/if}
+        </section>
         <div class="suite-list-head restart-audit-head">
           <div>
             <div class="eyebrow">Operations Audit</div>
@@ -1204,6 +1357,11 @@
             <span>Peak Load</span>
             <strong>{selectedRun.perf?.peakLoad1 ?? 'n/a'}</strong>
             <small>child cpu {selectedRun.perf?.maxChildCpuPct ?? 'n/a'}%</small>
+          </article>
+          <article class="summary-card" class:bad={browserHealth(selectedRun).errorCount > 0}>
+            <span>Browser Health</span>
+            <strong>{formatBrowserHealth(browserHealth(selectedRun))}</strong>
+            <small>{browserIssueDetail(browserHealth(selectedRun))}</small>
           </article>
           <article class="summary-card" class:bad={selectedRun.benchmark?.status === 'slower' || selectedRun.benchmark?.status === 'mixed'}>
             <span>Benchmark</span>
@@ -1268,6 +1426,7 @@
                 <span class:muted={artifactCount(shard, 'video') === 0}>{plural(artifactCount(shard, 'video'), 'video', 'videos')}</span>
                 <span class:muted={artifactCount(shard, 'image') === 0}>{plural(artifactCount(shard, 'image'), 'screenshot', 'screenshots')}</span>
                 <span class:muted={artifactCount(shard, 'trace') === 0}>{plural(artifactCount(shard, 'trace'), 'trace', 'traces')}</span>
+                <span class:warn={shardBrowserHealth(shard).errorCount > 0} class:muted={shardBrowserHealth(shard).issueCount === 0}>browser {formatBrowserHealth(shardBrowserHealth(shard))}</span>
                 {#if shard.logRelativePath}
                   <span>Log</span>
                 {/if}
@@ -1294,6 +1453,7 @@
                 <span class:muted={artifactCount(selectedShard, 'video') === 0}>{plural(artifactCount(selectedShard, 'video'), 'video', 'videos')}</span>
                 <span class:muted={artifactCount(selectedShard, 'image') === 0}>{plural(artifactCount(selectedShard, 'image'), 'screenshot', 'screenshots')}</span>
                 <span class:muted={artifactCount(selectedShard, 'trace') === 0}>{plural(artifactCount(selectedShard, 'trace'), 'trace', 'traces')}</span>
+                <span class:warn={shardBrowserHealth(selectedShard).errorCount > 0} class:muted={shardBrowserHealth(selectedShard).issueCount === 0}>browser {formatBrowserHealth(shardBrowserHealth(selectedShard))}</span>
                 {#if selectedShard.logRelativePath}
                   <span>log</span>
                 {/if}
@@ -1376,6 +1536,29 @@
                   </dl>
                 {:else}
                   <div class="empty">No phase timings</div>
+                {/if}
+              </section>
+
+              <section class="panel-block" data-testid="qa-browser-health">
+                <h4>Browser Health</h4>
+                <dl class="phase-list">
+                  <div><dt>errors</dt><dd>{shardBrowserHealth(selectedShard).errorCount}</dd></div>
+                  <div><dt>warnings</dt><dd>{shardBrowserHealth(selectedShard).warningCount}</dd></div>
+                  <div><dt>network</dt><dd>{shardBrowserHealth(selectedShard).networkFailureCount}</dd></div>
+                  <div><dt>http</dt><dd>{shardBrowserHealth(selectedShard).httpErrorCount}</dd></div>
+                </dl>
+                {#if (selectedShard.browserIssues ?? []).length > 0}
+                  <ul class="browser-issue-list">
+                    {#each (selectedShard.browserIssues ?? []).slice(0, 8) as issue}
+                      <li class:error={issue.severity === 'error'}>
+                        <strong>{browserIssueLabel(issue)}</strong>
+                        <span>{issue.message}</span>
+                        {#if issue.url}<small>{issue.method ?? 'GET'} {issue.url}</small>{/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {:else}
+                  <div class="empty">No browser issues captured</div>
                 {/if}
               </section>
 
@@ -1938,7 +2121,7 @@
   }
 
   .history-table article {
-    grid-template-columns: 80px minmax(170px, 1fr) repeat(5, minmax(90px, auto));
+    grid-template-columns: 80px minmax(170px, 1fr) repeat(6, minmax(86px, auto));
   }
 
   .restart-audit-table article {
@@ -1946,7 +2129,7 @@
   }
 
   .history-table.compact article {
-    grid-template-columns: 80px repeat(5, minmax(80px, auto));
+    grid-template-columns: 80px repeat(6, minmax(76px, auto));
   }
 
   .history-table article.ok,
@@ -1973,7 +2156,9 @@
     overflow-wrap: anywhere;
   }
 
-  .history-table .warn {
+  .history-table .warn,
+  .run-row-timing .warn,
+  .artifact-chips span.warn {
     color: #f1d48a;
     font-weight: 800;
   }
@@ -2007,6 +2192,52 @@
     color: #f1efe7;
     background: rgba(0, 0, 0, 0.22);
     font: inherit;
+  }
+
+  .retention-card {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(260px, 0.8fr) auto;
+    align-items: end;
+    gap: 0.85rem;
+    border: 1px solid rgba(255, 146, 132, 0.16);
+    border-radius: 8px;
+    padding: 0.9rem;
+    background: rgba(255, 146, 132, 0.035);
+  }
+
+  .retention-card label {
+    display: grid;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .retention-card label span {
+    color: #9b978a;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .retention-card input {
+    min-height: 34px;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    padding: 0 0.65rem;
+    color: #f1efe7;
+    background: rgba(0, 0, 0, 0.22);
+    font: inherit;
+  }
+
+  .mini-action.danger {
+    border-color: rgba(255, 146, 132, 0.35);
+    color: #ffb1a6;
+  }
+
+  .retention-card small {
+    color: #b7b2a4;
+    grid-column: 1 / -1;
   }
 
   .chip.warn {
@@ -2198,6 +2429,7 @@
   }
 
   .phase-list,
+  .browser-issue-list,
   .slow-step-list,
   .artifact-list {
     display: grid;
@@ -2205,6 +2437,7 @@
   }
 
   .phase-list div,
+  .browser-issue-list li,
   .slow-step-list li,
   .artifact-list button {
     padding-bottom: 0.55rem;
@@ -2222,6 +2455,34 @@
   .phase-list dd,
   .slow-step-list strong {
     margin: 0;
+  }
+
+  .browser-issue-list li {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+
+  .browser-issue-list strong {
+    color: #f1d48a;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+  }
+
+  .browser-issue-list li.error strong {
+    color: #ff9284;
+  }
+
+  .browser-issue-list span,
+  .browser-issue-list small {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .browser-issue-list small {
+    color: #8f8b80;
+    font-size: 0.76rem;
   }
 
   .artifact-list button {
@@ -2303,6 +2564,7 @@
     .history-table article,
     .history-table.compact article,
     .failure-list button,
+    .retention-card,
     .restart-audit-table article {
       grid-template-columns: 1fr;
       align-items: start;

@@ -7,7 +7,7 @@
  * IndexedDB/localStorage state, not two runtimes multiplexed inside one browser page.
  */
 
-import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from './global-setup';
 import { ethers } from 'ethers';
 import { deriveDelta } from '../runtime/account-utils';
 import { ensureE2EBaseline } from './utils/e2e-baseline';
