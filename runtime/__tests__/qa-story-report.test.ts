@@ -309,6 +309,33 @@ test('qa api requires read token and admin token for restart operations', async 
   });
 });
 
+test('qa read endpoints support ETag revalidation', async () => {
+  await withQaAuthEnv(async () => {
+    const first = await maybeHandleQaRequest(
+      qaRequest('http://127.0.0.1:8080/api/qa/catalog'),
+      '/api/qa/catalog',
+      JSON_HEADERS,
+    );
+    expect(first?.status).toBe(200);
+    const etag = first?.headers.get('etag');
+    expect(etag).toMatch(/^"qa-[a-f0-9]+"/);
+    expect(first?.headers.get('cache-control')).toBe('private, no-cache');
+    const firstPayload = await first!.json() as { ok?: boolean; catalog?: unknown[] };
+    expect(firstPayload.ok).toBe(true);
+
+    const second = await maybeHandleQaRequest(
+      qaRequest('http://127.0.0.1:8080/api/qa/catalog', {
+        headers: { 'if-none-match': etag || '' },
+      }),
+      '/api/qa/catalog',
+      JSON_HEADERS,
+    );
+    expect(second?.status).toBe(304);
+    expect(second?.headers.get('etag')).toBe(etag);
+    expect(await second!.text()).toBe('');
+  });
+});
+
 test('qa auth disabled escape hatch is explicit and media responses stay same-origin', async () => {
   const previousDisabled = process.env['XLN_QA_AUTH_DISABLED'];
   const previousRead = process.env['XLN_QA_READ_TOKEN'];

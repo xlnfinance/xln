@@ -138,6 +138,36 @@ const jsonResponse = (
   },
 });
 
+const etagForBody = (body: string): string =>
+  `"qa-${createHash('sha256').update(body).digest('hex').slice(0, 24)}"`;
+
+const jsonEtagResponse = (
+  request: Request,
+  body: Record<string, unknown>,
+  headers: JsonHeaders,
+): Response => {
+  const text = safeStringify(body);
+  const etag = etagForBody(text);
+  const responseHeaders = {
+    ...headers,
+    'Cache-Control': 'private, no-cache',
+    ETag: etag,
+  };
+  const requestedEtags = String(request.headers.get('if-none-match') || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  if (requestedEtags.includes(etag)) {
+    return new Response(null, {
+      status: 304,
+      headers: responseHeaders,
+    });
+  }
+  return new Response(text, {
+    headers: responseHeaders,
+  });
+};
+
 const qaAuthPayload = (auth: QaAuthContext): Record<string, unknown> => ({
   scope: auth.scope,
   disabled: auth.disabled,
@@ -620,15 +650,16 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
   const restartAllowed = qaRestartAllowed() && auth.scope === 'admin';
 
   if (pathname === '/api/qa/catalog' && request.method === 'GET') {
-    return new Response(
-      safeStringify({
+    return jsonEtagResponse(
+      request,
+      {
         ok: true,
         qaAuth: authInfo,
         catalog: QA_TEST_CATALOG,
         restart: restartStatus(),
         restartAllowed,
-      }),
-      { headers: { ...headers, 'Cache-Control': 'no-store' } },
+      },
+      headers,
     );
   }
 
@@ -638,10 +669,7 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
       const limitRaw = Number(url.searchParams.get('limit') || '120');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 120;
       const history = await listQaHistory(limit);
-      return new Response(
-        safeStringify({ ok: true, qaAuth: authInfo, history, restart: restartStatus(), restartAllowed }),
-        { headers: { ...headers, 'Cache-Control': 'no-store' } },
-      );
+      return jsonEtagResponse(request, { ok: true, qaAuth: authInfo, history, restart: restartStatus(), restartAllowed }, headers);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return new Response(safeStringify({ ok: false, error: message }), { status: 500, headers });
@@ -671,18 +699,14 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
   }
 
   if (pathname === '/api/qa/restart' && request.method === 'GET') {
-    return new Response(safeStringify({ ok: true, qaAuth: authInfo, restart: restartStatus(), restartAllowed }), {
-      headers: { ...headers, 'Cache-Control': 'no-store' },
-    });
+    return jsonEtagResponse(request, { ok: true, qaAuth: authInfo, restart: restartStatus(), restartAllowed }, headers);
   }
 
   if (pathname === '/api/qa/restart-audit' && request.method === 'GET') {
     const url = new URL(request.url);
     const limitRaw = Number(url.searchParams.get('limit') || '50');
     const audit = listQaRestartAudit(limitRaw);
-    return new Response(safeStringify({ ok: true, qaAuth: authInfo, audit }), {
-      headers: { ...headers, 'Cache-Control': 'no-store' },
-    });
+    return jsonEtagResponse(request, { ok: true, qaAuth: authInfo, audit }, headers);
   }
 
   if (pathname === '/api/qa/retention' && request.method === 'POST') {
@@ -829,19 +853,15 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
       const limitRaw = Number(url.searchParams.get('limit') || '200');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 200;
       const stories = await listQaStoryScreenshots(limit);
-      return new Response(
-        safeStringify({
+      return jsonEtagResponse(
+        request,
+        {
           ok: true,
           qaAuth: authInfo,
           total: stories.length,
           stories,
-        }),
-        {
-          headers: {
-            ...headers,
-            'Cache-Control': 'no-store',
-          },
         },
+        headers,
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -873,18 +893,14 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
       const limitRaw = Number(url.searchParams.get('limit') || '20');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
       const runs = await listQaRuns(limit);
-      return new Response(
-        safeStringify({
+      return jsonEtagResponse(
+        request,
+        {
           ok: true,
           qaAuth: authInfo,
           runs: runs.map((run) => summarizeQaRun(run)),
-        }),
-        {
-          headers: {
-            ...headers,
-            'Cache-Control': 'no-store',
-          },
         },
+        headers,
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -900,18 +916,14 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
     }
     try {
       const run = await readQaRun(runId);
-      return new Response(
-        safeStringify({
+      return jsonEtagResponse(
+        request,
+        {
           ok: true,
           qaAuth: authInfo,
           run: stripQaRunPerfSamples(enrichQaRunUrls(run)),
-        }),
-        {
-          headers: {
-            ...headers,
-            'Cache-Control': 'no-store',
-          },
         },
+        headers,
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
@@ -928,8 +940,9 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
     try {
       const run = await readQaRun(runId);
       const runPerf = run.perf ?? null;
-      return new Response(
-        safeStringify({
+      return jsonEtagResponse(
+        request,
+        {
           ok: true,
           qaAuth: authInfo,
           runId: run.runId,
@@ -942,13 +955,8 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
             perf: shard.perf ? summarizeQaPerf(shard.perf) : null,
             samples: shard.perf?.samples ?? [],
           })),
-        }),
-        {
-          headers: {
-            ...headers,
-            'Cache-Control': 'no-store',
-          },
         },
+        headers,
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
