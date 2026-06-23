@@ -101,6 +101,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - UI: sticky top banner with `SYSTEM PASS/DEGRADED/FAIL`, failing surface count, last run UTC, git HEAD, code hash, dirty flag, regression status, browser error count.
   - Drill-down: clicking a reason filters runs/shards to exact evidence.
+  - Partial shipped: `/qa` now has a sticky `PASS/DEGRADED/FAIL/UNKNOWN` banner with reason count, git HEAD, code hash, dirty flag, and latest run time.
+  - Remaining: browser error count and backend schema-backed severity.
   - Tests: failed fixture shows FAIL banner and selects failing shard.
 
 - [ ] Build canonical run ledger.
@@ -114,6 +116,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `/api/qa/runs` and `/api/qa/history` expose timing summaries: stack wall, avg/max shard, bootstrap, health wait, and Playwright/browser phase.
   - UI: sidebar/history can sort by newest/oldest, fastest/slowest stack, bootstrap, browser, and test. Selected run shards can sort by recorded order, duration, bootstrap, and browser phase.
   - Evidence: focused QA cockpit e2e verifies stack-fast/date sorting in run list and history; unit covers timing report ingestion.
+
+- [x] Add initial failure inbox UX shell.
+  - Impact: high.
+  - Status: done. `/qa` now shows a latest-first failure inbox for failed runs, benchmark regressions, dirty/latest degraded state, and failed restart audit rows.
+  - UI: each reason shows severity, class, detail, timestamp, and opens the related run/history surface.
+  - Evidence: focused QA cockpit e2e verifies `DEGRADED` verdict from benchmark regression, performance inbox item, click-through to the related run, and no browser console errors.
 
 - [ ] Add regression comparator.
   - Impact: high.
@@ -131,6 +139,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Inputs: fatal runtime markers, browser/page errors, network failures, phase budget breaches, restart failures.
   - UI: one page/list of latest failure causes linking directly to shard, log tail, video time, artifact.
+  - Partial shipped: initial inbox covers failed runs, benchmark regressions, and failed restart audit rows.
+  - Remaining: browser/page/network/HTTP errors, fatal log line linking, phase budget breaches, and video-time deep links.
   - Tests: fatal marker fixture maps to exact shard and log line.
 
 - [ ] Make `/health` read only its dedicated health surface.
