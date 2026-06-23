@@ -188,6 +188,12 @@ export type QaRunView = Omit<QaRunManifest, 'perf' | 'shards'> & {
   shards: QaShardView[];
 };
 
+export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
+  perf?: QaPerfSummaryView;
+  timing: QaRunTimingSummary;
+  failingTargets: string[];
+};
+
 type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'logTail'> & {
   browserIssues?: QaBrowserIssue[];
 };
@@ -924,6 +930,40 @@ const rowToQaHistoryEntry = (row: Record<string, unknown>): QaHistoryEntry => ({
   logsDir: String(row['logs_dir'] || ''),
 });
 
+const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
+  const parsed = parseManifestJson(row['manifest_json']);
+  if (parsed) return summarizeQaRun(parsed);
+  const history = rowToQaHistoryEntry(row);
+  return {
+    manifestVersion: 1,
+    runId: history.runId,
+    createdAt: history.createdAt,
+    completedAt: history.completedAt,
+    status: history.status,
+    totalMs: history.totalMs,
+    browserHealth: {
+      issueCount: history.browserIssueCount,
+      errorCount: history.browserErrorCount,
+      warningCount: history.browserWarningCount,
+      networkFailureCount: history.networkFailureCount,
+      httpErrorCount: history.httpErrorCount,
+    },
+    totalShards: history.totalShards,
+    passedShards: history.passedShards,
+    failedShards: history.failedShards,
+    failureClasses: [],
+    args: null,
+    timing: {
+      avgShardMs: history.avgShardMs,
+      maxShardMs: history.maxShardMs,
+      bootstrapMs: history.bootstrapMs,
+      apiHealthyMs: history.apiHealthyMs,
+      playwrightMs: history.playwrightMs,
+    },
+    failingTargets: [],
+  };
+};
+
 export const findComparableQaBenchmarkRun = (run: QaRunManifest): QaRunManifest | null => {
   const db = openQaHistoryDb();
   try {
@@ -1018,6 +1058,58 @@ export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
   } finally {
     db.close();
   }
+};
+
+export const listQaRunSummaries = async (limit = 20): Promise<QaRunSummary[]> => {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(50, Math.floor(limit))) : 20;
+  const db = openQaHistoryDb();
+  try {
+    const rows = db.query(`
+      SELECT
+        run_id,
+        created_at,
+        completed_at,
+        status,
+        total_ms,
+        total_shards,
+        passed_shards,
+        failed_shards,
+        git_head,
+        git_branch,
+        dirty,
+        code_hash,
+        avg_load1,
+        peak_load1,
+        max_child_cpu_pct,
+        max_child_rss_kb,
+        suite_key,
+        benchmark_status,
+        benchmark_delta_pct,
+        benchmark_compared_run_id,
+        browser_issue_count,
+        browser_error_count,
+        browser_warning_count,
+        network_failure_count,
+        http_error_count,
+        avg_shard_ms,
+        max_shard_ms,
+        bootstrap_ms,
+        api_healthy_ms,
+        playwright_ms,
+        logs_dir,
+        manifest_json
+      FROM qa_runs
+      ORDER BY
+        CASE WHEN created_at > $latestRealCreatedAt THEN 1 ELSE 0 END ASC,
+        created_at DESC
+      LIMIT $limit
+    `).all({ $limit: safeLimit, $latestRealCreatedAt: Date.now() + FUTURE_RUN_SKEW_MS }) as Array<Record<string, unknown>>;
+    if (rows.length > 0) return rows.map(rowToQaRunSummary);
+  } finally {
+    db.close();
+  }
+  const runs = await listQaRuns(safeLimit);
+  return runs.map(summarizeQaRun);
 };
 
 export const backfillQaHistoryFromLogs = async (limit = 500): Promise<QaHistoryBackfillResult> => {
@@ -1557,11 +1649,13 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
         const metadata = targetMetadata.get(shard.shard) ?? null;
         const target = shard.target ?? metadata?.target ?? null;
         const title = shard.title ?? metadata?.title ?? readShardTitleFromResults(runDir, shard.shard);
+        const hasStoredTimelineSteps = Array.isArray((shard as { timelineSteps?: unknown }).timelineSteps);
+        const hasStoredLogTail = Object.prototype.hasOwnProperty.call(shard, 'logTail');
         const logText =
-          shard.logRelativePath && existsSync(join(runDir, shard.logRelativePath))
+          shard.logRelativePath && (!hasStoredTimelineSteps || !hasStoredLogTail) && existsSync(join(runDir, shard.logRelativePath))
             ? await readFile(join(runDir, shard.logRelativePath), 'utf8')
             : '';
-        const timelineSteps = Array.isArray(shard.timelineSteps) && shard.timelineSteps.length > 0
+        const timelineSteps = hasStoredTimelineSteps
           ? shard.timelineSteps
           : logText
             ? parseQaTimelineSteps(logText).slice(0, 80)

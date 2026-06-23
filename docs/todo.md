@@ -101,11 +101,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. hub-node now calls `handleReserveFaucet()` with its local bootstrap hub and token catalog deps; the inline route body and local wait/reserve helpers were deleted.
   - Evidence: runtime typecheck and `bun run check` cover the shared handler wiring.
 
-- [ ] Decide BrowserVM adapter fate: delete dead stack or restore a real adapter.
+- [ ] Keep BrowserVM for visual debugger and make its adapter boundary explicit.
   - Impact: high.
-  - Current issue: `mode: 'browservm'` can be selected as a fallback while `createBrowserVMAdapter()` always throws.
-  - Fix: either remove BrowserVM mode branches and dead provider stack, or implement a real adapter with startup tests.
-  - Tests: no startup fallback can reach a throw-only adapter; if retained, BrowserVM smoke test deploys and watches events.
+  - Current issue: `mode: 'browservm'` is still required by the visual debugger / Graph3D simnet path, but the audit wording treated it as removable because `createBrowserVMAdapter()` is throw-only.
+  - Decision: do not delete BrowserVM. Clarify the intentional debug/simnet boundary, remove only unreachable throw-only fallback paths, and keep Graph3D/JurisdictionPanel BrowserVM flows working.
+  - Tests: BrowserVM smoke test deploys and watches events; visual debugger/Graph3D e2e opens a BrowserVM-backed runtime without startup fallback reaching a throw-only adapter.
 
 - [ ] Fix external-wallet snapshot baseline to use confirmed block, not tip.
   - Impact: medium.
@@ -141,6 +141,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - UI/API fields: status, severity, suite, category, gitHead, codeHash, dirty, startedBy, duration, failedShard, artifactBytes, cpuP95, ramPeak, browserErrors, networkFailures, audit action.
   - API: `/api/qa/runs` reads SQLite history as canonical source; manifest JSON is ingest/backfill only.
+  - Partial shipped: `/api/qa/runs` now serves DB-backed summaries when history rows exist and falls back to log-dir manifests only for an empty legacy DB.
+  - Evidence: unit removes a recorded run directory and still gets the run from `/api/qa/runs`.
   - Tests: fixture with three HEADs renders sortable ledger and regression deltas.
 
 - [x] Add operator sorting by run/test speed and launch time.
@@ -214,6 +216,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Current issue: history endpoint re-read and upserted manifests from disk on every poll.
   - Status: done. `/api/qa/history` is now SQLite SELECT-only; run completion still records history once; legacy manifest ingestion moved to explicit admin POST `/api/qa/history/backfill` with confirm `BACKFILL_QA_HISTORY`.
+  - Extra: `/api/qa/runs` no longer performs heavy `readQaRun()` reads on the normal DB-backed path.
   - UI: History tab has a disabled-without-admin `Backfill History Index` maintenance action and result counters.
   - Evidence: unit first failed on implicit manifest backfill, then passed with GET-only history and explicit admin backfill; focused QA cockpit e2e verifies the visible backfill action/result.
 
@@ -322,8 +325,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [ ] Unit: UTC formatter and runId timezone round-trip.
 - [x] API: restart target sanitizer rejects invalid target, self-target, null byte, and traversal.
 - [x] Unit: `resolveQaArtifactPath` traversal and symlink escape rejection.
-- [ ] Unit: `listQaHistory` hot path is SQLite-only after backfill.
-- [ ] Unit: run payload strips `perf.samples`.
+- [x] Unit: `listQaHistory`/`/api/qa/runs` hot path is SQLite-only after backfill.
+- [x] Unit: run payload strips `perf.samples`.
 - [x] API: QA read token can list runs/artifacts but cannot restart.
 - [x] API: admin restart requires operator id, reason, expected HEAD, and confirm.
 - [x] API: restart disabled returns 403 and invalid mode returns 400.

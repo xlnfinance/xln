@@ -9,7 +9,7 @@ import {
   backfillQaHistoryFromLogs,
   enrichQaRunUrls,
   listQaHistory,
-  listQaRuns,
+  listQaRunSummaries,
   listQaStoryScreenshots,
   purgeQaRunsOlderThan,
   isQaTextArtifactPath,
@@ -19,7 +19,6 @@ import {
   resolveQaArtifactPath,
   resolveQaStoryScreenshotPath,
   stripQaRunPerfSamples,
-  summarizeQaRun,
   summarizeQaPerf,
   type QaCodeFingerprint,
   type QaStorySource,
@@ -894,13 +893,13 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
       const url = new URL(request.url);
       const limitRaw = Number(url.searchParams.get('limit') || '20');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
-      const runs = await listQaRuns(limit);
+      const runs = await listQaRunSummaries(limit);
       return jsonEtagResponse(
         request,
         {
           ok: true,
           qaAuth: authInfo,
-          runs: runs.map((run) => summarizeQaRun(run)),
+          runs,
         },
         headers,
       );
