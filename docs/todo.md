@@ -91,11 +91,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Fix: compute min height only for entities whose depository/jurisdiction matches the watcher.
   - Tests: two-jurisdiction env with low unrelated entity does not lower watcher cursor.
 
-- [ ] Consolidate the duplicated reserve faucet implementation.
+- [x] Consolidate the duplicated reserve faucet implementation.
   - Impact: high.
-  - Current issue: `runtime/server/reserve-faucet.ts` is the canonical handler, but `runtime/orchestrator/hub-node.ts` still has a stale inline `/api/faucet/reserve` copy with old wait helpers.
-  - Fix: hub-node should call `handleReserveFaucet()` with its local deps and delete the inline wait/reserve helper copy.
-  - Tests: hub-node reserve faucet route returns the same success/error payloads as the main server path.
+  - Current issue: `runtime/server/reserve-faucet.ts` is the canonical handler, but `runtime/orchestrator/hub-node.ts` still had a stale inline `/api/faucet/reserve` copy with old wait helpers.
+  - Status: done. hub-node now calls `handleReserveFaucet()` with its local bootstrap hub and token catalog deps; the inline route body and local wait/reserve helpers were deleted.
+  - Evidence: runtime typecheck and `bun run check` cover the shared handler wiring.
 
 - [ ] Decide BrowserVM adapter fate: delete dead stack or restore a real adapter.
   - Impact: high.
