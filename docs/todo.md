@@ -93,6 +93,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Runner writes `failureClass` per shard and `failureClasses` per run; legacy manifests derive the field on read. QA cockpit shows class chips on run rows and shard detail, failure inbox clicks set the active class filter, and manual class chips filter both run list and inbox. Loading or opening a failure selects the first failed shard matching the active class before falling back to the first failed shard.
   - Evidence: unit covers timeout/assertion/infra/passed classifier behavior. Focused QA cockpit e2e verifies `assertion` filtering, run row chips, inbox narrowing, and shard detail class chips.
 
+- [ ] Fix radapter admin-state e2e height stalling after control mutation.
+  - Impact: high.
+  - Current issue: broad `tests/e2e-radapter-remote.spec.ts` run on 2026-06-23 failed `admin remote runtime control advances live state and exposes past frames`: expected height to advance after profile mutation, but `beforeHeight=18` and `after.height=18`.
+  - Constraints: do not mask by weakening the assertion. The admin write should produce an event/frame first, then the remote view should observe the advanced persisted height.
+  - Tests: reproduce with focused grep for the admin-state test, then add an L1/L2 wait/assertion around the control mutation event source before broad radapter e2e.
+
 - [ ] Fix numeric signer key cache isolation by runtime seed.
   - Impact: high.
   - Current issue: numeric signer private keys are cached by `signerId` only. Two test/runtime envs in one Bun process with different `runtimeSeed` and signer `2` can reuse the wrong private key and trigger `LAZY_HANKO_SELF_MISMATCH`.
