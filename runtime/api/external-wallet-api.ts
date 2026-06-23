@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { deriveSignerKeySync } from '../account-crypto';
-import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import type { JAdapter, JEvent, JTokenInfo, JWalletAllowanceRead } from '../jadapter/types';
 import { safeStringify } from '../serialization-utils';
 
 type Erc20ContractRunner = NonNullable<Parameters<typeof ERC20Mock__factory.connect>[1]>;
@@ -23,6 +23,7 @@ export type ExternalWalletApiContext = {
     details: Record<string, unknown>;
   }) => void;
   fundBrowserVmWallet: (address: string, amount: bigint) => Promise<boolean>;
+  observeExternalWalletSnapshot?: (events: JEvent[], label: string) => void;
 };
 
 type FaucetRequestBody = {
@@ -34,6 +35,13 @@ type FaucetRequestBody = {
 type GasFaucetRequestBody = {
   userAddress: string;
   amount: string;
+};
+
+type WalletSnapshotRequestBody = {
+  entityId: string;
+  owner: string;
+  tokenAddresses?: string[];
+  allowances?: JWalletAllowanceRead[];
 };
 
 type FaucetLock = {
@@ -113,6 +121,30 @@ const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody
   const userAddress = String(body['userAddress'] || '').trim();
   const amount = String(body['amount'] || '0.1').trim();
   return { userAddress, amount };
+};
+
+const readWalletSnapshotBody = async (request: Request): Promise<WalletSnapshotRequestBody> => {
+  const body = await request.json() as Record<string, unknown>;
+  const entityId = String(body['entityId'] || '').trim().toLowerCase();
+  const owner = String(body['owner'] || '').trim();
+  const tokenAddresses = Array.isArray(body['tokenAddresses'])
+    ? body['tokenAddresses'].map((value) => String(value || '').trim()).filter(Boolean)
+    : undefined;
+  const allowances = Array.isArray(body['allowances'])
+    ? body['allowances'].map((value) => {
+        const entry = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+        return {
+          tokenAddress: String(entry['tokenAddress'] || '').trim(),
+          spender: String(entry['spender'] || '').trim(),
+        };
+      }).filter((entry) => ethers.isAddress(entry.tokenAddress) && ethers.isAddress(entry.spender))
+    : undefined;
+  return {
+    entityId,
+    owner,
+    ...(tokenAddresses !== undefined ? { tokenAddresses } : {}),
+    ...(allowances !== undefined ? { allowances } : {}),
+  };
 };
 
 const toErc20ContractRunner = (runner: unknown, label: string): Erc20ContractRunner => {
@@ -500,6 +532,98 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
     }
   };
 
+  const handleWalletSnapshot = async (request: Request): Promise<Response> => {
+    try {
+      const adapter = context.getJAdapter();
+      if (!adapter) {
+        return createJsonResponse(context.jsonHeaders, { error: 'J-adapter not initialized' }, 503);
+      }
+
+      const { entityId, owner, tokenAddresses, allowances } = await readWalletSnapshotBody(request);
+      if (!entityId.startsWith('0x') || entityId.length !== 66) {
+        return createJsonResponse(context.jsonHeaders, { error: 'Invalid entityId' }, 400);
+      }
+      if (!ethers.isAddress(owner)) {
+        return createJsonResponse(context.jsonHeaders, { error: 'Invalid owner' }, 400);
+      }
+
+      const tokenCatalog = await context.getTokenCatalog();
+      const requestedTokenAddresses = (tokenAddresses && tokenAddresses.length > 0
+        ? tokenAddresses
+        : tokenCatalog.map((token) => token.address)
+      ).filter((address) => ethers.isAddress(address));
+      const normalizedOwner = ethers.getAddress(owner).toLowerCase();
+      const blockNumber = Number(
+        await (adapter.getCurrentBlockNumber?.() ?? adapter.provider.getBlockNumber()),
+      );
+      const block = await adapter.provider.getBlock(blockNumber);
+      if (!block?.hash) {
+        throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${blockNumber}`);
+      }
+      const snapshot = await adapter.readWalletSnapshot({
+        owner: normalizedOwner,
+        tokenAddresses: requestedTokenAddresses,
+        allowances: allowances ?? [],
+        includeNativeBalance: true,
+        blockTag: blockNumber,
+      });
+      const transactionHash = [
+        'external-wallet-snapshot',
+        blockNumber,
+        entityId,
+        normalizedOwner,
+      ].join(':');
+      const tokenIdByAddress = new Map(
+        tokenCatalog
+          .filter((token) => ethers.isAddress(token.address))
+          .map((token) => [token.address.toLowerCase(), token.tokenId]),
+      );
+      const tokenBalances = requestedTokenAddresses.map((tokenAddress, index) => {
+        const normalizedAddress = ethers.getAddress(tokenAddress).toLowerCase();
+        const tokenId = tokenIdByAddress.get(normalizedAddress);
+        return {
+          tokenAddress: normalizedAddress,
+          ...(typeof tokenId === 'number' ? { tokenId } : {}),
+          balance: (snapshot.tokenBalances[index] ?? 0n).toString(),
+        };
+      });
+      const allowancePayload = (allowances ?? []).map((entry, index) => ({
+        tokenAddress: ethers.getAddress(entry.tokenAddress).toLowerCase(),
+        spender: ethers.getAddress(entry.spender).toLowerCase(),
+        allowance: (snapshot.allowances[index] ?? 0n).toString(),
+      }));
+      const jEvent: JEvent = {
+        name: 'ExternalWalletSnapshot',
+        args: {
+          entityId,
+          owner: normalizedOwner,
+          nativeBalance: (snapshot.nativeBalance ?? 0n).toString(),
+          tokenBalances,
+          allowances: allowancePayload,
+        },
+        blockNumber,
+        blockHash: block.hash,
+        transactionHash,
+      };
+      context.observeExternalWalletSnapshot?.([jEvent], 'external-wallet-snapshot');
+      return createJsonResponse(context.jsonHeaders, {
+        success: true,
+        entityId,
+        owner: normalizedOwner,
+        blockNumber,
+        blockHash: block.hash,
+        transactionHash,
+        nativeBalance: (snapshot.nativeBalance ?? 0n).toString(),
+        tokenBalances,
+        allowances: allowancePayload,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[EXT-WALLET/SNAPSHOT] failed:', message);
+      return createJsonResponse(context.jsonHeaders, { error: message }, 500);
+    }
+  };
+
   const handleGasFaucet = async (request: Request): Promise<Response> => {
     try {
       const adapter = context.getJAdapter();
@@ -554,6 +678,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       });
     },
     handleTokens,
+    handleWalletSnapshot,
     handleErc20Faucet,
     handleGasFaucet,
   };

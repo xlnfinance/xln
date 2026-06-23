@@ -138,4 +138,85 @@ describe('external wallet API faucet transaction gate', () => {
       provider.destroy();
     }
   });
+
+  test('wallet snapshot endpoint emits canonical external wallet observation', async () => {
+    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    Object.assign(provider, {
+      getBlockNumber: async () => 77,
+      getBlock: async () => ({ hash: `0x${'77'.repeat(32)}` }),
+    });
+    const adapter = {
+      ...makeBrowserVmAdapter(provider),
+      readWalletSnapshot: async (request: {
+        owner: string;
+        tokenAddresses: string[];
+        allowances?: Array<{ tokenAddress: string; spender: string }>;
+        blockTag?: number | string;
+      }) => {
+        expect(request.owner).toBe(USER_ADDRESS.toLowerCase());
+        expect(request.tokenAddresses).toEqual(['0x1111111111111111111111111111111111111111']);
+        expect(request.allowances).toEqual([{
+          tokenAddress: '0x1111111111111111111111111111111111111111',
+          spender: '0x0000000000000000000000000000000000000002',
+        }]);
+        expect(request.blockTag).toBe(77);
+        return {
+          nativeBalance: 5n,
+          tokenBalances: [9n],
+          allowances: [7n],
+        };
+      },
+    } as unknown as JAdapter;
+    const observed: unknown[] = [];
+    const api = createExternalWalletApi({
+      ...makeContext(adapter, async () => false),
+      getTokenCatalog: async () => [{
+        symbol: 'USDC',
+        address: '0x1111111111111111111111111111111111111111',
+        decimals: 18,
+        tokenId: 3,
+      }],
+      observeExternalWalletSnapshot: (events) => observed.push(...events),
+    });
+
+    try {
+      const response = await api.handleWalletSnapshot(new Request('http://localhost/api/external-wallet/snapshot', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entityId: `0x${'44'.repeat(32)}`,
+          owner: USER_ADDRESS,
+          allowances: [{
+            tokenAddress: '0x1111111111111111111111111111111111111111',
+            spender: '0x0000000000000000000000000000000000000002',
+          }],
+        }),
+      }));
+      const body = await response.json() as { success?: boolean; tokenBalances?: Array<{ balance?: string }> };
+      expect(response.status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.tokenBalances?.[0]?.balance).toBe('9');
+      expect(observed).toHaveLength(1);
+      expect(observed[0]).toMatchObject({
+        name: 'ExternalWalletSnapshot',
+        args: {
+          owner: USER_ADDRESS.toLowerCase(),
+          nativeBalance: '5',
+          tokenBalances: [{
+            tokenAddress: '0x1111111111111111111111111111111111111111',
+            tokenId: 3,
+            balance: '9',
+          }],
+          allowances: [{
+            tokenAddress: '0x1111111111111111111111111111111111111111',
+            spender: '0x0000000000000000000000000000000000000002',
+            allowance: '7',
+          }],
+        },
+        blockNumber: 77,
+      });
+    } finally {
+      provider.destroy();
+    }
+  });
 });

@@ -37,6 +37,7 @@ import {
   type EVMEvent,
   type EthereumLog,
 } from './browservm-events';
+import type { JEvent } from './types';
 import {
   BROWSERVM_CONTRACT_VERSION,
   decodeBrowserVmStateRoot,
@@ -503,14 +504,14 @@ export class BrowserVMProvider {
     return decoded[0];
   }
 
-  async approveErc20(privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint): Promise<string> {
+  async approveErc20(privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint): Promise<JEvent[]> {
     const callData = this.erc20Interface!.encodeFunctionData('approve', [spender, amount]);
-    const result = await this.executeTx({
+    await this.executeTx({
       to: tokenAddress,
       data: callData,
       gasLimit: 200000n,
     }, privKey);
-    return result.txHash;
+    return [];
   }
 
   async mintErc20(tokenAddress: string, to: string, amount: bigint): Promise<string> {

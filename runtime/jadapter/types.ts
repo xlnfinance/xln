@@ -57,6 +57,7 @@ export interface JWalletSnapshotRequest {
   tokenAddresses: string[];
   allowances?: JWalletAllowanceRead[];
   includeNativeBalance?: boolean;
+  blockTag?: number | string;
 }
 
 export interface JWalletSnapshot {
@@ -139,7 +140,11 @@ export interface JAdapter {
     tokenAddress: string,
     spender: string,
     amount: bigint,
-  ): Promise<string>;
+    options?: {
+      entityId?: string;
+      tokenId?: number;
+    },
+  ): Promise<JEvent[]>;
   transferErc20(
     signerPrivateKey: Uint8Array,
     tokenAddress: string,

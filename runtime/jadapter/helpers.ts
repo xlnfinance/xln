@@ -21,6 +21,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 export const CANONICAL_J_EVENTS = [
   'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
+  'ExternalWalletSnapshot', 'ExternalWalletDelta',
   'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
@@ -211,6 +212,12 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
     case 'ReserveUpdated':
       return normalize(args['entity']) === normalizedEntity;
 
+    case 'ExternalWalletSnapshot':
+      return normalize(args['entityId']) === normalizedEntity;
+
+    case 'ExternalWalletDelta':
+      return normalize(args['entityId']) === normalizedEntity;
+
     case 'SecretRevealed':
       return true; // Global: all entities with matching hashlock should observe
 
@@ -265,6 +272,54 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
           entity: String(args['entity'] ?? ''),
           tokenId: Number(args['tokenId']),
           newBalance: (args['newBalance'] ?? 0).toString(),
+        },
+      }];
+
+    case 'ExternalWalletSnapshot': {
+      const tokenBalances = Array.isArray(args['tokenBalances'])
+        ? args['tokenBalances'].map((entry) => {
+            const record = entry as Record<string, unknown>;
+            const tokenId = record['tokenId'];
+            return {
+              tokenAddress: String(record['tokenAddress'] ?? ''),
+              ...(tokenId !== undefined ? { tokenId: Number(tokenId) } : {}),
+              balance: String(record['balance'] ?? '0'),
+            };
+          })
+        : [];
+      const allowances = Array.isArray(args['allowances'])
+        ? args['allowances'].map((entry) => {
+            const record = entry as Record<string, unknown>;
+            return {
+              tokenAddress: String(record['tokenAddress'] ?? ''),
+              spender: String(record['spender'] ?? ''),
+              allowance: String(record['allowance'] ?? '0'),
+            };
+          })
+        : [];
+      return [{
+        type: 'ExternalWalletSnapshot',
+        data: {
+          entityId: String(args['entityId'] ?? ''),
+          owner: String(args['owner'] ?? ''),
+          ...(args['nativeBalance'] !== undefined ? { nativeBalance: String(args['nativeBalance']) } : {}),
+          ...(tokenBalances.length > 0 ? { tokenBalances } : {}),
+          ...(allowances.length > 0 ? { allowances } : {}),
+        },
+      }];
+    }
+
+    case 'ExternalWalletDelta':
+      return [{
+        type: 'ExternalWalletDelta',
+        data: {
+          entityId: String(args['entityId'] ?? ''),
+          owner: String(args['owner'] ?? ''),
+          tokenAddress: String(args['tokenAddress'] ?? ''),
+          ...(args['tokenId'] !== undefined ? { tokenId: Number(args['tokenId']) } : {}),
+          ...(args['balanceDelta'] !== undefined ? { balanceDelta: String(args['balanceDelta']) } : {}),
+          ...(args['spender'] !== undefined ? { spender: String(args['spender']) } : {}),
+          ...(args['allowance'] !== undefined ? { allowance: String(args['allowance']) } : {}),
         },
       }];
 
@@ -587,6 +642,20 @@ export function applyJEventsToEnv(env: Env, events: JEvent[], label = 'J-EVENTS'
       transactionHash: event.transactionHash,
     }));
   if (rawEvents.length === 0) return;
+  for (const event of rawEvents) {
+    if (event.name !== 'ExternalWalletSnapshot') continue;
+    const entityId = String(event.args['entityId'] ?? '').trim().toLowerCase();
+    const owner = String(event.args['owner'] ?? '').trim().toLowerCase();
+    if (!entityId || !/^0x[0-9a-f]{40}$/.test(owner)) continue;
+    if (!env.runtimeState) env.runtimeState = {};
+    if (!env.runtimeState.externalWalletWatchOwners) {
+      env.runtimeState.externalWalletWatchOwners = new Map();
+    }
+    const owners = env.runtimeState.externalWalletWatchOwners.get(entityId) ?? new Map<string, number>();
+    const blockNumber = Number(event.blockNumber ?? 0);
+    owners.set(owner, Math.max(owners.get(owner) ?? 0, Number.isFinite(blockNumber) ? blockNumber : 0));
+    env.runtimeState.externalWalletWatchOwners.set(entityId, owners);
+  }
   const blockGroups = new Map<number, RawJEvent[]>();
   for (const event of rawEvents) {
     const blockNumber = Number(event.blockNumber ?? 0);
@@ -631,9 +700,15 @@ export function processEventBatch(
   for (let idx = 0; idx < canonical.length; idx++) {
     const event = canonical[idx]!;
     const txHash = event.transactionHash || '';
+    const syntheticEntityKey =
+      event.name === 'ExternalWalletSnapshot' || event.name === 'ExternalWalletDelta'
+        ? `:${String(event.args['entityId'] ?? '').toLowerCase()}:${String(event.args['owner'] ?? '').toLowerCase()}`
+        : '';
     const key = txHash && event.logIndex !== undefined
-      ? `${txHash.toLowerCase()}:${event.logIndex}`
-      : `${event.blockHash ?? blockHash}:${event.name}:${idx}`;
+      ? `${txHash.toLowerCase()}:${event.logIndex}${syntheticEntityKey}`
+      : txHash
+        ? `${txHash.toLowerCase()}:${event.name}${syntheticEntityKey}:${idx}`
+      : `${event.blockHash ?? blockHash}:${event.name}${syntheticEntityKey}:${idx}`;
     if (dedup.set.has(key)) continue;
     dedup.set.add(key);
     dedup.order.push(key);

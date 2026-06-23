@@ -8,6 +8,13 @@ export type FaucetApiResult = {
   details?: unknown;
   requestId?: string;
   serverDurationMs?: number;
+  events?: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    blockNumber: number;
+    blockHash: string;
+    transactionHash: string;
+  }>;
 };
 
 export type PendingReserveFaucet = {

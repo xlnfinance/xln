@@ -23,10 +23,6 @@ type ApiTokenEntry = {
 const ERC20_BALANCE_OF = new Interface([
   'function balanceOf(address owner) view returns (uint256)',
 ]);
-const ERC20_TRANSFER = new Interface([
-  'function transfer(address to, uint256 amount) returns (bool)',
-]);
-
 async function timedMillis<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const started = process.hrtime.bigint();
   try {
@@ -110,15 +106,6 @@ async function rpcCall<T>(page: Page, method: string, params: unknown[]): Promis
   return body?.result as T;
 }
 
-async function waitForRpcReceipt(page: Page, txHash: string, timeoutMs = ROUTE_TIMEOUT_MS): Promise<void> {
-  await expect
-    .poll(async () => {
-      const receipt = await rpcCall<Record<string, unknown> | null>(page, 'eth_getTransactionReceipt', [txHash]);
-      return receipt !== null;
-    }, { timeout: timeoutMs })
-    .toBe(true);
-}
-
 async function getRpcExternalBalanceRaw(page: Page, symbol: string, holder: string): Promise<bigint> {
   const tokens = await getApiTokens(page);
   const token = tokens.find((entry) => String(entry.symbol || '').toUpperCase() === symbol.toUpperCase());
@@ -141,28 +128,74 @@ async function getRpcExternalBalance(page: Page, symbol: string, holder: string)
   return Number(formatUnits(await getRpcExternalBalanceRaw(page, symbol, holder), decimals));
 }
 
+async function readBrowserExternalWalletDebug(page: Page, symbol: string, holder: string): Promise<Record<string, unknown>> {
+  const tokens = await getApiTokens(page);
+  const token = tokens.find((entry) => String(entry.symbol || '').toUpperCase() === symbol.toUpperCase());
+  const tokenAddress = String(token?.address || '').trim().toLowerCase();
+  const owner = String(holder || '').trim().toLowerCase();
+  return page.evaluate(({ owner, tokenAddress }) => {
+    const env = (window as typeof window & { __xln_env?: any }).__xln_env;
+    const mapEntries = (value: unknown): Array<[unknown, unknown]> => {
+      if (value instanceof Map) return [...value.entries()];
+      if (value && typeof value === 'object') return Object.entries(value as Record<string, unknown>);
+      return [];
+    };
+    const replicas = mapEntries(env?.eReplicas).map(([key, replica]: [unknown, any]) => {
+      const wallet = replica?.state?.externalWallet;
+      const balances = wallet?.balances instanceof Map ? wallet.balances.get(owner) : undefined;
+      const tokenRecord = balances instanceof Map ? balances.get(tokenAddress) : undefined;
+      const nativeRecord = balances instanceof Map ? balances.get('0x0000000000000000000000000000000000000000') : undefined;
+      return {
+        key: String(key),
+        entityId: String(replica?.state?.entityId || replica?.entityId || ''),
+        tokenBalance: tokenRecord ? String(tokenRecord.balance) : null,
+        tokenHeight: tokenRecord ? Number(tokenRecord.jHeight || 0) : null,
+        nativeBalance: nativeRecord ? String(nativeRecord.balance) : null,
+      };
+    });
+    const watchOwners = mapEntries(env?.runtimeState?.externalWalletWatchOwners).map(([entityId, owners]) => ({
+      entityId: String(entityId),
+      owners: mapEntries(owners).map(([trackedOwner, block]) => ({
+        owner: String(trackedOwner),
+        block: Number(block || 0),
+      })),
+    }));
+    const jReplicas = mapEntries(env?.jReplicas).map(([key, replica]: [unknown, any]) => ({
+      key: String(key),
+      blockNumber: Number(replica?.blockNumber || 0),
+      hasAdapter: Boolean(replica?.jAdapter),
+      adapterMode: String(replica?.jAdapter?.mode || ''),
+    }));
+    return {
+      runtimeId: String(env?.runtimeId || ''),
+      height: Number(env?.height || 0),
+      loopActive: Boolean(env?.runtimeState?.loopActive),
+      queuedEntityInputs: Number(env?.runtimeMempool?.entityInputs?.length || 0),
+      processing: Boolean(env?.runtimeState?.processingPromise),
+      watchOwners,
+      jReplicas,
+      replicas,
+    };
+  }, { owner, tokenAddress });
+}
+
 async function seedExternalWallet(page: Page, recipient: string, symbol: string, amount: string): Promise<void> {
   const tokens = await getApiTokens(page);
   const token = tokens.find((entry) => String(entry.symbol || '').toUpperCase() === symbol.toUpperCase());
   expect(token?.address, `Missing ${symbol} token address`).toBeTruthy();
   const decimals = typeof token?.decimals === 'number' ? token.decimals : 18;
-  const accounts = await rpcCall<string[]>(page, 'eth_accounts', []);
-  const source = String(accounts[0] || '').trim();
-  expect(source.length, 'Missing unlocked RPC source account').toBeGreaterThan(0);
-
-  const gasTopupTx = await rpcCall<string>(page, 'eth_sendTransaction', [{
-    from: source,
-    to: recipient,
-    value: `0x${parseUnits('0.1', 18).toString(16)}`,
-  }]);
-  await waitForRpcReceipt(page, gasTopupTx);
-
-  const tokenTx = await rpcCall<string>(page, 'eth_sendTransaction', [{
-    from: source,
-    to: token!.address,
-    data: ERC20_TRANSFER.encodeFunctionData('transfer', [recipient, parseUnits(amount, decimals)]),
-  }]);
-  await waitForRpcReceipt(page, tokenTx);
+  const beforeRaw = await getRpcExternalBalanceRaw(page, symbol, recipient);
+  const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/erc20`, {
+    data: { userAddress: recipient, tokenSymbol: symbol, amount },
+  });
+  const body = await faucetResponse.json().catch(() => ({}));
+  expect(faucetResponse.ok(), `ERC20 faucet failed: ${JSON.stringify(body)}`).toBe(true);
+  expect(body?.success, `ERC20 faucet failed: ${JSON.stringify(body)}`).toBe(true);
+  const expectedRaw = beforeRaw + parseUnits(amount, decimals);
+  await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, recipient), {
+    timeout: ROUTE_TIMEOUT_MS,
+  })
+    .toBeGreaterThanOrEqual(expectedRaw);
 }
 
 async function refreshExternalBalance(page: Page, symbol: string): Promise<number> {
@@ -184,6 +217,11 @@ test('move external to external sends directly from signer wallet', async ({ pag
   });
 
   let alice: { entityId: string; signerId: string; runtimeId: string } | null = null;
+  let bob: { entityId: string; signerId: string; runtimeId: string } | null = null;
+  const browser = page.context().browser();
+  expect(browser, 'browser must be available for isolated Bob context').toBeTruthy();
+  const bobContext = await browser!.newContext();
+  const bobPage = await bobContext.newPage();
   await timedStep('move-direct.runtime', async () => {
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
     await page.evaluate((apiBaseUrl: string) => {
@@ -192,18 +230,38 @@ test('move external to external sends directly from signer wallet', async ({ pag
     }, API_BASE_URL);
     alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
     await switchToRuntimeId(page, alice.runtimeId);
+
+    await gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+    await bobPage.evaluate((apiBaseUrl: string) => {
+      (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = apiBaseUrl;
+      localStorage.setItem('xln-api-base-url', apiBaseUrl);
+    }, API_BASE_URL);
+    bob = await createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'));
+    await switchToRuntimeId(bobPage, bob.runtimeId);
   });
 
   const symbol = 'USDC';
   const aliceEoa = String(alice!.signerId || '').trim();
-  const bobSignerId = deriveSignerAddressFromMnemonic(selectDemoMnemonic('bob'));
+  const bobSignerId = String(bob!.signerId || deriveSignerAddressFromMnemonic(selectDemoMnemonic('bob'))).trim();
+  await openAssetsTab(page);
+  await page.getByTestId('asset-ledger-refresh').first().click();
+  const aliceSeedBaseline = await getRenderedExternalBalance(page, symbol);
   await seedExternalWallet(page, aliceEoa, symbol, '20');
-  await expect.poll(async () => refreshExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(0);
+  try {
+    await expect.poll(async () => getRenderedExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(aliceSeedBaseline);
+  } catch (error) {
+    console.log('[move-direct external-wallet debug]', JSON.stringify(await readBrowserExternalWalletDebug(page, symbol, aliceEoa), null, 2));
+    throw error;
+  }
+  await openAssetsTab(bobPage);
+  await bobPage.getByTestId('asset-ledger-refresh').first().click();
 
   const aliceBeforeRaw = await getRpcExternalBalanceRaw(page, symbol, aliceEoa);
   const bobBeforeRaw = await getRpcExternalBalanceRaw(page, symbol, bobSignerId);
   const aliceBefore = await getRpcExternalBalance(page, symbol, aliceEoa);
   const bobBefore = await getRpcExternalBalance(page, symbol, bobSignerId);
+  const aliceBeforeRendered = await getRenderedExternalBalance(page, symbol);
+  const bobBeforeRendered = await getRenderedExternalBalance(bobPage, symbol);
 
   await timedMillis('move.direct-e2e', async () => {
     await openMoveTab(page);
@@ -216,8 +274,11 @@ test('move external to external sends directly from signer wallet', async ({ pag
 
     await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, aliceEoa), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(aliceBeforeRaw);
     await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, bobSignerId), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(bobBeforeRaw);
+    await expect.poll(async () => getRenderedExternalBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeLessThan(aliceBeforeRendered);
+    await expect.poll(async () => getRenderedExternalBalance(bobPage, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(bobBeforeRendered);
   });
   const aliceAfter = await getRpcExternalBalance(page, symbol, aliceEoa);
   const bobAfter = await getRpcExternalBalance(page, symbol, bobSignerId);
   logBalanceDelta('move.direct-e2e', { beforeSender: aliceBefore, afterSender: aliceAfter, beforeRecipient: bobBefore, afterRecipient: bobAfter });
+  await bobContext.close();
 });

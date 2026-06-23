@@ -135,6 +135,8 @@ const runSmoke = async (
         XLN_LOCAL_PROD_SMOKE_METRICS_JSON: metricsPath,
         XLN_LOCAL_PROD_SMOKE_EVENTS_JSONL: eventsJsonl,
         XLN_LOCAL_PROD_SMOKE_ENFORCE_STAGE_BUDGETS: '1',
+        XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1',
+        XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500',
         XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS:
           process.env['XLN_LOCAL_PROD_SMOKE_POST_BOOTSTRAP_STABILITY_MS'] || '1000',
         ...extraEnv,
@@ -245,7 +247,6 @@ if (mode === 'hydrate' || mode === 'all') {
   const templateHashes = expectedTemplateHashes();
   const hydrate = await runSmoke('hydrate', index++, {
     XLN_LOCAL_PROD_SMOKE_TEMPLATE_DIR: templateDir,
-    XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500',
   });
   if (templateHashes && hydrate.bootstrapHash !== templateHashes.bootstrapHash) {
     throw new Error(`BOOTSTRAP_SOUNDCHECK_HYDRATE_HASH_DRIFT template=${templateHashes.bootstrapHash} hydrate=${hydrate.bootstrapHash}`);

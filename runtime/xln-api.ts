@@ -76,7 +76,7 @@ export type {
 export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
-export type { JAdapter } from './jadapter/types';
+export type { JAdapter, JEvent } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
 export type {
@@ -297,6 +297,7 @@ export interface XLNModule {
     signerId?: string,
   ) => Promise<void>;
   processJBlockEvents?: (env: Env) => Promise<void>;
+  applyJEventsToEnv?: (env: Env, events: import('./jadapter/types').JEvent[], label?: string) => void;
   queueEntityInput?: (env: Env, entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
   submitCrossJurisdictionSwap?: (
     env: Env,

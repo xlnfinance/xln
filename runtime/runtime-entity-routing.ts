@@ -234,6 +234,18 @@ export const handleInboundP2PEntityInput = (
     return;
   }
 
+  if (runtimeState.persistenceQuiescing && !env.scenarioMode) {
+    const payload = { fromRuntimeId: from, entityId: input.entityId, txTypes };
+    if ((input.entityTxs?.length ?? 0) > 0) {
+      env.error?.('network', 'INBOUND_ENTITY_RUNTIME_QUIESCING', payload, input.entityId);
+      throw new Error(
+        `INBOUND_ENTITY_RUNTIME_QUIESCING: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
+      );
+    }
+    env.warn?.('network', 'INBOUND_ENTITY_RUNTIME_QUIESCING', payload, input.entityId);
+    return;
+  }
+
   deps.enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
   env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
 

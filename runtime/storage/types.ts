@@ -86,6 +86,7 @@ export type StorageEntityCoreDoc = {
   config: ConsensusConfig;
   prevFrameHash?: string;
   reserves: Map<number, bigint>;
+  externalWallet?: EntityState['externalWallet'];
   deferredAccountProposals?: Map<string, true>;
   lastFinalizedJHeight: number;
   jBlockObservations: EntityState['jBlockObservations'];

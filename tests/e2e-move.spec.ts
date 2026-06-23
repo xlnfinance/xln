@@ -26,9 +26,6 @@ type ApiTokenEntry = {
 const ERC20_BALANCE_OF = new Interface([
   'function balanceOf(address owner) view returns (uint256)',
 ]);
-const ERC20_TRANSFER = new Interface([
-  'function transfer(address to, uint256 amount) returns (bool)',
-]);
 const ERC20_ALLOWANCE = new Interface([
   'function allowance(address owner, address spender) view returns (uint256)',
 ]);
@@ -114,11 +111,20 @@ async function clickExternalFaucet(page: Page, symbol: string): Promise<void> {
   await page.getByTestId(`external-faucet-${symbol}`).first().click();
 }
 
-async function clickReserveFaucet(page: Page, symbol: string): Promise<void> {
+async function clickReserveFaucet(page: Page, symbol: string): Promise<unknown> {
   await selectAssetFaucetToken(page, symbol);
   const button = page.getByTestId(`reserve-faucet-${symbol}`).first();
   await expect(button).toBeEnabled({ timeout: 20_000 });
+  const responsePromise = page.waitForResponse((response) =>
+    response.request().method() === 'POST' && response.url().includes('/api/faucet/reserve'),
+  );
   await button.click();
+  const response = await responsePromise;
+  const body = await response.json().catch(async () => ({ raw: await response.text().catch(() => '') }));
+  console.log(`[reserve faucet response ${symbol}] status=${response.status()} body=${JSON.stringify(body)}`);
+  expect(response.ok(), `reserve faucet ${symbol} failed: status=${response.status()} body=${JSON.stringify(body)}`).toBe(true);
+  expect((body as { success?: unknown }).success, `reserve faucet ${symbol} response must be successful`).toBe(true);
+  return body;
 }
 
 async function clickAccountFaucet(page: Page, symbol: string): Promise<void> {
@@ -558,37 +564,23 @@ async function assertInfiniteDepositoryAllowance(page: Page, owner: string): Pro
   }
 }
 
-async function waitForRpcReceipt(page: Page, txHash: string, timeoutMs = ROUTE_TIMEOUT_MS): Promise<void> {
-  await expect
-    .poll(async () => {
-      const receipt = await rpcCall<Record<string, unknown> | null>(page, 'eth_getTransactionReceipt', [txHash]);
-      return receipt !== null;
-    }, { timeout: timeoutMs })
-    .toBe(true);
-}
-
 async function seedExternalWallet(page: Page, recipient: string, symbol: string, amount: string): Promise<void> {
   const tokens = await getApiTokens(page);
   const token = tokens.find((entry) => String(entry.symbol || '').toUpperCase() === symbol.toUpperCase());
   expect(token?.address, `Missing ${symbol} token address`).toBeTruthy();
   const decimals = typeof token?.decimals === 'number' ? token.decimals : 18;
-  const accounts = await rpcCall<string[]>(page, 'eth_accounts', []);
-  const source = String(accounts[0] || '').trim();
-  expect(source.length, 'Missing unlocked RPC source account').toBeGreaterThan(0);
-
-  const gasTopupTx = await rpcCall<string>(page, 'eth_sendTransaction', [{
-    from: source,
-    to: recipient,
-    value: `0x${parseUnits('0.1', 18).toString(16)}`,
-  }]);
-  await waitForRpcReceipt(page, gasTopupTx);
-
-  const tokenTx = await rpcCall<string>(page, 'eth_sendTransaction', [{
-    from: source,
-    to: token!.address,
-    data: ERC20_TRANSFER.encodeFunctionData('transfer', [recipient, parseUnits(amount, decimals)]),
-  }]);
-  await waitForRpcReceipt(page, tokenTx);
+  const beforeRaw = await getRpcExternalBalanceRaw(page, symbol, recipient);
+  const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/erc20`, {
+    data: { userAddress: recipient, tokenSymbol: symbol, amount },
+  });
+  const body = await faucetResponse.json().catch(() => ({}));
+  expect(faucetResponse.ok(), `ERC20 faucet failed: ${JSON.stringify(body)}`).toBe(true);
+  expect(body?.success, `ERC20 faucet failed: ${JSON.stringify(body)}`).toBe(true);
+  const expectedRaw = beforeRaw + parseUnits(amount, decimals);
+  await expect.poll(async () => getRpcExternalBalanceRaw(page, symbol, recipient), {
+    timeout: ROUTE_TIMEOUT_MS,
+  })
+    .toBeGreaterThanOrEqual(expectedRaw);
 }
 
 async function refreshExternalBalance(page: Page, symbol: string): Promise<number> {
@@ -601,6 +593,107 @@ async function refreshReserveBalance(page: Page, symbol: string): Promise<number
   await openAssetsTab(page);
   await page.getByTestId('asset-ledger-refresh').first().click();
   return getRenderedReserveBalance(page, symbol);
+}
+
+async function readBrowserReserveDebug(page: Page): Promise<unknown> {
+  return await page.evaluate(() => {
+    const readBig = (value: unknown): string => {
+      if (typeof value === 'bigint') return value.toString();
+      if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+      if (typeof value === 'string') return value;
+      return '';
+    };
+    const serializeMap = <K, V>(map: Map<K, V> | undefined, valueReader: (value: V) => unknown = (value) => value): Record<string, unknown> => {
+      const out: Record<string, unknown> = {};
+      if (!map || typeof map.entries !== 'function') return out;
+      for (const [key, value] of map.entries()) {
+        out[String(key)] = valueReader(value);
+      }
+      return out;
+    };
+    const win = window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        timestamp?: number;
+        eReplicas?: Map<string, {
+          entityId?: string;
+          signerId?: string;
+          state?: {
+            height?: number;
+            reserves?: Map<number | string, bigint>;
+            jBatchState?: { entityNonce?: number; status?: string; sentBatch?: unknown };
+          };
+        }>;
+        jReplicas?: Map<string, { blockNumber?: bigint | number; lastBlockTimestamp?: number }>;
+        runtimeMempool?: {
+          entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }>;
+          runtimeTxs?: unknown[];
+          jInputs?: unknown[];
+        };
+        runtimeState?: {
+          recentJEvents?: Array<{
+            name?: string;
+            blockNumber?: number;
+            transactionHash?: string;
+            args?: Record<string, unknown>;
+          }>;
+        };
+      };
+    };
+    const env = win.isolatedEnv;
+    const entities = Array.from(env?.eReplicas?.entries?.() ?? []).map(([key, replica]) => ({
+      key,
+      entityId: replica.entityId,
+      signerId: replica.signerId,
+      height: replica.state?.height ?? null,
+      reserves: serializeMap(replica.state?.reserves, readBig),
+      jBatchState: replica.state?.jBatchState
+        ? {
+            entityNonce: replica.state.jBatchState.entityNonce,
+            status: replica.state.jBatchState.status,
+            hasSentBatch: !!replica.state.jBatchState.sentBatch,
+          }
+        : null,
+    }));
+    const jReplicas = Array.from(env?.jReplicas?.entries?.() ?? []).map(([name, replica]) => ({
+      name,
+      blockNumber: readBig(replica.blockNumber),
+      lastBlockTimestamp: replica.lastBlockTimestamp ?? null,
+    }));
+    const ledger = Array.from(document.querySelectorAll('[data-testid^="asset-row-"]')).map((row) => {
+      const testid = row.getAttribute('data-testid') || '';
+      const symbol = testid.replace(/^asset-row-/, '');
+      const read = (kind: string): string | null =>
+        row.querySelector(`[data-testid="${kind}-balance-${symbol}"]`)?.getAttribute('data-raw-amount') ?? null;
+      return {
+        symbol,
+        external: read('external'),
+        reserve: read('reserve'),
+        account: row.querySelector(`[data-testid="account-spendable-${symbol}"]`)?.getAttribute('data-raw-amount') ?? null,
+      };
+    });
+    return {
+      runtimeId: env?.runtimeId ?? null,
+      timestamp: env?.timestamp ?? null,
+      entities,
+      jReplicas,
+      mempool: {
+        entityInputs: env?.runtimeMempool?.entityInputs?.map((input) => ({
+          entityId: input.entityId,
+          txTypes: input.entityTxs?.map((tx) => tx.type) ?? [],
+        })) ?? [],
+        runtimeTxs: env?.runtimeMempool?.runtimeTxs?.length ?? 0,
+        jInputs: env?.runtimeMempool?.jInputs?.length ?? 0,
+      },
+      recentJEvents: env?.runtimeState?.recentJEvents?.slice(-8).map((event) => ({
+        name: event.name,
+        blockNumber: event.blockNumber,
+        transactionHash: event.transactionHash,
+        args: event.args,
+      })) ?? [],
+      ledger,
+    };
+  });
 }
 
 async function refreshAccountSpendableBalance(page: Page, symbol: string): Promise<number> {
@@ -818,7 +911,12 @@ test('asset faucet exposes correct modes and funds every supported token', async
     await timedStep(`faucet.${symbol}.reserve`, async () => {
       const beforeReserve = await refreshReserveBalance(page, symbol);
       await clickReserveFaucet(page, symbol);
-      await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
+      try {
+        await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
+      } catch (error) {
+        console.log(`[move reserve debug ${symbol}] ${JSON.stringify(await readBrowserReserveDebug(page), null, 2)}`);
+        throw error;
+      }
     });
 
     await timedStep(`faucet.${symbol}.account`, async () => {

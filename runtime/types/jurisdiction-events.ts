@@ -35,6 +35,36 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
+      type: 'ExternalWalletSnapshot';
+      data: {
+        entityId: string;
+        owner: string;
+        nativeBalance?: string;
+        tokenBalances?: Array<{
+          tokenAddress: string;
+          tokenId?: number;
+          balance: string;
+        }>;
+        allowances?: Array<{
+          tokenAddress: string;
+          spender: string;
+          allowance: string;
+        }>;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'ExternalWalletDelta';
+      data: {
+        entityId: string;
+        owner: string;
+        tokenAddress: string;
+        tokenId?: number;
+        balanceDelta?: string;
+        spender?: string;
+        allowance?: string;
+      };
+    })
+  | (JEventMetadata & {
       type: 'SecretRevealed';
       data: {
         hashlock: string;

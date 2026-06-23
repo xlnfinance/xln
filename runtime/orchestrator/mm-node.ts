@@ -3965,6 +3965,15 @@ const run = async (): Promise<void> => {
     if (bootstrapReadySnapshotPersisted) return;
     if (!envFlagEnabled(process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT'])) return;
     const previousRuntimeConfig = env.runtimeConfig;
+    const wasLoopActive = Boolean(env.runtimeState?.loopActive);
+    const restartRuntimeLoopIfNeeded = (): void => {
+      if (!wasLoopActive) return;
+      startRuntimeLoop(env, {
+        tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
+        maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
+        maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+      });
+    };
     env.runtimeConfig = {
       ...(env.runtimeConfig || {}),
       storage: {
@@ -3972,12 +3981,20 @@ const run = async (): Promise<void> => {
         enabled: true,
       },
     };
+    env.runtimeState = env.runtimeState ?? {};
+    env.runtimeState.persistenceQuiescing = true;
     try {
+      const runtimeIdle = await stopRuntimeLoopAndWait(env, 30_000);
+      if (!runtimeIdle) {
+        throw new Error(`MARKET_MAKER_READY_SNAPSHOT_RUNTIME_NOT_IDLE: height=${Number(env.height ?? 0)}`);
+      }
       await persistRestoredEnvToDB(env);
       bootstrapReadySnapshotPersisted = true;
       console.log(`[MESH-MM] BOOTSTRAP_READY_SNAPSHOT_PERSISTED height=${env.height}`);
     } finally {
       env.runtimeConfig = previousRuntimeConfig;
+      if (env.runtimeState) env.runtimeState.persistenceQuiescing = false;
+      restartRuntimeLoopIfNeeded();
     }
   };
 

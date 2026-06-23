@@ -1771,6 +1771,7 @@ const ensureResetWithOptions = async (options: { enableMarketMaker: boolean }): 
 const {
   proxyAnyHubGet,
   proxyAnyHubRequest,
+  proxyEntityHubApi,
   proxyHubApi,
   proxyRpc,
 } = createOrchestratorProxyHandlers({
@@ -1872,10 +1873,18 @@ const server = Bun.serve({
     }
 
     if (
-      (pathname === '/api/faucet/erc20' || pathname === '/api/faucet/gas' || pathname === '/api/faucet/reserve')
+      (
+        pathname === '/api/faucet/erc20' ||
+        pathname === '/api/faucet/gas' ||
+        pathname === '/api/faucet/reserve'
+      )
       && request.method === 'POST'
     ) {
       return await proxyAnyHubRequest(request, pathname);
+    }
+
+    if (pathname === '/api/external-wallet/snapshot' && request.method === 'POST') {
+      return await proxyEntityHubApi(request, '/api/external-wallet/snapshot');
     }
 
     if (pathname === '/api/health') {

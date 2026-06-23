@@ -68,12 +68,71 @@ import {
   readContractCode,
   sendRpcBatch,
   type RpcBatchRequest,
+  type RpcBatchResponse,
 } from './rpc-utils';
 
 const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const TRON_FINALITY_DEPTH = 19;
 
 const isTronChainId = (chainId: number): boolean => TRON_CHAIN_IDS.has(chainId);
+
+export const readRequiredRpcBatchBigInt = (
+  responses: Map<number, RpcBatchResponse>,
+  id: number,
+  label: string,
+): bigint => {
+  const item = responses.get(id);
+  if (!item) {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_RPC_MISSING:${label}:id=${id}`);
+  }
+  if (item.error) {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_RPC_ERROR:${label}:${item.error.message || 'unknown'}`);
+  }
+  if (typeof item.result !== 'string') {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_RESULT:${label}:id=${id}`);
+  }
+  try {
+    return BigInt(item.result);
+  } catch {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT:${label}:id=${id}`);
+  }
+};
+
+export type ExternalWalletTrackedOwnerCursor = {
+  entityId: string;
+  watchAfterBlock: number;
+  balanceAfterBlockByToken: Map<string, number>;
+  allowanceAfterBlockByKey: Map<string, number>;
+};
+
+const normalizeTrackedKey = (value: unknown): string =>
+  String(value || '').trim().toLowerCase();
+
+export const shouldEmitExternalWalletBalanceDelta = (
+  tracked: Pick<ExternalWalletTrackedOwnerCursor, 'watchAfterBlock' | 'balanceAfterBlockByToken'>,
+  tokenAddress: string,
+  blockNumber: number,
+): boolean => {
+  const normalizedToken = normalizeTrackedKey(tokenAddress);
+  if (!normalizedToken || !tracked.balanceAfterBlockByToken.has(normalizedToken)) return false;
+  const baselineBlock = tracked.balanceAfterBlockByToken.get(normalizedToken) ?? 0;
+  return blockNumber > Math.max(tracked.watchAfterBlock, baselineBlock);
+};
+
+export const shouldEmitExternalWalletAllowanceDelta = (
+  tracked: Pick<ExternalWalletTrackedOwnerCursor, 'watchAfterBlock' | 'allowanceAfterBlockByKey'>,
+  tokenAddress: string,
+  spender: string,
+  blockNumber: number,
+): boolean => {
+  const normalizedToken = normalizeTrackedKey(tokenAddress);
+  const normalizedSpender = normalizeTrackedKey(spender);
+  if (!normalizedToken || !normalizedSpender) return false;
+  const key = `${normalizedToken}:${normalizedSpender}`;
+  if (!tracked.allowanceAfterBlockByKey.has(key)) return false;
+  const baselineBlock = tracked.allowanceAfterBlockByKey.get(key) ?? 0;
+  return blockNumber > Math.max(tracked.watchAfterBlock, baselineBlock);
+};
 
 /**
  * Create RPC adapter - works with any JSON-RPC provider
@@ -835,6 +894,8 @@ export async function createRpcAdapter(
       const tokenAddresses = request.tokenAddresses;
       const allowances = request.allowances ?? [];
       const includeNativeBalance = request.includeNativeBalance !== false;
+      const blockTag = request.blockTag ?? 'latest';
+      const rpcBlockTag = typeof blockTag === 'number' ? `0x${Math.max(0, Math.floor(blockTag)).toString(16)}` : blockTag;
       const erc20Interface = new ethers.Interface([
         'function balanceOf(address owner) view returns (uint256)',
         'function allowance(address owner, address spender) view returns (uint256)',
@@ -851,13 +912,13 @@ export async function createRpcAdapter(
         if (includeNativeBalance) {
           nativeBalanceId = nextId;
           batch.push({
-            id: nextId,
-            jsonrpc: '2.0',
-            method: 'eth_getBalance',
-            params: [owner, 'latest'],
-          });
-          nextId += 1;
-        }
+              id: nextId,
+              jsonrpc: '2.0',
+              method: 'eth_getBalance',
+              params: [owner, rpcBlockTag],
+            });
+            nextId += 1;
+          }
 
         for (const tokenAddress of tokenAddresses) {
           tokenIds.push(nextId);
@@ -868,7 +929,7 @@ export async function createRpcAdapter(
             params: [{
               to: tokenAddress,
               data: erc20Interface.encodeFunctionData('balanceOf', [owner]),
-            }, 'latest'],
+            }, rpcBlockTag],
           });
           nextId += 1;
         }
@@ -882,41 +943,55 @@ export async function createRpcAdapter(
             params: [{
               to: allowanceRead.tokenAddress,
               data: erc20Interface.encodeFunctionData('allowance', [owner, allowanceRead.spender]),
-            }, 'latest'],
+            }, rpcBlockTag],
           });
           nextId += 1;
         }
 
         const responses = await sendRpcBatch(rpcUrl, batch);
-        const readBigInt = (id: number): bigint => {
-          const item = responses.get(id);
-          if (!item) return 0n;
-          if (item.error) {
-            return 0n;
-          }
-          if (typeof item.result !== 'string') return 0n;
-          try {
-            return BigInt(item.result);
-          } catch {
-            return 0n;
-          }
-        };
 
         return {
-          nativeBalance: nativeBalanceId === null ? null : readBigInt(nativeBalanceId),
-          tokenBalances: tokenIds.map(readBigInt),
-          allowances: allowanceIds.map(readBigInt),
+          nativeBalance: nativeBalanceId === null
+            ? null
+            : readRequiredRpcBatchBigInt(responses, nativeBalanceId, `native:${owner}`),
+          tokenBalances: tokenIds.map((id, index) =>
+            readRequiredRpcBatchBigInt(responses, id, `balance:${tokenAddresses[index] ?? 'unknown'}:${owner}`),
+          ),
+          allowances: allowanceIds.map((id, index) => {
+            const allowanceRead = allowances[index];
+            return readRequiredRpcBatchBigInt(
+              responses,
+              id,
+              `allowance:${allowanceRead?.tokenAddress ?? 'unknown'}:${owner}:${allowanceRead?.spender ?? 'unknown'}`,
+            );
+          }),
         };
       }
 
+      const readViewUint = async (functionName: 'balanceOf' | 'allowance', to: string, data: string): Promise<bigint> => {
+        try {
+          const result = await provider.call({ to, data, blockTag });
+          const decoded = erc20Interface.decodeFunctionResult(functionName, result);
+          return BigInt(decoded[0] ?? 0n);
+        } catch (error) {
+          throw new Error(
+            `EXTERNAL_WALLET_SNAPSHOT_CALL_FAILED:${functionName}:${to}:${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      };
+
       const [nativeBalance, tokenBalances, allowanceValues] = await Promise.all([
-        includeNativeBalance ? provider.getBalance(owner).catch(() => 0n) : Promise.resolve<bigint | null>(null),
-        Promise.all(tokenAddresses.map((tokenAddress) => adapter.getErc20Balance(tokenAddress, owner).catch(() => 0n))),
-        Promise.all(allowances.map((allowanceRead) => adapter.getErc20Allowance(
-          allowanceRead.tokenAddress,
-          owner,
-          allowanceRead.spender,
-        ).catch(() => 0n))),
+        includeNativeBalance ? provider.getBalance(owner, blockTag) : Promise.resolve<bigint | null>(null),
+        Promise.all(tokenAddresses.map((tokenAddress) =>
+          readViewUint('balanceOf', tokenAddress, erc20Interface.encodeFunctionData('balanceOf', [owner])),
+        )),
+        Promise.all(allowances.map((allowanceRead) =>
+          readViewUint(
+            'allowance',
+            allowanceRead.tokenAddress,
+            erc20Interface.encodeFunctionData('allowance', [owner, allowanceRead.spender]),
+          ),
+        )),
       ]);
 
       return {
@@ -1198,7 +1273,11 @@ export async function createRpcAdapter(
       tokenAddress: string,
       spender: string,
       amount: bigint,
-    ): Promise<string> {
+      options?: {
+        entityId?: string;
+        tokenId?: number;
+      },
+    ): Promise<JEvent[]> {
       const signerWallet = new ethers.Wallet(
         '0x' + Buffer.from(signerPrivateKey).toString('hex'),
         provider,
@@ -1227,11 +1306,31 @@ export async function createRpcAdapter(
         throw new Error(`approveErc20 invalid spender contract: ${spender}`);
       }
       const currentAllowance = await allowanceFn(signerWallet.address, spender);
-      if (currentAllowance === amount) return 'already-approved';
+      if (currentAllowance === amount) return [];
+      const toApprovalDelta = (receipt: RpcReceipt, allowance: bigint): JEvent[] => {
+        const entityId = normalizeEntityId(options?.entityId || '');
+        const tokenId = Number(options?.tokenId);
+        if (!entityId || !Number.isInteger(tokenId) || tokenId < 0) return [];
+        return [{
+          name: 'ExternalWalletDelta',
+          args: {
+            entityId,
+            owner: signerWallet.address.toLowerCase(),
+            tokenAddress: tokenAddress.toLowerCase(),
+            tokenId,
+            spender: spender.toLowerCase(),
+            allowance: allowance.toString(),
+          },
+          blockNumber: receipt.blockNumber,
+          blockHash: receipt.blockHash,
+          transactionHash: receipt.hash,
+        }];
+      };
       try {
         return await runSerializedBatchFor(signerWallet, async () => {
+          const events: JEvent[] = [];
           if (currentAllowance > 0n && currentAllowance !== amount) {
-            await sendSignerTxWithExplicitNonce(
+            const resetReceipt = await sendSignerTxWithExplicitNonce(
               signerWallet,
               'approveErc20Reset',
               (nonce, feeOverrides) => approveFn(spender, 0n, {
@@ -1239,6 +1338,7 @@ export async function createRpcAdapter(
                 nonce,
               }),
             );
+            events.push(...toApprovalDelta(resetReceipt, 0n));
           }
           const receipt = await sendSignerTxWithExplicitNonce(
             signerWallet,
@@ -1248,7 +1348,8 @@ export async function createRpcAdapter(
               nonce,
             }),
           );
-          return receipt.hash;
+          events.push(...toApprovalDelta(receipt, amount));
+          return events;
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1585,8 +1686,9 @@ export async function createRpcAdapter(
                 const minedReceipt = await waitForReceipt(tx, 'submitTx:processBatch');
                 const txHash = minedReceipt.hash ?? tx.hash;
                 const blockNum = minedReceipt.blockNumber ?? 0;
+                const events = parseReceiptLogsToJEvents(asRpcReceipt(minedReceipt), eventCarriers(depository, entityProvider));
                 console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${minedReceipt.gasUsed}`);
-                return { success: true, txHash, blockNumber: blockNum };
+                return { success: true, txHash, blockNumber: blockNum, events };
               } catch (error) {
                 if (attempt < 2 && isNonceSyncError(error)) {
                   continue;
@@ -1674,9 +1776,114 @@ export async function createRpcAdapter(
         'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success)',
       ];
       const depositoryIface = new ethers.Interface(depositoryABI);
+      const erc20WatchIface = new ethers.Interface([
+        'event Transfer(address indexed from, address indexed to, uint256 value)',
+        'event Approval(address indexed owner, address indexed spender, uint256 value)',
+      ]);
       const processBatchIface = new ethers.Interface([
         'function processBatch(bytes encodedBatch, bytes hankoData, uint256 nonce)',
       ]);
+      let erc20WatchTokensCache: Array<{ tokenId: number; address: string }> = [];
+      let erc20WatchTokensLoadedAt = 0;
+      const normalizeEvmAddress = (value: unknown): string => {
+        const candidate = String(value || '').trim().toLowerCase();
+        return /^0x[0-9a-f]{40}$/.test(candidate) ? candidate : '';
+      };
+      const readWatchedErc20Tokens = async (): Promise<Array<{ tokenId: number; address: string }>> => {
+        const now = Date.now();
+        if (erc20WatchTokensCache.length > 0 && now - erc20WatchTokensLoadedAt < 10_000) {
+          return erc20WatchTokensCache;
+        }
+        const tokens: Array<{ tokenId: number; address: string }> = [];
+        try {
+          const length = Number(await depository.getTokensLength());
+          for (let tokenId = 1; tokenId < length; tokenId++) {
+            const [contractAddress] = await depository._tokens(tokenId);
+            const normalized = normalizeEvmAddress(contractAddress);
+            if (!normalized || normalized === ethers.ZeroAddress) continue;
+            tokens.push({ tokenId, address: normalized });
+          }
+        } catch (error) {
+          emitWatcherDebug({
+            event: 'j_watch_erc20_registry_read_failed',
+            error: watcherErrorDetails(error),
+          });
+        }
+        erc20WatchTokensCache = tokens;
+        erc20WatchTokensLoadedAt = now;
+        return erc20WatchTokensCache;
+      };
+      const buildTrackedExternalOwners = (activeEnv: Env): Map<string, ExternalWalletTrackedOwnerCursor[]> => {
+        const owners = new Map<string, Map<string, ExternalWalletTrackedOwnerCursor>>();
+        const readBlock = (value: unknown): number => {
+          const numeric = Number(value || 0);
+          return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
+        };
+        const getTracked = (owner: string, entityId: string): ExternalWalletTrackedOwnerCursor | null => {
+          const normalizedOwner = normalizeEvmAddress(owner);
+          const normalizedEntity = String(entityId || '').trim().toLowerCase();
+          if (!normalizedOwner || !normalizedEntity) return null;
+          let byEntity = owners.get(normalizedOwner);
+          if (!byEntity) {
+            byEntity = new Map();
+            owners.set(normalizedOwner, byEntity);
+          }
+          let tracked = byEntity.get(normalizedEntity);
+          if (!tracked) {
+            tracked = {
+              entityId: normalizedEntity,
+              watchAfterBlock: 0,
+              balanceAfterBlockByToken: new Map(),
+              allowanceAfterBlockByKey: new Map(),
+            };
+            byEntity.set(normalizedEntity, tracked);
+          }
+          return tracked;
+        };
+        for (const replica of activeEnv.eReplicas?.values?.() || []) {
+          const entityId = String(replica.state?.entityId || replica.entityId || '').trim().toLowerCase();
+          const externalWallet = replica.state?.externalWallet;
+          if (!entityId || !externalWallet) continue;
+          for (const [owner, balances] of externalWallet.balances?.entries?.() || []) {
+            const tracked = getTracked(owner, entityId);
+            if (!tracked) continue;
+            for (const [tokenAddress, record] of balances.entries()) {
+              const normalizedToken = normalizeEvmAddress(tokenAddress);
+              if (!normalizedToken) continue;
+              tracked.balanceAfterBlockByToken.set(
+                normalizedToken,
+                Math.max(tracked.balanceAfterBlockByToken.get(normalizedToken) ?? 0, readBlock(record.jHeight)),
+              );
+            }
+          }
+          for (const [owner, allowances] of externalWallet.allowances?.entries?.() || []) {
+            const tracked = getTracked(owner, entityId);
+            if (!tracked) continue;
+            for (const [allowanceKey, record] of allowances.entries()) {
+              const [tokenAddress, spender] = String(allowanceKey || '').split(':');
+              const normalizedToken = normalizeEvmAddress(tokenAddress);
+              const normalizedSpender = normalizeEvmAddress(spender);
+              if (!normalizedToken || !normalizedSpender) continue;
+              const key = `${normalizedToken}:${normalizedSpender}`;
+              tracked.allowanceAfterBlockByKey.set(
+                key,
+                Math.max(tracked.allowanceAfterBlockByKey.get(key) ?? 0, readBlock(record.jHeight)),
+              );
+            }
+          }
+        }
+        for (const [entityId, entityOwners] of activeEnv.runtimeState?.externalWalletWatchOwners?.entries?.() || []) {
+          for (const [owner, afterBlock] of entityOwners) {
+            const tracked = getTracked(owner, entityId);
+            if (!tracked) continue;
+            tracked.watchAfterBlock = Math.max(tracked.watchAfterBlock, readBlock(afterBlock));
+          }
+        }
+        return new Map([...owners.entries()].map(([owner, entityBlocks]) => [
+          owner,
+          [...entityBlocks.values()].sort((left, right) => left.entityId.localeCompare(right.entityId)),
+        ]));
+      };
       type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;
       const txFinalizationEvidenceCache = new Map<string, Promise<TxFinalizationEvidence[]>>();
       const toDecimalString = (value: unknown): string => {
@@ -1799,14 +2006,96 @@ export async function createRpcAdapter(
           pollStep = 'resolveDepository';
           const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock: safeToBlock };
           pollStep = 'eth_getLogs';
-          const logs = await provider.getLogs(filter);
+          const depositoryLogs = await provider.getLogs(filter);
+          pollStep = 'eth_getLogs:erc20';
+          const watchedTokens = await readWatchedErc20Tokens();
+          const erc20Logs = watchedTokens.length > 0
+            ? await provider.getLogs({
+                address: watchedTokens.map(token => token.address),
+                fromBlock,
+                toBlock: safeToBlock,
+              })
+            : [];
+          const tokenByAddress = new Map(watchedTokens.map(token => [token.address, token]));
+          const logs = [
+            ...depositoryLogs.map(log => ({ kind: 'depository' as const, log })),
+            ...erc20Logs.map(log => ({ kind: 'erc20' as const, log })),
+          ].sort((left, right) =>
+            Number(left.log.blockNumber || 0) - Number(right.log.blockNumber || 0) ||
+            Number(left.log.index || 0) - Number(right.log.index || 0)
+          );
 
           if (logs.length > 0) {
             const rawEvents: RawJEvent[] = [];
-            for (const log of logs) {
+            const trackedExternalOwners = buildTrackedExternalOwners(activeEnv);
+            for (const { kind, log } of logs) {
               try {
-                const parsed = depositoryIface.parseLog({ topics: log.topics as string[], data: log.data });
+                const parsed = kind === 'depository'
+                  ? depositoryIface.parseLog({ topics: log.topics as string[], data: log.data })
+                  : erc20WatchIface.parseLog({ topics: log.topics as string[], data: log.data });
                 if (!parsed) continue;
+                if (kind === 'erc20') {
+                  const tokenAddress = normalizeEvmAddress(log.address);
+                  const token = tokenByAddress.get(tokenAddress);
+                  if (!token) continue;
+                  if (parsed.name === 'Transfer') {
+                    const from = normalizeEvmAddress(parsed.args[0]);
+                    const to = normalizeEvmAddress(parsed.args[1]);
+                    if (from && to && from === to) continue;
+                    const amount = BigInt(parsed.args[2] ?? 0n);
+                    const deltas = [
+                      ...(from && from !== ethers.ZeroAddress ? [{ owner: from, balanceDelta: `-${amount.toString()}` }] : []),
+                      ...(to && to !== ethers.ZeroAddress ? [{ owner: to, balanceDelta: amount.toString() }] : []),
+                    ];
+                    for (const delta of deltas) {
+                      for (const tracked of trackedExternalOwners.get(delta.owner) ?? []) {
+                        if (!shouldEmitExternalWalletBalanceDelta(tracked, tokenAddress, Number(log.blockNumber || 0))) {
+                          continue;
+                        }
+                        rawEvents.push({
+                          name: 'ExternalWalletDelta',
+                          args: {
+                            entityId: tracked.entityId,
+                            owner: delta.owner,
+                            tokenAddress,
+                            tokenId: token.tokenId,
+                            balanceDelta: delta.balanceDelta,
+                          },
+                          blockNumber: log.blockNumber,
+                          blockHash: log.blockHash,
+                          transactionHash: log.transactionHash,
+                          logIndex: log.index,
+                        });
+                      }
+                    }
+                  } else if (parsed.name === 'Approval') {
+                    const owner = normalizeEvmAddress(parsed.args[0]);
+                    const spender = normalizeEvmAddress(parsed.args[1]);
+                    const allowance = BigInt(parsed.args[2] ?? 0n).toString();
+                    if (!owner || !spender) continue;
+                    for (const tracked of trackedExternalOwners.get(owner) ?? []) {
+                      if (!shouldEmitExternalWalletAllowanceDelta(tracked, tokenAddress, spender, Number(log.blockNumber || 0))) {
+                        continue;
+                      }
+                      rawEvents.push({
+                        name: 'ExternalWalletDelta',
+                        args: {
+                          entityId: tracked.entityId,
+                          owner,
+                          tokenAddress,
+                          tokenId: token.tokenId,
+                          spender,
+                          allowance,
+                        },
+                        blockNumber: log.blockNumber,
+                        blockHash: log.blockHash,
+                        transactionHash: log.transactionHash,
+                        logIndex: log.index,
+                      });
+                    }
+                  }
+                  continue;
+                }
                 if (!CANONICAL_J_EVENTS.some(name => name === parsed.name)) continue;
                 // Extract named args from ethers v6 Result (array-like, named keys
                 // not enumerable via Object.keys). Use positional fallback for unnamed params.

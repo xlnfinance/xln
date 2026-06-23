@@ -68,6 +68,8 @@ export type { IDepository } from "./contracts/IDepository";
 export { IDepository__factory } from "./factories/contracts/IDepository__factory";
 export type { IEntityProvider } from "./contracts/IEntityProvider";
 export { IEntityProvider__factory } from "./factories/contracts/IEntityProvider__factory";
+export type { EntityProviderSupplyHarness } from "./contracts/mocks/EntityProviderSupplyHarness";
+export { EntityProviderSupplyHarness__factory } from "./factories/contracts/mocks/EntityProviderSupplyHarness__factory";
 export type { HashLadderHarness } from "./contracts/mocks/HashLadderHarness";
 export { HashLadderHarness__factory } from "./factories/contracts/mocks/HashLadderHarness__factory";
 export type { MockEntityProvider } from "./contracts/mocks/MockEntityProvider";

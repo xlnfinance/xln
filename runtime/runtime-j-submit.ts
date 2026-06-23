@@ -54,6 +54,55 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
   }
 };
 
+const rememberSubmittedJEvents = (
+  env: Env,
+  events: Array<{
+    name?: string;
+    args?: Record<string, unknown>;
+    blockNumber?: number;
+    blockHash?: string;
+    transactionHash?: string;
+  }> | undefined,
+): void => {
+  if (!events || events.length === 0) return;
+  if (!env.runtimeState) env.runtimeState = {};
+  const observedAt = Number(env.timestamp ?? Date.now());
+  const normalizeArgValue = (value: unknown): unknown => {
+    if (typeof value === 'bigint') return value.toString();
+    if (Array.isArray(value)) return value.map(normalizeArgValue);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, normalizeArgValue(entry)]),
+      );
+    }
+    return value;
+  };
+  const canonicalEvents = events
+    .filter((event): event is {
+      name: string;
+      args: Record<string, unknown>;
+      blockNumber: number;
+      blockHash: string;
+      transactionHash: string;
+    } => (
+      typeof event.name === 'string' &&
+      event.args !== undefined &&
+      typeof event.blockNumber === 'number' &&
+      typeof event.blockHash === 'string' &&
+      typeof event.transactionHash === 'string'
+    ))
+    .map((event) => ({
+      ...event,
+      args: Object.fromEntries(
+        Object.entries(event.args).map(([key, value]) => [key, normalizeArgValue(value)]),
+      ),
+      observedAt,
+    }));
+  if (canonicalEvents.length === 0) return;
+  const previous = env.runtimeState.recentJEvents ?? [];
+  env.runtimeState.recentJEvents = [...previous, ...canonicalEvents].slice(-1_000);
+};
+
 const validateSealedBatchJTx = (jTx: JTx): void => {
   if (jTx.type !== 'batch') return;
   if (isBatchEmpty(jTx.data.batch)) return;
@@ -230,6 +279,7 @@ export async function submitRuntimeJOutbox(
       }
 
       if (result.success) {
+        rememberSubmittedJEvents(env, result.events);
         console.log(
           `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
         );
