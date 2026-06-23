@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import {
@@ -21,6 +21,7 @@ import {
   purgeQaRunsOlderThan,
   readQaRun,
   recordQaRunHistory,
+  resolveQaArtifactPath,
   resolveQaStoryScreenshotPath,
   type QaRunManifest,
 } from '../qa/report';
@@ -230,6 +231,32 @@ test('qa story image resolver rejects path traversal', async () => {
   await expect(resolveQaStoryScreenshotPath('e2e-screenshots', '../package.json')).rejects.toThrow(
     'INVALID_QA_STORY_IMAGE_PATH',
   );
+});
+
+test('qa artifact resolver rejects symlink escape from run directory', async () => {
+  const runId = '20000101-000002-125';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  const outsideDir = resolve(process.cwd(), '.logs', 'qa-artifact-symlink-fixture');
+  const outsideFile = join(outsideDir, 'secret.txt');
+  const linkPath = join(runDir, 'linked-secret.txt');
+  await rm(runDir, { recursive: true, force: true });
+  await rm(outsideDir, { recursive: true, force: true });
+  try {
+    await expect(resolveQaArtifactPath(runId, '../package.json')).rejects.toThrow(
+      'INVALID_QA_ARTIFACT_PATH',
+    );
+    await mkdir(runDir, { recursive: true });
+    await mkdir(outsideDir, { recursive: true });
+    await writeFile(outsideFile, 'secret-bearing artifact must not escape run root\n');
+    await symlink(outsideFile, linkPath);
+
+    await expect(resolveQaArtifactPath(runId, 'linked-secret.txt')).rejects.toThrow(
+      'INVALID_QA_ARTIFACT_PATH',
+    );
+  } finally {
+    await rm(runDir, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
 });
 
 test('qa stories api returns screenshot catalog', async () => {
