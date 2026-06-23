@@ -7,6 +7,7 @@ import { compareStableText, safeStringify } from '../serialization-utils';
 import {
   QA_HISTORY_DB_PATH,
   backfillQaHistoryFromLogs,
+  classifyQaArtifactSensitivity,
   enrichQaRunUrls,
   listQaHistory,
   listQaRunSummaries,
@@ -1185,6 +1186,22 @@ export async function maybeHandleQaRequest(
     }
     try {
       const absolutePath = await resolveQaArtifactPath(runId, relativePath);
+      const sensitivity = classifyQaArtifactSensitivity({
+        name: relativePath.split('/').pop() ?? relativePath,
+        relativePath,
+        contentType: qaArtifactContentType(absolutePath),
+      });
+      if (sensitivity === 'secret-bearing' && auth.scope !== 'admin') {
+        return new Response(safeStringify({
+          ok: false,
+          error: 'QA_ARTIFACT_ADMIN_REQUIRED',
+          sensitivity,
+          qaAuth: authInfo,
+        }), {
+          status: 403,
+          headers: { ...headers, 'Cache-Control': 'no-store' },
+        });
+      }
       if (isQaTextArtifactPath(absolutePath)) {
         return new Response(redactQaSecretText(await Bun.file(absolutePath).text()), {
           headers: mediaHeaders(absolutePath),

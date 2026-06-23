@@ -13,12 +13,14 @@ export type QaSlowStep = {
 };
 
 export type QaArtifactKind = 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other';
+export type QaArtifactSensitivity = 'public' | 'internal' | 'secret-bearing';
 
 export type QaArtifact = {
   name: string;
   relativePath: string;
   sizeBytes: number;
   kind: QaArtifactKind;
+  sensitivity: QaArtifactSensitivity;
   contentType: string;
   url?: string;
 };
@@ -332,6 +334,31 @@ export const redactQaSecretText = (value: string): string => {
 export const isQaTextArtifactPath = (filePath: string): boolean => {
   const contentType = detectContentType(basename(filePath));
   return contentType.startsWith('text/') || contentType.startsWith('application/json');
+};
+
+export const classifyQaArtifactSensitivity = (artifact: {
+  name?: string | null;
+  relativePath?: string | null;
+  kind?: QaArtifactKind | null;
+  contentType?: string | null;
+}): QaArtifactSensitivity => {
+  const name = String(artifact.name || '').toLowerCase();
+  const relativePath = String(artifact.relativePath || '').replace(/\\/g, '/').toLowerCase();
+  const kind = artifact.kind ?? detectArtifactKind(name || basename(relativePath));
+  const contentType = String(artifact.contentType || '').toLowerCase();
+  if (
+    relativePath.endsWith('/qa-cues/cues.vtt') ||
+    relativePath.endsWith('/qa-cues/cues.json') ||
+    name === 'cues.vtt' ||
+    name === 'cues.json'
+  ) {
+    return 'public';
+  }
+  if (kind === 'trace' || kind === 'archive') return 'secret-bearing';
+  if (kind === 'text' || kind === 'json') return 'secret-bearing';
+  if (contentType.startsWith('text/') || contentType.startsWith('application/json')) return 'secret-bearing';
+  if (kind === 'video' || kind === 'image') return 'internal';
+  return 'internal';
 };
 
 const asFiniteNumber = (value: unknown): number | null => {
@@ -1465,12 +1492,16 @@ const walkArtifacts = async (baseDir: string, currentDir: string, out: QaArtifac
       continue;
     }
     const fileStat = await stat(absolutePath);
+    const kind = detectArtifactKind(entry.name);
+    const contentType = detectContentType(entry.name);
+    const relativePath = absolutePath.slice(baseDir.length + 1);
     out.push({
       name: entry.name,
-      relativePath: absolutePath.slice(baseDir.length + 1),
+      relativePath,
       sizeBytes: fileStat.size,
-      kind: detectArtifactKind(entry.name),
-      contentType: detectContentType(entry.name),
+      kind,
+      sensitivity: classifyQaArtifactSensitivity({ name: entry.name, relativePath, kind, contentType }),
+      contentType,
     });
   }
 };
@@ -1678,7 +1709,10 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           title,
           handle: shard.handle ?? metadata?.handle ?? deriveQaTestHandle(target, title),
           description: metadata?.description ?? deriveQaTestDescription(target, title) ?? shard.description,
-          artifacts: sortArtifacts([...(shard.artifacts ?? [])]),
+          artifacts: sortArtifacts([...(shard.artifacts ?? [])]).map(artifact => ({
+            ...artifact,
+            sensitivity: artifact.sensitivity ?? classifyQaArtifactSensitivity(artifact),
+          })),
           browserIssues,
           browserHealth: summarizeQaBrowserIssues(browserIssues),
           error,
@@ -1753,10 +1787,14 @@ export const enrichQaRunUrls = (run: QaRunManifest): QaRunManifest => ({
   ...run,
   shards: run.shards.map(shard => ({
     ...shard,
-    artifacts: sortArtifacts([...(shard.artifacts ?? [])]).map(artifact => ({
-      ...artifact,
-      url: makeQaArtifactUrl(run.runId, artifact.relativePath),
-    })),
+    artifacts: sortArtifacts([...(shard.artifacts ?? [])]).map(artifact => {
+      const sensitivity = artifact.sensitivity ?? classifyQaArtifactSensitivity(artifact);
+      return {
+        ...artifact,
+        sensitivity,
+        url: makeQaArtifactUrl(run.runId, artifact.relativePath),
+      };
+    }),
   })),
 });
 

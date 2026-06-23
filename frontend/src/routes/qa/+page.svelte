@@ -39,6 +39,7 @@
     relativePath: string;
     sizeBytes: number;
     kind: 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other';
+    sensitivity: 'public' | 'internal' | 'secret-bearing';
     contentType: string;
     url?: string;
   };
@@ -1895,6 +1896,7 @@
                         <span>{artifactLabel(artifact)}</span>
                         <strong>{artifact.name}</strong>
                         <small>{formatBytes(artifact.sizeBytes)}</small>
+                        <small>{artifact.sensitivity}</small>
                       </button>
                     {/each}
                   </div>

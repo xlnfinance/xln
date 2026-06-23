@@ -32,6 +32,7 @@ import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   compareQaRunWithHistory,
+  classifyQaArtifactSensitivity,
   classifyQaShardFailure,
   deriveQaTestDescription,
   deriveQaTestHandle,
@@ -615,12 +616,16 @@ const collectShardArtifacts = (
         continue;
       }
       const fileStat = statSync(absolutePath);
+      const relativePath = absolutePath.slice(logsDir.length + 1);
+      const kind = detectArtifactKind(entry.name);
+      const contentType = detectArtifactContentType(entry.name);
       artifacts.push({
         name: entry.name,
-        relativePath: absolutePath.slice(logsDir.length + 1),
+        relativePath,
         sizeBytes: fileStat.size,
-        kind: detectArtifactKind(entry.name),
-        contentType: detectArtifactContentType(entry.name),
+        kind,
+        sensitivity: classifyQaArtifactSensitivity({ name: entry.name, relativePath, kind, contentType }),
+        contentType,
       });
     }
   };

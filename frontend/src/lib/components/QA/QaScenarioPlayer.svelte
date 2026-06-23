@@ -18,6 +18,7 @@
     relativePath: string;
     sizeBytes: number;
     kind: 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other';
+    sensitivity: 'public' | 'internal' | 'secret-bearing';
     contentType: string;
     url?: string;
   };
