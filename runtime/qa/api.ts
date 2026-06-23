@@ -41,6 +41,14 @@ type QaRestartState = {
   title: string;
   command: string[];
   logPath: string;
+  timeoutMs: number;
+  watchdogAt: number;
+  killGraceMs: number;
+  watchdogTimer: ReturnType<typeof setTimeout> | null;
+  sigkillTimer: ReturnType<typeof setTimeout> | null;
+  terminalStatus: QaRestartTerminalStatus | null;
+  writeLog: (text: string) => void;
+  closeLog: (suffix?: string) => void;
 };
 
 type QaRestartIntent = {
@@ -52,9 +60,14 @@ type QaRestartIntent = {
   expectedGitHead: string;
 };
 
+type QaApiDeps = {
+  computeRestartFingerprint?: () => QaCodeFingerprint;
+  spawnRestart?: typeof spawn;
+};
+
 export type QaRestartAuditEntry = {
   auditId: string;
-  status: 'started' | 'finished' | 'spawn_error';
+  status: 'started' | QaRestartTerminalStatus;
   actorKeyId: string;
   scope: QaAuthScope;
   operatorId: string;
@@ -77,9 +90,25 @@ export type QaRestartAuditEntry = {
 };
 
 let activeRestart: QaRestartState | null = null;
+let restartCooldownUntil = 0;
+let restartAuditReconciled = false;
+
+type QaRestartTerminalStatus = 'finished' | 'spawn_error' | 'watchdog_timeout' | 'aborted' | 'orphaned';
 
 const qaRestartAllowed = (): boolean => process.env['XLN_QA_RESTART_ALLOWED'] === '1';
 const qaAuthDisabled = (): boolean => process.env['XLN_QA_AUTH_DISABLED'] === '1';
+const qaRestartCooldownMs = (): number => {
+  const raw = Number(process.env['XLN_QA_RESTART_COOLDOWN_MS'] || '5000');
+  return Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 5000;
+};
+const qaRestartWatchdogMs = (): number => {
+  const raw = Number(process.env['XLN_QA_RESTART_WATCHDOG_MS'] || '330000');
+  return Number.isFinite(raw) ? Math.max(1000, Math.floor(raw)) : 330000;
+};
+const qaRestartKillGraceMs = (): number => {
+  const raw = Number(process.env['XLN_QA_RESTART_KILL_GRACE_MS'] || '10000');
+  return Number.isFinite(raw) ? Math.max(500, Math.floor(raw)) : 10000;
+};
 
 const QA_REQUIRED_RESTART_ENV_KEYS = [
   'ANVIL_RPC',
@@ -325,9 +354,21 @@ const openQaRestartAuditDb = (): Database => {
 const nullableNumber = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
 
+const normalizeRestartAuditStatus = (value: unknown): QaRestartAuditEntry['status'] => {
+  const status = String(value || '').trim();
+  if (
+    status === 'finished' ||
+    status === 'spawn_error' ||
+    status === 'watchdog_timeout' ||
+    status === 'aborted' ||
+    status === 'orphaned'
+  ) return status;
+  return 'started';
+};
+
 const rowToRestartAuditEntry = (row: Record<string, unknown>): QaRestartAuditEntry => ({
   auditId: String(row['audit_id'] || ''),
-  status: row['status'] === 'finished' || row['status'] === 'spawn_error' ? row['status'] : 'started',
+  status: normalizeRestartAuditStatus(row['status']),
   actorKeyId: String(row['actor_key_id'] || ''),
   scope: row['scope'] === 'admin' ? 'admin' : 'read',
   operatorId: String(row['operator_id'] || ''),
@@ -442,7 +483,7 @@ export const insertQaRestartAudit = (entry: QaRestartAuditEntry): void => {
 
 export const finishQaRestartAudit = (
   auditId: string,
-  status: Extract<QaRestartAuditEntry['status'], 'finished' | 'spawn_error'>,
+  status: QaRestartTerminalStatus,
   exitCode: number | null,
   finishedAt = Date.now(),
 ): void => {
@@ -463,6 +504,30 @@ export const finishQaRestartAudit = (
   } finally {
     db.close();
   }
+};
+
+const markStaleQaRestartAuditsOrphaned = (finishedAt = Date.now()): number => {
+  const db = openQaRestartAuditDb();
+  try {
+    const result = db.query(`
+      UPDATE qa_restart_audit
+      SET status = 'orphaned',
+          finished_at = $finishedAt,
+          exit_code = NULL
+      WHERE status = 'started'
+        AND started_at < $finishedAt
+    `).run({ $finishedAt: finishedAt });
+    return Number(result.changes || 0);
+  } finally {
+    db.close();
+  }
+};
+
+const reconcileQaRestartAuditOnce = (): void => {
+  if (restartAuditReconciled) return;
+  restartAuditReconciled = true;
+  if (activeRestart) return;
+  markStaleQaRestartAuditsOrphaned();
 };
 
 export const listQaRestartAudit = (limit = 50): QaRestartAuditEntry[] => {
@@ -533,23 +598,61 @@ const QA_TEST_CATALOG = [
   },
 ];
 
-const restartStatus = (): Record<string, unknown> => {
-  if (!activeRestart) return { active: false };
-  if (activeRestart.proc.exitCode !== null) {
-    finishQaRestartAudit(activeRestart.auditId, 'finished', activeRestart.proc.exitCode);
-    const finished = {
-      active: false,
-      last: {
-        auditId: activeRestart.auditId,
-        startedAt: activeRestart.startedAt,
-        target: activeRestart.target,
-        title: activeRestart.title,
-        exitCode: activeRestart.proc.exitCode,
-        logPath: activeRestart.logPath,
-      },
-    };
-    activeRestart = null;
-    return finished;
+const clearRestartTimers = (state: QaRestartState): void => {
+  if (state.watchdogTimer) clearTimeout(state.watchdogTimer);
+  if (state.sigkillTimer) clearTimeout(state.sigkillTimer);
+  state.watchdogTimer = null;
+  state.sigkillTimer = null;
+};
+
+const finishActiveRestart = (
+  state: QaRestartState,
+  status: QaRestartTerminalStatus,
+  exitCode: number | null,
+  suffix = '',
+): void => {
+  clearRestartTimers(state);
+  finishQaRestartAudit(state.auditId, status, exitCode);
+  state.closeLog(suffix);
+  restartCooldownUntil = Date.now() + qaRestartCooldownMs();
+  if (activeRestart === state) activeRestart = null;
+};
+
+const requestActiveRestartStop = (
+  state: QaRestartState,
+  status: Extract<QaRestartTerminalStatus, 'watchdog_timeout' | 'aborted'>,
+  reason: string,
+): void => {
+  if (state.terminalStatus) return;
+  state.terminalStatus = status;
+  state.writeLog(`\nQA_RESTART_${status.toUpperCase()}:${reason}\n`);
+  state.proc.kill('SIGTERM');
+  state.sigkillTimer = setTimeout(() => {
+    if (state.proc.exitCode !== null) return;
+    state.writeLog(`\nQA_RESTART_SIGKILL:${reason}\n`);
+    state.proc.kill('SIGKILL');
+  }, state.killGraceMs);
+  state.sigkillTimer.unref?.();
+};
+
+const reapQaRestartState = (now = Date.now()): void => {
+  if (!activeRestart) return;
+  const state = activeRestart;
+  if (state.proc.exitCode !== null) {
+    finishActiveRestart(state, state.terminalStatus ?? 'finished', state.proc.exitCode);
+    return;
+  }
+  if (now >= state.watchdogAt) {
+    requestActiveRestartStop(state, 'watchdog_timeout', `timeoutMs=${state.timeoutMs}`);
+  }
+};
+
+export const readQaRestartStatus = (now = Date.now()): Record<string, unknown> => {
+  if (!activeRestart) {
+    const cooldownRemainingMs = Math.max(0, restartCooldownUntil - now);
+    return cooldownRemainingMs > 0
+      ? { active: false, cooldownUntil: restartCooldownUntil, cooldownRemainingMs }
+      : { active: false };
   }
   return {
     active: true,
@@ -560,7 +663,17 @@ const restartStatus = (): Record<string, unknown> => {
     pid: activeRestart.proc.pid ?? null,
     command: activeRestart.command,
     logPath: activeRestart.logPath,
+    timeoutMs: activeRestart.timeoutMs,
+    watchdogAt: activeRestart.watchdogAt,
+    killGraceMs: activeRestart.killGraceMs,
+    terminating: activeRestart.terminalStatus !== null,
+    terminalStatus: activeRestart.terminalStatus,
   };
+};
+
+const restartStatus = (): Record<string, unknown> => {
+  reapQaRestartState();
+  return readQaRestartStatus();
 };
 
 const sanitizeE2ETarget = (target: string): string => {
@@ -634,12 +747,18 @@ const readRestartIntent = async (
   };
 };
 
-export async function maybeHandleQaRequest(request: Request, pathname: string, headers: JsonHeaders): Promise<Response | null> {
+export async function maybeHandleQaRequest(
+  request: Request,
+  pathname: string,
+  headers: JsonHeaders,
+  deps: QaApiDeps = {},
+): Promise<Response | null> {
   if (!pathname.startsWith('/api/qa/')) return null;
 
   const requiredScope: QaAuthScope =
     (
       pathname === '/api/qa/restart' ||
+      pathname === '/api/qa/restart/abort' ||
       pathname === '/api/qa/retention' ||
       pathname === '/api/qa/history/backfill'
     ) && request.method === 'POST'
@@ -647,6 +766,8 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
       : 'read';
   const auth = requireQaScope(request, requiredScope, headers);
   if (auth instanceof Response) return auth;
+  reconcileQaRestartAuditOnce();
+  reapQaRestartState();
   const authInfo = qaAuthPayload(auth);
   const restartAllowed = qaRestartAllowed() && auth.scope === 'admin';
 
@@ -710,6 +831,39 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
     return jsonEtagResponse(request, { ok: true, qaAuth: authInfo, audit }, headers);
   }
 
+  if (pathname === '/api/qa/restart/abort' && request.method === 'POST') {
+    try {
+      if (!restartAllowed) {
+        return new Response(safeStringify({ ok: false, error: 'QA_RESTART_DISABLED', restartAllowed: false }), {
+          status: 403,
+          headers,
+        });
+      }
+      const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+      const confirm = String(body?.['confirm'] || '').trim();
+      if (confirm !== 'ABORT_RESTART') {
+        return new Response(safeStringify({ ok: false, error: 'QA_RESTART_ABORT_CONFIRM_REQUIRED' }), {
+          status: 400,
+          headers,
+        });
+      }
+      if (!activeRestart) {
+        return new Response(safeStringify({ ok: false, error: 'QA_RESTART_NOT_RUNNING', restart: readQaRestartStatus() }), {
+          status: 409,
+          headers,
+        });
+      }
+      requestActiveRestartStop(activeRestart, 'aborted', `operator=${auth.actorKeyId}`);
+      return new Response(safeStringify({ ok: true, qaAuth: authInfo, restart: readQaRestartStatus(), restartAllowed }), {
+        status: 202,
+        headers: { ...headers, 'Cache-Control': 'no-store' },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 500, headers });
+    }
+  }
+
   if (pathname === '/api/qa/retention' && request.method === 'POST') {
     try {
       const body = await request.json().catch(() => null) as Record<string, unknown> | null;
@@ -738,7 +892,7 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
       const { target, title } = await readRestartTarget(body);
       if (!title) throw new Error('QA_RESTART_TITLE_REQUIRED');
       const command = buildRestartCommand(target, title);
-      const fingerprint = computeQaRestartFingerprint();
+      const fingerprint = (deps.computeRestartFingerprint ?? computeQaRestartFingerprint)();
       if (mode === 'plan') {
         return new Response(safeStringify({
           ok: true,
@@ -767,9 +921,17 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
           headers,
         });
       }
-      if (restartStatus()['active'] === true) {
-        return new Response(safeStringify({ ok: false, error: 'QA_RESTART_ALREADY_RUNNING', restart: restartStatus() }), {
+      const currentRestart = restartStatus();
+      if (currentRestart['active'] === true) {
+        return new Response(safeStringify({ ok: false, error: 'QA_RESTART_ALREADY_RUNNING', restart: currentRestart }), {
           status: 409,
+          headers,
+        });
+      }
+      const cooldownRemainingMs = Number(currentRestart['cooldownRemainingMs'] || 0);
+      if (cooldownRemainingMs > 0) {
+        return new Response(safeStringify({ ok: false, error: 'QA_RESTART_COOLDOWN_ACTIVE', restart: currentRestart }), {
+          status: 429,
           headers,
         });
       }
@@ -804,25 +966,35 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
       });
       const log = createWriteStream(logPath, { flags: 'w' });
       let logClosed = false;
+      const writeLog = (text: string): void => {
+        if (!logClosed) log.write(text);
+      };
       const closeLog = (suffix = ''): void => {
         if (logClosed) return;
         logClosed = true;
         log.end(suffix);
       };
-      const proc = spawn('bun', command, {
+      const proc = (deps.spawnRestart ?? spawn)('bun', command, {
         cwd: process.cwd(),
         env: buildQaRestartEnv(process.env),
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-      proc.stdout?.on('data', chunk => log.write(chunk.toString()));
-      proc.stderr?.on('data', chunk => log.write(chunk.toString()));
+      proc.stdout?.on('data', chunk => writeLog(chunk.toString()));
+      proc.stderr?.on('data', chunk => writeLog(chunk.toString()));
       proc.once('error', error => {
-        closeLog(`\nQA_RESTART_SPAWN_ERROR:${error.message}\n`);
+        const suffix = `\nQA_RESTART_SPAWN_ERROR:${error.message}\n`;
+        if (activeRestart?.proc === proc) {
+          finishActiveRestart(activeRestart, 'spawn_error', null, suffix);
+          return;
+        }
         finishQaRestartAudit(auditId, 'spawn_error', null);
-        if (activeRestart?.proc === proc) activeRestart = null;
+        closeLog(suffix);
       });
       proc.once('exit', code => {
-        finishQaRestartAudit(auditId, 'finished', code ?? null);
+        if (activeRestart?.proc === proc) {
+          finishActiveRestart(activeRestart, activeRestart.terminalStatus ?? 'finished', code ?? null);
+          return;
+        }
         closeLog();
       });
       const pid = proc.pid ?? null;
@@ -837,8 +1009,32 @@ export async function maybeHandleQaRequest(request: Request, pathname: string, h
           db.close();
         }
       }
-      activeRestart = { proc, auditId, startedAt, target: intent.target, title: intent.title, command: ['bun', ...command], logPath };
-      return new Response(safeStringify({ ok: true, qaAuth: authInfo, restart: restartStatus(), restartAllowed: true }), {
+      const timeoutMs = qaRestartWatchdogMs();
+      const watchdogAt = startedAt + timeoutMs;
+      const killGraceMs = qaRestartKillGraceMs();
+      const watchdogTimer = setTimeout(() => {
+        if (activeRestart?.proc !== proc) return;
+        reapQaRestartState(Date.now());
+      }, timeoutMs);
+      watchdogTimer.unref?.();
+      activeRestart = {
+        proc,
+        auditId,
+        startedAt,
+        target: intent.target,
+        title: intent.title,
+        command: ['bun', ...command],
+        logPath,
+        timeoutMs,
+        watchdogAt,
+        killGraceMs,
+        watchdogTimer,
+        sigkillTimer: null,
+        terminalStatus: null,
+        writeLog,
+        closeLog,
+      };
+      return new Response(safeStringify({ ok: true, qaAuth: authInfo, restart: readQaRestartStatus(), restartAllowed: true }), {
         status: 202,
         headers: { ...headers, 'Cache-Control': 'no-store' },
       });

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { spawn as spawnChild, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -31,6 +32,17 @@ const QA_READ_TOKEN = 'qa-read-test-token';
 const QA_ADMIN_TOKEN = 'qa-admin-test-token';
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
+const TEST_RESTART_FINGERPRINT = {
+  gitHead: 'test-head',
+  gitBranch: 'main',
+  gitStatus: '',
+  dirty: false,
+  codeHash: 'test-code-hash',
+  computedAt: Date.UTC(2026, 5, 23),
+  trackedFileCount: 1,
+  trackedBytes: 1,
+};
+
 const qaRequest = (url: string, init: RequestInit = {}, token = QA_READ_TOKEN): Request => {
   const headers = new Headers(init.headers);
   if (token) headers.set('authorization', `Bearer ${token}`);
@@ -54,6 +66,65 @@ const withQaAuthEnv = async <T>(work: () => Promise<T>): Promise<T> => {
     if (previousDisabled === undefined) delete process.env['XLN_QA_AUTH_DISABLED'];
     else process.env['XLN_QA_AUTH_DISABLED'] = previousDisabled;
   }
+};
+
+const withQaRestartEnv = async <T>(work: () => Promise<T>): Promise<T> => {
+  const previousAllowed = process.env['XLN_QA_RESTART_ALLOWED'];
+  const previousCooldown = process.env['XLN_QA_RESTART_COOLDOWN_MS'];
+  const previousWatchdog = process.env['XLN_QA_RESTART_WATCHDOG_MS'];
+  const previousGrace = process.env['XLN_QA_RESTART_KILL_GRACE_MS'];
+  process.env['XLN_QA_RESTART_ALLOWED'] = '1';
+  process.env['XLN_QA_RESTART_COOLDOWN_MS'] = '0';
+  process.env['XLN_QA_RESTART_WATCHDOG_MS'] = '300000';
+  process.env['XLN_QA_RESTART_KILL_GRACE_MS'] = '500';
+  try {
+    return await work();
+  } finally {
+    if (previousAllowed === undefined) delete process.env['XLN_QA_RESTART_ALLOWED'];
+    else process.env['XLN_QA_RESTART_ALLOWED'] = previousAllowed;
+    if (previousCooldown === undefined) delete process.env['XLN_QA_RESTART_COOLDOWN_MS'];
+    else process.env['XLN_QA_RESTART_COOLDOWN_MS'] = previousCooldown;
+    if (previousWatchdog === undefined) delete process.env['XLN_QA_RESTART_WATCHDOG_MS'];
+    else process.env['XLN_QA_RESTART_WATCHDOG_MS'] = previousWatchdog;
+    if (previousGrace === undefined) delete process.env['XLN_QA_RESTART_KILL_GRACE_MS'];
+    else process.env['XLN_QA_RESTART_KILL_GRACE_MS'] = previousGrace;
+  }
+};
+
+const restartRunBody = (): Record<string, unknown> => ({
+  target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
+  title: 'QA cockpit fixture records playback transcript',
+  operatorId: 'operator-test',
+  reason: 'verify restart control plane',
+  confirm: 'RUN',
+  expectedGitHead: TEST_RESTART_FINGERPRINT.gitHead,
+});
+
+const spawnSleeperRestart = (): ChildProcess => spawnChild('bun', [
+  '-e',
+  'process.on("SIGTERM",()=>process.exit(0)); setTimeout(()=>{}, 60000);',
+], {
+  cwd: process.cwd(),
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+
+const spawnImmediateRestart = (): ChildProcess => spawnChild('bun', ['-e', 'process.exit(0);'], {
+  cwd: process.cwd(),
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+
+const waitForRestartInactive = async (): Promise<void> => {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const response = await maybeHandleQaRequest(
+      qaRequest('http://127.0.0.1:8080/api/qa/restart', {}, QA_ADMIN_TOKEN),
+      '/api/qa/restart',
+      JSON_HEADERS,
+    );
+    const payload = await response!.json() as { restart?: { active?: boolean } };
+    if (payload.restart?.active === false) return;
+    await Bun.sleep(50);
+  }
+  throw new Error('QA_RESTART_TEST_ACTIVE_TIMEOUT');
 };
 
 const deleteQaHistoryRows = (runIds: string[]): void => {
@@ -711,6 +782,163 @@ test('qa restart run is explicitly disabled without operator flag', async () => 
         process.env['XLN_QA_RESTART_ALLOWED'] = previous;
       }
     }
+  });
+});
+
+test('qa restart rejects concurrent run without spawning a second heavy e2e process', async () => {
+  await withQaAuthEnv(async () => {
+    await withQaRestartEnv(async () => {
+      const spawned: ChildProcess[] = [];
+      const deps = {
+        computeRestartFingerprint: () => TEST_RESTART_FINGERPRINT,
+        spawnRestart: () => {
+          const proc = spawnSleeperRestart();
+          spawned.push(proc);
+          return proc;
+        },
+      };
+      try {
+        const first = await maybeHandleQaRequest(
+          qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=run', {
+            method: 'POST',
+            body: JSON.stringify(restartRunBody()),
+          }, QA_ADMIN_TOKEN),
+          '/api/qa/restart',
+          JSON_HEADERS,
+          deps,
+        );
+        expect(first?.status).toBe(202);
+        expect(spawned.length).toBe(1);
+
+        const second = await maybeHandleQaRequest(
+          qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=run', {
+            method: 'POST',
+            body: JSON.stringify(restartRunBody()),
+          }, QA_ADMIN_TOKEN),
+          '/api/qa/restart',
+          JSON_HEADERS,
+          deps,
+        );
+        expect(second?.status).toBe(409);
+        const payload = await second!.json() as { error?: string; restart?: { active?: boolean } };
+        expect(payload.error).toBe('QA_RESTART_ALREADY_RUNNING');
+        expect(payload.restart?.active).toBe(true);
+        expect(spawned.length).toBe(1);
+
+        const abort = await maybeHandleQaRequest(
+          qaRequest('http://127.0.0.1:8080/api/qa/restart/abort', {
+            method: 'POST',
+            body: JSON.stringify({ confirm: 'ABORT_RESTART' }),
+          }, QA_ADMIN_TOKEN),
+          '/api/qa/restart/abort',
+          JSON_HEADERS,
+        );
+        expect(abort?.status).toBe(202);
+        await waitForRestartInactive();
+      } finally {
+        for (const proc of spawned) {
+          if (proc.exitCode === null) proc.kill('SIGKILL');
+        }
+      }
+    });
+  });
+});
+
+test('qa restart watchdog marks hung child and frees the active slot', async () => {
+  await withQaAuthEnv(async () => {
+    await withQaRestartEnv(async () => {
+      const previousWatchdog = process.env['XLN_QA_RESTART_WATCHDOG_MS'];
+      process.env['XLN_QA_RESTART_WATCHDOG_MS'] = '1000';
+      const spawned: ChildProcess[] = [];
+      const deps = {
+        computeRestartFingerprint: () => TEST_RESTART_FINGERPRINT,
+        spawnRestart: () => {
+          const proc = spawnSleeperRestart();
+          spawned.push(proc);
+          return proc;
+        },
+      };
+      try {
+        const response = await maybeHandleQaRequest(
+          qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=run', {
+            method: 'POST',
+            body: JSON.stringify(restartRunBody()),
+          }, QA_ADMIN_TOKEN),
+          '/api/qa/restart',
+          JSON_HEADERS,
+          deps,
+        );
+        expect(response?.status).toBe(202);
+        const started = await response!.json() as { restart?: { auditId?: string; watchdogAt?: number } };
+        expect(started.restart?.auditId).toBeDefined();
+        expect(typeof started.restart?.watchdogAt).toBe('number');
+
+        await Bun.sleep(1200);
+        await waitForRestartInactive();
+        const row = listQaRestartAudit(50).find(candidate => candidate.auditId === started.restart?.auditId);
+        expect(row?.status).toBe('watchdog_timeout');
+        expect(row?.exitCode).not.toBeNull();
+      } finally {
+        if (previousWatchdog === undefined) delete process.env['XLN_QA_RESTART_WATCHDOG_MS'];
+        else process.env['XLN_QA_RESTART_WATCHDOG_MS'] = previousWatchdog;
+        for (const proc of spawned) {
+          if (proc.exitCode === null) proc.kill('SIGKILL');
+        }
+      }
+    });
+  });
+});
+
+test('qa restart cooldown rejects rapid sequential runs without spawning', async () => {
+  await withQaAuthEnv(async () => {
+    await withQaRestartEnv(async () => {
+      const previousCooldown = process.env['XLN_QA_RESTART_COOLDOWN_MS'];
+      process.env['XLN_QA_RESTART_COOLDOWN_MS'] = '1000';
+      const spawned: ChildProcess[] = [];
+      const deps = {
+        computeRestartFingerprint: () => TEST_RESTART_FINGERPRINT,
+        spawnRestart: () => {
+          const proc = spawnImmediateRestart();
+          spawned.push(proc);
+          return proc;
+        },
+      };
+      try {
+        const first = await maybeHandleQaRequest(
+          qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=run', {
+            method: 'POST',
+            body: JSON.stringify(restartRunBody()),
+          }, QA_ADMIN_TOKEN),
+          '/api/qa/restart',
+          JSON_HEADERS,
+          deps,
+        );
+        expect(first?.status).toBe(202);
+        await waitForRestartInactive();
+
+        const second = await maybeHandleQaRequest(
+          qaRequest('http://127.0.0.1:8080/api/qa/restart?mode=run', {
+            method: 'POST',
+            body: JSON.stringify(restartRunBody()),
+          }, QA_ADMIN_TOKEN),
+          '/api/qa/restart',
+          JSON_HEADERS,
+          deps,
+        );
+        expect(second?.status).toBe(429);
+        const payload = await second!.json() as { error?: string; restart?: { cooldownRemainingMs?: number } };
+        expect(payload.error).toBe('QA_RESTART_COOLDOWN_ACTIVE');
+        expect(Number(payload.restart?.cooldownRemainingMs || 0)).toBeGreaterThan(0);
+        expect(spawned.length).toBe(1);
+      } finally {
+        await Bun.sleep(1000);
+        if (previousCooldown === undefined) delete process.env['XLN_QA_RESTART_COOLDOWN_MS'];
+        else process.env['XLN_QA_RESTART_COOLDOWN_MS'] = previousCooldown;
+        for (const proc of spawned) {
+          if (proc.exitCode === null) proc.kill('SIGKILL');
+        }
+      }
+    });
   });
 });
 

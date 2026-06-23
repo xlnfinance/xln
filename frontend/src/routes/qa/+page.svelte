@@ -264,6 +264,13 @@
     pid?: number | null;
     command?: string[];
     logPath?: string;
+    timeoutMs?: number;
+    watchdogAt?: number;
+    killGraceMs?: number;
+    terminating?: boolean;
+    terminalStatus?: string | null;
+    cooldownUntil?: number;
+    cooldownRemainingMs?: number;
     last?: {
       startedAt: number;
       target: string;
@@ -1435,7 +1442,15 @@
             <h2>All Test Surfaces</h2>
             <p>{catalog.length} commands grouped for operators.</p>
           </div>
-          {#if restart.active}<span class="chip warn">restart running</span>{/if}
+          <div class="artifact-chips">
+            {#if restart.active}
+              <span class="chip warn">restart running</span>
+              {#if restart.terminating}<span class="chip bad">{restart.terminalStatus ?? 'terminating'}</span>{/if}
+              {#if restart.timeoutMs}<span>watchdog {formatMs(restart.timeoutMs)}</span>{/if}
+            {:else if restart.cooldownRemainingMs}
+              <span class="chip warn">restart cooldown {formatMs(restart.cooldownRemainingMs)}</span>
+            {/if}
+          </div>
         </div>
         {#if loadingMeta && catalog.length === 0}
           <div class="empty">Loading test catalog...</div>

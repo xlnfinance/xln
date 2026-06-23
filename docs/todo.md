@@ -319,21 +319,25 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [ ] Hide absolute server paths from operator UI.
   - Return relative artifact/log IDs, not raw filesystem paths.
 
-- [ ] Add restart cooldown and watchdog.
-  - Single-flight 409 exists, but rapid sequential restart and hung child need cooldown plus `SIGKILL` after timeout + grace.
+- [x] Add restart cooldown and watchdog.
+  - Status: done. Restart run now has explicit single-flight 409, post-finish cooldown 429, watchdog timeout, SIGTERM then SIGKILL grace, manual admin abort endpoint, and orphaned audit reconciliation for stale `started` rows.
+  - UI: QA catalog shows active restart, terminating status, watchdog budget, and cooldown reason chips.
+  - Evidence: unit starts a lightweight real child process, proves concurrent run returns 409 without spawning a second process, proves watchdog marks `watchdog_timeout` and frees the active slot, and proves cooldown returns 429 without spawning.
 
-- [ ] Split `restartStatus()` into pure getter and explicit reaper.
-  - Current getter mutates `activeRestart`; make state transitions explicit and testable.
+- [x] Split `restartStatus()` into pure getter and explicit reaper.
+  - Status: done. `readQaRestartStatus()` is a side-effect-free status reader; `reapQaRestartState()` performs explicit lifecycle transitions before API responses.
+  - Evidence: restart unit coverage exercises active, terminating, inactive, watchdog, and cooldown transitions through the API.
 
 - [ ] Confirm destructive/admin actions.
   - Typed confirm for restart-run, db reset, deleting history, switching admin token, disconnecting during active restart.
 
 ## missing tests
 
-- [ ] Unit: manifest ingest preserves timeline order and derives slow steps sorted.
-- [ ] Unit: severity classifier and failure-class classifier.
-- [ ] Unit: regression threshold math against same code hash and previous HEAD.
-- [ ] Unit: UTC formatter and runId timezone round-trip.
+- [x] Unit: manifest ingest preserves timeline order and derives slow steps sorted.
+- [ ] Unit: severity classifier.
+- [x] Unit: failure-class classifier.
+- [x] Unit: regression threshold math against same code hash and previous HEAD.
+- [x] Unit: UTC formatter and runId timezone round-trip.
 - [x] API: restart target sanitizer rejects invalid target, self-target, null byte, and traversal.
 - [x] Unit: `resolveQaArtifactPath` traversal and symlink escape rejection.
 - [x] Unit: `listQaHistory`/`/api/qa/runs` hot path is SQLite-only after backfill.
@@ -341,7 +345,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [x] API: QA read token can list runs/artifacts but cannot restart.
 - [x] API: admin restart requires operator id, reason, expected HEAD, and confirm.
 - [x] API: restart disabled returns 403 and invalid mode returns 400.
-- [ ] API: concurrent restart returns 409 without spawning a heavy real e2e run.
+- [x] API: concurrent restart returns 409 without spawning a heavy real e2e run.
 - [x] API: artifact endpoints are same-origin and token-gated.
 - [x] API: audit row written for restart start and updated on finish.
 - [ ] E2E: `/qa?runId=...` deep-link selects exact run and video shard.
