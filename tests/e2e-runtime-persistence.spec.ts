@@ -10,7 +10,7 @@
  * This test exists to prove that reload is not cosmetic: the runtime must restore the exact
  * financial state machine, not a UI cache approximation.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './global-setup';
 import { Wallet } from 'ethers';
 import {
   createRuntimeIdentity,

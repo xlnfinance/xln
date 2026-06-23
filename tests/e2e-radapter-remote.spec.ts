@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './global-setup';
 import { createHmac } from 'crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';

@@ -10,7 +10,7 @@
  * This test exists to keep the first-user experience honest: a brand-new user should be able
  * to create an entity, connect, receive capacity, and see account progress without hidden setup.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page } from './global-setup';
 import { Wallet } from 'ethers';
 import { APP_BASE_URL } from './utils/e2e-baseline';
 import {

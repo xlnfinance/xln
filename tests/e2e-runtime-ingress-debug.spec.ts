@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './global-setup';
 import { Wallet } from 'ethers';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp } from './utils/e2e-demo-users';

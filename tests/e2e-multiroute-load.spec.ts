@@ -38,7 +38,7 @@
  * Prereqs: localhost:8080, xln.finance with 3 hubs (H1/H2/H3)
  */
 
-import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from './global-setup';
 import { ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';

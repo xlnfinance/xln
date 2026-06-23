@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
@@ -71,6 +71,29 @@ export type QaPerfSummary = {
   samples: QaPerfSample[];
 };
 
+export type QaBrowserIssueType = 'console' | 'pageerror' | 'requestfailed' | 'http';
+
+export type QaBrowserIssueSeverity = 'error' | 'warning';
+
+export type QaBrowserIssue = {
+  type: QaBrowserIssueType;
+  severity: QaBrowserIssueSeverity;
+  message: string;
+  url: string | null;
+  method: string | null;
+  status: number | null;
+  testId: string | null;
+  timestamp: number;
+};
+
+export type QaBrowserHealthSummary = {
+  issueCount: number;
+  errorCount: number;
+  warningCount: number;
+  networkFailureCount: number;
+  httpErrorCount: number;
+};
+
 export type QaBenchmarkStatus = 'ok' | 'faster' | 'slower' | 'mixed' | 'insufficient';
 
 export type QaBenchmarkMetricDelta = {
@@ -121,6 +144,8 @@ export type QaShardManifest = {
   error: string | null;
   phaseMs: QaPhaseTimings | null;
   perf?: QaPerfSummary;
+  browserIssues?: QaBrowserIssue[];
+  browserHealth?: QaBrowserHealthSummary;
   timelineSteps: QaSlowStep[];
   slowSteps: QaSlowStep[];
   artifacts: QaArtifact[];
@@ -137,6 +162,7 @@ export type QaRunManifest = {
   totalMs: number | null;
   code?: QaCodeFingerprint;
   perf?: QaPerfSummary;
+  browserHealth?: QaBrowserHealthSummary;
   benchmark?: QaBenchmarkComparison;
   totalShards: number;
   passedShards: number;
@@ -170,12 +196,25 @@ export type QaHistoryEntry = {
   benchmarkStatus: QaBenchmarkStatus | null;
   benchmarkDeltaPct: number | null;
   benchmarkComparedRunId: string | null;
+  browserIssueCount: number;
+  browserErrorCount: number;
+  browserWarningCount: number;
+  networkFailureCount: number;
+  httpErrorCount: number;
   avgShardMs: number | null;
   maxShardMs: number | null;
   bootstrapMs: number | null;
   apiHealthyMs: number | null;
   playwrightMs: number | null;
   logsDir: string;
+};
+
+export type QaRetentionPurgeResult = {
+  retentionDays: number;
+  cutoff: number;
+  deletedRunIds: string[];
+  deletedLogDirs: number;
+  deletedHistoryRows: number;
 };
 
 export type QaStorySource = 'e2e-screenshots' | 'qa-run';
@@ -208,6 +247,60 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 const STORY_IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+
+const QA_BROWSER_ISSUE_TYPES = new Set<QaBrowserIssueType>(['console', 'pageerror', 'requestfailed', 'http']);
+const QA_BROWSER_ISSUE_SEVERITIES = new Set<QaBrowserIssueSeverity>(['error', 'warning']);
+
+const asNullableString = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() ? value.trim() : null;
+
+const asFiniteNumber = (value: unknown): number | null => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const trimIssueMessage = (value: unknown): string => {
+  const message = typeof value === 'string' ? value.trim() : String(value ?? '').trim();
+  return message.slice(0, 2_000);
+};
+
+const normalizeQaBrowserIssue = (value: unknown): QaBrowserIssue | null => {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const rawType = record['type'];
+  const rawSeverity = record['severity'];
+  const message = trimIssueMessage(record['message']);
+  const timestamp = asFiniteNumber(record['timestamp']) ?? Date.now();
+  if (!QA_BROWSER_ISSUE_TYPES.has(rawType as QaBrowserIssueType) || !message) return null;
+  return {
+    type: rawType as QaBrowserIssueType,
+    severity: QA_BROWSER_ISSUE_SEVERITIES.has(rawSeverity as QaBrowserIssueSeverity)
+      ? rawSeverity as QaBrowserIssueSeverity
+      : 'error',
+    message,
+    url: asNullableString(record['url']),
+    method: asNullableString(record['method']),
+    status: asFiniteNumber(record['status']),
+    testId: asNullableString(record['testId']),
+    timestamp,
+  };
+};
+
+export const normalizeQaBrowserIssues = (value: unknown): QaBrowserIssue[] => {
+  if (!Array.isArray(value)) return [];
+  return value.map(normalizeQaBrowserIssue).filter((item): item is QaBrowserIssue => Boolean(item));
+};
+
+export const summarizeQaBrowserIssues = (issues: readonly QaBrowserIssue[]): QaBrowserHealthSummary => ({
+  issueCount: issues.length,
+  errorCount: issues.filter(issue => issue.severity === 'error').length,
+  warningCount: issues.filter(issue => issue.severity === 'warning').length,
+  networkFailureCount: issues.filter(issue => issue.type === 'requestfailed').length,
+  httpErrorCount: issues.filter(issue => issue.type === 'http').length,
+});
+
+export const summarizeQaRunBrowserHealth = (run: Pick<QaRunManifest, 'shards'>): QaBrowserHealthSummary =>
+  summarizeQaBrowserIssues(run.shards.flatMap(shard => normalizeQaBrowserIssues(shard.browserIssues)));
 
 const parseRunIdTimestamp = (runId: string): number | null => {
   const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/.exec(runId);
@@ -480,6 +573,11 @@ const openQaHistoryDb = (): Database => {
       benchmark_status TEXT,
       benchmark_delta_pct REAL,
       benchmark_compared_run_id TEXT,
+      browser_issue_count INTEGER NOT NULL DEFAULT 0,
+      browser_error_count INTEGER NOT NULL DEFAULT 0,
+      browser_warning_count INTEGER NOT NULL DEFAULT 0,
+      network_failure_count INTEGER NOT NULL DEFAULT 0,
+      http_error_count INTEGER NOT NULL DEFAULT 0,
       avg_shard_ms REAL,
       max_shard_ms REAL,
       bootstrap_ms REAL,
@@ -501,6 +599,11 @@ const openQaHistoryDb = (): Database => {
   addColumn('benchmark_status', 'TEXT');
   addColumn('benchmark_delta_pct', 'REAL');
   addColumn('benchmark_compared_run_id', 'TEXT');
+  addColumn('browser_issue_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('browser_error_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('browser_warning_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('network_failure_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('http_error_count', 'INTEGER NOT NULL DEFAULT 0');
   addColumn('avg_shard_ms', 'REAL');
   addColumn('max_shard_ms', 'REAL');
   addColumn('bootstrap_ms', 'REAL');
@@ -515,6 +618,7 @@ const toNullableNumber = (value: unknown): number | null =>
 
 export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void => {
   const timing = summarizeQaRunTiming(run);
+  const browserHealth = run.browserHealth ?? summarizeQaRunBrowserHealth(run);
   const db = openQaHistoryDb();
   try {
     db.query(`
@@ -539,6 +643,11 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         benchmark_status,
         benchmark_delta_pct,
         benchmark_compared_run_id,
+        browser_issue_count,
+        browser_error_count,
+        browser_warning_count,
+        network_failure_count,
+        http_error_count,
         avg_shard_ms,
         max_shard_ms,
         bootstrap_ms,
@@ -567,6 +676,11 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         $benchmarkStatus,
         $benchmarkDeltaPct,
         $benchmarkComparedRunId,
+        $browserIssueCount,
+        $browserErrorCount,
+        $browserWarningCount,
+        $networkFailureCount,
+        $httpErrorCount,
         $avgShardMs,
         $maxShardMs,
         $bootstrapMs,
@@ -595,6 +709,11 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         benchmark_status = excluded.benchmark_status,
         benchmark_delta_pct = excluded.benchmark_delta_pct,
         benchmark_compared_run_id = excluded.benchmark_compared_run_id,
+        browser_issue_count = excluded.browser_issue_count,
+        browser_error_count = excluded.browser_error_count,
+        browser_warning_count = excluded.browser_warning_count,
+        network_failure_count = excluded.network_failure_count,
+        http_error_count = excluded.http_error_count,
         avg_shard_ms = excluded.avg_shard_ms,
         max_shard_ms = excluded.max_shard_ms,
         bootstrap_ms = excluded.bootstrap_ms,
@@ -623,6 +742,11 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
       $benchmarkStatus: run.benchmark?.status ?? null,
       $benchmarkDeltaPct: run.benchmark?.metrics.find(metric => metric.metric === 'totalMs')?.deltaPct ?? null,
       $benchmarkComparedRunId: run.benchmark?.comparedRunId ?? null,
+      $browserIssueCount: browserHealth.issueCount,
+      $browserErrorCount: browserHealth.errorCount,
+      $browserWarningCount: browserHealth.warningCount,
+      $networkFailureCount: browserHealth.networkFailureCount,
+      $httpErrorCount: browserHealth.httpErrorCount,
       $avgShardMs: timing.avgShardMs,
       $maxShardMs: timing.maxShardMs,
       $bootstrapMs: timing.bootstrapMs,
@@ -663,6 +787,11 @@ const rowToQaHistoryEntry = (row: Record<string, unknown>): QaHistoryEntry => ({
   ) ? row['benchmark_status'] : null,
   benchmarkDeltaPct: toNullableNumber(row['benchmark_delta_pct']),
   benchmarkComparedRunId: typeof row['benchmark_compared_run_id'] === 'string' ? row['benchmark_compared_run_id'] : null,
+  browserIssueCount: Number(row['browser_issue_count'] || 0),
+  browserErrorCount: Number(row['browser_error_count'] || 0),
+  browserWarningCount: Number(row['browser_warning_count'] || 0),
+  networkFailureCount: Number(row['network_failure_count'] || 0),
+  httpErrorCount: Number(row['http_error_count'] || 0),
   avgShardMs: toNullableNumber(row['avg_shard_ms']),
   maxShardMs: toNullableNumber(row['max_shard_ms']),
   bootstrapMs: toNullableNumber(row['bootstrap_ms']),
@@ -748,6 +877,11 @@ export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
         benchmark_status,
         benchmark_delta_pct,
         benchmark_compared_run_id,
+        browser_issue_count,
+        browser_error_count,
+        browser_warning_count,
+        network_failure_count,
+        http_error_count,
         avg_shard_ms,
         max_shard_ms,
         bootstrap_ms,
@@ -761,6 +895,38 @@ export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
       LIMIT $limit
     `).all({ $limit: safeLimit, $latestRealCreatedAt: Date.now() + FUTURE_RUN_SKEW_MS }) as Array<Record<string, unknown>>;
     return rows.map(rowToQaHistoryEntry);
+  } finally {
+    db.close();
+  }
+};
+
+export const purgeQaRunsOlderThan = (retentionDays = 30, now = Date.now()): QaRetentionPurgeResult => {
+  const safeRetentionDays = Number.isFinite(retentionDays) ? Math.max(30, Math.floor(retentionDays)) : 30;
+  const cutoff = now - safeRetentionDays * 24 * 60 * 60 * 1000;
+  const deletedRunIds: string[] = [];
+  let deletedLogDirs = 0;
+
+  if (existsSync(QA_LOGS_ROOT)) {
+    for (const entry of readdirSync(QA_LOGS_ROOT, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^\d{8}-\d{6}-\d{3}$/.test(entry.name)) continue;
+      const createdAt = parseRunIdTimestamp(entry.name);
+      if (createdAt === null || createdAt >= cutoff) continue;
+      rmSync(join(QA_LOGS_ROOT, entry.name), { recursive: true, force: true });
+      deletedRunIds.push(entry.name);
+      deletedLogDirs += 1;
+    }
+  }
+
+  const db = openQaHistoryDb();
+  try {
+    const result = db.query(`DELETE FROM qa_runs WHERE created_at < $cutoff`).run({ $cutoff: cutoff }) as { changes?: number };
+    return {
+      retentionDays: safeRetentionDays,
+      cutoff,
+      deletedRunIds: deletedRunIds.sort(compareStableText),
+      deletedLogDirs,
+      deletedHistoryRows: typeof result.changes === 'number' ? result.changes : 0,
+    };
   } finally {
     db.close();
   }
@@ -1075,6 +1241,7 @@ const collectLegacyShard = async (
   const phaseMs = parsePhaseTimings(logText);
   const timelineSteps = parseTimelineSteps(logText).slice(0, 80);
   const slowSteps = parseSlowSteps(logText).slice(0, 12);
+  const browserIssues: QaBrowserIssue[] = [];
   const artifacts: QaArtifact[] = [];
   const metadata = targetMetadata.get(shard) ?? null;
   let title: string | null = metadata?.title ?? null;
@@ -1100,6 +1267,8 @@ const collectLegacyShard = async (
     logTail: logText ? shortTail(logText) : null,
     error: status === 'failed' ? shortTail(logText, 40) : null,
     phaseMs,
+    browserIssues,
+    browserHealth: summarizeQaBrowserIssues(browserIssues),
     timelineSteps,
     slowSteps,
     artifacts,
@@ -1131,6 +1300,7 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
   const passedShards = shards.filter(shard => shard.status === 'passed').length;
   const failedShards = shards.filter(shard => shard.status === 'failed').length;
   const totalMs = null;
+  const browserHealth = summarizeQaRunBrowserHealth({ shards });
 
   return {
     manifestVersion: 1,
@@ -1143,6 +1313,7 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
     passedShards,
     failedShards,
     args: null,
+    browserHealth,
     shards,
   };
 };
@@ -1187,6 +1358,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           : logText
             ? parseTimelineSteps(logText).slice(0, 80)
             : [];
+        const browserIssues = normalizeQaBrowserIssues(shard.browserIssues);
         return {
           ...shard,
           target,
@@ -1194,6 +1366,8 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           handle: shard.handle ?? metadata?.handle ?? deriveQaTestHandle(target, title),
           description: metadata?.description ?? deriveQaTestDescription(target, title) ?? shard.description,
           artifacts: sortArtifacts([...(shard.artifacts ?? [])]),
+          browserIssues,
+          browserHealth: summarizeQaBrowserIssues(browserIssues),
           timelineSteps,
           slowSteps: Array.isArray(shard.slowSteps) && shard.slowSteps.length > 0
             ? shard.slowSteps
@@ -1202,7 +1376,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
         };
       }),
     );
-    return { ...parsed, shards };
+    return { ...parsed, browserHealth: parsed.browserHealth ?? summarizeQaRunBrowserHealth({ shards }), shards };
   }
   return await buildLegacyManifest(runId, runDir);
 };
@@ -1324,6 +1498,7 @@ export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'shards'
   timing: summarizeQaRunTiming(run),
   ...(run.code ? { code: run.code } : {}),
   ...(run.perf ? { perf: run.perf } : {}),
+  browserHealth: run.browserHealth ?? summarizeQaRunBrowserHealth(run),
   ...(run.benchmark ? { benchmark: run.benchmark } : {}),
   totalShards: run.totalShards,
   passedShards: run.passedShards,

@@ -4,7 +4,7 @@
  * These tests prove that a disputed bilateral account can be started from the UI, finalized into reserve,
  * extended with post-dispute settlement actions, and restored after reload without losing batch history.
  */
-import { test, expect, type Locator, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from './global-setup';
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { APP_BASE_URL, resetProdServer } from './utils/e2e-baseline';

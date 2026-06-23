@@ -12,7 +12,7 @@
  * 7. The test also proves user-visible truth: Alice's open order appears, gets filled, and stays resolved after reload.
  */
 
-import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from './global-setup';
 import { deriveDelta } from '../runtime/account-utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -13,7 +14,9 @@ import {
 import {
   compareQaBenchmarkRuns,
   listQaStoryScreenshots,
+  purgeQaRunsOlderThan,
   readQaRun,
+  recordQaRunHistory,
   resolveQaStoryScreenshotPath,
   type QaRunManifest,
 } from '../qa/report';
@@ -472,6 +475,28 @@ test('qa run report preserves timeline order and derives slow steps', async () =
             logTail: null,
             error: null,
             phaseMs: null,
+            browserIssues: [
+              {
+                type: 'pageerror',
+                severity: 'error',
+                message: 'fixture browser error',
+                url: 'https://localhost:8080/qa',
+                method: null,
+                status: null,
+                testId: 'chromium :: qa run report fixture',
+                timestamp: Date.UTC(2000, 0, 1, 0, 0, 0, 500),
+              },
+              {
+                type: 'http',
+                severity: 'warning',
+                message: 'HTTP 404',
+                url: 'https://localhost:8080/favicon.ico',
+                method: 'GET',
+                status: 404,
+                testId: 'chromium :: qa run report fixture',
+                timestamp: Date.UTC(2000, 0, 1, 0, 0, 0, 600),
+              },
+            ],
             slowSteps: [],
             artifacts: [],
             hasVideo: false,
@@ -500,6 +525,14 @@ test('qa run report preserves timeline order and derives slow steps', async () =
       { label: 'E2E-TIMING:subtitle synchronized', ms: 400 },
       { label: 'E2E-TIMING:first visible cockpit cue', ms: 200 },
     ]);
+    expect(run.shards[0]?.browserHealth).toEqual({
+      issueCount: 2,
+      errorCount: 1,
+      warningCount: 1,
+      networkFailureCount: 0,
+      httpErrorCount: 1,
+    });
+    expect(run.browserHealth?.errorCount).toBe(1);
 
     await withQaAuthEnv(async () => {
       const historyResponse = await maybeHandleQaRequest(
@@ -508,11 +541,55 @@ test('qa run report preserves timeline order and derives slow steps', async () =
         JSON_HEADERS,
       );
       expect(historyResponse?.status).toBe(200);
-      const historyPayload = await historyResponse!.json() as { ok?: boolean; history?: Array<{ runId?: string }> };
+      const historyPayload = await historyResponse!.json() as {
+        ok?: boolean;
+        history?: Array<{ runId?: string; browserErrorCount?: number; httpErrorCount?: number }>;
+      };
       expect(historyPayload.ok).toBe(true);
-      expect(historyPayload.history?.some((row) => row.runId === runId)).toBe(true);
+      const row = historyPayload.history?.find((item) => item.runId === runId);
+      expect(row?.browserErrorCount).toBe(1);
+      expect(row?.httpErrorCount).toBe(1);
     });
   } finally {
     await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test('qa retention purge deletes only runs older than the cutoff', async () => {
+  const oldRunId = '19990101-000000-777';
+  const recentRunId = '19990201-000000-888';
+  const oldRunDir = resolve(process.cwd(), '.logs', 'e2e-parallel', oldRunId);
+  const recentRunDir = resolve(process.cwd(), '.logs', 'e2e-parallel', recentRunId);
+  await rm(oldRunDir, { recursive: true, force: true });
+  await rm(recentRunDir, { recursive: true, force: true });
+  try {
+    await mkdir(oldRunDir, { recursive: true });
+    await mkdir(recentRunDir, { recursive: true });
+    const oldRun: QaRunManifest = {
+      ...benchmarkRun(oldRunId, 1000, 800),
+      runId: oldRunId,
+      createdAt: Date.UTC(1999, 0, 1),
+      completedAt: Date.UTC(1999, 0, 1, 0, 0, 1),
+    };
+    const recentRun: QaRunManifest = {
+      ...benchmarkRun(recentRunId, 1000, 800),
+      runId: recentRunId,
+      createdAt: Date.UTC(1999, 1, 1),
+      completedAt: Date.UTC(1999, 1, 1, 0, 0, 1),
+    };
+    recordQaRunHistory(oldRun, oldRunDir);
+    recordQaRunHistory(recentRun, recentRunDir);
+
+    const result = purgeQaRunsOlderThan(30, Date.UTC(1999, 1, 15));
+    expect(result.retentionDays).toBe(30);
+    expect(result.deletedRunIds).toContain(oldRunId);
+    expect(result.deletedRunIds).not.toContain(recentRunId);
+    expect(result.deletedHistoryRows).toBeGreaterThanOrEqual(1);
+    expect(existsSync(oldRunDir)).toBe(false);
+    expect(existsSync(recentRunDir)).toBe(true);
+  } finally {
+    purgeQaRunsOlderThan(30, Date.UTC(1999, 3, 15));
+    await rm(oldRunDir, { recursive: true, force: true });
+    await rm(recentRunDir, { recursive: true, force: true });
   }
 });

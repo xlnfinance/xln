@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './global-setup';
 
 import { APP_BASE_URL, createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 

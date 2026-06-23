@@ -34,9 +34,13 @@ import {
   compareQaRunWithHistory,
   deriveQaTestDescription,
   deriveQaTestHandle,
+  normalizeQaBrowserIssues,
   recordQaRunHistory,
+  summarizeQaBrowserIssues,
+  summarizeQaRunBrowserHealth,
   type QaArtifact,
   type QaArtifactKind,
+  type QaBrowserIssue,
   type QaRunManifest,
 } from '../qa/report';
 import { compareStableText } from '../serialization-utils';
@@ -644,6 +648,26 @@ const readShardLastRunStatus = (logsDir: string, shard: number): 'passed' | 'fai
   }
 };
 
+const shardBrowserEventsPath = (logsDir: string, shard: number): string =>
+  join(logsDir, `browser-events-shard-${shard}.jsonl`);
+
+const readShardBrowserIssues = (logsDir: string, shard: number): QaBrowserIssue[] => {
+  const eventsPath = shardBrowserEventsPath(logsDir, shard);
+  if (!existsSync(eventsPath)) return [];
+  const events = readFileSync(eventsPath, 'utf8')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .flatMap(line => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
+  return normalizeQaBrowserIssues(events).slice(0, 200);
+};
+
 const readShardTitle = (logsDir: string, shard: number): string | null => {
   const resultsDir = join(logsDir, `test-results-shard-${shard}`);
   if (!existsSync(resultsDir)) return null;
@@ -668,6 +692,7 @@ const writeRunManifest = (
       const timelineSteps = parseStepTimings(result.logPath).slice(0, 80);
       const slowSteps = timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, 12);
       const artifacts = collectShardArtifacts(logsDir, result.shard);
+      const browserIssues = readShardBrowserIssues(logsDir, result.shard);
       return {
         shard: result.shard,
         status:
@@ -684,6 +709,8 @@ const writeRunManifest = (
         error: result.error ?? null,
         phaseMs: result.phaseMs,
         perf: result.perf,
+        browserIssues,
+        browserHealth: summarizeQaBrowserIssues(browserIssues),
         timelineSteps,
         logRelativePath: result.logPath.slice(logsDir.length + 1),
         logTail: tailLog(result.logPath),
@@ -705,6 +732,7 @@ const writeRunManifest = (
     totalMs,
     code: codeFingerprint,
     perf: summarizePerfSamples(shards.flatMap(shard => shard.perf.samples ?? [])),
+    browserHealth: summarizeQaRunBrowserHealth({ shards }),
     totalShards: shards.length,
     passedShards,
     failedShards,
@@ -1906,6 +1934,7 @@ const runShard = async (
         E2E_RESET_BASE_URL: apiUrl,
         E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
         E2E_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
+        E2E_BROWSER_EVENTS_PATH: shardBrowserEventsPath(logsDir, shard),
         E2E_FAST: process.env['E2E_FAST'] ?? '1',
         E2E_ISOLATED_STACK: '1',
         E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
@@ -2206,11 +2235,18 @@ async function main(): Promise<void> {
     for (const r of completedResults.sort((a, b) => a.shard - b.shard)) {
       const sec = (r.durationMs / 1000).toFixed(1);
       const p = r.phaseMs;
+      const browserHealth = manifest.shards.find(shard => shard.shard === r.shard)?.browserHealth ?? null;
       console.log(
         `${r.status === 'passed' ? 'PASS' : 'FAIL'}  shard=${r.shard}  ${sec.padStart(8)}s  ` +
           `phases[pre=${p.preflight} anvil=${p.anvilBoot} api=${p.apiBoot} health=${p.apiHealthy} vite=${p.viteBoot} pw=${p.playwright}]  ` +
           `log=${r.logPath}`,
       );
+      if (browserHealth?.issueCount) {
+        console.log(
+          `      browser: errors=${browserHealth.errorCount} warnings=${browserHealth.warningCount} ` +
+            `network=${browserHealth.networkFailureCount} http=${browserHealth.httpErrorCount}`,
+        );
+      }
       const steps = parseStepTimings(r.logPath)
         .sort((a, b) => b.ms - a.ms)
         .slice(0, 8);

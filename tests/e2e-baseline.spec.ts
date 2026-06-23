@@ -10,7 +10,7 @@
  * This test exists to prove that every other E2E spec starts from one honest baseline:
  * separate runtimes, connected over relay/P2P, with reserves and hub mesh ready.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './global-setup';
 import { resetProdServer } from './utils/e2e-baseline';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
