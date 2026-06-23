@@ -75,7 +75,8 @@
   };
 
   type RemoteRuntimeImportRequest = {
-    source: 'hash';
+    source: 'hash' | 'query';
+    autoImport: boolean;
     initialError?: string;
   };
 
@@ -207,18 +208,7 @@
     };
   }
 
-  function readRemoteRuntimeImportRequestFromHash(): RemoteRuntimeImportRequest | null {
-    if (!browser) return null;
-    const hash = readCurrentHash().trim();
-    if (!hash) return null;
-    const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-    const payload = String(
-      params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) ||
-      params.get('runtimes') ||
-      params.get('remote-runtimes') ||
-      '',
-    ).trim();
-    if (!payload) return null;
+  function applyRemoteRuntimeImportPayload(payload: string, source: RemoteRuntimeImportRequest['source'], autoImport: boolean): RemoteRuntimeImportRequest {
     try {
       const entries = parseRemoteRuntimeImportPayload(payload);
       remoteRuntimeImportText = formatRemoteRuntimeImportLines(entries);
@@ -228,17 +218,49 @@
         access: entry.access,
         wsUrl: entry.wsUrl,
         status: 'pending',
-        detail: 'waiting',
+        detail: autoImport ? 'queued' : 'waiting',
       }));
       remoteRuntimeImportError = '';
-      return { source: 'hash' };
+      remoteRuntimeImportStatus = autoImport ? 'Auto-import queued' : '';
+      return { source, autoImport };
     } catch (error) {
       remoteRuntimeImportText = payload;
       remoteRuntimeImportRows = [];
       const message = error instanceof Error ? error.message : String(error);
       remoteRuntimeImportError = message;
-      return { source: 'hash', initialError: message };
+      remoteRuntimeImportStatus = '';
+      return { source, autoImport: false, initialError: message };
     }
+  }
+
+  function runtimeImportPayloadFromParams(params: URLSearchParams): string {
+    return String(
+      params.get('runtimeList') ||
+      params.get('runtime-list') ||
+      params.get('runtimeImport') ||
+      params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) ||
+      params.get('runtimes') ||
+      params.get('remote-runtimes') ||
+      params.get('xlnRemoteRuntimes') ||
+      '',
+    ).trim();
+  }
+
+  function readRemoteRuntimeImportRequestFromUrl(): RemoteRuntimeImportRequest | null {
+    if (!browser) return null;
+    const payload = runtimeImportPayloadFromParams(new URLSearchParams(window.location.search));
+    if (!payload) return null;
+    return applyRemoteRuntimeImportPayload(payload, 'query', true);
+  }
+
+  function readRemoteRuntimeImportRequestFromHash(): RemoteRuntimeImportRequest | null {
+    if (!browser) return null;
+    const hash = readCurrentHash().trim();
+    if (!hash) return null;
+    const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+    const payload = runtimeImportPayloadFromParams(params);
+    if (!payload) return null;
+    return applyRemoteRuntimeImportPayload(payload, 'hash', false);
   }
 
   function stripRemoteRuntimeParams(): void {
@@ -257,6 +279,23 @@
     url.hash = '';
     history.replaceState(null, '', `${url.pathname}${url.search}`);
     syncHashLocation();
+  }
+
+  function stripRemoteRuntimeImportParams(): void {
+    if (!browser) return;
+    const url = new URL(window.location.href);
+    for (const key of [
+      'runtimeList',
+      'runtime-list',
+      'runtimeImport',
+      REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+      'runtimes',
+      'remote-runtimes',
+      'xlnRemoteRuntimes',
+    ]) {
+      url.searchParams.delete(key);
+    }
+    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
   function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {
@@ -366,6 +405,12 @@
     } finally {
       remoteRuntimeImporting = false;
     }
+  }
+
+  async function queueAutoRemoteRuntimeImport(): Promise<void> {
+    await tick();
+    if (!pendingRemoteRuntimeImport?.autoImport || remoteRuntimeImportError) return;
+    await acceptRemoteRuntimeImport();
   }
 
   function useLocalBrowserRuntime(): void {
@@ -504,14 +549,18 @@
     void (async () => {
       if (await ensureCurrentDeployVersion()) return;
       if (await maybeHandleResetHash()) return;
-      const remoteImportRequest = readRemoteRuntimeImportRequestFromHash();
+      const remoteImportRequest = readRemoteRuntimeImportRequestFromUrl() ?? readRemoteRuntimeImportRequestFromHash();
       if (remoteImportRequest) {
         pendingRemoteRuntimeImport = remoteImportRequest;
-        stripRemoteRuntimeImportHash();
+        if (remoteImportRequest.source === 'query') stripRemoteRuntimeImportParams();
+        else stripRemoteRuntimeImportHash();
         activeTabLockReady = true;
         hasActiveTabLock = false;
         isLoading.set(false);
         error.set(null);
+        if (remoteImportRequest.autoImport && !remoteImportRequest.initialError) {
+          void queueAutoRemoteRuntimeImport();
+        }
         return;
       }
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
@@ -584,9 +633,11 @@
     <div class="remote-login-screen" data-testid="remote-runtime-bulk-import-screen">
       <section class="remote-login-card remote-login-card--wide">
         <div class="remote-kicker">Remote runtimes</div>
-        <h2>Import runtime hosts</h2>
+        <h2>{pendingRemoteRuntimeImport.autoImport && !remoteRuntimeImportError ? 'Importing runtime hosts' : 'Import runtime hosts'}</h2>
         <p>
-          Review the capability list, then confirm. Each host is opened, authenticated, and read before it is added.
+          {pendingRemoteRuntimeImport.autoImport
+            ? 'Each host is being opened, authenticated, and read before it is added.'
+            : 'Review the capability list, then confirm. Each host is opened, authenticated, and read before it is added.'}
         </p>
         <label class="remote-token-input remote-import-textarea">
           <span>Capability lines</span>
@@ -617,17 +668,21 @@
         {#if remoteRuntimeImportError}
           <p class="remote-token-error" data-testid="remote-runtime-import-error">{remoteRuntimeImportError}</p>
         {/if}
-        <div class="remote-actions">
-          <button
-            class="primary"
-            data-testid="remote-runtime-import-confirm"
-            disabled={remoteRuntimeImporting}
-            onclick={acceptRemoteRuntimeImport}
-          >
-            {remoteRuntimeImporting ? 'Checking...' : 'Confirm import'}
-          </button>
-          <button class="secondary" disabled={remoteRuntimeImporting} onclick={useLocalBrowserRuntime}>Use browser runtime</button>
-        </div>
+        {#if !pendingRemoteRuntimeImport.autoImport || remoteRuntimeImportError}
+          <div class="remote-actions">
+            <button
+              class="primary"
+              data-testid="remote-runtime-import-confirm"
+              disabled={remoteRuntimeImporting}
+              onclick={acceptRemoteRuntimeImport}
+            >
+              {remoteRuntimeImporting ? 'Checking...' : 'Confirm import'}
+            </button>
+            {#if !pendingRemoteRuntimeImport.autoImport}
+              <button class="secondary" disabled={remoteRuntimeImporting} onclick={useLocalBrowserRuntime}>Use browser runtime</button>
+            {/if}
+          </div>
+        {/if}
       </section>
     </div>
   {:else if pendingRemoteRuntime}

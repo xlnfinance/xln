@@ -43,6 +43,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Runtime import stdout logs count/access/path/expiry/labels/wallet only; hub inspect URLs are logged without query/hash secrets.
   - Evidence: unit asserts no `runtime-import=`, `xlnra1.`, token strings, or base64 manifest in log lines. Focused browser e2e imported mesh/custody/MM runtimes and the new run logs had no `runtime-import=` or `xlnra1.` outside the local secret manifest.
 
+- [x] Replace per-runtime paste links with one-click `runtimeList` auto-import.
+  - Impact: critical.
+  - Status: done. Dev radapter keys print one `/app?runtimeList=...` URL with ready read tokens; orchestrator writes the same query-based import URL. `/app` parses the query, fills the import textarea, strips token params from the address bar, validates every host, and imports automatically without confirm or browser-runtime choice.
+  - Evidence: focused unit asserts one printed app link, no `key=paste`, read/admin manifests, and ready tokens. Focused browser e2e now expects `runtimeList=`, no `runtime-import=`, no confirm button, then verifies mesh/custody/MM runtimes are imported and live.
+
 - [x] Fix reserve faucet missing-event invariant.
   - Impact: high.
   - Current issue: faucet could return `500 RESERVE_EVENT_MISSING` after `getReserves()` confirmed the money moved.

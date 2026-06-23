@@ -638,6 +638,8 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     expectMarketMakerBooksHealthy(baseline);
 
     const importUrl = await readRuntimeImportUrl(page);
+    expect(importUrl).toContain('runtimeList=');
+    expect(importUrl).not.toContain('runtime-import=');
     await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toBeVisible({ timeout: 10_000 });
 
@@ -646,7 +648,7 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       expect(textareaText, `import textarea must include ${label}`).toContain(label);
     }
 
-    await page.getByTestId('remote-runtime-import-confirm').click();
+    await expect(page.getByTestId('remote-runtime-import-confirm')).toHaveCount(0);
     await page.waitForFunction((storageKey) => {
       const raw = sessionStorage.getItem(storageKey);
       if (!raw) return false;
