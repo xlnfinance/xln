@@ -1,7 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte';
   import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import {
     activeRuntimeId as activeStoreRuntimeId,
@@ -375,13 +374,10 @@
       {/each}
 	    </div>
 
-	    <div class="remote-manager-block">
-	      <div class="remote-manager-title">
-	        <span>Remote manager</span>
-	        <span>{Array.from($runtimeEntries.values()).filter((runtime) => runtime.type === 'remote').length}/100</span>
-	      </div>
-	      <RemoteRuntimeManager on:imported={() => open = false} />
-	    </div>
+      <a class="remote-manager-link" href="/radapter/manage">
+        <span>Remote runtimes</span>
+        <strong>{Array.from($runtimeEntries.values()).filter((runtime) => runtime.type === 'remote').length}/100</strong>
+      </a>
 
 	    <div class="menu-footer">
       {#if allowAddJurisdiction}
@@ -578,24 +574,32 @@
     gap: 6px;
   }
 
-  .remote-manager-block {
+  .remote-manager-link {
     margin-top: 6px;
     border: 1px solid #292524;
     border-radius: 12px;
     background: #141210;
-    overflow: hidden;
-  }
-
-  .remote-manager-title {
-    padding: 9px 12px 0;
     display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
+    padding: 10px 12px;
     color: #a8a29e;
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0;
+    text-decoration: none;
+  }
+
+  .remote-manager-link:hover {
+    border-color: rgba(122, 168, 255, 0.36);
+    color: #dbeafe;
+  }
+
+  .remote-manager-link strong {
+    color: #e5e7eb;
+    font-size: 11px;
   }
 
   .runtime-group {

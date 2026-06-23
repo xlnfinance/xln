@@ -591,15 +591,21 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   );
 
   await page.getByTestId('context-current').click();
+  await expect(page.getByTestId('remote-runtime-manager')).toHaveCount(0);
+  await page.goto(`${APP_BASE_URL}/radapter/manage`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('remote-runtime-manager')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('remote-runtime-label').fill('H2 dropdown');
   await page.getByTestId('remote-runtime-ws').fill(h2WsUrl);
   await page.getByTestId('remote-runtime-token').fill(h2Key);
+  const reloadAfterAttach = page.waitForEvent('framenavigated', { timeout: 90_000 }).catch(() => null);
   await page.getByTestId('remote-runtime-attach').click();
+  await reloadAfterAttach;
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page.getByTestId('remote-runtime-manager')).toBeVisible({ timeout: 10_000 });
 
   await page.waitForFunction(
-    (expectedRuntimeId) => String((window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv?.runtimeId || '') === expectedRuntimeId,
-    `radapter:${h2WsUrl}`,
+    (expectedWsUrl) => localStorage.getItem('xln-runtime-adapter-ws') === expectedWsUrl,
+    h2WsUrl,
     { timeout: 90_000 },
   );
 
@@ -619,6 +625,13 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   expect(managerState.h2Import?.label).toBe('H2 dropdown');
   expect(managerState.h2Import?.access).toBe('read');
   expect(managerState.h2Import?.entityCount ?? 0).toBeGreaterThan(0);
+
+  await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(
+    (expectedRuntimeId) => String((window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv?.runtimeId || '') === expectedRuntimeId,
+    `radapter:${h2WsUrl}`,
+    { timeout: 90_000 },
+  );
 });
 
 test('bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser', async ({ browser }) => {

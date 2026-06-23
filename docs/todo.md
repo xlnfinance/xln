@@ -48,6 +48,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Dev radapter keys print one `/app?runtimeList=...` URL with ready read tokens; orchestrator writes the same query-based import URL. `/app` parses the query, fills the import textarea, strips token params from the address bar, validates every host, and imports automatically without confirm or browser-runtime choice.
   - Evidence: focused unit asserts one printed app link, no `key=paste`, read/admin manifests, and ready tokens. Focused browser e2e now expects `runtimeList=`, no `runtime-import=`, no confirm button, then verifies mesh/custody/MM runtimes are imported and live.
 
+- [x] Move manual Remote Manager out of the main app dropdowns.
+  - Impact: high.
+  - Status: done. Context/runtime dropdowns no longer render the attach/bulk form; they show only a compact `/radapter/manage` link. Manual attach/bulk import now lives on the dedicated `/radapter/manage` page.
+  - Evidence: focused radapter e2e asserts the context dropdown has no `remote-runtime-manager`, opens `/radapter/manage`, attaches H2 by token, then opens `/app` and verifies the remote runtime is active. The bulk import e2e still validates the single `runtimeList` URL for H1/H2/H3/MM/Custody.
+
 - [x] Fix reserve faucet missing-event invariant.
   - Impact: high.
   - Current issue: faucet could return `500 RESERVE_EVENT_MISSING` after `getReserves()` confirmed the money moved.

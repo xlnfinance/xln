@@ -6,7 +6,6 @@
   import { createEventDispatcher } from 'svelte';
   import { Compass, Plus, Trash2 } from 'lucide-svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte';
   import {
     activeRuntime as activeVaultRuntime,
     allRuntimes as allVaultRuntimes,
@@ -190,11 +189,10 @@
     {/if}
 
     <div class="menu-divider"></div>
-    <div class="manager-title">
-      <span>Remote manager</span>
-      <span>{remoteRuntimes.length}/100</span>
-    </div>
-    <RemoteRuntimeManager on:imported={() => isOpen = false} />
+    <a class="remote-manager-link" href="/radapter/manage">
+      <span>Remote runtimes</span>
+      <strong>{remoteRuntimes.length}/100</strong>
+    </a>
 
     <!-- Relay Status -->
     <div class="menu-divider"></div>
@@ -345,16 +343,31 @@
     align-items: center;
   }
 
-  .manager-title {
-    padding: 6px 12px 2px;
+  .remote-manager-link {
+    margin: 4px 8px;
+    border: 1px solid rgba(122, 168, 255, 0.2);
+    border-radius: 6px;
+    background: rgba(122, 168, 255, 0.06);
     display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: 12px;
+    padding: 8px 10px;
     color: #a1a1aa;
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0;
+    text-decoration: none;
+  }
+
+  .remote-manager-link:hover {
+    border-color: rgba(122, 168, 255, 0.42);
+    color: #dbeafe;
+  }
+
+  .remote-manager-link strong {
+    color: #e5e7eb;
   }
 
   .empty-state {
