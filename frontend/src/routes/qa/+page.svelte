@@ -276,6 +276,12 @@
     deletedHistoryRows: number;
   };
 
+  type QaHistoryBackfillResult = {
+    scannedRuns: number;
+    recordedRuns: number;
+    failedRuns: Array<{ runId: string; error: string }>;
+  };
+
   type QaView = 'e2e' | 'scenarios' | 'gallery' | 'suites' | 'benchmarks' | 'history';
   type RunSortKey =
     | 'date-desc'
@@ -350,6 +356,8 @@
   let retentionConfirm = $state('');
   let retentionBusy = $state(false);
   let retentionResult = $state<QaRetentionPurgeResult | null>(null);
+  let historyBackfillBusy = $state(false);
+  let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
 
   const selectedShard = $derived(
     selectedRun?.shards?.[selectedShardIndex] ?? null,
@@ -388,6 +396,7 @@
     restartExpectedGitHead.trim(),
   ));
   const retentionReady = $derived(Boolean(qaCanPlanRestart && retentionConfirm.trim() === 'DELETE_OLDER_THAN_30_DAYS' && !retentionBusy));
+  const historyBackfillReady = $derived(Boolean(qaCanPlanRestart && !historyBackfillBusy));
   const sortedRuns = $derived([...runs].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedHistory = $derived([...history].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedShardEntries = $derived((selectedRun?.shards ?? [])
@@ -942,6 +951,30 @@
     }
   }
 
+  async function backfillQaHistory(): Promise<void> {
+    if (!historyBackfillReady) return;
+    historyBackfillBusy = true;
+    actionError = null;
+    historyBackfillResult = null;
+    try {
+      const response = await qaFetch('/api/qa/history/backfill', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: 'BACKFILL_QA_HISTORY', limit: 500 }),
+      });
+      const payload = await response.json() as { ok?: boolean; result?: QaHistoryBackfillResult; error?: string };
+      if (!response.ok || !payload.ok || !payload.result) {
+        throw new Error(payload.error || 'Failed to backfill QA history');
+      }
+      historyBackfillResult = payload.result;
+      await Promise.all([loadRuns(false), loadMeta()]);
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err);
+    } finally {
+      historyBackfillBusy = false;
+    }
+  }
+
   async function openProtectedArtifact(url: string | null | undefined): Promise<void> {
     const cleanUrl = String(url || '').trim();
     if (!cleanUrl) return;
@@ -1377,6 +1410,27 @@
             </article>
           {/each}
         </div>
+        <section class="retention-card" data-testid="qa-history-backfill-card">
+          <div>
+            <div class="eyebrow">Maintenance</div>
+            <h3>Backfill History Index</h3>
+            <p>One-shot manifest import for legacy runs.</p>
+          </div>
+          <button
+            class="mini-action"
+            disabled={!historyBackfillReady}
+            title={qaCanPlanRestart ? 'Reads legacy manifests once and records SQLite rows' : 'Admin QA token required'}
+            onclick={backfillQaHistory}
+            data-testid="qa-history-backfill"
+          >
+            {historyBackfillBusy ? 'Backfilling...' : 'Backfill index'}
+          </button>
+          {#if historyBackfillResult}
+            <small data-testid="qa-history-backfill-result">
+              scanned {historyBackfillResult.scannedRuns} / recorded {historyBackfillResult.recordedRuns} / failed {historyBackfillResult.failedRuns.length}
+            </small>
+          {/if}
+        </section>
         <section class="retention-card" data-testid="qa-retention-card">
           <div>
             <div class="eyebrow">Maintenance</div>

@@ -209,6 +209,12 @@ export type QaHistoryEntry = {
   logsDir: string;
 };
 
+export type QaHistoryBackfillResult = {
+  scannedRuns: number;
+  recordedRuns: number;
+  failedRuns: Array<{ runId: string; error: string }>;
+};
+
 export type QaRetentionPurgeResult = {
   retentionDays: number;
   cutoff: number;
@@ -861,10 +867,6 @@ export const compareQaRunWithHistory = (run: QaRunManifest): QaBenchmarkComparis
 
 export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
   const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
-  for (const run of await listQaRuns(Math.max(safeLimit, 100))) {
-    const runDir = join(QA_LOGS_ROOT, run.runId);
-    recordQaRunHistory(run, runDir);
-  }
   const db = openQaHistoryDb();
   try {
     const rows = db.query(`
@@ -910,6 +912,30 @@ export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
   } finally {
     db.close();
   }
+};
+
+export const backfillQaHistoryFromLogs = async (limit = 500): Promise<QaHistoryBackfillResult> => {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(2_000, Math.floor(limit))) : 500;
+  const runIds = await listQaRunIds(safeLimit);
+  const failedRuns: QaHistoryBackfillResult['failedRuns'] = [];
+  let recordedRuns = 0;
+  for (const runId of runIds) {
+    try {
+      const run = await readQaRun(runId);
+      recordQaRunHistory(run, join(QA_LOGS_ROOT, run.runId));
+      recordedRuns += 1;
+    } catch (error) {
+      failedRuns.push({
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return {
+    scannedRuns: runIds.length,
+    recordedRuns,
+    failedRuns,
+  };
 };
 
 export const purgeQaRunsOlderThan = (retentionDays = 30, now = Date.now()): QaRetentionPurgeResult => {
@@ -1356,14 +1382,18 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
   };
 };
 
-export const listQaRuns = async (limit = 20): Promise<QaRunManifest[]> => {
+const listQaRunIds = async (limit: number): Promise<string[]> => {
   if (!existsSync(QA_LOGS_ROOT)) return [];
   const entries = await readdir(QA_LOGS_ROOT, { withFileTypes: true });
-  const runIds = entries
+  return entries
     .filter(entry => entry.isDirectory() && /^\d{8}-\d{6}-\d{3}$/.test(entry.name))
     .map(entry => entry.name)
     .sort(compareQaRunIdsForOperator)
     .slice(0, limit);
+};
+
+export const listQaRuns = async (limit = 20): Promise<QaRunManifest[]> => {
+  const runIds = await listQaRunIds(limit);
   return await Promise.all(runIds.map(runId => readQaRun(runId)));
 };
 

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -13,6 +14,7 @@ import {
 } from '../qa/api';
 import {
   compareQaBenchmarkRuns,
+  QA_HISTORY_DB_PATH,
   listQaStoryScreenshots,
   purgeQaRunsOlderThan,
   readQaRun,
@@ -47,6 +49,26 @@ const withQaAuthEnv = async <T>(work: () => Promise<T>): Promise<T> => {
     else process.env['XLN_QA_ADMIN_TOKEN'] = previousAdmin;
     if (previousDisabled === undefined) delete process.env['XLN_QA_AUTH_DISABLED'];
     else process.env['XLN_QA_AUTH_DISABLED'] = previousDisabled;
+  }
+};
+
+const deleteQaHistoryRows = (runIds: string[]): void => {
+  if (runIds.length === 0) return;
+  if (!existsSync(QA_HISTORY_DB_PATH)) return;
+  const db = new Database(QA_HISTORY_DB_PATH);
+  try {
+    const hasTable = db.query(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'qa_runs'
+      LIMIT 1
+    `).get();
+    if (!hasTable) return;
+    for (const runId of runIds) {
+      db.query(`DELETE FROM qa_runs WHERE run_id = $runId`).run({ $runId: runId });
+    }
+  } finally {
+    db.close();
   }
 };
 
@@ -533,6 +555,7 @@ test('qa run report preserves timeline order and derives slow steps', async () =
       httpErrorCount: 1,
     });
     expect(run.browserHealth?.errorCount).toBe(1);
+    recordQaRunHistory(run, runDir);
 
     await withQaAuthEnv(async () => {
       const historyResponse = await maybeHandleQaRequest(
@@ -551,6 +574,72 @@ test('qa run report preserves timeline order and derives slow steps', async () =
       expect(row?.httpErrorCount).toBe(1);
     });
   } finally {
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test('qa history endpoint reads only sqlite and does not backfill manifests on poll', async () => {
+  const runId = '20260623-000123-777';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  await rm(runDir, { recursive: true, force: true });
+  deleteQaHistoryRows([runId]);
+  try {
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, 'manifest.json'),
+      `${JSON.stringify({
+        ...benchmarkRun(runId, 900, 700, 'history-hot-path-code', 'history-hot-path-head'),
+        createdAt: Date.UTC(2026, 5, 23, 0, 1, 23),
+        completedAt: Date.UTC(2026, 5, 23, 0, 1, 24),
+      })}\n`,
+    );
+
+    await withQaAuthEnv(async () => {
+      const historyResponse = await maybeHandleQaRequest(
+        qaRequest('http://127.0.0.1:8080/api/qa/history?limit=500'),
+        '/api/qa/history',
+        JSON_HEADERS,
+      );
+      expect(historyResponse?.status).toBe(200);
+      const historyPayload = await historyResponse!.json() as {
+        ok?: boolean;
+        history?: Array<{ runId?: string }>;
+      };
+      expect(historyPayload.ok).toBe(true);
+      expect(historyPayload.history?.some((item) => item.runId === runId)).toBe(false);
+
+      const backfillResponse = await maybeHandleQaRequest(
+        qaRequest('http://127.0.0.1:8080/api/qa/history/backfill', {
+          method: 'POST',
+          body: JSON.stringify({ confirm: 'BACKFILL_QA_HISTORY', limit: 500 }),
+        }, QA_ADMIN_TOKEN),
+        '/api/qa/history/backfill',
+        JSON_HEADERS,
+      );
+      expect(backfillResponse?.status).toBe(200);
+      const backfillPayload = await backfillResponse!.json() as {
+        ok?: boolean;
+        result?: { recordedRuns?: number; failedRuns?: unknown[] };
+      };
+      expect(backfillPayload.ok).toBe(true);
+      expect(backfillPayload.result?.recordedRuns).toBeGreaterThan(0);
+      expect(backfillPayload.result?.failedRuns).toEqual([]);
+
+      const refreshedResponse = await maybeHandleQaRequest(
+        qaRequest('http://127.0.0.1:8080/api/qa/history?limit=500'),
+        '/api/qa/history',
+        JSON_HEADERS,
+      );
+      expect(refreshedResponse?.status).toBe(200);
+      const refreshedPayload = await refreshedResponse!.json() as {
+        ok?: boolean;
+        history?: Array<{ runId?: string }>;
+      };
+      expect(refreshedPayload.ok).toBe(true);
+      expect(refreshedPayload.history?.some((item) => item.runId === runId)).toBe(true);
+    });
+  } finally {
+    deleteQaHistoryRows([runId]);
     await rm(runDir, { recursive: true, force: true });
   }
 });
