@@ -39,6 +39,7 @@ let activeRuntimeAdapterConfig: RuntimeAdapterConfig | null = null;
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
 const DEFAULT_REMOTE_ADAPTER_PATH = '/rpc';
 const REMOTE_VIEW_PAGE_SIZE = 10;
+const REMOTE_HISTORY_FRAME_LIMIT = 12;
 
 type FrontendEntitySummary = {
   id: string;
@@ -328,6 +329,22 @@ export const entityPositions = writable<Map<string, RelativeEntityPosition>>(new
 // Track if XLN is already initialized to prevent data loss
 let isInitialized = false;
 
+type RemoteAdapterSnapshotOptions = {
+  atHeight?: number;
+  includeHistory?: boolean;
+  updateUiState?: boolean;
+  requestedEntityId?: string;
+  accountsPage?: number;
+  booksPage?: number;
+};
+
+type RemoteHistoryCacheEntry = {
+  latestHeight: number;
+  framesByHeight: Map<number, EnvSnapshot>;
+};
+
+const remoteHistoryCache = new Map<string, RemoteHistoryCacheEntry>();
+
 export const resolveConfiguredApiBase = (baseOrigin: string): string => {
   if (typeof window === 'undefined') return baseOrigin;
   const fromWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
@@ -336,6 +353,64 @@ export const resolveConfiguredApiBase = (baseOrigin: string): string => {
 };
 
 const normalizeEntityIdForView = (value: string): string => String(value || '').trim().toLowerCase();
+
+const emptyRemoteRuntimeInput = (): RuntimeInput => ({ runtimeTxs: [], entityInputs: [] });
+
+const remoteRuntimeOutputs = (env: Env): RoutedEntityInput[] =>
+  ((env as Env & { runtimeOutputs?: RoutedEntityInput[] }).runtimeOutputs ?? []);
+
+const remoteEnvToSnapshot = (env: Env): EnvSnapshot => ({
+  height: Math.max(0, Math.floor(Number(env.height || 0))),
+  timestamp: Math.max(0, Math.floor(Number(env.timestamp || env.height || 0))),
+  ...(env.runtimeSeed ? { runtimeSeed: env.runtimeSeed } : {}),
+  ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
+  ...(env.dbNamespace ? { dbNamespace: env.dbNamespace } : {}),
+  eReplicas: new Map(env.eReplicas ?? []),
+  jReplicas: new Map(env.jReplicas ?? []),
+  ...(env.browserVMState ? { browserVMState: env.browserVMState } : {}),
+  runtimeInput: env.runtimeInput ?? emptyRemoteRuntimeInput(),
+  runtimeOutputs: remoteRuntimeOutputs(env),
+  description: `Remote runtime frame ${Math.max(0, Math.floor(Number(env.height || 0)))}`,
+});
+
+const remoteHistoryHeights = (latestHeight: number): number[] => {
+  const latest = Math.max(0, Math.floor(Number(latestHeight || 0)));
+  if (latest < 1) return [];
+  const first = Math.max(1, latest - REMOTE_HISTORY_FRAME_LIMIT + 1);
+  const heights: number[] = [];
+  for (let height = first; height <= latest; height += 1) heights.push(height);
+  return heights;
+};
+
+const remoteHistoryCacheKey = (
+  config: RuntimeAdapterConfig,
+  entityId: string,
+  accountsPage: number,
+  booksPage: number,
+): string => [
+  String(config.wsUrl || 'remote'),
+  normalizeEntityIdForView(entityId),
+  Math.max(0, Math.floor(Number(accountsPage || 0))),
+  Math.max(0, Math.floor(Number(booksPage || 0))),
+].join('|');
+
+const trimRemoteHistoryCache = (): void => {
+  while (remoteHistoryCache.size > 50) {
+    const firstKey = remoteHistoryCache.keys().next().value;
+    if (!firstKey) return;
+    remoteHistoryCache.delete(firstKey);
+  }
+};
+
+const isRemoteHistoryBoundaryError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return message.includes('STORAGE_DIFF_MISSING') ||
+    message.includes('entity not found at height') ||
+    message.includes('historical reads are unavailable') ||
+    message.includes('storage head reader is required') ||
+    message.includes('storage entity listing is required') ||
+    message.includes('height unavailable');
+};
 
 const readStoredAdapterValue = (key: string): string => {
   if (typeof window === 'undefined') return '';
@@ -623,20 +698,77 @@ const upsertRuntimeSnapshot = (
   activeRuntimeId.set(runtimeId);
 };
 
+const buildRemoteAdapterHistory = async (
+  xln: XLNModule,
+  adapter: RuntimeAdapter,
+  config: RuntimeAdapterConfig,
+  options: {
+    latestHeight: number;
+    activeEntityId: string;
+    accountsPage: number;
+    booksPage: number;
+    latestEnv: Env;
+  },
+): Promise<EnvSnapshot[]> => {
+  const latestHeight = Math.max(0, Math.floor(Number(options.latestHeight || 0)));
+  const heights = remoteHistoryHeights(latestHeight);
+  if (heights.length === 0) return [];
+
+  const key = remoteHistoryCacheKey(config, options.activeEntityId, options.accountsPage, options.booksPage);
+  const cached = remoteHistoryCache.get(key);
+  const framesByHeight = new Map<number, EnvSnapshot>();
+
+  for (const height of [...heights].reverse()) {
+    const cachedFrame = cached?.framesByHeight.get(height);
+    if (cachedFrame) {
+      framesByHeight.set(height, cachedFrame);
+      continue;
+    }
+    if (height === latestHeight) {
+      framesByHeight.set(height, remoteEnvToSnapshot(options.latestEnv));
+      continue;
+    }
+    try {
+      const historicalEnv = await buildRemoteAdapterEnvSnapshot(xln, adapter, config, {
+        atHeight: height,
+        includeHistory: false,
+        updateUiState: false,
+        requestedEntityId: options.activeEntityId,
+        accountsPage: options.accountsPage,
+        booksPage: options.booksPage,
+      });
+      framesByHeight.set(height, remoteEnvToSnapshot(historicalEnv));
+    } catch (error) {
+      if (isRemoteHistoryBoundaryError(error)) break;
+      throw error;
+    }
+  }
+
+  remoteHistoryCache.set(key, { latestHeight, framesByHeight });
+  trimRemoteHistoryCache();
+  return heights.map((height) => framesByHeight.get(height)).filter((frame): frame is EnvSnapshot => !!frame);
+};
+
 const buildRemoteAdapterEnvSnapshot = async (
   xln: XLNModule,
   adapter: RuntimeAdapter,
   config: RuntimeAdapterConfig,
+  options: RemoteAdapterSnapshotOptions = {},
 ): Promise<Env> => {
   const pinnedHeight = Math.max(0, Math.floor(Number(adapter.currentHeight || 0)));
-  const requestedEntityId = normalizeEntityIdForView(get(appRuntimeAdapterActiveEntityId));
+  const requestedEntityId = normalizeEntityIdForView(options.requestedEntityId ?? get(appRuntimeAdapterActiveEntityId));
+  const accountsPage = Math.max(0, Math.floor(Number(options.accountsPage ?? get(appRuntimeAdapterAccountsPage) ?? 0)));
+  const booksPage = Math.max(0, Math.floor(Number(options.booksPage ?? get(appRuntimeAdapterBooksPage) ?? 0)));
+  const requestedHeight = options.atHeight === undefined
+    ? (pinnedHeight > 0 ? pinnedHeight : undefined)
+    : Math.max(1, Math.floor(Number(options.atHeight)));
   const viewFrame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', {
     limit: REMOTE_VIEW_PAGE_SIZE,
     accountsLimit: REMOTE_VIEW_PAGE_SIZE,
     booksLimit: REMOTE_VIEW_PAGE_SIZE,
-    accountsPage: get(appRuntimeAdapterAccountsPage),
-    booksPage: get(appRuntimeAdapterBooksPage),
-    ...(pinnedHeight > 0 ? { atHeight: pinnedHeight } : {}),
+    accountsPage,
+    booksPage,
+    ...(requestedHeight !== undefined ? { atHeight: requestedHeight } : {}),
     ...(requestedEntityId ? { entityId: requestedEntityId } : {}),
   });
   const atHeight = Math.max(0, Math.floor(Number(viewFrame.height ?? viewFrame.head.latestHeight ?? adapter.currentHeight ?? 0)));
@@ -647,12 +779,14 @@ const buildRemoteAdapterEnvSnapshot = async (
   env.history = [];
   env.eReplicas = new Map();
   env.quietRuntimeLogs = true;
+  env.runtimeInput = emptyRemoteRuntimeInput();
 
   const active = viewFrame.activeEntity;
   const activeEntityId = active
     ? normalizeEntityIdForView(active.core.entityId || active.summary.entityId)
     : '';
-  if (!active) appRuntimeAdapterPageInfo.set(null);
+  const shouldUpdateUiState = options.updateUiState !== false;
+  if (!active && shouldUpdateUiState) appRuntimeAdapterPageInfo.set(null);
 
   for (const summary of viewFrame.entities || []) {
     const entityId = normalizeEntityIdForView(summary.entityId);
@@ -670,24 +804,26 @@ const buildRemoteAdapterEnvSnapshot = async (
 
   if (active) {
     const entityId = activeEntityId;
-    appRuntimeAdapterActiveEntityId.set(entityId);
-    appRuntimeAdapterPageInfo.set({
-      entityId,
-      accountsShown: active.accounts.items.length,
-      accountsTotal: active.accounts.totalItems ?? active.accounts.items.length,
-      accountsPageIndex: active.accounts.pageIndex ?? 0,
-      accountsPageCount: active.accounts.pageCount ?? 1,
-      accountsPrevCursor: active.accounts.prevCursor ?? null,
-      accountsNextCursor: active.accounts.nextCursor ?? null,
-      accountsHasMore: !!active.accounts.nextCursor,
-      booksShown: active.books.items.length,
-      booksTotal: active.books.totalItems ?? active.books.items.length,
-      booksPageIndex: active.books.pageIndex ?? 0,
-      booksPageCount: active.books.pageCount ?? 1,
-      booksPrevCursor: active.books.prevCursor ?? null,
-      booksNextCursor: active.books.nextCursor ?? null,
-      booksHasMore: !!active.books.nextCursor,
-    });
+    if (shouldUpdateUiState) {
+      appRuntimeAdapterActiveEntityId.set(entityId);
+      appRuntimeAdapterPageInfo.set({
+        entityId,
+        accountsShown: active.accounts.items.length,
+        accountsTotal: active.accounts.totalItems ?? active.accounts.items.length,
+        accountsPageIndex: active.accounts.pageIndex ?? 0,
+        accountsPageCount: active.accounts.pageCount ?? 1,
+        accountsPrevCursor: active.accounts.prevCursor ?? null,
+        accountsNextCursor: active.accounts.nextCursor ?? null,
+        accountsHasMore: !!active.accounts.nextCursor,
+        booksShown: active.books.items.length,
+        booksTotal: active.books.totalItems ?? active.books.items.length,
+        booksPageIndex: active.books.pageIndex ?? 0,
+        booksPageCount: active.books.pageCount ?? 1,
+        booksPrevCursor: active.books.prevCursor ?? null,
+        booksNextCursor: active.books.nextCursor ?? null,
+        booksHasMore: !!active.books.nextCursor,
+      });
+    }
     const accounts = new Map<string, StorageAccountDoc>();
     for (const doc of active.accounts.items) {
       accounts.set(accountCounterpartyId(entityId, doc), doc);
@@ -714,6 +850,16 @@ const buildRemoteAdapterEnvSnapshot = async (
       books,
     );
   }
+
+  env.history = options.includeHistory === false
+    ? []
+    : await buildRemoteAdapterHistory(xln, adapter, config, {
+        latestHeight: atHeight,
+        activeEntityId: activeEntityId || requestedEntityId,
+        accountsPage,
+        booksPage,
+        latestEnv: env,
+      });
 
   return env;
 };

@@ -7,6 +7,18 @@ declare global {
 	interface Window {
 		__xln_instance?: import('@xln/runtime/xln-api').XLNModule | null;
 		__xln_env?: import('@xln/runtime/xln-api').Env | null;
+		__xlnRuntimeAdapter?: {
+			read: <T = unknown>(
+				path: string,
+				query?: import('@xln/runtime/xln-api').RuntimeAdapterReadQuery,
+			) => Promise<T>;
+			send: (input: import('@xln/runtime/xln-api').RuntimeInput) => Promise<{ height: number }>;
+			status: () => {
+				connected: boolean;
+				height: number;
+				authLevel: import('@xln/runtime/xln-api').RuntimeAdapterAuthLevel | null;
+			};
+		};
 	}
 
 	interface ImportMeta {

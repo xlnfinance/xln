@@ -225,6 +225,285 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   await expect(page.getByRole('button', { name: /^H3$/ })).toBeVisible();
 });
 
+test('admin remote runtime control advances live state and exposes past frames', async ({ page }) => {
+  await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+  const h1 = String(hubs.h1 || '').toLowerCase();
+  expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
+
+  const apiPort = Number(new URL(API_BASE_URL).port);
+  const wsUrl = hubRpcUrl(10);
+  const hubInfoResponse = await page.request.get(`http://127.0.0.1:${apiPort + 10}/api/info`);
+  expect(hubInfoResponse.ok()).toBe(true);
+  const hubInfo = await hubInfoResponse.json().catch(() => ({}));
+  const audience = String(hubInfo.runtimeId || '').toLowerCase();
+  expect(audience.length).toBeGreaterThan(0);
+
+  const adminKey = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000, audience);
+  await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`, {
+    waitUntil: 'domcontentloaded',
+  });
+
+  await page.waitForFunction(
+    ({ expectedRuntimeId, hubId }) => {
+      const view = window as typeof window & {
+        isolatedEnv?: {
+          runtimeId?: string;
+          height?: number;
+          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { isHub?: boolean } } }>;
+        };
+      };
+      const env = view.isolatedEnv;
+      if (String(env?.runtimeId || '') !== expectedRuntimeId || Number(env?.height || 0) < 1) return false;
+      const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
+      return replicas.some((replica) =>
+        String(replica.entityId || '').toLowerCase() === hubId &&
+        replica.state?.profile?.isHub === true,
+      );
+    },
+    { expectedRuntimeId: `radapter:${wsUrl}`, hubId: h1 },
+    { timeout: 60_000 },
+  );
+
+  const before = await page.evaluate((hubId) => {
+    const view = window as typeof window & {
+      isolatedEnv?: {
+        height?: number;
+        history?: Array<{ height?: number }>;
+        eReplicas?: Map<string, {
+          entityId?: string;
+          signerId?: string;
+          state?: {
+            profile?: { name?: string; isHub?: boolean };
+            accounts?: Map<string, unknown>;
+          };
+        }>;
+      };
+    };
+    const env = view.isolatedEnv;
+    const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
+    const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
+    return {
+      height: Number(env?.height || 0),
+      historyLength: Number(env?.history?.length || 0),
+      historyHeights: (env?.history ?? []).map((frame) => Number(frame.height || 0)),
+      signerId: String(replica?.signerId || ''),
+      profileName: String(replica?.state?.profile?.name || ''),
+      isHub: replica?.state?.profile?.isHub === true,
+      accountCount: Number(replica?.state?.accounts?.size || 0),
+    };
+  }, h1);
+
+  expect(before.height).toBeGreaterThan(0);
+  expect(before.historyLength).toBeGreaterThan(0);
+  expect(before.historyLength).toBeLessThanOrEqual(12);
+  expect(before.historyHeights).toContain(before.height);
+  expect(before.isHub).toBe(true);
+  expect(before.accountCount).toBeLessThanOrEqual(10);
+
+  const activeH1Before = await page.evaluate(async (entityId) => {
+    const adapter = (window as typeof window & {
+      __xlnRuntimeAdapter?: {
+        read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
+      };
+    }).__xlnRuntimeAdapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    type ViewFrame = {
+      height?: number;
+      activeEntity?: {
+        core?: { signerId?: string; profile?: { name?: string; isHub?: boolean } };
+        accounts?: { items?: unknown[] };
+        books?: { items?: unknown[] };
+      } | null;
+    };
+    const frame = await adapter.read<ViewFrame>('view-frame', {
+      entityId,
+      accountsLimit: 10,
+      booksLimit: 10,
+    });
+    return {
+      height: Number(frame.height || 0),
+      signerId: String(frame.activeEntity?.core?.signerId || ''),
+      profileName: String(frame.activeEntity?.core?.profile?.name || ''),
+      isHub: frame.activeEntity?.core?.profile?.isHub === true,
+      accountCount: Number(frame.activeEntity?.accounts?.items?.length || 0),
+      bookCount: Number(frame.activeEntity?.books?.items?.length || 0),
+    };
+  }, h1);
+
+  expect(activeH1Before.height).toBeGreaterThan(0);
+  expect(activeH1Before.signerId.length).toBeGreaterThan(0);
+  expect(activeH1Before.isHub).toBe(true);
+  expect(activeH1Before.accountCount).toBeLessThanOrEqual(10);
+  expect(activeH1Before.bookCount).toBeLessThanOrEqual(10);
+
+  const baseName = `H1 Admin E2E ${activeH1Before.height + 1}`;
+  const nextProfileName = activeH1Before.profileName === baseName ? `${baseName}b` : baseName;
+  const controlResult = await page.evaluate(async ({ entityId, signerId, name, timestamp }) => {
+    const adapter = (window as typeof window & {
+      __xlnRuntimeAdapter?: {
+        read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
+        send: (input: unknown) => Promise<{ height: number }>;
+      };
+    }).__xlnRuntimeAdapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    const head = await adapter.read<{ latestHeight?: number }>('head');
+    const sent = await adapter.send({
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        timestamp,
+        entityTxs: [{
+          type: 'profile-update',
+          data: {
+            profile: {
+              entityId,
+              name,
+              avatar: '',
+              bio: 'admin-e2e-control',
+              website: '',
+            },
+          },
+        }],
+      }],
+      timestamp,
+    });
+    return {
+      beforeHeight: Number(head.latestHeight || 0),
+      sendHeight: Number(sent.height || 0),
+    };
+  }, {
+    entityId: h1,
+    signerId: activeH1Before.signerId,
+    name: nextProfileName,
+    timestamp: 1_700_000_000_000 + activeH1Before.height,
+  });
+
+  expect(controlResult.beforeHeight).toBeGreaterThanOrEqual(activeH1Before.height);
+  expect(controlResult.sendHeight).toBeGreaterThanOrEqual(controlResult.beforeHeight);
+
+  await page.waitForFunction(
+    async ({ hubId, minHeight, expectedName }) => {
+      const view = window as typeof window & {
+        isolatedEnv?: {
+          height?: number;
+          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string } } }>;
+        };
+        __xlnRuntimeAdapter?: {
+          read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
+        };
+      };
+      const adapter = view.__xlnRuntimeAdapter;
+      if (!adapter) return false;
+      type Head = { latestHeight?: number };
+      type ViewFrame = { activeEntity?: { core?: { profile?: { name?: string } } } | null };
+      const head = await adapter.read<Head>('head');
+      const latestHeight = Number(head.latestHeight || 0);
+      if (latestHeight <= minHeight) return false;
+      const frame = await adapter.read<ViewFrame>('view-frame', {
+        atHeight: latestHeight,
+        entityId: hubId,
+        accountsLimit: 1,
+        booksLimit: 1,
+      });
+      if (String(frame.activeEntity?.core?.profile?.name || '') !== expectedName) return false;
+      const env = view.isolatedEnv;
+      const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
+      const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
+      return Number(env?.height || 0) >= latestHeight &&
+        String(replica?.state?.profile?.name || '') === expectedName;
+    },
+    { hubId: h1, minHeight: controlResult.beforeHeight, expectedName: nextProfileName },
+    { timeout: 90_000 },
+  );
+
+  const after = await page.evaluate((hubId) => {
+    const view = window as typeof window & {
+      isolatedEnv?: {
+        height?: number;
+        history?: Array<{
+          height?: number;
+          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string } } }>;
+        }>;
+        eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string }; accounts?: Map<string, unknown> } }>;
+      };
+    };
+    const env = view.isolatedEnv;
+    const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
+    const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
+    const history = env?.history ?? [];
+    return {
+      height: Number(env?.height || 0),
+      profileName: String(replica?.state?.profile?.name || ''),
+      accountCount: Number(replica?.state?.accounts?.size || 0),
+      historyLength: history.length,
+      historyHeights: history.map((frame) => Number(frame.height || 0)),
+    };
+  }, h1);
+
+  expect(after.height).toBeGreaterThan(controlResult.beforeHeight);
+  expect(after.profileName).toBe(nextProfileName);
+  expect(after.accountCount).toBeLessThanOrEqual(10);
+  expect(after.historyLength).toBeGreaterThanOrEqual(2);
+  expect(after.historyLength).toBeLessThanOrEqual(12);
+  expect(after.historyHeights).toContain(controlResult.beforeHeight);
+  expect(after.historyHeights).toContain(after.height);
+
+  const frameProbe = await page.evaluate(async ({ entityId, beforeHeight, afterHeight }) => {
+    const adapter = (window as typeof window & {
+      __xlnRuntimeAdapter?: {
+        read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
+      };
+    }).__xlnRuntimeAdapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    type ViewFrame = {
+      height?: number;
+      activeEntity?: {
+        core?: { profile?: { name?: string } };
+        accounts?: { items?: unknown[] };
+        books?: { items?: unknown[] };
+      } | null;
+    };
+    const beforeFrame = await adapter.read<ViewFrame>('view-frame', {
+      atHeight: beforeHeight,
+      entityId,
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    const afterFrame = await adapter.read<ViewFrame>('view-frame', {
+      atHeight: afterHeight,
+      entityId,
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    return {
+      beforeHeight: Number(beforeFrame.height || 0),
+      afterHeight: Number(afterFrame.height || 0),
+      beforeName: String(beforeFrame.activeEntity?.core?.profile?.name || ''),
+      afterName: String(afterFrame.activeEntity?.core?.profile?.name || ''),
+      beforeAccounts: Number(beforeFrame.activeEntity?.accounts?.items?.length || 0),
+      afterAccounts: Number(afterFrame.activeEntity?.accounts?.items?.length || 0),
+      beforeBooks: Number(beforeFrame.activeEntity?.books?.items?.length || 0),
+      afterBooks: Number(afterFrame.activeEntity?.books?.items?.length || 0),
+    };
+  }, {
+    entityId: h1,
+    beforeHeight: controlResult.beforeHeight,
+    afterHeight: after.height,
+  });
+
+  expect(frameProbe.beforeHeight).toBe(controlResult.beforeHeight);
+  expect(frameProbe.afterHeight).toBe(after.height);
+  expect(frameProbe.beforeName).toBe(activeH1Before.profileName);
+  expect(frameProbe.beforeName).not.toBe(nextProfileName);
+  expect(frameProbe.afterName).toBe(nextProfileName);
+  expect(frameProbe.beforeAccounts).toBeLessThanOrEqual(1);
+  expect(frameProbe.afterAccounts).toBeLessThanOrEqual(1);
+  expect(frameProbe.beforeBooks).toBeLessThanOrEqual(1);
+  expect(frameProbe.afterBooks).toBeLessThanOrEqual(1);
+});
+
 test('runtime dropdown manager attaches a remote radapter by token', async ({ page }) => {
   await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const apiPort = Number(new URL(API_BASE_URL).port);
