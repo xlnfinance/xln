@@ -912,6 +912,51 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
   }
 });
 
+test('qa history stores sample-stripped manifest json', () => {
+  const runId = '20260623-000126-780';
+  deleteQaHistoryRows([runId]);
+  try {
+    const sample = {
+      ts: Date.UTC(2026, 5, 23, 0, 1, 26),
+      load1: 1.5,
+      load5: 1.25,
+      load15: 1.1,
+      freeMemBytes: 900_000_000,
+      totalMemBytes: 1_800_000_000,
+      runnerRssBytes: 123_000_000,
+      children: [],
+    };
+    const base = benchmarkRun(runId, 2345, 1200);
+    const perf = { ...base.perf!, samples: [sample] };
+    const run: QaRunManifest = {
+      ...base,
+      perf,
+      shards: [{
+        ...base.shards[0]!,
+        perf,
+      }],
+    };
+    recordQaRunHistory(run, resolve(process.cwd(), '.logs', 'e2e-parallel', runId));
+
+    const db = new Database(QA_HISTORY_DB_PATH);
+    try {
+      const row = db.query(`SELECT manifest_json FROM qa_runs WHERE run_id = $runId`).get({ $runId: runId }) as {
+        manifest_json?: string;
+      } | null;
+      expect(typeof row?.manifest_json).toBe('string');
+      const stored = JSON.parse(row!.manifest_json!) as QaRunManifest;
+      expect(stored.perf?.sampleCount).toBe(1);
+      expect(stored.perf?.samples).toEqual([]);
+      expect(stored.shards[0]?.perf?.sampleCount).toBe(1);
+      expect(stored.shards[0]?.perf?.samples).toEqual([]);
+    } finally {
+      db.close();
+    }
+  } finally {
+    deleteQaHistoryRows([runId]);
+  }
+});
+
 test('qa run endpoint strips perf samples and exposes raw timeseries separately', async () => {
   const runId = '20260623-000124-778';
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
