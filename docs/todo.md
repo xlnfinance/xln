@@ -183,21 +183,24 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: unit enforces at least 20 curated screens and required groups `Payments`, `Swap`, `On-chain Batch`, `Disputes`, `History`; focused QA cockpit e2e verifies default gallery rendering, counts, and categories.
   - Revalidated: run `20260623-200141-886` regenerated 30 gallery artifacts on HEAD `20aa9c0d`; QA cockpit run `20260623-200321-059` passed gallery visibility.
 
-- [ ] Make `/health` read only its dedicated health surface.
+- [x] Make `/health` read only its dedicated health surface.
   - Impact: medium.
   - Goal: avoid mixing all admin dashboards into health. Health should embed or link QA cockpit, not become the full QA implementation.
-  - UI: `/health` shows verdict, bootstrap/infra health, lightweight QA teaser, and cockpit link/embed.
+  - UI: `/health` shows verdict, bootstrap/infra health, a link-only QA evidence panel, and runtime adapter inspector.
+  - Status: done. `/health` no longer imports QA fetch helpers, QA run/story panels, protected QA images, or a QA iframe; it reads `/api/health`, `/api/debug/events`, `/api/debug/entities`, and `/rpc` only.
+  - Evidence: unit scans the health route against forbidden QA surfaces; focused radapter e2e blocks `/api/qa/**` while loading `/health` and asserts no QA iframe or run panel exists.
 
 - [ ] Separate privileged operations from read-only QA views.
   - Impact: high.
   - UI: read-only by default. Put restart/run controls in an `Operations` or `Admin` tab, hidden until admin scope is active.
   - Tests: read mode cannot see or trigger run controls; admin mode requires confirm.
 
-- [ ] Implement `/qa?embed=1` properly or remove it.
+- [x] Implement `/qa?embed=1` properly or remove it.
   - Impact: medium.
   - Current issue: health embed passes `embed=1`, but route does not honor it.
   - Fix: embed mode hides sidebar/heavy nested iframe controls and shows compact cockpit teaser, or remove the param.
-  - Tests: embedded cockpit has no nested iframe-in-iframe layout.
+  - Status: removed. The health embed component that passed `/qa?embed=1` was deleted; health now links to `/qa` instead of embedding an unimplemented mode.
+  - Tests: health e2e asserts no QA iframe is present.
 
 - [ ] Split `EntityPanelTabs.svelte` into tab-owned components.
   - Impact: medium-high.

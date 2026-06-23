@@ -1,13 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Activity, Camera, Database, Network, RefreshCw, ShieldCheck, Siren, Zap } from 'lucide-svelte';
+  import { Activity, Database, Network, RefreshCw, ShieldCheck, Siren, Zap } from 'lucide-svelte';
   import BootstrapLive from '$lib/components/Health/BootstrapLive.svelte';
-  import QaProtectedImage from '$lib/components/QA/QaProtectedImage.svelte';
-  import QaCockpitEmbedPanel from '$lib/components/Health/QaCockpitEmbedPanel.svelte';
-  import QaRunsPanel from '$lib/components/Health/QaRunsPanel.svelte';
+  import HealthQaLinkPanel from '$lib/components/Health/HealthQaLinkPanel.svelte';
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
-  import { qaFetch } from '$lib/qa/apiClient';
 
   type HealthData = {
     timestamp: number;
@@ -234,21 +231,6 @@
     entities: DebugEntity[];
   };
 
-  type QaStoryScreenshot = {
-    id: string;
-    source: 'e2e-screenshots' | 'qa-run';
-    title: string;
-    group: string;
-    name: string;
-    relativePath: string;
-    sizeBytes: number;
-    updatedAt: number;
-    url: string;
-    runId?: string;
-    shard?: number;
-    status?: 'passed' | 'failed' | 'unknown';
-  };
-
   type TestnetGate = {
     label: string;
     value: string;
@@ -268,15 +250,11 @@
   let health = $state<HealthData | null>(null);
   let events = $state<RelayDebugEvent[]>([]);
   let entities = $state<DebugEntity[]>([]);
-  let stories = $state<QaStoryScreenshot[]>([]);
   let filteredEvents = $state<RelayDebugEvent[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let storyError = $state<string | null>(null);
   let autoRefresh = $state(true);
   let activeSection = $state('bootstrap');
-  let storyGroupFilter = $state('all');
-  let selectedStoryId = $state('');
 
   let rpcOk = $state<boolean | null>(null);
   let rpcLatencyMs = $state<number | null>(null);
@@ -409,14 +387,6 @@
   const directOpenLinks = $derived(health?.hubMesh?.direct?.openLinkCount ?? 0);
   const storageTracked = $derived((health?.storage?.tracked ?? []).slice(0, 6));
   const childProcesses = $derived(health?.process?.children ?? []);
-  const storyGroups = $derived(['all', ...Array.from(new Set(stories.map((story) => story.group))).sort()]);
-  const filteredStories = $derived.by(() => {
-    const selected = storyGroupFilter;
-    return stories.filter((story) => selected === 'all' || story.group === selected).slice(0, 80);
-  });
-  const selectedStory = $derived.by(() =>
-    filteredStories.find((story) => story.id === selectedStoryId) ?? filteredStories[0] ?? null
-  );
   const flowEdges = $derived.by(() => buildFlowEdges(events).slice(0, 12));
   const testnetGates = $derived.by<TestnetGate[]>(() => buildTestnetGates(health, rpcOk));
   const overallOk = $derived(
@@ -619,11 +589,10 @@
 
   async function fetchHealth(): Promise<void> {
     try {
-      const [hRes, dRes, eRes, sRes] = await Promise.all([
+      const [hRes, dRes, eRes] = await Promise.all([
         fetch('/api/health'),
         fetch('/api/debug/events?last=1000'),
         fetch('/api/debug/entities?limit=1000'),
-        qaFetch('/api/qa/stories?limit=160'),
       ]);
 
       if (!hRes.ok) throw new Error(`health HTTP ${hRes.status}`);
@@ -635,17 +604,6 @@
       const entitiesData = (await eRes.json()) as DebugEntitiesResponse;
       events = Array.isArray(debugData.events) ? debugData.events : [];
       entities = Array.isArray(entitiesData.entities) ? entitiesData.entities : [];
-      if (sRes.ok) {
-        const storiesData = (await sRes.json()) as { ok?: boolean; stories?: QaStoryScreenshot[]; error?: string };
-        if (!storiesData.ok || !Array.isArray(storiesData.stories)) {
-          throw new Error(storiesData.error || 'stories payload malformed');
-        }
-        stories = storiesData.stories;
-        storyError = null;
-      } else {
-        const payload = await sRes.json().catch(() => null) as { error?: string } | null;
-        storyError = payload?.error || `stories HTTP ${sRes.status}`;
-      }
 
       eventOptions = [...new Set(events.map((e) => e.event).filter(Boolean))].sort();
       msgTypeOptions = [...new Set(events.map((e) => e.msgType).filter(Boolean) as string[])].sort();
@@ -683,7 +641,7 @@
     <div>
       <div class="eyebrow">operator cockpit</div>
       <h1>xln health admin</h1>
-      <p>Bootstrap, runtime adapters, mesh, market maker, QA evidence, screenshots.</p>
+      <p>Bootstrap, runtime adapters, mesh, market maker, and process health.</p>
     </div>
     <div class="actions">
       <label class="switch">
@@ -710,17 +668,11 @@
     <button class:active={activeSection === 'testset'} onclick={() => jumpTo('testset')}>
       <ShieldCheck size={15} /> Test Set
     </button>
-    <button class:active={activeSection === 'qa-runs'} onclick={() => jumpTo('qa-runs')}>
-      <Activity size={15} /> QA Runs
-    </button>
     <button class:active={activeSection === 'qa-cockpit'} onclick={() => jumpTo('qa-cockpit')}>
-      <ShieldCheck size={15} /> Cockpit
+      <ShieldCheck size={15} /> QA Link
     </button>
     <button class:active={activeSection === 'runtime-adapter'} onclick={() => jumpTo('runtime-adapter')}>
       <Database size={15} /> Adapter
-    </button>
-    <button class:active={activeSection === 'stories'} onclick={() => jumpTo('stories')}>
-      <Camera size={15} /> Stories
     </button>
     <button class:active={activeSection === 'events'} onclick={() => jumpTo('events')}>
       <Siren size={15} /> Events
@@ -746,8 +698,7 @@
   {:else if error}
     <div class="panel error">{error}</div>
     <div class="admin-stack">
-      <QaRunsPanel />
-      <QaCockpitEmbedPanel />
+      <HealthQaLinkPanel />
       <RuntimeAdapterPanel />
     </div>
   {:else if health}
@@ -844,8 +795,7 @@
     </section>
 
     <div class="admin-stack">
-      <QaRunsPanel />
-      <QaCockpitEmbedPanel />
+      <HealthQaLinkPanel />
       <RuntimeAdapterPanel />
     </div>
 
@@ -963,60 +913,6 @@
           {/each}
         {/if}
       </div>
-    </section>
-
-    <section id="stories" class="panel story-panel">
-      <div class="panel-head">
-        <div>
-          <h2>User Story Screenshots</h2>
-          <p class="sub">{stories.length} real image artifacts from disk</p>
-        </div>
-        <div class="story-controls">
-          <select bind:value={storyGroupFilter}>
-            {#each storyGroups as group}
-              <option value={group}>{group}</option>
-            {/each}
-          </select>
-          <a class="panel-link" href="/qa">Run history</a>
-        </div>
-      </div>
-
-      {#if storyError}
-        <div class="panel error">{storyError}</div>
-      {:else if filteredStories.length === 0}
-        <div class="empty">No screenshots found in story catalog.</div>
-      {:else}
-        <div class="story-layout">
-          <div class="story-stage">
-            {#if selectedStory}
-              <a href={selectedStory.url} target="_blank" rel="noreferrer">
-                <QaProtectedImage url={selectedStory.url} alt={selectedStory.title} loading="eager" />
-              </a>
-              <div class="story-caption">
-                <div>
-                  <strong>{selectedStory.title}</strong>
-                  <span>{selectedStory.group} · {selectedStory.source}{selectedStory.runId ? ` · ${selectedStory.runId}` : ''}</span>
-                </div>
-                <span>{formatBytes(selectedStory.sizeBytes)}</span>
-              </div>
-            {/if}
-          </div>
-
-          <div class="story-grid">
-            {#each filteredStories as story}
-              <button
-                class="story-thumb"
-                class:selected={selectedStory?.id === story.id}
-                onclick={() => (selectedStoryId = story.id)}
-                title={story.title}
-              >
-                <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
-                <span>{story.title}</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-      {/if}
     </section>
 
     <section id="events" class="panel">
@@ -1614,121 +1510,6 @@
   .storage-row strong {
     color: #d9ad58;
     font-size: 13px;
-  }
-
-  .story-panel {
-    overflow: hidden;
-  }
-
-  .story-controls {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .story-controls select {
-    height: 34px;
-    max-width: 180px;
-    border: 1px solid #38362f;
-    border-radius: 8px;
-    background: #10100f;
-    color: #efe8d8;
-    padding: 0 10px;
-  }
-
-  .story-layout {
-    display: grid;
-    grid-template-columns: minmax(420px, 1.05fr) minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  .story-stage {
-    min-height: 430px;
-    border: 1px solid #38362f;
-    border-radius: 10px;
-    background: #080908;
-    overflow: hidden;
-  }
-
-  .story-stage a {
-    display: block;
-    height: 376px;
-    background: #050605;
-  }
-
-  .story-stage :global(img) {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    display: block;
-  }
-
-  .story-caption {
-    min-height: 54px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 12px;
-    border-top: 1px solid #2c2a25;
-  }
-
-  .story-caption strong,
-  .story-caption span {
-    display: block;
-  }
-
-  .story-caption strong {
-    color: #eee8dc;
-  }
-
-  .story-caption span {
-    color: #958e80;
-    font-size: 11px;
-  }
-
-  .story-grid {
-    max-height: 430px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-    gap: 8px;
-    overflow: auto;
-    padding-right: 4px;
-  }
-
-  .story-thumb {
-    height: 118px;
-    display: grid;
-    grid-template-rows: 84px 1fr;
-    gap: 0;
-    padding: 0;
-    overflow: hidden;
-    border: 1px solid #38362f;
-    background: #0b0c0b;
-    text-align: left;
-  }
-
-  .story-thumb.selected {
-    border-color: #d9ad58;
-    box-shadow: inset 0 0 0 1px rgba(217, 173, 88, 0.35);
-  }
-
-  .story-thumb :global(img) {
-    width: 100%;
-    height: 84px;
-    object-fit: cover;
-    display: block;
-    background: #050605;
-  }
-
-  .story-thumb span {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding: 7px 8px;
-    color: #cfc8b8;
-    font-size: 11px;
   }
 
   .flow-edge {
