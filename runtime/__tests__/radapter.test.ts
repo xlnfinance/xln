@@ -36,7 +36,7 @@ import type {
   StorageMerkleRootDoc,
   StorageSnapshotManifest,
 } from '../storage/types';
-import type { EntityReplica, Env, RuntimeInput } from '../types';
+import type { Delta, EntityReplica, Env, RuntimeInput } from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
 
@@ -143,6 +143,17 @@ const makeOrderbookExt = (books: Map<string, BookState>): OrderbookExtState => (
     minTradeSize: 0n,
     supportedPairs: Array.from(books.keys()),
   },
+});
+
+const makeTestDelta = (tokenId: number, value: bigint): Delta => ({
+  tokenId,
+  collateral: 0n,
+  ondelta: value,
+  offdelta: 0n,
+  leftCreditLimit: 1_000_000n,
+  rightCreditLimit: 1_000_000n,
+  leftAllowance: 0n,
+  rightAllowance: 0n,
 });
 
 const compareAscii = (left: string, right: string): number =>
@@ -684,26 +695,151 @@ test('runtime adapter historical account search uses the point storage loader', 
   expect(viewPageCalled).toBe(false);
 });
 
-test('runtime adapter current view frame reads live env without touching storage loader', async () => {
+test('runtime adapter current view frame prefers storage page loader when current height is persisted', async () => {
   const env = makeEnv();
-  let pagedLoadCalled = false;
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const storedOnlyCounterpartyId = `0x${'cc'.repeat(32)}`;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  const storedDoc = projectAccountDoc({
+    ...account,
+    rightEntity: storedOnlyCounterpartyId,
+    proofHeader: { ...account.proofHeader, toEntity: storedOnlyCounterpartyId },
+  });
+  let pagedLoadCalled: { entityId: string; height: number } | null = null;
 
   const frame = await resolveRuntimeAdapterRead<{
-    activeEntity: { accounts: { items: Array<{ rightEntity: string }> } } | null;
+    activeEntity: {
+      accounts: {
+        items: Array<{ rightEntity: string }>;
+        summary?: { totalItems: number | null; visibleItems: number; sampleIds: string[] };
+      };
+    } | null;
   }>({
     env,
-    readHead: async () => {
-      throw new Error('current view-frame must not hit storage head');
-    },
-    loadEntityViewPage: async () => {
-      pagedLoadCalled = true;
-      throw new Error('current-height view-frame must not hit storage loader');
+    readHead: async () => ({
+      schemaVersion: 1,
+      latestHeight: env.height,
+      latestMaterializedHeight: env.height,
+      latestSnapshotHeight: 0,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    }),
+    loadEntityViewPage: async (requestedEntityId, height) => {
+      pagedLoadCalled = { entityId: requestedEntityId, height };
+      return {
+        core: projectEntityCoreDoc(replica.state, replica),
+        accounts: {
+          items: [storedDoc],
+          nextCursor: 'next-page',
+          firstCursor: storedOnlyCounterpartyId,
+          lastCursor: storedOnlyCounterpartyId,
+          pageIndex: 0,
+          pageCount: 1_000_000,
+          totalItems: 1_000_000,
+          limit: 1,
+        },
+        books: { items: [], nextCursor: null, pageIndex: 0, pageCount: 0, totalItems: 0, limit: 1 },
+      };
     },
   }, 'view-frame', { accountsLimit: 1 });
 
-  expect(pagedLoadCalled).toBe(false);
+  expect(pagedLoadCalled).toEqual({ entityId, height: env.height });
   expect(frame.activeEntity?.accounts.items).toHaveLength(1);
-  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(storedOnlyCounterpartyId);
+  expect(frame.activeEntity?.accounts.summary).toMatchObject({
+    totalItems: 1_000_000,
+    visibleItems: 1,
+    sampleIds: [storedOnlyCounterpartyId],
+  });
+});
+
+test('runtime adapter 1M account view-frame stays aggregate-first and under wire budget', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  let loaderCalls = 0;
+  const visibleDocs = Array.from({ length: 10 }, (_, index) => {
+    const id = `0x${(index + 1).toString(16).padStart(64, '0')}`;
+    return projectAccountDoc({
+      ...account,
+      rightEntity: id,
+      currentFrame: {
+        ...account.currentFrame,
+        stateHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+      },
+      deltas: new Map([[1, makeTestDelta(1, BigInt(index + 1) * 1_000n)]]),
+      proofHeader: { ...account.proofHeader, toEntity: id },
+    });
+  });
+
+  const startedAt = Date.now();
+  const frame = await resolveRuntimeAdapterRead<{
+    activeEntity: {
+      accounts: {
+        items: Array<{ rightEntity: string }>;
+        nextCursor: string | null;
+        summary?: {
+          totalItems: number | null;
+          visibleItems: number;
+          hasMore: boolean;
+          sampleIds: string[];
+          pageStateHashes: string[];
+          visibleTopDeltas: Array<{ counterpartyId: string; tokenId: number; delta: string }>;
+        };
+      };
+    } | null;
+  }>({
+    env,
+    readHead: async () => ({
+      schemaVersion: 1,
+      latestHeight: env.height,
+      latestMaterializedHeight: env.height,
+      latestSnapshotHeight: env.height,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    }),
+    loadEntityViewPage: async () => {
+      loaderCalls += 1;
+      return {
+        core: projectEntityCoreDoc(replica.state, replica),
+        accounts: {
+          items: visibleDocs,
+          nextCursor: visibleDocs[visibleDocs.length - 1]!.rightEntity,
+          firstCursor: visibleDocs[0]!.rightEntity,
+          lastCursor: visibleDocs[visibleDocs.length - 1]!.rightEntity,
+          pageIndex: 0,
+          pageCount: 100_000,
+          totalItems: 1_000_000,
+          limit: 10,
+        },
+        books: { items: [], nextCursor: null, pageIndex: 0, pageCount: 0, totalItems: 0, limit: 10 },
+      };
+    },
+  }, 'view-frame', { entityId, accountsLimit: 10, booksLimit: 10 });
+  const elapsedMs = Date.now() - startedAt;
+  const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'budget', ok: true, payload: frame });
+
+  expect(loaderCalls).toBe(1);
+  expect(elapsedMs).toBeLessThan(100);
+  expect(encoded.byteLength).toBeLessThan(100_000);
+  expect(frame.activeEntity?.accounts.items).toHaveLength(10);
+  expect(frame.activeEntity?.accounts.summary).toMatchObject({
+    totalItems: 1_000_000,
+    visibleItems: 10,
+    hasMore: true,
+  });
+  expect(frame.activeEntity?.accounts.summary?.sampleIds).toHaveLength(8);
+  expect(frame.activeEntity?.accounts.summary?.pageStateHashes).toHaveLength(8);
+  expect(frame.activeEntity?.accounts.summary?.visibleTopDeltas[0]).toMatchObject({
+    tokenId: 1,
+    delta: '10000',
+  });
 });
 
 test('storage-backed historical view pages support desc account and book cursors', async () => {

@@ -48,6 +48,7 @@ export type RuntimeAdapterAccountPage = {
   pageCount?: number;
   totalItems?: number;
   limit?: number;
+  summary?: RuntimeAdapterAccountPageSummary;
 };
 
 export type RuntimeAdapterBookPage = {
@@ -60,6 +61,24 @@ export type RuntimeAdapterBookPage = {
   pageCount?: number;
   totalItems?: number;
   limit?: number;
+};
+
+export type RuntimeAdapterVisibleDeltaSummary = {
+  counterpartyId: string;
+  tokenId: number;
+  delta: string;
+};
+
+export type RuntimeAdapterAccountPageSummary = {
+  totalItems: number | null;
+  visibleItems: number;
+  limit: number;
+  pageIndex: number | null;
+  pageCount: number | null;
+  hasMore: boolean;
+  sampleIds: string[];
+  pageStateHashes: string[];
+  visibleTopDeltas: RuntimeAdapterVisibleDeltaSummary[];
 };
 
 export type RuntimeAdapterViewEntityFrame = {
@@ -405,6 +424,94 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
   swapClosedOrders: undefined,
 });
 
+const compactEntityCoreForRemote = (core: StorageEntityCoreDoc): StorageEntityCoreDoc => {
+  const compact: StorageEntityCoreDoc = {
+    ...core,
+    messages: core.messages.slice(-20),
+    proposals: new Map(Array.from(core.proposals.entries()).slice(-20)),
+    jBlockObservations: core.jBlockObservations.slice(-20),
+    jBlockChain: core.jBlockChain.slice(-20),
+    lockBook: new Map(Array.from(core.lockBook.entries()).slice(-20)),
+  };
+
+  if (core.deferredAccountProposals) {
+    compact.deferredAccountProposals = new Map(Array.from(core.deferredAccountProposals.entries()).slice(-20));
+  }
+  if (core.batchHistory) compact.batchHistory = core.batchHistory.slice(-20);
+  if (core.accountInputQueue) compact.accountInputQueue = core.accountInputQueue.slice(-20);
+  if (core.htlcNotes) compact.htlcNotes = new Map(Array.from(core.htlcNotes.entries()).slice(-20));
+  if (core.outDebtsByToken) compact.outDebtsByToken = new Map(Array.from(core.outDebtsByToken.entries()).slice(0, 20));
+  if (core.inDebtsByToken) compact.inDebtsByToken = new Map(Array.from(core.inDebtsByToken.entries()).slice(0, 20));
+  if (core.pendingSwapFillRatios) {
+    compact.pendingSwapFillRatios = new Map(Array.from(core.pendingSwapFillRatios.entries()).slice(-20));
+  }
+  if (core.pendingCrossJurisdictionFillAcks) {
+    compact.pendingCrossJurisdictionFillAcks = new Map(Array.from(core.pendingCrossJurisdictionFillAcks.entries()).slice(-20));
+  }
+  if (core.crossJurisdictionBookAdmissions) {
+    compact.crossJurisdictionBookAdmissions = new Map(Array.from(core.crossJurisdictionBookAdmissions.entries()).slice(-20));
+  }
+  if (core.orderbookReferrals) {
+    compact.orderbookReferrals = new Map(Array.from(core.orderbookReferrals.entries()).slice(0, 20));
+  }
+  return compact;
+};
+
+const accountCounterpartyIdForView = (entityId: string, doc: StorageAccountDoc): string => {
+  const normalized = normalizeEntityId(entityId);
+  const left = normalizeEntityId(doc.leftEntity);
+  const right = normalizeEntityId(doc.rightEntity);
+  return left === normalized ? right : left;
+};
+
+const absoluteBigInt = (value: bigint): bigint => value < 0n ? -value : value;
+
+const accountPageSummaryForView = (
+  entityId: string,
+  page: RuntimeAdapterAccountPage,
+): RuntimeAdapterAccountPageSummary => {
+  const limit = Math.max(1, Number(page.limit ?? (page.items.length || 1)));
+  const totalItems = Number.isFinite(Number(page.totalItems)) ? Math.max(0, Math.floor(Number(page.totalItems))) : null;
+  const pageIndex = Number.isFinite(Number(page.pageIndex)) ? Math.max(0, Math.floor(Number(page.pageIndex))) : null;
+  const pageCount = Number.isFinite(Number(page.pageCount)) ? Math.max(0, Math.floor(Number(page.pageCount))) : null;
+  const sampleIds = page.items.slice(0, 8).map((doc) => accountCounterpartyIdForView(entityId, doc));
+  const pageStateHashes = Array.from(new Set(page.items
+    .map((doc) => String(doc.currentFrame?.stateHash || doc.currentDisputeProofBodyHash || doc.counterpartyDisputeProofBodyHash || '').trim())
+    .filter(Boolean)))
+    .slice(0, 8);
+  const visibleTopDeltas = page.items
+    .flatMap((doc) => {
+      const counterpartyId = accountCounterpartyIdForView(entityId, doc);
+      return Array.from(doc.deltas.entries()).map(([tokenId, delta]) => {
+        const netDelta = BigInt(delta.offdelta ?? 0n) + BigInt(delta.ondelta ?? 0n);
+        return {
+          counterpartyId,
+          tokenId: Number(delta.tokenId ?? tokenId),
+          delta: String(netDelta),
+          magnitude: absoluteBigInt(netDelta),
+        };
+      });
+    })
+    .sort((left, right) => {
+      if (left.magnitude === right.magnitude) return compareAscii(left.counterpartyId, right.counterpartyId);
+      return left.magnitude > right.magnitude ? -1 : 1;
+    })
+    .slice(0, 8)
+    .map(({ counterpartyId, tokenId, delta }) => ({ counterpartyId, tokenId, delta }));
+
+  return {
+    totalItems,
+    visibleItems: page.items.length,
+    limit,
+    pageIndex,
+    pageCount,
+    hasMore: Boolean(page.nextCursor) || (totalItems !== null && pageIndex !== null && pageCount !== null && pageIndex + 1 < pageCount),
+    sampleIds,
+    pageStateHashes,
+    visibleTopDeltas,
+  };
+};
+
 const compactBookSideForView = (
   bucketIds: readonly bigint[],
   buckets: ReadonlyMap<string, PriceBucketState>,
@@ -493,7 +600,7 @@ const compactBookStateForView = (book: BookState, maxLevelsPerSide = 5, maxOrder
   };
 };
 
-const compactViewPageForRemote = (view: {
+const compactViewPageForRemote = (entityId: string, view: {
   core: StorageEntityCoreDoc;
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
@@ -502,10 +609,11 @@ const compactViewPageForRemote = (view: {
   accounts: RuntimeAdapterAccountPage;
   books: RuntimeAdapterBookPage;
 } => ({
-  core: view.core,
+  core: compactEntityCoreForRemote(view.core),
   accounts: {
     ...view.accounts,
     items: view.accounts.items.map(compactAccountDocForView),
+    summary: accountPageSummaryForView(entityId, view.accounts),
   },
   books: {
     ...view.books,
@@ -515,6 +623,51 @@ const compactViewPageForRemote = (view: {
     })),
   },
 });
+
+const storageHeadCanServeHeight = async (
+  ctx: RuntimeAdapterResolveContext,
+  height: number,
+): Promise<boolean> => {
+  if (height < 1) return false;
+  if (!ctx.readHead) return false;
+  const head = await ctx.readHead();
+  if (!head) return false;
+  return latestHeadHeight(head) >= height;
+};
+
+const loadStorageViewPageIfAvailable = async (
+  ctx: RuntimeAdapterResolveContext,
+  entityId: string,
+  height: number,
+  query?: RuntimeAdapterReadQuery,
+): Promise<{
+  core: StorageEntityCoreDoc;
+  accounts: RuntimeAdapterAccountPage;
+  books: RuntimeAdapterBookPage;
+} | null> => {
+  if (!ctx.loadEntityViewPage) return null;
+  if (!await storageHeadCanServeHeight(ctx, height)) return null;
+  const stored = await ctx.loadEntityViewPage!(entityId, height, query);
+  return stored ?? null;
+};
+
+const loadViewPageForHeight = async (
+  ctx: RuntimeAdapterResolveContext,
+  entityId: string,
+  height: number,
+  isCurrentHeight: boolean,
+  query?: RuntimeAdapterReadQuery,
+): Promise<{
+  core: StorageEntityCoreDoc;
+  accounts: RuntimeAdapterAccountPage;
+  books: RuntimeAdapterBookPage;
+}> => {
+  if (isCurrentHeight) {
+    const stored = await loadStorageViewPageIfAvailable(ctx, entityId, height, query);
+    return stored ?? projectLiveEntityViewPage(ctx, entityId, query);
+  }
+  return await loadRequiredEntityViewPage(ctx, entityId, height, query);
+};
 
 const projectViewFrame = async (
   ctx: RuntimeAdapterResolveContext,
@@ -568,10 +721,8 @@ const projectViewFrame = async (
   if (bookQuery.limit !== undefined) storedQuery.booksLimit = bookQuery.limit;
   if (bookQuery.cursor) storedQuery.booksCursor = bookQuery.cursor;
   if (query?.booksPage !== undefined) storedQuery.booksPage = query.booksPage;
-  const stored = isCurrentHeight
-    ? projectLiveEntityViewPage(ctx, activeEntityId, storedQuery)
-    : await loadRequiredEntityViewPage(ctx, activeEntityId, height, storedQuery);
-  const compactStored = compactViewPageForRemote(stored);
+  const stored = await loadViewPageForHeight(ctx, activeEntityId, height, isCurrentHeight, storedQuery);
+  const compactStored = compactViewPageForRemote(activeEntityId, stored);
   const fallbackJurisdiction = jurisdictionSummary(compactStored.core.config?.jurisdiction);
   const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
     entityId: activeEntityId,
@@ -636,22 +787,32 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
       const accountId = normalizeEntityId(String(query?.accountId || ''));
       if (parts[2] === 'accounts' && accountId) {
         const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
-        if (height === null || targetHeight === envHeight(ctx.env)) {
+        const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
+        if (isCurrentHeight) {
+          const stored = ctx.loadEntityAccountDoc && await storageHeadCanServeHeight(ctx, targetHeight)
+            ? await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight)
+            : null;
+          if (stored) {
+            const page = singleAccountPage(accountId, compactAccountDocForView(stored), limit);
+            return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
+          }
           const replica = findReplica(ctx.env, entityId);
           if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);
-          return singleAccountPage(accountId, account ? projectAccountDoc(account) : null, limit) as T;
+          const page = singleAccountPage(accountId, account ? compactAccountDocForView(projectAccountDoc(account)) : null, limit);
+          return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
         }
         if (!ctx.loadEntityAccountDoc) {
           throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
         }
         const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
-        return singleAccountPage(accountId, account, limit) as T;
+        const page = singleAccountPage(accountId, account ? compactAccountDocForView(account) : null, limit);
+        return { ...page, summary: accountPageSummaryForView(entityId, page) } as T;
       }
-      const stored = height === null || targetHeight === envHeight(ctx.env)
-        ? projectLiveEntityViewPage(ctx, entityId, query)
-        : await loadRequiredEntityViewPage(ctx, entityId, targetHeight, query);
-      return (parts[2] === 'accounts' ? stored.accounts : stored.books) as T;
+      const isCurrentHeight = height === null || targetHeight === envHeight(ctx.env);
+      const stored = await loadViewPageForHeight(ctx, entityId, targetHeight, isCurrentHeight, query);
+      const compactStored = compactViewPageForRemote(entityId, stored);
+      return (parts[2] === 'accounts' ? compactStored.accounts : compactStored.books) as T;
     }
 
     if (parts.length === 4 && parts[2] === 'account') {

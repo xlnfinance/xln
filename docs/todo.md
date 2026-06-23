@@ -225,11 +225,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Coverage: catalog/history/restart status/restart audit/stories/runs/run/perf use `private, no-cache` ETags; POST/admin actions stay `no-store`.
   - Evidence: backend unit asserts ETag/304 contract; frontend integration test uses a real Bun server to verify `qaFetch()` sends `If-None-Match` and returns cached JSON on 304.
 
-- [ ] Keep 1M-account remote snapshots aggregate-first.
+- [x] Keep 1M-account remote snapshots aggregate-first.
   - Impact: high.
   - Requirement: server returns small snapshots; frontend drill-down is cursor/page based.
   - API: counts, hashes, sample IDs, top deltas, pagination cursors, not full arrays.
   - Tests: 1M fake hub snapshot stays under 100KB and renders under 100ms without main-thread freeze.
+  - Status: done. Current-height `view-frame` and paged account/book reads now prefer persisted storage pages when the persisted head can serve the requested height; live env projection is only fallback for unpersisted/local reads.
+  - Evidence: L1 `runtime adapter 1M account view-frame stays aggregate-first and under wire budget` uses a fake 1M hub, returns 10 visible accounts plus `summary.totalItems`, cursors, sample IDs, state hashes, and top deltas; encoded response stays below 100KB and resolves under 100ms.
 
 - [ ] Virtualize large run/shard/artifact lists.
   - Impact: medium.
