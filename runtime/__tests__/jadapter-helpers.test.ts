@@ -17,6 +17,7 @@ import {
   resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
 } from '../jadapter/watcher';
+import { findRecentReserveUpdatedEvent } from '../j-event-evidence';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, Env, JReplica } from '../types';
 
@@ -339,6 +340,63 @@ describe('jadapter helper cursors', () => {
     expect(queuedInputs.map((input) => input.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
     expect(queuedInputs.every((input) => input.entityTxs[0]?.type === 'j_event')).toBe(true);
     expect(env.runtimeState?.wakeRequested).toBe(true);
+  });
+
+  test('watcher reserve evidence survives unrelated two-jurisdiction traffic', () => {
+    const env = createEmptyEnv('jadapter-helper-reserve-evidence-seed');
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+
+    const entityA = `0x${'71'.repeat(32)}`;
+    const entityB = `0x${'72'.repeat(32)}`;
+    const signerA = '1';
+    const signerB = '2';
+    env.eReplicas.set(`${entityA}:${signerA}`, makeReplica(entityA, signerA, true));
+    env.eReplicas.set(`${entityB}:${signerB}`, makeReplica(entityB, signerB, true));
+
+    processEventBatch(
+      [{
+        name: 'ReserveUpdated',
+        args: {
+          entity: entityA,
+          tokenId: 2,
+          newBalance: 500n,
+        },
+        blockNumber: 20,
+        blockHash: `0x${'aa'.repeat(32)}`,
+        transactionHash: `0x${'ab'.repeat(32)}`,
+        logIndex: 0,
+      }],
+      env,
+      20,
+      `0x${'aa'.repeat(32)}`,
+      { value: 0 },
+      'jurisdiction-a',
+    );
+
+    processEventBatch(
+      Array.from({ length: 1_100 }, (_, index) => ({
+        name: 'ReserveUpdated',
+        args: {
+          entity: entityB,
+          tokenId: 2,
+          newBalance: BigInt(index + 1),
+        },
+        blockNumber: 21,
+        blockHash: `0x${'bb'.repeat(32)}`,
+        transactionHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+        logIndex: index,
+      })),
+      env,
+      21,
+      `0x${'bb'.repeat(32)}`,
+      { value: 0 },
+      'jurisdiction-b',
+    );
+
+    const reserveEvent = findRecentReserveUpdatedEvent(env, entityA, 2, 500n);
+    expect(reserveEvent?.transactionHash).toBe(`0x${'ab'.repeat(32)}`);
+    expect(findRecentReserveUpdatedEvent(env, entityA, 2, 501n)).toBeNull();
   });
 
   test('processEventBatch keeps same ERC20 transfer log deltas for both tracked external owners', () => {

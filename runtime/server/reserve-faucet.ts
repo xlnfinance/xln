@@ -9,6 +9,14 @@ import { formatTimingMs, getErrorMessage } from '../server-utils';
 import { getEntityReplicaById } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import type { RelayStore } from '../relay-store';
+import {
+  findRecentReserveUpdatedEvent,
+  type RecentReserveUpdatedEvent,
+} from '../j-event-evidence';
+
+export {
+  findRecentReserveUpdatedEvent,
+} from '../j-event-evidence';
 
 type TokenCatalogEntry = {
   tokenId?: number | string | null;
@@ -16,50 +24,7 @@ type TokenCatalogEntry = {
   decimals?: number | null;
 };
 
-type ReserveFaucetJEvent = {
-  name: string;
-  args: Record<string, unknown>;
-  blockNumber: number;
-  blockHash: string;
-  transactionHash: string;
-};
-
-const readDecimalBigInt = (value: unknown): bigint | null => {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value);
-  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return BigInt(value.trim());
-  return null;
-};
-
-export const findRecentReserveUpdatedEvent = (
-  env: Env,
-  entityId: string,
-  tokenId: number,
-  expectedMin: bigint,
-): ReserveFaucetJEvent | null => {
-  const normalizedEntityId = String(entityId || '').trim().toLowerCase();
-  const normalizedTokenId = Number(tokenId);
-  const events = env.runtimeState?.recentJEvents ?? [];
-  for (let index = events.length - 1; index >= 0; index--) {
-    const event = events[index];
-    if (!event || event.name !== 'ReserveUpdated') continue;
-    const args = event.args ?? {};
-    const eventEntity = String(args['entity'] ?? '').trim().toLowerCase();
-    const eventTokenId = Number(args['tokenId']);
-    const newBalance = readDecimalBigInt(args['newBalance']);
-    if (eventEntity !== normalizedEntityId) continue;
-    if (eventTokenId !== normalizedTokenId) continue;
-    if (newBalance === null || newBalance < expectedMin) continue;
-    return {
-      name: event.name,
-      args: { ...args },
-      blockNumber: event.blockNumber,
-      blockHash: event.blockHash,
-      transactionHash: event.transactionHash,
-    };
-  }
-  return null;
-};
+const faucetLog = createStructuredLogger('server.faucet');
 
 export const waitForRecentReserveUpdatedEvent = async (
   env: Env,
@@ -68,7 +33,7 @@ export const waitForRecentReserveUpdatedEvent = async (
   expectedMin: bigint,
   timeoutMs = 5000,
   pollMs = 50,
-): Promise<ReserveFaucetJEvent | null> => {
+): Promise<RecentReserveUpdatedEvent | null> => {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const event = findRecentReserveUpdatedEvent(env, entityId, tokenId, expectedMin);
@@ -77,8 +42,6 @@ export const waitForRecentReserveUpdatedEvent = async (
   }
   return findRecentReserveUpdatedEvent(env, entityId, tokenId, expectedMin);
 };
-
-const faucetLog = createStructuredLogger('server.faucet');
 
 const faucetLock = {
   locked: false,
