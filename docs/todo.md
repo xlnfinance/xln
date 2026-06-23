@@ -359,7 +359,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [x] E2E: `/qa?runId=...&shard=...` deep-link selects exact run and video shard.
   - Status: done. QA cockpit now treats `shard` as the actual manifest shard number, applies it on run load, and keeps `runId/shard` in the URL when a shard or failure class is selected.
   - Evidence: focused QA cockpit e2e fixture has two shards and opens `/qa?runId=20260623-235959-999&shard=7`; the test asserts shard `7` is selected instead of the failed/default shard and that its video path remains playable.
-- [ ] E2E: failed run opens directly to failed shard and first failure cue.
+- [x] E2E: failed run opens directly to failed shard and first failure cue.
+  - Status: done. Failure Inbox clicks now select the failed shard, keep `runId/shard` in the URL, add a first-class `Failure` transcript cue from the shard error/log, and seek the scenario video to that cue once metadata is ready.
+  - Evidence: focused QA cockpit e2e asserts the failed shard `1` is selected, the active transcript cue is marked `data-failure-cue="true"`, the cue text contains the fixture assertion failure, and video currentTime seeks to the failure cue.
 - [ ] E2E: missing video shows stable empty state with no console errors.
 - [ ] E2E: scenario transcript cue scrubs video to real marker timestamp.
 - [ ] E2E: verdict banner shows FAIL on failed fixture and PASS on green fixture.

@@ -22,6 +22,8 @@ export type QaScenarioShardLike = {
   description: string | null;
   target: string | null;
   title: string | null;
+  error?: string | null;
+  logTail?: string | null;
   phaseMs: QaScenarioPhaseMs | null;
   timelineSteps?: QaScenarioStep[];
   slowSteps: QaScenarioStep[];
@@ -86,6 +88,11 @@ const formatMs = (ms: number): string => {
 const formatTimeRange = (startMs: number, endMs: number): string =>
   `${formatMs(startMs)}-${formatMs(endMs)}`;
 
+const firstUsefulLine = (value: string | null | undefined): string => {
+  const lines = String(value || '').split(/\r?\n/).map(line => cleanText(line)).filter(Boolean);
+  return lines.find(line => !/^(\[|at\s|file\s|trace\s)/i.test(line)) ?? lines[0] ?? '';
+};
+
 const pushCue = (
   cues: QaScenarioCue[],
   cursorMs: number,
@@ -135,6 +142,26 @@ const pushVideoCue = (
   });
 };
 
+const pushFailureCue = (
+  cues: QaScenarioCue[],
+  shard: QaScenarioShardLike,
+): void => {
+  const lastCue = cues[cues.length - 1] ?? null;
+  const startMs = lastCue ? Math.max(0, lastCue.endMs) : 0;
+  const detail = tenWordScenarioSummary(firstUsefulLine(shard.error) || firstUsefulLine(shard.logTail));
+  cues.push({
+    id: `${cues.length}-failure`,
+    startMs,
+    endMs: startMs + 1200,
+    title: 'Failure',
+    text: detail === 'No scenario summary recorded'
+      ? 'Failure artifacts were captured for inspection.'
+      : detail,
+    meta: 'failed',
+    timebase: lastCue?.timebase ?? 'synthetic',
+  });
+};
+
 export function tenWordScenarioSummary(value: string | null | undefined): string {
   const text = cleanText(value);
   if (!text) return 'No scenario summary recorded';
@@ -167,6 +194,7 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
 
   if (videoSteps.length > 0) {
     for (const step of videoSteps) pushVideoCue(cues, step);
+    if (shard.status === 'failed') pushFailureCue(cues, shard);
     return cues;
   }
 
@@ -205,18 +233,20 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
     );
   }
 
-  pushCue(
-    cues,
-    cursorMs,
-    1200,
-    shard.status === 'passed' ? 'Passed' : shard.status === 'failed' ? 'Failed' : 'Finished',
-    shard.status === 'passed'
-      ? 'Assertions passed and artifacts were captured for review.'
-      : shard.status === 'failed'
-        ? 'Failure artifacts were captured for inspection.'
+  if (shard.status === 'failed') {
+    pushFailureCue(cues, shard);
+  } else {
+    pushCue(
+      cues,
+      cursorMs,
+      1200,
+      shard.status === 'passed' ? 'Passed' : 'Finished',
+      shard.status === 'passed'
+        ? 'Assertions passed and artifacts were captured for review.'
         : 'Run completed with unknown shard status.',
-    shard.status,
-  );
+      shard.status,
+    );
+  }
   return cues;
 }
 
@@ -233,4 +263,10 @@ export function qaScenarioCueIndexAt(cues: QaScenarioCue[], positionMs: number):
   const safePosition = Math.max(0, Number.isFinite(positionMs) ? positionMs : 0);
   const index = cues.findIndex(cue => safePosition >= cue.startMs && safePosition < cue.endMs);
   return index >= 0 ? index : cues.length - 1;
+}
+
+export function qaScenarioFailureCueIndex(shard: QaScenarioShardLike, cues: QaScenarioCue[]): number {
+  if (shard.status !== 'failed' || cues.length === 0) return -1;
+  const explicit = cues.findIndex(cue => cue.title.toLowerCase() === 'failure' || cue.meta === 'failed');
+  return explicit >= 0 ? explicit : cues.length - 1;
 }

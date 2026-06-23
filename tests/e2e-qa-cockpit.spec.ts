@@ -658,6 +658,18 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await page.getByTestId('qa-failure-item').first().click();
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/);
+    await expect(page.locator('[data-testid="qa-suite-row"][data-shard="1"]')).toHaveClass(/selected/);
+    await expect(page.locator('.shard-detail')).toContainText('qa.cockpit-fixture');
+    await expect(page.getByTestId('qa-video-player')).toBeVisible();
+    const activeFailureCue = page.locator('[data-testid="qa-subtitle-cue"][aria-current="step"][data-failure-cue="true"]');
+    await expect(activeFailureCue).toContainText('Failure');
+    await expect(activeFailureCue).toContainText('Expected scenario playback to render active cue');
+    await expect
+      .poll(async () => page.getByTestId('qa-video-player').evaluate((node) => (node as HTMLVideoElement).currentTime), {
+        timeout: 5_000,
+        message: 'failure inbox should seek to the first failure cue',
+      })
+      .toBeGreaterThanOrEqual(0.1);
 
     await page.goto(`/qa?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&shard=7`);
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/, { timeout: 30_000 });
