@@ -1778,7 +1778,15 @@
         tokenId: token.tokenId,
       });
       await applyCanonicalJEventsToActiveEnv(approvalEvents, `move-allowance-${token.symbol}`);
-      const confirmedAllowance = await jadapter.getErc20Allowance(token.address, owner, spender);
+      if (approvalEvents.length === 0 && readObservedExternalAllowance(owner, token.address, spender) === null) {
+        await fetchExternalTokens(true);
+      }
+      const confirmedAllowance = readObservedExternalAllowance(owner, token.address, spender);
+      if (confirmedAllowance === null) {
+        throw new Error(
+          `approveErc20 postcondition missing observed allowance owner=${owner} token=${token.address} spender=${spender}`,
+        );
+      }
       if (confirmedAllowance < approvalAmount) {
         throw new Error(
           `approveErc20 postcondition failed owner=${owner} token=${token.address} spender=${spender} ` +
@@ -2575,6 +2583,18 @@
       balances: balances as bigint[],
       allowanceValues: allowanceValues as bigint[],
     };
+  }
+
+  function readObservedExternalAllowance(owner: string, tokenAddress: string, spender: string): bigint | null {
+    const externalWallet = getCurrentLiveEntityReplica()?.state?.externalWallet;
+    const ownerKey = String(owner || '').trim().toLowerCase();
+    const tokenKey = String(tokenAddress || '').trim().toLowerCase();
+    const spenderKey = String(spender || '').trim().toLowerCase();
+    if (!externalWallet || !ownerKey || !tokenKey || !spenderKey) return null;
+    return externalWallet.allowances
+      ?.get?.(ownerKey)
+      ?.get?.(`${tokenKey}:${spenderKey}`)
+      ?.allowance ?? null;
   }
 
   async function applyCanonicalJEventsToActiveEnv(
@@ -3870,15 +3890,7 @@
     }
   }
 
-  let externalBalancePollTimer: number | null = null;
   let externalBalancePollKey = '';
-
-  function clearExternalBalancePoller(): void {
-    if (externalBalancePollTimer !== null) {
-      window.clearInterval(externalBalancePollTimer);
-      externalBalancePollTimer = null;
-    }
-  }
 
   $: {
     if (typeof window === 'undefined') {
@@ -3891,7 +3903,6 @@
       const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
       if (nextKey !== externalBalancePollKey) {
         externalBalancePollKey = nextKey;
-        clearExternalBalancePoller();
         if (signerId) {
           void fetchExternalTokens();
         } else {
@@ -3903,7 +3914,6 @@
   }
 
   onDestroy(() => {
-    clearExternalBalancePoller();
     resetMoveLineMeasurement();
     moveVisualResizeObserver?.disconnect();
   });
