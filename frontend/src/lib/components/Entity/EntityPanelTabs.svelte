@@ -1423,6 +1423,19 @@
     error?: string;
   };
 
+  function requireExternalSnapshotBigInt(value: bigint | null | undefined, label: string): bigint {
+    if (typeof value !== 'bigint') {
+      throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:${label}`);
+    }
+    return value;
+  }
+
+  function assertExternalSnapshotCount(values: unknown[], expected: number, label: string): void {
+    if (values.length !== expected) {
+      throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:${label}:expected=${expected}:actual=${values.length}`);
+    }
+  }
+
   function normalizeOptionalTokenId(value: unknown): number | undefined {
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
     if (typeof value === 'bigint') {
@@ -2616,7 +2629,81 @@
     owner: string,
     tokenList: ExternalToken[],
     allowanceReads: ExternalAllowanceRead[],
+    jadapter?: JAdapter | null,
   ): Promise<ExternalWalletReadResult> {
+    const tokenAddresses = tokenList.map((token) => token.address).filter((address) => isAddress(address));
+    if (jadapter?.readWalletSnapshot && jadapter?.provider) {
+      const blockNumber = Number(await (jadapter.getCurrentBlockNumber?.() ?? jadapter.provider.getBlockNumber()));
+      const block = await jadapter.provider.getBlock(blockNumber);
+      if (!block?.hash) {
+        throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${blockNumber}`);
+      }
+      const snapshot = await jadapter.readWalletSnapshot({
+        owner,
+        tokenAddresses,
+        allowances: allowanceReads,
+        includeNativeBalance: true,
+        blockTag: blockNumber,
+      });
+      assertExternalSnapshotCount(snapshot.tokenBalances, tokenAddresses.length, 'tokenBalances');
+      assertExternalSnapshotCount(snapshot.allowances, allowanceReads.length, 'allowances');
+      const nativeBalance = requireExternalSnapshotBigInt(snapshot.nativeBalance, 'nativeBalance');
+      const tokenBalances = tokenAddresses.map((tokenAddress, index) => {
+        const normalizedTokenAddress = String(tokenAddress || '').trim().toLowerCase();
+        const token = tokenList.find((candidate) =>
+          String(candidate.address || '').trim().toLowerCase() === normalizedTokenAddress
+        );
+        return {
+          tokenAddress: normalizedTokenAddress,
+          ...(typeof token?.tokenId === 'number' ? { tokenId: token.tokenId } : {}),
+          balance: requireExternalSnapshotBigInt(snapshot.tokenBalances[index], `tokenBalance:${tokenAddress}`).toString(),
+        };
+      });
+      const allowances = allowanceReads.map((entry, index) => ({
+        tokenAddress: String(entry.tokenAddress || '').trim().toLowerCase(),
+        spender: String(entry.spender || '').trim().toLowerCase(),
+        allowance: requireExternalSnapshotBigInt(snapshot.allowances[index], `allowance:${entry.tokenAddress}:${entry.spender}`).toString(),
+      }));
+      const transactionHash = [
+        'external-wallet-snapshot',
+        blockNumber,
+        entityId,
+        String(owner || '').trim().toLowerCase(),
+      ].join(':');
+      const env = getRuntimeEnv(activeEnv);
+      if (env) {
+        const xln = await getXLN();
+        xln.applyJEventsToEnv?.(env, [{
+          name: 'ExternalWalletSnapshot',
+          args: {
+            entityId,
+            owner,
+            nativeBalance: nativeBalance.toString(),
+            tokenBalances,
+            allowances,
+          },
+          blockNumber,
+          blockHash: block.hash,
+          transactionHash,
+        }], 'external-wallet-snapshot-ui-local');
+        xln.startRuntimeLoop?.(env);
+        await xln.process(env, undefined, 0);
+        setXlnEnvironment(env);
+      }
+      const balanceByToken = new Map(tokenBalances.map((entry) => [entry.tokenAddress, BigInt(entry.balance)]));
+      const allowanceByKey = new Map(allowances.map((entry) => [
+        `${entry.tokenAddress}:${entry.spender}`,
+        BigInt(entry.allowance),
+      ]));
+      return {
+        nativeBalance,
+        balances: tokenList.map((token) => balanceByToken.get(String(token.address || '').trim().toLowerCase()) ?? 0n),
+        allowanceValues: allowanceReads.map((read) =>
+          allowanceByKey.get(`${String(read.tokenAddress || '').trim().toLowerCase()}:${String(read.spender || '').trim().toLowerCase()}`) ?? 0n
+        ),
+      };
+    }
+
     const requestApiBase = resolveApiBase();
     const response = await fetch(`${requestApiBase}/api/external-wallet/snapshot`, {
       method: 'POST',
@@ -2624,7 +2711,7 @@
       body: JSON.stringify({
         entityId,
         owner,
-        tokenAddresses: tokenList.map((token) => token.address).filter((address) => isAddress(address)),
+        tokenAddresses,
         allowances: allowanceReads,
       }),
     });
@@ -2754,7 +2841,7 @@
           balances = observed.balances;
           allowanceValues = observed.allowanceValues;
         } else if (entityId) {
-          const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads);
+          const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads, jadapter);
           nativeBalance = snapshot.nativeBalance;
           balances = snapshot.balances;
           allowanceValues = snapshot.allowanceValues;

@@ -8,10 +8,16 @@
 
 export {
   applyJEventsToEnv,
+  collectRelevantJEventReplicaKeys,
   getWatcherStartBlock,
+  getMinimumCommittedSignerJHeight,
   processEventBatch,
+  rawEventToJEvents,
+  rememberPendingWatcherJBlock,
+  resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
+  type PendingWatcherJBlockMap,
   type RawJEvent,
   type RawJEventArgs,
 } from './helpers';

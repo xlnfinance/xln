@@ -2,6 +2,8 @@
   import { onMount } from 'svelte';
   import { Activity, Camera, Database, Network, RefreshCw, ShieldCheck, Siren, Zap } from 'lucide-svelte';
   import BootstrapLive from '$lib/components/Health/BootstrapLive.svelte';
+  import QaRunsPanel from '$lib/components/Health/QaRunsPanel.svelte';
+  import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
 
   type HealthData = {
@@ -674,7 +676,7 @@
     <div>
       <div class="eyebrow">operator cockpit</div>
       <h1>xln health admin</h1>
-      <p>Runtime, mesh, market maker, QA evidence, screenshots.</p>
+      <p>Bootstrap, runtime adapters, mesh, market maker, QA evidence, screenshots.</p>
     </div>
     <div class="actions">
       <label class="switch">
@@ -700,6 +702,12 @@
     </button>
     <button class:active={activeSection === 'testset'} onclick={() => jumpTo('testset')}>
       <ShieldCheck size={15} /> Test Set
+    </button>
+    <button class:active={activeSection === 'qa-runs'} onclick={() => jumpTo('qa-runs')}>
+      <Activity size={15} /> QA Runs
+    </button>
+    <button class:active={activeSection === 'runtime-adapter'} onclick={() => jumpTo('runtime-adapter')}>
+      <Database size={15} /> Adapter
     </button>
     <button class:active={activeSection === 'stories'} onclick={() => jumpTo('stories')}>
       <Camera size={15} /> Stories
@@ -727,6 +735,10 @@
     <div class="panel">Loading health console...</div>
   {:else if error}
     <div class="panel error">{error}</div>
+    <div class="admin-stack">
+      <QaRunsPanel />
+      <RuntimeAdapterPanel />
+    </div>
   {:else if health}
     <BootstrapLive
       {health}
@@ -819,6 +831,11 @@
         <code>bun run gate:capped-testnet</code>
       </div>
     </section>
+
+    <div class="admin-stack">
+      <QaRunsPanel />
+      <RuntimeAdapterPanel />
+    </div>
 
     <section id="topology" class="panel split topology-split">
       <div>
@@ -1426,6 +1443,12 @@
     grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
     gap: 10px;
     margin-bottom: 12px;
+  }
+
+  .admin-stack {
+    display: grid;
+    gap: 16px;
+    margin: 16px 0;
   }
 
   .metric {
