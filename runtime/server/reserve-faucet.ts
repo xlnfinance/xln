@@ -8,7 +8,6 @@ import { resolveEntityProposerId } from '../state-helpers';
 import { formatTimingMs, getErrorMessage } from '../server-utils';
 import { getEntityReplicaById } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
-import type { RelayStore } from '../relay-store';
 import {
   findRecentReserveUpdatedEvent,
   type RecentReserveUpdatedEvent,
@@ -163,7 +162,7 @@ export const handleReserveFaucet = async (input: {
   req: Request;
   env: Env | null;
   headers: HeadersInit;
-  relayStore: RelayStore;
+  relayStore: { activeHubEntityIds: string[] };
   getJAdapter: () => JAdapter | null;
   ensureTokenCatalog: () => Promise<TokenCatalogEntry[]>;
   enqueueRuntimeInput: (env: Env, runtimeInput: RuntimeInput) => void;

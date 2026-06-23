@@ -56,7 +56,7 @@ import {
   handleLendingStateRequest,
 } from '../server/lending';
 import { handleRuntimeActivityRequest } from '../server/activity-api';
-import { waitForRecentReserveUpdatedEvent } from '../server/reserve-faucet';
+import { handleReserveFaucet } from '../server/reserve-faucet';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -85,7 +85,6 @@ import {
 } from '../runtime.ts';
 import type { EntityInput, Env, JReplica } from '../types';
 import {
-  hasPendingRuntimeWork,
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
   getAccountMachine,
@@ -925,68 +924,6 @@ const ensureOrderbook = async (env: Env, entityId: string, signerId: string): Pr
   });
   await settleRuntimeFor(env, 45);
   finishTiming('orderbook_init', startedAt);
-};
-
-const resolveRuntimeWaitPollMs = (): number => 25;
-const resolveReserveWaitPollMs = (): number => 50;
-
-const waitForRuntimeIdle = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
-  const started = Date.now();
-  const pollMs = resolveRuntimeWaitPollMs();
-  while (Date.now() - started < timeoutMs) {
-    if (!hasPendingRuntimeWork(env)) return true;
-    await sleep(pollMs);
-  }
-  return false;
-};
-
-const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
-  const started = Date.now();
-  const pollMs = resolveRuntimeWaitPollMs();
-  while (Date.now() - started < timeoutMs) {
-    const pendingJ = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
-    if (!pendingJ && !hasPendingRuntimeWork(env)) return true;
-    await sleep(pollMs);
-  }
-  return false;
-};
-
-const hasEntitySentBatchPending = (env: Env, entityId: string): boolean => {
-  const replica = getEntityReplicaById(env, entityId);
-  return Boolean(replica?.state?.jBatchState?.sentBatch);
-};
-
-const waitForEntityBroadcastWindow = async (
-  env: Env,
-  entityId: string,
-  timeoutMs = 10000,
-): Promise<boolean> => {
-  const started = Date.now();
-  const pollMs = resolveRuntimeWaitPollMs();
-  while (Date.now() - started < timeoutMs) {
-    if (!hasEntitySentBatchPending(env, entityId)) return true;
-    await sleep(pollMs);
-  }
-  return false;
-};
-
-const waitForReserveUpdate = async (
-  jadapter: JAdapter,
-  entityId: string,
-  tokenId: number,
-  expectedMin: bigint,
-  timeoutMs = 10000,
-): Promise<bigint | null> => {
-  const started = Date.now();
-  const pollMs = resolveReserveWaitPollMs();
-  while (Date.now() - started < timeoutMs) {
-    try {
-      const current = await jadapter.getReserves(entityId, tokenId);
-      if (current >= expectedMin) return current;
-    } catch {}
-    await sleep(pollMs);
-  }
-  return null;
 };
 
 const tokenCatalogsByEntityId = new Map<string, JTokenInfo[]>();
@@ -1851,127 +1788,19 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/faucet/reserve' && request.method === 'POST') {
-        const body = await request.json() as {
-          userEntityId?: string;
-          tokenId?: number | string;
-          tokenSymbol?: string;
-          amount?: string | number;
-        };
-        const userEntityId = String(body.userEntityId || '').toLowerCase();
-        const rawTokenId = body.tokenId ?? 1;
-        let tokenId = typeof rawTokenId === 'number' ? rawTokenId : Number(rawTokenId);
-        const tokenSymbol = typeof body.tokenSymbol === 'string' ? body.tokenSymbol : undefined;
-        const amount = typeof body.amount === 'string' ? body.amount : String(body.amount ?? '100');
-        if (!userEntityId) {
-          return new Response(safeStringify({ error: 'Missing userEntityId' }), { status: 400, headers });
-        }
-        if (!Number.isFinite(tokenId) || tokenId <= 0) {
-          return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
-        }
-
-        const tokenMeta = activeTokenCatalog.find(token =>
-          Number(token.tokenId) === tokenId ||
-          (tokenSymbol ? String(token.symbol || '').toUpperCase() === tokenSymbol.toUpperCase() : false),
-        );
-        if (!tokenMeta) {
-          return new Response(safeStringify({ error: 'Unknown token', tokenId, tokenSymbol }), {
-            status: 400,
-            headers,
-          });
-        }
-
-        tokenId = Number(tokenMeta.tokenId);
-        const decimals = typeof tokenMeta.decimals === 'number' ? Number(tokenMeta.decimals) : 18;
-        const amountWei = ethers.parseUnits(amount, decimals);
-        const prevUserReserve = await readyJAdapter.getReserves(userEntityId, tokenId).catch(() => 0n);
-        const hubReplica = getEntityReplicaById(env, readyBootstrap.entityId);
-        const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
-        if (hubReserve < amountWei) {
-          return new Response(safeStringify({
-            error: 'Hub has insufficient reserves',
-            have: hubReserve.toString(),
-            need: amountWei.toString(),
-          }), {
-            status: 409,
-            headers,
-          });
-        }
-
-        const enqueueReserveTransfer = (): void => {
-          enqueueRuntimeInput(env, {
-            runtimeTxs: [],
-            entityInputs: [{
-              entityId: readyBootstrap.entityId,
-              signerId: readyBootstrap.signerId,
-              entityTxs: [
-                {
-                  type: 'r2r',
-                  data: { toEntityId: userEntityId, tokenId, amount: amountWei },
-                },
-              ],
-            }],
-          });
-        };
-
-        const enqueueBatchBroadcast = (): void => {
-          enqueueRuntimeInput(env, {
-            runtimeTxs: [],
-            entityInputs: [{
-              entityId: readyBootstrap.entityId,
-              signerId: readyBootstrap.signerId,
-              entityTxs: [{ type: 'j_broadcast', data: {} }],
-            }],
-          });
-        };
-
-        enqueueReserveTransfer();
-        await waitForRuntimeIdle(env, 5000);
-        const broadcastWindowReady = await waitForEntityBroadcastWindow(env, readyBootstrap.entityId, 10000);
-        if (!broadcastWindowReady) {
-          return new Response(safeStringify({ error: 'Hub sentBatch did not clear in time' }), {
-            status: 504,
-            headers,
-          });
-        }
-        enqueueBatchBroadcast();
-        await waitForRuntimeIdle(env, 5000);
-        const batchCleared = await waitForJBatchClear(env, 10000);
-        if (!batchCleared) {
-          return new Response(safeStringify({ error: 'J-batch did not broadcast in time' }), {
-            status: 504,
-            headers,
-          });
-        }
-        const expectedMin = prevUserReserve + amountWei;
-        const updatedReserve = await waitForReserveUpdate(readyJAdapter, userEntityId, tokenId, expectedMin, 10000);
-        if (updatedReserve === null) {
-          return new Response(safeStringify({ error: 'Reserve update not confirmed on-chain' }), {
-            status: 504,
-            headers,
-          });
-        }
-        const reserveEvent = await waitForRecentReserveUpdatedEvent(env, userEntityId, tokenId, expectedMin);
-        if (!reserveEvent) {
-          return new Response(safeStringify({
-            error: 'RESERVE_EVENT_MISSING',
-            entityId: userEntityId,
-            tokenId,
-            expectedMin: expectedMin.toString(),
-            updatedReserve: updatedReserve.toString(),
-          }), {
-            status: 500,
-            headers,
-          });
-        }
-        return new Response(safeStringify({
-          success: true,
-          type: 'reserve',
-          amount,
-          tokenId,
-          from: readyBootstrap.entityId,
-          to: userEntityId,
-          events: [reserveEvent],
-        }), { headers });
+        return handleReserveFaucet({
+          req: request,
+          env,
+          headers,
+          relayStore: { activeHubEntityIds: [readyBootstrap.entityId] },
+          getJAdapter: () => readyJAdapter,
+          ensureTokenCatalog: async () => {
+            if (activeTokenCatalog.length > 0) return activeTokenCatalog;
+            activeTokenCatalog = await waitForTokenCatalog(readyJAdapter);
+            return activeTokenCatalog;
+          },
+          enqueueRuntimeInput,
+        });
       }
 
       if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
