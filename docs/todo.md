@@ -218,11 +218,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `/api/qa/runs` and `/api/qa/run` now serialize perf summaries without raw `samples`; `/api/qa/run/perf?runId=...` returns raw run and shard samples only when requested.
   - Evidence: unit asserts default run payload strips run/shard samples while the perf endpoint returns the raw timeseries; QA cockpit fixture now mirrors the lean run contract.
 
-- [ ] Add ETag or shared polling store for QA/health data.
+- [x] Add ETag or shared polling store for QA/health data.
   - Impact: medium.
-  - Current issue: multiple panels poll overlapping endpoints every 15 seconds.
-  - Fix: single shared store or SSE/WS updates; use ETag/304 for unchanged history/runs.
-  - Tests: two panels mounted produce one network request per interval.
+  - Current issue: multiple panels polled overlapping endpoints every 15 seconds and re-downloaded unchanged JSON.
+  - Status: done. QA JSON GET endpoints now emit strong content ETags and return `304` on matching `If-None-Match`; media endpoints stay uncached. `qaFetch()` keeps an in-memory per-token response cache and transparently serves cached JSON bodies on 304.
+  - Coverage: catalog/history/restart status/restart audit/stories/runs/run/perf use `private, no-cache` ETags; POST/admin actions stay `no-store`.
+  - Evidence: backend unit asserts ETag/304 contract; frontend integration test uses a real Bun server to verify `qaFetch()` sends `If-None-Match` and returns cached JSON on 304.
 
 - [ ] Keep 1M-account remote snapshots aggregate-first.
   - Impact: high.
