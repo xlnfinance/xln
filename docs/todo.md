@@ -318,8 +318,10 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. QA manifests now store redacted `logTail/error`, legacy reads redact old raw tails, and `/api/qa/artifact` redacts text/json/vtt/log responses while leaving binary media byte-for-byte.
   - Evidence: unit covers direct redactor cases plus a real QA run fixture where manifest tail, error, and text artifact all hide stored secrets.
 
-- [ ] Add artifact sensitivity classification.
+- [x] Add artifact sensitivity classification.
   - Artifacts: public, internal, secret-bearing. Secret-bearing artifacts require admin scope or are unavailable in regulator export.
+  - Status: done. Runner and report reader classify artifacts as `public`, `internal`, or `secret-bearing`; legacy manifests are enriched on read. `/api/qa/artifact` now denies secret-bearing files to read tokens and requires admin scope, while cue transcripts stay public and videos/screenshots stay internal.
+  - Evidence: `bun test runtime/__tests__/qa-story-report.test.ts` covers classifier decisions plus read/admin artifact access; `bun x tsc -p tsconfig.runtime.json --noEmit` passes.
 
 - [x] Hide absolute server paths from operator UI.
   - Status: done. Restart active status and restart audit rows now expose relative `.logs/...` IDs, not `/Users/...` or other host paths; legacy absolute DB rows are normalized on read.

@@ -14,6 +14,7 @@ import {
   type QaRestartAuditEntry,
 } from '../qa/api';
 import {
+  classifyQaArtifactSensitivity,
   classifyQaShardFailure,
   compareQaBenchmarkRuns,
   formatQaRunIdUtc,
@@ -360,6 +361,39 @@ test('qa secret redactor masks runtime tokens and labeled secrets', () => {
   expect(redacted).toContain('[REDACTED]');
 });
 
+test('qa artifact sensitivity classifier separates public cues from secret-bearing files', () => {
+  expect(classifyQaArtifactSensitivity({
+    name: 'video.webm',
+    relativePath: 'test-results-shard-1/wallet/video.webm',
+    kind: 'video',
+    contentType: 'video/webm',
+  })).toBe('internal');
+  expect(classifyQaArtifactSensitivity({
+    name: 'state.png',
+    relativePath: 'ux-gallery/desktop/state.png',
+    kind: 'image',
+    contentType: 'image/png',
+  })).toBe('internal');
+  expect(classifyQaArtifactSensitivity({
+    name: 'cues.vtt',
+    relativePath: 'test-results-shard-1/wallet/qa-cues/cues.vtt',
+    kind: 'text',
+    contentType: 'text/vtt; charset=utf-8',
+  })).toBe('public');
+  expect(classifyQaArtifactSensitivity({
+    name: 'trace.zip',
+    relativePath: 'test-results-shard-1/wallet/trace.zip',
+    kind: 'trace',
+    contentType: 'application/zip',
+  })).toBe('secret-bearing');
+  expect(classifyQaArtifactSensitivity({
+    name: 'manifest.json',
+    relativePath: 'manifest.json',
+    kind: 'json',
+    contentType: 'application/json',
+  })).toBe('secret-bearing');
+});
+
 test('qa run and text artifact surfaces redact stored secrets', async () => {
   const runId = '20000101-000002-126';
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
@@ -383,6 +417,7 @@ test('qa run and text artifact surfaces redact stored secrets', async () => {
       relativePath: 'secret.log',
       sizeBytes: secretLog.length,
       kind: 'text' as const,
+      sensitivity: 'secret-bearing' as const,
       contentType: 'text/plain; charset=utf-8',
     }],
   };
@@ -409,15 +444,28 @@ test('qa run and text artifact surfaces redact stored secrets', async () => {
     expect(runSurface).not.toContain('encoded-secret');
     expect(runSurface).not.toContain('read-secret');
     expect(runSurface).not.toContain('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(run.shards[0].artifacts[0]?.sensitivity).toBe('secret-bearing');
 
     await withQaAuthEnv(async () => {
-      const response = await maybeHandleQaRequest(
+      const readResponse = await maybeHandleQaRequest(
         qaRequest(`http://127.0.0.1:8080/api/qa/artifact?runId=${runId}&path=secret.log`),
         '/api/qa/artifact',
         JSON_HEADERS,
       );
-      expect(response?.status).toBe(200);
-      const artifactText = await response!.text();
+      expect(readResponse?.status).toBe(403);
+      expect(await readResponse!.json()).toMatchObject({
+        ok: false,
+        error: 'QA_ARTIFACT_ADMIN_REQUIRED',
+        sensitivity: 'secret-bearing',
+      });
+
+      const adminResponse = await maybeHandleQaRequest(
+        qaRequest(`http://127.0.0.1:8080/api/qa/artifact?runId=${runId}&path=secret.log`, {}, QA_ADMIN_TOKEN),
+        '/api/qa/artifact',
+        JSON_HEADERS,
+      );
+      expect(adminResponse?.status).toBe(200);
+      const artifactText = await adminResponse!.text();
       expect(artifactText).toContain('[REDACTED]');
       expect(artifactText).not.toContain('bearer-secret-123456789');
       expect(artifactText).not.toContain('remote-secret-token');
