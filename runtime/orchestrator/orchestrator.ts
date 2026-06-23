@@ -276,6 +276,9 @@ const runtimeImportTokenTtlMs = Math.max(
 );
 const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH']?.trim()
   || join(args.dbRoot, 'runtime-import-manifest.json');
+const runtimeImportLogUrlEnabled = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env['XLN_RUNTIME_IMPORT_LOG_URL'] || '').trim().toLowerCase(),
+);
 
 const buildPublicRuntimeRpcUrl = (apiPort: number): string => {
   const url = new URL(args.publicWsBaseUrl);
@@ -371,6 +374,7 @@ const publishRuntimeImportManifest = (): void => {
     importUrl,
     access: runtimeImportAccess,
     manifestPath: runtimeImportManifestPath,
+    exposeUrl: runtimeImportLogUrlEnabled,
   }));
 };
 

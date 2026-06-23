@@ -654,13 +654,8 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     expect(importUrl).toContain('runtimeList=');
     expect(importUrl).not.toContain('runtime-import=');
     await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toBeVisible({ timeout: 10_000 });
-
-    const textareaText = await page.getByTestId('remote-runtime-import-textarea').inputValue();
-    for (const label of ['H1', 'H2', 'H3', 'MM', 'Custody']) {
-      expect(textareaText, `import textarea must include ${label}`).toContain(label);
-    }
-
+    await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toHaveCount(0);
+    await expect(page.getByTestId('remote-runtime-import-textarea')).toHaveCount(0);
     await expect(page.getByTestId('remote-runtime-import-confirm')).toHaveCount(0);
     await page.waitForFunction((storageKey) => {
       const raw = sessionStorage.getItem(storageKey);
@@ -674,6 +669,8 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     }, REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY, { timeout: 120_000 });
 
     const importSummary = await readRuntimeImportSummary(page);
+    await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toHaveCount(0);
+    await expect(page.getByTestId('remote-runtime-import-textarea')).toHaveCount(0);
 
     expect(importSummary.ok).toBe(true);
     expect(importSummary.entries.length).toBeGreaterThanOrEqual(5);

@@ -64,3 +64,34 @@ test('dev radapter keys prints one auto-import runtimeList URL with ready tokens
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('dev radapter keys can suppress early URL logging for bun run dev', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xln-dev-radapter-'));
+  const outPath = join(dir, 'radapter-keys.json');
+  const envOutPath = join(dir, 'radapter-keys.env');
+  try {
+    const result = spawnSync('bun', [
+      'runtime/scripts/dev-radapter-keys.ts',
+      '--web-port',
+      '8084',
+      '--api-port',
+      '8082',
+      '--out',
+      outPath,
+      '--env-out',
+      envOutPath,
+      '--suppress-url-log',
+    ], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).not.toContain('/app?runtimeList=');
+    const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
+    expect(payload.importUrl).toContain('/app?runtimeList=');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
