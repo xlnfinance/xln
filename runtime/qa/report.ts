@@ -71,6 +71,8 @@ export type QaPerfSummary = {
   samples: QaPerfSample[];
 };
 
+export type QaPerfSummaryView = Omit<QaPerfSummary, 'samples'>;
+
 export type QaBrowserIssueType = 'console' | 'pageerror' | 'requestfailed' | 'http';
 
 export type QaBrowserIssueSeverity = 'error' | 'warning';
@@ -169,6 +171,15 @@ export type QaRunManifest = {
   failedShards: number;
   args?: Record<string, unknown> | null;
   shards: QaShardManifest[];
+};
+
+export type QaShardView = Omit<QaShardManifest, 'perf'> & {
+  perf?: QaPerfSummaryView;
+};
+
+export type QaRunView = Omit<QaRunManifest, 'perf' | 'shards'> & {
+  perf?: QaPerfSummaryView;
+  shards: QaShardView[];
 };
 
 export const QA_LOGS_ROOT = resolve(process.cwd(), '.logs', 'e2e-parallel');
@@ -1495,6 +1506,25 @@ export const enrichQaRunUrls = (run: QaRunManifest): QaRunManifest => ({
   })),
 });
 
+export const summarizeQaPerf = (perf: QaPerfSummary): QaPerfSummaryView => ({
+  sampleCount: perf.sampleCount,
+  avgLoad1: perf.avgLoad1,
+  peakLoad1: perf.peakLoad1,
+  minFreeMemBytes: perf.minFreeMemBytes,
+  maxRunnerRssBytes: perf.maxRunnerRssBytes,
+  maxChildCpuPct: perf.maxChildCpuPct,
+  maxChildRssKb: perf.maxChildRssKb,
+});
+
+export const stripQaRunPerfSamples = (run: QaRunManifest): QaRunView => ({
+  ...run,
+  ...(run.perf ? { perf: summarizeQaPerf(run.perf) } : {}),
+  shards: run.shards.map(shard => ({
+    ...shard,
+    ...(shard.perf ? { perf: summarizeQaPerf(shard.perf) } : {}),
+  })),
+});
+
 const listQaRunStoryScreenshots = async (runLimit: number): Promise<QaStoryScreenshot[]> => {
   const runs = await listQaRuns(runLimit);
   const stories: QaStoryScreenshot[] = [];
@@ -1559,7 +1589,8 @@ export const resolveQaStoryScreenshotPath = async (
   return absolutePath;
 };
 
-export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'shards'> & {
+export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'perf' | 'shards'> & {
+  perf?: QaPerfSummaryView;
   timing: QaRunTimingSummary;
   failingTargets: string[];
 } => ({
@@ -1571,7 +1602,7 @@ export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'shards'
   totalMs: run.totalMs,
   timing: summarizeQaRunTiming(run),
   ...(run.code ? { code: run.code } : {}),
-  ...(run.perf ? { perf: run.perf } : {}),
+  ...(run.perf ? { perf: summarizeQaPerf(run.perf) } : {}),
   browserHealth: run.browserHealth ?? summarizeQaRunBrowserHealth(run),
   ...(run.benchmark ? { benchmark: run.benchmark } : {}),
   totalShards: run.totalShards,
