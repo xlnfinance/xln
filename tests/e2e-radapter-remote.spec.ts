@@ -240,6 +240,11 @@ test('health admin consolidates bootstrap QA and runtime adapter panels', async 
   await expect(page.locator('body')).toContainText('xln health admin', { timeout: 30_000 });
   await expect(page.locator('#bootstrap')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#qa-runs')).toBeVisible();
+  const cockpitPanel = page.locator('#qa-cockpit');
+  await expect(cockpitPanel).toBeVisible();
+  await expect(cockpitPanel.getByRole('link', { name: 'Open full' })).toHaveAttribute('href', '/qa');
+  await cockpitPanel.getByRole('button', { name: 'Embed cockpit' }).click();
+  await expect(page.frameLocator('iframe[title="QA Cockpit"]').getByRole('heading', { name: 'Test Cockpit' })).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#runtime-adapter')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open cockpit' })).toHaveAttribute('href', '/qa');
   await expect(page.getByRole('link', { name: 'Open inspector' })).toHaveAttribute('href', '/radapter');
