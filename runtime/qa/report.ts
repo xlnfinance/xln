@@ -582,14 +582,17 @@ export const compareQaBenchmarkRuns = (
   });
 
   const slower = metrics.filter(metric => metric.verdict === 'slower').sort((a, b) => b.deltaPct - a.deltaPct);
+  const blockingSlower = slower.filter(metric => metric.metric !== 'peakLoad1');
   const faster = metrics.filter(metric => metric.verdict === 'faster').sort((a, b) => a.deltaPct - b.deltaPct);
   const fasterTiming = faster.filter(metric => metric.unit === 'ms');
   const status: QaBenchmarkStatus =
-    slower.length > 0 && fasterTiming.length > 0 ? 'mixed'
-      : slower.length > 0 ? 'slower'
+    blockingSlower.length > 0 && fasterTiming.length > 0 ? 'mixed'
+      : blockingSlower.length > 0 ? 'slower'
         : fasterTiming.length > 0 ? 'faster'
           : 'ok';
-  const top = slower[0] ?? fasterTiming[0] ?? null;
+  const top = blockingSlower[0] ?? fasterTiming[0] ?? null;
+  const hostLoadOnly = slower.length > 0 && blockingSlower.length === 0;
+  const hostLoadDelta = slower.find(metric => metric.metric === 'peakLoad1') ?? null;
   const sameGitHead = Boolean(current.code?.gitHead && baseline.code?.gitHead)
     ? current.code!.gitHead === baseline.code!.gitHead
     : null;
@@ -600,10 +603,13 @@ export const compareQaBenchmarkRuns = (
     ...(sameCodeHash === false ? ['code hash changed'] : []),
     ...(sameGitHead === false ? ['git HEAD changed'] : []),
     ...(current.code?.dirty ? ['current worktree is dirty'] : []),
+    ...(hostLoadOnly ? ['host load increased without app timing regression'] : []),
     ...(top ? [`largest delta: ${top.label} ${top.deltaPct > 0 ? '+' : ''}${top.deltaPct}%`] : []),
   ];
   const reason = top
     ? `${top.label} ${top.deltaPct > 0 ? '+' : ''}${top.deltaPct}% vs ${baseline.runId}`
+    : hostLoadOnly && hostLoadDelta
+      ? `Timing within thresholds; host load ${hostLoadDelta.deltaPct > 0 ? '+' : ''}${hostLoadDelta.deltaPct}% vs ${baseline.runId}`
     : faster.length > 0
       ? `Timing within thresholds; resource usage improved vs ${baseline.runId}`
       : `Within thresholds vs ${baseline.runId}`;
