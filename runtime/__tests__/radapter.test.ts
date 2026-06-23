@@ -1328,6 +1328,11 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
 
     const head = await adapter.read<{ latestHeight: number }>('head');
     expect(head.latestHeight).toBe(8);
+    env.height = 12;
+    const newerHead = await adapter.read<{ latestHeight: number }>('head');
+    expect(newerHead.latestHeight).toBe(12);
+    expect(adapter.currentHeight).toBe(12);
+    expect(heights).toContain(12);
     adapter.disconnect();
   } finally {
     globalThis.WebSocket = previousWebSocket;
