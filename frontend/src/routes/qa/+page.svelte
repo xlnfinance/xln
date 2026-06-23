@@ -1,5 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import QaProtectedImage from '$lib/components/QA/QaProtectedImage.svelte';
+  import QaScenarioPlayer from '$lib/components/QA/QaScenarioPlayer.svelte';
+  import {
+    qaScenarioDescription,
+    qaScenarioTitle,
+    tenWordScenarioSummary,
+  } from '$lib/qa/scenarioPlayer';
+  import { clearQaToken, consumeQaTokenFromUrl, qaFetch, writeQaToken } from '$lib/qa/apiClient';
+
+  type QaAuthInfo = {
+    scope?: 'read' | 'admin';
+    disabled?: boolean;
+  };
 
   type QaSummary = {
     manifestVersion: number;
@@ -8,6 +21,10 @@
     completedAt: number | null;
     status: 'passed' | 'failed' | 'unknown';
     totalMs: number | null;
+    timing?: QaRunTimingSummary;
+    code?: QaCodeFingerprint;
+    perf?: QaPerfSummary;
+    benchmark?: QaBenchmarkComparison;
     totalShards: number;
     passedShards: number;
     failedShards: number;
@@ -49,6 +66,8 @@
       viteBoot: number;
       playwright: number;
     } | null;
+    perf?: QaPerfSummary;
+    timelineSteps?: QaSlowStep[];
     slowSteps: QaSlowStep[];
     artifacts: QaArtifact[];
     hasVideo: boolean;
@@ -62,6 +81,9 @@
     completedAt: number | null;
     status: 'passed' | 'failed' | 'unknown';
     totalMs: number | null;
+    code?: QaCodeFingerprint;
+    perf?: QaPerfSummary;
+    benchmark?: QaBenchmarkComparison;
     totalShards: number;
     passedShards: number;
     failedShards: number;
@@ -69,23 +91,187 @@
     shards: QaShard[];
   };
 
+  type QaCodeFingerprint = {
+    gitHead: string | null;
+    gitBranch: string | null;
+    gitStatus: string;
+    dirty: boolean;
+    codeHash: string;
+    computedAt: number;
+    trackedFileCount: number;
+    trackedBytes: number;
+  };
+
+  type QaPerfSummary = {
+    sampleCount: number;
+    avgLoad1: number;
+    peakLoad1: number;
+    minFreeMemBytes: number;
+    maxRunnerRssBytes: number;
+    maxChildCpuPct: number;
+    maxChildRssKb: number;
+  };
+
+  type QaRunTimingSummary = {
+    avgShardMs: number | null;
+    maxShardMs: number | null;
+    bootstrapMs: number | null;
+    apiHealthyMs: number | null;
+    playwrightMs: number | null;
+  };
+
+  type QaBenchmarkMetricDelta = {
+    metric: string;
+    label: string;
+    unit: 'ms' | 'load' | 'percent' | 'kb' | 'bytes';
+    current: number;
+    baseline: number;
+    delta: number;
+    deltaPct: number;
+    thresholdPct: number;
+    verdict: 'ok' | 'faster' | 'slower';
+  };
+
+  type QaBenchmarkComparison = {
+    status: 'ok' | 'faster' | 'slower' | 'mixed' | 'insufficient';
+    suiteKey: string;
+    suiteLabel: string;
+    comparedRunId: string | null;
+    comparedGitHead: string | null;
+    comparedCodeHash: string | null;
+    sameGitHead: boolean | null;
+    sameCodeHash: boolean | null;
+    reason: string;
+    metrics: QaBenchmarkMetricDelta[];
+    likelyCauses: string[];
+  };
+
+  type QaCatalogEntry = {
+    id: string;
+    group: string;
+    label: string;
+    command: string;
+    description: string;
+  };
+
+  type QaHistoryEntry = {
+    runId: string;
+    createdAt: number;
+    completedAt: number | null;
+    status: 'passed' | 'failed' | 'unknown';
+    totalMs: number | null;
+    totalShards: number;
+    passedShards: number;
+    failedShards: number;
+    gitHead: string | null;
+    gitBranch: string | null;
+    dirty: boolean;
+    codeHash: string | null;
+    avgLoad1: number | null;
+    peakLoad1: number | null;
+    maxChildCpuPct: number | null;
+    maxChildRssKb: number | null;
+    benchmarkStatus: QaBenchmarkComparison['status'] | null;
+    benchmarkDeltaPct: number | null;
+    benchmarkComparedRunId: string | null;
+    avgShardMs: number | null;
+    maxShardMs: number | null;
+    bootstrapMs: number | null;
+    apiHealthyMs: number | null;
+    playwrightMs: number | null;
+  };
+
+  type QaRestartAuditEntry = {
+    auditId: string;
+    status: 'started' | 'finished' | 'spawn_error';
+    actorKeyId: string;
+    scope: 'read' | 'admin';
+    operatorId: string;
+    action: 'restart-run';
+    target: string;
+    title: string;
+    reason: string;
+    expectedGitHead: string | null;
+    actualGitHead: string | null;
+    gitBranch: string | null;
+    codeHash: string | null;
+    dirty: boolean;
+    startedAt: number;
+    finishedAt: number | null;
+    pid: number | null;
+    exitCode: number | null;
+    logPath: string;
+    requestIp: string | null;
+    userAgent: string | null;
+  };
+
+  type RestartStatus = {
+    active: boolean;
+    target?: string;
+    title?: string;
+    pid?: number | null;
+    command?: string[];
+    logPath?: string;
+    last?: {
+      startedAt: number;
+      target: string;
+      title: string;
+      exitCode: number | null;
+      logPath: string;
+    };
+  };
+
+  type QaView = 'e2e' | 'scenarios' | 'suites' | 'benchmarks' | 'history';
+  type RunSortKey =
+    | 'date-desc'
+    | 'date-asc'
+    | 'stack-fast'
+    | 'stack-slow'
+    | 'bootstrap-fast'
+    | 'bootstrap-slow'
+    | 'playwright-fast'
+    | 'playwright-slow'
+    | 'test-fast'
+    | 'test-slow';
+  type ShardSortKey =
+    | 'index'
+    | 'duration-fast'
+    | 'duration-slow'
+    | 'bootstrap-fast'
+    | 'bootstrap-slow'
+    | 'playwright-fast'
+    | 'playwright-slow';
+
   let runs = $state<QaSummary[]>([]);
+  let catalog = $state<QaCatalogEntry[]>([]);
+  let history = $state<QaHistoryEntry[]>([]);
+  let restartAudit = $state<QaRestartAuditEntry[]>([]);
+  let restart = $state<RestartStatus>({ active: false });
   let selectedRunId = $state('');
   let selectedRun = $state<QaRun | null>(null);
   let selectedShardIndex = $state(0);
   let loadingRuns = $state(true);
+  let loadingMeta = $state(true);
   let loadingRun = $state(false);
   let error = $state<string | null>(null);
+  let actionError = $state<string | null>(null);
+  let restartPlan = $state<string[]>([]);
+  let restartAllowed = $state(false);
+  let activeView = $state<QaView>('e2e');
+  let runSortKey = $state<RunSortKey>('date-desc');
+  let shardSortKey = $state<ShardSortKey>('index');
   let autoRefresh = $state(true);
+  let qaTokenInput = $state('');
+  let qaAuthLabel = $state('locked');
+  let restartOperatorId = $state('');
+  let restartReason = $state('');
+  let restartConfirm = $state('');
+  let restartExpectedGitHead = $state('');
+  let restartCodeHash = $state('');
+  let restartDirty = $state(false);
 
   const selectedShard = $derived(
     selectedRun?.shards?.[selectedShardIndex] ?? null,
-  );
-  const selectedVideo = $derived(
-    selectedShard?.artifacts.find((artifact) => artifact.kind === 'video') ?? null,
-  );
-  const selectedImages = $derived(
-    selectedShard?.artifacts.filter((artifact) => artifact.kind === 'image') ?? [],
   );
   const latestRun = $derived(runs[0] ?? null);
   const previousRun = $derived(runs[1] ?? null);
@@ -96,6 +282,41 @@
     latestRun?.totalMs && previousRun?.totalMs ? latestRun.totalMs - previousRun.totalMs : null,
   );
   const latestTrend = $derived(runs.slice(0, 12));
+  const hashChanged = $derived(Boolean(latestRun?.code?.codeHash && previousRun?.code?.codeHash && latestRun.code.codeHash !== previousRun.code.codeHash));
+  const selectedHistoryPrevious = $derived.by(() => {
+    const run = selectedRun;
+    if (!run) return null;
+    return history.find((row) => row.runId !== run.runId && row.createdAt < run.createdAt && Boolean(row.codeHash)) ?? null;
+  });
+  const selectedHashDelta = $derived(
+    selectedRun?.code?.codeHash && selectedHistoryPrevious?.codeHash
+      ? selectedRun.code.codeHash === selectedHistoryPrevious.codeHash
+        ? 'same'
+        : 'changed'
+      : 'unknown',
+  );
+  const catalogGroups = $derived(Array.from(new Set(catalog.map(item => item.group))));
+  const benchmarkCatalog = $derived(catalog.filter(item => item.group === 'Benchmark'));
+  const qaCanPlanRestart = $derived(qaAuthLabel === 'admin' || qaAuthLabel === 'open');
+  const restartReady = $derived(Boolean(
+    restartAllowed &&
+    !restart.active &&
+    restartOperatorId.trim() &&
+    restartReason.trim() &&
+    restartConfirm.trim() === 'RUN' &&
+    restartExpectedGitHead.trim(),
+  ));
+  const sortedRuns = $derived([...runs].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
+  const sortedHistory = $derived([...history].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
+  const sortedShardEntries = $derived((selectedRun?.shards ?? [])
+    .map((shard, index) => ({ shard, index }))
+    .sort((a, b) => compareShardsForSort(a, b, shardSortKey)));
+
+  function applyQaAuth(payload: { qaAuth?: QaAuthInfo } | null | undefined): void {
+    const auth = payload?.qaAuth;
+    if (!auth) return;
+    qaAuthLabel = auth.disabled ? 'open' : auth.scope ?? 'locked';
+  }
 
   function formatDate(timestamp: number | null | undefined): string {
     if (!timestamp) return 'n/a';
@@ -114,6 +335,80 @@
     return `${run.passedShards}/${run.totalShards}`;
   }
 
+  function shortHash(value: string | null | undefined, len = 12): string {
+    const raw = String(value || '').trim();
+    return raw ? raw.slice(0, len) : 'n/a';
+  }
+
+  function statusLabel(entry: { status: 'passed' | 'failed' | 'unknown' }): string {
+    if (entry.status === 'passed') return 'PASS';
+    if (entry.status === 'failed') return 'FAIL';
+    return 'UNKNOWN';
+  }
+
+  function benchmarkLabel(status: QaBenchmarkComparison['status'] | null | undefined): string {
+    if (!status) return 'n/a';
+    if (status === 'insufficient') return 'NEW';
+    return status.toUpperCase();
+  }
+
+  function formatPct(value: number | null | undefined): string {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 'n/a';
+    return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+  }
+
+  function finiteSortValue(value: number | null | undefined, fallback: number): number {
+    return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  }
+
+  function runTimingValue(run: QaSummary | QaHistoryEntry, key: RunSortKey): number {
+    const timing = 'timing' in run ? run.timing : null;
+    if (key.startsWith('stack')) return finiteSortValue(run.totalMs, Number.POSITIVE_INFINITY);
+    if (key.startsWith('bootstrap')) {
+      return finiteSortValue(timing?.bootstrapMs ?? ('bootstrapMs' in run ? run.bootstrapMs : null), Number.POSITIVE_INFINITY);
+    }
+    if (key.startsWith('playwright')) {
+      return finiteSortValue(timing?.playwrightMs ?? ('playwrightMs' in run ? run.playwrightMs : null), Number.POSITIVE_INFINITY);
+    }
+    if (key.startsWith('test')) {
+      return finiteSortValue(timing?.avgShardMs ?? ('avgShardMs' in run ? run.avgShardMs : null), Number.POSITIVE_INFINITY);
+    }
+    return finiteSortValue(run.createdAt, 0);
+  }
+
+  function compareRunsForSort(a: QaSummary | QaHistoryEntry, b: QaSummary | QaHistoryEntry, key: RunSortKey): number {
+    if (key === 'date-asc') return a.createdAt - b.createdAt || a.runId.localeCompare(b.runId);
+    if (key === 'date-desc') return b.createdAt - a.createdAt || b.runId.localeCompare(a.runId);
+    const descending = key.endsWith('slow');
+    const av = runTimingValue(a, key);
+    const bv = runTimingValue(b, key);
+    return descending ? bv - av || b.createdAt - a.createdAt : av - bv || b.createdAt - a.createdAt;
+  }
+
+  function shardBootstrapMs(shard: QaShard): number | null {
+    const phase = shard.phaseMs;
+    if (!phase) return null;
+    return phase.preflight + phase.anvilBoot + phase.apiBoot + phase.apiHealthy + phase.viteBoot;
+  }
+
+  function shardSortValue(shard: QaShard, key: ShardSortKey): number {
+    if (key.startsWith('bootstrap')) return finiteSortValue(shardBootstrapMs(shard), Number.POSITIVE_INFINITY);
+    if (key.startsWith('playwright')) return finiteSortValue(shard.phaseMs?.playwright, Number.POSITIVE_INFINITY);
+    return finiteSortValue(shard.durationMs, Number.POSITIVE_INFINITY);
+  }
+
+  function compareShardsForSort(
+    a: { shard: QaShard; index: number },
+    b: { shard: QaShard; index: number },
+    key: ShardSortKey,
+  ): number {
+    if (key === 'index') return a.index - b.index;
+    const descending = key.endsWith('slow');
+    const av = shardSortValue(a.shard, key);
+    const bv = shardSortValue(b.shard, key);
+    return descending ? bv - av || a.index - b.index : av - bv || a.index - b.index;
+  }
+
   function runArg(run: QaRun, key: string): unknown {
     return run.args && typeof run.args === 'object' ? run.args[key] : undefined;
   }
@@ -126,6 +421,18 @@
   function pickDefaultShard(run: QaRun): number {
     const failedIndex = run.shards.findIndex((shard) => shard.status === 'failed');
     return failedIndex >= 0 ? failedIndex : 0;
+  }
+
+  function requestedRunIdFromUrl(): string {
+    if (typeof window === 'undefined') return '';
+    return new URL(window.location.href).searchParams.get('runId')?.trim() || '';
+  }
+
+  function rememberRunInUrl(runId: string): void {
+    if (typeof window === 'undefined' || !runId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('runId', runId);
+    window.history.replaceState(null, '', url);
   }
 
   function readableText(raw: string | null | undefined): string {
@@ -143,64 +450,27 @@
   }
 
   function testHandle(shard: QaShard): string {
-    const key = `${shard.handle || ''} ${shard.title || ''} ${shard.target || ''}`.toLowerCase();
-    if (key.includes('workspace-dispute-lifecycle') || key.includes('dispute lifecycle returns')) {
-      return 'dispute.lifecycle-return';
-    }
-    if (key.includes('settle-workspace-sign') || key.includes('sign-broadcast')) {
-      return 'dispute.sign-broadcast';
-    }
-    if (key.includes('payment-smoke') || key.includes('payment smoke')) {
-      return 'payment.smoke';
-    }
-    if (key.includes('baseline') || key.includes('cold reset provisions')) {
-      return 'baseline.mesh-reserves';
-    }
-    if (key.includes('connect')) {
-      return 'wallet.connect';
-    }
     return shard.handle || readableText(shard.target) || `shard-${shard.shard}`;
   }
 
   function describeShard(shard: QaShard): string {
-    const key = `${shard.handle || ''} ${shard.title || ''} ${shard.target || ''}`.toLowerCase();
-    if (key.includes('workspace-dispute-lifecycle') || key.includes('dispute lifecycle returns')) {
-      return 'Dispute lifecycle returns reserve';
-    }
-    if (key.includes('settle-workspace-sign') || key.includes('sign-broadcast')) {
-      return 'Settlement workspace signs dispute batch';
-    }
-    if (key.includes('payment-smoke') || key.includes('payment smoke')) {
-      return 'Payment smoke';
-    }
-    if (key.includes('baseline')) {
-      return 'Baseline boot and account open';
-    }
-    if (key.includes('connect')) {
-      return 'Wallet connection flow';
-    }
-    return readableText(shard.title) || readableText(shard.handle) || readableText(shard.target) || `Shard ${shard.shard}`;
+    return qaScenarioTitle(shard);
   }
 
   function shardDescription(shard: QaShard): string {
-    const key = `${shard.handle || ''} ${shard.title || ''} ${shard.target || ''}`.toLowerCase();
-    if (key.includes('workspace-dispute-lifecycle') || key.includes('dispute lifecycle returns')) {
-      return 'Opens a disputed account, waits through the dispute window, finalizes the account, and checks that the reserve is returned.';
-    }
-    if (key.includes('settle-workspace-sign') || key.includes('sign-broadcast')) {
-      return 'Builds a settlement workspace, signs the dispute batch, broadcasts it, and verifies that the hub accepts the result.';
-    }
-    if (key.includes('payment-smoke') || key.includes('payment smoke')) {
-      return 'Creates users, opens the route through a hub, sends a payment, and verifies the receipt path.';
-    }
-    if (key.includes('baseline')) {
-      return 'Starts an isolated stack, logs in, checks health, and confirms that account opening reaches the first frame.';
-    }
-    if (key.includes('connect')) {
-      return 'Checks that the browser wallet connects to the local runtime and reaches the account workspace.';
-    }
-    const text = shard.description || shard.title || shard.target || '';
-    return readableText(text) || 'No test description recorded.';
+    return qaScenarioDescription(shard);
+  }
+
+  function shardPreviewImage(shard: QaShard): QaArtifact | null {
+    return shard.artifacts.find((artifact) => artifact.kind === 'image' && artifact.url) ?? null;
+  }
+
+  function shardPreviewUrl(shard: QaShard): string {
+    return shardPreviewImage(shard)?.url ?? '';
+  }
+
+  function shardPreviewText(shard: QaShard): string {
+    return tenWordScenarioSummary(shardDescription(shard));
   }
 
   function artifactCount(shard: QaShard, kind: QaArtifact['kind']): number {
@@ -234,20 +504,26 @@
     loadingRuns = true;
     error = null;
     try {
-      const response = await fetch('/api/qa/runs?limit=20', { cache: 'no-store' });
-      const payload = await response.json() as { ok?: boolean; runs?: QaSummary[]; error?: string };
+      const response = await qaFetch('/api/qa/runs?limit=20', { cache: 'no-store' });
+      const payload = await response.json() as { ok?: boolean; qaAuth?: QaAuthInfo; runs?: QaSummary[]; error?: string };
+      applyQaAuth(payload);
       if (!response.ok || !payload.ok || !Array.isArray(payload.runs)) {
         throw new Error(payload.error || 'Failed to load QA runs');
       }
       runs = payload.runs;
+      const requestedRunId = requestedRunIdFromUrl();
       const nextRunId = preserveSelection && selectedRunId && runs.some((run) => run.runId === selectedRunId)
         ? selectedRunId
+        : requestedRunId && runs.some((run) => run.runId === requestedRunId)
+          ? requestedRunId
         : runs[0]?.runId || '';
       if (nextRunId && nextRunId !== selectedRunId) {
         selectedRunId = nextRunId;
+        rememberRunInUrl(nextRunId);
         await loadRun(nextRunId);
       } else if (!selectedRunId && nextRunId) {
         selectedRunId = nextRunId;
+        rememberRunInUrl(nextRunId);
         await loadRun(nextRunId);
       }
     } catch (err) {
@@ -261,8 +537,9 @@
     loadingRun = true;
     error = null;
     try {
-      const response = await fetch(`/api/qa/run?runId=${encodeURIComponent(runId)}`, { cache: 'no-store' });
-      const payload = await response.json() as { ok?: boolean; run?: QaRun; error?: string };
+      const response = await qaFetch(`/api/qa/run?runId=${encodeURIComponent(runId)}`, { cache: 'no-store' });
+      const payload = await response.json() as { ok?: boolean; qaAuth?: QaAuthInfo; run?: QaRun; error?: string };
+      applyQaAuth(payload);
       if (!response.ok || !payload.ok || !payload.run) {
         throw new Error(payload.error || 'Failed to load QA run');
       }
@@ -275,18 +552,169 @@
     }
   }
 
+  async function loadMeta(): Promise<void> {
+    loadingMeta = true;
+    try {
+      const [catalogResponse, historyResponse, auditResponse] = await Promise.all([
+        qaFetch('/api/qa/catalog', { cache: 'no-store' }),
+        qaFetch('/api/qa/history?limit=120', { cache: 'no-store' }),
+        qaFetch('/api/qa/restart-audit?limit=25', { cache: 'no-store' }),
+      ]);
+      const catalogPayload = await catalogResponse.json() as {
+        ok?: boolean;
+        qaAuth?: QaAuthInfo;
+        catalog?: QaCatalogEntry[];
+        restart?: RestartStatus;
+        restartAllowed?: boolean;
+        error?: string;
+      };
+      if (!catalogResponse.ok || !catalogPayload.ok || !Array.isArray(catalogPayload.catalog)) {
+        throw new Error(catalogPayload.error || 'Failed to load QA catalog');
+      }
+      applyQaAuth(catalogPayload);
+      const historyPayload = await historyResponse.json() as {
+        ok?: boolean;
+        qaAuth?: QaAuthInfo;
+        history?: QaHistoryEntry[];
+        restart?: RestartStatus;
+        restartAllowed?: boolean;
+        error?: string;
+      };
+      if (!historyResponse.ok || !historyPayload.ok || !Array.isArray(historyPayload.history)) {
+        throw new Error(historyPayload.error || 'Failed to load QA history');
+      }
+      applyQaAuth(historyPayload);
+      const auditPayload = await auditResponse.json() as {
+        ok?: boolean;
+        qaAuth?: QaAuthInfo;
+        audit?: QaRestartAuditEntry[];
+        error?: string;
+      };
+      if (!auditResponse.ok || !auditPayload.ok || !Array.isArray(auditPayload.audit)) {
+        throw new Error(auditPayload.error || 'Failed to load QA restart audit');
+      }
+      applyQaAuth(auditPayload);
+      catalog = catalogPayload.catalog;
+      history = historyPayload.history;
+      restartAudit = auditPayload.audit;
+      restart = historyPayload.restart ?? catalogPayload.restart ?? { active: false };
+      restartAllowed = Boolean(catalogPayload.restartAllowed || historyPayload.restartAllowed);
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err);
+    } finally {
+      loadingMeta = false;
+    }
+  }
+
   async function selectRun(runId: string): Promise<void> {
     if (!runId || runId === selectedRunId) return;
     selectedRunId = runId;
+    rememberRunInUrl(runId);
     await loadRun(runId);
   }
 
+  async function planRestartSelectedShard(): Promise<void> {
+    if (!selectedRun || !selectedShard) return;
+    actionError = null;
+    restartPlan = [];
+    try {
+      const response = await qaFetch('/api/qa/restart?mode=plan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ runId: selectedRun.runId, shard: selectedShard.shard }),
+      });
+      const payload = await response.json() as {
+        ok?: boolean;
+        command?: string[];
+        expectedGitHead?: string | null;
+        codeHash?: string;
+        dirty?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !payload.ok || !Array.isArray(payload.command)) {
+        throw new Error(payload.error || 'Failed to plan QA restart');
+      }
+      restartPlan = payload.command;
+      restartExpectedGitHead = payload.expectedGitHead ?? '';
+      restartCodeHash = payload.codeHash ?? '';
+      restartDirty = Boolean(payload.dirty);
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function runRestartSelectedShard(): Promise<void> {
+    if (!selectedRun || !selectedShard || !restartReady) return;
+    actionError = null;
+    restartPlan = [];
+    try {
+      const response = await qaFetch('/api/qa/restart?mode=run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          runId: selectedRun.runId,
+          shard: selectedShard.shard,
+          operatorId: restartOperatorId.trim(),
+          reason: restartReason.trim(),
+          confirm: restartConfirm.trim(),
+          expectedGitHead: restartExpectedGitHead.trim(),
+        }),
+      });
+      const payload = await response.json() as { ok?: boolean; restart?: RestartStatus; error?: string };
+      if (!response.ok || !payload.ok || !payload.restart) {
+        throw new Error(payload.error || 'Failed to start QA restart');
+      }
+      restart = payload.restart;
+      await loadMeta();
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function openProtectedArtifact(url: string | null | undefined): Promise<void> {
+    const cleanUrl = String(url || '').trim();
+    if (!cleanUrl) return;
+    actionError = null;
+    try {
+      const response = await qaFetch(cleanUrl, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`QA artifact HTTP ${response.status}`);
+      const blobUrl = URL.createObjectURL(await response.blob());
+      window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  function selectedLogArtifactUrl(): string {
+    if (!selectedRun || !selectedShard?.logRelativePath) return '';
+    return `/api/qa/artifact?runId=${encodeURIComponent(selectedRun.runId)}&path=${encodeURIComponent(selectedShard.logRelativePath)}`;
+  }
+
+  async function applyQaToken(): Promise<void> {
+    writeQaToken(qaTokenInput);
+    error = null;
+    actionError = null;
+    await Promise.all([loadRuns(false), loadMeta()]);
+    if (selectedRunId) await loadRun(selectedRunId);
+  }
+
+  async function forgetQaToken(): Promise<void> {
+    clearQaToken();
+    qaTokenInput = '';
+    qaAuthLabel = 'locked';
+    await Promise.all([loadRuns(false), loadMeta()]);
+  }
+
   onMount(() => {
+    qaTokenInput = consumeQaTokenFromUrl();
     void loadRuns(false);
+    void loadMeta();
     const timer = setInterval(() => {
       if (!autoRefresh) return;
       void loadRuns(true);
       if (selectedRunId) void loadRun(selectedRunId);
+      void loadMeta();
     }, 15000);
     return () => clearInterval(timer);
   });
@@ -345,12 +773,34 @@
       {/each}
     </div>
 
+    <label class="sort-control">
+      <span>Sort runs</span>
+      <select bind:value={runSortKey} data-testid="qa-run-sort">
+        <option value="date-desc">Newest first</option>
+        <option value="date-asc">Oldest first</option>
+        <option value="stack-fast">Stack fastest</option>
+        <option value="stack-slow">Stack slowest</option>
+        <option value="bootstrap-fast">Bootstrap fastest</option>
+        <option value="bootstrap-slow">Bootstrap slowest</option>
+        <option value="playwright-fast">Browser fastest</option>
+        <option value="playwright-slow">Browser slowest</option>
+        <option value="test-fast">Test fastest</option>
+        <option value="test-slow">Test slowest</option>
+      </select>
+    </label>
+
     <div class="run-list">
       {#if loadingRuns && runs.length === 0}
         <div class="empty">Loading runs…</div>
       {:else}
-        {#each runs as run}
-          <button class="run-row" class:selected={run.runId === selectedRunId} onclick={() => selectRun(run.runId)}>
+        {#each sortedRuns as run}
+          <button
+            class="run-row"
+            class:selected={run.runId === selectedRunId}
+            data-testid="qa-run-row"
+            data-run-id={run.runId}
+            onclick={() => selectRun(run.runId)}
+          >
             <div class="run-row-top">
               <span class="status-dot" class:pass={run.status === 'passed'} class:fail={run.status === 'failed'}></span>
               <strong>{getRunLabel(run)}</strong>
@@ -359,6 +809,12 @@
             <div class="run-row-meta">
               <span>{formatCount(run)}</span>
               <span>{formatDate(run.createdAt)}</span>
+            </div>
+            <div class="run-row-timing">
+              <span>stack {formatMs(run.totalMs)}</span>
+              <span>boot {formatMs(run.timing?.bootstrapMs)}</span>
+              <span>pw {formatMs(run.timing?.playwrightMs)}</span>
+              <span>test {formatMs(run.timing?.avgShardMs)}</span>
             </div>
             {#if run.failingTargets.length > 0}
               <div class="run-row-failures">{run.failingTargets.join(' · ')}</div>
@@ -370,11 +826,195 @@
   </aside>
 
   <main class="content">
+    <section class="auth-strip" class:open={qaAuthLabel === 'open'} data-testid="qa-auth-panel">
+      <div>
+        <span>QA access</span>
+        <strong>{qaAuthLabel}</strong>
+      </div>
+      {#if qaAuthLabel !== 'open'}
+        <label>
+          <span>Bearer token</span>
+          <input
+            bind:value={qaTokenInput}
+            type="password"
+            autocomplete="off"
+            placeholder="read/admin token"
+          />
+        </label>
+        <button class="mini-action" onclick={applyQaToken}>Apply</button>
+        <button class="mini-action ghost" onclick={forgetQaToken}>Clear</button>
+      {/if}
+    </section>
+
+    <nav class="qa-tabs" data-testid="qa-test-tabs">
+      <button class:active={activeView === 'e2e'} onclick={() => (activeView = 'e2e')}>E2E Runs</button>
+      <button class:active={activeView === 'scenarios'} onclick={() => (activeView = 'scenarios')}>Scenario Player</button>
+      <button class:active={activeView === 'suites'} onclick={() => (activeView = 'suites')}>Suites</button>
+      <button class:active={activeView === 'benchmarks'} onclick={() => (activeView = 'benchmarks')}>Benchmarks</button>
+      <button class:active={activeView === 'history'} onclick={() => (activeView = 'history')}>History</button>
+    </nav>
+
     {#if error}
       <div class="error-banner">{error}</div>
     {/if}
+    {#if actionError}
+      <div class="error-banner">{actionError}</div>
+    {/if}
 
-    {#if selectedRun}
+    {#if activeView === 'scenarios'}
+      <section class="admin-card">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">Deterministic Scenarios</div>
+            <h2>Scenario Player</h2>
+            <p>Visual runtime scenarios with wallet preview and frame scrubbing.</p>
+          </div>
+          <a class="player-action-link" href="/scenarios" target="_blank" rel="noreferrer">Open full</a>
+        </div>
+        <iframe
+          class="scenario-frame"
+          title="Scenario Player"
+          src="/scenarios"
+          loading="lazy"
+          allowfullscreen
+          data-testid="qa-scenario-player-frame"
+        ></iframe>
+      </section>
+    {:else if activeView === 'suites'}
+      <section class="admin-card" data-testid="qa-system-suites">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">System Test Catalog</div>
+            <h2>All Test Surfaces</h2>
+            <p>{catalog.length} commands grouped for operators.</p>
+          </div>
+          {#if restart.active}<span class="chip warn">restart running</span>{/if}
+        </div>
+        {#if loadingMeta && catalog.length === 0}
+          <div class="empty">Loading test catalog...</div>
+        {:else}
+          {#each catalogGroups as group}
+            <div class="catalog-group">
+              <h3>{group}</h3>
+              <div class="catalog-grid">
+                {#each catalog.filter(item => item.group === group) as item}
+                  <article class="catalog-card">
+                    <span>{item.group}</span>
+                    <strong>{item.label}</strong>
+                    <p>{item.description}</p>
+                    <code>{item.command}</code>
+                  </article>
+                {/each}
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </section>
+    {:else if activeView === 'benchmarks'}
+      <section class="admin-card" data-testid="qa-benchmarks">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">Performance</div>
+            <h2>Benchmarks + Run Load</h2>
+            <p>Runner wall time, host load, child CPU, and memory by code hash.</p>
+          </div>
+          <span class="chip">{benchmarkCatalog.length} benchmark commands</span>
+        </div>
+        <div class="catalog-grid">
+          {#each benchmarkCatalog as item}
+            <article class="catalog-card benchmark">
+              <span>{item.group}</span>
+              <strong>{item.label}</strong>
+              <p>{item.description}</p>
+              <code>{item.command}</code>
+            </article>
+          {/each}
+        </div>
+        <div class="history-table compact">
+          {#each sortedHistory.slice(0, 12) as row}
+            <article class:bad={row.status === 'failed'} class:ok={row.status === 'passed'}>
+              <strong>{statusLabel(row)}</strong>
+              <span>{formatMs(row.totalMs)}</span>
+              <span>load {row.peakLoad1 ?? 'n/a'}</span>
+              <span>cpu {row.maxChildCpuPct ?? 'n/a'}%</span>
+              <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
+                {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
+              </span>
+              <code>{shortHash(row.codeHash)}</code>
+            </article>
+          {/each}
+        </div>
+      </section>
+    {:else if activeView === 'history'}
+      <section class="admin-card" data-testid="qa-history">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">Persistent History</div>
+            <h2>QA Run Database</h2>
+            <p>SQLite-backed run index with git HEAD, code hash, status, and perf.</p>
+          </div>
+          <div class="history-actions">
+            <label class="sort-control inline">
+              <span>Sort</span>
+              <select bind:value={runSortKey} data-testid="qa-history-sort">
+                <option value="date-desc">Newest</option>
+                <option value="date-asc">Oldest</option>
+                <option value="stack-fast">Stack fastest</option>
+                <option value="stack-slow">Stack slowest</option>
+                <option value="bootstrap-fast">Bootstrap fastest</option>
+                <option value="bootstrap-slow">Bootstrap slowest</option>
+                <option value="playwright-fast">Browser fastest</option>
+                <option value="playwright-slow">Browser slowest</option>
+                <option value="test-fast">Test fastest</option>
+                <option value="test-slow">Test slowest</option>
+              </select>
+            </label>
+            <span class="chip">{history.length} rows</span>
+          </div>
+        </div>
+        <div class="history-table">
+          {#each sortedHistory as row}
+            <article
+              class:bad={row.status === 'failed'}
+              class:ok={row.status === 'passed'}
+              data-testid="qa-history-row"
+              data-run-id={row.runId}
+            >
+              <strong>{statusLabel(row)}</strong>
+              <span>{formatDate(row.createdAt)}</span>
+              <span>{formatMs(row.totalMs)}</span>
+              <span>{row.passedShards}/{row.totalShards}</span>
+              <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
+                {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
+              </span>
+              <code title={row.gitHead ?? ''}>head {shortHash(row.gitHead)}</code>
+              <code title={row.codeHash ?? ''}>code {shortHash(row.codeHash)}</code>
+              {#if row.dirty}<em>dirty</em>{/if}
+            </article>
+          {/each}
+        </div>
+        <div class="suite-list-head restart-audit-head">
+          <div>
+            <div class="eyebrow">Operations Audit</div>
+            <h3>Restart Trail</h3>
+          </div>
+          <span class="chip">{restartAudit.length} actions</span>
+        </div>
+        <div class="restart-audit-table">
+          {#each restartAudit as row}
+            <article class:bad={row.status === 'spawn_error' || (row.exitCode !== null && row.exitCode !== 0)} class:ok={row.status === 'finished' && row.exitCode === 0}>
+              <strong>{row.status}</strong>
+              <span>{formatDate(row.startedAt)}</span>
+              <span>{row.operatorId}</span>
+              <span>{row.reason}</span>
+              <code title={row.actualGitHead ?? ''}>head {shortHash(row.actualGitHead)}</code>
+              <code title={row.codeHash ?? ''}>code {shortHash(row.codeHash)}</code>
+              <span>{row.exitCode === null ? 'running' : `exit ${row.exitCode}`}</span>
+            </article>
+          {/each}
+        </div>
+      </section>
+    {:else if selectedRun}
       <section class="run-summary">
         <div>
           <div class="eyebrow">Selected Run</div>
@@ -400,6 +1040,21 @@
             <span>Parallel</span>
             <strong>{String(runArg(selectedRun, 'shards') ?? 'n/a')}</strong>
           </article>
+          <article class="summary-card" class:bad={hashChanged}>
+            <span>Code Hash</span>
+            <strong>{shortHash(selectedRun.code?.codeHash)}</strong>
+            <small>{selectedRun.code?.gitHead ? `head ${shortHash(selectedRun.code.gitHead)}` : 'legacy run'}</small>
+          </article>
+          <article class="summary-card">
+            <span>Peak Load</span>
+            <strong>{selectedRun.perf?.peakLoad1 ?? 'n/a'}</strong>
+            <small>child cpu {selectedRun.perf?.maxChildCpuPct ?? 'n/a'}%</small>
+          </article>
+          <article class="summary-card" class:bad={selectedRun.benchmark?.status === 'slower' || selectedRun.benchmark?.status === 'mixed'}>
+            <span>Benchmark</span>
+            <strong>{benchmarkLabel(selectedRun.benchmark?.status)}</strong>
+            <small>{selectedRun.benchmark?.reason ?? 'No baseline yet'}</small>
+          </article>
         </div>
       </section>
 
@@ -410,29 +1065,50 @@
             <h3>{isolatedTestLabel(selectedRun.totalShards)}</h3>
           </div>
           <div class="suite-list-meta">
+            <label class="sort-control inline">
+              <span>Sort tests</span>
+              <select bind:value={shardSortKey} data-testid="qa-shard-sort">
+                <option value="index">Recorded order</option>
+                <option value="duration-fast">Test fastest</option>
+                <option value="duration-slow">Test slowest</option>
+                <option value="bootstrap-fast">Bootstrap fastest</option>
+                <option value="bootstrap-slow">Bootstrap slowest</option>
+                <option value="playwright-fast">Browser fastest</option>
+                <option value="playwright-slow">Browser slowest</option>
+              </select>
+            </label>
             <span>{selectedRun.passedShards} passed</span>
             <span>{selectedRun.failedShards} failed</span>
           </div>
         </div>
-        {#each selectedRun.shards as shard, index}
+        {#each sortedShardEntries as { shard, index }}
           <button
             class="suite-row"
             class:selected={index === selectedShardIndex}
             class:pass={shard.status === 'passed'}
             class:fail={shard.status === 'failed'}
+            data-testid="qa-suite-row"
+            data-has-video={shard.hasVideo}
             onclick={() => (selectedShardIndex = index)}
           >
-            <span
-              class="status-dot"
-              class:pass={shard.status === 'passed'}
-              class:fail={shard.status === 'failed'}
-            ></span>
+            <div class="suite-preview" data-testid="scenario-preview-card">
+              {#if shardPreviewUrl(shard)}
+                <QaProtectedImage url={shardPreviewUrl(shard)} alt={describeShard(shard)} loading="lazy" />
+              {:else}
+                <span class="preview-play">Play</span>
+              {/if}
+              <i
+                class="status-dot"
+                class:pass={shard.status === 'passed'}
+                class:fail={shard.status === 'failed'}
+              ></i>
+            </div>
             <div class="suite-row-main">
               <div class="suite-row-title">
                 <strong>{describeShard(shard)}</strong>
                 <code>{testHandle(shard)}</code>
               </div>
-              <p>{shardDescription(shard)}</p>
+              <p>{shardPreviewText(shard)}</p>
               <div class="artifact-chips">
                 <span class:muted={artifactCount(shard, 'video') === 0}>{plural(artifactCount(shard, 'video'), 'video', 'videos')}</span>
                 <span class:muted={artifactCount(shard, 'image') === 0}>{plural(artifactCount(shard, 'image'), 'screenshot', 'screenshots')}</span>
@@ -474,42 +1150,61 @@
             <div class="detail-meta">
               <span>{selectedShard.status}</span>
               <span>{formatMs(selectedShard.durationMs)}</span>
+              <button
+                class="mini-action"
+                disabled={!qaCanPlanRestart}
+                title={qaCanPlanRestart ? 'Plan isolated rerun' : 'Admin QA token required'}
+                onclick={planRestartSelectedShard}
+              >Restart plan</button>
+              <button
+                class="mini-action"
+                disabled={!restartReady}
+                title={restartAllowed ? 'Requires operator, reason, confirm RUN, and expected HEAD' : 'Set XLN_QA_RESTART_ALLOWED=1 on the API process'}
+                onclick={runRestartSelectedShard}
+              >Restart run</button>
             </div>
           </div>
 
+          {#if restartPlan.length > 0}
+            <section class="restart-plan" data-testid="qa-restart-plan">
+              <strong>Restart command</strong>
+              <code>{restartPlan.join(' ')}</code>
+              <small>
+                Code hash {selectedHashDelta}
+                {#if selectedHistoryPrevious?.codeHash}
+                  vs previous {shortHash(selectedHistoryPrevious.codeHash)}
+                {:else}
+                  vs previous n/a
+                {/if}
+              </small>
+              <div class="restart-confirm-grid" data-testid="qa-restart-confirm">
+                <label>
+                  <span>operator</span>
+                  <input bind:value={restartOperatorId} autocomplete="off" placeholder="operator id" />
+                </label>
+                <label>
+                  <span>reason</span>
+                  <input bind:value={restartReason} autocomplete="off" placeholder="why this rerun is needed" />
+                </label>
+                <label>
+                  <span>confirm</span>
+                  <input bind:value={restartConfirm} autocomplete="off" placeholder="RUN" />
+                </label>
+                <label>
+                  <span>expected HEAD</span>
+                  <input bind:value={restartExpectedGitHead} autocomplete="off" />
+                </label>
+              </div>
+              <small>
+                Current code {shortHash(restartCodeHash)}
+                {#if restartDirty} dirty{/if}
+              </small>
+            </section>
+          {/if}
+
           <div class="detail-layout">
             <div class="media-panel">
-              <section class="media-block">
-                <div class="media-title">
-                  <h4>Video</h4>
-                  {#if selectedVideo?.url}
-                    <a href={selectedVideo.url} target="_blank" rel="noreferrer">{formatBytes(selectedVideo.sizeBytes)}</a>
-                  {/if}
-                </div>
-                {#if selectedVideo?.url}
-                  <!-- svelte-ignore a11y_media_has_caption -->
-                  <video class="video-player" controls preload="metadata" src={selectedVideo.url}></video>
-                {:else}
-                  <div class="empty-media">No video for this test</div>
-                {/if}
-              </section>
-
-              {#if selectedImages.length > 0}
-                <section class="media-block">
-                  <div class="media-title">
-                    <h4>Screenshots</h4>
-                    <span>{selectedImages.length}</span>
-                  </div>
-                  <div class="image-strip">
-                    {#each selectedImages as image}
-                      <a class="image-thumb" href={image.url} target="_blank" rel="noreferrer">
-                        <img alt={image.name} src={image.url} loading="lazy" />
-                        <span>{image.name}</span>
-                      </a>
-                    {/each}
-                  </div>
-                </section>
-              {/if}
+              <QaScenarioPlayer runId={selectedRun.runId} shard={selectedShard} />
             </div>
 
             <div class="info-panel">
@@ -547,11 +1242,11 @@
                 {#if selectedShard.artifacts.length > 0}
                   <div class="artifact-list">
                     {#each selectedShard.artifacts as artifact}
-                      <a href={artifact.url} target="_blank" rel="noreferrer">
+                      <button type="button" onclick={() => openProtectedArtifact(artifact.url)}>
                         <span>{artifactLabel(artifact)}</span>
                         <strong>{artifact.name}</strong>
                         <small>{formatBytes(artifact.sizeBytes)}</small>
-                      </a>
+                      </button>
                     {/each}
                   </div>
                 {:else}
@@ -565,9 +1260,13 @@
             <div class="log-head">
               <h4>Log Tail</h4>
               {#if selectedShard.logRelativePath}
-                <a href={`/api/qa/artifact?runId=${encodeURIComponent(selectedRun.runId)}&path=${encodeURIComponent(selectedShard.logRelativePath)}`} target="_blank" rel="noreferrer">
+                <button
+                  class="inline-link"
+                  type="button"
+                  onclick={() => openProtectedArtifact(selectedLogArtifactUrl())}
+                >
                   Open full log
-                </a>
+                </button>
               {/if}
             </div>
             <pre>{selectedShard.logTail || selectedShard.error || 'No log tail available.'}</pre>
@@ -646,8 +1345,6 @@
   .suite-row,
   .panel-block,
   .log-panel,
-  .media-block,
-  .empty-media,
   .empty-state,
   .error-banner {
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -692,6 +1389,38 @@
     display: flex;
     gap: 0.45rem;
     flex-wrap: wrap;
+  }
+
+  .sort-control {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+
+  .sort-control.inline {
+    grid-auto-flow: column;
+    grid-template-columns: auto minmax(150px, 1fr);
+    align-items: center;
+  }
+
+  .sort-control span {
+    color: #9b978a;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .sort-control select {
+    min-height: 34px;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    padding: 0 0.65rem;
+    color: #f1efe7;
+    background: rgba(0, 0, 0, 0.22);
+    font: inherit;
+    font-size: 0.82rem;
   }
 
   .trend-pill {
@@ -745,6 +1474,7 @@
 
   .run-row-failures,
   .run-row-meta,
+  .run-row-timing,
   .run-duration,
   .detail-meta,
   .suite-list-meta,
@@ -752,6 +1482,18 @@
   small,
   p {
     color: #9b978a;
+  }
+
+  .run-row-timing {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.3rem 0.5rem;
+    margin-top: 0.45rem;
+    font-size: 0.74rem;
+  }
+
+  .run-row-timing span {
+    overflow-wrap: anywhere;
   }
 
   .status-dot {
@@ -770,6 +1512,100 @@
     min-width: 0;
   }
 
+  .auth-strip {
+    display: grid;
+    grid-template-columns: minmax(140px, 0.3fr) minmax(240px, 1fr) auto auto;
+    gap: 0.7rem;
+    align-items: end;
+    padding: 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .auth-strip.open {
+    grid-template-columns: max-content;
+    justify-content: start;
+  }
+
+  .auth-strip div,
+  .auth-strip label {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+  }
+
+  .auth-strip span {
+    color: #9b978a;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .auth-strip strong {
+    color: #f1efe7;
+    font-size: 0.92rem;
+  }
+
+  .auth-strip input {
+    min-height: 34px;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    padding: 0 0.75rem;
+    color: #f1efe7;
+    background: rgba(0, 0, 0, 0.22);
+    font: inherit;
+  }
+
+  .qa-tabs {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 0.35rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(10, 10, 14, 0.92);
+    backdrop-filter: blur(12px);
+  }
+
+  .qa-tabs button,
+  .mini-action,
+  .player-action-link {
+    min-height: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 7px;
+    padding: 0 0.75rem;
+    color: #f1efe7;
+    background: rgba(255, 255, 255, 0.04);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .qa-tabs button.active,
+  .mini-action:hover,
+  .player-action-link:hover {
+    border-color: rgba(216, 175, 79, 0.58);
+    background: rgba(216, 175, 79, 0.12);
+    color: #fff4d8;
+  }
+
+  .mini-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .mini-action.ghost {
+    color: #b7b1a4;
+    background: transparent;
+  }
+
   .run-summary,
   .shard-detail {
     display: grid;
@@ -777,7 +1613,168 @@
   }
 
   .summary-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .admin-card,
+  .restart-plan {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 1rem;
+    display: grid;
+    gap: 1rem;
+  }
+
+  .scenario-frame {
+    width: 100%;
+    min-height: 720px;
+    height: calc(100vh - 220px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: #050506;
+  }
+
+  .catalog-group {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.75rem;
+  }
+
+  .catalog-card {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.18);
+    display: grid;
+    gap: 0.55rem;
+  }
+
+  .catalog-card.benchmark {
+    border-color: rgba(112, 165, 255, 0.18);
+  }
+
+  .catalog-card span,
+  .restart-plan strong {
+    color: #d8af4f;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .catalog-card code,
+  .restart-plan code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #b9d2ff;
+    font-size: 0.78rem;
+  }
+
+  .restart-plan small {
+    color: #b7b2a4;
+  }
+
+  .history-table,
+  .restart-audit-table {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .restart-audit-head {
+    margin-top: 0.65rem;
+  }
+
+  .history-table article,
+  .restart-audit-table article {
+    display: grid;
+    align-items: center;
+    gap: 0.75rem;
+    border-left: 3px solid #6b7280;
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .history-table article {
+    grid-template-columns: 80px minmax(170px, 1fr) repeat(5, minmax(90px, auto));
+  }
+
+  .restart-audit-table article {
+    grid-template-columns: 92px minmax(160px, 0.8fr) minmax(120px, 0.5fr) minmax(180px, 1fr) repeat(3, minmax(90px, auto));
+  }
+
+  .history-table.compact article {
+    grid-template-columns: 80px repeat(5, minmax(80px, auto));
+  }
+
+  .history-table article.ok,
+  .restart-audit-table article.ok {
+    border-left-color: #3fb950;
+  }
+
+  .history-table article.bad,
+  .restart-audit-table article.bad,
+  .summary-card.bad {
+    border-left-color: #ff7b72;
+  }
+
+  .history-table code,
+  .history-table em,
+  .restart-audit-table code {
+    color: #9ec2ff;
+    font-style: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .restart-audit-table span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .history-table .warn {
+    color: #f1d48a;
+    font-weight: 800;
+  }
+
+  .restart-confirm-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 0.7rem;
+  }
+
+  .restart-confirm-grid label {
+    display: grid;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+
+  .restart-confirm-grid span {
+    color: #9b978a;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .restart-confirm-grid input {
+    min-height: 34px;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    padding: 0 0.65rem;
+    color: #f1efe7;
+    background: rgba(0, 0, 0, 0.22);
+    font: inherit;
+  }
+
+  .chip.warn {
+    border-color: rgba(216, 175, 79, 0.35);
+    color: #f1d48a;
   }
 
   .suite-list {
@@ -790,10 +1787,9 @@
   .suite-row-title,
   .suite-row-side,
   .artifact-chips,
-  .media-title,
   .phase-list div,
   .slow-step-list li,
-  .artifact-list a {
+  .artifact-list button {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -802,6 +1798,14 @@
 
   .suite-list-head {
     padding: 0.2rem 0.1rem 0.3rem;
+  }
+
+  .history-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    flex-wrap: wrap;
   }
 
   .detail-head > div {
@@ -813,8 +1817,7 @@
   .suite-list-meta,
   .suite-row-title,
   .suite-row-side,
-  .artifact-chips,
-  .media-title {
+  .artifact-chips {
     display: flex;
     align-items: center;
     gap: 0.65rem;
@@ -822,9 +1825,42 @@
 
   .suite-row {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: 112px minmax(0, 1fr) auto;
     align-items: start;
     gap: 0.85rem;
+  }
+
+  .suite-preview {
+    position: relative;
+    overflow: hidden;
+    width: 112px;
+    aspect-ratio: 16 / 9;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: #08090a;
+    display: grid;
+    place-items: center;
+  }
+
+  .suite-preview :global(img) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .suite-preview .status-dot {
+    position: absolute;
+    top: 7px;
+    right: 7px;
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.54);
+  }
+
+  .preview-play {
+    color: #d8af4f;
+    font-size: 0.76rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
   }
 
   .suite-row.pass {
@@ -910,66 +1946,11 @@
     gap: 1rem;
   }
 
-  .video-player {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    height: auto;
-    max-height: min(72vh, 720px);
-    display: block;
-    object-fit: contain;
-    background: #050506;
-    border-radius: 8px;
-  }
-
-  .empty-media {
-    width: 100%;
-    min-height: 220px;
-  }
-
-  .media-block {
-    padding: 1rem;
-    display: grid;
-    gap: 0.8rem;
-  }
-
-  .media-title {
-    justify-content: space-between;
-  }
-
-  .media-title a,
-  .media-title span {
-    color: #9ec2ff;
-    font-size: 0.82rem;
-    text-decoration: none;
-  }
-
-  .empty-media,
   .empty-state {
     display: grid;
     place-items: center;
     color: #9b978a;
     padding: 2rem;
-  }
-
-  .image-strip {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 0.75rem;
-  }
-
-  .image-thumb {
-    color: inherit;
-    text-decoration: none;
-    display: grid;
-    gap: 0.45rem;
-  }
-
-  .image-thumb img {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
-    border-radius: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .panel-block,
@@ -988,7 +1969,7 @@
 
   .phase-list div,
   .slow-step-list li,
-  .artifact-list a {
+  .artifact-list button {
     padding-bottom: 0.55rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
@@ -1006,16 +1987,32 @@
     margin: 0;
   }
 
-  .artifact-list a {
+  .artifact-list button {
     color: inherit;
-    text-decoration: none;
     display: grid;
     grid-template-columns: 90px minmax(0, 1fr) auto;
     align-items: center;
+    width: 100%;
+    border-top: 0;
+    border-right: 0;
+    border-left: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
   }
 
   .artifact-list strong {
     overflow-wrap: anywhere;
+  }
+
+  .inline-link {
+    border: 0;
+    padding: 0;
+    color: #d8af4f;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
   }
 
   .log-panel pre {
@@ -1049,9 +2046,18 @@
     }
 
     .detail-layout,
+    .auth-strip,
+    .restart-confirm-grid,
     .summary-grid,
     .metric-stack {
       grid-template-columns: 1fr;
+    }
+
+    .history-table article,
+    .history-table.compact article,
+    .restart-audit-table article {
+      grid-template-columns: 1fr;
+      align-items: start;
     }
 
     .suite-row {

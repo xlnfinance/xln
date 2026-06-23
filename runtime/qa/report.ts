@@ -1,6 +1,8 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
+import { Database } from 'bun:sqlite';
 import { compareStableText } from '../serialization-utils';
 
 export type QaSlowStep = {
@@ -28,6 +30,83 @@ export type QaPhaseTimings = {
   playwright: number;
 };
 
+export type QaCodeFingerprint = {
+  gitHead: string | null;
+  gitBranch: string | null;
+  gitStatus: string;
+  dirty: boolean;
+  codeHash: string;
+  computedAt: number;
+  trackedFileCount: number;
+  trackedBytes: number;
+};
+
+export type QaPerfChildSample = {
+  name: string;
+  pid: number;
+  cpuPct: number;
+  memPct: number;
+  rssKb: number;
+};
+
+export type QaPerfSample = {
+  ts: number;
+  load1: number;
+  load5: number;
+  load15: number;
+  freeMemBytes: number;
+  totalMemBytes: number;
+  runnerRssBytes: number;
+  children: QaPerfChildSample[];
+};
+
+export type QaPerfSummary = {
+  sampleCount: number;
+  avgLoad1: number;
+  peakLoad1: number;
+  minFreeMemBytes: number;
+  maxRunnerRssBytes: number;
+  maxChildCpuPct: number;
+  maxChildRssKb: number;
+  samples: QaPerfSample[];
+};
+
+export type QaBenchmarkStatus = 'ok' | 'faster' | 'slower' | 'mixed' | 'insufficient';
+
+export type QaBenchmarkMetricDelta = {
+  metric: string;
+  label: string;
+  unit: 'ms' | 'load' | 'percent' | 'kb' | 'bytes';
+  current: number;
+  baseline: number;
+  delta: number;
+  deltaPct: number;
+  thresholdPct: number;
+  verdict: 'ok' | 'faster' | 'slower';
+};
+
+export type QaBenchmarkComparison = {
+  status: QaBenchmarkStatus;
+  suiteKey: string;
+  suiteLabel: string;
+  comparedRunId: string | null;
+  comparedGitHead: string | null;
+  comparedCodeHash: string | null;
+  sameGitHead: boolean | null;
+  sameCodeHash: boolean | null;
+  reason: string;
+  metrics: QaBenchmarkMetricDelta[];
+  likelyCauses: string[];
+};
+
+export type QaRunTimingSummary = {
+  avgShardMs: number | null;
+  maxShardMs: number | null;
+  bootstrapMs: number | null;
+  apiHealthyMs: number | null;
+  playwrightMs: number | null;
+};
+
 export type QaShardManifest = {
   shard: number;
   status: 'passed' | 'failed' | 'unknown';
@@ -41,6 +120,8 @@ export type QaShardManifest = {
   logTail: string | null;
   error: string | null;
   phaseMs: QaPhaseTimings | null;
+  perf?: QaPerfSummary;
+  timelineSteps: QaSlowStep[];
   slowSteps: QaSlowStep[];
   artifacts: QaArtifact[];
   hasVideo: boolean;
@@ -54,6 +135,9 @@ export type QaRunManifest = {
   completedAt: number | null;
   status: 'passed' | 'failed' | 'unknown';
   totalMs: number | null;
+  code?: QaCodeFingerprint;
+  perf?: QaPerfSummary;
+  benchmark?: QaBenchmarkComparison;
   totalShards: number;
   passedShards: number;
   failedShards: number;
@@ -63,6 +147,36 @@ export type QaRunManifest = {
 
 export const QA_LOGS_ROOT = resolve(process.cwd(), '.logs', 'e2e-parallel');
 export const QA_STORY_SCREENSHOTS_ROOT = resolve(process.cwd(), 'tests', 'e2e', 'screenshots');
+export const QA_HISTORY_DB_PATH = resolve(process.cwd(), '.logs', 'qa-history.sqlite');
+
+export type QaHistoryEntry = {
+  runId: string;
+  createdAt: number;
+  completedAt: number | null;
+  status: QaRunManifest['status'];
+  totalMs: number | null;
+  totalShards: number;
+  passedShards: number;
+  failedShards: number;
+  gitHead: string | null;
+  gitBranch: string | null;
+  dirty: boolean;
+  codeHash: string | null;
+  avgLoad1: number | null;
+  peakLoad1: number | null;
+  maxChildCpuPct: number | null;
+  maxChildRssKb: number | null;
+  suiteKey: string | null;
+  benchmarkStatus: QaBenchmarkStatus | null;
+  benchmarkDeltaPct: number | null;
+  benchmarkComparedRunId: string | null;
+  avgShardMs: number | null;
+  maxShardMs: number | null;
+  bootstrapMs: number | null;
+  apiHealthyMs: number | null;
+  playwrightMs: number | null;
+  logsDir: string;
+};
 
 export type QaStorySource = 'e2e-screenshots' | 'qa-run';
 
@@ -109,6 +223,547 @@ const parseRunIdTimestamp = (runId: string): number | null => {
     Number(ms),
   );
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const FUTURE_RUN_SKEW_MS = 60_000;
+
+const formatLocalRunIdUpperBound = (timestamp: number): string => {
+  const d = new Date(timestamp);
+  const p2 = (n: number): string => String(n).padStart(2, '0');
+  const p3 = (n: number): string => String(n).padStart(3, '0');
+  return [
+    `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}`,
+    `${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`,
+    p3(d.getMilliseconds()),
+  ].join('-');
+};
+
+const compareQaRunIdsForOperator = (a: string, b: string, now = Date.now()): number => {
+  const latestLocalRunId = formatLocalRunIdUpperBound(now + FUTURE_RUN_SKEW_MS);
+  const aFuture = compareStableText(a, latestLocalRunId) > 0;
+  const bFuture = compareStableText(b, latestLocalRunId) > 0;
+  if (aFuture !== bFuture) return aFuture ? 1 : -1;
+  return compareStableText(b, a);
+};
+
+const normalizeSuiteText = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const runShardIdentity = (shard: QaShardManifest): string =>
+  [
+    normalizeSuiteText(shard.target),
+    normalizeSuiteText(shard.title),
+    normalizeSuiteText(shard.handle),
+  ].filter(Boolean).join('::') || `shard-${shard.shard}`;
+
+export const qaRunSuiteKey = (run: Pick<QaRunManifest, 'args' | 'shards'>): string => {
+  const args = run.args ?? {};
+  const source = {
+    pwProject: normalizeSuiteText(args['pwProject']),
+    pwGrep: normalizeSuiteText(args['pwGrep']),
+    pwFiles: Array.isArray(args['pwFiles'])
+      ? args['pwFiles'].map(normalizeSuiteText).sort(compareStableText)
+      : normalizeSuiteText(args['pwFiles']),
+    shards: run.shards.map(runShardIdentity).sort(compareStableText),
+  };
+  return createHash('sha256').update(JSON.stringify(source)).digest('hex').slice(0, 24);
+};
+
+export const qaRunSuiteLabel = (run: Pick<QaRunManifest, 'args' | 'shards'>): string => {
+  if (run.shards.length === 1) {
+    const shard = run.shards[0]!;
+    return normalizeSuiteText(shard.handle) || normalizeSuiteText(shard.title) || normalizeSuiteText(shard.target) || 'single shard';
+  }
+  const args = run.args ?? {};
+  const pwGrep = normalizeSuiteText(args['pwGrep']);
+  if (pwGrep) return `grep:${pwGrep}`;
+  const pwFiles = Array.isArray(args['pwFiles']) ? args['pwFiles'].map(normalizeSuiteText).filter(Boolean) : [];
+  if (pwFiles.length > 0) return pwFiles.length === 1 ? pwFiles[0]! : `${pwFiles.length} files`;
+  return `${run.shards.length} shards`;
+};
+
+type BenchmarkMetricSnapshot = {
+  metric: string;
+  label: string;
+  unit: QaBenchmarkMetricDelta['unit'];
+  value: number | null;
+  thresholdPct: number;
+};
+
+const finiteMetric = (
+  metric: string,
+  label: string,
+  unit: QaBenchmarkMetricDelta['unit'],
+  value: unknown,
+  thresholdPct: number,
+): BenchmarkMetricSnapshot => ({
+  metric,
+  label,
+  unit,
+  value: typeof value === 'number' && Number.isFinite(value) ? value : null,
+  thresholdPct,
+});
+
+const averagePhaseMs = (run: QaRunManifest, key: keyof QaPhaseTimings): number | null => {
+  const values = run.shards
+    .map(shard => shard.phaseMs?.[key])
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+};
+
+const averageShardMs = (run: QaRunManifest): number | null => {
+  const values = run.shards
+    .map(shard => shard.durationMs)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+};
+
+const maxShardMs = (run: QaRunManifest): number | null => {
+  const values = run.shards
+    .map(shard => shard.durationMs)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  return values.length > 0 ? Math.max(...values) : null;
+};
+
+const averageBootstrapMs = (run: QaRunManifest): number | null => {
+  const values = run.shards
+    .map((shard): number | null => {
+      const phase = shard.phaseMs;
+      if (!phase) return null;
+      return phase.preflight + phase.anvilBoot + phase.apiBoot + phase.apiHealthy + phase.viteBoot;
+    })
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+};
+
+export const summarizeQaRunTiming = (run: QaRunManifest): QaRunTimingSummary => ({
+  avgShardMs: averageShardMs(run),
+  maxShardMs: maxShardMs(run),
+  bootstrapMs: averageBootstrapMs(run),
+  apiHealthyMs: averagePhaseMs(run, 'apiHealthy'),
+  playwrightMs: averagePhaseMs(run, 'playwright'),
+});
+
+const benchmarkSnapshot = (run: QaRunManifest): BenchmarkMetricSnapshot[] => [
+  finiteMetric('totalMs', 'wall time', 'ms', run.totalMs, 20),
+  finiteMetric('avgShardMs', 'avg shard', 'ms', averageShardMs(run), 20),
+  finiteMetric('phase.apiHealthy', 'health wait', 'ms', averagePhaseMs(run, 'apiHealthy'), 25),
+  finiteMetric('phase.playwright', 'browser test', 'ms', averagePhaseMs(run, 'playwright'), 25),
+  finiteMetric('phase.viteBoot', 'vite boot', 'ms', averagePhaseMs(run, 'viteBoot'), 30),
+  finiteMetric('phase.apiBoot', 'api boot', 'ms', averagePhaseMs(run, 'apiBoot'), 30),
+  finiteMetric('peakLoad1', 'peak load1', 'load', run.perf?.peakLoad1, 50),
+  finiteMetric('maxChildCpuPct', 'max child CPU', 'percent', run.perf?.maxChildCpuPct, 40),
+  finiteMetric('maxChildRssKb', 'max child RSS', 'kb', run.perf?.maxChildRssKb, 30),
+];
+
+export const compareQaBenchmarkRuns = (
+  current: QaRunManifest,
+  baseline: QaRunManifest | null,
+): QaBenchmarkComparison => {
+  const suiteKey = qaRunSuiteKey(current);
+  const suiteLabel = qaRunSuiteLabel(current);
+  if (!baseline) {
+    return {
+      status: 'insufficient',
+      suiteKey,
+      suiteLabel,
+      comparedRunId: null,
+      comparedGitHead: null,
+      comparedCodeHash: null,
+      sameGitHead: null,
+      sameCodeHash: null,
+      reason: 'No previous comparable E2E run found.',
+      metrics: [],
+      likelyCauses: [],
+    };
+  }
+
+  const baselineByMetric = new Map(benchmarkSnapshot(baseline).map(item => [item.metric, item]));
+  const metrics = benchmarkSnapshot(current).flatMap((item): QaBenchmarkMetricDelta[] => {
+    const base = baselineByMetric.get(item.metric);
+    if (item.value === null || !base || base.value === null || base.value <= 0) return [];
+    const delta = item.value - base.value;
+    const deltaPct = (delta / base.value) * 100;
+    const verdict: QaBenchmarkMetricDelta['verdict'] =
+      deltaPct >= item.thresholdPct ? 'slower' : deltaPct <= -item.thresholdPct ? 'faster' : 'ok';
+    return [{
+      metric: item.metric,
+      label: item.label,
+      unit: item.unit,
+      current: Math.round(item.value * 100) / 100,
+      baseline: Math.round(base.value * 100) / 100,
+      delta: Math.round(delta * 100) / 100,
+      deltaPct: Math.round(deltaPct * 100) / 100,
+      thresholdPct: item.thresholdPct,
+      verdict,
+    }];
+  });
+
+  const slower = metrics.filter(metric => metric.verdict === 'slower').sort((a, b) => b.deltaPct - a.deltaPct);
+  const faster = metrics.filter(metric => metric.verdict === 'faster').sort((a, b) => a.deltaPct - b.deltaPct);
+  const fasterTiming = faster.filter(metric => metric.unit === 'ms');
+  const status: QaBenchmarkStatus =
+    slower.length > 0 && fasterTiming.length > 0 ? 'mixed'
+      : slower.length > 0 ? 'slower'
+        : fasterTiming.length > 0 ? 'faster'
+          : 'ok';
+  const top = slower[0] ?? fasterTiming[0] ?? null;
+  const sameGitHead = Boolean(current.code?.gitHead && baseline.code?.gitHead)
+    ? current.code!.gitHead === baseline.code!.gitHead
+    : null;
+  const sameCodeHash = Boolean(current.code?.codeHash && baseline.code?.codeHash)
+    ? current.code!.codeHash === baseline.code!.codeHash
+    : null;
+  const likelyCauses = [
+    ...(sameCodeHash === false ? ['code hash changed'] : []),
+    ...(sameGitHead === false ? ['git HEAD changed'] : []),
+    ...(current.code?.dirty ? ['current worktree is dirty'] : []),
+    ...(top ? [`largest delta: ${top.label} ${top.deltaPct > 0 ? '+' : ''}${top.deltaPct}%`] : []),
+  ];
+  const reason = top
+    ? `${top.label} ${top.deltaPct > 0 ? '+' : ''}${top.deltaPct}% vs ${baseline.runId}`
+    : faster.length > 0
+      ? `Timing within thresholds; resource usage improved vs ${baseline.runId}`
+      : `Within thresholds vs ${baseline.runId}`;
+
+  return {
+    status,
+    suiteKey,
+    suiteLabel,
+    comparedRunId: baseline.runId,
+    comparedGitHead: baseline.code?.gitHead ?? null,
+    comparedCodeHash: baseline.code?.codeHash ?? null,
+    sameGitHead,
+    sameCodeHash,
+    reason,
+    metrics,
+    likelyCauses,
+  };
+};
+
+const parseManifestJson = (value: unknown): QaRunManifest | null => {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    return JSON.parse(value) as QaRunManifest;
+  } catch {
+    return null;
+  }
+};
+
+const openQaHistoryDb = (): Database => {
+  mkdirSync(resolve(process.cwd(), '.logs'), { recursive: true });
+  const db = new Database(QA_HISTORY_DB_PATH);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS qa_runs (
+      run_id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      status TEXT NOT NULL,
+      total_ms INTEGER,
+      total_shards INTEGER NOT NULL,
+      passed_shards INTEGER NOT NULL,
+      failed_shards INTEGER NOT NULL,
+      git_head TEXT,
+      git_branch TEXT,
+      dirty INTEGER NOT NULL DEFAULT 0,
+      code_hash TEXT,
+      avg_load1 REAL,
+      peak_load1 REAL,
+      max_child_cpu_pct REAL,
+      max_child_rss_kb INTEGER,
+      suite_key TEXT,
+      benchmark_status TEXT,
+      benchmark_delta_pct REAL,
+      benchmark_compared_run_id TEXT,
+      avg_shard_ms REAL,
+      max_shard_ms REAL,
+      bootstrap_ms REAL,
+      api_healthy_ms REAL,
+      playwright_ms REAL,
+      logs_dir TEXT NOT NULL,
+      manifest_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS qa_runs_created_at_idx ON qa_runs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS qa_runs_code_hash_idx ON qa_runs(code_hash);
+    CREATE INDEX IF NOT EXISTS qa_runs_git_head_idx ON qa_runs(git_head);
+  `);
+  const columns = new Set((db.query(`PRAGMA table_info(qa_runs)`).all() as Array<Record<string, unknown>>).map(row => String(row['name'])));
+  const addColumn = (name: string, ddl: string): void => {
+    if (columns.has(name)) return;
+    db.exec(`ALTER TABLE qa_runs ADD COLUMN ${name} ${ddl}`);
+  };
+  addColumn('suite_key', 'TEXT');
+  addColumn('benchmark_status', 'TEXT');
+  addColumn('benchmark_delta_pct', 'REAL');
+  addColumn('benchmark_compared_run_id', 'TEXT');
+  addColumn('avg_shard_ms', 'REAL');
+  addColumn('max_shard_ms', 'REAL');
+  addColumn('bootstrap_ms', 'REAL');
+  addColumn('api_healthy_ms', 'REAL');
+  addColumn('playwright_ms', 'REAL');
+  db.exec(`CREATE INDEX IF NOT EXISTS qa_runs_suite_key_idx ON qa_runs(suite_key, created_at DESC);`);
+  return db;
+};
+
+const toNullableNumber = (value: unknown): number | null =>
+  typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void => {
+  const timing = summarizeQaRunTiming(run);
+  const db = openQaHistoryDb();
+  try {
+    db.query(`
+      INSERT INTO qa_runs (
+        run_id,
+        created_at,
+        completed_at,
+        status,
+        total_ms,
+        total_shards,
+        passed_shards,
+        failed_shards,
+        git_head,
+        git_branch,
+        dirty,
+        code_hash,
+        avg_load1,
+        peak_load1,
+        max_child_cpu_pct,
+        max_child_rss_kb,
+        suite_key,
+        benchmark_status,
+        benchmark_delta_pct,
+        benchmark_compared_run_id,
+        avg_shard_ms,
+        max_shard_ms,
+        bootstrap_ms,
+        api_healthy_ms,
+        playwright_ms,
+        logs_dir,
+        manifest_json
+      ) VALUES (
+        $runId,
+        $createdAt,
+        $completedAt,
+        $status,
+        $totalMs,
+        $totalShards,
+        $passedShards,
+        $failedShards,
+        $gitHead,
+        $gitBranch,
+        $dirty,
+        $codeHash,
+        $avgLoad1,
+        $peakLoad1,
+        $maxChildCpuPct,
+        $maxChildRssKb,
+        $suiteKey,
+        $benchmarkStatus,
+        $benchmarkDeltaPct,
+        $benchmarkComparedRunId,
+        $avgShardMs,
+        $maxShardMs,
+        $bootstrapMs,
+        $apiHealthyMs,
+        $playwrightMs,
+        $logsDir,
+        $manifestJson
+      )
+      ON CONFLICT(run_id) DO UPDATE SET
+        created_at = excluded.created_at,
+        completed_at = excluded.completed_at,
+        status = excluded.status,
+        total_ms = excluded.total_ms,
+        total_shards = excluded.total_shards,
+        passed_shards = excluded.passed_shards,
+        failed_shards = excluded.failed_shards,
+        git_head = excluded.git_head,
+        git_branch = excluded.git_branch,
+        dirty = excluded.dirty,
+        code_hash = excluded.code_hash,
+        avg_load1 = excluded.avg_load1,
+        peak_load1 = excluded.peak_load1,
+        max_child_cpu_pct = excluded.max_child_cpu_pct,
+        max_child_rss_kb = excluded.max_child_rss_kb,
+        suite_key = excluded.suite_key,
+        benchmark_status = excluded.benchmark_status,
+        benchmark_delta_pct = excluded.benchmark_delta_pct,
+        benchmark_compared_run_id = excluded.benchmark_compared_run_id,
+        avg_shard_ms = excluded.avg_shard_ms,
+        max_shard_ms = excluded.max_shard_ms,
+        bootstrap_ms = excluded.bootstrap_ms,
+        api_healthy_ms = excluded.api_healthy_ms,
+        playwright_ms = excluded.playwright_ms,
+        logs_dir = excluded.logs_dir,
+        manifest_json = excluded.manifest_json
+    `).run({
+      $runId: run.runId,
+      $createdAt: run.createdAt,
+      $completedAt: run.completedAt,
+      $status: run.status,
+      $totalMs: run.totalMs,
+      $totalShards: run.totalShards,
+      $passedShards: run.passedShards,
+      $failedShards: run.failedShards,
+      $gitHead: run.code?.gitHead ?? null,
+      $gitBranch: run.code?.gitBranch ?? null,
+      $dirty: run.code?.dirty ? 1 : 0,
+      $codeHash: run.code?.codeHash ?? null,
+      $avgLoad1: toNullableNumber(run.perf?.avgLoad1),
+      $peakLoad1: toNullableNumber(run.perf?.peakLoad1),
+      $maxChildCpuPct: toNullableNumber(run.perf?.maxChildCpuPct),
+      $maxChildRssKb: toNullableNumber(run.perf?.maxChildRssKb),
+      $suiteKey: qaRunSuiteKey(run),
+      $benchmarkStatus: run.benchmark?.status ?? null,
+      $benchmarkDeltaPct: run.benchmark?.metrics.find(metric => metric.metric === 'totalMs')?.deltaPct ?? null,
+      $benchmarkComparedRunId: run.benchmark?.comparedRunId ?? null,
+      $avgShardMs: timing.avgShardMs,
+      $maxShardMs: timing.maxShardMs,
+      $bootstrapMs: timing.bootstrapMs,
+      $apiHealthyMs: timing.apiHealthyMs,
+      $playwrightMs: timing.playwrightMs,
+      $logsDir: logsDir,
+      $manifestJson: JSON.stringify(run),
+    });
+  } finally {
+    db.close();
+  }
+};
+
+const rowToQaHistoryEntry = (row: Record<string, unknown>): QaHistoryEntry => ({
+  runId: String(row['run_id'] || ''),
+  createdAt: Number(row['created_at'] || 0),
+  completedAt: toNullableNumber(row['completed_at']),
+  status: row['status'] === 'passed' || row['status'] === 'failed' ? row['status'] : 'unknown',
+  totalMs: toNullableNumber(row['total_ms']),
+  totalShards: Number(row['total_shards'] || 0),
+  passedShards: Number(row['passed_shards'] || 0),
+  failedShards: Number(row['failed_shards'] || 0),
+  gitHead: typeof row['git_head'] === 'string' ? row['git_head'] : null,
+  gitBranch: typeof row['git_branch'] === 'string' ? row['git_branch'] : null,
+  dirty: Number(row['dirty'] || 0) === 1,
+  codeHash: typeof row['code_hash'] === 'string' ? row['code_hash'] : null,
+  avgLoad1: toNullableNumber(row['avg_load1']),
+  peakLoad1: toNullableNumber(row['peak_load1']),
+  maxChildCpuPct: toNullableNumber(row['max_child_cpu_pct']),
+  maxChildRssKb: toNullableNumber(row['max_child_rss_kb']),
+  suiteKey: typeof row['suite_key'] === 'string' ? row['suite_key'] : null,
+  benchmarkStatus: (
+    row['benchmark_status'] === 'ok' ||
+    row['benchmark_status'] === 'faster' ||
+    row['benchmark_status'] === 'slower' ||
+    row['benchmark_status'] === 'mixed' ||
+    row['benchmark_status'] === 'insufficient'
+  ) ? row['benchmark_status'] : null,
+  benchmarkDeltaPct: toNullableNumber(row['benchmark_delta_pct']),
+  benchmarkComparedRunId: typeof row['benchmark_compared_run_id'] === 'string' ? row['benchmark_compared_run_id'] : null,
+  avgShardMs: toNullableNumber(row['avg_shard_ms']),
+  maxShardMs: toNullableNumber(row['max_shard_ms']),
+  bootstrapMs: toNullableNumber(row['bootstrap_ms']),
+  apiHealthyMs: toNullableNumber(row['api_healthy_ms']),
+  playwrightMs: toNullableNumber(row['playwright_ms']),
+  logsDir: String(row['logs_dir'] || ''),
+});
+
+export const findComparableQaBenchmarkRun = (run: QaRunManifest): QaRunManifest | null => {
+  const db = openQaHistoryDb();
+  try {
+    const row = db.query(`
+      SELECT manifest_json
+      FROM qa_runs
+      WHERE suite_key = $suiteKey
+        AND run_id != $runId
+        AND total_ms IS NOT NULL
+        AND created_at < $createdAt
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get({
+      $suiteKey: qaRunSuiteKey(run),
+      $runId: run.runId,
+      $createdAt: run.createdAt,
+    }) as Record<string, unknown> | null;
+    const direct = parseManifestJson(row?.['manifest_json']);
+    if (direct) return direct;
+    const fallbackRows = db.query(`
+      SELECT manifest_json
+      FROM qa_runs
+      WHERE run_id != $runId
+        AND total_ms IS NOT NULL
+        AND created_at < $createdAt
+      ORDER BY created_at DESC
+      LIMIT 200
+    `).all({
+      $runId: run.runId,
+      $createdAt: run.createdAt,
+    }) as Array<Record<string, unknown>>;
+    const suiteKey = qaRunSuiteKey(run);
+    for (const candidate of fallbackRows) {
+      const parsed = parseManifestJson(candidate['manifest_json']);
+      if (parsed && qaRunSuiteKey(parsed) === suiteKey) return parsed;
+    }
+    return null;
+  } finally {
+    db.close();
+  }
+};
+
+export const compareQaRunWithHistory = (run: QaRunManifest): QaBenchmarkComparison => {
+  const baseline = findComparableQaBenchmarkRun(run);
+  return compareQaBenchmarkRuns(run, baseline);
+};
+
+export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
+  for (const run of await listQaRuns(Math.max(safeLimit, 100))) {
+    const runDir = join(QA_LOGS_ROOT, run.runId);
+    recordQaRunHistory(run, runDir);
+  }
+  const db = openQaHistoryDb();
+  try {
+    const rows = db.query(`
+      SELECT
+        run_id,
+        created_at,
+        completed_at,
+        status,
+        total_ms,
+        total_shards,
+        passed_shards,
+        failed_shards,
+        git_head,
+        git_branch,
+        dirty,
+        code_hash,
+        avg_load1,
+        peak_load1,
+        max_child_cpu_pct,
+        max_child_rss_kb,
+        suite_key,
+        benchmark_status,
+        benchmark_delta_pct,
+        benchmark_compared_run_id,
+        avg_shard_ms,
+        max_shard_ms,
+        bootstrap_ms,
+        api_healthy_ms,
+        playwright_ms,
+        logs_dir
+      FROM qa_runs
+      ORDER BY
+        CASE WHEN created_at > $latestRealCreatedAt THEN 1 ELSE 0 END ASC,
+        created_at DESC
+      LIMIT $limit
+    `).all({ $limit: safeLimit, $latestRealCreatedAt: Date.now() + FUTURE_RUN_SKEW_MS }) as Array<Record<string, unknown>>;
+    return rows.map(rowToQaHistoryEntry);
+  } finally {
+    db.close();
+  }
 };
 
 const detectArtifactKind = (name: string): QaArtifactKind => {
@@ -272,7 +927,7 @@ const readTargetsMetadata = async (runDir: string): Promise<Map<number, QaTarget
   return out;
 };
 
-const parseSlowSteps = (text: string): QaSlowStep[] => {
+const parseTimelineSteps = (text: string): QaSlowStep[] => {
   const out: QaSlowStep[] = [];
   const re = /\[(E2E-TIMING|MESH-TIMING)\]\s+(.+?)\s+(\d+)ms/g;
   let match: RegExpExecArray | null = null;
@@ -283,6 +938,11 @@ const parseSlowSteps = (text: string): QaSlowStep[] => {
     if (!label || !Number.isFinite(ms)) continue;
     out.push({ label, ms });
   }
+  return out;
+};
+
+const parseSlowSteps = (text: string): QaSlowStep[] => {
+  const out = parseTimelineSteps(text);
   return out.sort((a, b) => b.ms - a.ms);
 };
 
@@ -413,6 +1073,7 @@ const collectLegacyShard = async (
   const resultsDir = join(runDir, `test-results-shard-${shard}`);
   const logText = existsSync(logPath) ? await readFile(logPath, 'utf8') : '';
   const phaseMs = parsePhaseTimings(logText);
+  const timelineSteps = parseTimelineSteps(logText).slice(0, 80);
   const slowSteps = parseSlowSteps(logText).slice(0, 12);
   const artifacts: QaArtifact[] = [];
   const metadata = targetMetadata.get(shard) ?? null;
@@ -439,6 +1100,7 @@ const collectLegacyShard = async (
     logTail: logText ? shortTail(logText) : null,
     error: status === 'failed' ? shortTail(logText, 40) : null,
     phaseMs,
+    timelineSteps,
     slowSteps,
     artifacts,
     hasVideo: artifacts.some(artifact => artifact.kind === 'video'),
@@ -491,7 +1153,7 @@ export const listQaRuns = async (limit = 20): Promise<QaRunManifest[]> => {
   const runIds = entries
     .filter(entry => entry.isDirectory() && /^\d{8}-\d{6}-\d{3}$/.test(entry.name))
     .map(entry => entry.name)
-    .sort((a, b) => compareStableText(b, a))
+    .sort(compareQaRunIdsForOperator)
     .slice(0, limit);
   return await Promise.all(runIds.map(runId => readQaRun(runId)));
 };
@@ -520,6 +1182,11 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           shard.logRelativePath && existsSync(join(runDir, shard.logRelativePath))
             ? await readFile(join(runDir, shard.logRelativePath), 'utf8')
             : '';
+        const timelineSteps = Array.isArray(shard.timelineSteps) && shard.timelineSteps.length > 0
+          ? shard.timelineSteps
+          : logText
+            ? parseTimelineSteps(logText).slice(0, 80)
+            : [];
         return {
           ...shard,
           target,
@@ -527,6 +1194,10 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           handle: shard.handle ?? metadata?.handle ?? deriveQaTestHandle(target, title),
           description: metadata?.description ?? deriveQaTestDescription(target, title) ?? shard.description,
           artifacts: sortArtifacts([...(shard.artifacts ?? [])]),
+          timelineSteps,
+          slowSteps: Array.isArray(shard.slowSteps) && shard.slowSteps.length > 0
+            ? shard.slowSteps
+            : timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, 12),
           logTail: shard.logTail ?? (logText ? shortTail(logText) : null),
         };
       }),
@@ -640,13 +1311,20 @@ export const resolveQaStoryScreenshotPath = async (
   return absolutePath;
 };
 
-export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'shards'> & { failingTargets: string[] } => ({
+export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'shards'> & {
+  timing: QaRunTimingSummary;
+  failingTargets: string[];
+} => ({
   manifestVersion: run.manifestVersion,
   runId: run.runId,
   createdAt: run.createdAt,
   completedAt: run.completedAt,
   status: run.status,
   totalMs: run.totalMs,
+  timing: summarizeQaRunTiming(run),
+  ...(run.code ? { code: run.code } : {}),
+  ...(run.perf ? { perf: run.perf } : {}),
+  ...(run.benchmark ? { benchmark: run.benchmark } : {}),
   totalShards: run.totalShards,
   passedShards: run.passedShards,
   failedShards: run.failedShards,

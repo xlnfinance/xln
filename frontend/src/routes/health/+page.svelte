@@ -2,10 +2,12 @@
   import { onMount } from 'svelte';
   import { Activity, Camera, Database, Network, RefreshCw, ShieldCheck, Siren, Zap } from 'lucide-svelte';
   import BootstrapLive from '$lib/components/Health/BootstrapLive.svelte';
+  import QaProtectedImage from '$lib/components/QA/QaProtectedImage.svelte';
   import QaCockpitEmbedPanel from '$lib/components/Health/QaCockpitEmbedPanel.svelte';
   import QaRunsPanel from '$lib/components/Health/QaRunsPanel.svelte';
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { qaFetch } from '$lib/qa/apiClient';
 
   type HealthData = {
     timestamp: number;
@@ -621,25 +623,29 @@
         fetch('/api/health'),
         fetch('/api/debug/events?last=1000'),
         fetch('/api/debug/entities?limit=1000'),
-        fetch('/api/qa/stories?limit=160'),
+        qaFetch('/api/qa/stories?limit=160'),
       ]);
 
       if (!hRes.ok) throw new Error(`health HTTP ${hRes.status}`);
       if (!dRes.ok) throw new Error(`debug HTTP ${dRes.status}`);
       if (!eRes.ok) throw new Error(`entities HTTP ${eRes.status}`);
-      if (!sRes.ok) throw new Error(`stories HTTP ${sRes.status}`);
 
       health = normalizeHealthData(await hRes.json());
       const debugData = (await dRes.json()) as DebugResponse;
       const entitiesData = (await eRes.json()) as DebugEntitiesResponse;
-      const storiesData = (await sRes.json()) as { ok?: boolean; stories?: QaStoryScreenshot[]; error?: string };
       events = Array.isArray(debugData.events) ? debugData.events : [];
       entities = Array.isArray(entitiesData.entities) ? entitiesData.entities : [];
-      if (!storiesData.ok || !Array.isArray(storiesData.stories)) {
-        throw new Error(storiesData.error || 'stories payload malformed');
+      if (sRes.ok) {
+        const storiesData = (await sRes.json()) as { ok?: boolean; stories?: QaStoryScreenshot[]; error?: string };
+        if (!storiesData.ok || !Array.isArray(storiesData.stories)) {
+          throw new Error(storiesData.error || 'stories payload malformed');
+        }
+        stories = storiesData.stories;
+        storyError = null;
+      } else {
+        const payload = await sRes.json().catch(() => null) as { error?: string } | null;
+        storyError = payload?.error || `stories HTTP ${sRes.status}`;
       }
-      stories = storiesData.stories;
-      storyError = null;
 
       eventOptions = [...new Set(events.map((e) => e.event).filter(Boolean))].sort();
       msgTypeOptions = [...new Set(events.map((e) => e.msgType).filter(Boolean) as string[])].sort();
@@ -984,7 +990,7 @@
           <div class="story-stage">
             {#if selectedStory}
               <a href={selectedStory.url} target="_blank" rel="noreferrer">
-                <img src={selectedStory.url} alt={selectedStory.title} loading="eager" />
+                <QaProtectedImage url={selectedStory.url} alt={selectedStory.title} loading="eager" />
               </a>
               <div class="story-caption">
                 <div>
@@ -1004,7 +1010,7 @@
                 onclick={() => (selectedStoryId = story.id)}
                 title={story.title}
               >
-                <img src={story.url} alt={story.title} loading="lazy" />
+                <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
                 <span>{story.title}</span>
               </button>
             {/each}
@@ -1650,7 +1656,7 @@
     background: #050605;
   }
 
-  .story-stage img {
+  .story-stage :global(img) {
     width: 100%;
     height: 100%;
     object-fit: contain;
@@ -1707,7 +1713,7 @@
     box-shadow: inset 0 0 0 1px rgba(217, 173, 88, 0.35);
   }
 
-  .story-thumb img {
+  .story-thumb :global(img) {
     width: 100%;
     height: 84px;
     object-fit: cover;
