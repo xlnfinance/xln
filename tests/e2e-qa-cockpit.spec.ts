@@ -40,6 +40,18 @@ const QA_FIXTURE_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGNk+M+ABzAwMDAwMgAAHncCPYhSw6AAAAAASUVORK5CYII=',
   'base64',
 );
+const QA_FIXTURE_VTT = [
+  'WEBVTT',
+  '',
+  'cue-01',
+  '00:00:00.000 --> 00:00:00.030',
+  'open wallet cockpit',
+  '',
+  'cue-02',
+  '00:00:00.030 --> 00:00:00.060',
+  'select recorded shard',
+  '',
+].join('\n');
 
 const QA_FIXTURE_RUN = {
   manifestVersion: 2,
@@ -153,15 +165,15 @@ const QA_FIXTURE_RUN = {
       ],
       browserHealth: QA_FIXTURE_BROWSER_HEALTH,
       timelineSteps: [
-        { label: 'E2E-TIMING:open wallet cockpit', ms: 900 },
-        { label: 'E2E-TIMING:select recorded shard', ms: 1_100 },
-        { label: 'E2E-TIMING:sync video subtitle transcript', ms: 1_300 },
-        { label: 'E2E-TIMING:enter theater playback', ms: 1_500 },
+        { label: 'E2E-TIMING:open wallet cockpit', ms: 30, startMs: 0, endMs: 30 },
+        { label: 'E2E-TIMING:select recorded shard', ms: 30, startMs: 30, endMs: 60 },
+        { label: 'E2E-TIMING:sync video subtitle transcript', ms: 30, startMs: 60, endMs: 90 },
+        { label: 'E2E-TIMING:enter theater playback', ms: 30, startMs: 90, endMs: 120 },
       ],
       slowSteps: [
-        { label: 'E2E-TIMING:enter theater playback', ms: 1_500 },
-        { label: 'E2E-TIMING:sync video subtitle transcript', ms: 1_300 },
-        { label: 'E2E-TIMING:select recorded shard', ms: 1_100 },
+        { label: 'E2E-TIMING:enter theater playback', ms: 30, startMs: 90, endMs: 120 },
+        { label: 'E2E-TIMING:sync video subtitle transcript', ms: 30, startMs: 60, endMs: 90 },
+        { label: 'E2E-TIMING:select recorded shard', ms: 30, startMs: 30, endMs: 60 },
       ],
       artifacts: [
         {
@@ -171,6 +183,14 @@ const QA_FIXTURE_RUN = {
           kind: 'video',
           contentType: 'video/webm',
           url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent(QA_FIXTURE_ARTIFACT)}`,
+        },
+        {
+          name: 'cues.vtt',
+          relativePath: 'test-results-shard-1/qa-cockpit-fixture/qa-cues/cues.vtt',
+          sizeBytes: QA_FIXTURE_VTT.length,
+          kind: 'text',
+          contentType: 'text/vtt; charset=utf-8',
+          url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent('test-results-shard-1/qa-cockpit-fixture/qa-cues/cues.vtt')}`,
         },
       ],
       hasVideo: true,
@@ -527,10 +547,11 @@ test.describe('QA cockpit scenario player', () => {
       const requestUrl = new URL(route.request().url());
       const artifactPath = requestUrl.searchParams.get('path') || '';
       const isPng = artifactPath.endsWith('.png');
+      const isVtt = artifactPath.endsWith('.vtt');
       await route.fulfill({
         status: 200,
-        contentType: isPng ? 'image/png' : 'video/webm',
-        body: isPng ? QA_FIXTURE_PNG : QA_FIXTURE_WEBM,
+        contentType: isPng ? 'image/png' : isVtt ? 'text/vtt; charset=utf-8' : 'video/webm',
+        body: isPng ? QA_FIXTURE_PNG : isVtt ? QA_FIXTURE_VTT : QA_FIXTURE_WEBM,
       });
     });
     const runtimeErrors: string[] = [];
@@ -623,6 +644,7 @@ test.describe('QA cockpit scenario player', () => {
     await expect(watchPanel).toBeVisible();
     await expect(page.getByTestId('qa-video-player')).toBeVisible();
     await expect(page.getByTestId('qa-video-player')).toHaveAttribute('src', /^blob:/);
+    await expect(page.getByTestId('qa-video-track')).toHaveAttribute('src', /^blob:/);
 
     const shortDescription = (await page.getByTestId('qa-short-description').textContent())?.trim() ?? '';
     expect(shortDescription.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(10);
@@ -641,8 +663,17 @@ test.describe('QA cockpit scenario player', () => {
       .toBeGreaterThan(2);
 
     await expect(page.getByTestId('qa-live-subtitle')).toBeVisible();
+    await expect(page.getByTestId('qa-scenario-transcript')).not.toContainText('Preflight');
+    await expect(page.getByTestId('qa-scenario-transcript')).not.toContainText('Health Gate');
+    await expect(page.getByTestId('qa-subtitle-cue').nth(1)).toContainText('30ms-60ms');
     await page.getByTestId('qa-subtitle-cue').nth(1).click();
     await expect(page.locator('[data-testid="qa-subtitle-cue"][aria-current="step"]')).toBeVisible();
+    await expect
+      .poll(async () => page.getByTestId('qa-video-player').evaluate((node) => (node as HTMLVideoElement).currentTime), {
+        timeout: 5_000,
+        message: 'cue click should seek to video-clock offset',
+      })
+      .toBeGreaterThanOrEqual(0.02);
 
     await page.getByTestId('qa-theater-toggle').click();
     await expect(watchPanel).toHaveClass(/theater/);

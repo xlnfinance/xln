@@ -11,6 +11,7 @@ import {
 } from '@playwright/test';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { setE2ETimingOrigin } from './utils/e2e-timing';
 
 type BrowserIssueType = 'console' | 'pageerror' | 'requestfailed' | 'http';
 type BrowserIssueSeverity = 'error' | 'warning';
@@ -148,6 +149,7 @@ test.beforeEach(async ({ browser, context, page }, testInfo) => {
   observeContext(context, testInfo);
   observePage(page, testInfo);
   await page.setViewportSize({ width: 1920, height: 1080 });
+  setE2ETimingOrigin();
 });
 
 test.afterEach(async () => {

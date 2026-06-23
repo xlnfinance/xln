@@ -574,6 +574,7 @@ test('qa run report preserves timeline order and derives slow steps', async () =
         '[E2E-TIMING] first visible cockpit cue 200ms',
         '[MESH-TIMING] hub mesh hydrated 800ms',
         '[E2E-TIMING] subtitle synchronized 400ms',
+        '[E2E-CUE] subtitle synchronized start=1200ms end=1600ms duration=400ms',
       ].join('\n'),
     );
 
@@ -581,11 +582,11 @@ test('qa run report preserves timeline order and derives slow steps', async () =
     expect(run.shards[0]?.timelineSteps).toEqual([
       { label: 'E2E-TIMING:first visible cockpit cue', ms: 200 },
       { label: 'MESH-TIMING:hub mesh hydrated', ms: 800 },
-      { label: 'E2E-TIMING:subtitle synchronized', ms: 400 },
+      { label: 'E2E-TIMING:subtitle synchronized', ms: 400, startMs: 1200, endMs: 1600 },
     ]);
     expect(run.shards[0]?.slowSteps).toEqual([
       { label: 'MESH-TIMING:hub mesh hydrated', ms: 800 },
-      { label: 'E2E-TIMING:subtitle synchronized', ms: 400 },
+      { label: 'E2E-TIMING:subtitle synchronized', ms: 400, startMs: 1200, endMs: 1600 },
       { label: 'E2E-TIMING:first visible cockpit cue', ms: 200 },
     ]);
     expect(run.shards[0]?.browserHealth).toEqual({
