@@ -666,6 +666,7 @@
     activeView = 'e2e';
     if (item.runId === selectedRunId && selectedRun) {
       selectedShardIndex = pickDefaultShard(selectedRun, item.failureClass);
+      rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
       return;
     }
     await selectRun(item.runId);
@@ -741,23 +742,52 @@
     return failedIndex >= 0 ? failedIndex : 0;
   }
 
+  function shardNumberFromUrl(): number | null {
+    if (typeof window === 'undefined') return null;
+    const raw = new URL(window.location.href).searchParams.get('shard')?.trim() || '';
+    if (!/^\d+$/.test(raw)) return null;
+    const value = Number(raw);
+    return Number.isSafeInteger(value) ? value : null;
+  }
+
+  function pickUrlShardIndex(run: QaRun): number | null {
+    const shardNumber = shardNumberFromUrl();
+    if (shardNumber === null) return null;
+    const index = run.shards.findIndex((shard) => shard.shard === shardNumber);
+    return index >= 0 ? index : null;
+  }
+
+  function rememberRunInUrl(runId: string, shardNumber: number | null | undefined = selectedShard?.shard): void {
+    if (typeof window === 'undefined' || !runId) return;
+    const url = new URL(window.location.href);
+    url.searchParams.set('runId', runId);
+    if (typeof shardNumber === 'number' && Number.isSafeInteger(shardNumber)) {
+      url.searchParams.set('shard', String(shardNumber));
+    } else {
+      url.searchParams.delete('shard');
+    }
+    window.history.replaceState(null, '', url);
+  }
+
+  function selectShard(index: number): void {
+    if (!selectedRun || index < 0 || index >= selectedRun.shards.length) return;
+    const shard = selectedRun.shards[index];
+    if (!shard) return;
+    selectedShardIndex = index;
+    rememberRunInUrl(selectedRun.runId, shard.shard);
+  }
+
   function setFailureClassFilter(failureClass: QaFailureClassFilter): void {
     selectedFailureClass = failureClass;
     if (selectedRun) {
       selectedShardIndex = pickDefaultShard(selectedRun, failureClass);
+      rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
     }
   }
 
   function requestedRunIdFromUrl(): string {
     if (typeof window === 'undefined') return '';
     return new URL(window.location.href).searchParams.get('runId')?.trim() || '';
-  }
-
-  function rememberRunInUrl(runId: string): void {
-    if (typeof window === 'undefined' || !runId) return;
-    const url = new URL(window.location.href);
-    url.searchParams.set('runId', runId);
-    window.history.replaceState(null, '', url);
   }
 
   function readableText(raw: string | null | undefined): string {
@@ -844,11 +874,9 @@
         : runs[0]?.runId || '';
       if (nextRunId && nextRunId !== selectedRunId) {
         selectedRunId = nextRunId;
-        rememberRunInUrl(nextRunId);
         await loadRun(nextRunId);
       } else if (!selectedRunId && nextRunId) {
         selectedRunId = nextRunId;
-        rememberRunInUrl(nextRunId);
         await loadRun(nextRunId);
       }
     } catch (err) {
@@ -869,7 +897,8 @@
         throw new Error(payload.error || 'Failed to load QA run');
       }
       selectedRun = payload.run;
-      selectedShardIndex = pickDefaultShard(payload.run);
+      selectedShardIndex = pickUrlShardIndex(payload.run) ?? pickDefaultShard(payload.run);
+      rememberRunInUrl(payload.run.runId, payload.run.shards[selectedShardIndex]?.shard);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
     } finally {
@@ -946,7 +975,7 @@
   async function selectRun(runId: string): Promise<void> {
     if (!runId || runId === selectedRunId) return;
     selectedRunId = runId;
-    rememberRunInUrl(runId);
+    rememberRunInUrl(runId, null);
     await loadRun(runId);
   }
 
@@ -1708,7 +1737,8 @@
             class:fail={shard.status === 'failed'}
             data-testid="qa-suite-row"
             data-has-video={shard.hasVideo}
-            onclick={() => (selectedShardIndex = index)}
+            data-shard={shard.shard}
+            onclick={() => selectShard(index)}
           >
             <div class="suite-preview" data-testid="scenario-preview-card">
               {#if shardPreviewUrl(shard)}

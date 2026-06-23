@@ -356,7 +356,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [x] API: concurrent restart returns 409 without spawning a heavy real e2e run.
 - [x] API: artifact endpoints are same-origin and token-gated.
 - [x] API: audit row written for restart start and updated on finish.
-- [ ] E2E: `/qa?runId=...` deep-link selects exact run and video shard.
+- [x] E2E: `/qa?runId=...&shard=...` deep-link selects exact run and video shard.
+  - Status: done. QA cockpit now treats `shard` as the actual manifest shard number, applies it on run load, and keeps `runId/shard` in the URL when a shard or failure class is selected.
+  - Evidence: focused QA cockpit e2e fixture has two shards and opens `/qa?runId=20260623-235959-999&shard=7`; the test asserts shard `7` is selected instead of the failed/default shard and that its video path remains playable.
 - [ ] E2E: failed run opens directly to failed shard and first failure cue.
 - [ ] E2E: missing video shows stable empty state with no console errors.
 - [ ] E2E: scenario transcript cue scrubs video to real marker timestamp.

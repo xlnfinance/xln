@@ -106,8 +106,8 @@ const QA_FIXTURE_RUN = {
     ],
     likelyCauses: ['code hash changed', 'git HEAD changed', 'largest delta: wall time +25%'],
   },
-  totalShards: 1,
-  passedShards: 0,
+  totalShards: 2,
+  passedShards: 1,
   failedShards: 1,
   failureClasses: ['assertion'],
   args: { fixture: 'qa-cockpit-scenario-player' },
@@ -195,6 +195,59 @@ const QA_FIXTURE_RUN = {
           sensitivity: 'public',
           contentType: 'text/vtt; charset=utf-8',
           url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent('test-results-shard-1/qa-cockpit-fixture/qa-cues/cues.vtt')}`,
+        },
+      ],
+      hasVideo: true,
+      hasTrace: false,
+    },
+    {
+      shard: 7,
+      status: 'passed',
+      durationMs: 1_800,
+      handle: 'qa.deep-link-video',
+      description: 'Deep link opens the exact recorded video shard without falling back to the failed shard.',
+      target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
+      title: 'QA cockpit deep link opens exact video shard',
+      requireMarketMaker: false,
+      logRelativePath: 'e2e-shard-07.log',
+      logTail: 'Deep link video shard passed',
+      error: null,
+      failureClass: null,
+      phaseMs: {
+        preflight: 50,
+        anvilBoot: 100,
+        apiBoot: 120,
+        apiHealthy: 180,
+        viteBoot: 200,
+        playwright: 1_150,
+      },
+      browserIssues: [],
+      browserHealth: QA_CLEAN_BROWSER_HEALTH,
+      timelineSteps: [
+        { label: 'E2E-TIMING:open deep link video shard', ms: 40, startMs: 0, endMs: 40 },
+        { label: 'E2E-TIMING:verify selected shard playback', ms: 50, startMs: 40, endMs: 90 },
+      ],
+      slowSteps: [
+        { label: 'E2E-TIMING:verify selected shard playback', ms: 50, startMs: 40, endMs: 90 },
+      ],
+      artifacts: [
+        {
+          name: 'video.webm',
+          relativePath: 'test-results-shard-7/qa-cockpit-deep-link/video.webm',
+          sizeBytes: 1024,
+          kind: 'video',
+          sensitivity: 'internal',
+          contentType: 'video/webm',
+          url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent('test-results-shard-7/qa-cockpit-deep-link/video.webm')}`,
+        },
+        {
+          name: 'cues.vtt',
+          relativePath: 'test-results-shard-7/qa-cockpit-deep-link/qa-cues/cues.vtt',
+          sizeBytes: QA_FIXTURE_VTT.length,
+          kind: 'text',
+          sensitivity: 'public',
+          contentType: 'text/vtt; charset=utf-8',
+          url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent('test-results-shard-7/qa-cockpit-deep-link/qa-cues/cues.vtt')}`,
         },
       ],
       hasVideo: true,
@@ -606,8 +659,12 @@ test.describe('QA cockpit scenario player', () => {
     await page.getByTestId('qa-failure-item').first().click();
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/);
 
-    await page.goto(`/qa?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}`);
+    await page.goto(`/qa?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&shard=7`);
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/, { timeout: 30_000 });
+    await expect(page).toHaveURL(new RegExp(`runId=${QA_FIXTURE_RUN_ID}.*shard=7`));
+    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await expect(page.locator('[data-testid="qa-suite-row"][data-shard="7"]')).toHaveClass(/selected/);
+    await expect(page.locator('.shard-detail')).toContainText('qa.deep-link-video');
 
     await page.getByRole('button', { name: 'Scenario Player' }).click();
     await expect(page.getByTestId('qa-scenario-player-frame')).toBeVisible();

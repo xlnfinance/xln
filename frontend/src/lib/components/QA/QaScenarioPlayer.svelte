@@ -56,6 +56,10 @@
   let imageBlobUrls = $state<Record<string, string>>({});
   let selectedKey = $state('');
 
+  function revokeObjectUrlAfterMediaDetach(url: string): void {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   const selectedVideo = $derived.by(() =>
     shard.artifacts.find(artifact => artifact.kind === 'video' && artifact.name === 'video.webm' && artifact.url) ??
     shard.artifacts.find(artifact => artifact.kind === 'video' && artifact.url) ??
@@ -116,7 +120,7 @@
       });
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) revokeObjectUrlAfterMediaDetach(objectUrl);
     };
   });
 
@@ -140,7 +144,7 @@
       });
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) revokeObjectUrlAfterMediaDetach(objectUrl);
     };
   });
 
@@ -167,7 +171,7 @@
       });
     return () => {
       cancelled = true;
-      for (const blobUrl of objectUrls) URL.revokeObjectURL(blobUrl);
+      for (const blobUrl of objectUrls) revokeObjectUrlAfterMediaDetach(blobUrl);
     };
   });
 
