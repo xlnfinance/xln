@@ -36,6 +36,10 @@ const QA_FIXTURE_WEBM = Buffer.from(
   'GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAITEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEjTbuMU6uEHFO7a1OsggH97AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjIuMy4xMDBXQYxMYXZmNjIuMy4xMDBEiYhAXgAAAAAAABZUrmvIrgEAAAAAAAA/14EBc8WIrVSOo5G6X2+cgQAitZyDdW5kiIEAhoVWX1ZQOYOBASPjg4QCYloA4JCwgRC6gRCagQJVsIRVuYEBElTDZ0B/c3OfY8CAZ8iZRaOHRU5DT0RFUkSHjExhdmY2Mi4zLjEwMHNz2mPAi2PFiK1UjqORul9vZ8ilRaOHRU5DT0RFUkSHmExhdmM2Mi4xMS4xMDAgbGlidnB4LXZwOWfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDAuMTIwMDAwMDAwAB9DtnXQ54EAo6GBAACAgkmDQgAA8AD2ADgkHBhCAAAwYAAAEL///YsqAACjk4EAKACGAECSnABJQAADIAAAQkCjk4EAUACGAECSnABKwAADIAAAQkAcU7trkbuPs4EAt4r3gQHxggGo8IED',
   'base64',
 );
+const QA_FIXTURE_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGNk+M+ABzAwMDAwMgAAHncCPYhSw6AAAAAASUVORK5CYII=',
+  'base64',
+);
 
 const QA_FIXTURE_RUN = {
   manifestVersion: 2,
@@ -301,6 +305,45 @@ const QA_HISTORY = [
   },
 ];
 
+const QA_STORIES = [
+  {
+    id: `qa-run:${QA_FIXTURE_RUN_ID}:ux-gallery/desktop/desktop-accounts-pay.png`,
+    source: 'qa-run',
+    title: 'desktop payment composer',
+    group: 'Payments',
+    description: 'User prepares a payment from an open hub account.',
+    platform: 'desktop',
+    tags: ['payment', 'account'],
+    curated: true,
+    name: 'desktop-accounts-pay.png',
+    relativePath: 'ux-gallery/desktop/desktop-accounts-pay.png',
+    sizeBytes: QA_FIXTURE_PNG.length,
+    updatedAt: QA_FIXTURE_RUN.completedAt,
+    url: '/api/qa/artifact?runId=20260623-235959-999&path=ux-gallery%2Fdesktop%2Fdesktop-accounts-pay.png',
+    runId: QA_FIXTURE_RUN_ID,
+    shard: 1,
+    status: 'passed',
+  },
+  {
+    id: `qa-run:${QA_FIXTURE_RUN_ID}:ux-gallery/mobile/mobile-iphone15pro-swap-base.png`,
+    source: 'qa-run',
+    title: 'mobile swap ticket',
+    group: 'Swap',
+    description: 'Prepared cross-chain swap ticket with live orderbook depth.',
+    platform: 'mobile',
+    tags: ['swap', 'orderbook'],
+    curated: true,
+    name: 'mobile-iphone15pro-swap-base.png',
+    relativePath: 'ux-gallery/mobile/mobile-iphone15pro-swap-base.png',
+    sizeBytes: QA_FIXTURE_PNG.length,
+    updatedAt: QA_FIXTURE_RUN.completedAt,
+    url: '/api/qa/artifact?runId=20260623-235959-999&path=ux-gallery%2Fmobile%2Fmobile-iphone15pro-swap-base.png',
+    runId: QA_FIXTURE_RUN_ID,
+    shard: 1,
+    status: 'passed',
+  },
+];
+
 const QA_RESTART_AUDIT = [
   {
     auditId: 'fixture-restart-audit-1',
@@ -381,6 +424,18 @@ test.describe('QA cockpit scenario player', () => {
         }),
       });
     });
+    await page.route('**/api/qa/stories?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          total: QA_STORIES.length,
+          stories: QA_STORIES,
+        }),
+      });
+    });
     await page.route('**/api/qa/restart?**', async (route) => {
       await route.fulfill({
         status: 200,
@@ -422,10 +477,13 @@ test.describe('QA cockpit scenario player', () => {
       });
     });
     await page.route('**/api/qa/artifact?**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const artifactPath = requestUrl.searchParams.get('path') || '';
+      const isPng = artifactPath.endsWith('.png');
       await route.fulfill({
         status: 200,
-        contentType: 'video/webm',
-        body: QA_FIXTURE_WEBM,
+        contentType: isPng ? 'image/png' : 'video/webm',
+        body: isPng ? QA_FIXTURE_PNG : QA_FIXTURE_WEBM,
       });
     });
     const runtimeErrors: string[] = [];
@@ -443,6 +501,8 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('performance');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('SLOWER');
+    await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('UX Screenshot Gallery');
+    await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('desktop payment composer');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await page.getByTestId('qa-run-sort').selectOption('stack-fast');
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
@@ -456,6 +516,10 @@ test.describe('QA cockpit scenario player', () => {
 
     await page.getByRole('button', { name: 'Scenario Player' }).click();
     await expect(page.getByTestId('qa-scenario-player-frame')).toBeVisible();
+    await page.getByRole('button', { name: 'UX Gallery' }).click();
+    await expect(page.getByTestId('qa-ux-gallery')).toContainText('Payments');
+    await expect(page.getByTestId('qa-ux-gallery')).toContainText('mobile swap ticket');
+    await expect(page.getByTestId('qa-ux-gallery-card').filter({ hasText: 'desktop' }).first()).toBeVisible();
     await page.getByRole('button', { name: 'Suites' }).click();
     await expect(page.getByTestId('qa-system-suites')).toContainText('Runtime Unit Tests');
     await expect(page.getByTestId('qa-system-suites')).toContainText('Contract Tests');

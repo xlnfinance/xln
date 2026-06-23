@@ -42,6 +42,25 @@
     url?: string;
   };
 
+  type QaStoryScreenshot = {
+    id: string;
+    source: 'e2e-screenshots' | 'qa-run';
+    title: string;
+    group: string;
+    description: string | null;
+    platform: string | null;
+    tags: string[];
+    curated: boolean;
+    name: string;
+    relativePath: string;
+    sizeBytes: number;
+    updatedAt: number;
+    url: string;
+    runId?: string;
+    shard?: number;
+    status?: 'passed' | 'failed' | 'unknown';
+  };
+
   type QaSlowStep = {
     label: string;
     ms: number;
@@ -257,7 +276,7 @@
     deletedHistoryRows: number;
   };
 
-  type QaView = 'e2e' | 'scenarios' | 'suites' | 'benchmarks' | 'history';
+  type QaView = 'e2e' | 'scenarios' | 'gallery' | 'suites' | 'benchmarks' | 'history';
   type RunSortKey =
     | 'date-desc'
     | 'date-asc'
@@ -302,6 +321,7 @@
 
   let runs = $state<QaSummary[]>([]);
   let catalog = $state<QaCatalogEntry[]>([]);
+  let stories = $state<QaStoryScreenshot[]>([]);
   let history = $state<QaHistoryEntry[]>([]);
   let restartAudit = $state<QaRestartAuditEntry[]>([]);
   let restart = $state<RestartStatus>({ active: false });
@@ -375,6 +395,11 @@
     .sort((a, b) => compareShardsForSort(a, b, shardSortKey)));
   const failureInbox = $derived(buildFailureInbox(runs, restartAudit));
   const verdict = $derived(buildVerdictSummary(latestRun, failureInbox));
+  const uxGalleryStories = $derived([
+    ...stories.filter(story => story.curated),
+    ...stories.filter(story => !story.curated),
+  ]);
+  const uxGalleryGroups = $derived(Array.from(new Set(uxGalleryStories.map(story => story.group))));
 
   function applyQaAuth(payload: { qaAuth?: QaAuthInfo } | null | undefined): void {
     const auth = payload?.qaAuth;
@@ -764,10 +789,11 @@
   async function loadMeta(): Promise<void> {
     loadingMeta = true;
     try {
-      const [catalogResponse, historyResponse, auditResponse] = await Promise.all([
+      const [catalogResponse, historyResponse, auditResponse, storiesResponse] = await Promise.all([
         qaFetch('/api/qa/catalog', { cache: 'no-store' }),
         qaFetch('/api/qa/history?limit=120', { cache: 'no-store' }),
         qaFetch('/api/qa/restart-audit?limit=25', { cache: 'no-store' }),
+        qaFetch('/api/qa/stories?limit=200', { cache: 'no-store' }),
       ]);
       const catalogPayload = await catalogResponse.json() as {
         ok?: boolean;
@@ -803,7 +829,18 @@
         throw new Error(auditPayload.error || 'Failed to load QA restart audit');
       }
       applyQaAuth(auditPayload);
+      const storiesPayload = await storiesResponse.json() as {
+        ok?: boolean;
+        qaAuth?: QaAuthInfo;
+        stories?: QaStoryScreenshot[];
+        error?: string;
+      };
+      if (!storiesResponse.ok || !storiesPayload.ok || !Array.isArray(storiesPayload.stories)) {
+        throw new Error(storiesPayload.error || 'Failed to load UX screenshots');
+      }
+      applyQaAuth(storiesPayload);
       catalog = catalogPayload.catalog;
+      stories = storiesPayload.stories;
       history = historyPayload.history;
       restartAudit = auditPayload.audit;
       restart = historyPayload.restart ?? catalogPayload.restart ?? { active: false };
@@ -1084,6 +1121,7 @@
     <nav class="qa-tabs" data-testid="qa-test-tabs">
       <button class:active={activeView === 'e2e'} onclick={() => (activeView = 'e2e')}>E2E Runs</button>
       <button class:active={activeView === 'scenarios'} onclick={() => (activeView = 'scenarios')}>Scenario Player</button>
+      <button class:active={activeView === 'gallery'} onclick={() => (activeView = 'gallery')}>UX Gallery</button>
       <button class:active={activeView === 'suites'} onclick={() => (activeView = 'suites')}>Suites</button>
       <button class:active={activeView === 'benchmarks'} onclick={() => (activeView = 'benchmarks')}>Benchmarks</button>
       <button class:active={activeView === 'history'} onclick={() => (activeView = 'history')}>History</button>
@@ -1109,6 +1147,27 @@
         <span>{formatDate(verdict.latestAt)}</span>
       </div>
     </section>
+
+    {#if uxGalleryStories.length > 0}
+      <section class="ux-gallery-preview" data-testid="qa-ux-gallery-preview">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">UX Screenshot Gallery</div>
+            <h3>{uxGalleryStories.filter(story => story.curated).length || uxGalleryStories.length} curated screens</h3>
+          </div>
+          <button class="mini-action" type="button" onclick={() => (activeView = 'gallery')}>Open gallery</button>
+        </div>
+        <div class="ux-preview-strip">
+          {#each uxGalleryStories.slice(0, 6) as story}
+            <button type="button" class="ux-preview-card" onclick={() => (activeView = 'gallery')} title={story.description ?? story.title}>
+              <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
+              <span>{story.group}</span>
+              <strong>{story.title}</strong>
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     {#if failureInbox.length > 0}
       <section class="failure-inbox" data-testid="qa-failure-inbox">
@@ -1160,6 +1219,48 @@
           allowfullscreen
           data-testid="qa-scenario-player-frame"
         ></iframe>
+      </section>
+    {:else if activeView === 'gallery'}
+      <section class="admin-card" data-testid="qa-ux-gallery">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">Application Screens</div>
+            <h2>UX Gallery</h2>
+            <p>{uxGalleryStories.length} screenshots from e2e runs and curated fixtures.</p>
+          </div>
+          <span class="chip">{uxGalleryGroups.length} groups</span>
+        </div>
+        {#if loadingMeta && uxGalleryStories.length === 0}
+          <div class="empty">Loading screenshots...</div>
+        {:else if uxGalleryStories.length === 0}
+          <div class="empty">No UX screenshots captured yet</div>
+        {:else}
+          {#each uxGalleryGroups as group}
+            <div class="ux-gallery-group">
+              <h3>{group}</h3>
+              <div class="ux-gallery-grid">
+                {#each uxGalleryStories.filter(story => story.group === group) as story}
+                  <article class="ux-gallery-card" data-testid="qa-ux-gallery-card" data-platform={story.platform ?? 'unknown'}>
+                    <div class="ux-shot">
+                      <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
+                    </div>
+                    <div class="ux-shot-meta">
+                      <div>
+                        <strong>{story.title}</strong>
+                        <p>{story.description ?? story.name}</p>
+                      </div>
+                      <div class="artifact-chips">
+                        <span>{story.platform ?? 'screen'}</span>
+                        <span>{story.curated ? 'curated' : story.source}</span>
+                        {#if story.runId}<span>run {story.runId}</span>{/if}
+                      </div>
+                    </div>
+                  </article>
+                {/each}
+              </div>
+            </div>
+          {/each}
+        {/if}
       </section>
     {:else if activeView === 'suites'}
       <section class="admin-card" data-testid="qa-system-suites">
@@ -1944,6 +2045,122 @@
     background: transparent;
   }
 
+  .ux-gallery-preview {
+    display: grid;
+    gap: 0.85rem;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .ux-preview-strip {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .ux-preview-card {
+    display: grid;
+    grid-template-rows: 96px auto auto;
+    gap: 0.35rem;
+    min-width: 0;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: inherit;
+    background: rgba(0, 0, 0, 0.16);
+    text-align: left;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .ux-preview-card :global(img) {
+    width: 100%;
+    height: 96px;
+    object-fit: cover;
+    object-position: top center;
+    background: #101014;
+  }
+
+  .ux-preview-card span,
+  .ux-preview-card strong {
+    padding: 0 0.55rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ux-preview-card span {
+    color: #9b978a;
+    font-size: 0.7rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .ux-preview-card strong {
+    padding-bottom: 0.55rem;
+    font-size: 0.78rem;
+  }
+
+  .ux-gallery-group {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+  }
+
+  .ux-gallery-group h3 {
+    margin: 0;
+    color: #f1efe7;
+    font-size: 0.95rem;
+  }
+
+  .ux-gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.9rem;
+  }
+
+  .ux-gallery-card {
+    display: grid;
+    grid-template-rows: 180px auto;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    overflow: hidden;
+  }
+
+  .ux-shot {
+    min-width: 0;
+    background: #101014;
+  }
+
+  .ux-shot :global(img) {
+    width: 100%;
+    height: 180px;
+    object-fit: cover;
+    object-position: top center;
+    display: block;
+  }
+
+  .ux-shot-meta {
+    display: grid;
+    gap: 0.65rem;
+    padding: 0.8rem;
+  }
+
+  .ux-shot-meta strong,
+  .ux-shot-meta p {
+    margin: 0;
+  }
+
+  .ux-shot-meta p {
+    min-height: 2.2em;
+    font-size: 0.78rem;
+    line-height: 1.35;
+  }
+
   .run-summary,
   .shard-detail {
     display: grid;
@@ -2578,6 +2795,24 @@
       grid-column: 2;
       align-items: flex-start;
       flex-direction: row;
+    }
+
+    .ux-preview-strip,
+    .ux-gallery-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .ux-preview-card {
+      grid-template-rows: 150px auto auto;
+    }
+
+    .ux-preview-card :global(img),
+    .ux-shot :global(img) {
+      height: 150px;
+    }
+
+    .ux-gallery-card {
+      grid-template-rows: 150px auto;
     }
   }
 </style>

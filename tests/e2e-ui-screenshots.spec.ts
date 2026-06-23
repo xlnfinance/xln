@@ -6,6 +6,46 @@ import { captureLocatorScreenshot, capturePageScreenshot } from './utils/e2e-scr
 
 const SWAP_CONNECT_TOKEN_IDS = [1, 2, 3] as const;
 
+const platformFromPrefix = (prefix: string): 'desktop' | 'mobile' =>
+  prefix.startsWith('mobile') ? 'mobile' : 'desktop';
+
+const uxDescription = (description: string): string => description;
+
+async function captureUxPage(
+  page: Page,
+  output: Parameters<typeof capturePageScreenshot>[1],
+  name: string,
+  metadata: { title: string; group: string; description: string; platform?: 'desktop' | 'mobile'; tags?: string[] },
+): Promise<void> {
+  await capturePageScreenshot(page, output, name, {
+    fullPage: false,
+    ux: {
+      title: metadata.title,
+      group: metadata.group,
+      description: metadata.description,
+      platform: metadata.platform ?? (name.startsWith('mobile') ? 'mobile' : 'desktop'),
+      tags: metadata.tags,
+    },
+  });
+}
+
+async function captureUxLocator(
+  locator: Parameters<typeof captureLocatorScreenshot>[0],
+  output: Parameters<typeof captureLocatorScreenshot>[1],
+  name: string,
+  metadata: { title: string; group: string; description: string; platform?: 'desktop' | 'mobile'; tags?: string[] },
+): Promise<void> {
+  await captureLocatorScreenshot(locator, output, name, {
+    ux: {
+      title: metadata.title,
+      group: metadata.group,
+      description: metadata.description,
+      platform: metadata.platform ?? (name.startsWith('mobile') ? 'mobile' : 'desktop'),
+      tags: metadata.tags,
+    },
+  });
+}
+
 async function openAssetsTab(page: Page): Promise<void> {
   const tab = page.getByTestId('tab-assets').first();
   await expect(tab).toBeVisible({ timeout: 20_000 });
@@ -117,33 +157,64 @@ async function captureSwapVisualStates(
   prefix: string,
   output: Parameters<typeof capturePageScreenshot>[1],
 ): Promise<void> {
+  const platform = platformFromPrefix(prefix);
   await openAccountWorkspaceTab(page, 'swap');
   await expect(page.getByTestId('swap-order-amount').first()).toBeVisible({ timeout: 20_000 });
   await expectSwapOrderbookReady(page);
   const swapPanel = page.locator('.swap-panel').first();
-  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-base.png`);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-base.png`, {
+    title: `${platform} swap ticket`,
+    group: 'Swap',
+    description: uxDescription('Prepared cross-chain swap ticket with live orderbook depth.'),
+    platform,
+    tags: ['swap', 'orderbook'],
+  });
 
   const sourceButton = page.locator('.swap-panel .anyswap-builder .entity-select-wrap').first()
     .locator('button.entity-select-button').first();
   await sourceButton.click();
   await expect(page.locator('.swap-panel .entity-menu[aria-label="Source account"]').first()).toBeVisible({ timeout: 10_000 });
-  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-source-menu.png`);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-source-menu.png`, {
+    title: `${platform} swap source picker`,
+    group: 'Swap',
+    description: uxDescription('Source account menu while preparing a routed swap.'),
+    platform,
+    tags: ['swap', 'account-picker'],
+  });
   await closeSwapMenus(page);
 
   const tokenButton = page.locator('.swap-panel .token-select-wrap button.token-select-button').first();
   await tokenButton.click();
   await expect(page.locator('.swap-panel .token-menu').first()).toBeVisible({ timeout: 10_000 });
-  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-token-menu.png`);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-token-menu.png`, {
+    title: `${platform} swap token picker`,
+    group: 'Swap',
+    description: uxDescription('Token selector with balances during swap preparation.'),
+    platform,
+    tags: ['swap', 'token-picker'],
+  });
   await closeSwapMenus(page);
 
   await page.locator('.swap-panel .route-menu-button').first().click();
   await expect(page.locator('.swap-panel .route-menu').first()).toBeVisible({ timeout: 10_000 });
-  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-route-menu.png`);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-route-menu.png`, {
+    title: `${platform} swap route menu`,
+    group: 'Swap',
+    description: uxDescription('Route selector for cross-chain liquidity paths.'),
+    platform,
+    tags: ['swap', 'route'],
+  });
   await closeSwapMenus(page);
 
   await page.locator('.swap-panel .hub-select-wrap button.entity-select-button').first().click();
   await expect(page.locator('.swap-panel .hub-menu').first()).toBeVisible({ timeout: 10_000 });
-  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-hub-menu.png`);
+  await captureUxLocator(swapPanel, output, `${prefix}-swap-hub-menu.png`, {
+    title: `${platform} swap hub menu`,
+    group: 'Swap',
+    description: uxDescription('Hub selector showing available market-making venues.'),
+    platform,
+    tags: ['swap', 'hub'],
+  });
   await closeSwapMenus(page);
 }
 
@@ -162,21 +233,40 @@ async function captureAccountWorkspaces(
   prefix: string,
   output: Parameters<typeof capturePageScreenshot>[1],
 ): Promise<void> {
+  const platform = platformFromPrefix(prefix);
   await openAccountsTab(page);
 
   await openAccountWorkspaceTab(page, 'send');
   await expect(page.getByTestId('payment-amount-input').first()).toBeVisible({ timeout: 20_000 });
-  await capturePageScreenshot(page, output, `${prefix}-accounts-pay.png`);
+  await captureUxPage(page, output, `${prefix}-accounts-pay.png`, {
+    title: `${platform} payment composer`,
+    group: 'Payments',
+    description: uxDescription('User prepares a payment from an open hub account.'),
+    platform,
+    tags: ['payment', 'account'],
+  });
 
   await openAccountWorkspaceTab(page, 'receive');
   await expect(page.getByTestId('receive-invoice-amount').first()).toBeVisible({ timeout: 20_000 });
-  await capturePageScreenshot(page, output, `${prefix}-accounts-receive.png`);
+  await captureUxPage(page, output, `${prefix}-accounts-receive.png`, {
+    title: `${platform} receive request`,
+    group: 'Payments',
+    description: uxDescription('User prepares a receive invoice for inbound liquidity.'),
+    platform,
+    tags: ['payment', 'invoice'],
+  });
 
   await captureSwapVisualStates(page, prefix, output);
 
   await openAccountWorkspaceTab(page, 'move');
   await expect(page.getByTestId('move-confirm').first()).toBeVisible({ timeout: 20_000 });
-  await capturePageScreenshot(page, output, `${prefix}-accounts-move.png`);
+  await captureUxPage(page, output, `${prefix}-accounts-move.png`, {
+    title: `${platform} asset move ticket`,
+    group: 'Move',
+    description: uxDescription('Move ticket for reserve, collateral, and external token flows.'),
+    platform,
+    tags: ['move', 'batch'],
+  });
 }
 
 async function captureMainTabs(
@@ -184,27 +274,58 @@ async function captureMainTabs(
   prefix: string,
   output: Parameters<typeof capturePageScreenshot>[1],
 ): Promise<void> {
+  const platform = platformFromPrefix(prefix);
   await openAssetsTab(page);
-  await capturePageScreenshot(page, output, `${prefix}-assets.png`);
+  await captureUxPage(page, output, `${prefix}-assets.png`, {
+    title: `${platform} assets ledger`,
+    group: 'Portfolio',
+    description: uxDescription('Portfolio ledger with external, reserve, and account balances.'),
+    platform,
+    tags: ['assets', 'balances'],
+  });
   await openAccountsTab(page);
-  await capturePageScreenshot(page, output, `${prefix}-accounts.png`);
+  await captureUxPage(page, output, `${prefix}-accounts.png`, {
+    title: `${platform} accounts overview`,
+    group: 'Accounts',
+    description: uxDescription('Hub account list with balances and counterparty capacity.'),
+    platform,
+    tags: ['accounts', 'credit'],
+  });
   const firstDeltaToggle = page.locator('[data-counterparty-id] .delta-capacity-bar[role="button"]').first();
   if (await firstDeltaToggle.isVisible().catch(() => false)) {
     await firstDeltaToggle.click();
     await expect(
       page.locator('[data-counterparty-id] .inline-detail-row, [data-counterparty-id] .inline-details-stack').first(),
     ).toBeVisible({ timeout: 20_000 });
-    await capturePageScreenshot(page, output, `${prefix}-accounts-expanded.png`);
+    await captureUxPage(page, output, `${prefix}-accounts-expanded.png`, {
+      title: `${platform} account capacity detail`,
+      group: 'Accounts',
+      description: uxDescription('Expanded account row showing directional credit capacity.'),
+      platform,
+      tags: ['accounts', 'capacity'],
+    });
   }
   await captureAccountWorkspaces(page, prefix, output);
   await openSettingsTab(page);
-  await capturePageScreenshot(page, output, `${prefix}-settings.png`);
+  await captureUxPage(page, output, `${prefix}-settings.png`, {
+    title: `${platform} wallet settings`,
+    group: 'Settings',
+    description: uxDescription('Wallet settings and display controls for the runtime.'),
+    platform,
+    tags: ['settings'],
+  });
 }
 
 async function captureOnboardingScreens(page: Page, output: Parameters<typeof capturePageScreenshot>[1]): Promise<void> {
   await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
   await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 30_000 });
-  await capturePageScreenshot(page, output, 'desktop-onboarding-seed.png');
+  await captureUxPage(page, output, 'desktop-onboarding-seed.png', {
+    title: 'desktop onboarding seed',
+    group: 'Onboarding',
+    description: uxDescription('New operator creates a browser runtime wallet.'),
+    platform: 'desktop',
+    tags: ['onboarding', 'wallet'],
+  });
 
   const seed = selectDemoMnemonic('dave');
   await page.evaluate(async ({ label, mnemonic }) => {
@@ -224,7 +345,13 @@ async function captureOnboardingScreens(page: Page, output: Parameters<typeof ca
 
   await expect(page.getByRole('heading', { name: /Configure account/i }).first()).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('brainvault-onboarding-recovery').first()).toBeVisible({ timeout: 20_000 });
-  await capturePageScreenshot(page, output, 'desktop-onboarding-account-config.png');
+  await captureUxPage(page, output, 'desktop-onboarding-account-config.png', {
+    title: 'desktop account configuration',
+    group: 'Onboarding',
+    description: uxDescription('Recovery and account setup screen before entering the wallet.'),
+    platform: 'desktop',
+    tags: ['onboarding', 'recovery'],
+  });
 }
 
 test('ui screenshot smoke captures onboarding screens', async ({ page }, testInfo) => {

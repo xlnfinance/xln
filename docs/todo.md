@@ -169,6 +169,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Remaining: fatal log line linking, phase budget breaches, and video-time deep links.
   - Tests: fatal marker fixture maps to exact shard and log line.
 
+- [x] Add e2e UX screenshot gallery for design audits.
+  - Impact: high.
+  - Status: done. Curated e2e screenshots now write PNG plus JSON metadata under `ux-gallery/{desktop,mobile}` inside Playwright artifacts; `/api/qa/stories` reads metadata and the QA cockpit shows a top preview plus full `UX Gallery` tab.
+  - Coverage: screenshot smoke generated 26 curated PNGs and 26 metadata sidecars across onboarding, assets, accounts, payment, receive, swap menus, move, and settings. Move/swap/dispute flows are annotated for on-chain batch, resting order, active dispute, finalized dispute, and history screenshots when those e2e paths run.
+  - Evidence: focused QA cockpit e2e verifies preview/full gallery rendering; focused screenshot e2e generated 26 curated screenshots.
+
 - [ ] Make `/health` read only its dedicated health surface.
   - Impact: medium.
   - Goal: avoid mixing all admin dashboards into health. Health should embed or link QA cockpit, not become the full QA implementation.
