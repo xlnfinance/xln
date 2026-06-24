@@ -30,29 +30,11 @@
   import { getJurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
   import { formatEntityId } from '$lib/utils/format';
   import { resetEverything } from '$lib/utils/resetEverything';
-  import {
-    ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
-    Settings as SettingsIcon,
-    ChevronDown, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal, Banknote
-  } from 'lucide-svelte';
+  import { Landmark, Users, Settings as SettingsIcon, AlertTriangle } from 'lucide-svelte';
   import EntityDropdown from './EntityDropdown.svelte';
-  import AccountDropdown from './AccountDropdown.svelte';
   import AccountPanel from './AccountPanel.svelte';
-  import AccountList from './AccountList.svelte';
-  import AccountWorkspaceRail from './AccountWorkspaceRail.svelte';
-  import PaymentPanel from './PaymentPanel.svelte';
-  import ReceivePanel from './ReceivePanel.svelte';
-  import SwapPanel from './SwapPanel.svelte';
-  import LendingPanel from './LendingPanel.svelte';
-  import MoveWorkspace from './MoveWorkspace.svelte';
-  import SettlementPanel from './SettlementPanel.svelte';
-  import PendingBatchNotice from './PendingBatchNotice.svelte';
-  import LiveRequiredState from './LiveRequiredState.svelte';
+  import AccountWorkspaceView from './AccountWorkspaceView.svelte';
   import EntityAssetsTab from './EntityAssetsTab.svelte';
-  import AccountAppearancePanel from './AccountAppearancePanel.svelte';
-  import AccountConfigurePanel from './AccountConfigurePanel.svelte';
-  import AccountOpenPanel from './AccountOpenPanel.svelte';
-  import EntityActivityPanel from './EntityActivityPanel.svelte';
   import EntityPanelHeroTabs from './EntityPanelHeroTabs.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
   import EntitySettingsPanel from '$lib/components/Settings/EntitySettingsPanel.svelte';
@@ -344,9 +326,6 @@
   type IconBadgeTabConfig<T extends string> = IconTabConfig<T> & {
     showBadge?: boolean;
     badgeType?: 'pending';
-  };
-  type IconPendingTabConfig<T extends string> = IconTabConfig<T> & {
-    showPendingBatch?: boolean;
   };
   type IndexedDbWithDatabases = IDBFactory & {
     databases?: () => Promise<IDBDatabaseInfo[]>;
@@ -3414,41 +3393,9 @@
     { id: 'accounts', icon: Users, label: 'Accounts' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
-  const accountWorkspaceTabs: IconPendingTabConfig<AccountWorkspaceTab>[] = [
-    { id: 'open', icon: PlusCircle, label: 'Open Account' },
-    { id: 'send', icon: ArrowUpRight, label: 'Pay' },
-    { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
-    { id: 'swap', icon: Repeat, label: 'Swap' },
-    { id: 'move', icon: Landmark, label: 'Move' },
-    { id: 'lending', icon: Banknote, label: 'Lending' },
-    { id: 'history', icon: Activity, label: 'History' },
-    { id: 'configure', icon: SettingsIcon, label: 'Manage' },
-    { id: 'activity', icon: Activity, label: 'Activity' },
-    { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
-  ];
-  const accountWorkspacePrimaryTabIds: AccountWorkspaceTab[] = ['open', 'send', 'receive', 'swap', 'move', 'lending'];
-  $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
   $: hasAnyAccounts = accountIds.length > 0;
   $: faucetSupportsReserve = !!getFaucetReserveTokenMeta(faucetAssetSymbol);
   $: canShowAccountFaucet = faucetSupportsReserve && hasAnyAccounts;
-  $: visibleAccountWorkspaceTabs = hasWorkspaceAccounts
-    ? accountWorkspaceTabs
-    : accountWorkspaceTabs.filter((tabConfig) => tabConfig.id === 'open');
-  $: if (!hasWorkspaceAccounts && accountWorkspaceTab !== 'open') {
-    accountWorkspaceTab = 'open';
-  }
-  function selectAccountWorkspaceTab(next: string): void {
-    const target = next as AccountWorkspaceTab;
-    if (target === 'move') {
-      openAccountMoveWorkspace();
-      return;
-    }
-    if (target === 'history') {
-      openAccountHistoryWorkspace();
-      return;
-    }
-    accountWorkspaceTab = target;
-  }
   let lastDeepLinkWorkspaceSignature = '';
   $: {
     const hashRoute = typeof window === 'undefined' ? '' : getLocationHashRoute(window.location) || '';
@@ -3648,207 +3595,115 @@
             {broadcastPendingBatch}
           />
         {:else if activeTab === 'accounts'}
-          {#if accountIds.length > 5}
-            <div class="accounts-selector-row">
-              <AccountDropdown
-                {replica}
-                {selectedAccountId}
-                on:accountSelect={handleAccountSelect}
-              />
-            </div>
-          {/if}
-
-          <AccountList
+          <AccountWorkspaceView
             {replica}
+            {tab}
+            {activeEnv}
+            {liveRuntimeEnv}
+            {activeIsLive}
+            {actionRuntimeEnv}
+            {accountIds}
+            {workspaceAccountIds}
+            {workspaceAccountId}
             {selectedAccountId}
-            pendingFaucetKeys={pendingOffchainFaucetKeys}
-            on:select={handleAccountSelect}
-            on:faucet={handleAccountFaucet}
-            on:settleApprove={handleQuickSettleApprove}
-          />
-
-          <PendingBatchNotice
-            debtCount={openOutgoingDebtSummary.count}
-            debtUsdLabel={formatApproxUsd(openOutgoingDebtSummary.usdTotal)}
-            debtNote="Reserve spends sweep debts first. Sign & Broadcast stays locked while the draft still overspends after debt collection."
-            pendingCount={pendingBatchCount}
-            pendingMode={pendingBatchMode}
-            reserveIssueText={pendingBatchReserveIssueText}
-            previewItems={pendingBatchPreview}
-            submitting={pendingBatchSubmitting}
+            {pendingOffchainFaucetKeys}
+            bind:accountWorkspaceTab
+            bind:configureWorkspaceTab
+            bind:configureTokenId
+            {configureTokenOptions}
+            bind:unsafeCrossJTargetDisputeAccepted
+            {openOutgoingDebtSummary}
+            {pendingBatchCount}
+            {pendingBatchMode}
+            {pendingBatchReserveIssueText}
+            {pendingBatchPreview}
+            {pendingBatchSubmitting}
             {hasSentBatch}
-            canBroadcast={canBroadcastPendingBatch}
-            openHistory={openAccountHistoryWorkspace}
-            clearBatch={clearPendingBatch}
-            rebroadcastBatch={rebroadcastPendingBatch}
-            broadcastBatch={broadcastPendingBatch}
+            {canBroadcastPendingBatch}
+            bind:moveAmount
+            bind:moveAssetSymbol
+            bind:moveFromEndpoint
+            bind:moveToEndpoint
+            bind:moveExternalRecipient
+            bind:moveReserveRecipientEntityId
+            bind:moveSourceAccountId
+            bind:moveTargetEntityId
+            bind:moveTargetHubEntityId
+            {moveExecuting}
+            {moveProgressLabel}
+            {moveDraftError}
+            {moveBroadcastError}
+            {moveAllowanceRouteEnabled}
+            {moveAllowanceSatisfied}
+            {moveAllowanceLoading}
+            {moveAllowanceStatusLabel}
+            {moveAllowanceAmount}
+            {moveAllowanceSubmittingMode}
+            {moveSelectedSource}
+            {moveSelectedTarget}
+            {moveDragSource}
+            {moveDragHoverTarget}
+            {moveLineReady}
+            {moveCommittedLineReady}
+            {moveNodeLayoutVersion}
+            {moveNeedsReserveRecipient}
+            {moveNeedsExternalRecipient}
+            {isMoveRouteSupported}
+            {moveUiState}
+            {setMoveSource}
+            {setMoveTarget}
+            {beginMoveDrag}
+            {getMoveNodeAnchor}
+            {buildMoveArrowPath}
+            {moveRouteSteps}
+            {canAddMoveToExistingBatch}
+            {submitMovePrimaryAction}
+            {approveMoveExternalAllowance}
+            {handleMoveAllowanceAmountInput}
+            {handleMoveSourceAccountChange}
+            {handleMoveReserveRecipientChange}
+            {handleMoveTargetEntityChange}
+            {handleMoveTargetHubChange}
+            {moveNodeAction}
+            {moveEntityOptions}
+            {moveHubEntityOptions}
+            {moveSourceAccountOptions}
+            {moveAssetOptions}
+            moveEndpointLabels={MOVE_ENDPOINT_LABEL}
+            moveEndpoints={MOVE_ENDPOINTS}
+            bind:openAccountEntityId
+            {openAccountEntityOptions}
+            {disputedAccounts}
+            {entityActivityRows}
+            {filteredEntityActivityRows}
+            {entityActivityAccounts}
+            bind:entityActivityAccountFilter
+            {handleAccountSelect}
+            {handleAccountFaucet}
+            {handleQuickSettleApprove}
+            {openAccountHistoryWorkspace}
+            {openAccountMoveWorkspace}
+            {clearPendingBatch}
+            {rebroadcastPendingBatch}
+            {broadcastPendingBatch}
+            {handleWorkspaceAccountChange}
+            {getCrossJTargetDisputeRisk}
+            {formatCrossJTargetDisputeRisk}
+            {confirmAndQueueDisputeFinalize}
+            {confirmAndQueueDisputeStart}
+            {confirmAndQueueDisputePrepare}
+            {addTokenToAccount}
+            {handleOpenAccountTargetChange}
+            {openAccountWithFullId}
+            {openDisputedAccount}
+            {reopenDisputedAccount}
+            {resolveSelfEntityId}
+            {formatAmount}
+            {formatApproxUsd}
+            {getMovePrimaryActionLabel}
+            onMoveVisualRoot={moveVisualController.setRoot}
+            {handleMoveWorkspaceError}
           />
-
-          <AccountWorkspaceRail
-            tabs={visibleAccountWorkspaceTabs}
-            activeTab={accountWorkspaceTab}
-            primaryTabIds={accountWorkspacePrimaryTabIds}
-            ariaLabel="Account workspace"
-            on:select={(event) => selectAccountWorkspaceTab(event.detail)}
-          />
-
-          <section class="account-workspace-content">
-            {#if accountWorkspaceTab === 'send'}
-              {#if liveRuntimeEnv && activeIsLive}
-                <PaymentPanel
-                  entityId={replica.state?.entityId || tab.entityId}
-                  env={liveRuntimeEnv}
-                  isLive={activeIsLive}
-                />
-              {:else}
-                <LiveRequiredState message="Payments are only available in LIVE mode." />
-              {/if}
-
-            {:else if accountWorkspaceTab === 'receive'}
-              <ReceivePanel entityId={replica.state?.entityId || tab.entityId} />
-
-            {:else if accountWorkspaceTab === 'swap'}
-              <SwapPanel
-                {replica}
-                {tab}
-                env={activeEnv}
-                isLive={activeIsLive}
-              />
-
-            {:else if accountWorkspaceTab === 'move'}
-              <MoveWorkspace
-                mode="accounts"
-                bind:moveAmount
-                bind:moveAssetSymbol
-                bind:moveFromEndpoint
-                bind:moveToEndpoint
-                bind:moveExternalRecipient
-                bind:moveReserveRecipientEntityId
-                bind:moveSourceAccountId
-                bind:moveTargetEntityId
-                bind:moveTargetHubEntityId
-                {moveExecuting}
-                {moveProgressLabel}
-                {moveDraftError}
-                {moveBroadcastError}
-                moveRequiresExplicitAllowance={moveAllowanceRouteEnabled}
-                moveAllowanceSatisfied={moveAllowanceSatisfied}
-                moveAllowanceLoading={moveAllowanceLoading}
-                moveAllowanceStatusLabel={moveAllowanceStatusLabel}
-                moveAllowanceAmount={moveAllowanceAmount}
-                moveAllowanceSubmittingMode={moveAllowanceSubmittingMode}
-                {moveSelectedSource}
-                {moveSelectedTarget}
-                {moveDragSource}
-                {moveDragHoverTarget}
-                {moveLineReady}
-                {moveCommittedLineReady}
-                {moveNodeLayoutVersion}
-                {moveNeedsReserveRecipient}
-                {moveNeedsExternalRecipient}
-                {isMoveRouteSupported}
-                moveDisplayBalances={moveUiState.displayBalances}
-                moveDisplayDecimals={moveUiState.displayDecimals}
-                moveSourceAvailableBalance={moveUiState.sourceAvailableBalance}
-                {setMoveSource}
-                {setMoveTarget}
-                {beginMoveDrag}
-                {getMoveNodeAnchor}
-                {buildMoveArrowPath}
-                {moveRouteSteps}
-                {canAddMoveToExistingBatch}
-                {submitMovePrimaryAction}
-                approveMoveAllowanceAmount={() => approveMoveExternalAllowance('amount')}
-                approveMoveAllowanceMax={() => approveMoveExternalAllowance('max')}
-                {handleMoveAllowanceAmountInput}
-                {handleMoveSourceAccountChange}
-                {handleMoveReserveRecipientChange}
-                {handleMoveTargetEntityChange}
-                {handleMoveTargetHubChange}
-                {moveNodeAction}
-                {moveEntityOptions}
-                {moveHubEntityOptions}
-                {moveSourceAccountOptions}
-                reserveRecipientPreferredId={resolveSelfEntityId()}
-                targetEntityPreferredId={resolveSelfEntityId()}
-                entityId={replica?.state?.entityId || tab.entityId}
-                moveAssetOptions={moveAssetOptions}
-                moveEndpointLabels={MOVE_ENDPOINT_LABEL}
-                moveEndpoints={MOVE_ENDPOINTS}
-                {formatAmount}
-                movePrimaryActionLabel={getMovePrimaryActionLabel()}
-                onMoveVisualRoot={moveVisualController.setRoot}
-                toastMoveError={handleMoveWorkspaceError}
-              />
-
-            {:else if accountWorkspaceTab === 'lending'}
-              <LendingPanel
-                entityId={replica.state?.entityId || tab.entityId}
-                {replica}
-                accountIds={workspaceAccountIds}
-                isLive={activeIsLive}
-              />
-
-            {:else if accountWorkspaceTab === 'history'}
-              <SettlementPanel
-                entityId={replica.state?.entityId || tab.entityId}
-                {replica}
-                env={activeEnv}
-                isLive={activeIsLive}
-                historyOnly={true}
-              />
-
-            {:else if accountWorkspaceTab === 'configure'}
-              <AccountConfigurePanel
-                {replica}
-                {tab}
-                {activeIsLive}
-                {liveRuntimeEnv}
-                {workspaceAccountId}
-                {workspaceAccountIds}
-                {configureWorkspaceTab}
-                bind:configureTokenId
-                {configureTokenOptions}
-                bind:unsafeCrossJTargetDisputeAccepted
-                {handleWorkspaceAccountChange}
-                selectConfigureTab={(nextTab) => configureWorkspaceTab = nextTab}
-                {getCrossJTargetDisputeRisk}
-                {formatCrossJTargetDisputeRisk}
-                {confirmAndQueueDisputeFinalize}
-                {confirmAndQueueDisputeStart}
-                {confirmAndQueueDisputePrepare}
-                {addTokenToAccount}
-              />
-
-            {:else if accountWorkspaceTab === 'appearance'}
-              <AccountAppearancePanel />
-
-            {:else if accountWorkspaceTab === 'open'}
-              <AccountOpenPanel
-                {replica}
-                {tab}
-                {activeIsLive}
-                {actionRuntimeEnv}
-                {openAccountEntityId}
-                {openAccountEntityOptions}
-                {disputedAccounts}
-                {handleOpenAccountTargetChange}
-                {openAccountWithFullId}
-                {openDisputedAccount}
-                {reopenDisputedAccount}
-              />
-
-            {:else if accountWorkspaceTab === 'activity'}
-              <EntityActivityPanel
-                rows={entityActivityRows}
-                filteredRows={filteredEntityActivityRows}
-                accountOptions={entityActivityAccounts}
-                accountFilter={entityActivityAccountFilter}
-                on:filterChange={(event) => entityActivityAccountFilter = event.detail.accountFilter}
-              />
-
-            {/if}
-          </section>
 
         {:else if activeTab === 'settings'}
           <EntitySettingsPanel
@@ -3967,32 +3822,6 @@
     min-width: 0;
   }
 
-  .accounts-selector-row {
-    margin-bottom: 10px;
-    padding: 10px;
-    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 64%, transparent);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 94%, transparent);
-    box-shadow: 0 8px 18px color-mix(in srgb, var(--theme-background, #09090b) 4%, transparent);
-  }
-
-  .accounts-selector-row :global(.dropdown-trigger) {
-    width: 100%;
-    min-height: 42px;
-    border: 1px solid color-mix(in srgb, var(--theme-input-border, var(--theme-card-border, #27272a)) 86%, transparent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 96%, transparent);
-    color: var(--theme-text-primary, #e4e4e7);
-  }
-
-  .accounts-selector-row :global(.trigger-text) {
-    font-size: 13px;
-  }
-
-  .account-workspace-content {
-    margin-top: var(--space-3);
-  }
-
   .content :global(input:not([type="range"]):not([type="checkbox"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input)),
   .content :global(select:not(.move-token-select)) {
     background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent) !important;
@@ -4048,10 +3877,7 @@
     }
 
     .header,
-    .content,
-    .content > *,
-    .accounts-selector-row,
-    .account-workspace-content {
+    .content {
       width: 100%;
       max-width: 100%;
       min-width: 0;
