@@ -5,6 +5,8 @@
  */
 
 import {
+  handlePushRegister,
+  handlePushUnregister,
   handleRecoveryComplaint,
   handleRecoveryDiscover,
   handleRecoveryState,
@@ -15,7 +17,10 @@ import {
   handleWatchtowerSweep,
 } from './http';
 import { runWatchtowerSweep } from './action';
+import { runDisputeWatchSweep } from './dispute-watch';
 import { createWatchtowerStore, type WatchtowerStore } from './store';
+import { createPushStore, type PushStore } from '../push/store';
+import { createPushSender, type PushSenderConfig } from '../push/sender';
 
 export type StandaloneWatchtowerOptions = {
   host?: string;
@@ -31,11 +36,16 @@ export type StandaloneWatchtowerOptions = {
   operatorToken?: string;
   sweepIntervalMs?: number;
   allowedRpcUrls?: string[];
+  enablePushWake?: boolean;
+  pushDbPath?: string;
+  pushSweepIntervalMs?: number;
+  pushSender?: PushSenderConfig;
 };
 
 export type StandaloneWatchtowerServer = {
   server: ReturnType<typeof Bun.serve>;
   store: WatchtowerStore;
+  pushStore: PushStore | null;
   close: () => Promise<void>;
 };
 
@@ -115,6 +125,69 @@ const startSweepScheduler = (
   };
 };
 
+const startPushWatchScheduler = (
+  store: PushStore,
+  options: {
+    enabled?: boolean;
+    intervalMs?: number;
+    allowedRpcUrls?: string[];
+    sender: ReturnType<typeof createPushSender>;
+  },
+): SweepScheduler => {
+  const intervalMs = Math.max(1_000, Math.floor(Number(options.intervalMs ?? 15_000)));
+  if (!options.enabled) {
+    return { enabled: false, intervalMs, close: () => {} };
+  }
+
+  let closed = false;
+  let running = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let nextPruneAt = Date.now() + SWEEP_PRUNE_INTERVAL_MS;
+
+  const schedule = (): void => {
+    if (closed) return;
+    timer = setTimeout(tick, intervalMs);
+    timer.unref?.();
+  };
+
+  const tick = async (): Promise<void> => {
+    if (closed) return;
+    if (running) {
+      schedule();
+      return;
+    }
+    running = true;
+    try {
+      const now = Date.now();
+      if (now >= nextPruneAt) {
+        nextPruneAt = now + SWEEP_PRUNE_INTERVAL_MS;
+        await store.pruneExpired();
+      }
+      const result = await runDisputeWatchSweep(store, options.sender, {
+        ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
+      });
+      if (result.eventsObserved > 0 || result.notificationsSent > 0 || result.errors > 0) {
+        console.log(`[PUSH-WATCH] sweep ${JSON.stringify(result)}`);
+      }
+    } catch (error) {
+      console.error(`[PUSH-WATCH] sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      running = false;
+      schedule();
+    }
+  };
+
+  schedule();
+  return {
+    enabled: true,
+    intervalMs,
+    close: () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+};
+
 export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOptions): StandaloneWatchtowerServer => {
   const store = createWatchtowerStore({
     ...(options.towerId ? { towerId: options.towerId } : {}),
@@ -130,6 +203,19 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     ...(options.sweepIntervalMs !== undefined ? { intervalMs: options.sweepIntervalMs } : {}),
     ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
   });
+  const pushEnabled = options.enablePushWake === true;
+  const pushStore = pushEnabled
+    ? createPushStore({ ...(options.pushDbPath ? { dbPath: options.pushDbPath } : {}) })
+    : null;
+  const pushSender = createPushSender(options.pushSender);
+  const pushScheduler = pushStore
+    ? startPushWatchScheduler(pushStore, {
+        enabled: true,
+        sender: pushSender,
+        ...(options.pushSweepIntervalMs !== undefined ? { intervalMs: options.pushSweepIntervalMs } : {}),
+        ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
+      })
+    : { enabled: false, intervalMs: 0, close: () => {} };
   const operatorApiEnabled = options.enableOperatorApi === true;
   const operatorToken = String(options.operatorToken || '').trim();
   const bindHost = options.host || '0.0.0.0';
@@ -153,6 +239,14 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     headers: { 'content-type': 'application/json', 'cache-control': 'no-store, max-age=0' },
   });
 
+  const pushDisabled = (): Response => new Response(JSON.stringify({
+    ok: false,
+    error: 'WATCHTOWER_PUSH_WAKE_DISABLED',
+  }), {
+    status: 404,
+    headers: { 'content-type': 'application/json', 'cache-control': 'no-store, max-age=0' },
+  });
+
   const server = Bun.serve({
     hostname: bindHost,
     port: options.port,
@@ -162,6 +256,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
 
       if (pathname === '/' || pathname === '/healthz' || pathname === '/api/tower/healthz') {
         const stats = await store.getStats();
+        const pushStats = pushStore ? await pushStore.getStats() : null;
         return new Response(JSON.stringify({
           ok: true,
           service: 'xln-watchtower',
@@ -172,6 +267,12 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
           sweep: {
             enabled: scheduler.enabled,
             intervalMs: scheduler.intervalMs,
+          },
+          pushWake: {
+            enabled: pushScheduler.enabled,
+            intervalMs: pushScheduler.intervalMs,
+            sender: pushSender.kind,
+            ...(pushStats ? { stats: pushStats } : {}),
           },
           operatorApi: {
             enabled: operatorApiEnabled,
@@ -214,6 +315,15 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
         return handleWatchtowerActions(decodeURIComponent(actionReceiptMatch[1] || ''), store);
       }
 
+      if (pathname === '/api/push/register' && (req.method === 'PUT' || req.method === 'POST')) {
+        if (!pushStore) return pushDisabled();
+        return handlePushRegister(req, pushStore);
+      }
+      if (pathname === '/api/push/unregister' && req.method === 'POST') {
+        if (!pushStore) return pushDisabled();
+        return handlePushUnregister(req, pushStore);
+      }
+
       return new Response('Not found', { status: 404 });
     },
   });
@@ -225,10 +335,13 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
   return {
     server,
     store,
+    pushStore,
     close: async () => {
       scheduler.close();
+      pushScheduler.close();
       server.stop(true);
       await store.close();
+      if (pushStore) await pushStore.close();
     },
   };
 };
@@ -271,6 +384,20 @@ if (import.meta.main) {
     .map(value => value.trim())
     .filter(Boolean);
 
+  const enablePushWake = args.includes('--enable-push-wake')
+    || process.env['XLN_PUSH_ENABLE'] === '1';
+  const pushDbPath = process.env['XLN_PUSH_DB_PATH'];
+  const pushSweepIntervalMs = Number(process.env['XLN_PUSH_SWEEP_INTERVAL_MS'] || 15_000);
+  const pushWebhookEndpoint = String(process.env['XLN_PUSH_WEBHOOK_URL'] || '').trim();
+  const pushWebhookAuthToken = String(process.env['XLN_PUSH_WEBHOOK_TOKEN'] || '').trim();
+  const pushSender: PushSenderConfig = pushWebhookEndpoint
+    ? {
+        kind: 'webhook',
+        webhookEndpoint: pushWebhookEndpoint,
+        ...(pushWebhookAuthToken ? { webhookAuthToken: pushWebhookAuthToken } : {}),
+      }
+    : { kind: 'console' };
+
   startStandaloneWatchtowerServer({
     host,
     port,
@@ -284,5 +411,9 @@ if (import.meta.main) {
     ...(operatorToken ? { operatorToken } : {}),
     ...(allowedRpcUrls.length > 0 ? { allowedRpcUrls } : {}),
     ...(process.env['XLN_WATCHTOWER_PRIVATE_KEY'] ? { towerPrivateKey: process.env['XLN_WATCHTOWER_PRIVATE_KEY'] } : {}),
+    enablePushWake,
+    ...(pushDbPath ? { pushDbPath } : {}),
+    ...(Number.isFinite(pushSweepIntervalMs) && pushSweepIntervalMs > 0 ? { pushSweepIntervalMs } : {}),
+    pushSender,
   });
 }
