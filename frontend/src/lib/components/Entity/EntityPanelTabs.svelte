@@ -174,9 +174,11 @@
     type ReserveTransferAsset,
   } from './entity-asset-catalog';
   import {
+    buildPendingBatchActionTxs,
     buildOpenOutgoingDebtTotals,
     buildPendingBatchPreview,
-    countBatchOps,
+    buildPendingBatchState,
+    canBroadcastPendingBatch as canBroadcastPendingBatchState,
     formatBatchReserveIssue,
     getPendingBatchReserveIssue,
     pendingBatchEntityLabel,
@@ -229,6 +231,7 @@
   let pendingBatchSubmitting = false;
   let debtEnforcingTokenId: number | null = null;
   let pendingBatchMode: 'draft' | 'sent' | null = null;
+  let pendingBatchState = buildPendingBatchState(null);
   // State
   let replica: EntityReplica | null = null;
   let selectedAccountId: string | null = null;
@@ -3604,8 +3607,9 @@
     };
   }
   $: openOutgoingDebtSummary = buildOpenOutgoingDebtTotals({ replica, activeXlnFunctions });
-  $: hasDraftBatch = !!(replica?.state?.jBatchState?.batch && countBatchOps(replica.state.jBatchState.batch) > 0);
-  $: hasSentBatch = !!(replica?.state?.jBatchState?.sentBatch?.batch && countBatchOps(replica.state.jBatchState.sentBatch.batch) > 0);
+  $: pendingBatchState = buildPendingBatchState(replica?.state?.jBatchState);
+  $: hasDraftBatch = pendingBatchState.hasDraftBatch;
+  $: hasSentBatch = pendingBatchState.hasSentBatch;
   $: pendingBatchReserveIssue = getPendingBatchReserveIssue({
     entityId: String(replica?.state?.entityId || tab.entityId || ''),
     batch: replica?.state?.jBatchState?.batch,
@@ -3613,20 +3617,20 @@
     openDebtByToken: openOutgoingDebtSummary.byToken,
   });
   $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue, getPendingBatchLabelOptions());
-  $: canBroadcastPendingBatch = hasDraftBatch && !hasSentBatch && !pendingBatchReserveIssue;
+  $: canBroadcastPendingBatch = canBroadcastPendingBatchState(pendingBatchState, pendingBatchReserveIssue);
+  async function enqueuePendingBatchAction(action: 'clear' | 'broadcast' | 'rebroadcast', context: string): Promise<void> {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const env = requireRuntimeEnv(activeEnv, context);
+    if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
+    const signerId = resolveEntitySigner(entityId, context);
+    await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, buildPendingBatchActionTxs(action))]);
+  }
   async function clearPendingBatch(): Promise<void> {
     if (!pendingBatchCount || pendingBatchSubmitting) return;
     if (!confirm('Clear current draft and any sent batch state?')) return;
     pendingBatchSubmitting = true;
     try {
-      const entityId = replica?.state?.entityId || tab.entityId;
-      const env = requireRuntimeEnv(activeEnv, 'global-clear-batch');
-      if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
-      const signerId = resolveEntitySigner(entityId, 'global-clear-batch');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-        type: 'j_clear_batch',
-        data: { reason: 'global-batch-bar-clear' },
-      }])]);
+      await enqueuePendingBatchAction('clear', 'global-clear-batch');
       toasts.success('Batch cleared');
     } catch (error) {
       toasts.error(`Batch clear failed: ${toErrorMessage(error, 'Unknown error')}`);
@@ -3642,14 +3646,7 @@
     if (!canBroadcastPendingBatch || pendingBatchSubmitting) return;
     pendingBatchSubmitting = true;
     try {
-      const entityId = replica?.state?.entityId || tab.entityId;
-      const env = requireRuntimeEnv(activeEnv, 'global-batch-broadcast');
-      if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
-      const signerId = resolveEntitySigner(entityId, 'global-batch-broadcast');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-        type: 'j_broadcast',
-        data: {},
-      }])]);
+      await enqueuePendingBatchAction('broadcast', 'global-batch-broadcast');
       toasts.success('Broadcast queued');
     } catch (error) {
       toasts.error(`Batch broadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
@@ -3661,14 +3658,7 @@
     if (!hasSentBatch || pendingBatchSubmitting) return;
     pendingBatchSubmitting = true;
     try {
-      const entityId = replica?.state?.entityId || tab.entityId;
-      const env = requireRuntimeEnv(activeEnv, 'global-batch-rebroadcast');
-      if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
-      const signerId = resolveEntitySigner(entityId, 'global-batch-rebroadcast');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-        type: 'j_rebroadcast',
-        data: { gasBumpBps: 1000 },
-      }])]);
+      await enqueuePendingBatchAction('rebroadcast', 'global-batch-rebroadcast');
       toasts.success('Sent batch queued for rebroadcast');
     } catch (error) {
       toasts.error(`Rebroadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
@@ -3678,20 +3668,10 @@
   }
   // Tab config
   // Pending batch count for Accounts tab badge
-  $: pendingBatchCount = (() => {
-    if (!replica?.state) return 0;
-    const jBatchState = replica.state.jBatchState;
-    const draft = countBatchOps(jBatchState?.batch);
-    const sent = countBatchOps(jBatchState?.sentBatch?.batch);
-    return draft > 0 ? draft : sent;
-  })();
-  $: pendingBatchMode = replica?.state?.jBatchState?.batch && countBatchOps(replica.state.jBatchState.batch) > 0
-    ? 'draft'
-    : (replica?.state?.jBatchState?.sentBatch?.batch && countBatchOps(replica.state.jBatchState.sentBatch.batch) > 0 ? 'sent' : null);
+  $: pendingBatchCount = pendingBatchState.count;
+  $: pendingBatchMode = pendingBatchState.mode;
   $: pendingBatchPreview = buildPendingBatchPreview(
-    pendingBatchMode === 'draft'
-      ? (replica?.state?.jBatchState?.batch || null)
-      : (replica?.state?.jBatchState?.sentBatch?.batch || null),
+    pendingBatchState.previewBatch,
     getPendingBatchLabelOptions(),
   );
   const tabs: IconBadgeTabConfig<ViewTab>[] = [

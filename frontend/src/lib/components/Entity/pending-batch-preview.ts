@@ -1,4 +1,4 @@
-import type { JBatch } from '@xln/runtime/xln-api';
+import type { EntityTx, JBatch } from '@xln/runtime/xln-api';
 import {
   simulateDraftBatchReserveAvailability,
   type DraftBatchReserveIssue,
@@ -15,6 +15,20 @@ export type PendingBatchPreviewItem = {
   title: string;
   subtitle: string;
 };
+
+export type PendingBatchMode = 'draft' | 'sent' | null;
+
+export type PendingBatchState = {
+  draftCount: number;
+  sentCount: number;
+  count: number;
+  mode: PendingBatchMode;
+  hasDraftBatch: boolean;
+  hasSentBatch: boolean;
+  previewBatch: JBatch | null;
+};
+
+export type PendingBatchAction = 'clear' | 'broadcast' | 'rebroadcast';
 
 type PendingBatchLabelOptions = {
   activeEnv: GossipSource;
@@ -46,6 +60,49 @@ export function countBatchOps(batch: JBatch | null | undefined): number {
     (batch.externalTokenToReserve?.length || 0) +
     (batch.reserveToExternalToken?.length || 0) +
     (batch.revealSecrets?.length || 0);
+}
+
+export function buildPendingBatchState(jBatchState: {
+  batch?: JBatch | null;
+  sentBatch?: { batch?: JBatch | null } | null;
+} | null | undefined): PendingBatchState {
+  const draftBatch = jBatchState?.batch || null;
+  const sentBatch = jBatchState?.sentBatch?.batch || null;
+  const draftCount = countBatchOps(draftBatch);
+  const sentCount = countBatchOps(sentBatch);
+  const mode: PendingBatchMode = draftCount > 0 ? 'draft' : sentCount > 0 ? 'sent' : null;
+  return {
+    draftCount,
+    sentCount,
+    count: draftCount > 0 ? draftCount : sentCount,
+    mode,
+    hasDraftBatch: draftCount > 0,
+    hasSentBatch: sentCount > 0,
+    previewBatch: mode === 'draft' ? draftBatch : mode === 'sent' ? sentBatch : null,
+  };
+}
+
+export function canBroadcastPendingBatch(state: Pick<PendingBatchState, 'hasDraftBatch' | 'hasSentBatch'>, reserveIssue: unknown): boolean {
+  return state.hasDraftBatch && !state.hasSentBatch && !reserveIssue;
+}
+
+export function buildPendingBatchActionTxs(action: PendingBatchAction): EntityTx[] {
+  if (action === 'clear') {
+    return [{
+      type: 'j_clear_batch',
+      data: { reason: 'global-batch-bar-clear' },
+    }];
+  }
+  if (action === 'broadcast') {
+    return [{
+      type: 'j_broadcast',
+      data: {},
+    }];
+  }
+  return [{
+    type: 'j_rebroadcast',
+    data: { gasBumpBps: 1000 },
+  }];
 }
 
 export function pendingBatchEntityLabel(entityId: string, options: PendingBatchLabelOptions): string {
