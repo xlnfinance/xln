@@ -106,6 +106,12 @@
     shortHash,
   } from './entity-panel-display';
   import {
+    buildMoveEntityOptions,
+    buildMoveSourceAccountOptions,
+    buildOpenAccountEntityOptions,
+    isFullEntityId,
+  } from './entity-panel-options';
+  import {
     buildEntityPanelHashRouteFromState,
     canonicalizeEntityPanelRoute,
     getLocationHashParams,
@@ -937,9 +943,6 @@
   let openAccountEntityOptions: string[] = [];
   let moveEntityOptions: string[] = [];
   let moveSourceAccountOptions: string[] = [];
-  function isFullEntityId(value: string): boolean {
-    return /^0x[0-9a-fA-F]{64}$/.test(String(value || '').trim());
-  }
   function handleOpenAccountTargetChange(event: CustomEvent<{ value?: string }>) {
     openAccountEntityId = String(event.detail?.value || '').trim();
   }
@@ -949,47 +952,26 @@
     workspaceAccountId = matched || nextRaw;
   }
   $: openAccountEntityOptions = (() => {
-    const ids = new Map<string, string>();
-    const selfId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    const existingAccountIds = new Set(accountIds.map((id) => String(id || '').trim().toLowerCase()));
-    const add = (candidate: unknown) => {
-      const raw = String(candidate || '').trim();
-      if (!isFullEntityId(raw)) return;
-      const normalized = raw.toLowerCase();
-      if (!normalized || normalized === selfId || existingAccountIds.has(normalized)) return;
-      if (!ids.has(normalized)) ids.set(normalized, normalized);
-    };
-    for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
-    for (const profile of getGossipProfiles(activeEnv)) add(profile.entityId);
-    return Array.from(ids.values()).sort();
+    return buildOpenAccountEntityOptions({
+      replica,
+      tabEntityId: tab.entityId,
+      accountIds,
+      activeReplicas,
+      profiles: getGossipProfiles(activeEnv),
+    });
   })();
   $: moveEntityOptions = (() => {
-    const ids = new Map<string, string>();
-    const selfId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    const add = (candidate: unknown) => {
-      const raw = String(candidate || '').trim();
-      if (!isFullEntityId(raw)) return;
-      const normalized = raw.toLowerCase();
-      if (!ids.has(normalized)) ids.set(normalized, normalized);
-    };
-    if (selfId) add(selfId);
-    for (const id of accountIds) add(id);
-    for (const id of openAccountEntityOptions) add(id);
-    for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
-    for (const profile of getGossipProfiles(activeEnv)) add(profile.entityId);
-    return Array.from(ids.values());
+    return buildMoveEntityOptions({
+      replica,
+      tabEntityId: tab.entityId,
+      accountIds,
+      openAccountEntityOptions,
+      activeReplicas,
+      profiles: getGossipProfiles(activeEnv),
+    });
   })();
   $: moveSourceAccountOptions = (() => {
-    const ordered = new Map<string, string>();
-    for (const id of workspaceAccountIds) {
-      const normalized = String(id || '').trim().toLowerCase();
-      if (normalized && !ordered.has(normalized)) ordered.set(normalized, normalized);
-    }
-    for (const id of accountIds) {
-      const normalized = String(id || '').trim().toLowerCase();
-      if (normalized && !ordered.has(normalized)) ordered.set(normalized, normalized);
-    }
-    return Array.from(ordered.values());
+    return buildMoveSourceAccountOptions({ workspaceAccountIds, accountIds });
   })();
   // On-chain reserves are derived directly from replica.state.reserves.
   let onchainReserves: Map<number, bigint> = new Map();
