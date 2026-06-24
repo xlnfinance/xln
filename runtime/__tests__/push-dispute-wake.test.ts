@@ -169,6 +169,39 @@ describe('push registration signature', () => {
       await store.close();
     }
   });
+
+  test('http unregister accepts signed token hash without retaining raw token client-side', async () => {
+    const dbPath = join(await mkdtemp(join(tmpdir(), 'xln-push-hash-unregister-')), 'push.level');
+    const store = createPushStore({ dbPath, now: () => Date.now() });
+    const wallet = Wallet.createRandom();
+    const runtimeId = wallet.address.toLowerCase();
+    const token = 'device-token-hash-only-revoke';
+    const tokenHash = hashPushToken(token);
+    const signedAt = Date.now();
+    try {
+      await store.registerToken(makeRegistration({ runtimeId, token, tokenHash, entityId: entityId(4) }));
+
+      const unregisterMessage = buildPushUnregisterMessage(runtimeId, tokenHash, signedAt);
+      const unregisterResponse = await handlePushUnregister(new Request('http://tower.local/api/push/unregister', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'push_unregister',
+          version: 1,
+          runtimeId,
+          tokenHash,
+          signedAt,
+          ownerSignature: await wallet.signMessage(unregisterMessage),
+        }),
+      }), store);
+
+      expect(unregisterResponse.status).toBe(200);
+      expect(await unregisterResponse.json()).toMatchObject({ ok: true, removed: 1 });
+      expect(await store.listRegistrationsForTarget(CHAIN_ID, DEPOSITORY)).toHaveLength(0);
+    } finally {
+      await store.close();
+    }
+  });
 });
 
 describe('runDisputeWatchSweep', () => {

@@ -119,13 +119,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Goal: if a `DisputeStarted` event targets an offline entity, the standalone watchtower can wake the victim's registered device so the user can sync and respond before the dispute window closes.
   - Status: done. The watchtower has signed `/api/push/register` and `/api/push/unregister` handlers, a LevelDB push registry, cursor/dedup storage, opt-in `--enable-push-wake` sweep scheduler, console/webhook senders, and health stats. Wakes are matched to the counterentity/victim, never the starter, and unregister is scoped to `(runtimeId, tokenHash)`.
-  - Evidence: L1 `bun test runtime/__tests__/push-dispute-wake.test.ts` PASS `7/7`; runtime `tsc` PASS. The test covers victim-only targeting, wrong-chain/depository filtering, signed registration tamper rejection, runtime-scoped unregister, HTTP register/unregister handlers, sweep dedup, and tappable notification payload.
+  - Evidence: L1 `bun test runtime/__tests__/push-dispute-wake.test.ts` PASS `8/8`; runtime `tsc` PASS. The test covers victim-only targeting, wrong-chain/depository filtering, signed registration tamper rejection, runtime-scoped unregister, signed token-hash unregister without retaining raw client token, HTTP register/unregister handlers, sweep dedup, and tappable notification payload.
 
-- [ ] Wire wallet/native push-token registration to the watchtower push-wake API.
+- [x] Wire wallet/native push-token registration to the watchtower push-wake API.
   - Impact: medium-high.
-  - Current state: server-side push-wake is ready, but browser/native clients still need a real device-token bridge and UI/settings flow to register/unregister push tokens.
   - Requirement: no mock tokens in production UX. The wallet signs the registration message with the runtime owner key, sends the real APNs/FCM/Web Push token, shows registration status, and lets users revoke it.
-  - Tests: browser/native-capable e2e registers a token, starts a dispute against the offline entity, receives exactly one wake through a capture webhook, then unregisters and verifies no further wake.
+  - Status: done. Recovery settings now include a Push Wake panel that obtains a real desktop bridge, Capacitor native, or Web Push token, signs register/unregister requests with the runtime owner key, stores only token hashes locally, and calls the same-origin watchtower proxy for local HTTPS wallet sessions. The browser path supports a shell-provided server-reachable RPC override so standalone watchtowers never need to call the wallet's self-signed Vite RPC proxy.
+  - Evidence: L1 `bun test runtime/__tests__/push-dispute-wake.test.ts runtime/__tests__/watchtower-proxy.test.ts tests/frontend/push-wake-registration.test.ts tests/frontend/recovery-tower-config.test.ts` PASS `25/25`. L2 isolated browser e2e `tests/e2e-push-wake-registration.spec.ts` PASS `1/1`, run `20260624-022222-222`, wall `21.0s`, HEAD `4f93bde67b08`, code hash `09d7f5cde7fdc309df26aba46c63c6b7139d865fc22b98ca8e73ce48f1f12902`, browser issues `0`, watchtower sweep `notificationsSent=1`.
 
 - [x] Consolidate the duplicated reserve faucet implementation.
   - Impact: high.

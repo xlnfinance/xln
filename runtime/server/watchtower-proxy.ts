@@ -8,6 +8,8 @@ const isAllowedTowerPath = (path: string): boolean =>
   || path === '/api/tower/appointment'
   || path === '/api/recovery/discover'
   || path === '/api/recovery/state'
+  || path === '/api/push/register'
+  || path === '/api/push/unregister'
   || path.startsWith('/api/tower/receipt/');
 
 const resolveLocalTowerUrl = (target: string, path: string): URL => {
