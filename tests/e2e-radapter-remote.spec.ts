@@ -605,6 +605,11 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(audience.length).toBeGreaterThan(0);
 
   const adminKey = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000, audience);
+  await page.addInitScript(() => {
+    const raw = localStorage.getItem('xln-settings');
+    const settings = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+    localStorage.setItem('xln-settings', JSON.stringify({ ...settings, showTimeMachine: true }));
+  });
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`, {
     waitUntil: 'domcontentloaded',
   });
@@ -814,6 +819,28 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(frameProbe.afterAccounts).toBeLessThanOrEqual(1);
   expect(frameProbe.beforeBooks).toBeLessThanOrEqual(1);
   expect(frameProbe.afterBooks).toBeLessThanOrEqual(1);
+
+  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('time-machine-remote-height').fill(String(controlResult.beforeHeight));
+  await page.getByTestId('time-machine-remote-scan-button').click();
+  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: 30_000 });
+  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(/ms/);
+  await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
+  const timeMachineProbe = await page.evaluate((height) => {
+    const view = window as typeof window & {
+      isolatedEnv?: { history?: Array<{ height?: number }> };
+    };
+    const heights = (view.isolatedEnv?.history ?? []).map((frame) => Number(frame.height || 0));
+    return {
+      historyLength: heights.length,
+      hasRequestedHeight: heights.includes(height),
+      maxHistoryHeight: Math.max(0, ...heights),
+    };
+  }, controlResult.beforeHeight);
+  expect(timeMachineProbe.historyLength).toBeGreaterThanOrEqual(2);
+  expect(timeMachineProbe.historyLength).toBeLessThanOrEqual(24);
+  expect(timeMachineProbe.hasRequestedHeight).toBe(true);
+  expect(timeMachineProbe.maxHistoryHeight).toBeGreaterThanOrEqual(after.envHeight);
 });
 
 test('runtime dropdown manager attaches a remote radapter by token', async ({ page }) => {
