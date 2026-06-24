@@ -82,6 +82,7 @@
     MOVE_ENDPOINTS,
     type MoveEndpoint,
   } from './move-routes';
+  import { createMoveVisualController } from './move-visual-controller';
   import type { AssetLedgerRow, AssetLedgerTotals, ExternalWalletSnapshotSource } from './asset-ledger';
   import {
     findLocalAccountByCounterparty,
@@ -311,150 +312,34 @@
     return { entityId, signerId, entityTxs };
   }
   let moveNodeLayoutVersion = 0;
-  let moveNodeLayoutRaf: number | null = null;
-  let moveNodeLayoutSettleRaf: number | null = null;
-  let moveVisualResizeObserver: ResizeObserver | null = null;
   let moveLineReady = false;
   let moveCommittedLineReady = false;
-  let moveCommittedLinePrimed = false;
-  let moveCommittedLineTimeout: ReturnType<typeof setTimeout> | null = null;
   let moveHubEntityOptions: string[] = [];
   let moveValidationSignature = '';
   function resetMoveLineMeasurement(): void {
-    moveLineReady = false;
-    moveCommittedLineReady = false;
-    moveCommittedLinePrimed = false;
-    if (moveNodeLayoutRaf !== null) {
-      cancelAnimationFrame(moveNodeLayoutRaf);
-      moveNodeLayoutRaf = null;
-    }
-    if (moveNodeLayoutSettleRaf !== null) {
-      cancelAnimationFrame(moveNodeLayoutSettleRaf);
-      moveNodeLayoutSettleRaf = null;
-    }
-    if (moveCommittedLineTimeout) {
-      clearTimeout(moveCommittedLineTimeout);
-      moveCommittedLineTimeout = null;
-    }
+    moveVisualController.resetMeasurement();
   }
   function scheduleMoveCommittedLineReady(): void {
-    if (moveCommittedLineTimeout) clearTimeout(moveCommittedLineTimeout);
-    if (moveDragSource) return;
-    if (moveCommittedLinePrimed) {
-      moveNodeLayoutVersion += 1;
-      moveCommittedLineReady = true;
-      return;
-    }
-    moveCommittedLineReady = false;
-    moveCommittedLineTimeout = setTimeout(() => {
-      moveCommittedLineTimeout = null;
-      moveNodeLayoutVersion += 1;
-      moveCommittedLineReady = true;
-      moveCommittedLinePrimed = true;
-    }, 200);
+    moveVisualController.scheduleCommittedLineReady();
   }
   function bumpMoveNodeLayout(): void {
-    moveNodeLayoutVersion += 1;
-    if (typeof requestAnimationFrame !== 'function') {
-      const hasAnchors =
-        !!getMoveNodeAnchor('from', moveFromEndpoint)
-        && !!getMoveNodeAnchor('to', moveToEndpoint);
-      moveLineReady = hasAnchors;
-      if (hasAnchors) scheduleMoveCommittedLineReady();
-      return;
-    }
-    moveLineReady = false;
-    moveCommittedLineReady = false;
-    if (moveNodeLayoutRaf !== null) cancelAnimationFrame(moveNodeLayoutRaf);
-    if (moveNodeLayoutSettleRaf !== null) cancelAnimationFrame(moveNodeLayoutSettleRaf);
-    if (moveCommittedLineTimeout) {
-      clearTimeout(moveCommittedLineTimeout);
-      moveCommittedLineTimeout = null;
-    }
-    // Wait for child node refs to be available before measuring.
-    // First RAF: layout pass. Second RAF: paint pass.
-    // Third RAF: guarantees all Svelte action bindings (setMoveNodeRef) have fired.
-    moveNodeLayoutRaf = requestAnimationFrame(() => {
-      moveNodeLayoutRaf = null;
-      moveNodeLayoutSettleRaf = requestAnimationFrame(() => {
-        moveNodeLayoutSettleRaf = null;
-        const fromAnchor = getMoveNodeAnchor('from', moveFromEndpoint);
-        const toAnchor = getMoveNodeAnchor('to', moveToEndpoint);
-        if (fromAnchor && toAnchor) {
-          moveNodeLayoutVersion += 1;
-          moveLineReady = true;
-          scheduleMoveCommittedLineReady();
-        } else {
-          requestAnimationFrame(() => {
-            const retryFromAnchor = getMoveNodeAnchor('from', moveFromEndpoint);
-            const retryToAnchor = getMoveNodeAnchor('to', moveToEndpoint);
-            if (!retryFromAnchor || !retryToAnchor) return;
-            moveNodeLayoutVersion += 1;
-            moveLineReady = true;
-            scheduleMoveCommittedLineReady();
-          });
-        }
-      });
-    });
-  }
-  function setMoveNodeRef(side: 'from' | 'to', endpoint: MoveEndpoint, node: HTMLButtonElement | null): void {
-    const key = `${side}:${endpoint}`;
-    if (node) {
-      moveNodeRefs.set(key, node);
-    } else {
-      moveNodeRefs.delete(key);
-    }
-    bumpMoveNodeLayout();
+    moveVisualController.bumpNodeLayout();
   }
   function moveNodeAction(
     node: HTMLButtonElement,
     params: { side: 'from' | 'to'; endpoint: MoveEndpoint },
   ): { update: (next: { side: 'from' | 'to'; endpoint: MoveEndpoint }) => void; destroy: () => void } {
-    setMoveNodeRef(params.side, params.endpoint, node);
-    return {
-      update(next) {
-        setMoveNodeRef(params.side, params.endpoint, null);
-        setMoveNodeRef(next.side, next.endpoint, node);
-        params = next;
-      },
-      destroy() {
-        setMoveNodeRef(params.side, params.endpoint, null);
-      },
-    };
+    return moveVisualController.nodeAction(node, params);
   }
   function getMoveNodeAnchor(side: 'from' | 'to', endpoint: MoveEndpoint): { x: number; y: number } | null {
-    const rootRect = moveVisualRoot?.getBoundingClientRect();
-    const node = moveNodeRefs.get(`${side}:${endpoint}`)
-      || moveVisualRoot?.querySelector<HTMLButtonElement>(`[data-move-side="${side}"][data-move-endpoint="${endpoint}"]`)
-      || null;
-    const nodeRect = node?.getBoundingClientRect();
-    if (
-      !rootRect
-      || !nodeRect
-      || rootRect.width <= 0
-      || rootRect.height <= 0
-      || nodeRect.width <= 0
-      || nodeRect.height <= 0
-    ) {
-      return null;
-    }
-    return {
-      x: side === 'from'
-        ? nodeRect.right - rootRect.left
-        : nodeRect.left - rootRect.left,
-      y: nodeRect.top - rootRect.top + (nodeRect.height / 2),
-    };
+    return moveVisualController.getNodeAnchor(side, endpoint);
   }
   function beginMoveDrag(endpoint: MoveEndpoint, event: PointerEvent | MouseEvent): void {
     event.preventDefault();
     moveDragSource = endpoint;
     moveDragHoverTarget = null;
     moveSelectedSource = endpoint;
-    moveCommittedLineReady = false;
-    if (moveCommittedLineTimeout) {
-      clearTimeout(moveCommittedLineTimeout);
-      moveCommittedLineTimeout = null;
-    }
+    moveVisualController.beginDrag();
   }
   function applyMoveRoute(from: MoveEndpoint, to: MoveEndpoint): void {
     const selfEntityId = resolveSelfEntityId();
@@ -513,7 +398,7 @@
   function clearMoveDrag(): void {
     moveDragSource = null;
     moveDragHoverTarget = null;
-    if (moveLineReady) scheduleMoveCommittedLineReady();
+    moveVisualController.clearDrag();
   }
   function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
     const targetEntity = getCurrentMoveTargetEntityId();
@@ -1314,9 +1199,15 @@
   let moveSelectedTarget: MoveEndpoint | null = null;
   let moveDragSource: MoveEndpoint | null = null;
   let moveDragHoverTarget: MoveEndpoint | null = null;
-  let moveVisualRoot: HTMLDivElement | null = null;
-  let previousMoveVisualRoot: HTMLDivElement | null = null;
-  const moveNodeRefs = new Map<string, HTMLButtonElement>();
+  const moveVisualController = createMoveVisualController({
+    getFromEndpoint: () => moveFromEndpoint,
+    getToEndpoint: () => moveToEndpoint,
+    getDragSource: () => moveDragSource,
+    isLineReady: () => moveLineReady,
+    setLineReady: (ready) => moveLineReady = ready,
+    setCommittedLineReady: (ready) => moveCommittedLineReady = ready,
+    bumpLayoutVersion: () => moveNodeLayoutVersion += 1,
+  });
   let collateralToReserveAmount = '';
   let reserveToExternalAmount = '';
   let sendingExternalToken: string | null = null;
@@ -1365,19 +1256,6 @@
   let moveAssetOptions: Array<{ symbol: string }> = [];
   let selectedMoveExternalToken: ExternalToken | null = null;
   let selectedMoveTransferToken: ReserveTransferAsset | null = null;
-  $: if (moveVisualRoot !== previousMoveVisualRoot) {
-    moveVisualResizeObserver?.disconnect();
-    moveVisualResizeObserver = null;
-    resetMoveLineMeasurement();
-    previousMoveVisualRoot = moveVisualRoot;
-    if (moveVisualRoot && typeof ResizeObserver === 'function') {
-      moveVisualResizeObserver = new ResizeObserver(() => {
-        bumpMoveNodeLayout();
-      });
-      moveVisualResizeObserver.observe(moveVisualRoot);
-    }
-    bumpMoveNodeLayout();
-  }
   $: moveLayoutSignature = [
     assetWorkspaceTab,
     moveFromEndpoint,
@@ -3773,8 +3651,7 @@
     }
   }
   onDestroy(() => {
-    resetMoveLineMeasurement();
-    moveVisualResizeObserver?.disconnect();
+    moveVisualController.destroy();
   });
   onMount(() => {
     applyDeepLinkViewFromUrl();
@@ -4340,7 +4217,7 @@
             {formatAmount}
             {formatApproxUsd}
             {getMovePrimaryActionLabel}
-            setMoveVisualRoot={(node) => moveVisualRoot = node}
+            setMoveVisualRoot={moveVisualController.setRoot}
             {handleMoveWorkspaceError}
             {refreshBalances}
             {submitAssetFaucet}
@@ -4483,7 +4360,7 @@
                 moveEndpoints={MOVE_ENDPOINTS}
                 {formatAmount}
                 movePrimaryActionLabel={getMovePrimaryActionLabel()}
-                onMoveVisualRoot={(node) => moveVisualRoot = node}
+                onMoveVisualRoot={moveVisualController.setRoot}
                 toastMoveError={handleMoveWorkspaceError}
               />
 
