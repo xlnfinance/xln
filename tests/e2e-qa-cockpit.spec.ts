@@ -345,6 +345,46 @@ const QA_FAST_SUMMARY = {
   failingTargets: [],
 };
 
+const QA_FAIL_VERDICT = {
+  ...qaSignal('FAIL', 'backend verdict: qa.cockpit-fixture', 'qa-system', QA_FIXTURE_RUN.createdAt, [
+    { label: 'run', value: QA_FIXTURE_RUN_ID },
+    { label: 'failed shards', value: 1 },
+    { label: 'browser errors', value: 1 },
+    { label: 'benchmark', value: 'slower' },
+  ]),
+  schemaVersion: 1,
+  status: 'FAIL',
+  activeCount: 3,
+  failingSurfaceCount: 3,
+  latestRunId: QA_FIXTURE_RUN_ID,
+  latestAt: QA_FIXTURE_RUN.createdAt,
+  gitHead: QA_FIXTURE_RUN.code.gitHead,
+  codeHash: QA_FIXTURE_RUN.code.codeHash,
+  dirty: false,
+  regressionStatus: 'slower',
+  browserErrorCount: 1,
+  browserWarningCount: 2,
+};
+
+const QA_PASS_VERDICT = {
+  ...qaSignal('OK', 'backend verdict: all green', 'qa-system', QA_FAST_SUMMARY.createdAt, [
+    { label: 'run', value: QA_FAST_RUN_ID },
+    { label: 'failed shards', value: 0 },
+  ]),
+  schemaVersion: 1,
+  status: 'PASS',
+  activeCount: 0,
+  failingSurfaceCount: 0,
+  latestRunId: QA_FAST_RUN_ID,
+  latestAt: QA_FAST_SUMMARY.createdAt,
+  gitHead: QA_FAST_SUMMARY.code.gitHead,
+  codeHash: QA_FAST_SUMMARY.code.codeHash,
+  dirty: false,
+  regressionStatus: 'ok',
+  browserErrorCount: 0,
+  browserWarningCount: 0,
+};
+
 const QA_CATALOG = [
   {
     id: 'e2e-isolated',
@@ -808,11 +848,17 @@ const QA_RESTART_AUDIT = [
 test.describe('QA cockpit scenario player', () => {
   test('plays recorded scenario videos with short copy and synced transcript', async ({ page }) => {
     test.setTimeout(90_000);
+    let runsPayload = {
+      ok: true,
+      qaAuth: QA_AUTH,
+      runs: [QA_FIXTURE_SUMMARY, QA_FAST_SUMMARY],
+      verdict: QA_FAIL_VERDICT,
+    };
     await page.route('**/api/qa/runs?**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, runs: [QA_FIXTURE_SUMMARY, QA_FAST_SUMMARY] }),
+        body: JSON.stringify(runsPayload),
       });
     });
     await page.route('**/api/qa/run?**', async (route) => {
@@ -948,7 +994,11 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByRole('heading', { name: 'Test Cockpit' })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('qa-test-tabs')).toBeVisible();
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('FAIL');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('backend verdict: qa.cockpit-fixture');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('qa.cockpit-fixture');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('3 failing surfaces');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('benchmark SLOWER');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('2026-06-23 23:59:59 UTC');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('browser');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
@@ -1114,6 +1164,20 @@ test.describe('QA cockpit scenario player', () => {
     await expect(watchPanel).toHaveClass(/theater/);
     await page.getByTestId('qa-fullscreen-button').click();
     await expect(watchPanel).toHaveClass(/theater/);
+
+    runsPayload = {
+      ok: true,
+      qaAuth: QA_AUTH,
+      runs: [QA_FAST_SUMMARY],
+      verdict: QA_PASS_VERDICT,
+    };
+    await page.reload();
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('PASS', { timeout: 30_000 });
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('backend verdict: all green');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('0 active reasons');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('0 failing surfaces');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('benchmark OK');
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('browser 0 err / 0 warn');
 
     expect(runtimeErrors).toEqual([]);
   });

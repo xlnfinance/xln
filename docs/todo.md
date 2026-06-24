@@ -165,13 +165,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 ## p1 product and UX
 
-- [ ] Add single system verdict banner.
+- [x] Add single system verdict banner.
   - Impact: high.
   - UI: sticky top banner with `SYSTEM PASS/DEGRADED/FAIL`, failing surface count, last run UTC, git HEAD, code hash, dirty flag, regression status, browser error count.
   - Drill-down: clicking a reason filters runs/shards to exact evidence.
-  - Partial shipped: `/qa` now has a sticky `PASS/DEGRADED/FAIL/UNKNOWN` banner with reason count, git HEAD, code hash, dirty flag, latest run time, benchmark regression, and browser health failures.
-  - Remaining: backend schema-backed severity.
-  - Tests: failed fixture shows FAIL banner and selects failing shard.
+  - Status: done. `/api/qa/runs` now returns a schema-backed `QaSystemVerdict` built from the latest run summary, including active/failing surface counts, UTC run time, git HEAD, code hash, dirty flag, benchmark status, and browser error/warning counts. `/qa` renders that backend verdict and only overlays local operations failures.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `34/34`; focused QA cockpit e2e `20260624-023242-580` PASS `1/1`, wall `11.3s`, code hash `c9ffc08fe7c195ab`, benchmark OK. Fixture proves backend-driven FAIL and green PASS verdicts.
 
 - [ ] Build canonical run ledger.
   - Impact: high.
@@ -416,7 +415,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. QA cockpit fixture includes a passed shard with no video artifacts; the Scenario Player renders `No recorded video for this shard` without mounting video or subtitle track elements.
   - Evidence: focused QA cockpit e2e `20260624-003232-055` asserts `qa-video-missing`, `qa-video-player` count `0`, `qa-video-track` count `0`, and no new browser runtime errors.
 - [ ] E2E: scenario transcript cue scrubs video to real marker timestamp.
-- [ ] E2E: verdict banner shows FAIL on failed fixture and PASS on green fixture.
+- [x] E2E: verdict banner shows FAIL on failed fixture and PASS on green fixture.
 - [ ] E2E: history compare renders deltas and regression badge.
 - [ ] E2E: restart run disabled in read mode and enabled only in admin mode.
 - [ ] E2E: 1M account health snapshot renders aggregate view without freezing.

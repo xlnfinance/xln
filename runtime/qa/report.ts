@@ -204,6 +204,23 @@ export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
   failingTargets: string[];
 };
 
+export type QaSystemVerdictStatus = 'PASS' | 'DEGRADED' | 'FAIL' | 'UNKNOWN';
+
+export type QaSystemVerdict = QaSeveritySignal & {
+  schemaVersion: 1;
+  status: QaSystemVerdictStatus;
+  activeCount: number;
+  failingSurfaceCount: number;
+  latestRunId: string | null;
+  latestAt: number | null;
+  gitHead: string | null;
+  codeHash: string | null;
+  dirty: boolean;
+  regressionStatus: QaBenchmarkStatus | null;
+  browserErrorCount: number;
+  browserWarningCount: number;
+};
+
 type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'logTail'> & {
   browserIssues?: QaBrowserIssue[];
 };
@@ -746,6 +763,115 @@ const buildQaRunSeveritySignal = (run: Pick<QaRunManifest,
     owner: 'qa',
     evidence,
   });
+};
+
+const qaSystemVerdictStatusFromSeverity = (severity: QaSeveritySignal['severity']): QaSystemVerdictStatus => {
+  if (severity === 'OK') return 'PASS';
+  if (severity === 'WARN' || severity === 'DEGRADED') return 'DEGRADED';
+  if (severity === 'FAIL' || severity === 'BLOCKED') return 'FAIL';
+  return 'UNKNOWN';
+};
+
+const qaSystemVerdictReason = (run: QaRunSummary): string => {
+  if (run.failedShards > 0 || run.status === 'failed') {
+    return run.failingTargets.length > 0 ? run.failingTargets.join(' · ') : run.reason;
+  }
+  if (run.browserHealth?.severity === 'FAIL' || run.browserHealth?.severity === 'WARN') return run.browserHealth.reason;
+  if (run.benchmark?.status === 'slower' || run.benchmark?.status === 'mixed') return run.benchmark.reason;
+  if (run.code?.dirty) return 'Worktree was dirty during QA run';
+  return run.reason;
+};
+
+export const buildQaSystemVerdict = (runs: readonly QaRunSummary[]): QaSystemVerdict => {
+  const latest = runs[0] ?? null;
+  if (!latest) {
+    return {
+      ...makeQaSeveritySignal({
+        severity: 'UNKNOWN',
+        reason: 'No QA runs yet',
+        since: 0,
+        owner: 'qa-system',
+        evidence: [{ label: 'runs', value: 0 }],
+      }),
+      schemaVersion: 1,
+      status: 'UNKNOWN',
+      activeCount: 0,
+      failingSurfaceCount: 0,
+      latestRunId: null,
+      latestAt: null,
+      gitHead: null,
+      codeHash: null,
+      dirty: false,
+      regressionStatus: null,
+      browserErrorCount: 0,
+      browserWarningCount: 0,
+    };
+  }
+
+  const browser = latest.browserHealth;
+  const regressionStatus = latest.benchmark?.status ?? null;
+  const regressionActive = regressionStatus === 'slower' || regressionStatus === 'mixed';
+  const failedShardSurface = latest.failedShards > 0 || latest.status === 'failed';
+  const browserSurface = Boolean(browser && browser.issueCount > 0);
+  const browserBlocking = browser?.severity === 'FAIL' || (browser?.errorCount ?? 0) > 0;
+  const browserWarning = browser?.severity === 'WARN' || (browser?.warningCount ?? 0) > 0;
+  const dirtySurface = latest.code?.dirty === true;
+  const unknownSurface = latest.status === 'unknown' || latest.severity === 'UNKNOWN';
+  const effectiveSeverity: QaSeveritySignal['severity'] =
+    failedShardSurface || browserBlocking
+      ? 'FAIL'
+      : unknownSurface
+        ? 'UNKNOWN'
+        : regressionActive || dirtySurface
+          ? 'DEGRADED'
+          : browserWarning
+            ? 'WARN'
+            : latest.severity;
+  const surfaceCount = [
+    failedShardSurface,
+    browserSurface,
+    regressionActive,
+    dirtySurface,
+    unknownSurface,
+  ].filter(Boolean).length;
+  const activeCount = surfaceCount > 0 ? surfaceCount : latest.severity === 'OK' ? 0 : 1;
+  const reason = qaSystemVerdictReason(latest);
+  const evidence = [
+    { label: 'run', value: latest.runId },
+    { label: 'status', value: latest.status },
+    { label: 'failed shards', value: latest.failedShards },
+    { label: 'total shards', value: latest.totalShards },
+    ...(browser ? [
+      { label: 'browser errors', value: browser.errorCount },
+      { label: 'browser warnings', value: browser.warningCount },
+    ] : []),
+    ...(regressionStatus ? [{ label: 'benchmark', value: regressionStatus }] : []),
+    ...(latest.code?.gitHead ? [{ label: 'git head', value: latest.code.gitHead.slice(0, 12) }] : []),
+    ...(latest.code?.codeHash ? [{ label: 'code hash', value: latest.code.codeHash.slice(0, 16) }] : []),
+    ...(dirtySurface ? [{ label: 'dirty', value: true }] : []),
+  ];
+
+  return {
+    ...makeQaSeveritySignal({
+      severity: effectiveSeverity,
+      reason,
+      since: latest.since || latest.createdAt,
+      owner: 'qa-system',
+      evidence,
+    }),
+    schemaVersion: 1,
+    status: qaSystemVerdictStatusFromSeverity(effectiveSeverity),
+    activeCount,
+    failingSurfaceCount: activeCount,
+    latestRunId: latest.runId,
+    latestAt: latest.createdAt,
+    gitHead: latest.code?.gitHead ?? null,
+    codeHash: latest.code?.codeHash ?? null,
+    dirty: dirtySurface,
+    regressionStatus,
+    browserErrorCount: browser?.errorCount ?? 0,
+    browserWarningCount: browser?.warningCount ?? 0,
+  };
 };
 
 const parseRunIdTimestamp = (runId: string): number | null => {

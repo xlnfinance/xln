@@ -9,6 +9,7 @@ import {
   QA_HISTORY_DB_PATH,
   auditQaUxReleasePack,
   backfillQaHistoryFromLogs,
+  buildQaSystemVerdict,
   classifyQaArtifactSensitivity,
   enrichQaRunUrls,
   listQaHistory,
@@ -1211,6 +1212,7 @@ export async function maybeHandleQaRequest(
           ok: true,
           qaAuth: authInfo,
           runs,
+          verdict: buildQaSystemVerdict(runs),
         },
         headers,
       );

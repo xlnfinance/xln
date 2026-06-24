@@ -364,11 +364,29 @@
     status: QaVerdictStatus;
     reason: string;
     activeCount: number;
+    failingSurfaceCount: number;
     latestRunId: string | null;
     latestAt: number | null;
     gitHead: string | null;
     codeHash: string | null;
     dirty: boolean;
+    regressionStatus: QaBenchmarkComparison['status'] | null;
+    browserErrorCount: number;
+    browserWarningCount: number;
+  };
+  type QaSystemVerdict = QaSeveritySignal & {
+    schemaVersion: 1;
+    status: QaVerdictStatus;
+    activeCount: number;
+    failingSurfaceCount: number;
+    latestRunId: string | null;
+    latestAt: number | null;
+    gitHead: string | null;
+    codeHash: string | null;
+    dirty: boolean;
+    regressionStatus: QaBenchmarkComparison['status'] | null;
+    browserErrorCount: number;
+    browserWarningCount: number;
   };
 
   let runs = $state<QaSummary[]>([]);
@@ -409,6 +427,7 @@
   let retentionResult = $state<QaRetentionPurgeResult | null>(null);
   let historyBackfillBusy = $state(false);
   let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
+  let systemVerdict = $state<QaSystemVerdict | null>(null);
 
   const selectedShard = $derived(
     selectedRun?.shards?.[selectedShardIndex] ?? null,
@@ -461,7 +480,7 @@
       : failureInbox.filter(item => item.failureClass === selectedFailureClass),
   );
   const failureClassOptions = $derived(buildFailureClassOptions(runs, failureInbox));
-  const verdict = $derived(buildVerdictSummary(latestRun, failureInbox));
+  const verdict = $derived(buildVerdictSummary(systemVerdict, latestRun, failureInbox));
   const uxGalleryStories = $derived([
     ...stories.filter(story => story.curated),
     ...stories.filter(story => !story.curated),
@@ -719,9 +738,48 @@
     return 'UNKNOWN';
   }
 
-  function buildVerdictSummary(run: QaSummary | null, inbox: QaFailureInboxItem[]): QaVerdictSummary {
+  function emptyVerdict(activeCount: number): QaVerdictSummary {
+    return {
+      status: 'UNKNOWN',
+      reason: 'No QA runs yet',
+      activeCount,
+      failingSurfaceCount: 0,
+      latestRunId: null,
+      latestAt: null,
+      gitHead: null,
+      codeHash: null,
+      dirty: false,
+      regressionStatus: null,
+      browserErrorCount: 0,
+      browserWarningCount: 0,
+    };
+  }
+
+  function buildVerdictSummary(
+    source: QaSystemVerdict | null,
+    run: QaSummary | null,
+    inbox: QaFailureInboxItem[],
+  ): QaVerdictSummary {
+    const operationIssues = inbox.filter(item => item.failureClass === 'operations');
+    if (source) {
+      const hasOperationFail = operationIssues.some(item => item.severity === 'FAIL');
+      return {
+        status: hasOperationFail ? 'FAIL' : source.status,
+        reason: operationIssues[0]?.detail || source.reason,
+        activeCount: source.activeCount + operationIssues.length,
+        failingSurfaceCount: source.failingSurfaceCount + operationIssues.length,
+        latestRunId: source.latestRunId,
+        latestAt: source.latestAt,
+        gitHead: source.gitHead,
+        codeHash: source.codeHash,
+        dirty: source.dirty,
+        regressionStatus: source.regressionStatus,
+        browserErrorCount: source.browserErrorCount,
+        browserWarningCount: source.browserWarningCount,
+      };
+    }
     if (!run) {
-      return { status: 'UNKNOWN', reason: 'No QA runs yet', activeCount: inbox.length, latestRunId: null, latestAt: null, gitHead: null, codeHash: null, dirty: false };
+      return emptyVerdict(inbox.length);
     }
     const latestIssues = inbox.filter(item => item.runId === run.runId || item.failureClass === 'operations');
     const issueOverride = latestIssues.some(item => item.severity === 'FAIL')
@@ -734,11 +792,15 @@
       status,
       reason: latestIssues[0]?.detail || run.reason,
       activeCount: latestIssues.length,
+      failingSurfaceCount: latestIssues.length,
       latestRunId: run.runId,
       latestAt: run.createdAt,
       gitHead: run.code?.gitHead ?? null,
       codeHash: run.code?.codeHash ?? null,
       dirty: run.code?.dirty === true,
+      regressionStatus: run.benchmark?.status ?? null,
+      browserErrorCount: browserHealth(run).errorCount,
+      browserWarningCount: browserHealth(run).warningCount,
     };
   }
 
@@ -954,12 +1016,19 @@
     error = null;
     try {
       const response = await qaFetch('/api/qa/runs?limit=20', { cache: 'no-store' });
-      const payload = await response.json() as { ok?: boolean; qaAuth?: QaAuthInfo; runs?: QaSummary[]; error?: string };
+      const payload = await response.json() as {
+        ok?: boolean;
+        qaAuth?: QaAuthInfo;
+        runs?: QaSummary[];
+        verdict?: QaSystemVerdict;
+        error?: string;
+      };
       applyQaAuth(payload);
       if (!response.ok || !payload.ok || !Array.isArray(payload.runs)) {
         throw new Error(payload.error || 'Failed to load QA runs');
       }
       runs = payload.runs;
+      systemVerdict = payload.verdict ?? null;
       const requestedRunId = requestedRunIdFromUrl();
       const nextRunId = preserveSelection && selectedRunId && runs.some((run) => run.runId === selectedRunId)
         ? selectedRunId
@@ -1414,6 +1483,9 @@
       </div>
       <div class="verdict-meta">
         <span>{verdict.activeCount} active reasons</span>
+        <span>{verdict.failingSurfaceCount} failing surfaces</span>
+        <span>benchmark {benchmarkLabel(verdict.regressionStatus)}</span>
+        <span>browser {verdict.browserErrorCount} err / {verdict.browserWarningCount} warn</span>
         <code title={verdict.gitHead ?? ''}>head {shortHash(verdict.gitHead)}</code>
         <code title={verdict.codeHash ?? ''}>code {shortHash(verdict.codeHash)}</code>
         {#if verdict.dirty}<span>dirty</span>{/if}

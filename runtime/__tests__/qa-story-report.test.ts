@@ -19,6 +19,7 @@ import {
   applyQaRunSeverity,
   assertQaReleaseRunSeverity,
   auditQaUxReleasePack,
+  buildQaSystemVerdict,
   classifyQaArtifactSensitivity,
   classifyQaShardFailure,
   compareQaBenchmarkRuns,
@@ -31,6 +32,7 @@ import {
   recordQaRunHistory,
   resolveQaArtifactPath,
   resolveQaStoryScreenshotPath,
+  summarizeQaRun,
   type QaRunManifest,
 } from '../qa/report';
 
@@ -266,6 +268,65 @@ test('qa severity model normalizes legacy runs and gates release manifests', () 
   const missingReason = { ...legacy, manifestVersion: 3 } as Record<string, unknown>;
   delete missingReason['reason'];
   expect(() => assertQaReleaseRunSeverity(missingReason as QaRunManifest)).toThrow('QA_RUN_REASON_REQUIRED');
+});
+
+test('qa system verdict is schema-backed by latest run severity', () => {
+  const empty = buildQaSystemVerdict([]);
+  expect(empty.status).toBe('UNKNOWN');
+  expect(empty.activeCount).toBe(0);
+  expect(empty.reason).toBe('No QA runs yet');
+
+  const baseline = benchmarkRun('system-baseline', 1000, 800);
+  const failedCurrent = benchmarkRun('system-current', 1300, 1100, 'new-code', 'new-head');
+  const failedRun = applyQaRunSeverity({
+    ...failedCurrent,
+    status: 'failed',
+    passedShards: 0,
+    failedShards: 1,
+    benchmark: compareQaBenchmarkRuns(failedCurrent, baseline),
+    browserHealth: {
+      severity: 'FAIL',
+      reason: '1 browser error(s) captured',
+      since: Date.UTC(2026, 5, 23),
+      owner: 'browser',
+      evidence: [{ label: 'errors', value: 1 }],
+      issueCount: 1,
+      errorCount: 1,
+      warningCount: 0,
+      networkFailureCount: 0,
+      httpErrorCount: 0,
+    },
+    shards: [{
+      ...failedCurrent.shards[0]!,
+      status: 'failed',
+      handle: 'qa.system-verdict-fixture',
+      error: 'Expected system verdict failure',
+      failureClass: 'assertion',
+      browserIssues: [{
+        type: 'pageerror',
+        severity: 'error',
+        message: 'Unhandled fixture error',
+        url: 'http://127.0.0.1:8080/qa',
+        method: null,
+        status: null,
+        testId: 'system-verdict',
+        timestamp: Date.UTC(2026, 5, 23),
+      }],
+    }],
+  });
+  const failed = buildQaSystemVerdict([summarizeQaRun(failedRun)]);
+  expect(failed.schemaVersion).toBe(1);
+  expect(failed.status).toBe('FAIL');
+  expect(failed.reason).toContain('qa.system-verdict-fixture');
+  expect(failed.activeCount).toBe(3);
+  expect(failed.failingSurfaceCount).toBe(3);
+  expect(failed.regressionStatus).toBe('slower');
+  expect(failed.browserErrorCount).toBe(1);
+
+  const passed = buildQaSystemVerdict([summarizeQaRun(benchmarkRun('system-green', 900, 700))]);
+  expect(passed.status).toBe('PASS');
+  expect(passed.activeCount).toBe(0);
+  expect(passed.failingSurfaceCount).toBe(0);
 });
 
 test('qa run id formatter uses UTC fields', () => {
@@ -1244,12 +1305,17 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       const payload = await response!.json() as {
         ok?: boolean;
         runs?: Array<{ runId?: string; status?: string; failingTargets?: string[]; timing?: { playwrightMs?: number | null } }>;
+        verdict?: { status?: string; latestRunId?: string | null; reason?: string; activeCount?: number };
       };
       expect(payload.ok).toBe(true);
       const summary = payload.runs?.find(item => item.runId === runId);
       expect(summary?.status).toBe('failed');
       expect(summary?.failingTargets).toEqual(['qa cockpit']);
       expect(summary?.timing?.playwrightMs).toBe(1200);
+      expect(payload.verdict?.status).toBe('FAIL');
+      expect(payload.verdict?.latestRunId).toBe(runId);
+      expect(payload.verdict?.reason).toContain('qa cockpit');
+      expect(payload.verdict?.activeCount).toBeGreaterThan(0);
     });
   } finally {
     deleteQaHistoryRows([runId]);
