@@ -69,3 +69,79 @@ export function buildMoveSourceAccountOptions(input: {
   }
   return Array.from(ordered.values());
 }
+
+export function normalizeWorkspaceAccountId(raw: string, workspaceAccountIds: readonly string[]): string {
+  const nextRaw = String(raw || '').trim();
+  const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
+  return matched || nextRaw;
+}
+
+export function buildMoveHubEntityOptions(input: {
+  targetEntityId: string;
+  selfEntityId: string;
+  workspaceAccountIds: readonly string[];
+  profiles: ReadonlyArray<{
+    entityId?: string;
+    accounts?: readonly { counterpartyId?: unknown }[];
+  }>;
+}): string[] {
+  const ids = new Map<string, string>();
+  const recipientEntityId = String(input.targetEntityId || input.selfEntityId || '').trim().toLowerCase();
+  const selfEntityId = String(input.selfEntityId || '').trim().toLowerCase();
+  const recipientProfile = input.profiles.find(
+    (profile) => String(profile.entityId || '').trim().toLowerCase() === recipientEntityId,
+  );
+  for (const account of Array.isArray(recipientProfile?.accounts) ? recipientProfile.accounts : []) {
+    addFullEntityId(ids, account?.counterpartyId);
+  }
+  if (recipientEntityId === selfEntityId) {
+    for (const id of input.workspaceAccountIds) addFullEntityId(ids, id);
+  }
+  return Array.from(ids.values()).sort();
+}
+
+export function resolveMoveTargetHubEntityId(input: {
+  currentTargetHubId: string;
+  workspaceAccountId: string;
+  options: readonly string[];
+  manualOverride: boolean;
+}): string {
+  const normalizedTargetHub = String(input.currentTargetHubId || '').trim().toLowerCase();
+  if (!normalizedTargetHub) return input.workspaceAccountId || input.options[0] || '';
+  if (!input.manualOverride && input.options.length > 0 && !input.options.includes(normalizedTargetHub)) {
+    return input.workspaceAccountId && input.options.includes(input.workspaceAccountId)
+      ? input.workspaceAccountId
+      : input.options[0] || '';
+  }
+  return normalizedTargetHub;
+}
+
+export function buildConfigureTokenOptions(input: {
+  reserveTokenIds: Iterable<unknown>;
+  getTokenInfo: (tokenId: number) => { symbol?: string };
+  compareSymbols: (left: string, right: string) => number;
+}): Array<{ id: number; symbol: string }> {
+  const ids = new Set<number>([1, 2, 3]);
+  for (const tokenId of input.reserveTokenIds) {
+    const numericId = Number(tokenId);
+    if (Number.isFinite(numericId) && numericId > 0) ids.add(numericId);
+  }
+  return Array.from(ids).sort((leftId, rightId) => {
+    const leftInfo = input.getTokenInfo(leftId);
+    const rightInfo = input.getTokenInfo(rightId);
+    return input.compareSymbols(leftInfo.symbol || `TKN${leftId}`, rightInfo.symbol || `TKN${rightId}`);
+  }).map((id) => {
+    const info = input.getTokenInfo(id);
+    return { id, symbol: info.symbol || `TKN${id}` };
+  });
+}
+
+export function resolveConfigureTokenId(
+  currentTokenId: number,
+  options: readonly { id: number }[],
+  fallbackTokenId = 1,
+): number {
+  return options.some((opt) => opt.id === currentTokenId)
+    ? currentTokenId
+    : options[0]?.id ?? fallbackTokenId;
+}

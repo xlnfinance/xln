@@ -116,10 +116,15 @@
     shortHash,
   } from './entity-panel-display';
   import {
+    buildConfigureTokenOptions,
     buildMoveEntityOptions,
+    buildMoveHubEntityOptions,
     buildMoveSourceAccountOptions,
     buildOpenAccountEntityOptions,
     isFullEntityId,
+    normalizeWorkspaceAccountId,
+    resolveConfigureTokenId,
+    resolveMoveTargetHubEntityId,
   } from './entity-panel-options';
   import {
     assertExternalSnapshotCount,
@@ -622,13 +627,8 @@
   function handleMoveReserveRecipientChange(event: CustomEvent<{ value?: string }>) {
     moveReserveRecipientEntityId = String(event.detail?.value || '').trim().toLowerCase();
   }
-  function normalizeMoveAccountId(raw: string): string {
-    const nextRaw = String(raw || '').trim();
-    const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
-    return matched || nextRaw;
-  }
   function handleMoveSourceAccountChange(event: CustomEvent<{ value?: string }>) {
-    moveSourceAccountId = normalizeMoveAccountId(String(event.detail?.value || ''));
+    moveSourceAccountId = normalizeWorkspaceAccountId(String(event.detail?.value || ''), workspaceAccountIds);
   }
   function handleMoveTargetEntityChange(event: CustomEvent<{ value?: string }>) {
     const next = String(event.detail?.value || '').trim().toLowerCase();
@@ -898,56 +898,26 @@
   $: if (assetWorkspaceTab === 'move' && moveToEndpoint === 'account' && !moveTargetEntityId.trim()) {
     moveTargetEntityId = resolveSelfEntityId();
   }
-  $: moveHubEntityOptions = (() => {
-    const ids = new Map<string, string>();
-    const add = (candidate: unknown) => {
-      const raw = String(candidate || '').trim();
-      if (!isFullEntityId(raw)) return;
-      const normalized = raw.toLowerCase();
-      if (!ids.has(normalized)) ids.set(normalized, normalized);
-    };
-    const recipientEntityId = String(moveTargetEntityId || resolveSelfEntityId() || '').trim().toLowerCase();
-    const recipientProfile = getGossipProfiles(activeEnv).find(
-      (profile: GossipProfile) => String(profile.entityId || '').trim().toLowerCase() === recipientEntityId,
-    );
-    for (const account of Array.isArray(recipientProfile?.accounts) ? recipientProfile!.accounts : []) {
-      add(account?.counterpartyId);
-    }
-    if (recipientEntityId === resolveSelfEntityId()) {
-      for (const id of workspaceAccountIds) add(id);
-    }
-    return Array.from(ids.values()).sort();
-  })();
+  $: moveHubEntityOptions = buildMoveHubEntityOptions({
+    targetEntityId: moveTargetEntityId,
+    selfEntityId: resolveSelfEntityId(),
+    workspaceAccountIds,
+    profiles: getGossipProfiles(activeEnv),
+  });
   $: if (assetWorkspaceTab === 'move' && moveToEndpoint === 'account') {
-    const normalizedTargetHub = String(moveTargetHubEntityId || '').trim().toLowerCase();
-    if (!normalizedTargetHub) {
-      moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
-    } else if (!moveTargetCounterpartyManualOverride && moveHubEntityOptions.length > 0 && !moveHubEntityOptions.includes(normalizedTargetHub)) {
-      moveTargetHubEntityId = workspaceAccountId && moveHubEntityOptions.includes(workspaceAccountId)
-        ? workspaceAccountId
-        : moveHubEntityOptions[0] || '';
-    }
-  }
-  $: configureTokenOptions = (() => {
-    const ids = new Set<number>([1, 2, 3]);
-    for (const tokenId of replica?.state?.reserves?.keys?.() || []) {
-      const numericId = Number(tokenId);
-      if (Number.isFinite(numericId) && numericId > 0) ids.add(numericId);
-    }
-    return Array.from(ids).sort((leftId, rightId) => {
-      const leftInfo = getTokenInfo(leftId);
-      const rightInfo = getTokenInfo(rightId);
-      return compareTokenSymbols(leftInfo.symbol || `TKN${leftId}`, rightInfo.symbol || `TKN${rightId}`);
-    }).map((id) => {
-      const info = getTokenInfo(id);
-      return { id, symbol: info.symbol || `TKN${id}` };
+    moveTargetHubEntityId = resolveMoveTargetHubEntityId({
+      currentTargetHubId: moveTargetHubEntityId,
+      workspaceAccountId,
+      options: moveHubEntityOptions,
+      manualOverride: moveTargetCounterpartyManualOverride,
     });
-  })();
-  $: {
-    if (!configureTokenOptions.some((opt) => opt.id === configureTokenId)) {
-      configureTokenId = configureTokenOptions[0]?.id ?? 1;
-    }
   }
+  $: configureTokenOptions = buildConfigureTokenOptions({
+    reserveTokenIds: replica?.state?.reserves?.keys?.() || [],
+    getTokenInfo,
+    compareSymbols: compareTokenSymbols,
+  });
+  $: configureTokenId = resolveConfigureTokenId(configureTokenId, configureTokenOptions);
   // Jurisdictions
   $: availableJurisdictions = (() => {
     const env = activeEnv;
@@ -966,9 +936,7 @@
     openAccountEntityId = String(event.detail?.value || '').trim();
   }
   function handleWorkspaceAccountChange(event: CustomEvent<{ value?: string }>) {
-    const nextRaw = String(event.detail?.value || '').trim();
-    const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
-    workspaceAccountId = matched || nextRaw;
+    workspaceAccountId = normalizeWorkspaceAccountId(String(event.detail?.value || ''), workspaceAccountIds);
   }
   $: openAccountEntityOptions = (() => {
     return buildOpenAccountEntityOptions({
