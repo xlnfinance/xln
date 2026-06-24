@@ -117,11 +117,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. hub-node now calls `handleReserveFaucet()` with its local bootstrap hub and token catalog deps; the inline route body and local wait/reserve helpers were deleted.
   - Evidence: runtime typecheck and `bun run check` cover the shared handler wiring.
 
-- [ ] Keep BrowserVM for visual debugger and make its adapter boundary explicit.
+- [x] Keep BrowserVM for visual debugger and make its adapter boundary explicit.
   - Impact: high.
   - Current issue: `mode: 'browservm'` is still required by the visual debugger / Graph3D simnet path, but the audit wording treated it as removable because `createBrowserVMAdapter()` is throw-only.
   - Decision: do not delete BrowserVM. Clarify the intentional debug/simnet boundary, remove only unreachable throw-only fallback paths, and keep Graph3D/JurisdictionPanel BrowserVM flows working.
   - Tests: BrowserVM smoke test deploys and watches events; visual debugger/Graph3D e2e opens a BrowserVM-backed runtime without startup fallback reaching a throw-only adapter.
+  - Status: done. BrowserVM now has a real `JAdapter` wrapper over `BrowserVMProvider`, emits transaction-bound events through the shared watcher path, supports typed contract reads/writes, snapshots/revert, and keeps the boundary documented as debug/simnet rather than release evidence.
+  - Evidence: `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun test runtime/__tests__/browservm-adapter.test.ts` PASS `1/1`; browser-target `bun build runtime/runtime.ts --target=browser ...` PASS; focused isolated e2e `tests/e2e-jurisdiction-settings.spec.ts` PASS `2/2`, wall `22.5s`, browser errors `0`, run `20260624-001843-259`, code hash `85c16db3bd818999`.
 
 - [ ] Fix external-wallet snapshot baseline to use confirmed block, not tip.
   - Impact: medium.

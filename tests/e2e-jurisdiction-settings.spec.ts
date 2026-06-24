@@ -147,3 +147,50 @@ test('settings can add custom jurisdiction from canonical JSON and import it int
     }
   }
 });
+
+test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive', async ({ page }) => {
+  console.log('[J-SETTINGS-BROWSERVM] open app');
+  await gotoApp(page);
+  await dismissOnboardingIfVisible(page);
+  await createSharedRuntime(page, 'settings-browservm', selectDemoMnemonic('alice'));
+
+  await page.goto(`${APP_BASE_URL}/app#settings/network`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('tab-settings')).toBeVisible({ timeout: INIT_TIMEOUT });
+  await page.getByTestId('tab-settings').click();
+  const networkButton = page.getByRole('button', { name: 'Network' });
+  if (await networkButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await networkButton.click();
+  }
+
+  await page.getByTestId('settings-network-add-jmachine-toggle').click();
+  await page.getByTestId('add-jmachine-mode-browservm').click();
+  await page.getByTestId('add-jmachine-name').fill('local-sim-visual');
+  await page.getByTestId('add-jmachine-create').click();
+
+  await expect(page.getByText('Imported into active runtime')).toBeVisible({ timeout: 45_000 });
+  await expect.poll(async () => {
+    return await page.evaluate(() => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          activeJurisdiction?: string;
+          jReplicas?: Map<string, { rpcs?: string[]; stateRoot?: Uint8Array | null; contracts?: { depository?: string } }>;
+        };
+      }).isolatedEnv;
+      const replica = env?.jReplicas?.get?.('local-sim-visual');
+      return {
+        hasReplica: Boolean(replica),
+        rpcCount: Number(replica?.rpcs?.length ?? -1),
+        hasStateRoot: replica?.stateRoot instanceof Uint8Array && replica.stateRoot.length === 32,
+        depository: String(replica?.contracts?.depository || ''),
+      };
+    });
+  }, { timeout: 45_000 }).toMatchObject({
+    hasReplica: true,
+    rpcCount: 0,
+    hasStateRoot: true,
+  });
+
+  await page.goto(`${APP_BASE_URL}/embed`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.graph3d-wrapper')).toBeVisible({ timeout: INIT_TIMEOUT });
+  await expect(page.locator('.graph3d-panel canvas')).toHaveCount(1, { timeout: INIT_TIMEOUT });
+});

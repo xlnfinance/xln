@@ -16,6 +16,17 @@
   } from '$lib/stores/jmachineStore';
   import { POPULAR_NETWORKS, isBrowserVMChainId, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
 
+  type FieldDraft = {
+    name: string;
+    defaultName: string;
+    mode: 'browservm' | 'rpc';
+    chainId: number;
+    ticker: string;
+    rpcs: string[];
+    blockTimeMs: number;
+    contracts?: JMachineConfig['contracts'];
+  };
+
   const dispatch = createEventDispatcher<{
     create: {
       name: string;
@@ -79,14 +90,14 @@
     name = defaultName;
   }
 
-  const buildDraftConfig = (): JMachineConfig => ({
-    name: name.trim() || defaultName,
-    mode,
-    chainId,
-    ticker,
-    rpcs,
-    blockTimeMs,
-    ...(advancedContracts ? { contracts: advancedContracts } : {}),
+  const buildDraftConfig = (fields: FieldDraft): JMachineConfig => ({
+    name: fields.name.trim() || fields.defaultName,
+    mode: fields.mode,
+    chainId: fields.chainId,
+    ticker: fields.ticker,
+    rpcs: fields.rpcs,
+    blockTimeMs: fields.blockTimeMs,
+    ...(fields.contracts ? { contracts: fields.contracts } : {}),
     createdAt: Date.now(),
   });
 
@@ -95,9 +106,18 @@
     return JSON.stringify(publicConfig, null, 2);
   };
 
-  $: if (!advancedJsonDirty) {
-    advancedJson = stringifyDraftConfig(buildDraftConfig());
-  }
+  $: fieldDraftConfig = buildDraftConfig({
+    name,
+    defaultName,
+    mode,
+    chainId,
+    ticker,
+    rpcs,
+    blockTimeMs,
+    contracts: advancedContracts,
+  });
+
+  $: if (!advancedJsonDirty) advancedJson = stringifyDraftConfig(fieldDraftConfig);
 
   function parseRpcList(text: string): string[] {
     return text
@@ -165,7 +185,7 @@
 
     let config: JMachineConfig;
     try {
-      config = parseJMachineConfigJson(advancedJson);
+      config = advancedJsonDirty ? parseJMachineConfigJson(advancedJson) : fieldDraftConfig;
     } catch (err) {
       error = err instanceof Error ? err.message : 'Invalid jurisdiction JSON';
       return;
