@@ -438,7 +438,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [x] E2E: missing video shows stable empty state with no console errors.
   - Status: done. QA cockpit fixture includes a passed shard with no video artifacts; the Scenario Player renders `No recorded video for this shard` without mounting video or subtitle track elements.
   - Evidence: focused QA cockpit e2e `20260624-003232-055` asserts `qa-video-missing`, `qa-video-player` count `0`, `qa-video-track` count `0`, and no new browser runtime errors.
-- [ ] E2E: scenario transcript cue scrubs video to real marker timestamp.
+- [x] E2E: scenario transcript cue scrubs video to real marker timestamp.
+  - Status: done. QA cockpit fixture renders authored cue text on real video-clock cue `30ms-60ms`; clicking that transcript cue seeks the `<video>` currentTime to the marker offset instead of synthetic phase time.
+  - Evidence: focused QA cockpit e2e PASS `3/3`, run `20260624-134259-361`; assertion checks cue text `Select recorded shard`, `30ms-60ms`, and `currentTime >= 0.02` after clicking the cue.
 - [x] E2E: verdict banner shows FAIL on failed fixture and PASS on green fixture.
 - [x] E2E: history compare renders deltas and regression badge.
 - [x] E2E: restart run disabled in read mode and enabled only in admin mode.
