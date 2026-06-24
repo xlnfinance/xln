@@ -169,7 +169,6 @@
     type ReserveTransferAsset,
   } from './entity-asset-catalog';
   import {
-    buildPendingBatchActionTxs,
     buildOpenOutgoingDebtTotals,
     buildPendingBatchPreview,
     buildPendingBatchState,
@@ -178,6 +177,10 @@
     getPendingBatchReserveIssue,
     pendingBatchEntityLabel,
   } from './pending-batch-preview';
+  import {
+    createPendingBatchActionRunner,
+    enqueuePendingBatchAction,
+  } from './pending-batch-actions';
   import {
     buildAddTokenToAccountTx,
     buildBroadcastTx,
@@ -3331,53 +3334,42 @@
   });
   $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue, getPendingBatchLabelOptions());
   $: canBroadcastPendingBatch = canBroadcastPendingBatchState(pendingBatchState, pendingBatchReserveIssue);
-  async function enqueuePendingBatchAction(action: 'clear' | 'broadcast' | 'rebroadcast', context: string): Promise<void> {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    const env = requireRuntimeEnv(activeEnv, context);
-    if (!activeIsLive) throw new Error('Batch actions require LIVE mode');
-    const signerId = resolveEntitySigner(entityId, context);
-    await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, buildPendingBatchActionTxs(action))]);
+  function enqueueCurrentPendingBatchAction(action: 'clear' | 'broadcast' | 'rebroadcast', context: string): Promise<void> {
+    return enqueuePendingBatchAction({
+      activeEnv,
+      activeIsLive,
+      action,
+      context,
+      entityId: replica?.state?.entityId || tab.entityId,
+      resolveEntitySigner,
+      enqueueEntityInputs,
+    });
   }
+  const runPendingBatchAction = createPendingBatchActionRunner({
+    getState: () => ({
+      pendingBatchCount,
+      pendingBatchSubmitting,
+      pendingBatchReserveIssueText,
+      canBroadcastPendingBatch,
+      hasSentBatch,
+    }),
+    setSubmitting: (submitting) => {
+      pendingBatchSubmitting = submitting;
+    },
+    enqueueAction: enqueueCurrentPendingBatchAction,
+    confirmClear: () => confirm('Clear current draft and any sent batch state?'),
+    notifySuccess: toasts.success,
+    notifyError: toasts.error,
+    formatError: toErrorMessage,
+  });
   async function clearPendingBatch(): Promise<void> {
-    if (!pendingBatchCount || pendingBatchSubmitting) return;
-    if (!confirm('Clear current draft and any sent batch state?')) return;
-    pendingBatchSubmitting = true;
-    try {
-      await enqueuePendingBatchAction('clear', 'global-clear-batch');
-      toasts.success('Batch cleared');
-    } catch (error) {
-      toasts.error(`Batch clear failed: ${toErrorMessage(error, 'Unknown error')}`);
-    } finally {
-      pendingBatchSubmitting = false;
-    }
+    await runPendingBatchAction('clear');
   }
   async function broadcastPendingBatch(): Promise<void> {
-    if (pendingBatchReserveIssueText) {
-      toasts.error(pendingBatchReserveIssueText);
-      return;
-    }
-    if (!canBroadcastPendingBatch || pendingBatchSubmitting) return;
-    pendingBatchSubmitting = true;
-    try {
-      await enqueuePendingBatchAction('broadcast', 'global-batch-broadcast');
-      toasts.success('Broadcast queued');
-    } catch (error) {
-      toasts.error(`Batch broadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
-    } finally {
-      pendingBatchSubmitting = false;
-    }
+    await runPendingBatchAction('broadcast');
   }
   async function rebroadcastPendingBatch(): Promise<void> {
-    if (!hasSentBatch || pendingBatchSubmitting) return;
-    pendingBatchSubmitting = true;
-    try {
-      await enqueuePendingBatchAction('rebroadcast', 'global-batch-rebroadcast');
-      toasts.success('Sent batch queued for rebroadcast');
-    } catch (error) {
-      toasts.error(`Rebroadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
-    } finally {
-      pendingBatchSubmitting = false;
-    }
+    await runPendingBatchAction('rebroadcast');
   }
   // Tab config
   // Pending batch count for Accounts tab badge
