@@ -1352,6 +1352,7 @@ test('qa run report preserves timeline order and derives slow steps', async () =
   const runId = '20000101-000000-123';
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
   await rm(runDir, { recursive: true, force: true });
+  deleteQaHistoryRows([runId]);
   try {
     await mkdir(runDir, { recursive: true });
     await writeFile(
@@ -1461,6 +1462,7 @@ test('qa run report preserves timeline order and derives slow steps', async () =
       expect(row?.httpErrorCount).toBe(1);
     });
   } finally {
+    deleteQaHistoryRows([runId]);
     await rm(runDir, { recursive: true, force: true });
   }
 });

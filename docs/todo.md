@@ -337,9 +337,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. QA shard detail now opens on an Evidence Summary with status, failure class, browser health, fatal marker, and primary error; raw log tail is hidden behind `Show raw log tail` plus the protected full-log artifact button.
   - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `38/38`; focused QA cockpit e2e `20260624-131548-261` PASS `1/1`, wall `12.2s`, code hash `a49c66059e94f9b6`, benchmark OK. Fixture verifies fatal/primary-error summary and raw-log expand/collapse.
 
-- [ ] Stop using future/test run IDs that pollute history.
+- [x] Stop using future/test run IDs that pollute history.
   - Impact: medium.
   - Tests: Playwright should route fixtures or use temp DB/log root, never persistent future `.logs` entries.
+  - Status: done. QA report tests now delete their disposable history rows before and after the test that records a synthetic run; the existing QA cockpit Playwright fixture remains API-routed and does not persist its mocked run IDs.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `38/38`; focused QA cockpit e2e `20260624-131940-545` PASS `1/1`, wall `12.2s`, code hash `a88373a7348b7a59`, benchmark OK. SQLite check after both runs returned `[]` for `20000101-000000-123`, `20260623-235959-999`, and `20260623-225959-888`.
 
 - [x] Fix remote orderbook compact depth.
   - Impact: low-medium.
