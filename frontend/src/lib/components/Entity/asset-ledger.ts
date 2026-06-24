@@ -19,3 +19,10 @@ export type AssetLedgerTotals = {
   reserveUsd: number;
   accountUsd: number;
 };
+
+export type ExternalWalletSnapshotSource = {
+  sourceHeight: number;
+  sourceHash?: string;
+  finalityDepth?: number;
+  headBlockNumber?: number;
+};

@@ -58,6 +58,7 @@
   import DebtPanel from './DebtPanel.svelte';
   import AssetLedgerTable from './AssetLedgerTable.svelte';
   import AssetFaucetCard from './AssetFaucetCard.svelte';
+  import AssetWalletMeta from './AssetWalletMeta.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
@@ -89,7 +90,7 @@
     MOVE_ENDPOINTS,
     type MoveEndpoint,
   } from './move-routes';
-  import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
+  import type { AssetLedgerRow, AssetLedgerTotals, ExternalWalletSnapshotSource } from './asset-ledger';
   import {
     findLocalAccountByCounterparty,
     getActiveJurisdictionName,
@@ -1465,12 +1466,6 @@
     return undefined;
   }
 
-  type ExternalWalletSnapshotSource = {
-    sourceHeight: number;
-    sourceHash?: string;
-    finalityDepth?: number;
-    headBlockNumber?: number;
-  };
   type ResolvedExternalWalletSnapshotSource = ExternalWalletSnapshotSource & {
     sourceHash: string;
     finalityDepth: number;
@@ -5440,40 +5435,13 @@
             submitting={assetFaucetSubmitting}
             submitFaucet={submitAssetFaucet}
           />
-          <div class="asset-ledger-meta">
-            <div class="wallet-meta-block">
-              <p class="muted wallet-label">External EOA</p>
-              <button
-                class="wallet-meta-copy"
-                type="button"
-                title="Copy external EOA"
-                on:click={() => copyMetaValue(currentExternalEoaValue, 'external')}
-              >
-                <span class="wallet-meta-value">{currentExternalEoaValue || '-'}</span>
-                {#if copiedMetaField === 'external'}
-                  <Check size={12} />
-                {:else}
-                  <Copy size={12} />
-                {/if}
-              </button>
-              <p class="muted wallet-meta-help">External ETH and ERC20 endpoint.</p>
-              {#if externalWalletSnapshotSource}
-                <p
-                  class="muted wallet-meta-help wallet-source-line"
-                  data-testid="external-wallet-source"
-                  title={externalWalletSnapshotSource.sourceHash || ''}
-                >
-                  Snapshot J#{externalWalletSnapshotSource.sourceHeight}
-                  {#if externalWalletSnapshotSource.sourceHash}
-                    · {shortHash(externalWalletSnapshotSource.sourceHash)}
-                  {/if}
-                  {#if externalWalletSnapshotSource.finalityDepth !== undefined}
-                    · depth {externalWalletSnapshotSource.finalityDepth}
-                  {/if}
-                </p>
-              {/if}
-            </div>
-          </div>
+          <AssetWalletMeta
+            externalEoaValue={currentExternalEoaValue}
+            copied={copiedMetaField === 'external'}
+            snapshotSource={externalWalletSnapshotSource}
+            copyExternal={() => copyMetaValue(currentExternalEoaValue, 'external')}
+            {shortHash}
+          />
 
           <AssetLedgerTable
             rows={assetLedgerRows}
@@ -7448,7 +7416,7 @@
     color: var(--theme-text-muted, #71717a) !important;
   }
 
-  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item):not(.settings-tab):not(.compact-btn):not(.pill):not(.theme-swatch):not(.icon-btn):not(.danger-icon):not(.close-btn):not(.file-btn):not(.danger-btn)) {
+  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item):not(.settings-tab):not(.compact-btn):not(.pill):not(.theme-swatch):not(.icon-btn):not(.danger-icon):not(.close-btn):not(.file-btn):not(.danger-btn):not(.btn-table-action):not(.wallet-meta-copy)) {
     background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent) !important;
     border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent) !important;
     border-radius: 6px !important;
@@ -7513,68 +7481,6 @@
   .btn-refresh-small:disabled {
     opacity: 0.5;
     cursor: not-allowed;
-  }
-
-  .wallet-label {
-    margin-bottom: 0;
-    font-family: 'JetBrains Mono', monospace;
-    overflow-wrap: anywhere;
-  }
-
-  .asset-ledger-meta {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px 16px;
-    margin-bottom: 12px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid #1f1f23;
-  }
-
-  .wallet-meta-block {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .wallet-meta-copy {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    width: fit-content;
-    max-width: 100%;
-    padding: 0;
-    margin: 0;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    min-width: 0;
-  }
-
-  .wallet-meta-copy:hover .wallet-meta-value {
-    color: #f5f5f4;
-  }
-
-  .wallet-meta-value {
-    margin: 0;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #e7e5e4;
-    overflow-wrap: anywhere;
-    min-width: 0;
-  }
-
-  .wallet-meta-help {
-    margin: 0;
-    max-width: 40ch;
-  }
-
-  .wallet-source-line {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #a8a29e;
-    max-width: none;
   }
 
   .asset-workspace-tabs {
@@ -7793,11 +7699,6 @@
       flex-wrap: wrap;
     }
 
-    .asset-ledger-meta {
-      grid-template-columns: 1fr;
-      gap: 4px;
-    }
-
     .account-workspace-tabs {
       gap: 4px;
     }
@@ -7917,8 +7818,6 @@
     .tabs,
     .content,
     .content > *,
-    .asset-ledger-meta,
-    .wallet-meta-block,
     .accounts-selector-row,
     .asset-action-card,
     .account-workspace-content,
@@ -7955,17 +7854,6 @@
     .btn-refresh-small {
       width: 100%;
       min-height: 38px;
-    }
-
-    .wallet-meta-copy {
-      width: 100%;
-      justify-content: space-between;
-      align-items: flex-start;
-    }
-
-    .wallet-meta-value {
-      font-size: 11px;
-      max-width: calc(100% - 24px);
     }
 
     .account-open-sections {
