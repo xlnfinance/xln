@@ -501,6 +501,12 @@ test('health admin keeps QA evidence link-only and runtime adapter local', async
 
   await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('body')).toContainText('xln health admin', { timeout: 30_000 });
+  await expect(page.getByTestId('health-verdict-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('health-verdict-status')).toContainText(/READY|DEGRADED|FAIL/);
+  await expect(page.getByTestId('health-verdict-reason')).not.toHaveText('');
+  await expect(page.getByTestId('health-verdict-source-height')).toContainText(/source #[1-9]/, { timeout: 30_000 });
+  await expect(page.getByTestId('health-verdict-code-hash')).toContainText(/code [0-9a-f]{12}/);
+  await expect(page.getByTestId('health-verdict-owner')).toContainText(/owner health/);
   await expect(page.locator('#bootstrap')).toBeVisible({ timeout: 30_000 });
   const cockpitPanel = page.locator('#qa-cockpit');
   await expect(cockpitPanel).toBeVisible();

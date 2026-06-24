@@ -72,6 +72,7 @@ export type HubChild = HubProcessSpec & {
 export type HubHealthPayload = {
   ok?: boolean;
   name?: string;
+  height?: number;
   entityId?: string | null;
   runtimeId?: string | null;
   relayUrl?: string;
@@ -199,6 +200,7 @@ export type MarketMakerCrossHealthPayload = {
 export type MarketMakerHealthPayload = {
   ok?: boolean;
   name?: string;
+  height?: number;
   entityId?: string | null;
   runtimeId?: string | null;
   relayUrl?: string;
@@ -234,6 +236,12 @@ export type MarketMakerHealthPayload = {
       }>;
     }>;
   };
+  bootstrap?: {
+    readyHash?: string | null;
+    runtimeStateHash?: string | null;
+    entityStateHash?: string | null;
+    readyAt?: number | null;
+  };
 };
 
 export type MarketMakerInfoPayload = HubInfoPayload;
@@ -242,6 +250,15 @@ export type ManagedRuntimeRole = 'hub' | 'market-maker';
 
 export type AggregatedHealth = {
   timestamp: number;
+  source: {
+    height: number | null;
+    codeHash: string | null;
+    gitHead: string | null;
+    gitBranch: string | null;
+    dirty: boolean;
+    computedAt: number;
+    owner: string;
+  };
   coreOk: boolean;
   systemOk: boolean;
   degraded: string[];

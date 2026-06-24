@@ -460,7 +460,10 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 ## ideal 1-month UX
 
-- [ ] `/health` opens to one verdict: `READY`, `DEGRADED`, or `FAIL`, with exact blocking reason, data age, source height, code hash, and owner.
+- [x] `/health` opens to one verdict: `READY`, `DEGRADED`, or `FAIL`, with exact blocking reason, data age, source height, code hash, and owner.
+  - Status: done. The health readiness banner now renders one operator verdict plus blocking reason, payload age, source runtime height, code hash, and owner. `/api/health` refreshes child hub/MM health with a bounded response window so the banner does not depend on stale readiness-cache data.
+  - Fix: `normalizeHealthData()` preserves the backend `source` payload; the prior UI dropped `source.height/codeHash` even though backend/redaction already returned it.
+  - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun test runtime/__tests__/health-admin-isolation.test.ts` PASS `1/1`. Focused e2e `20260624-143132-199` PASS `1/1`, wall `10.1s`, code hash `b9299a48e6e467f2`, browser health `0` issues. Benchmark recovered from the failed timeout run: browser test `33154ms -> 4131ms` (`-87.54%`).
 - [ ] Bootstrap timeline shows preflight, hub mesh, same-chain, cross-chain, market maker, custody, health poll, ready hash, budget vs actual, backlog, and last event.
 - [ ] `/qa` feels like a regulator-grade video evidence system: run playlist left, video center, real transcript right, failed cue highlighted, artifacts below.
 - [ ] `/runs` is a ledger across unit, contract, e2e, scenario, benchmark, and release gates.

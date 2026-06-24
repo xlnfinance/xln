@@ -115,9 +115,21 @@ export const publicAggregatedHealth = (health: unknown): Record<string, unknown>
   const storage = recordOf(root, 'storage');
   const processHealth = optionalRecordOf(root, 'process');
   const reset = optionalRecordOf(root, 'reset');
+  const source = optionalRecordOf(root, 'source');
 
   return {
     timestamp: valueOf(root, 'timestamp'),
+    source: source
+      ? {
+        height: valueOf(source, 'height'),
+        codeHash: valueOf(source, 'codeHash'),
+        gitHead: valueOf(source, 'gitHead'),
+        gitBranch: valueOf(source, 'gitBranch'),
+        dirty: valueOf(source, 'dirty') === true,
+        computedAt: valueOf(source, 'computedAt'),
+        owner: valueOf(source, 'owner'),
+      }
+      : undefined,
     coreOk: valueOf(root, 'coreOk'),
     systemOk: valueOf(root, 'systemOk'),
     degraded: arrayOf(root, 'degraded') ?? [],

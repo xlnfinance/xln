@@ -3180,6 +3180,7 @@ const run = async (): Promise<void> => {
     cachedHealthResponseJson = safeStringify({
       ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
       name: resolvedArgs.name,
+      height: Math.max(0, Math.floor(Number(env.height || 0))),
       entityId: activeEntityId,
       runtimeId: String(env.runtimeId || '') || null,
       relayUrl: resolvedArgs.relayUrl,
