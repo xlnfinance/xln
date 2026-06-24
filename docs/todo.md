@@ -342,7 +342,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `SwapPanel.svelte` 3,898 lines, `Graph3DPanel.svelte` 3,842 lines, `EntityPanelTabs.svelte` 3,801 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 3,842 lines, `EntityPanelTabs.svelte` 3,801 lines, `SwapPanel.svelte` 3,798 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move Graph3D pure helpers out of the Svelte panel.
   - Impact: medium.
@@ -383,6 +383,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused orderbook pair dropdown e2e `20260624-192407-034` PASS `1/1`, wall `19.8s`, code hash `d7ba9723be496ed1`, browser issues `0`, benchmark `INSUFFICIENT` because no previous comparable pair-dropdown run exists.
   - Progress: sixth extraction done. Route summary, route flow, cross auto-extend controls, price-improvement selector, and manual route recommendation rendering moved into `SwapRouteBuilder.svelte`; `SwapPanel.svelte` is down to 3,898 lines. The cross e2e helper now uses the localhost `window.isolatedEnv` setter instead of importing `/src/lib/stores/runtimeStore.ts`, removing the dev-server 404 browser issue from QA evidence.
   - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused cross no-market route-builder e2e `20260624-193449-543` PASS `1/1`, wall `16.8s`, code hash `245d9563c84567cd`, browser issues `0`, benchmark OK vs `20260624-193238-803`.
+  - Progress: seventh extraction done. Limit-rate input, market-price strip, hub selector, and size slider moved into `SwapPriceVenueControls.svelte`; `SwapPanel.svelte` is down to 3,798 lines.
+  - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused orderbook pair-dropdown e2e `20260624-195232-023` PASS `1/1`, wall `20.4s`, browser issues `0`, benchmark flagged one Playwright max-child-CPU spike (`51.8% -> 101.2%`). Immediate rerun `20260624-195325-575` PASS `1/1`, wall `20.2s`, browser issues `0`, max child CPU `55.9%`, benchmark OK.
 
 - [x] Move QA cockpit API/UI types out of the Svelte route.
   - Impact: medium-high.
