@@ -351,39 +351,39 @@
           {/each}
         </div>
       {/if}
+
+      <section class="transcript-panel">
+        <div class="transcript-head">
+          <h4>Scenario Transcript</h4>
+          <span>{cues.length} cues</span>
+        </div>
+        <div class="transcript-list" data-testid="qa-scenario-transcript">
+          {#each cues as cue, index}
+            <button
+              class="transcript-cue"
+              class:active={index === activeCueIndex}
+              class:failure={index === failureCueIndex}
+              aria-current={index === activeCueIndex ? 'step' : undefined}
+              data-failure-cue={index === failureCueIndex ? 'true' : undefined}
+              data-testid="qa-subtitle-cue"
+              onclick={() => seekToCue(cue)}
+            >
+              <time>{formatTime(cue.startMs)}</time>
+              <span>
+                <strong>{cue.title}</strong>
+                <small>{cue.text}</small>
+              </span>
+              <em>{cue.meta}</em>
+            </button>
+          {/each}
+        </div>
+      </section>
     </aside>
   </div>
 
   <div class="subtitle-progress" aria-hidden="true">
     <i style={`width:${playbackPct}%`}></i>
   </div>
-
-  <section class="transcript-panel">
-    <div class="transcript-head">
-      <h4>Scenario Transcript</h4>
-      <span>{cues.length} cues</span>
-    </div>
-    <div class="transcript-list" data-testid="qa-scenario-transcript">
-      {#each cues as cue, index}
-        <button
-          class="transcript-cue"
-          class:active={index === activeCueIndex}
-          class:failure={index === failureCueIndex}
-          aria-current={index === activeCueIndex ? 'step' : undefined}
-          data-failure-cue={index === failureCueIndex ? 'true' : undefined}
-          data-testid="qa-subtitle-cue"
-          onclick={() => seekToCue(cue)}
-        >
-          <time>{formatTime(cue.startMs)}</time>
-          <span>
-            <strong>{cue.title}</strong>
-            <small>{cue.text}</small>
-          </span>
-          <em>{cue.meta}</em>
-        </button>
-      {/each}
-    </div>
-  </section>
 </section>
 
 <style>
