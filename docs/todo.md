@@ -452,7 +452,10 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [x] E2E: 1M account health snapshot renders aggregate view without freezing.
   - Status: done. `/health` Runtime Adapter panel now renders aggregate account totals, page/cursor state, sample IDs, page hashes, and top deltas while keeping the DOM row count bounded to the visible account page.
   - Evidence: L1 `bun test runtime/__tests__/radapter.test.ts --test-name-pattern "1M account view-frame"` PASS `1/1`; focused radapter e2e `20260624-141628-013` PASS `1/1`, wall `9.3s`, code hash `9252fd58e32cf351`; browser test asserts `1,000,000` total accounts, `10` visible rows, page `1/100,000`, cursor available, state hashes/top deltas, and view-frame wire payload under `100KB`.
-- [ ] Failure fixtures: browser console error, pageerror, network 502, fatal log marker, phase budget exceeded, corrupt manifest, empty logs dir.
+- [x] Failure fixtures: browser console error, pageerror, network 502, fatal log marker, phase budget exceeded, corrupt manifest, empty logs dir.
+  - Status: done. QA report fixtures now cover browser console assertion errors, pageerror crashes, request failures, HTTP 502 infra failures, fatal runtime log markers, phase-budget breaches, corrupt manifests, and empty legacy run directories.
+  - Behavior: corrupt `manifest.json` no longer breaks the QA catalog; it is surfaced as a failed redacted `qa.corrupt-manifest` run with `failureClass=infra`.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `42/42`.
 - [ ] Golden regulator scenarios: baseline mesh reserves, payment smoke, multi-hop HTLC, dispute lifecycle return, reserve faucet, rebalance, market-maker order placement.
 
 ## ideal 1-month UX
