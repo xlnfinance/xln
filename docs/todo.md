@@ -77,14 +77,14 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Policy: benign local analytics warnings and navigation/static `net::ERR_ABORTED` cancellations are filtered; page errors, HTTP 5xx, and real failed fetch/xhr/network issues remain blocking.
   - Evidence: unit covers browser issue normalization/history counts; focused QA cockpit e2e fixture shows FAIL from browser health and a clean real focused run records browserHealth 0/0/0/0.
 
-- [ ] Add unified severity model.
+- [x] Add unified severity model.
   - Impact: high.
   - Statuses: `OK`, `WARN`, `DEGRADED`, `FAIL`, `BLOCKED`, `UNKNOWN`.
   - Required fields: `severity`, `reason`, `since`, `owner`, `evidence`.
   - Apply to health, QA runs, bootstrap stages, restart state, remote adapter, and benchmarks.
   - Tests: API schema rejects missing `severity`/`reason` for release runs.
-  - Status: in progress. Shared runtime severity contract exists. QA run/shard/browser-health/benchmark manifests are normalized on legacy reads; new runner manifests are `manifestVersion: 3` and gated by `assertQaReleaseRunSeverity`. Restart state and restart audit rows now expose severity fields. Remaining: health page, bootstrap stages, and remote adapter surfaces must consume the same model before this parent TODO is closed.
-  - Evidence: `bun test runtime/__tests__/qa-story-report.test.ts` covers legacy normalization, v3 schema rejection for missing `severity`/`reason`, benchmark degradation severity, and restart audit severity.
+  - Status: done. Shared runtime severity contract exists. QA run/shard/browser-health/benchmark manifests are normalized on legacy reads; new runner manifests are `manifestVersion: 3` and gated by `assertQaReleaseRunSeverity`. Restart state and restart audit rows expose severity fields. `/health` computes one health severity, testnet gates carry severity, bootstrap stages carry severity, and the runtime adapter panel reports remote-adapter severity.
+  - Evidence: `bun test runtime/__tests__/qa-story-report.test.ts` covers legacy normalization, v3 schema rejection for missing `severity`/`reason`, benchmark degradation severity, and restart audit severity. `cd frontend && bun run check` verifies health/bootstrap/remote-adapter Svelte surfaces.
 
 - [x] Add failure class per shard/run.
   - Impact: high.

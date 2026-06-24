@@ -5,6 +5,7 @@
   import HealthQaLinkPanel from '$lib/components/Health/HealthQaLinkPanel.svelte';
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
 
   type HealthData = {
     timestamp: number;
@@ -231,7 +232,7 @@
     entities: DebugEntity[];
   };
 
-  type TestnetGate = {
+  type TestnetGate = QaSeveritySignal & {
     label: string;
     value: string;
     detail: string;
@@ -389,8 +390,9 @@
   const childProcesses = $derived(health?.process?.children ?? []);
   const flowEdges = $derived.by(() => buildFlowEdges(events).slice(0, 12));
   const testnetGates = $derived.by<TestnetGate[]>(() => buildTestnetGates(health, rpcOk));
+  const healthSeverity = $derived.by<QaSeveritySignal>(() => buildHealthSeverity(health, rpcOk, criticalSignals.length));
   const overallOk = $derived(
-    (health?.systemOk ?? health?.coreOk ?? false) && rpcOk !== false && criticalSignals.length === 0
+    healthSeverity.severity === 'OK'
   );
 
   function applyFilters(): void {
@@ -504,6 +506,84 @@
     return `${value.slice(0, 8)}...${value.slice(-4)}`;
   }
 
+  function gateSeverity(
+    owner: string,
+    ok: boolean | null,
+    reason: string,
+    since: number,
+    evidence: QaSeveritySignal['evidence'] = [],
+  ): QaSeveritySignal {
+    const severity: QaSeverity = ok === true ? 'OK' : ok === false ? 'FAIL' : 'UNKNOWN';
+    return makeQaSeveritySignal({ severity, reason, since, owner, evidence });
+  }
+
+  function buildHealthSeverity(
+    data: HealthData | null,
+    rpcHealthy: boolean | null,
+    criticalCount: number,
+  ): QaSeveritySignal {
+    if (!data) {
+      return makeQaSeveritySignal({
+        severity: 'UNKNOWN',
+        reason: 'Health payload has not loaded',
+        since: 0,
+        owner: 'health',
+        evidence: [],
+      });
+    }
+    const evidence = [
+      { label: 'systemOk', value: data.systemOk ?? null },
+      { label: 'coreOk', value: data.coreOk ?? null },
+      { label: 'rpcOk', value: rpcHealthy },
+      { label: 'critical signals', value: criticalCount },
+      { label: 'hubs online', value: onlineHubs },
+      { label: 'hubs total', value: totalHubs },
+    ];
+    if (rpcHealthy === false) {
+      return makeQaSeveritySignal({
+        severity: 'FAIL',
+        reason: `RPC health check failed${rpcError ? `: ${rpcError}` : ''}`,
+        since: data.timestamp,
+        owner: 'health',
+        evidence,
+      });
+    }
+    if (data.systemOk === false || data.coreOk === false) {
+      return makeQaSeveritySignal({
+        severity: 'FAIL',
+        reason: (data.degraded ?? []).join(', ') || 'Core/system health gate failed',
+        since: data.timestamp,
+        owner: 'health',
+        evidence,
+      });
+    }
+    if (criticalCount > 0) {
+      return makeQaSeveritySignal({
+        severity: 'DEGRADED',
+        reason: `${criticalCount} critical relay signal(s) in current window`,
+        since: data.timestamp,
+        owner: 'health',
+        evidence,
+      });
+    }
+    if (rpcHealthy === null) {
+      return makeQaSeveritySignal({
+        severity: 'UNKNOWN',
+        reason: 'RPC health check is still pending',
+        since: data.timestamp,
+        owner: 'health',
+        evidence,
+      });
+    }
+    return makeQaSeveritySignal({
+      severity: 'OK',
+      reason: 'Health gates are clear',
+      since: data.timestamp,
+      owner: 'health',
+      evidence,
+    });
+  }
+
   function buildFlowEdges(input: RelayDebugEvent[]): FlowEdge[] {
     const edges = new Map<string, FlowEdge>();
     for (const event of input) {
@@ -526,54 +606,76 @@
     const crossApplicable = data.marketMaker?.cross?.applicable !== false;
     return [
       {
+        ...gateSeverity('health.core', data.coreOk ?? null, data.coreOk === false ? 'Core health is down' : 'Core health is ready', data.timestamp, [
+          { label: 'hubs online', value: onlineHubs },
+          { label: 'hubs total', value: totalHubs },
+        ]),
         label: 'Core',
         value: data.coreOk === false ? 'down' : 'ready',
         detail: `${onlineHubs}/${totalHubs} hubs online`,
         ok: data.coreOk ?? null,
       },
       {
+        ...gateSeverity('health.system', data.systemOk ?? null, (data.degraded ?? []).join(', ') || 'System gates are clear', data.timestamp),
         label: 'System',
         value: data.systemOk === false ? 'degraded' : 'ready',
         detail: (data.degraded ?? []).length > 0 ? (data.degraded ?? []).join(', ') : 'no fatal degraded gates',
         ok: data.systemOk ?? null,
       },
       {
+        ...gateSeverity('health.rpc', rpcHealthy, rpcError || 'eth_chainId reachable through /rpc', data.timestamp, [
+          { label: 'latency', value: rpcLatencyMs, unit: 'ms' },
+        ]),
         label: 'RPC',
         value: rpcHealthy === null ? 'checking' : rpcHealthy ? formatLatency(rpcLatencyMs ?? undefined) : 'down',
         detail: rpcError || 'eth_chainId reachable through /rpc',
         ok: rpcHealthy,
       },
       {
+        ...gateSeverity('health.mesh', data.hubMesh?.ok ?? null, 'Direct mesh pair health', data.timestamp, [
+          { label: 'links', value: directOpenLinks },
+        ]),
         label: 'Direct Mesh',
         value: `${directOpenLinks} links`,
         detail: `${data.hubMesh?.pairs?.filter((pair) => pair.ok).length ?? 0}/${data.hubMesh?.pairs?.length ?? 0} hub pairs`,
         ok: data.hubMesh?.ok ?? null,
       },
       {
+        ...gateSeverity('health.market-maker', marketMakerEnabled ? data.marketMaker?.ok ?? null : true, marketMakerEnabled ? 'Market maker enabled gate' : 'Market maker disabled', data.timestamp),
         label: 'Market Maker',
         value: marketMakerEnabled ? (data.marketMaker?.startupPhase || 'enabled') : 'disabled',
         detail: marketMakerEnabled ? `${data.marketMaker?.hubs?.filter((hub) => hub.ready).length ?? 0}/${data.marketMaker?.hubs?.length ?? 0} hubs ready` : 'not required',
         ok: marketMakerEnabled ? data.marketMaker?.ok ?? null : true,
       },
       {
+        ...gateSeverity('health.cross-j-routes', marketMakerEnabled && crossApplicable ? data.marketMaker?.cross?.ok ?? null : true, 'Cross-jurisdiction route depth gate', data.timestamp),
         label: 'Cross-J Routes',
         value: `${formatCount(data.marketMaker?.cross?.expectedRoutes ?? 0)} expected`,
         detail: `${formatCount(data.marketMaker?.cross?.expectedPairs ?? 0)} pairs`,
         ok: marketMakerEnabled && crossApplicable ? data.marketMaker?.cross?.ok ?? null : true,
       },
       {
+        ...gateSeverity('health.custody', custodyEnabled ? data.custody?.ok ?? null : true, custodyEnabled ? 'Custody daemon + service health' : 'Custody disabled', data.timestamp),
         label: 'Custody',
         value: custodyEnabled ? (data.custody?.ok ? 'ready' : 'down') : 'disabled',
         detail: custodyEnabled ? 'daemon + service health' : 'not required',
         ok: custodyEnabled ? data.custody?.ok ?? null : true,
       },
       {
+        ...gateSeverity('health.bootstrap-reserves', (data.bootstrapReserves?.ok ?? false) && (data.bootstrapReserves?.targetMet ?? false), 'Bootstrap reserve targets', data.timestamp, [
+          { label: 'entities', value: data.bootstrapReserves?.entityCount ?? 0 },
+          { label: 'tokens', value: data.bootstrapReserves?.requiredTokenCount ?? 0 },
+        ]),
         label: 'Bootstrap Reserves',
         value: `${formatCount(data.bootstrapReserves?.entityCount ?? 0)} entities`,
         detail: `${formatCount(data.bootstrapReserves?.requiredTokenCount ?? 0)} token targets`,
         ok: (data.bootstrapReserves?.ok ?? false) && (data.bootstrapReserves?.targetMet ?? false),
       },
       {
+        ...gateSeverity('health.storage', data.storage?.ok ?? data.disk?.ok ?? null, 'Storage and disk pressure', data.timestamp, [
+          { label: 'free bytes', value: data.disk?.freeBytes ?? null },
+          { label: 'used percent', value: data.disk?.usedPct ?? null },
+        ]),
         label: 'Storage',
         value: data.disk?.freeGiB !== undefined ? `${data.disk.freeGiB.toFixed(1)} GiB free` : formatBytes(data.disk?.freeBytes),
         detail: `${data.disk?.usedPct ?? 0}% disk used`,
@@ -714,8 +816,8 @@
         <span class="pulse"></span>
         <div>
           <div class="eyebrow">readiness</div>
-          <strong>{overallOk ? 'green' : 'attention'}</strong>
-          <p>{(health.degraded ?? []).length > 0 ? (health.degraded ?? []).join(', ') : 'core gates clear'}</p>
+          <strong>{healthSeverity.severity}</strong>
+          <p>{healthSeverity.reason}</p>
         </div>
       </div>
 
@@ -781,7 +883,7 @@
             <div class="gate-status"></div>
             <div>
               <strong>{gate.label}</strong>
-              <span>{gate.value}</span>
+              <span>{gate.severity} · {gate.value}</span>
               <small>{gate.detail}</small>
             </div>
           </article>

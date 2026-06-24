@@ -13,6 +13,7 @@
     RuntimeAdapterViewFrame,
   } from '@xln/runtime/xln-api';
   import type { StorageHead } from '@xln/runtime/storage/types';
+  import { makeQaSeveritySignal, type QaSeveritySignal } from '@xln/runtime/qa/severity';
 
   type Props = {
     fullPage?: boolean;
@@ -33,6 +34,55 @@
   const activeEntity = $derived(viewFrame?.activeEntity ?? null);
   const activeAccounts = $derived(activeEntity?.accounts?.items ?? []);
   const activeBooks = $derived(activeEntity?.books?.items ?? []);
+  const adapterSeverity = $derived.by<QaSeveritySignal>(() => {
+    if (error) {
+      return makeQaSeveritySignal({
+        severity: 'FAIL',
+        reason: error,
+        since: Date.now(),
+        owner: 'remote-adapter',
+        evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+      });
+    }
+    if (loading) {
+      return makeQaSeveritySignal({
+        severity: 'UNKNOWN',
+        reason: 'Runtime adapter request is in flight',
+        since: Date.now(),
+        owner: 'remote-adapter',
+        evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+      });
+    }
+    if ($runtimeAdapterStatus === 'connected') {
+      return makeQaSeveritySignal({
+        severity: viewFrame ? 'OK' : 'WARN',
+        reason: viewFrame ? 'Remote runtime compact frame is loaded' : 'Remote adapter is connected; compact frame not loaded yet',
+        since: Date.now(),
+        owner: 'remote-adapter',
+        evidence: [
+          { label: 'height', value: $runtimeAdapterHeight },
+          { label: 'auth', value: $runtimeAdapterAuthLevel ?? 'none' },
+          { label: 'entities', value: entities.length },
+        ],
+      });
+    }
+    if ($runtimeAdapterStatus === 'error') {
+      return makeQaSeveritySignal({
+        severity: 'FAIL',
+        reason: 'Remote adapter connection failed',
+        since: Date.now(),
+        owner: 'remote-adapter',
+        evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+      });
+    }
+    return makeQaSeveritySignal({
+      severity: 'UNKNOWN',
+      reason: 'Remote adapter is not connected',
+      since: 0,
+      owner: 'remote-adapter',
+      evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+    });
+  });
 
   function defaultWsUrl(): string {
     if (typeof window === 'undefined') return '';
@@ -142,6 +192,8 @@
   {/if}
 
   <div class="status-line">
+    <span class:ok={adapterSeverity.severity === 'OK'} class:bad={adapterSeverity.severity === 'FAIL'}>{adapterSeverity.severity}</span>
+    <span title={adapterSeverity.reason}>{adapterSeverity.reason}</span>
     <span class:ok={$runtimeAdapterStatus === 'connected'} class:bad={$runtimeAdapterStatus === 'error'}>{$runtimeAdapterStatus}</span>
     <span>height {$runtimeAdapterHeight}</span>
     <span>{$runtimeAdapterAuthLevel ?? 'no auth'}</span>
