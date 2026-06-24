@@ -546,8 +546,11 @@
   let retentionConfirm = $state('');
   let retentionBusy = $state(false);
   let retentionResult = $state<QaRetentionPurgeResult | null>(null);
+  let historyBackfillConfirm = $state('');
   let historyBackfillBusy = $state(false);
   let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
+  let restartAbortConfirm = $state('');
+  let restartAbortBusy = $state(false);
   let systemVerdict = $state<QaSystemVerdict | null>(null);
   let showRawLogTail = $state(false);
 
@@ -630,7 +633,14 @@
     restartExpectedGitHead.trim(),
   ));
   const retentionReady = $derived(Boolean(qaCanPlanRestart && retentionConfirm.trim() === 'DELETE_OLDER_THAN_30_DAYS' && !retentionBusy));
-  const historyBackfillReady = $derived(Boolean(qaCanPlanRestart && !historyBackfillBusy));
+  const historyBackfillReady = $derived(Boolean(qaCanPlanRestart && historyBackfillConfirm.trim() === 'BACKFILL_QA_HISTORY' && !historyBackfillBusy));
+  const restartAbortReady = $derived(Boolean(
+    qaCanPlanRestart &&
+    restartAllowed &&
+    restart.active &&
+    restartAbortConfirm.trim() === 'ABORT_RESTART' &&
+    !restartAbortBusy,
+  ));
   const filteredRuns = $derived(runs.filter(run => runMatchesFailureClass(run, selectedFailureClass)));
   const sortedRuns = $derived([...filteredRuns].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedHistory = $derived([...history].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
@@ -1625,18 +1635,43 @@
       const response = await qaFetch('/api/qa/history/backfill', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirm: 'BACKFILL_QA_HISTORY', limit: 500 }),
+        body: JSON.stringify({ confirm: historyBackfillConfirm.trim(), limit: 500 }),
       });
       const payload = await response.json() as { ok?: boolean; result?: QaHistoryBackfillResult; error?: string };
       if (!response.ok || !payload.ok || !payload.result) {
         throw new Error(payload.error || 'Failed to backfill QA history');
       }
       historyBackfillResult = payload.result;
+      historyBackfillConfirm = '';
       await Promise.all([loadRuns(false), loadMeta()]);
     } catch (err) {
       actionError = err instanceof Error ? err.message : String(err);
     } finally {
       historyBackfillBusy = false;
+    }
+  }
+
+  async function abortActiveRestart(): Promise<void> {
+    if (!restartAbortReady) return;
+    restartAbortBusy = true;
+    actionError = null;
+    try {
+      const response = await qaFetch('/api/qa/restart/abort', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: restartAbortConfirm.trim() }),
+      });
+      const payload = await response.json() as { ok?: boolean; restart?: RestartStatus; error?: string };
+      if (!response.ok || !payload.ok || !payload.restart) {
+        throw new Error(payload.error || 'Failed to abort QA restart');
+      }
+      restart = payload.restart;
+      restartAbortConfirm = '';
+      await loadMeta();
+    } catch (err) {
+      actionError = err instanceof Error ? err.message : String(err);
+    } finally {
+      restartAbortBusy = false;
     }
   }
 
@@ -2083,6 +2118,32 @@
             {/if}
           </div>
         </div>
+        {#if restart.active}
+          <section class="restart-abort-card" data-testid="qa-restart-abort-card">
+            <div>
+              <strong>Active restart</strong>
+              <span>{restart.target ?? 'restart'} · pid {restart.pid ?? 'n/a'}</span>
+            </div>
+            <label>
+              <span>abort confirm</span>
+              <input
+                bind:value={restartAbortConfirm}
+                autocomplete="off"
+                placeholder="ABORT_RESTART"
+                disabled={!qaCanPlanRestart || restartAbortBusy}
+              />
+            </label>
+            <button
+              class="mini-action danger"
+              disabled={!restartAbortReady}
+              title={qaCanPlanRestart ? 'Stops the active restart process with SIGTERM then SIGKILL grace' : 'Admin QA token required'}
+              onclick={abortActiveRestart}
+              data-testid="qa-restart-abort"
+            >
+              {restartAbortBusy ? 'Aborting...' : 'Abort restart'}
+            </button>
+          </section>
+        {/if}
         {#if loadingMeta && catalog.length === 0}
           <div class="empty">Loading test catalog...</div>
         {:else}
@@ -2280,6 +2341,10 @@
             <h3>Backfill History Index</h3>
             <p>One-shot manifest import for legacy runs.</p>
           </div>
+          <label>
+            <span>confirm phrase</span>
+            <input bind:value={historyBackfillConfirm} autocomplete="off" placeholder="BACKFILL_QA_HISTORY" />
+          </label>
           <button
             class="mini-action"
             disabled={!historyBackfillReady}
@@ -3517,7 +3582,8 @@
     font: inherit;
   }
 
-  .retention-card {
+  .retention-card,
+  .restart-abort-card {
     display: grid;
     grid-template-columns: minmax(220px, 1fr) minmax(260px, 0.8fr) auto;
     align-items: end;
@@ -3528,13 +3594,29 @@
     background: rgba(255, 146, 132, 0.035);
   }
 
-  .retention-card label {
+  .restart-abort-card {
+    margin-bottom: 0.9rem;
+  }
+
+  .restart-abort-card > div {
+    display: grid;
+    gap: 0.25rem;
+  }
+
+  .restart-abort-card > div span {
+    color: #9b978a;
+    font-size: 0.78rem;
+  }
+
+  .retention-card label,
+  .restart-abort-card label {
     display: grid;
     gap: 0.35rem;
     min-width: 0;
   }
 
-  .retention-card label span {
+  .retention-card label span,
+  .restart-abort-card label span {
     color: #9b978a;
     font-size: 0.7rem;
     font-weight: 800;
@@ -3542,7 +3624,8 @@
     text-transform: uppercase;
   }
 
-  .retention-card input {
+  .retention-card input,
+  .restart-abort-card input {
     min-height: 34px;
     min-width: 0;
     border: 1px solid rgba(255, 255, 255, 0.12);
