@@ -145,6 +145,41 @@ const QA_FIXTURE_RUN = {
       durationMs: 7_200,
       handle: 'qa.cockpit-fixture',
       description: 'Fixture run records a wallet scenario with synced transcript and video playback.',
+      scenario: {
+        summary10w: 'Authored cockpit evidence summary stays exact for central bank',
+        owner: 'qa',
+        severityPolicy: 'release-blocker',
+        steps: [
+          {
+            title: 'Open wallet cockpit',
+            text: 'Operator opens the QA cockpit and selects the failing run.',
+            startMs: 0,
+            endMs: 30,
+            ms: 30,
+          },
+          {
+            title: 'Select recorded shard',
+            text: 'Operator selects the failed shard with recorded video evidence.',
+            startMs: 30,
+            endMs: 60,
+            ms: 30,
+          },
+          {
+            title: 'Sync transcript cue',
+            text: 'Transcript cue follows the video clock at the real marker.',
+            startMs: 60,
+            endMs: 90,
+            ms: 30,
+          },
+          {
+            title: 'Enter theater playback',
+            text: 'Operator opens full playback without losing failure context.',
+            startMs: 90,
+            endMs: 120,
+            ms: 30,
+          },
+        ],
+      },
       target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
       title: 'QA cockpit fixture records playback transcript',
       requireMarketMaker: false,
@@ -1332,7 +1367,7 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-video-track')).toHaveAttribute('src', /^blob:/);
 
     const shortDescription = (await page.getByTestId('qa-short-description').textContent())?.trim() ?? '';
-    expect(shortDescription.split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(10);
+    expect(shortDescription).toBe('Authored cockpit evidence summary stays exact for central bank');
 
     await page.getByRole('button', { name: 'Restart plan' }).click();
     await expect(page.getByTestId('qa-restart-plan')).toContainText('run-e2e-parallel-isolated');
@@ -1351,6 +1386,8 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-scenario-transcript')).not.toContainText('Preflight');
     await expect(page.getByTestId('qa-scenario-transcript')).not.toContainText('Health Gate');
     await expect(page.getByTestId('qa-subtitle-cue').nth(1)).toContainText('30ms-60ms');
+    await expect(page.getByTestId('qa-subtitle-cue').nth(1)).toContainText('Select recorded shard');
+    await expect(page.getByTestId('qa-subtitle-cue').nth(1)).toContainText('recorded video evidence');
     await page.getByTestId('qa-subtitle-cue').nth(1).click();
     await expect(page.locator('[data-testid="qa-subtitle-cue"][aria-current="step"]')).toBeVisible();
     await expect

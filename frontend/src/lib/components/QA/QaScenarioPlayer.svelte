@@ -4,10 +4,11 @@
     qaScenarioCueIndexAt,
     qaScenarioDescription,
     qaScenarioFailureCueIndex,
+    qaScenarioSummary,
     qaScenarioTimelineMs,
     qaScenarioTitle,
     qaScenarioUsesVideoClock,
-    tenWordScenarioSummary,
+    type QaScenarioMetadata,
     type QaScenarioCue,
     type QaScenarioPhaseMs,
     type QaScenarioStep,
@@ -30,6 +31,7 @@
     durationMs: number | null;
     handle: string | null;
     description: string | null;
+    scenario?: QaScenarioMetadata | null;
     target: string | null;
     title: string | null;
     error?: string | null;
@@ -79,7 +81,7 @@
   const selectedImageKey = $derived(selectedImages.map(image => image.url).filter(Boolean).join('|'));
   const scenarioTitle = $derived(qaScenarioTitle(shard));
   const scenarioDescription = $derived(qaScenarioDescription(shard));
-  const shortDescription = $derived(tenWordScenarioSummary(scenarioDescription));
+  const shortDescription = $derived(qaScenarioSummary(shard));
   const cues = $derived(buildQaScenarioCues(shard));
   const timelineMs = $derived(qaScenarioTimelineMs(cues));
   const usesVideoClock = $derived(qaScenarioUsesVideoClock(cues));

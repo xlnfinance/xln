@@ -50,6 +50,7 @@ import {
   type QaArtifactKind,
   type QaBrowserIssue,
   type QaRunManifest,
+  type QaScenarioMetadata,
   type QaSlowStep,
 } from '../qa/report';
 import { compareStableText } from '../serialization-utils';
@@ -89,6 +90,7 @@ type RunResult = {
   title: string;
   requireMarketMaker: boolean;
   requireCustody: boolean;
+  scenario: QaScenarioMetadata | null;
   phaseMs: {
     preflight: number;
     anvilBoot: number;
@@ -108,6 +110,7 @@ type RunTask = {
   requireMarketMaker: boolean;
   requireCustody: boolean;
   usePlaywrightShard: boolean;
+  scenario: QaScenarioMetadata | null;
   title?: string | undefined;
   grep?: string | undefined;
 };
@@ -749,6 +752,7 @@ const writeRunManifest = (
         durationMs: result.durationMs,
         handle: deriveQaTestHandle(result.target, result.title),
         description: deriveQaTestDescription(result.target, result.title),
+        scenario: result.scenario,
         target: result.target,
         title: result.title || readShardTitle(logsDir, result.shard),
         requireMarketMaker: result.requireMarketMaker,
@@ -885,6 +889,7 @@ type PlaywrightTarget = {
   target: string;
   requireMarketMaker: boolean;
   requireCustody: boolean;
+  scenario: QaScenarioMetadata | null;
   title?: string;
   grep?: string;
 };
@@ -960,6 +965,7 @@ const listDynamicPlaywrightTargets = (
     target: file,
     requireMarketMaker: requiresMarketMaker(file, spec.title),
     requireCustody: requiresCustody(file, spec.title),
+    scenario: null,
     title: spec.title,
     grep: escapeRegExp(spec.title),
   }));
@@ -1063,6 +1069,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
         target: sourceFile,
         requireMarketMaker: requiresMarketMaker(sourceFile, title),
         requireCustody: requiresCustody(sourceFile, title),
+        scenario: null,
         title,
         grep: escapeRegExp(title),
       });
@@ -1080,6 +1087,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
         target: file,
         requireMarketMaker: requiresMarketMaker(file),
         requireCustody: requiresCustody(file),
+        scenario: null,
         title: file,
       });
       continue;
@@ -1101,6 +1109,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
           target: file,
           requireMarketMaker: requiresMarketMaker(file, title, block.text),
           requireCustody: requiresCustody(file, title, block.text),
+          scenario: null,
           title,
           grep: escapeRegExp(title),
         });
@@ -2022,6 +2031,7 @@ const runShard = async (
         title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
         requireMarketMaker: task.requireMarketMaker,
         requireCustody: task.requireCustody,
+        scenario: task.scenario,
         phaseMs,
         error: teardownReason,
       });
@@ -2047,6 +2057,7 @@ const runShard = async (
         title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
         requireMarketMaker: task.requireMarketMaker,
         requireCustody: task.requireCustody,
+        scenario: task.scenario,
         phaseMs,
         error: teardownReason,
       });
@@ -2061,6 +2072,7 @@ const runShard = async (
       title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
       requireMarketMaker: task.requireMarketMaker,
       requireCustody: task.requireCustody,
+      scenario: task.scenario,
       phaseMs,
     });
   } catch (error) {
@@ -2084,6 +2096,7 @@ const runShard = async (
       title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
       requireMarketMaker: task.requireMarketMaker,
       requireCustody: task.requireCustody,
+      scenario: task.scenario,
       phaseMs,
       error: teardownReason,
     });
@@ -2196,6 +2209,7 @@ async function main(): Promise<void> {
       requireMarketMaker: entry.requireMarketMaker,
       requireCustody: entry.requireCustody,
       usePlaywrightShard: false,
+      scenario: entry.scenario,
       title: entry.title,
       grep: entry.grep,
     }));
@@ -2208,6 +2222,7 @@ async function main(): Promise<void> {
           title: task.title || task.pwTargets[0],
           handle: deriveQaTestHandle(task.pwTargets[0], task.title || task.pwTargets[0]),
           description: deriveQaTestDescription(task.pwTargets[0], task.title || task.pwTargets[0]),
+          scenario: task.scenario,
           requireMarketMaker: task.requireMarketMaker,
           requireCustody: task.requireCustody,
           grep: task.grep,

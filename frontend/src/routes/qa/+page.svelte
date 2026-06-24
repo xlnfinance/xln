@@ -4,8 +4,8 @@
   import QaScenarioPlayer from '$lib/components/QA/QaScenarioPlayer.svelte';
   import {
     qaScenarioDescription,
+    qaScenarioSummary,
     qaScenarioTitle,
-    tenWordScenarioSummary,
   } from '$lib/qa/scenarioPlayer';
   import { clearQaToken, consumeQaTokenFromUrl, qaFetch, writeQaToken } from '$lib/qa/apiClient';
   import type { QaSeverity, QaSeverityEvidence } from '@xln/runtime/qa/severity';
@@ -94,6 +94,21 @@
     endMs?: number;
   };
 
+  type QaAuthoredScenarioStep = {
+    title: string;
+    text: string;
+    ms?: number;
+    startMs?: number;
+    endMs?: number;
+  };
+
+  type QaScenarioMetadata = {
+    summary10w: string | null;
+    steps: QaAuthoredScenarioStep[];
+    owner: string | null;
+    severityPolicy: string | null;
+  };
+
   type QaPhaseTimings = {
     preflight: number;
     anvilBoot: number;
@@ -127,6 +142,7 @@
     durationMs: number | null;
     handle: string | null;
     description: string | null;
+    scenario?: QaScenarioMetadata | null;
     target: string | null;
     title: string | null;
     requireMarketMaker: boolean | null;
@@ -1339,7 +1355,7 @@
   }
 
   function shardPreviewText(shard: QaShard): string {
-    return tenWordScenarioSummary(shardDescription(shard));
+    return qaScenarioSummary(shard);
   }
 
   function artifactCount(shard: QaShard, kind: QaArtifact['kind']): number {

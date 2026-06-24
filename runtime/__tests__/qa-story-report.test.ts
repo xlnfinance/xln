@@ -205,6 +205,7 @@ const benchmarkRun = (
     durationMs: totalMs,
     handle: 'qa cockpit',
     description: null,
+    scenario: null,
     target: 'tests/e2e-qa-cockpit.spec.ts',
     title: 'plays recorded scenario videos',
     requireMarketMaker: false,
@@ -1461,6 +1462,100 @@ test('qa run report preserves timeline order and derives slow steps', async () =
       expect(row?.browserErrorCount).toBe(1);
       expect(row?.httpErrorCount).toBe(1);
     });
+  } finally {
+    deleteQaHistoryRows([runId]);
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test('qa run report preserves authored scenario metadata from targets', async () => {
+  const runId = '20000101-000003-127';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  const summary10w = 'Author wrote exact golden summary for regulator playback evidence proof';
+  await rm(runDir, { recursive: true, force: true });
+  deleteQaHistoryRows([runId]);
+  try {
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, 'targets.json'),
+      `${JSON.stringify([
+        {
+          shard: 0,
+          target: 'tests/e2e-regulator-golden.spec.ts',
+          title: 'prepares cross border payment evidence',
+          handle: 'golden.payment-evidence',
+          description: 'Full authored description survives report enrichment.',
+          scenario: {
+            summary10w,
+            owner: 'qa',
+            severityPolicy: 'release-blocker',
+            steps: [
+              {
+                title: 'Open payment form',
+                text: 'Operator opens the payment form with a funded route.',
+                startMs: 100,
+                endMs: 450,
+                ms: 350,
+              },
+            ],
+          },
+        },
+      ])}\n`,
+    );
+    await writeFile(
+      join(runDir, 'manifest.json'),
+      `${JSON.stringify({
+        manifestVersion: 2,
+        runId,
+        createdAt: Date.UTC(2000, 0, 1, 0, 0, 3),
+        completedAt: Date.UTC(2000, 0, 1, 0, 0, 4),
+        status: 'passed',
+        totalMs: 1000,
+        totalShards: 1,
+        passedShards: 1,
+        failedShards: 0,
+        args: null,
+        shards: [
+          {
+            shard: 0,
+            status: 'passed',
+            durationMs: 1000,
+            handle: null,
+            description: null,
+            target: null,
+            title: null,
+            requireMarketMaker: false,
+            logRelativePath: null,
+            logTail: null,
+            error: null,
+            phaseMs: null,
+            timelineSteps: [],
+            slowSteps: [],
+            artifacts: [],
+            hasVideo: false,
+            hasTrace: false,
+          },
+        ],
+      })}\n`,
+    );
+
+    const run = await readQaRun(runId);
+    expect(run.shards[0]?.handle).toBe('golden.payment-evidence');
+    expect(run.shards[0]?.description).toBe('Full authored description survives report enrichment.');
+    expect(run.shards[0]?.target).toBe('tests/e2e-regulator-golden.spec.ts');
+    expect(run.shards[0]?.title).toBe('prepares cross border payment evidence');
+    expect(run.shards[0]?.scenario?.summary10w).toBe(summary10w);
+    expect(run.shards[0]?.scenario?.owner).toBe('qa');
+    expect(run.shards[0]?.scenario?.severityPolicy).toBe('release-blocker');
+    expect(run.shards[0]?.scenario?.steps).toEqual([
+      {
+        title: 'Open payment form',
+        text: 'Operator opens the payment form with a funded route.',
+        startMs: 100,
+        endMs: 450,
+        ms: 350,
+      },
+    ]);
   } finally {
     deleteQaHistoryRows([runId]);
     await rm(runDir, { recursive: true, force: true });

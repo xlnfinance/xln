@@ -20,6 +20,21 @@ export type QaSlowStep = {
   endMs?: number;
 };
 
+export type QaAuthoredScenarioStep = {
+  title: string;
+  text: string;
+  ms?: number;
+  startMs?: number;
+  endMs?: number;
+};
+
+export type QaScenarioMetadata = {
+  summary10w: string | null;
+  steps: QaAuthoredScenarioStep[];
+  owner: string | null;
+  severityPolicy: string | null;
+};
+
 export type QaArtifactKind = 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other';
 export type QaArtifactSensitivity = 'public' | 'internal' | 'secret-bearing';
 
@@ -247,6 +262,7 @@ export type QaShardManifest = {
   durationMs: number | null;
   handle: string | null;
   description: string | null;
+  scenario: QaScenarioMetadata | null;
   target: string | null;
   title: string | null;
   requireMarketMaker: boolean | null;
@@ -580,6 +596,41 @@ export const classifyQaArtifactSensitivity = (artifact: {
 const asFiniteNumber = (value: unknown): number | null => {
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizeQaAuthoredScenarioStep = (value: unknown): QaAuthoredScenarioStep | null => {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const title = asNullableString(record['title']);
+  const text = asNullableString(record['text']);
+  if (!title || !text) return null;
+  const ms = asFiniteNumber(record['ms']);
+  const startMs = asFiniteNumber(record['startMs']);
+  const endMs = asFiniteNumber(record['endMs']);
+  return {
+    title,
+    text,
+    ...(ms !== null ? { ms } : {}),
+    ...(startMs !== null ? { startMs } : {}),
+    ...(endMs !== null ? { endMs } : {}),
+  };
+};
+
+const normalizeQaScenarioMetadata = (value: unknown): QaScenarioMetadata | null => {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const steps = Array.isArray(record['steps'])
+    ? record['steps'].map(normalizeQaAuthoredScenarioStep).filter((step): step is QaAuthoredScenarioStep => Boolean(step))
+    : [];
+  const scenario = {
+    summary10w: asNullableString(record['summary10w']),
+    steps,
+    owner: asNullableString(record['owner']),
+    severityPolicy: asNullableString(record['severityPolicy']),
+  };
+  return scenario.summary10w || scenario.steps.length > 0 || scenario.owner || scenario.severityPolicy
+    ? scenario
+    : null;
 };
 
 const trimIssueMessage = (value: unknown): string => {
@@ -2445,6 +2496,7 @@ type QaTargetMetadata = {
   title: string | null;
   handle: string | null;
   description: string | null;
+  scenario: QaScenarioMetadata | null;
   requireMarketMaker: boolean | null;
 };
 
@@ -2465,6 +2517,7 @@ const readTargetsMetadata = async (runDir: string): Promise<Map<number, QaTarget
         title,
         handle: typeof entry.handle === 'string' ? entry.handle : deriveQaTestHandle(target, title),
         description: typeof entry.description === 'string' ? entry.description : deriveQaTestDescription(target, title),
+        scenario: normalizeQaScenarioMetadata(entry.scenario) ?? normalizeQaScenarioMetadata(entry),
         requireMarketMaker: typeof entry.requireMarketMaker === 'boolean' ? entry.requireMarketMaker : null,
       });
     }
@@ -2698,6 +2751,7 @@ const collectLegacyShard = async (
     hasTrace: artifacts.some(artifact => artifact.kind === 'trace'),
     handle: metadata?.handle ?? deriveQaTestHandle(metadata?.target ?? null, title),
     description: metadata?.description ?? deriveQaTestDescription(metadata?.target ?? null, title),
+    scenario: metadata?.scenario ?? null,
   } as QaShardManifest, parseRunIdTimestamp(_runId) ?? 0);
 };
 
@@ -2798,6 +2852,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           title,
           handle: shard.handle ?? metadata?.handle ?? deriveQaTestHandle(target, title),
           description: metadata?.description ?? deriveQaTestDescription(target, title) ?? shard.description,
+          scenario: normalizeQaScenarioMetadata(shard.scenario) ?? metadata?.scenario ?? null,
           artifacts: sortArtifacts([...(shard.artifacts ?? [])]).map(artifact => ({
             ...artifact,
             sensitivity: artifact.sensitivity ?? classifyQaArtifactSensitivity(artifact),
