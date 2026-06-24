@@ -4,6 +4,7 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText } from '../serialization-utils';
+import { DISPLAY, QA } from '../constants';
 import {
   assertQaSeveritySignal,
   makeQaSeveritySignal,
@@ -946,8 +947,8 @@ const buildQaRunSeveritySignal = (run: Pick<QaRunManifest,
     ...(run.failureClasses?.length ? [{ label: 'failure classes', value: run.failureClasses.join(',') }] : []),
     ...(run.browserHealth?.issueCount ? [{ label: 'browser issues', value: run.browserHealth.issueCount }] : []),
     ...(run.benchmark ? [{ label: 'benchmark', value: run.benchmark.status }] : []),
-    ...(run.code?.gitHead ? [{ label: 'git head', value: run.code.gitHead.slice(0, 12) }] : []),
-    ...(run.code?.codeHash ? [{ label: 'code hash', value: run.code.codeHash.slice(0, 16) }] : []),
+    ...(run.code?.gitHead ? [{ label: 'git head', value: run.code.gitHead.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS) }] : []),
+    ...(run.code?.codeHash ? [{ label: 'code hash', value: run.code.codeHash.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS) }] : []),
   ];
   if (run.status === 'failed' || run.failedShards > 0 || run.browserHealth?.severity === 'FAIL') {
     return makeQaSeveritySignal({
@@ -1077,8 +1078,8 @@ export const buildQaSystemVerdict = (runs: readonly QaRunSummary[]): QaSystemVer
       { label: 'browser warnings', value: browser.warningCount },
     ] : []),
     ...(regressionStatus ? [{ label: 'benchmark', value: regressionStatus }] : []),
-    ...(latest.code?.gitHead ? [{ label: 'git head', value: latest.code.gitHead.slice(0, 12) }] : []),
-    ...(latest.code?.codeHash ? [{ label: 'code hash', value: latest.code.codeHash.slice(0, 16) }] : []),
+    ...(latest.code?.gitHead ? [{ label: 'git head', value: latest.code.gitHead.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS) }] : []),
+    ...(latest.code?.codeHash ? [{ label: 'code hash', value: latest.code.codeHash.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS) }] : []),
     ...(dirtySurface ? [{ label: 'dirty', value: true }] : []),
   ];
 
@@ -2171,8 +2172,10 @@ export const compareQaRunWithHistory = (run: QaRunManifest): QaBenchmarkComparis
   return compareQaBenchmarkRuns(run, baseline);
 };
 
-export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
-  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(500, Math.floor(limit))) : 100;
+export const listQaHistory = async (limit: number = QA.HISTORY_DEFAULT_LIMIT): Promise<QaHistoryEntry[]> => {
+  const safeLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(QA.HISTORY_MAX_LIMIT, Math.floor(limit)))
+    : QA.HISTORY_DEFAULT_LIMIT;
   const db = openQaHistoryDb();
   try {
     const rows = db.query(`
@@ -2310,8 +2313,10 @@ export const backfillQaHistoryFromLogs = async (limit = 500): Promise<QaHistoryB
   };
 };
 
-export const purgeQaRunsOlderThan = (retentionDays = 30, now = Date.now()): QaRetentionPurgeResult => {
-  const safeRetentionDays = Number.isFinite(retentionDays) ? Math.max(30, Math.floor(retentionDays)) : 30;
+export const purgeQaRunsOlderThan = (retentionDays = QA.RETENTION_MIN_DAYS, now = Date.now()): QaRetentionPurgeResult => {
+  const safeRetentionDays = Number.isFinite(retentionDays)
+    ? Math.max(QA.RETENTION_MIN_DAYS, Math.floor(retentionDays))
+    : QA.RETENTION_MIN_DAYS;
   const cutoff = now - safeRetentionDays * 24 * 60 * 60 * 1000;
   const deletedRunIds: string[] = [];
   let deletedLogDirs = 0;
@@ -2397,7 +2402,7 @@ const readUxScreenshotMetadata = async (imagePath: string): Promise<QaUxScreensh
     const tags = rawTags
       .map((tag) => String(tag || '').trim())
       .filter(Boolean)
-      .slice(0, 12);
+      .slice(0, QA.STORY_TAG_LIMIT);
     if (!title && !group && !description && !platform && tags.length === 0) return null;
     return { title, group, description, platform, tags };
   } catch {
@@ -2408,7 +2413,7 @@ const readUxScreenshotMetadata = async (imagePath: string): Promise<QaUxScreensh
 export const makeQaStoryImageUrl = (source: QaStorySource, relativePath: string): string =>
   `/api/qa/story-image?source=${encodeURIComponent(source)}&path=${encodeURIComponent(relativePath)}`;
 
-const shortTail = (text: string, lines = 80): string => text.split('\n').slice(-lines).join('\n');
+const shortTail = (text: string, lines: number = QA.LOG_TAIL_LINES): string => text.split('\n').slice(-lines).join('\n');
 
 const humanizeSlug = (value: string): string =>
   value
@@ -2710,8 +2715,8 @@ const collectLegacyShard = async (
   const resultsDir = join(runDir, `test-results-shard-${shard}`);
   const logText = existsSync(logPath) ? await readFile(logPath, 'utf8') : '';
   const phaseMs = parsePhaseTimings(logText);
-  const timelineSteps = parseQaTimelineSteps(logText).slice(0, 80);
-  const slowSteps = parseQaSlowSteps(logText).slice(0, 12);
+  const timelineSteps = parseQaTimelineSteps(logText).slice(0, QA.SHARD_TIMELINE_STEP_LIMIT);
+  const slowSteps = parseQaSlowSteps(logText).slice(0, QA.SHARD_SLOW_STEP_LIMIT);
   const browserIssues: QaBrowserIssue[] = [];
   const artifacts: QaArtifact[] = [];
   const metadata = targetMetadata.get(shard) ?? null;
@@ -2906,7 +2911,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
         const timelineSteps = hasStoredTimelineSteps
           ? shard.timelineSteps
           : logText
-            ? parseQaTimelineSteps(logText).slice(0, 80)
+            ? parseQaTimelineSteps(logText).slice(0, QA.SHARD_TIMELINE_STEP_LIMIT)
             : [];
         const browserIssues = normalizeQaBrowserIssues(shard.browserIssues);
         const logTail = shard.logTail ? redactQaSecretText(shard.logTail) : logText ? redactQaSecretText(shortTail(logText)) : null;
@@ -2935,7 +2940,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           timelineSteps,
           slowSteps: Array.isArray(shard.slowSteps) && shard.slowSteps.length > 0
             ? shard.slowSteps
-            : timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, 12),
+            : timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, QA.SHARD_SLOW_STEP_LIMIT),
           logTail,
         } as QaShardManifest, parsed.createdAt);
       }),

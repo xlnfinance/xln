@@ -20,6 +20,7 @@
     Wifi,
   } from 'lucide-svelte';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
+  import { QA } from '@xln/runtime/constants';
 
   type IconComponent = typeof Activity;
 
@@ -698,7 +699,7 @@
               </div>
               <div class="progress-line"><i></i></div>
               <div class="pair-pills">
-                {#each (hub.pairs ?? []).slice(0, 6) as pair (pair.pairId)}
+                {#each (hub.pairs ?? []).slice(0, QA.BOOTSTRAP_PAIR_PREVIEW_LIMIT) as pair (pair.pairId)}
                   {@const pairExpected = numberOrZero(pair.expectedOffers || health.marketMaker?.expectedOffersPerPair)}
                   <span class:ok={pair.depthReady === true || (pairExpected > 0 && pair.offers >= pairExpected)}>
                     {pair.pairId}: {pair.offers}/{pairExpected}
@@ -722,7 +723,7 @@
         {#if mmCrossRoutes.length === 0}
           <div class="empty-line">No cross route payload.</div>
         {:else}
-          {#each mmCrossRoutes.slice(0, 8) as route, index (`route-${index}`)}
+          {#each mmCrossRoutes.slice(0, QA.BOOTSTRAP_CROSS_ROUTE_PREVIEW_LIMIT) as route, index (`route-${index}`)}
             {@const expected = numberOrZero(route.expectedOffers || health.marketMaker?.cross?.expectedOffersPerRoute)}
             {@const progress = ratioPercent(numberOrZero(route.offers), expected)}
             <article class="route-card" class:ok={route.depthReady === true} style={progressStyle(progress)}>

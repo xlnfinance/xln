@@ -31,16 +31,17 @@ import type {
   SwapBookEntry,
 } from '@xln/runtime/xln-api';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '@xln/runtime/storage/types';
+import { REMOTE_RUNTIME } from '@xln/runtime/constants';
 
 let unregisterEnvChange: (() => void) | null = null;
 let unregisterRuntimeAdapterChange: (() => void) | null = null;
 let remoteAdapterRefreshPromise: Promise<Env | null> | null = null;
 let activeRuntimeAdapterConfig: RuntimeAdapterConfig | null = null;
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
-const DEFAULT_REMOTE_ADAPTER_PATH = '/rpc';
-export const REMOTE_VIEW_PAGE_SIZE = 10;
-export const REMOTE_HISTORY_FRAME_LIMIT = 12;
-export const REMOTE_HISTORY_SCAN_CACHE_LIMIT = 24;
+const DEFAULT_REMOTE_ADAPTER_PATH = REMOTE_RUNTIME.DEFAULT_ADAPTER_PATH;
+export const REMOTE_VIEW_PAGE_SIZE = REMOTE_RUNTIME.VIEW_PAGE_SIZE;
+export const REMOTE_HISTORY_FRAME_LIMIT = REMOTE_RUNTIME.HISTORY_FRAME_LIMIT;
+export const REMOTE_HISTORY_SCAN_CACHE_LIMIT = REMOTE_RUNTIME.HISTORY_SCAN_CACHE_LIMIT;
 
 type FrontendEntitySummary = {
   id: string;

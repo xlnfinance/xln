@@ -6,6 +6,7 @@
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
+  import { DISPLAY } from '@xln/runtime/constants';
 
   type HealthData = {
     timestamp: number;
@@ -443,7 +444,7 @@
   const directOpenLinks = $derived(health?.hubMesh?.direct?.openLinkCount ?? 0);
   const storageTracked = $derived((health?.storage?.tracked ?? []).slice(0, 6));
   const childProcesses = $derived(health?.process?.children ?? []);
-  const flowEdges = $derived.by(() => buildFlowEdges(events).slice(0, 12));
+  const flowEdges = $derived.by(() => buildFlowEdges(events).slice(0, DISPLAY.HEALTH_FLOW_EDGE_LIMIT));
   const testnetGates = $derived.by<TestnetGate[]>(() => buildTestnetGates(health, rpcOk));
   const healthSeverity = $derived.by<QaSeveritySignal>(() => buildHealthSeverity(health, rpcOk, criticalSignals.length));
   const healthVerdict = $derived(healthVerdictLabel(healthSeverity.severity));
@@ -569,7 +570,7 @@
     if (!text) return 'n/a';
     const clean = text.replace(/-dirty$/, '');
     const suffix = text.endsWith('-dirty') ? '-dirty' : '';
-    return `${clean.slice(0, 8)}${suffix}`;
+    return `${clean.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS)}${suffix}`;
   }
 
   function healthVerdictLabel(severity: QaSeverity): 'READY' | 'DEGRADED' | 'FAIL' {
@@ -585,8 +586,9 @@
 
   function endpointLabel(value?: string): string {
     if (!value) return 'local';
-    if (value.length <= 14) return value;
-    return `${value.slice(0, 8)}...${value.slice(-4)}`;
+    const maxInline = DISPLAY.ENDPOINT_PREFIX_CHARS + DISPLAY.ENDPOINT_SUFFIX_CHARS + 2;
+    if (value.length <= maxInline) return value;
+    return `${value.slice(0, DISPLAY.ENDPOINT_PREFIX_CHARS)}...${value.slice(-DISPLAY.ENDPOINT_SUFFIX_CHARS)}`;
   }
 
   function gateSeverity(

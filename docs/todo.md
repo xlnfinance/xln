@@ -473,9 +473,10 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [ ] `/runs` is a ledger across unit, contract, e2e, scenario, benchmark, and release gates.
 - [ ] `/ops` is gated and audited: release gate, bootstrap soundcheck, MM soak, shard rerun, restart.
 - [ ] Every chart compares current vs same-codeHash baseline, previous HEAD, and last green.
-- [ ] Centralize system constants in one typed registry so budgets, limits, polling intervals, and UI labels do not drift across orchestrator/runtime/frontend.
+- [x] Centralize system constants in one typed registry so budgets, limits, polling intervals, and UI labels do not drift across orchestrator/runtime/frontend.
   - User-confirmed 2026-06-24: keep system constants in one place for operator/developer convenience.
-  - First step done in WIP: health response refresh budget moved into `orchestrator-config.ts` and reused by bootstrap timeline.
+  - Status: done for the active operator surfaces. `runtime/constants.ts` now includes typed `DISPLAY`, `REMOTE_RUNTIME`, and `QA` registries for compact 4-byte hash display, endpoint trimming, health graph preview, R-adapter page/history/import limits, QA window sizes, confirm phrases, retention/backfill limits, phase budgets, log-tail/timeline caps, and bootstrap evidence preview caps.
+  - Evidence: `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun test runtime/__tests__/qa-story-report.test.ts` PASS `42/42`; `bun test tests/frontend/remote-runtime-import.test.ts` PASS `3/3`.
 - [ ] Remote runtime state is always aggregate/cursor/hash based; no full 1M arrays in browser.
 - [ ] Regulator export produces one evidence bundle: health snapshot, run ledger, videos, WebVTT, hashes, audit trail, failure explanations, and redacted artifacts.
 
