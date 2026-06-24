@@ -87,18 +87,24 @@
   import {
     findLocalAccountByCounterparty,
     getActiveJurisdictionName,
+    getCurrentEntityJurisdictionName,
     getEnvReplicaMap,
     getGossipProfiles,
     getRuntimeEnv,
     getRuntimeId,
+    isSameJurisdictionEntity,
     isAccountLeftPerspective,
     isHubProfile,
-    jurisdictionKey,
     materializeAccountView,
     materializeReplicaMap,
     materializeReplicaView,
     requireRuntimeEnv,
   } from './entity-panel-model';
+  import {
+    formatAddress,
+    isPlaceholderEntityName,
+    shortHash,
+  } from './entity-panel-display';
   import {
     buildEntityPanelHashRouteFromState,
     canonicalizeEntityPanelRoute,
@@ -253,52 +259,6 @@
     databases?: () => Promise<IDBDatabaseInfo[]>;
   };
   type JTokenRegistryItem = Awaited<ReturnType<JAdapter['getTokenRegistry']>>[number];
-  function getCurrentEntityJurisdictionName(env: Env | EnvSnapshot | null | undefined): string | null {
-    const configured = String(replica?.state?.config?.jurisdiction?.name || '').trim();
-    return configured || getActiveJurisdictionName(env);
-  }
-  function getCurrentEntityJurisdictionKey(env: Env | EnvSnapshot | null | undefined): string {
-    return jurisdictionKey(replica?.state?.config?.jurisdiction)
-      || jurisdictionKey(replica?.position?.jurisdiction)
-      || jurisdictionKey(getActiveJurisdictionName(env));
-  }
-  function getEntityJurisdictionKey(entityId: string): string {
-    const normalized = String(entityId || '').trim().toLowerCase();
-    if (!normalized) return '';
-    if (activeEnv?.eReplicas) {
-      for (const [key, candidate] of activeEnv.eReplicas.entries()) {
-        const [candidateEntityId] = String(key || '').split(':');
-        const stateEntityId = String(candidate?.entityId || candidate?.state?.entityId || '').trim().toLowerCase();
-        if (String(candidateEntityId || '').trim().toLowerCase() !== normalized && stateEntityId !== normalized) continue;
-        return jurisdictionKey(candidate?.state?.config?.jurisdiction)
-          || jurisdictionKey(candidate?.position?.jurisdiction);
-      }
-    }
-    const gossip = activeEnv?.gossip as {
-      getProfiles?: () => Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
-      profiles?: Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
-    } | undefined;
-    const profiles = typeof gossip?.getProfiles === 'function'
-      ? gossip.getProfiles()
-      : (Array.isArray(gossip?.profiles) ? gossip.profiles : []);
-    const profile = profiles.find((candidate) =>
-      String(candidate?.entityId || '').trim().toLowerCase() === normalized
-    );
-    return jurisdictionKey(profile?.metadata?.jurisdiction);
-  }
-  function isSameJurisdictionEntity(leftEntityId: string, rightEntityId: string): boolean {
-    const currentEntityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    const normalizedLeftEntityId = String(leftEntityId || '').trim().toLowerCase();
-    const normalizedRightEntityId = String(rightEntityId || '').trim().toLowerCase();
-    const leftJurisdiction = normalizedLeftEntityId === currentEntityId
-      ? getCurrentEntityJurisdictionKey(activeEnv)
-      : getEntityJurisdictionKey(leftEntityId);
-    const rightJurisdiction = normalizedRightEntityId === currentEntityId
-      ? getCurrentEntityJurisdictionKey(activeEnv)
-      : getEntityJurisdictionKey(rightEntityId);
-    if (!leftJurisdiction && !rightJurisdiction) return true;
-    return Boolean(leftJurisdiction && rightJurisdiction && leftJurisdiction === rightJurisdiction);
-  }
   function getCurrentEntityJAdapter(xln: XLNModule, env: Env, context: string): JAdapter {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
     const signerId = String(currentSignerId || tab.signerId || '').trim();
@@ -800,33 +760,15 @@
     const profile = profiles.find((p: GossipProfile) => p.entityId.toLowerCase() === entityId);
     return profile?.name || '';
   })();
-  function isPlaceholderName(value: string): boolean {
-    const normalized = String(value || '').trim().toLowerCase();
-    if (!normalized) return true;
-    if (/^signer\s+\d+$/i.test(normalized)) return true;
-    if (/^entity\s+[0-9a-f]{4,}$/i.test(normalized)) return true;
-    return false;
-  }
   $: heroDisplayName = (() => {
     const fallbackId = replica?.state?.entityId || tab.entityId || '';
     const gossip = (gossipName ?? '').trim();
-    return gossip && !isPlaceholderName(gossip) ? gossip : fallbackId;
+    return gossip && !isPlaceholderEntityName(gossip) ? gossip : fallbackId;
   })();
   $: entityJurisdictionBadge = getJurisdictionBadgeInfo(
     replica?.state?.config?.jurisdiction?.name || selectedJurisdictionName || tab.jurisdiction || null,
     replica?.state?.config?.jurisdiction?.chainId ?? null,
   );
-  // Format short address for display
-  function formatAddress(addr: string): string {
-    if (!addr) return '';
-    if (addr.length <= 18) return addr;
-    return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
-  }
-  function shortHash(value: unknown): string {
-    const text = String(value || '').trim();
-    if (!text) return '-';
-    return formatAddress(text);
-  }
   $: activeReplicas = getEnvReplicaMap(activeEnv, envRevision);
   $: activeXlnFunctions = $xlnFunctions;
   $: activeHistory = history;
@@ -989,7 +931,7 @@
   })() as Array<{ name?: string }>;
   $: {
     if (showJurisdiction && availableJurisdictions.length > 0 && !selectedJurisdictionName) {
-      selectedJurisdictionName = getCurrentEntityJurisdictionName(activeEnv) ?? availableJurisdictions[0]?.name ?? null;
+      selectedJurisdictionName = getCurrentEntityJurisdictionName(activeEnv, replica) ?? availableJurisdictions[0]?.name ?? null;
     }
   }
   let openAccountEntityOptions: string[] = [];
@@ -1693,7 +1635,7 @@
 	      notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
 	      return;
 	    }
-	    if (!isSameJurisdictionEntity(entityId, hubEntityId)) {
+	    if (!isSameJurisdictionEntity(activeEnv, replica, tab.entityId, entityId, hubEntityId)) {
 	      toasts.error('Switch to the matching jurisdiction entity before funding that account.');
 	      return;
 	    }
@@ -2468,7 +2410,7 @@
       const signerId = String(currentSignerId || '').trim();
       const owner = resolveSelfEoaAddress();
       const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
-      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv) || '').trim();
+      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv, replica) || '').trim();
       const fetchKey = `${owner}|${runtimeId}|${jurisdiction}`;
       externalTokensLoading = true;
       if (!signerId || !isAddress(owner)) {
@@ -2566,7 +2508,7 @@
           }
         });
         const runtimeIdNow = getRuntimeId(activeEnv);
-        const jurisdictionNow = String(getCurrentEntityJurisdictionName(activeEnv) || '');
+        const jurisdictionNow = String(getCurrentEntityJurisdictionName(activeEnv, replica) || '');
         const currentKey = `${resolveSelfEoaAddress()}|${String(runtimeIdNow || '').trim()}|${jurisdictionNow.trim()}`;
         if (currentKey === fetchKey) {
           externalWalletSnapshotSource = snapshotSource;
@@ -3248,7 +3190,7 @@
 	      toasts.error('Cannot open account with yourself');
 	      return;
 	    }
-    if (!isSameJurisdictionEntity(entityId, trimmed)) {
+    if (!isSameJurisdictionEntity(activeEnv, replica, tab.entityId, entityId, trimmed)) {
       toasts.error('Accounts can only be opened inside the same jurisdiction');
       return;
     }
@@ -3635,7 +3577,7 @@
     } else {
       const signerId = String(currentSignerId || '').trim();
       const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
-      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv) || getActiveJurisdictionName(activeEnv) || '').trim();
+      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv, replica) || getActiveJurisdictionName(activeEnv) || '').trim();
       const refreshMs = 5_000;
       const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
       if (nextKey !== externalBalancePollKey) {
