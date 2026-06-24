@@ -418,6 +418,8 @@
     detail: string;
     runId: string | null;
     createdAt: number;
+    phaseKey?: QaPhaseKey;
+    phaseLimitMs?: number;
   };
   type QaVerdictSummary = {
     status: QaVerdictStatus;
@@ -798,7 +800,16 @@
     if (failureClass === 'all') return true;
     if ((run.failureClasses ?? []).includes(failureClass)) return true;
     const health = browserHealth(run);
-    if (failureClass === 'performance') return run.benchmark?.status === 'slower' || run.benchmark?.status === 'mixed';
+    if (failureClass === 'performance') {
+      return (
+        run.benchmark?.status === 'slower' ||
+        run.benchmark?.status === 'mixed' ||
+        phaseOrder.some((key) => {
+          const ms = phaseObservedMs(run, key);
+          return typeof ms === 'number' && Number.isFinite(ms) && ms > phaseBudgets[key];
+        })
+      );
+    }
     if (failureClass === 'network') return health.networkFailureCount > 0 || health.httpErrorCount > 0;
     if (failureClass === 'browser') return health.issueCount > 0 && health.networkFailureCount === 0 && health.httpErrorCount === 0;
     if (failureClass === 'unknown') return run.status === 'failed' && (run.failureClasses ?? []).length === 0;
@@ -857,6 +868,63 @@
     };
   }
 
+  function phaseObservedMs(run: QaSummary, key: QaPhaseKey): number | null {
+    const p95 = run.timing?.phaseP95?.[key];
+    if (typeof p95 === 'number' && Number.isFinite(p95)) return p95;
+    if (key === 'apiHealthy') return finiteSortValue(run.timing?.apiHealthyMs, Number.NaN);
+    if (key === 'playwright') return finiteSortValue(run.timing?.playwrightMs, Number.NaN);
+    return null;
+  }
+
+  function historicalPhaseLimit(runRows: QaSummary[], run: QaSummary, key: QaPhaseKey): number | null {
+    if (!run.suiteKey) return null;
+    const samples = runRows
+      .filter((candidate) =>
+        candidate.runId !== run.runId &&
+        candidate.suiteKey === run.suiteKey &&
+        candidate.createdAt < run.createdAt
+      )
+      .map((candidate) => candidate.timing?.phaseP95?.[key])
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0)
+      .sort((a, b) => a - b);
+    if (samples.length === 0) return null;
+    const index = Math.min(samples.length - 1, Math.max(0, Math.ceil(samples.length * 0.95) - 1));
+    return samples[index]!;
+  }
+
+  function phaseBudgetFailureItem(run: QaSummary, runRows: QaSummary[]): QaFailureInboxItem | null {
+    const breaches = phaseOrder
+      .map((key) => {
+        const ms = phaseObservedMs(run, key);
+        if (ms === null || !Number.isFinite(ms)) return null;
+        const historicalLimit = historicalPhaseLimit(runRows, run, key);
+        const limitMs = Math.floor(historicalLimit ?? phaseBudgets[key]);
+        if (limitMs <= 0 || ms <= limitMs) return null;
+        return {
+          key,
+          ms,
+          limitMs,
+          limitKind: historicalLimit === null ? 'budget' : 'p95',
+          deltaMs: ms - limitMs,
+        };
+      })
+      .filter((item): item is { key: QaPhaseKey; ms: number; limitMs: number; limitKind: 'budget' | 'p95'; deltaMs: number } => Boolean(item))
+      .sort((a, b) => b.deltaMs - a.deltaMs);
+    const breach = breaches[0];
+    if (!breach) return null;
+    return {
+      id: `phase:${run.runId}:${breach.key}`,
+      severity: 'DEGRADED',
+      failureClass: 'performance',
+      title: 'Phase budget exceeded',
+      detail: `${phaseLabels[breach.key]} ${formatMs(breach.ms)} > ${breach.limitKind} ${formatMs(breach.limitMs)}`,
+      runId: run.runId,
+      createdAt: run.createdAt,
+      phaseKey: breach.key,
+      phaseLimitMs: breach.limitMs,
+    };
+  }
+
   function restartFailureItem(row: QaRestartAuditEntry): QaFailureInboxItem | null {
     const failed = row.status === 'spawn_error' || (row.exitCode !== null && row.exitCode !== 0);
     if (!failed) return null;
@@ -872,7 +940,12 @@
   }
 
   function buildFailureInbox(runRows: QaSummary[], auditRows: QaRestartAuditEntry[]): QaFailureInboxItem[] {
-    const runItems = runRows.flatMap((run) => [runFailureItem(run), browserFailureItem(run), benchmarkFailureItem(run)].filter(Boolean) as QaFailureInboxItem[]);
+    const runItems = runRows.flatMap((run) => [
+      runFailureItem(run),
+      browserFailureItem(run),
+      benchmarkFailureItem(run),
+      phaseBudgetFailureItem(run, runRows),
+    ].filter(Boolean) as QaFailureInboxItem[]);
     const restartItems = auditRows.map(restartFailureItem).filter(Boolean) as QaFailureInboxItem[];
     return [...runItems, ...restartItems].sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
   }
@@ -958,13 +1031,17 @@
     }
     activeView = 'e2e';
     if (item.runId === selectedRunId && selectedRun) {
-      selectedShardIndex = pickDefaultShard(selectedRun, item.failureClass);
+      selectedShardIndex = pickFailureShardIndex(selectedRun, item);
       rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
       focusFailureCue(item, selectedRun, selectedShardIndex);
       return;
     }
     await selectRun(item.runId);
-    if (selectedRun) focusFailureCue(item, selectedRun, selectedShardIndex);
+    if (selectedRun) {
+      selectedShardIndex = pickFailureShardIndex(selectedRun, item);
+      rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
+      focusFailureCue(item, selectedRun, selectedShardIndex);
+    }
   }
 
   function finiteSortValue(value: number | null | undefined, fallback: number): number {
@@ -1091,6 +1168,19 @@
     if (classIndex >= 0) return classIndex;
     const failedIndex = run.shards.findIndex((shard) => shard.status === 'failed');
     return failedIndex >= 0 ? failedIndex : 0;
+  }
+
+  function pickFailureShardIndex(run: QaRun, item: QaFailureInboxItem): number {
+    if (item.phaseKey) {
+      const limitMs = typeof item.phaseLimitMs === 'number' && Number.isFinite(item.phaseLimitMs)
+        ? item.phaseLimitMs
+        : phaseBudgets[item.phaseKey];
+      const phaseIndex = run.shards.findIndex((shard) =>
+        Boolean(shard.phaseMs && phaseValue(shard.phaseMs, item.phaseKey!) > limitMs)
+      );
+      if (phaseIndex >= 0) return phaseIndex;
+    }
+    return pickDefaultShard(run, item.failureClass);
   }
 
   function focusFailureCue(item: QaFailureInboxItem, run: QaRun, shardIndex: number): void {
