@@ -1,0 +1,123 @@
+<script lang="ts">
+  import type { Action } from 'svelte/action';
+  import type { RoutedSwapRouteCandidate } from './routed-swap-planner';
+
+  const noopAction: Action<HTMLElement> = () => {};
+
+  export let syncOrderAmountContainerAction: Action<HTMLElement> = noopAction;
+  export let liveOrderAmountInput = '';
+  export let orderAmountInput = '';
+  export let latestOrderAmountDomValue = '';
+  export let hasLatestOrderAmountDomValue = false;
+  export let orderAmountRevision = 0;
+  export let orderAmountDomRevision = 0;
+  export let orderAmountNodeValue = '';
+  export let giveToken = 0;
+  export let wantToken = 0;
+  export let giveTokenDecimals = 18;
+  export let giveAmount: bigint = 0n;
+  export let canonicalGiveAmount: bigint = 0n;
+  export let routeSummaryLabel = '';
+  export let routePathLabel = '';
+  export let routeVenueDisplayLabel = '';
+  export let routeSummaryAssetsLabel = '';
+  export let routeDetailsOpen = false;
+  export let swapRouteMode: 'same' | 'cross' = 'same';
+  export let liveSelectedRouteValue = '';
+  export let routePathSourceLabel = '';
+  export let routePathTargetLabel = '';
+  export let selectedRouteLabel = '';
+  export let sourceRouteEntityLabel = '';
+  export let targetRouteEntityLabel = '';
+  export let canAutoPrepareCrossInboundCapacity = false;
+  export let autoExtendCrossInbound = true;
+  export let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
+  export let showManualRouteRecommendation = false;
+  export let routedRouteRecommendations: RoutedSwapRouteCandidate[] = [];
+  export let manualRouteEstimateLabel: (route: RoutedSwapRouteCandidate) => string = () => '';
+</script>
+
+<div
+  class="route-builder"
+  class:cross-route={swapRouteMode === 'cross'}
+  use:syncOrderAmountContainerAction
+  data-testid="swap-route-picker"
+  data-order-amount-input={liveOrderAmountInput}
+  data-order-amount-state={orderAmountInput}
+  data-order-amount-dom={latestOrderAmountDomValue}
+  data-order-amount-has-dom={hasLatestOrderAmountDomValue ? 'true' : 'false'}
+  data-order-amount-revision={orderAmountRevision}
+  data-order-amount-dom-revision={orderAmountDomRevision}
+  data-order-amount-node={orderAmountNodeValue}
+  data-give-token={giveToken}
+  data-want-token={wantToken}
+  data-give-decimals={giveTokenDecimals}
+  data-give-amount={giveAmount.toString()}
+  data-canonical-give-amount={canonicalGiveAmount.toString()}
+>
+  <button
+    type="button"
+    class="route-summary"
+    title={`${routeSummaryLabel} · ${routePathLabel} · ${routeVenueDisplayLabel}`}
+    on:click={() => routeDetailsOpen = !routeDetailsOpen}
+  >
+    <span>Route</span>
+    <strong>{routeSummaryLabel}</strong>
+    <em>{routeSummaryAssetsLabel}</em>
+  </button>
+  <div
+    class="route-flow"
+    data-testid="swap-route-flow"
+    data-selected-route-value={liveSelectedRouteValue}
+    data-route-mode={swapRouteMode}
+    data-source-jurisdiction={routePathSourceLabel}
+    data-target-jurisdiction={routePathTargetLabel}
+    data-route-venue={routeVenueDisplayLabel}
+    data-selected-route-label={selectedRouteLabel}
+  >
+    <span title={`${sourceRouteEntityLabel} -> ${targetRouteEntityLabel}`}>{routePathLabel}</span>
+    <em>via {routeVenueDisplayLabel}</em>
+  </div>
+  {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
+    <label class="route-checkbox" data-testid="swap-cross-auto-extend">
+      <input type="checkbox" bind:checked={autoExtendCrossInbound} />
+      <span>Auto-extend target inbound capacity</span>
+    </label>
+  {/if}
+  {#if swapRouteMode === 'cross'}
+    <label class="route-select-row" data-testid="swap-cross-improvement-mode">
+      <span>Price improvement</span>
+      <select class="route-select" bind:value={crossPriceImprovementMode} title="Price improvement">
+        <option value="source_savings">Spend less source</option>
+        <option value="target_bonus">Receive more target</option>
+      </select>
+    </label>
+  {/if}
+  {#if routeDetailsOpen}
+    <div class="route-details">
+      <span>Source account: {sourceRouteEntityLabel}</span>
+      <span>Target account: {targetRouteEntityLabel}</span>
+      <span>Venue/orderbook: {routeVenueDisplayLabel}</span>
+    </div>
+  {/if}
+  {#if showManualRouteRecommendation}
+    <div class="manual-route-card" data-testid="swap-route-recommendation">
+      <div class="manual-route-head">
+        <span>No direct orderbook</span>
+        <strong>Swap manually in order</strong>
+      </div>
+      {#each routedRouteRecommendations as route (route.id)}
+        <div
+          class="manual-route-row"
+          data-testid="swap-route-recommendation-row"
+          data-route-id={route.id}
+          data-hop-count={route.hops.length}
+        >
+          <span>{route.label}</span>
+          <strong>{manualRouteEstimateLabel(route)}</strong>
+          <em>{route.summary}</em>
+        </div>
+      {/each}
+    </div>
+  {/if}
+</div>

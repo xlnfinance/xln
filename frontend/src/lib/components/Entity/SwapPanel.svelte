@@ -97,6 +97,7 @@
   import SwapOrderList from './SwapOrderList.svelte';
   import SwapCompletionDialog from './SwapCompletionDialog.svelte';
   import SwapOrderbookSection from './SwapOrderbookSection.svelte';
+  import SwapRouteBuilder from './SwapRouteBuilder.svelte';
   import type { SwapOrderbookLevelClickDetail, SwapOrderbookPairOption } from './swap-orderbook-view';
   import './SwapPanel.css';
 
@@ -3736,85 +3737,39 @@
         </div>
       </div>
 
-      <div
-        class="route-builder"
-        class:cross-route={swapRouteMode === 'cross'}
-        use:syncOrderAmountContainerAction
-        data-testid="swap-route-picker"
-        data-order-amount-input={liveOrderAmountInput}
-        data-order-amount-state={orderAmountInput}
-        data-order-amount-dom={latestOrderAmountDomValue}
-        data-order-amount-has-dom={hasLatestOrderAmountDomValue ? 'true' : 'false'}
-        data-order-amount-revision={orderAmountRevision}
-        data-order-amount-dom-revision={orderAmountDomRevision}
-        data-order-amount-node={String(orderAmountInputElement?.value ?? '')}
-        data-give-token={giveToken}
-        data-want-token={wantToken}
-        data-give-decimals={giveTokenDecimals}
-        data-give-amount={giveAmount.toString()}
-        data-canonical-give-amount={canonicalGiveAmount.toString()}
-      >
-        <button type="button" class="route-summary" title={`${routeSummaryLabel} · ${routePathLabel} · ${routeVenueDisplayLabel}`} on:click={() => routeDetailsOpen = !routeDetailsOpen}>
-          <span>Route</span>
-          <strong>{routeSummaryLabel}</strong>
-          <em>{routeSummaryAssetsLabel}</em>
-        </button>
-        <div
-          class="route-flow"
-          data-testid="swap-route-flow"
-          data-selected-route-value={liveSelectedRouteValue}
-          data-route-mode={swapRouteMode}
-          data-source-jurisdiction={routePathSourceLabel}
-          data-target-jurisdiction={routePathTargetLabel}
-          data-route-venue={routeVenueDisplayLabel}
-          data-selected-route-label={selectedRouteLabel}
-        >
-          <span title={`${sourceRouteEntityLabel} -> ${targetRouteEntityLabel}`}>{routePathLabel}</span>
-          <em>via {routeVenueDisplayLabel}</em>
-        </div>
-        {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
-          <label class="route-checkbox" data-testid="swap-cross-auto-extend">
-            <input type="checkbox" bind:checked={autoExtendCrossInbound} />
-            <span>Auto-extend target inbound capacity</span>
-          </label>
-        {/if}
-        {#if swapRouteMode === 'cross'}
-          <label class="route-select-row" data-testid="swap-cross-improvement-mode">
-            <span>Price improvement</span>
-            <select class="route-select" bind:value={crossPriceImprovementMode} title="Price improvement">
-              <option value="source_savings">Spend less source</option>
-              <option value="target_bonus">Receive more target</option>
-            </select>
-          </label>
-        {/if}
-        {#if routeDetailsOpen}
-          <div class="route-details">
-            <span>Source account: {sourceRouteEntityLabel}</span>
-            <span>Target account: {targetRouteEntityLabel}</span>
-            <span>Venue/orderbook: {routeVenueDisplayLabel}</span>
-          </div>
-        {/if}
-        {#if showManualRouteRecommendation}
-          <div class="manual-route-card" data-testid="swap-route-recommendation">
-            <div class="manual-route-head">
-              <span>No direct orderbook</span>
-              <strong>Swap manually in order</strong>
-            </div>
-            {#each routedRouteRecommendations as route (route.id)}
-              <div
-                class="manual-route-row"
-                data-testid="swap-route-recommendation-row"
-                data-route-id={route.id}
-                data-hop-count={route.hops.length}
-              >
-                <span>{route.label}</span>
-                <strong>{manualRouteEstimateLabel(route)}</strong>
-                <em>{route.summary}</em>
-              </div>
-            {/each}
-          </div>
-        {/if}
-      </div>
+      <SwapRouteBuilder
+        {syncOrderAmountContainerAction}
+        {liveOrderAmountInput}
+        {orderAmountInput}
+        {latestOrderAmountDomValue}
+        {hasLatestOrderAmountDomValue}
+        {orderAmountRevision}
+        {orderAmountDomRevision}
+        orderAmountNodeValue={String(orderAmountInputElement?.value ?? '')}
+        {giveToken}
+        {wantToken}
+        {giveTokenDecimals}
+        {giveAmount}
+        {canonicalGiveAmount}
+        {routeSummaryLabel}
+        {routePathLabel}
+        {routeVenueDisplayLabel}
+        {routeSummaryAssetsLabel}
+        bind:routeDetailsOpen
+        {swapRouteMode}
+        {liveSelectedRouteValue}
+        {routePathSourceLabel}
+        {routePathTargetLabel}
+        {selectedRouteLabel}
+        {sourceRouteEntityLabel}
+        {targetRouteEntityLabel}
+        {canAutoPrepareCrossInboundCapacity}
+        bind:autoExtendCrossInbound
+        bind:crossPriceImprovementMode
+        {showManualRouteRecommendation}
+        {routedRouteRecommendations}
+        {manualRouteEstimateLabel}
+      />
 
       <div class="avbl-row size-stats">
         <span data-testid="swap-available-stat">Available: <strong>{formattedAvailableGive}</strong></span>

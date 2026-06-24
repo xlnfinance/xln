@@ -185,6 +185,9 @@
       get() {
         return get(localEnvStore);
       },
+      set(value: Env | null) {
+        publishLocalEnv(value);
+      },
       configurable: true,
       enumerable: true,
     });
