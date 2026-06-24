@@ -15,16 +15,20 @@
   import { compareStableText } from '$lib/utils/stableSort';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import {
+    buildGraphAvailableRoutes,
     formatGraphDualConnectionAccountInfoFromReplicas,
     formatGraphEntityBalanceInfo,
     formatGraphEntityShortNameFromReplicas,
     formatGraphMempoolTxLabel,
     formatGraphReserveBadge,
+    getGraphEntityNameFromGossip,
     getGraphEntityFlag,
+    getGraphSignerIdForEntity,
+    graphEntityHasReserves,
     graphReserveValue,
-    graphReserveValues,
     graphTotalReserves,
     parseGraphScenarioSteps,
+    type GraphPaymentRoute,
   } from './graph3d-helpers';
   import {
     buildBirdViewSettings,
@@ -733,15 +737,7 @@
     maxRadius: number;
   }
   let activeRipples: Ripple[] = [];
-  let availableRoutes: Array<{
-    from: string;
-    to: string;
-    path: string[];
-    type: 'direct' | 'multihop';
-    description: string;
-    cost: number;
-    hops: number;
-  }> = [];
+  let availableRoutes: GraphPaymentRoute[] = [];
   let selectedRouteIndex: number = 0;
   let graphInitialized = false;
   let recentActivity: Array<{
@@ -3346,20 +3342,10 @@
     }
   }
   function getEntityName(entityId: string): string {
-    if (!env?.gossip) return '';
-    const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : (env.gossip.profiles || []);
-    const profile = profiles.find((p: any) => p.entityId === entityId);
-    return profile?.name || '';
+    return getGraphEntityNameFromGossip(env?.gossip, entityId);
   }
   function getSignerIdForEntity(entityId: string): string {
-    const currentReplicas = getTimeAwareReplicas();
-    for (const key of currentReplicas.keys() as IterableIterator<string>) {
-      if (key.startsWith(entityId + ':')) {
-        const signerId = key.slice(entityId.length + 1);
-        return signerId;
-      }
-    }
-    return entityId; // Fallback to entityId if no replica found
+    return getGraphSignerIdForEntity(getTimeAwareReplicas(), entityId);
   }
   function closeMiniPanel() {
     showMiniPanel = false;
@@ -3568,70 +3554,19 @@
     return EMPTY_SIZE; // Entity not found in replicas
   }
   function checkEntityHasReserves(entityId: string): boolean {
-    const currentReplicas = getTimeAwareReplicas();  // Time-aware, not stale reactive
-    for (const [key, value] of currentReplicas) {
-      if (key.startsWith(entityId + ':')) {
-        const replica = value as any;
-        const reserveValues = graphReserveValues(replica?.state?.reserves);
-        for (const amount of reserveValues) {
-          if (amount > 0n) return true;
-        }
-        return false;
-      }
-    }
-    return false;
+    return graphEntityHasReserves(getTimeAwareReplicas(), entityId);
   }
   function calculateAvailableRoutes(from: string, to: string) {
     if (!env) {
       availableRoutes = [];
       return;
     }
-    const routes: typeof availableRoutes = [];
-    const fromReplicaEntry = [...env.eReplicas.entries()].find(([k]) => k.startsWith(from + ':'));
-    const fromReplica = fromReplicaEntry?.[1];
-    if (fromReplica?.state?.accounts?.has(to)) {
-      routes.push({
-        from,
-        to,
-        path: [from, to],
-        type: 'direct',
-        description: `Direct: ${getEntityShortName(from)} → ${getEntityShortName(to)}`,
-        cost: 0,
-        hops: 1
-      });
-    }
-    const queue: Array<{current: string; path: string[]}> = [{current: from, path: [from]}];
-    const visited = new Set<string>([from]);
-    const maxHops = 10;
-    while (queue.length > 0) {
-      const item = queue.shift();
-      if (!item) break;
-      const {current, path} = item;
-      if (path.length > maxHops) continue;
-      const currentReplicaEntry = [...env.eReplicas.entries()].find(([k]) => k.startsWith(current + ':'));
-      const currentReplica = currentReplicaEntry?.[1];
-      if (!currentReplica?.state?.accounts) continue;
-      for (const [neighbor] of currentReplica.state.accounts.entries()) {
-        const neighborStr = String(neighbor);
-        if (neighborStr === to && path.length > 1) {
-          const fullPath = [...path, to];
-          routes.push({
-            from,
-            to,
-            path: fullPath,
-            type: 'multihop',
-            description: fullPath.map(id => getEntityShortName(id)).join(' → '),
-            cost: fullPath.length - 1, // Simple cost = hop count
-            hops: fullPath.length - 1
-          });
-        } else if (!visited.has(neighborStr) && neighborStr !== to) {
-          visited.add(neighborStr);
-          queue.push({current: neighborStr, path: [...path, neighborStr]});
-        }
-      }
-    }
-    routes.sort((a, b) => a.hops - b.hops);
-    availableRoutes = routes;
+    availableRoutes = buildGraphAvailableRoutes({
+      replicas: env.eReplicas,
+      from,
+      to,
+      getEntityShortName,
+    });
     selectedRouteIndex = 0;
   }
   async function sendPayment() {

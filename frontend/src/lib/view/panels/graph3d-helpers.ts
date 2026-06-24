@@ -21,6 +21,21 @@ export type GraphReplicaLike = {
   } | null;
 };
 
+export type GraphGossipLike = {
+  getProfiles?: () => Array<{ entityId?: string; name?: string }>;
+  profiles?: Array<{ entityId?: string; name?: string }>;
+} | null | undefined;
+
+export type GraphPaymentRoute = {
+  from: string;
+  to: string;
+  path: string[];
+  type: 'direct' | 'multihop';
+  description: string;
+  cost: number;
+  hops: number;
+};
+
 export type GraphScenarioStep = {
   timestamp: number;
   title: string;
@@ -223,6 +238,29 @@ export function findGraphReplicaByEntityId(
   return null;
 }
 
+export function getGraphEntityNameFromGossip(gossip: GraphGossipLike, entityId: string): string {
+  if (!gossip) return '';
+  const profiles = typeof gossip.getProfiles === 'function' ? gossip.getProfiles() : (gossip.profiles || []);
+  const profile = profiles.find((item) => String(item.entityId || '') === entityId);
+  return String(profile?.name || '');
+}
+
+export function getGraphSignerIdForEntity(replicas: Map<string, GraphReplicaLike>, entityId: string): string {
+  for (const key of replicas.keys()) {
+    if (key.startsWith(`${entityId}:`)) return key.slice(entityId.length + 1);
+  }
+  return entityId;
+}
+
+export function graphEntityHasReserves(replicas: Map<string, GraphReplicaLike>, entityId: string): boolean {
+  const replica = findGraphReplicaByEntityId(replicas, entityId);
+  if (!replica) return false;
+  for (const amount of graphReserveValues(replica.state?.reserves)) {
+    if (amount > 0n) return true;
+  }
+  return false;
+}
+
 export function formatGraphEntityBalanceInfo(input: {
   entityId: string;
   replicas: Map<string, GraphReplicaLike>;
@@ -248,6 +286,60 @@ export function formatGraphEntityShortNameFromReplicas(input: {
     runtimeShortId: input.getEntityShortId(input.entityId),
     signerId: replica?.signerId,
   });
+}
+
+export function buildGraphAvailableRoutes(input: {
+  replicas: Map<string, GraphReplicaLike>;
+  from: string;
+  to: string;
+  getEntityShortName: (entityId: string) => string;
+  maxHops?: number;
+}): GraphPaymentRoute[] {
+  const routes: GraphPaymentRoute[] = [];
+  const fromReplica = findGraphReplicaByEntityId(input.replicas, input.from);
+  if (fromReplica?.state?.accounts?.has(input.to)) {
+    routes.push({
+      from: input.from,
+      to: input.to,
+      path: [input.from, input.to],
+      type: 'direct',
+      description: `Direct: ${input.getEntityShortName(input.from)} → ${input.getEntityShortName(input.to)}`,
+      cost: 0,
+      hops: 1,
+    });
+  }
+
+  const queue: Array<{ current: string; path: string[] }> = [{ current: input.from, path: [input.from] }];
+  const visited = new Set<string>([input.from]);
+  const maxHops = input.maxHops ?? 10;
+  while (queue.length > 0) {
+    const item = queue.shift();
+    if (!item) break;
+    const { current, path } = item;
+    if (path.length > maxHops) continue;
+    const currentReplica = findGraphReplicaByEntityId(input.replicas, current);
+    if (!currentReplica?.state?.accounts) continue;
+    for (const [neighbor] of currentReplica.state.accounts.entries()) {
+      const neighborStr = String(neighbor);
+      if (neighborStr === input.to && path.length > 1) {
+        const fullPath = [...path, input.to];
+        routes.push({
+          from: input.from,
+          to: input.to,
+          path: fullPath,
+          type: 'multihop',
+          description: fullPath.map((id) => input.getEntityShortName(id)).join(' → '),
+          cost: fullPath.length - 1,
+          hops: fullPath.length - 1,
+        });
+      } else if (!visited.has(neighborStr) && neighborStr !== input.to) {
+        visited.add(neighborStr);
+        queue.push({ current: neighborStr, path: [...path, neighborStr] });
+      }
+    }
+  }
+
+  return routes.sort((a, b) => a.hops - b.hops);
 }
 
 export function formatGraphDualConnectionAccountInfo(input: {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  buildGraphAvailableRoutes,
   findGraphReplicaByEntityId,
   formatGraphDualConnectionAccountInfo,
   formatGraphDualConnectionAccountInfoFromReplicas,
@@ -11,6 +12,9 @@ import {
   formatGraphFinancialAmount,
   formatGraphMempoolTxLabel,
   formatGraphReserveBadge,
+  getGraphEntityNameFromGossip,
+  getGraphSignerIdForEntity,
+  graphEntityHasReserves,
   graphReserveValue,
   graphReserveValues,
   graphTotalReserves,
@@ -175,6 +179,62 @@ describe('graph3d helpers', () => {
       right: 'Our Credit: 30\nCollateral: 70\nTheir Credit: 50\nNet: -10',
       leftEntity: 'ALICE',
       rightEntity: 'BOB',
+    });
+  });
+
+  test('extracts graph gossip names, signer ids, reserve presence, and payment routes', () => {
+    const replicas = new Map([
+      ['alice:signer-a', {
+        state: {
+          reserves: new Map<string, bigint>([['1', 1n]]),
+          accounts: new Map([['hub', {}]]),
+        },
+      }],
+      ['hub:signer-h', {
+        state: {
+          reserves: new Map<string, bigint>([['1', 0n]]),
+          accounts: new Map([['bob', {}], ['alice', {}]]),
+        },
+      }],
+      ['bob:signer-b', {
+        state: {
+          accounts: new Map([['alice', {}]]),
+        },
+      }],
+    ]);
+
+    expect(getGraphEntityNameFromGossip({
+      getProfiles: () => [{ entityId: 'alice', name: 'Alice Bank' }],
+    }, 'alice')).toBe('Alice Bank');
+    expect(getGraphSignerIdForEntity(replicas, 'alice')).toBe('signer-a');
+    expect(getGraphSignerIdForEntity(replicas, 'missing')).toBe('missing');
+    expect(graphEntityHasReserves(replicas, 'alice')).toBe(true);
+    expect(graphEntityHasReserves(replicas, 'hub')).toBe(false);
+    expect(buildGraphAvailableRoutes({
+      replicas,
+      from: 'alice',
+      to: 'bob',
+      getEntityShortName: (id) => id.toUpperCase(),
+    })).toEqual([
+      {
+        from: 'alice',
+        to: 'bob',
+        path: ['alice', 'hub', 'bob'],
+        type: 'multihop',
+        description: 'ALICE → HUB → BOB',
+        cost: 2,
+        hops: 2,
+      },
+    ]);
+    expect(buildGraphAvailableRoutes({
+      replicas,
+      from: 'alice',
+      to: 'hub',
+      getEntityShortName: (id) => id.toUpperCase(),
+    })[0]).toMatchObject({
+      path: ['alice', 'hub'],
+      type: 'direct',
+      description: 'Direct: ALICE → HUB',
     });
   });
 
