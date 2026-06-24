@@ -551,8 +551,19 @@
   let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
   let restartAbortConfirm = $state('');
   let restartAbortBusy = $state(false);
+  let runWindowSize = $state(80);
+  let shardWindowSize = $state(80);
+  let historyWindowSize = $state(80);
+  let ledgerWindowSize = $state(80);
+  let artifactWindowSize = $state(40);
   let systemVerdict = $state<QaSystemVerdict | null>(null);
   let showRawLogTail = $state(false);
+
+  const RUN_WINDOW_STEP = 80;
+  const SHARD_WINDOW_STEP = 80;
+  const HISTORY_WINDOW_STEP = 80;
+  const LEDGER_WINDOW_STEP = 80;
+  const ARTIFACT_WINDOW_STEP = 40;
 
   const phaseOrder: QaPhaseKey[] = ['preflight', 'anvilBoot', 'apiBoot', 'apiHealthy', 'viteBoot', 'playwright'];
   const phaseLabels: Record<QaPhaseKey, string> = {
@@ -648,6 +659,12 @@
   const sortedShardEntries = $derived((selectedRun?.shards ?? [])
     .map((shard, index) => ({ shard, index }))
     .sort((a, b) => compareShardsForSort(a, b, shardSortKey)));
+  const visibleRuns = $derived(sortedRuns.slice(0, runWindowSize));
+  const visibleHistory = $derived(sortedHistory.slice(0, historyWindowSize));
+  const visibleLedger = $derived(sortedLedger.slice(0, ledgerWindowSize));
+  const visibleShardEntries = $derived(sortedShardEntries.slice(0, shardWindowSize));
+  const selectedShardEvidenceArtifacts = $derived(selectedShard ? shardEvidenceArtifacts(selectedShard) : []);
+  const visibleSelectedShardEvidenceArtifacts = $derived(selectedShardEvidenceArtifacts.slice(0, artifactWindowSize));
   const failureInbox = $derived(buildFailureInbox(runs, restartAudit));
   const filteredFailureInbox = $derived(
     selectedFailureClass === 'all'
@@ -1312,12 +1329,16 @@
     const shard = selectedRun.shards[index];
     if (!shard) return;
     selectedShardIndex = index;
+    artifactWindowSize = ARTIFACT_WINDOW_STEP;
     showRawLogTail = false;
     rememberRunInUrl(selectedRun.runId, shard.shard);
   }
 
   function setFailureClassFilter(failureClass: QaFailureClassFilter): void {
     selectedFailureClass = failureClass;
+    runWindowSize = RUN_WINDOW_STEP;
+    shardWindowSize = SHARD_WINDOW_STEP;
+    artifactWindowSize = ARTIFACT_WINDOW_STEP;
     if (selectedRun) {
       selectedShardIndex = pickDefaultShard(selectedRun, failureClass);
       showRawLogTail = false;
@@ -1539,6 +1560,8 @@
   async function selectRun(runId: string): Promise<void> {
     if (!runId || runId === selectedRunId) return;
     selectedRunId = runId;
+    shardWindowSize = SHARD_WINDOW_STEP;
+    artifactWindowSize = ARTIFACT_WINDOW_STEP;
     rememberRunInUrl(runId, null);
     await loadRun(runId);
   }
@@ -1823,7 +1846,7 @@
       {:else if sortedRuns.length === 0}
         <div class="empty">No runs for {selectedFailureClass}</div>
       {:else}
-        {#each sortedRuns as run}
+        {#each visibleRuns as run}
           <button
             class="run-row"
             class:selected={run.runId === selectedRunId}
@@ -1859,6 +1882,16 @@
             {/if}
           </button>
         {/each}
+        {#if visibleRuns.length < sortedRuns.length}
+          <button
+            class="window-more"
+            type="button"
+            data-testid="qa-runs-show-more"
+            onclick={() => (runWindowSize += RUN_WINDOW_STEP)}
+          >
+            Show {Math.min(RUN_WINDOW_STEP, sortedRuns.length - visibleRuns.length)} more runs · {visibleRuns.length}/{sortedRuns.length}
+          </button>
+        {/if}
       {/if}
     </div>
   </aside>
@@ -2282,7 +2315,7 @@
             <div class="empty">No canonical ledger rows indexed yet</div>
           {:else}
             <div class="history-table ledger-table">
-              {#each sortedLedger as row}
+              {#each visibleLedger as row}
                 <article
                   class:bad={row.status === 'failed'}
                   class:ok={row.status === 'passed'}
@@ -2311,10 +2344,20 @@
                 </article>
               {/each}
             </div>
+            {#if visibleLedger.length < sortedLedger.length}
+              <button
+                class="window-more"
+                type="button"
+                data-testid="qa-ledger-show-more"
+                onclick={() => (ledgerWindowSize += LEDGER_WINDOW_STEP)}
+              >
+                Show {Math.min(LEDGER_WINDOW_STEP, sortedLedger.length - visibleLedger.length)} more ledger rows · {visibleLedger.length}/{sortedLedger.length}
+              </button>
+            {/if}
           {/if}
         </section>
         <div class="history-table">
-          {#each sortedHistory as row}
+          {#each visibleHistory as row}
             <article
               class:bad={row.status === 'failed'}
               class:ok={row.status === 'passed'}
@@ -2335,6 +2378,16 @@
             </article>
           {/each}
         </div>
+        {#if visibleHistory.length < sortedHistory.length}
+          <button
+            class="window-more"
+            type="button"
+            data-testid="qa-history-show-more"
+            onclick={() => (historyWindowSize += HISTORY_WINDOW_STEP)}
+          >
+            Show {Math.min(HISTORY_WINDOW_STEP, sortedHistory.length - visibleHistory.length)} more history rows · {visibleHistory.length}/{sortedHistory.length}
+          </button>
+        {/if}
         <section class="retention-card" data-testid="qa-history-backfill-card">
           <div>
             <div class="eyebrow">Maintenance</div>
@@ -2481,7 +2534,7 @@
             <span>{selectedRun.failedShards} failed</span>
           </div>
         </div>
-        {#each sortedShardEntries as { shard, index }}
+        {#each visibleShardEntries as { shard, index }}
           <button
             class="suite-row"
             class:selected={index === selectedShardIndex}
@@ -2530,6 +2583,16 @@
             </div>
           </button>
         {/each}
+        {#if visibleShardEntries.length < sortedShardEntries.length}
+          <button
+            class="window-more"
+            type="button"
+            data-testid="qa-shards-show-more"
+            onclick={() => (shardWindowSize += SHARD_WINDOW_STEP)}
+          >
+            Show {Math.min(SHARD_WINDOW_STEP, sortedShardEntries.length - visibleShardEntries.length)} more shards · {visibleShardEntries.length}/{sortedShardEntries.length}
+          </button>
+        {/if}
       </section>
 
       {#if selectedShard}
@@ -2702,9 +2765,9 @@
 
               <section class="panel-block" data-testid="qa-evidence-artifacts">
                 <h4>Evidence Files</h4>
-                {#if shardEvidenceArtifacts(selectedShard).length > 0}
+                {#if selectedShardEvidenceArtifacts.length > 0}
                   <div class="artifact-list">
-                    {#each shardEvidenceArtifacts(selectedShard) as artifact}
+                    {#each visibleSelectedShardEvidenceArtifacts as artifact}
                       <button type="button" onclick={() => openProtectedArtifact(artifact.url)}>
                         <span>{artifactLabel(artifact)}</span>
                         <strong>{artifact.name}</strong>
@@ -2713,6 +2776,16 @@
                       </button>
                     {/each}
                   </div>
+                  {#if visibleSelectedShardEvidenceArtifacts.length < selectedShardEvidenceArtifacts.length}
+                    <button
+                      class="window-more"
+                      type="button"
+                      data-testid="qa-artifacts-show-more"
+                      onclick={() => (artifactWindowSize += ARTIFACT_WINDOW_STEP)}
+                    >
+                      Show {Math.min(ARTIFACT_WINDOW_STEP, selectedShardEvidenceArtifacts.length - visibleSelectedShardEvidenceArtifacts.length)} more artifacts · {visibleSelectedShardEvidenceArtifacts.length}/{selectedShardEvidenceArtifacts.length}
+                    </button>
+                  {/if}
                 {:else}
                   <div class="empty">No non-media artifact files captured</div>
                 {/if}
@@ -2999,6 +3072,24 @@
     max-height: calc(100vh - 18rem);
     overflow: auto;
     padding-right: 0.15rem;
+  }
+
+  .window-more {
+    min-height: 34px;
+    width: 100%;
+    border: 1px solid rgba(158, 194, 255, 0.22);
+    border-radius: 7px;
+    background: rgba(158, 194, 255, 0.06);
+    color: #9ec2ff;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .window-more:hover {
+    border-color: rgba(158, 194, 255, 0.38);
+    background: rgba(158, 194, 255, 0.1);
   }
 
   .run-row,
