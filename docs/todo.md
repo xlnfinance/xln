@@ -304,6 +304,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
   - Evidence: `bun run check` PASS. Largest frontend files after the split are `EntityPanelTabs.svelte` 4,875 lines, `/qa/+page.svelte` 4,503 lines, `Graph3DPanel.svelte` 4,344 lines, and `SwapPanel.svelte` 4,210 lines.
 
+- [x] Move QA cockpit API/UI types out of the Svelte route.
+  - Impact: medium-high.
+  - Current issue: `/qa/+page.svelte` redeclared the QA API contract locally, and importing the server report module directly into the frontend would pull `bun:sqlite` into the browser type graph.
+  - Status: done. Added browser-safe `runtime/qa/types.ts` for shared QA contracts and a thin `$lib/qa/types.ts` for UI-only cockpit types. `/qa/+page.svelte` now imports those contracts instead of carrying 500 lines of duplicate type declarations. The isolated e2e runner also imports type-only QA contracts from `runtime/qa/types.ts` while keeping server functions in `runtime/qa/report.ts`.
+  - Evidence: `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; `bun test runtime/__tests__/qa-story-report.test.ts` PASS `42/42`; focused QA cockpit e2e `20260624-163926-929` PASS `1/1`, wall `10.2s`, code hash `7675ff0595bcdbc1`.
+
 ## p2 performance and scale
 
 - [x] Make `listQaHistory` pure SELECT on the hot path.

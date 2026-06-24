@@ -46,13 +46,15 @@ import {
   summarizeQaFailureClasses,
   summarizeQaBrowserIssues,
   summarizeQaRunBrowserHealth,
-  type QaArtifact,
-  type QaArtifactKind,
-  type QaBrowserIssue,
-  type QaRunManifest,
-  type QaScenarioMetadata,
-  type QaSlowStep,
 } from '../qa/report';
+import type {
+  QaArtifact,
+  QaArtifactKind,
+  QaBrowserIssue,
+  QaRunManifest,
+  QaScenarioMetadata,
+  QaSlowStep,
+} from '../qa/types';
 import { compareStableText } from '../serialization-utils';
 import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
 
