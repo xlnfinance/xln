@@ -103,7 +103,7 @@
     canonicalizeEntityPanelRoute,
     getLocationHashParams,
     getLocationHashRoute,
-    getLocationParamValue,
+    resolveEntityPanelDeepLinkFromLocation,
     type AccountWorkspaceTab,
     type AssetWorkspaceTab,
     type ConfigureWorkspaceTab,
@@ -191,18 +191,6 @@
     return resolveConfiguredApiBase(window.location.origin);
   }
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-  function getUrlHashRoute(): string | null {
-    if (typeof window === 'undefined') return null;
-    return getLocationHashRoute(window.location);
-  }
-  function getUrlHashParams(): URLSearchParams | null {
-    if (typeof window === 'undefined') return null;
-    return getLocationHashParams(window.location);
-  }
-  function getUrlParamValue(keys: string[]): string | null {
-    if (typeof window === 'undefined') return null;
-    return getLocationParamValue(window.location, keys);
-  }
   function buildHashRouteFromState(): string {
     return buildEntityPanelHashRouteFromState({
       activeTab,
@@ -213,118 +201,26 @@
   }
   function applyDeepLinkViewFromUrl(): void {
     if (typeof window === 'undefined') return;
-    const hashRoute = canonicalizeEntityPanelRoute(getUrlHashRoute());
-    const view = String(getUrlParamValue(['view']) || hashRoute || '').trim().toLowerCase();
-    const subview = String(getUrlParamValue(['subview', 'sub']) || '').trim().toLowerCase();
-    const jurisdiction = String(getUrlParamValue(['jId', 'jurisdiction', 'j']) || '').trim();
-    switch (view) {
-      case 'assets':
-        activeTab = 'assets';
-        assetWorkspaceTab = 'move';
-        break;
-      case 'assets/history':
-        activeTab = 'assets';
-        assetWorkspaceTab = 'history';
-        break;
-      case 'accounts':
-      case 'accounts/open':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'open';
-        break;
-      case 'accounts/send':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'send';
-        break;
-      case 'accounts/receive':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'receive';
-        break;
-      case 'accounts/swap':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'swap';
-        break;
-      case 'accounts/move':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'move';
-        break;
-      case 'accounts/history':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'history';
-        break;
-      case 'accounts/configure':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'configure';
-        break;
-      case 'accounts/activity':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'activity';
-        break;
-      case 'accounts/appearance':
-        activeTab = 'accounts';
-        accountWorkspaceTab = 'appearance';
-        break;
-      case 'settings':
-        activeTab = 'settings';
-        settingsSubview = 'wallet';
-        break;
-      case 'settings/recovery':
-        activeTab = 'settings';
-        settingsSubview = 'recovery';
-        break;
-      case 'settings/display':
-        activeTab = 'settings';
-        settingsSubview = 'display';
-        break;
-      case 'settings/network':
-        activeTab = 'settings';
-        settingsSubview = 'network';
-        break;
-      case 'settings/data':
-        activeTab = 'settings';
-        settingsSubview = 'data';
-        break;
-      case 'settings/log':
-        activeTab = 'settings';
-        settingsSubview = 'log';
-        break;
-      case 'settings/entity':
-        activeTab = 'settings';
-        settingsSubview = 'entity';
-        break;
-      default:
-        break;
-    }
-    if (view === 'settings' && subview) {
-      const nextSettingsSubview = ['wallet', 'recovery', 'display', 'network', 'data', 'log', 'entity'].includes(subview)
-        ? subview as SettingsSubview
-        : null;
-      if (nextSettingsSubview) settingsSubview = nextSettingsSubview;
-    }
-    if (view === 'configure' && subview) {
-      const nextConfigureTab =
-        subview === 'credit'
-          ? 'extend-credit'
-          : ['extend-credit', 'request-credit', 'collateral', 'token'].includes(subview)
-            ? subview as ConfigureWorkspaceTab
-            : null;
-      if (nextConfigureTab) configureWorkspaceTab = nextConfigureTab;
-    }
-    if (jurisdiction) {
-      const matched = availableJurisdictions.find((candidate) =>
-        String(candidate?.name || '').trim().toLowerCase() === jurisdiction.toLowerCase(),
-      );
-      selectedJurisdictionName = matched?.name ?? jurisdiction;
-    }
+    const next = resolveEntityPanelDeepLinkFromLocation(
+      window.location,
+      availableJurisdictions.map((candidate) => candidate?.name),
+    );
+    if (next.activeTab) activeTab = next.activeTab;
+    if (next.assetWorkspaceTab) assetWorkspaceTab = next.assetWorkspaceTab;
+    if (next.settingsSubview) settingsSubview = next.settingsSubview;
+    if (next.accountWorkspaceTab) accountWorkspaceTab = next.accountWorkspaceTab;
+    if (next.configureWorkspaceTab) configureWorkspaceTab = next.configureWorkspaceTab;
+    if ('selectedJurisdictionName' in next) selectedJurisdictionName = next.selectedJurisdictionName ?? null;
   }
   function syncHashToCurrentView(): void {
     if (typeof window === 'undefined') return;
     const nextRoute = buildHashRouteFromState();
-    const currentRoute = getUrlHashRoute();
+    const currentRoute = getLocationHashRoute(window.location);
     const currentCanonical = canonicalizeEntityPanelRoute(currentRoute);
     if (typeof currentRoute === 'string' && currentRoute.toLowerCase().startsWith('pay/') && nextRoute === 'accounts/send') {
       return;
     }
-    const params = getUrlHashParams();
+    const params = getLocationHashParams(window.location);
     const preserveParams = currentCanonical === nextRoute && params && params.toString().length > 0;
     const nextHash = preserveParams ? `${nextRoute}?${params.toString()}` : nextRoute;
     const currentHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
@@ -4261,7 +4157,8 @@
   }
   let lastDeepLinkWorkspaceSignature = '';
   $: {
-    const signature = `${getUrlHashRoute() || ''}|${workspaceAccountIds.length}|${accountIds.length}`;
+    const hashRoute = typeof window === 'undefined' ? '' : getLocationHashRoute(window.location) || '';
+    const signature = `${hashRoute}|${workspaceAccountIds.length}|${accountIds.length}`;
     if (signature !== lastDeepLinkWorkspaceSignature) {
       lastDeepLinkWorkspaceSignature = signature;
       applyDeepLinkViewFromUrl();

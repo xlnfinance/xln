@@ -11,6 +11,22 @@ export type EntityPanelRouteState = {
   accountWorkspaceTab: AccountWorkspaceTab;
 };
 
+export type EntityPanelDeepLinkRequest = {
+  hashRoute?: string | null;
+  view?: string | null;
+  subview?: string | null;
+  jurisdiction?: string | null;
+  availableJurisdictionNames?: readonly (string | null | undefined)[];
+};
+
+export type EntityPanelDeepLinkUpdate = Partial<EntityPanelRouteState & {
+  configureWorkspaceTab: ConfigureWorkspaceTab;
+  selectedJurisdictionName: string | null;
+}>;
+
+const settingsSubviews: readonly SettingsSubview[] = ['wallet', 'recovery', 'display', 'network', 'data', 'log', 'entity'];
+const configureWorkspaceTabs: readonly ConfigureWorkspaceTab[] = ['extend-credit', 'request-credit', 'collateral', 'token', 'dispute'];
+
 export function getLocationHashRoute(location: Location): string | null {
   const hashRaw = location.hash.startsWith('#') ? location.hash.slice(1) : location.hash;
   if (!hashRaw) return null;
@@ -121,6 +137,128 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
     default:
       return null;
   }
+}
+
+export function resolveEntityPanelDeepLink(input: EntityPanelDeepLinkRequest): EntityPanelDeepLinkUpdate {
+  const update: EntityPanelDeepLinkUpdate = {};
+  const hashRoute = canonicalizeEntityPanelRoute(input.hashRoute ?? null);
+  const view = String(input.view || hashRoute || '').trim().toLowerCase();
+  const subview = String(input.subview || '').trim().toLowerCase();
+  const jurisdiction = String(input.jurisdiction || '').trim();
+
+  switch (view) {
+    case 'assets':
+      update.activeTab = 'assets';
+      update.assetWorkspaceTab = 'move';
+      break;
+    case 'assets/history':
+      update.activeTab = 'assets';
+      update.assetWorkspaceTab = 'history';
+      break;
+    case 'accounts':
+    case 'accounts/open':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'open';
+      break;
+    case 'accounts/send':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'send';
+      break;
+    case 'accounts/receive':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'receive';
+      break;
+    case 'accounts/swap':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'swap';
+      break;
+    case 'accounts/move':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'move';
+      break;
+    case 'accounts/lending':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'lending';
+      break;
+    case 'accounts/history':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'history';
+      break;
+    case 'accounts/configure':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'configure';
+      break;
+    case 'accounts/activity':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'activity';
+      break;
+    case 'accounts/appearance':
+      update.activeTab = 'accounts';
+      update.accountWorkspaceTab = 'appearance';
+      break;
+    case 'settings':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'wallet';
+      break;
+    case 'settings/recovery':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'recovery';
+      break;
+    case 'settings/display':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'display';
+      break;
+    case 'settings/network':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'network';
+      break;
+    case 'settings/data':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'data';
+      break;
+    case 'settings/log':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'log';
+      break;
+    case 'settings/entity':
+      update.activeTab = 'settings';
+      update.settingsSubview = 'entity';
+      break;
+    default:
+      break;
+  }
+
+  if (view === 'settings' && settingsSubviews.includes(subview as SettingsSubview)) {
+    update.settingsSubview = subview as SettingsSubview;
+  }
+  if (view === 'configure' && subview) {
+    if (subview === 'credit') {
+      update.configureWorkspaceTab = 'extend-credit';
+    } else if (configureWorkspaceTabs.includes(subview as ConfigureWorkspaceTab)) {
+      update.configureWorkspaceTab = subview as ConfigureWorkspaceTab;
+    }
+  }
+  if (jurisdiction) {
+    const matched = input.availableJurisdictionNames?.find((candidate) =>
+      String(candidate || '').trim().toLowerCase() === jurisdiction.toLowerCase(),
+    );
+    update.selectedJurisdictionName = matched ? String(matched) : jurisdiction;
+  }
+  return update;
+}
+
+export function resolveEntityPanelDeepLinkFromLocation(
+  location: Location,
+  availableJurisdictionNames: readonly (string | null | undefined)[] = [],
+): EntityPanelDeepLinkUpdate {
+  const hashRoute = canonicalizeEntityPanelRoute(getLocationHashRoute(location));
+  return resolveEntityPanelDeepLink({
+    hashRoute,
+    view: getLocationParamValue(location, ['view']),
+    subview: getLocationParamValue(location, ['subview', 'sub']),
+    jurisdiction: getLocationParamValue(location, ['jId', 'jurisdiction', 'j']),
+    availableJurisdictionNames,
+  });
 }
 
 export function buildEntityPanelHashRouteFromState(state: EntityPanelRouteState): string {

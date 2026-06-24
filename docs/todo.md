@@ -296,13 +296,15 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused UI screenshot browser flow PASS `1/1`, run `20260624-160118-721`, wall `31.4s`, code hash `241c8b94ecb691be`, benchmark insufficient because no previous comparable run. Regenerated gallery PNGs were restored because the nav extraction is visually identical and the PNG deltas were rerun churn.
   - Progress: current file-size phase done. Account selector, hero tabs, activity, open-account, configure-account, appearance, assets, and pending-batch preview logic moved into dedicated `Entity/*` components/helpers. `EntityPanelTabs.svelte` is now 4,875 lines.
   - Evidence: `bun run check` PASS; frontend file-size gate PASS; `svelte-check 0 errors / 0 warnings`; focused isolated e2e `20260624-163027-981` PASS `2/2`, wall `33.5s`, HEAD `b5d6a96c092f`, code hash `804dc251bee8d69d`. The run covers BrowserVM/Graph3D visual path plus desktop/mobile main-tab screenshots. Browser issues: `0` errors, only WebGL driver `ReadPixels` perf warnings.
+  - Progress: seventh extraction done. Deep-link route parsing and tab/subview reducer moved into `entity-panel-routing.ts`; `EntityPanelTabs.svelte` now only applies the typed update to Svelte state and is down to 4,772 lines.
+  - Evidence: L1 `bun test tests/frontend/entity-panel-routing.test.ts` PASS `5/5`; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused `/app#pay` deep-link e2e `20260624-165103-048` PASS `1/1`, wall `19.4s`, code hash `2042b9393cd84e77`, browser errors `0`.
   - Remaining: keep reducing this parent below the limit with real component ownership, not just line pruning. Next cuts should move account form actions and account-tab state machines out of the parent.
 
 - [x] Enforce frontend source file-size invariant in the main check.
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `EntityPanelTabs.svelte` 4,875 lines, `Graph3DPanel.svelte` 4,344 lines, `SwapPanel.svelte` 4,210 lines, and `/qa/+page.svelte` 3,663 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `EntityPanelTabs.svelte` 4,772 lines, `Graph3DPanel.svelte` 4,344 lines, `SwapPanel.svelte` 4,210 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move QA cockpit API/UI types out of the Svelte route.
   - Impact: medium-high.
