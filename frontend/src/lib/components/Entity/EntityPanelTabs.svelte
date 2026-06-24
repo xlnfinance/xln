@@ -59,6 +59,7 @@
   import AssetLedgerTable from './AssetLedgerTable.svelte';
   import AssetFaucetCard from './AssetFaucetCard.svelte';
   import AssetWalletMeta from './AssetWalletMeta.svelte';
+  import PendingBatchNotice from './PendingBatchNotice.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
@@ -169,6 +170,7 @@
   let configureTokenId = 1;
   let pendingBatchSubmitting = false;
   let debtEnforcingTokenId: number | null = null;
+  let pendingBatchMode: 'draft' | 'sent' | null = null;
 
   // State
   let replica: EntityReplica | null = null;
@@ -5466,54 +5468,22 @@
           />
 
           <section class="asset-action-card">
-            {#if openOutgoingDebtSummary.count > 0}
-              <div class="workspace-debt-warning" data-testid="workspace-debt-warning">
-                <div class="workspace-debt-warning-copy">
-                  <span class="workspace-debt-warning-kicker">Open debts across all tokens</span>
-                  <strong>{openOutgoingDebtSummary.count} open · {formatApproxUsd(openOutgoingDebtSummary.usdTotal)}</strong>
-                </div>
-                <span class="workspace-debt-warning-note">Reserve spends sweep debts first. Enforce or refill before broadcasting risky reserve moves.</span>
-              </div>
-            {/if}
-
-            {#if pendingBatchCount > 0}
-              <div
-                class="workspace-pending-banner"
-                data-testid="workspace-pending-banner"
-                data-pending-count={pendingBatchCount}
-              >
-                <div class="workspace-pending-copy">
-                  <div class="workspace-pending-head">
-                    <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
-                    <span class="workspace-pending-note">What will go on-chain next</span>
-                  </div>
-                  {#if pendingBatchReserveIssueText}
-                    <div class="workspace-pending-alert">{pendingBatchReserveIssueText}</div>
-                  {/if}
-                  <div class="workspace-pending-list">
-                    {#each pendingBatchPreview as item (item.key)}
-                      <div class="workspace-pending-chip">
-                        <strong>{item.title}</strong>
-                        <span>{item.subtitle}</span>
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-                <div class="workspace-pending-actions">
-                  <button class="btn-table-action" type="button" on:click={openAssetHistoryWorkspace}>History</button>
-                  <button class="btn-table-action" type="button" data-testid="settle-clear-batch" on:click={clearPendingBatch} disabled={pendingBatchSubmitting}>Clear Batch</button>
-                  {#if hasSentBatch}
-                    <button class="btn-table-action deposit" type="button" data-testid="settle-rebroadcast" on:click={rebroadcastPendingBatch} disabled={pendingBatchSubmitting}>
-                      {pendingBatchSubmitting ? 'Working...' : 'Rebroadcast'}
-                    </button>
-                  {:else}
-                    <button class="btn-table-action deposit" type="button" data-testid="settle-sign-broadcast" on:click={broadcastPendingBatch} disabled={!canBroadcastPendingBatch || pendingBatchSubmitting}>
-                      {pendingBatchSubmitting ? 'Working...' : 'Sign & Broadcast'}
-                    </button>
-                  {/if}
-                </div>
-              </div>
-            {/if}
+            <PendingBatchNotice
+              debtCount={openOutgoingDebtSummary.count}
+              debtUsdLabel={formatApproxUsd(openOutgoingDebtSummary.usdTotal)}
+              debtNote="Reserve spends sweep debts first. Enforce or refill before broadcasting risky reserve moves."
+              pendingCount={pendingBatchCount}
+              pendingMode={pendingBatchMode}
+              reserveIssueText={pendingBatchReserveIssueText}
+              previewItems={pendingBatchPreview}
+              submitting={pendingBatchSubmitting}
+              {hasSentBatch}
+              canBroadcast={canBroadcastPendingBatch}
+              openHistory={openAssetHistoryWorkspace}
+              clearBatch={clearPendingBatch}
+              rebroadcastBatch={rebroadcastPendingBatch}
+              broadcastBatch={broadcastPendingBatch}
+            />
 
             <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
               <button class="account-workspace-tab" data-testid="asset-tab-move" class:active={assetWorkspaceTab === 'move'} on:click={openAssetMoveWorkspace}>
@@ -5619,54 +5589,22 @@
             on:settleApprove={handleQuickSettleApprove}
           />
 
-          {#if openOutgoingDebtSummary.count > 0}
-            <div class="workspace-debt-warning" data-testid="workspace-debt-warning">
-              <div class="workspace-debt-warning-copy">
-                <span class="workspace-debt-warning-kicker">Open debts across all tokens</span>
-                <strong>{openOutgoingDebtSummary.count} open · {formatApproxUsd(openOutgoingDebtSummary.usdTotal)}</strong>
-              </div>
-              <span class="workspace-debt-warning-note">Reserve spends sweep debts first. Sign & Broadcast stays locked while the draft still overspends after debt collection.</span>
-            </div>
-          {/if}
-
-          {#if pendingBatchCount > 0}
-            <div
-              class="workspace-pending-banner"
-              data-testid="workspace-pending-banner"
-              data-pending-count={pendingBatchCount}
-            >
-              <div class="workspace-pending-copy">
-                <div class="workspace-pending-head">
-                  <span class="workspace-pending-kicker">{pendingBatchMode === 'sent' ? 'Sent Batch' : 'Draft Batch'}</span>
-                  <span class="workspace-pending-note">What will go on-chain next</span>
-                </div>
-                {#if pendingBatchReserveIssueText}
-                  <div class="workspace-pending-alert">{pendingBatchReserveIssueText}</div>
-                {/if}
-                <div class="workspace-pending-list">
-                  {#each pendingBatchPreview as item (item.key)}
-                    <div class="workspace-pending-chip">
-                      <strong>{item.title}</strong>
-                      <span>{item.subtitle}</span>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-              <div class="workspace-pending-actions">
-                <button class="btn-table-action" type="button" on:click={openAccountHistoryWorkspace}>History</button>
-                <button class="btn-table-action" type="button" data-testid="settle-clear-batch" on:click={clearPendingBatch} disabled={pendingBatchSubmitting}>Clear Batch</button>
-                {#if hasSentBatch}
-                  <button class="btn-table-action deposit" type="button" data-testid="settle-rebroadcast" on:click={rebroadcastPendingBatch} disabled={pendingBatchSubmitting}>
-                    {pendingBatchSubmitting ? 'Working...' : 'Rebroadcast'}
-                  </button>
-                {:else}
-                  <button class="btn-table-action deposit" type="button" data-testid="settle-sign-broadcast" on:click={broadcastPendingBatch} disabled={!canBroadcastPendingBatch || pendingBatchSubmitting}>
-                    {pendingBatchSubmitting ? 'Working...' : 'Sign & Broadcast'}
-                  </button>
-                {/if}
-              </div>
-            </div>
-          {/if}
+          <PendingBatchNotice
+            debtCount={openOutgoingDebtSummary.count}
+            debtUsdLabel={formatApproxUsd(openOutgoingDebtSummary.usdTotal)}
+            debtNote="Reserve spends sweep debts first. Sign & Broadcast stays locked while the draft still overspends after debt collection."
+            pendingCount={pendingBatchCount}
+            pendingMode={pendingBatchMode}
+            reserveIssueText={pendingBatchReserveIssueText}
+            previewItems={pendingBatchPreview}
+            submitting={pendingBatchSubmitting}
+            {hasSentBatch}
+            canBroadcast={canBroadcastPendingBatch}
+            openHistory={openAccountHistoryWorkspace}
+            clearBatch={clearPendingBatch}
+            rebroadcastBatch={rebroadcastPendingBatch}
+            broadcastBatch={broadcastPendingBatch}
+          />
 
           <AccountWorkspaceRail
             tabs={visibleAccountWorkspaceTabs}
@@ -6358,124 +6296,6 @@
 
   .history-warning:hover {
     background: color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent);
-  }
-
-  .workspace-pending-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 14px;
-    margin-bottom: 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(236, 179, 55, 0.35);
-    background: rgba(236, 179, 55, 0.08);
-    color: rgba(255, 242, 213, 0.96);
-  }
-
-  .workspace-debt-warning {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 11px 14px;
-    margin-bottom: 12px;
-    border-radius: 14px;
-    border: 1px solid rgba(248, 113, 113, 0.26);
-    background: rgba(127, 29, 29, 0.16);
-    color: #fee2e2;
-  }
-
-  .workspace-debt-warning-copy {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 10px;
-  }
-
-  .workspace-debt-warning-kicker {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #fca5a5;
-  }
-
-  .workspace-debt-warning-note {
-    font-size: 12px;
-    color: rgba(254, 226, 226, 0.84);
-  }
-
-  .workspace-pending-copy {
-    display: grid;
-    gap: 10px;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .workspace-pending-head {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    align-items: baseline;
-  }
-
-  .workspace-pending-kicker {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #ffd56a;
-  }
-
-  .workspace-pending-note {
-    font-size: 12px;
-    color: rgba(255, 242, 213, 0.82);
-  }
-
-  .workspace-pending-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .workspace-pending-alert {
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(127, 29, 29, 0.28);
-    border: 1px solid rgba(248, 113, 113, 0.22);
-    color: #fecaca;
-    font-size: 12px;
-    line-height: 1.4;
-  }
-
-  .workspace-pending-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    justify-content: flex-end;
-  }
-
-  .workspace-pending-chip {
-    display: grid;
-    gap: 3px;
-    min-width: 160px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(8, 10, 14, 0.36);
-    border: 1px solid rgba(236, 179, 55, 0.18);
-  }
-
-  .workspace-pending-chip strong {
-    font-size: 12px;
-    color: #fff5d9;
-  }
-
-  .workspace-pending-chip span {
-    font-size: 11px;
-    line-height: 1.35;
-    color: rgba(255, 242, 213, 0.74);
   }
 
   /* Main content - NO own scrollbar, parent .panel-content scrolls */
@@ -7500,41 +7320,6 @@
     border-radius: 10px;
   }
 
-  /* Table Action Buttons */
-  .btn-table-action {
-    padding: 5px 10px;
-    border: none;
-    border-radius: 4px;
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
-  }
-
-  .btn-table-action.faucet {
-    background: linear-gradient(135deg, #0ea5e9, #0284c7);
-    color: #f0f9ff;
-  }
-
-  .btn-table-action.faucet:hover:not(:disabled) {
-    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
-  }
-
-  .btn-table-action.deposit {
-    background: linear-gradient(135deg, #16a34a, #15803d);
-    color: #f0fdf4;
-  }
-
-  .btn-table-action.deposit:hover:not(:disabled) {
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-  }
-
-  .btn-table-action:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   .account-open-sections {
     display: grid;
     grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.95fr);
@@ -7820,35 +7605,21 @@
     .content > *,
     .accounts-selector-row,
     .asset-action-card,
-    .account-workspace-content,
-    .workspace-pending-banner,
-    .workspace-pending-copy,
-    .workspace-pending-list,
-    .workspace-pending-actions,
-    .workspace-pending-chip {
+    .account-workspace-content {
       width: 100%;
       max-width: 100%;
       min-width: 0;
       box-sizing: border-box;
     }
 
-    .tab-header-row,
-    .workspace-pending-banner,
-    .workspace-debt-warning {
+    .tab-header-row {
       flex-direction: column;
       align-items: stretch;
     }
 
-    .header-actions,
-    .workspace-pending-actions,
-    .workspace-debt-warning-copy {
+    .header-actions {
       width: 100%;
       justify-content: flex-start;
-    }
-
-    .workspace-pending-chip {
-      min-width: 0;
-      width: 100%;
     }
 
     .btn-refresh-small {
