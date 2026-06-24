@@ -35,6 +35,11 @@
     writeBirdViewSettings,
     type BirdViewSettings,
   } from './graph3d-settings';
+  import {
+    createGraphRenderer,
+    disposeGraphObject3D,
+    getGraphThemeColors,
+  } from './graph3d-renderer';
   import type {
     GraphConnectionData,
     GraphDerivedAccountData,
@@ -110,45 +115,7 @@
   const reportGraphInitError = (error: unknown) => {
     debug.error('Graph initialization failed:', error);
   };
-  const getThemeColors = (theme: string) => ({
-    background: 0x222222, // Lighter gray for debugging
-    entity: 0x007acc,
-    connection: 0x444444,
-    entityColor: '#007acc',
-    entityEmissive: '#003366',
-    connectionColor: '#444444'
-  });
   const settings = { theme: 'dark', portfolioScale: 5000, dollarsPerPx: 30000 };
-  const createRenderer = async (mode: string, options: THREE.WebGLRendererParameters) => {
-    if (mode === 'webgpu' && typeof navigator !== 'undefined' && navigator.gpu) {
-      try {
-        const { default: WebGPURenderer } = await import('three/src/renderers/webgpu/WebGPURenderer.js');
-        const renderer = new WebGPURenderer({ antialias: options.antialias });
-        await renderer.init();
-        return renderer;
-      } catch (err) {
-      }
-    }
-    try {
-      return new THREE.WebGLRenderer(options);
-    } catch (err) {
-      console.error('[Graph3D] Renderer init failed:', err);
-      return null;
-    }
-  };
-  function disposeObject3D(obj: THREE.Object3D): void {
-    obj.traverse((child: any) => {
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) {
-        const mat = child.material;
-        if (Array.isArray(mat)) {
-          mat.forEach(m => m.dispose());
-        } else {
-          mat.dispose();
-        }
-      }
-    });
-  }
   let OrbitControls: typeof OrbitControlsType;
   let container: HTMLDivElement;
   let scene: THREE.Scene;
@@ -300,7 +267,7 @@
     clearRouteHighlight();
   }
   $: if (scene && settings.theme) {
-    const themeColors = getThemeColors(settings.theme);
+    const themeColors = getGraphThemeColors(settings.theme);
     scene.background = new THREE.Color(themeColors.background);
   }
   let selectedScenarioFile: string = '';
@@ -370,7 +337,7 @@
       jMachineTxBoxes.forEach(cube => {
         if (cube && activeJMachine) {
           activeJMachine.remove(cube);
-          disposeObject3D(cube);
+          disposeGraphObject3D(cube);
         }
       });
       jMachineTxBoxes = [];
@@ -413,7 +380,7 @@
             const oldBlock = jBlockHistory.shift();
             if (oldBlock) {
               scene.remove(oldBlock.container);
-              disposeObject3D(oldBlock.container);
+              disposeGraphObject3D(oldBlock.container);
             }
           }
           createProportionalBroadcast(activeJMachine.position, prevMempoolSize);
@@ -453,7 +420,7 @@
             (jBlockHistory[0] && Number(jBlockHistory[0].blockNumber) !== blockBoundaries[0]?.blockNum)) {
           jBlockHistory.forEach(block => {
             scene.remove(block.container);
-            disposeObject3D(block.container);
+            disposeGraphObject3D(block.container);
           });
           jBlockHistory = [];
           blockBoundaries.reverse().forEach((boundary, idx) => {
@@ -825,7 +792,7 @@
     activeBroadcastSpheres.forEach(({ sphere, animationId: rafId }) => {
       cancelAnimationFrame(rafId);
       if (scene) scene.remove(sphere);
-      disposeObject3D(sphere);
+      disposeGraphObject3D(sphere);
     });
     activeBroadcastSpheres = [];
     if (animationId) {
@@ -998,7 +965,7 @@
       debug.warn('OrbitControls not available:', error);
     }
     scene = new THREE.Scene();
-    const themeColors = getThemeColors(settings.theme);
+    const themeColors = getGraphThemeColors(settings.theme);
     scene.background = new THREE.Color(themeColors.background);
     createGrid();
     const containerWidth = container.clientWidth || window.innerWidth;
@@ -1010,7 +977,7 @@
       100000 // Far plane: see objects at extreme distances
     );
     camera.position.set(0.41, 572.94, 38.32); // AHB top-down view
-    renderer = await createRenderer(rendererMode, { antialias: false }); // Disabled for performance
+    renderer = await createGraphRenderer(rendererMode, { antialias: false }); // Disabled for performance
     if (!renderer) {
       console.warn('[Graph3D] Renderer unavailable - skipping 3D init');
       return;
@@ -1455,7 +1422,7 @@
           [leftBox, rightBox].forEach(box => {
             if (!box) return;
             scene.remove(box);
-            disposeObject3D(box);
+            disposeGraphObject3D(box);
           });
         }
       });
@@ -1508,14 +1475,14 @@
         }
         if (connection.progressBars) {
           scene.remove(connection.progressBars);
-          disposeObject3D(connection.progressBars);
+          disposeGraphObject3D(connection.progressBars);
         }
         if (connection.mempoolBoxes) {
           const { leftBox, rightBox } = connection.mempoolBoxes;
           [leftBox, rightBox].forEach(box => {
             if (!box) return;
             scene.remove(box);
-            disposeObject3D(box);
+            disposeGraphObject3D(box);
           });
         }
       });
@@ -1561,14 +1528,14 @@
         [leftBox, rightBox].forEach(box => {
           if (!box) return;
           scene.remove(box);
-          disposeObject3D(box);
+          disposeGraphObject3D(box);
         });
       }
     });
     connections = [];
     jBlockHistory.forEach(block => {
       scene.remove(block.container);
-      disposeObject3D(block.container);
+      disposeGraphObject3D(block.container);
     });
     jBlockHistory = [];
     particles.forEach(particle => {
@@ -2092,7 +2059,7 @@
               scene.remove(conn.mempoolBoxes.leftBox);
               scene.remove(conn.mempoolBoxes.rightBox);
               [conn.mempoolBoxes.leftBox, conn.mempoolBoxes.rightBox].forEach(box => {
-                disposeObject3D(box);
+                disposeGraphObject3D(box);
               });
             }
             const currentReplicas = getTimeAwareReplicas();
@@ -2133,7 +2100,7 @@
       dashSize = 1.0;  // Longer dashes
       gapSize = 0.5;   // Smaller gaps (more continuous)
     } else {
-      const themeColors = getThemeColors(settings.theme);
+      const themeColors = getGraphThemeColors(settings.theme);
       connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
       opacity = 0.5;
       linewidth = 2;
@@ -2753,11 +2720,11 @@
         if (connection.mempoolBoxes) {
           if (connection.mempoolBoxes.leftBox) {
             scene.remove(connection.mempoolBoxes.leftBox);
-            disposeObject3D(connection.mempoolBoxes.leftBox);
+            disposeGraphObject3D(connection.mempoolBoxes.leftBox);
           }
           if (connection.mempoolBoxes.rightBox) {
             scene.remove(connection.mempoolBoxes.rightBox);
-            disposeObject3D(connection.mempoolBoxes.rightBox);
+            disposeGraphObject3D(connection.mempoolBoxes.rightBox);
           }
         }
       });
@@ -3042,11 +3009,11 @@
       if (connection.mempoolBoxes) {
         if (connection.mempoolBoxes.leftBox) {
           scene.remove(connection.mempoolBoxes.leftBox);
-          disposeObject3D(connection.mempoolBoxes.leftBox);
+          disposeGraphObject3D(connection.mempoolBoxes.leftBox);
         }
         if (connection.mempoolBoxes.rightBox) {
           scene.remove(connection.mempoolBoxes.rightBox);
-          disposeObject3D(connection.mempoolBoxes.rightBox);
+          disposeGraphObject3D(connection.mempoolBoxes.rightBox);
         }
       }
     });
@@ -3431,7 +3398,7 @@
     }
   }
   function clearRouteHighlight() {
-    const themeColors = getThemeColors(settings.theme);
+    const themeColors = getGraphThemeColors(settings.theme);
     const connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
     connections.forEach(connection => {
       const lineMaterial = connection.line.material as THREE.LineDashedMaterial;
