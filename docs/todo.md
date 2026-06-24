@@ -348,9 +348,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. QA shard detail now treats `video`, `image`, and `qa-cues` artifacts as Scenario Player-owned. The right panel shows only non-media evidence files, so the operator sees one canonical video/screenshot/transcript surface.
   - Evidence: `bun run check` PASS; focused QA cockpit e2e PASS `1/1`, run `20260624-133405-526`, wall `12.6s`, benchmark OK vs `20260624-133006-710`.
 
-- [ ] Merge overlapping Runs/Suites/Benchmarks surfaces.
+- [x] Merge overlapping Runs/Suites/Benchmarks surfaces.
   - Impact: medium.
   - UI: one Runs ledger with category chips: unit, contract, e2e, benchmark, scenario. Benchmarks tab should chart bench metrics, not duplicate history rows.
+  - Status: done. `Runs Ledger` is now the canonical run surface with category chips and shared speed/date sorting; `Database` owns persistent history, retention, backfill, and restart audit only. `Benchmarks` keeps benchmark commands plus regression comparator and a compact wall/load/cpu/browser/bench trend, without duplicating the history table.
+  - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`. Focused QA cockpit e2e `20260624-152023-776` PASS `5/5`, wall `17.8s`, code hash `e1bed4acbb1f2031`, benchmark OK vs `20260624-151932-222`. First rerun `20260624-151932-222` failed only on stale short-hash assertions after UI moved to git-style 8-char hashes; assertions were updated.
 
 - [x] Collapse raw log tail by default and show structured summary first.
   - Impact: medium.

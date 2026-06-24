@@ -1270,14 +1270,14 @@ test.describe('QA cockpit scenario player', () => {
     await page.goto(`/qa?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&shard=7`);
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/, { timeout: 30_000 });
     await expect(page).toHaveURL(new RegExp(`runId=${QA_FIXTURE_RUN_ID}.*shard=7`));
-    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
     await expect(page.locator('[data-testid="qa-suite-row"][data-shard="7"]')).toHaveClass(/selected/);
     await expect(page.locator('.shard-detail')).toContainText('qa.deep-link-video');
 
     const errorsBeforeMissingVideo = runtimeErrors.length;
     await page.goto(`/qa?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&shard=9`);
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/, { timeout: 30_000 });
-    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
     await expect(page.locator('[data-testid="qa-suite-row"][data-shard="9"]')).toHaveClass(/selected/);
     await expect(page.locator('[data-testid="qa-suite-row"][data-shard="9"]')).toHaveAttribute('data-has-video', 'false');
     await expect(page.locator('.shard-detail')).toContainText('qa.missing-video-empty-state');
@@ -1314,11 +1314,13 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-benchmarks')).toContainText('cpu 44.2%');
     await expect(page.getByTestId('qa-benchmarks')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-benchmarks')).toContainText('SLOWER +25.0%');
-    await page.getByTestId('qa-test-tabs').getByRole('button', { name: 'History' }).click();
-    await expect(page.getByTestId('qa-history')).toContainText('head 95174ad2c2d');
-    await expect(page.getByTestId('qa-history')).toContainText('code b4e0f2401f81');
+    await page.getByTestId('qa-test-tabs').getByRole('button', { name: 'Database' }).click();
+    await expect(page.getByTestId('qa-history')).toContainText('head 95174ad2');
+    await expect(page.getByTestId('qa-history')).toContainText('code b4e0f240');
     await expect(page.getByTestId('qa-history')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-history')).toContainText('SLOWER +25.0%');
+    await expect(page.getByTestId('qa-run-ledger')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
     await expect(page.getByTestId('qa-run-ledger')).toContainText('Canonical Ledger');
     await expect(page.getByTestId('qa-run-ledger')).toContainText('qa.cockpit-fixture');
     await expect(page.getByTestId('qa-run-ledger')).toContainText('regulator-auditor');
@@ -1328,6 +1330,7 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-run-ledger')).toContainText('network 1');
     await expect(page.getByTestId('qa-run-ledger')).toContainText('SLOWER +25.0%');
     await expect(page.getByTestId('qa-ledger-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
+    await page.getByTestId('qa-test-tabs').getByRole('button', { name: 'Database' }).click();
     await expect(page.getByTestId('qa-history')).toContainText('regulator-auditor');
     await expect(page.getByTestId('qa-history')).toContainText('verify evidence playback');
     await expect(page.getByTestId('qa-history-backfill-card')).toContainText('Backfill History Index');
@@ -1343,12 +1346,14 @@ test.describe('QA cockpit scenario player', () => {
     await page.getByTestId('qa-retention-purge').click();
     await expect(page.getByTestId('qa-retention-result')).toContainText('deleted 1 log dirs / 1 history rows');
     await page.getByTestId('qa-history-sort').selectOption('stack-fast');
-    await expect(page.getByTestId('qa-ledger-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
     await expect(page.getByTestId('qa-history-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
-    await page.getByTestId('qa-history-sort').selectOption('date-desc');
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
+    await expect(page.getByTestId('qa-ledger-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
+    await page.getByTestId('qa-run-sort').selectOption('date-desc');
     await expect(page.getByTestId('qa-ledger-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
+    await page.getByTestId('qa-test-tabs').getByRole('button', { name: 'Database' }).click();
     await expect(page.getByTestId('qa-history-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
-    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
     await expect(page.locator('.run-summary')).toContainText('Benchmark');
     await expect(page.locator('.run-summary')).toContainText('wall time +25%');
     await expect(page.locator('.run-summary')).toContainText('Browser Health');
@@ -1550,14 +1555,14 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('FAIL');
     await expect(page.getByTestId('qa-ux-gallery-preview')).toBeVisible();
 
-    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await page.getByTestId('qa-suite-row').first().click();
     await expect(page.getByTestId('qa-watch-panel')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Restart plan' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Restart run' })).toBeDisabled();
 
-    await page.getByTestId('qa-test-tabs').getByRole('button', { name: 'History' }).click();
+    await page.getByTestId('qa-test-tabs').getByRole('button', { name: 'Database' }).click();
     await expect(page.getByTestId('qa-history-backfill')).toBeDisabled();
     await page.getByPlaceholder('DELETE_OLDER_THAN_30_DAYS').fill('DELETE_OLDER_THAN_30_DAYS');
     await expect(page.getByTestId('qa-retention-purge')).toBeDisabled();
@@ -1679,7 +1684,7 @@ test.describe('QA cockpit scenario player', () => {
 
     await page.goto('/qa');
     await expect(page.getByTestId('qa-auth-panel')).toContainText('open', { timeout: 30_000 });
-    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
     await page.getByTestId('qa-suite-row').first().click();
 
     const restartRunButton = page.getByRole('button', { name: 'Restart run' });
@@ -1958,7 +1963,7 @@ test.describe('QA cockpit scenario player', () => {
 
     await page.goto('/qa');
     await expect(page.getByTestId('qa-auth-panel')).toContainText('open', { timeout: 30_000 });
-    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await page.getByRole('button', { name: 'Runs Ledger' }).click();
     await expect(page.getByTestId('qa-suite-row')).toHaveCount(80);
     await expect(page.getByTestId('qa-shards-show-more')).toContainText('80/240');
     await page.getByTestId('qa-shards-show-more').click();
