@@ -3,16 +3,21 @@
   import { type Writable, type Readable } from 'svelte/store';
   import type { Env, EnvSnapshot, JReplica, XLNModule } from '@xln/runtime/xln-api';
   import type { JAdapter } from '@xln/runtime/jadapter';
+  import { DISPLAY, TIME_MACHINE } from '@xln/runtime/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
+  import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
   import {
+    appRuntimeAdapterActiveEntityId,
     appRuntimeAdapterEndpoint,
     appRuntimeAdapterHistoryScan,
     appRuntimeAdapterMode,
     getXLN,
+    refreshRuntimeAdapterEnvironment,
     REMOTE_HISTORY_SCAN_CACHE_LIMIT,
     scanRuntimeAdapterHistoryAtHeight,
+    setRuntimeAdapterActiveEntityId,
     type RuntimeAdapterHistoryScanState,
   } from '$lib/stores/xlnStore';
   // BrowserVM resolved via JAdapter
@@ -189,6 +194,9 @@
   let showExportMenu = false;
   let remoteScanHeightDraft = '';
   let remoteScanError = '';
+  let remoteEntityChanging = false;
+  let pendingDeepLink: { height: number; entityId: string; runtimeId: string } | null = null;
+  let deepLinkApplied = false;
 
   const speedOptions = [
     { value: 0.1, label: '0.1x' },
@@ -329,7 +337,162 @@
   function formatShortEndpoint(value: string): string {
     const text = String(value || '').trim().replace(/^wss?:\/\//, '');
     if (!text) return 'remote';
-    return text.length > 28 ? `${text.slice(0, 24)}...` : text;
+    const maxInline = DISPLAY.ENDPOINT_PREFIX_CHARS + DISPLAY.ENDPOINT_SUFFIX_CHARS + 12;
+    return text.length > maxInline
+      ? `${text.slice(0, DISPLAY.ENDPOINT_PREFIX_CHARS + 16)}...`
+      : text;
+  }
+
+  type RemoteTargetOption = {
+    id: string;
+    label: string;
+    accounts: number;
+    books: number;
+    isHub: boolean;
+  };
+
+  type FrameSummary = {
+    height: number;
+    entities: number;
+    accounts: number;
+    books: number;
+    targetAccounts: number;
+    targetBooks: number;
+  };
+
+  function replicaEntityId(replica: unknown): string {
+    const value = replica as { entityId?: unknown; state?: { entityId?: unknown } } | null;
+    return String(value?.entityId || value?.state?.entityId || '').trim().toLowerCase();
+  }
+
+  function replicaProfileName(replica: unknown): string {
+    const value = replica as { state?: { profile?: { name?: unknown; isHub?: boolean } } } | null;
+    return String(value?.state?.profile?.name || '').trim();
+  }
+
+  function replicaAccountCount(replica: unknown): number {
+    const value = replica as { state?: { accounts?: Map<unknown, unknown> } } | null;
+    return Math.max(0, Number(value?.state?.accounts?.size || 0));
+  }
+
+  function replicaBookCount(replica: unknown): number {
+    const value = replica as { state?: { orderbookExt?: { books?: Map<unknown, unknown> } } } | null;
+    return Math.max(0, Number(value?.state?.orderbookExt?.books?.size || 0));
+  }
+
+  function isHubReplica(replica: unknown): boolean {
+    const value = replica as { state?: { profile?: { isHub?: boolean }; orderbookHubProfile?: unknown } } | null;
+    return value?.state?.profile?.isHub === true || Boolean(value?.state?.orderbookHubProfile);
+  }
+
+  function frameReplicas(frame: Env | EnvSnapshot | null | undefined): unknown[] {
+    return Array.from(frame?.eReplicas?.values?.() ?? []);
+  }
+
+  function buildRemoteTargetOptions(frame: Env | EnvSnapshot | null | undefined): RemoteTargetOption[] {
+    return frameReplicas(frame)
+      .map((replica): RemoteTargetOption | null => {
+        const id = replicaEntityId(replica);
+        if (!id) return null;
+        const label = replicaProfileName(replica) || `${id.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS)}...`;
+        return {
+          id,
+          label,
+          accounts: replicaAccountCount(replica),
+          books: replicaBookCount(replica),
+          isHub: isHubReplica(replica),
+        };
+      })
+      .filter((item): item is RemoteTargetOption => item !== null)
+      .sort((left, right) => {
+        if (left.isHub !== right.isHub) return left.isHub ? -1 : 1;
+        return left.label.localeCompare(right.label);
+      });
+  }
+
+  function summarizeFrame(frame: Env | EnvSnapshot | null | undefined, targetEntityId: string): FrameSummary {
+    const replicas = frameReplicas(frame);
+    const normalizedTarget = targetEntityId.trim().toLowerCase();
+    let accounts = 0;
+    let books = 0;
+    let targetAccounts = 0;
+    let targetBooks = 0;
+    for (const replica of replicas) {
+      const replicaAccounts = replicaAccountCount(replica);
+      const replicaBooks = replicaBookCount(replica);
+      accounts += replicaAccounts;
+      books += replicaBooks;
+      if (normalizedTarget && replicaEntityId(replica) === normalizedTarget) {
+        targetAccounts = replicaAccounts;
+        targetBooks = replicaBooks;
+      }
+    }
+    return {
+      height: Math.max(0, Math.floor(Number(frame?.height || 0))),
+      entities: replicas.length,
+      accounts,
+      books,
+      targetAccounts,
+      targetBooks,
+    };
+  }
+
+  function signedDelta(value: number): string {
+    if (value > 0) return `+${value}`;
+    return String(value);
+  }
+
+  function formatRemoteDiff(current: FrameSummary, selected: FrameSummary, targetEntityId: string, isLiveFrame: boolean): string {
+    if (isLiveFrame) return `live h${current.height} · e${current.entities} a${current.accounts} b${current.books}`;
+    const targetSuffix = targetEntityId
+      ? ` · target a${signedDelta(current.targetAccounts - selected.targetAccounts)} b${signedDelta(current.targetBooks - selected.targetBooks)}`
+      : '';
+    return `Δh ${signedDelta(current.height - selected.height)} · e${signedDelta(current.entities - selected.entities)} · a${signedDelta(current.accounts - selected.accounts)} · b${signedDelta(current.books - selected.books)}${targetSuffix}`;
+  }
+
+  function parseHashParams(): { route: string; params: URLSearchParams } {
+    if (typeof window === 'undefined') return { route: '', params: new URLSearchParams() };
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (!hash.trim()) return { route: '', params: new URLSearchParams() };
+    const queryIndex = hash.indexOf('?');
+    if (queryIndex >= 0) {
+      return {
+        route: hash.slice(0, queryIndex).trim(),
+        params: new URLSearchParams(hash.slice(queryIndex + 1)),
+      };
+    }
+    if (hash.includes('=')) return { route: '', params: new URLSearchParams(hash) };
+    return { route: hash.trim(), params: new URLSearchParams() };
+  }
+
+  function readTimeMachineDeepLink(): { height: number; entityId: string; runtimeId: string } | null {
+    const { params } = parseHashParams();
+    const rawHeight = Number(params.get(TIME_MACHINE.HASH_HEIGHT_PARAM) || '');
+    const height = Math.max(1, Math.floor(rawHeight));
+    if (!Number.isFinite(height) || height < 1) return null;
+    return {
+      height,
+      entityId: String(params.get(TIME_MACHINE.HASH_ENTITY_PARAM) || '').trim().toLowerCase(),
+      runtimeId: String(params.get(TIME_MACHINE.HASH_RUNTIME_PARAM) || '').trim().toLowerCase(),
+    };
+  }
+
+  function writeTimeMachineDeepLink(height: number, entityId: string): void {
+    if (typeof window === 'undefined') return;
+    const safeHeight = Math.max(1, Math.floor(Number(height || 0)));
+    if (!Number.isFinite(safeHeight)) return;
+    const { route, params } = parseHashParams();
+    params.set(TIME_MACHINE.HASH_HEIGHT_PARAM, String(safeHeight));
+    const normalizedEntity = entityId.trim().toLowerCase();
+    if (normalizedEntity) params.set(TIME_MACHINE.HASH_ENTITY_PARAM, normalizedEntity);
+    else params.delete(TIME_MACHINE.HASH_ENTITY_PARAM);
+    const runtimeId = String($activeRuntimeId || $env?.runtimeId || '').trim().toLowerCase();
+    if (runtimeId) params.set(TIME_MACHINE.HASH_RUNTIME_PARAM, runtimeId);
+    const query = params.toString();
+    const nextHash = route ? `${route}?${query}` : `?${query}`;
+    const url = new URL(window.location.href);
+    url.hash = nextHash;
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   }
 
   function formatCount(value: number | null | undefined): string {
@@ -365,9 +528,39 @@
       remoteScanHeightDraft = String(result.snapshot.height || requestedHeight);
       safeSet(timeIndex, result.frameIndex);
       safeSet(isLive, false);
+      writeTimeMachineDeepLink(Number(result.snapshot.height || requestedHeight), $appRuntimeAdapterActiveEntityId);
     } catch (error) {
       remoteScanError = error instanceof Error ? error.message : String(error || 'scan failed');
     }
+  }
+
+  async function selectRemoteEntity(entityId: string): Promise<void> {
+    const normalized = String(entityId || '').trim().toLowerCase();
+    if (!normalized || normalized === $appRuntimeAdapterActiveEntityId) return;
+    remoteEntityChanging = true;
+    remoteScanError = '';
+    try {
+      setRuntimeAdapterActiveEntityId(normalized);
+      await refreshRuntimeAdapterEnvironment();
+      if (!$isLive && $history[selectedFrameIndex]?.height) {
+        const height = Number($history[selectedFrameIndex]?.height || 0);
+        remoteScanHeightDraft = String(height);
+        const result = await scanRuntimeAdapterHistoryAtHeight(height);
+        safeSet(timeIndex, result.frameIndex);
+        safeSet(isLive, false);
+      }
+      writeTimeMachineDeepLink(Number($history[selectedFrameIndex]?.height || $env?.height || 1), normalized);
+    } catch (error) {
+      remoteScanError = error instanceof Error ? error.message : String(error || 'target switch failed');
+    } finally {
+      remoteEntityChanging = false;
+    }
+  }
+
+  function selectRemoteRuntime(runtimeId: string): void {
+    const normalized = String(runtimeId || '').trim().toLowerCase();
+    if (!normalized || normalized === $activeRuntimeId) return;
+    runtimeOperations.activateRemoteRuntime(normalized);
   }
 
   // Handle slider drag/input
@@ -410,6 +603,8 @@
 
   onMount(() => {
     window.addEventListener('keydown', handleKeyboard);
+    pendingDeepLink = readTimeMachineDeepLink();
+    if (pendingDeepLink?.height) remoteScanHeightDraft = String(pendingDeepLink.height);
   });
 
   onDestroy(() => {
@@ -427,6 +622,42 @@
   $: progressPercent = maxTimeIndex > 0 ? (selectedFrameIndex / maxTimeIndex) * 100 : 0;
   $: remoteScanPlaceholder = String(Math.max(1, Math.floor(Number($history[selectedFrameIndex]?.height || $env?.height || 1))));
   $: remoteScanStatusText = buildRemoteScanStatusLabel($appRuntimeAdapterHistoryScan, $history.length, remoteScanError);
+  $: remoteTargetOptions = buildRemoteTargetOptions($env);
+  $: selectedRemoteEntityId = $appRuntimeAdapterActiveEntityId || remoteTargetOptions[0]?.id || '';
+  $: selectedFrameSummary = summarizeFrame($history[selectedFrameIndex] ?? null, selectedRemoteEntityId);
+  $: liveFrameSummary = summarizeFrame($env, selectedRemoteEntityId);
+  $: remoteDiffText = formatRemoteDiff(liveFrameSummary, selectedFrameSummary, selectedRemoteEntityId, $isLive);
+  $: remoteRuntimeOptions = Array.from($runtimes.values()).filter((runtime) => runtime.type === 'remote');
+  $: if (
+    pendingDeepLink &&
+    !deepLinkApplied &&
+    $appRuntimeAdapterMode === 'remote' &&
+    $appRuntimeAdapterEndpoint &&
+    $history.length > 0 &&
+    !$appRuntimeAdapterHistoryScan.loading
+  ) {
+    deepLinkApplied = true;
+    const request = pendingDeepLink;
+    pendingDeepLink = null;
+    (async () => {
+      const activeRuntimeKey = String($activeRuntimeId || $env?.runtimeId || '').trim().toLowerCase();
+      if (request.runtimeId && request.runtimeId !== activeRuntimeKey) {
+        if ($runtimes.has(request.runtimeId)) {
+          runtimeOperations.activateRemoteRuntime(request.runtimeId, { href: window.location.href });
+          return;
+        }
+        throw new Error(`Time Machine runtime is not imported: ${request.runtimeId.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS)}`);
+      }
+      if (request.entityId) {
+        setRuntimeAdapterActiveEntityId(request.entityId);
+        await refreshRuntimeAdapterEnvironment();
+      }
+      remoteScanHeightDraft = String(request.height);
+      await scanRemoteHeight();
+    })().catch((error) => {
+      remoteScanError = error instanceof Error ? error.message : String(error || 'deep link scan failed');
+    });
+  }
 </script>
 
 <div class="time-machine">
@@ -518,9 +749,38 @@
     </div>
     {#if $appRuntimeAdapterMode === 'remote'}
       <div class="remote-scan" data-testid="time-machine-remote-scan">
+        {#if remoteRuntimeOptions.length > 1}
+          <select
+            class="remote-runtime-select"
+            data-testid="time-machine-remote-runtime"
+            aria-label="Remote runtime"
+            value={$activeRuntimeId}
+            on:change={(event) => selectRemoteRuntime((event.currentTarget as HTMLSelectElement).value)}
+          >
+            {#each remoteRuntimeOptions as runtime (runtime.id)}
+              <option value={runtime.id}>{runtime.label}</option>
+            {/each}
+          </select>
+        {/if}
         <span class="remote-endpoint" title={$appRuntimeAdapterEndpoint}>
           {formatShortEndpoint($appRuntimeAdapterEndpoint)}
         </span>
+        {#if remoteTargetOptions.length > 0}
+          <select
+            class="remote-entity-select"
+            data-testid="time-machine-remote-target"
+            aria-label="Remote entity target"
+            value={selectedRemoteEntityId}
+            disabled={remoteEntityChanging || $appRuntimeAdapterHistoryScan.loading}
+            on:change={(event) => void selectRemoteEntity((event.currentTarget as HTMLSelectElement).value)}
+          >
+            {#each remoteTargetOptions as target (target.id)}
+              <option value={target.id}>
+                {target.isHub ? 'hub ' : ''}{target.label} · a{formatCount(target.accounts)} b{formatCount(target.books)}
+              </option>
+            {/each}
+          </select>
+        {/if}
         <input
           data-testid="time-machine-remote-height"
           inputmode="numeric"
@@ -540,6 +800,18 @@
         <span class="remote-scan-status" data-testid="time-machine-remote-scan-status">
           {remoteScanStatusText}
         </span>
+        <span class="remote-diff" data-testid="time-machine-remote-diff" title="Current live frame vs selected historical frame">
+          {remoteDiffText}
+        </span>
+        <button
+          type="button"
+          class="remote-link-button"
+          data-testid="time-machine-remote-deeplink"
+          disabled={$history.length === 0}
+          on:click={() => writeTimeMachineDeepLink(Number($history[selectedFrameIndex]?.height || $env?.height || 1), selectedRemoteEntityId)}
+        >
+          Link
+        </button>
         {#if $appRuntimeAdapterHistoryScan.accountsTotal !== null}
           <span class="remote-scan-meta" data-testid="time-machine-remote-scan-meta">
             {formatCount($appRuntimeAdapterHistoryScan.accountsShown)}/{formatCount($appRuntimeAdapterHistoryScan.accountsTotal)} accounts
@@ -672,7 +944,7 @@
     align-items: center;
     gap: 5px;
     min-width: 0;
-    max-width: min(460px, 44vw);
+    max-width: min(760px, 58vw);
     padding: 3px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
@@ -688,6 +960,24 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: rgba(132, 204, 255, 0.92);
+  }
+
+  .remote-runtime-select,
+  .remote-entity-select {
+    height: 24px;
+    min-width: 0;
+    max-width: 132px;
+    box-sizing: border-box;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.32);
+    color: rgba(255, 255, 255, 0.86);
+    padding: 0 18px 0 6px;
+    font: inherit;
+  }
+
+  .remote-entity-select {
+    max-width: 170px;
   }
 
   .remote-scan input {
@@ -719,7 +1009,8 @@
   }
 
   .remote-scan-status,
-  .remote-scan-meta {
+  .remote-scan-meta,
+  .remote-diff {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -731,6 +1022,17 @@
 
   .remote-scan-meta {
     color: rgba(0, 255, 136, 0.78);
+  }
+
+  .remote-diff {
+    max-width: 230px;
+    color: rgba(255, 214, 128, 0.9);
+  }
+
+  .remote-link-button {
+    color: rgba(210, 190, 255, 0.96) !important;
+    border-color: rgba(168, 85, 247, 0.28) !important;
+    background: rgba(168, 85, 247, 0.13) !important;
   }
 
   .dock-toggle-btn {
