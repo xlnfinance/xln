@@ -81,6 +81,66 @@ export function jurisdictionKey(value: unknown): string {
   return String(value || '').trim().toLowerCase();
 }
 
+export function getCurrentEntityJurisdictionName(
+  env: Env | EnvSnapshot | null | undefined,
+  replica: EntityReplica | null | undefined,
+): string | null {
+  const configured = String(replica?.state?.config?.jurisdiction?.name || '').trim();
+  return configured || getActiveJurisdictionName(env);
+}
+
+export function getCurrentEntityJurisdictionKey(
+  env: Env | EnvSnapshot | null | undefined,
+  replica: EntityReplica | null | undefined,
+): string {
+  return jurisdictionKey(replica?.state?.config?.jurisdiction)
+    || jurisdictionKey(replica?.position?.jurisdiction)
+    || jurisdictionKey(getActiveJurisdictionName(env));
+}
+
+export function getEntityJurisdictionKey(
+  env: Env | EnvSnapshot | null | undefined,
+  entityId: string,
+): string {
+  const normalized = String(entityId || '').trim().toLowerCase();
+  if (!normalized) return '';
+
+  if (env?.eReplicas) {
+    for (const [key, candidate] of env.eReplicas.entries()) {
+      const [candidateEntityId] = String(key || '').split(':');
+      const stateEntityId = String(candidate?.entityId || candidate?.state?.entityId || '').trim().toLowerCase();
+      if (String(candidateEntityId || '').trim().toLowerCase() !== normalized && stateEntityId !== normalized) continue;
+      return jurisdictionKey(candidate?.state?.config?.jurisdiction)
+        || jurisdictionKey(candidate?.position?.jurisdiction);
+    }
+  }
+
+  const profile = getGossipProfiles(env).find((candidate) =>
+    String(candidate?.entityId || '').trim().toLowerCase() === normalized
+  );
+  return jurisdictionKey(profile?.metadata?.jurisdiction);
+}
+
+export function isSameJurisdictionEntity(
+  env: Env | EnvSnapshot | null | undefined,
+  replica: EntityReplica | null | undefined,
+  fallbackEntityId: string,
+  leftEntityId: string,
+  rightEntityId: string,
+): boolean {
+  const currentEntityId = String(replica?.state?.entityId || fallbackEntityId || '').trim().toLowerCase();
+  const normalizedLeftEntityId = String(leftEntityId || '').trim().toLowerCase();
+  const normalizedRightEntityId = String(rightEntityId || '').trim().toLowerCase();
+  const leftJurisdiction = normalizedLeftEntityId === currentEntityId
+    ? getCurrentEntityJurisdictionKey(env, replica)
+    : getEntityJurisdictionKey(env, leftEntityId);
+  const rightJurisdiction = normalizedRightEntityId === currentEntityId
+    ? getCurrentEntityJurisdictionKey(env, replica)
+    : getEntityJurisdictionKey(env, rightEntityId);
+  if (!leftJurisdiction && !rightJurisdiction) return true;
+  return Boolean(leftJurisdiction && rightJurisdiction && leftJurisdiction === rightJurisdiction);
+}
+
 export function getGossipProfiles(env: Env | EnvSnapshot | null | undefined): GossipProfile[] {
   if (!env?.gossip) return [];
   if ('getProfiles' in env.gossip && typeof env.gossip.getProfiles === 'function') {
