@@ -23,11 +23,9 @@
   import { formatEntityId } from '$lib/utils/format';
   import {
     crossOrderbookPairLabel,
-    entityInitials,
     firstAvailableHubId,
     formatEntityNetworkLabel,
     getTokenMapValue,
-    jurisdictionBadgeText,
     normalizeJurisdictionDisplayName,
     nonNegative,
     parseCrossAssetKey,
@@ -97,8 +95,7 @@
   import SwapOrderList from './SwapOrderList.svelte';
   import SwapCompletionDialog from './SwapCompletionDialog.svelte';
   import SwapOrderbookSection from './SwapOrderbookSection.svelte';
-  import SwapPriceVenueControls from './SwapPriceVenueControls.svelte';
-  import SwapRouteBuilder from './SwapRouteBuilder.svelte';
+  import SwapTradeTicket from './SwapTradeTicket.svelte';
   import type { SwapOrderbookLevelClickDetail, SwapOrderbookPairOption } from './swap-orderbook-view';
   import './SwapPanel.css';
 
@@ -3300,424 +3297,130 @@
   on:change|capture={handleSwapPanelAmountSync}
 >
   <div class="trade-grid" class:book-open={showOrderbook}>
-    <div class="section section-order">
-      <div class="swap-mode-bar">
-        <span>{swapRouteMode === 'cross' ? 'Cross chain' : 'Same chain'}</span>
-        <strong title={`${sourceAssetLabel} -> ${targetAssetLabel}`}>{swapRouteTitle}</strong>
-        <button
-          type="button"
-          class="book-toggle"
-          class:active={showOrderbook}
-          data-testid="swap-orderbook-toggle"
-          aria-pressed={showOrderbook}
-          on:click={() => showOrderbook = !showOrderbook}
-        >
-          {showOrderbook ? 'Hide book' : 'Open book'}
-        </button>
-      </div>
-      <div class="anyswap-builder" data-testid="swap-any-builder">
-        <div class="swap-leg-card">
-          <div class="leg-header">
-            <span>From</span>
-            <div class="entity-select-wrap" data-swap-menu-root>
-              <button
-                type="button"
-                class="entity-select-button"
-                aria-haspopup="listbox"
-                aria-expanded={sourceMenuOpen}
-                title={selectedSourceEntityLabel}
-                on:click|stopPropagation={toggleSourceMenu}
-              >
-                <span class="entity-avatar-wrap">
-                  {#if selectedSourceEntity && entityAvatarSrc(selectedSourceEntity.entityId)}
-                    <img class="entity-avatar-mini" src={entityAvatarSrc(selectedSourceEntity.entityId)} alt="" />
-                  {:else}
-                    <span class="entity-avatar-mini placeholder">{entityInitials(sourceEntityIdValue, selectedSourceEntity?.name || selectedSourceEntityLabel)}</span>
-                  {/if}
-                  <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel)}</span>
-                </span>
-                <span class="entity-select-copy">
-                  <strong>{formatEntityNetworkLabel(selectedSourceEntity?.name || accountLabel(sourceEntityIdValue), selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel)}</strong>
-                </span>
-                <span class="entity-select-chevron" aria-hidden="true">⌄</span>
-              </button>
-              <select
-                class="entity-select-native"
-                value={selectedSourceEntityValue}
-                data-testid="swap-from-chain-select"
-                title={selectedSourceEntityLabel}
-                aria-label="Swap from account and network"
-                on:change={handleSourceEntityChange}
-              >
-                {#each sourceEntityOptions as option}
-                  <option value={option.value} title={option.label}>{option.label}</option>
-                {/each}
-              </select>
-              {#if sourceMenuOpen}
-                <div class="entity-menu" role="listbox" aria-label="Source account">
-                  {#each sourceEntityOptions as option}
-                    <button
-                      type="button"
-                      class:selected={option.value === selectedSourceEntityValue}
-                      class="entity-option"
-                      role="option"
-                      aria-selected={option.value === selectedSourceEntityValue}
-                      title={option.label}
-                      on:click|stopPropagation={() => selectSourceEntityOption(option.value)}
-                    >
-                      <span class="entity-avatar-wrap">
-                        {#if entityAvatarSrc(option.entityId)}
-                          <img class="entity-avatar-mini" src={entityAvatarSrc(option.entityId)} alt="" />
-                        {:else}
-                          <span class="entity-avatar-mini placeholder">{entityInitials(option.entityId, option.name)}</span>
-                        {/if}
-                        <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(option.jurisdiction)}</span>
-                      </span>
-                      <span class="entity-select-copy">
-                        <strong>{formatEntityNetworkLabel(option.name, option.jurisdiction)}</strong>
-                      </span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
-          <div class="leg-main">
-            <input
-              type="text"
-              bind:value={orderAmountInput}
-              bind:this={orderAmountInputElement}
-              inputmode="decimal"
-              placeholder="0"
-              data-testid="swap-order-amount"
-              aria-label="Swap from amount"
-              on:input={handleOrderAmountInput}
-            />
-            <div class="token-select-wrap" data-swap-menu-root title={giveTokenSymbol}>
-              <button
-                type="button"
-                class="token-select-button"
-                aria-haspopup="listbox"
-                aria-expanded={openTokenMenu === 'give'}
-                on:click|stopPropagation={() => toggleTokenMenu('give')}
-              >
-                <span class={`token-dot token-${tokenClass(giveTokenSymbol)}`}>{tokenIconText(giveTokenSymbol)}</span>
-                {#key giveTokenId}
-                  <span class="token-select-visible" data-testid="swap-from-token-label">{giveTokenSymbol}</span>
-                {/key}
-                <span class="token-select-chevron" aria-hidden="true">⌄</span>
-              </button>
-              <select
-                class="token-select-native"
-                bind:value={giveTokenId}
-                data-testid="swap-from-token-select"
-                aria-label="Swap from token"
-                on:change={handleGiveTokenChange}
-              >
-                {#each giveTokenOptions as token}
-                  <option value={String(token.tokenId)}>{token.symbol}</option>
-                {/each}
-              </select>
-              {#if openTokenMenu === 'give'}
-                <div class="token-menu" role="listbox" aria-label="Sell token">
-                  {#each giveTokenOptions as token}
-                    <button
-                      type="button"
-                      class:selected={token.tokenId === giveToken}
-                      class="token-option"
-                      role="option"
-                      aria-selected={token.tokenId === giveToken}
-                      on:click|stopPropagation={() => selectGiveTokenOption(token.tokenId)}
-                    >
-                      <span class={`token-dot token-${tokenClass(token.symbol)}`}>{tokenIconText(token.symbol)}</span>
-                      <span>{token.symbol}</span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
-          <div class="leg-meta">
-            <span>{sourceAssetLabel}</span>
-            <strong title={`Available ${formattedAvailableGive}`}>{formattedAvailableGiveAmount}</strong>
-          </div>
-        </div>
-
-        <div class="swap-leg-divider">
-          <button
-            type="button"
-            class="direction-chip"
-            data-testid="swap-flip-tokens"
-            on:click={flipSwapTokens}
-            title="Swap selected tokens"
-            aria-label="Swap selected tokens"
-          >⇅</button>
-        </div>
-
-        <div class="swap-leg-card">
-          <div class="leg-header">
-            <span>To</span>
-            <div class="route-select-wrap" data-swap-menu-root>
-              <button
-                type="button"
-                class="entity-select-button route-menu-button"
-                use:routeMenuButtonAction
-                data-testid="swap-route-menu-button"
-                data-route-menu-open={$routeMenuOpenStore ? 'true' : 'false'}
-                data-route-menu-toggle-count={routeMenuToggleCount}
-                data-route-native-click-count={routeMenuNativeClickCount}
-                data-route-menu-set-count={routeMenuSetCount}
-                data-route-menu-last-set={routeMenuLastSetReason}
-                aria-haspopup="listbox"
-                aria-expanded={$routeMenuOpenStore}
-                title={selectedRouteLabel}
-              >
-                <span class="entity-avatar-wrap">
-                  {#if selectedRouteEntityId && entityAvatarSrc(selectedRouteEntityId)}
-                    <img class="entity-avatar-mini" src={entityAvatarSrc(selectedRouteEntityId)} alt="" />
-                  {:else}
-                    <span class="entity-avatar-mini placeholder">{entityInitials(selectedRouteEntityId, selectedRouteEntityName)}</span>
-                  {/if}
-                  <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(selectedRouteJurisdictionLabel)}</span>
-                </span>
-                <span class="entity-select-copy">
-                  <strong>{formatEntityNetworkLabel(selectedRouteEntityName, selectedRouteJurisdictionLabel)}</strong>
-                </span>
-                <span class="entity-select-chevron" aria-hidden="true">⌄</span>
-              </button>
-              <select
-                class="route-select-native"
-                bind:this={routeSelectElement}
-                bind:value={selectedRouteValue}
-                data-testid="swap-route-select"
-                data-selected-route-value={liveSelectedRouteValue}
-                data-committed-route-value={committedRouteSelectionValue}
-                data-route-commit-nonce={routeSelectionCommitNonce}
-                data-selected-route-mode={swapRouteMode}
-                data-selected-route-known={visibleRouteOptions.some((option) => option.value === liveSelectedRouteValue) ? 'true' : 'false'}
-                data-selected-route-disabled={liveSelectedRouteValue !== 'same' && visibleRouteOptions.find((option) => option.value === liveSelectedRouteValue)?.disabled ? 'true' : 'false'}
-                aria-label="Swap to network"
-                title={selectedRouteLabel}
-                on:input={handleRouteSelectChange}
-                on:change={handleRouteSelectChange}
-              >
-                {#each visibleRouteOptions as option}
-                  <option
-                    value={option.value}
-                    disabled={option.disabled}
-                    selected={option.value === liveSelectedRouteValue}
-                    title={option.label}
-                  >
-                    {option.label}
-                  </option>
-                {/each}
-              </select>
-              {#if $routeMenuOpenStore}
-                <div class="route-menu" data-testid="swap-route-menu" role="listbox" aria-label="Destination account">
-                  {#each visibleRouteOptions as option}
-                    <button
-                      type="button"
-                      data-testid="swap-route-option"
-                      data-route-value={option.value}
-                      class:selected={option.value === liveSelectedRouteValue}
-                      class:disabled={option.disabled}
-                      class="route-option"
-                      role="option"
-                      aria-selected={option.value === liveSelectedRouteValue}
-                      disabled={option.disabled}
-                      title={option.disabledReason || option.label}
-                      on:click|stopPropagation={() => selectRouteOption(option.value)}
-                    >
-                      <span class="entity-avatar-wrap">
-                        {#if option.targetEntityId && entityAvatarSrc(option.targetEntityId)}
-                          <img class="entity-avatar-mini" src={entityAvatarSrc(option.targetEntityId)} alt="" />
-                        {:else}
-                          <span class="entity-avatar-mini placeholder">{entityInitials(option.targetEntityId, accountLabel(option.targetEntityId))}</span>
-                        {/if}
-                        <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(option.targetJurisdiction)}</span>
-                      </span>
-                      <span class="route-option-copy">
-                        <strong>{formatEntityNetworkLabel(accountLabel(option.targetEntityId), option.targetJurisdiction)}</strong>
-                        {#if option.disabledReason}
-                          <small>{option.disabledReason}</small>
-                        {/if}
-                      </span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
-          <div class="leg-main">
-            <input
-              type="text"
-              readonly
-              value={formatAmount(wantAmount, wantToken)}
-              class="readonly-input receive-amount"
-              data-testid="swap-receive-amount"
-              aria-label="Estimated receive amount"
-            />
-            <div class="token-select-wrap" data-swap-menu-root title={wantTokenSymbol}>
-              <button
-                type="button"
-                class="token-select-button"
-                aria-haspopup="listbox"
-                aria-expanded={openTokenMenu === 'want'}
-                on:click|stopPropagation={() => toggleTokenMenu('want')}
-              >
-                <span class={`token-dot token-${tokenClass(wantTokenSymbol)}`}>{tokenIconText(wantTokenSymbol)}</span>
-                {#key wantTokenId}
-                  <span class="token-select-visible" data-testid="swap-to-token-label">{wantTokenSymbol}</span>
-                {/key}
-                <span class="token-select-chevron" aria-hidden="true">⌄</span>
-              </button>
-              <select
-                class="token-select-native"
-                bind:value={wantTokenId}
-                data-testid="swap-to-token-select"
-                aria-label="Swap to token"
-                on:change={handleWantTokenChange}
-              >
-                {#each wantTokenOptions as token}
-                  <option value={String(token.tokenId)}>{token.symbol}</option>
-                {/each}
-              </select>
-              {#if openTokenMenu === 'want'}
-                <div class="token-menu" role="listbox" aria-label="Buy token">
-                  {#each wantTokenOptions as token}
-                    <button
-                      type="button"
-                      class:selected={token.tokenId === wantToken}
-                      class="token-option"
-                      role="option"
-                      aria-selected={token.tokenId === wantToken}
-                      on:click|stopPropagation={() => selectWantTokenOption(token.tokenId)}
-                    >
-                      <span class={`token-dot token-${tokenClass(token.symbol)}`}>{tokenIconText(token.symbol)}</span>
-                      <span>{token.symbol}</span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          </div>
-          <div class="leg-meta">
-            <span>{targetAssetLabel}</span>
-            <strong title={targetAccountReady ? `Inbound capacity ${formattedTargetCapacityAmount} ${wantTokenSymbol}` : 'Account setup required'}>{targetCapacityLabel}</strong>
-          </div>
-        </div>
-      </div>
-
-      <SwapPriceVenueControls
-        bind:priceRatioInput
-        bind:createOrderAccountId
-        {quoteTokenSymbol}
-        {marketPriceTicks}
-        {marketPriceSideLabel}
-        {marketPriceLabel}
-        {bookVenueLabel}
-        {hubMenuOpen}
-        {activeOrderAccountId}
-        {selectedHubDisplayLabel}
-        {selectedHubLabel}
-        {selectedHubJurisdictionLabel}
-        {selectedHubOptions}
-        {orderPercent}
-        {handlePriceRatioInput}
-        {stepPrice}
-        {useMarketPrice}
-        {toggleHubMenu}
-        {handleSelectedHubChange}
-        {selectHubOption}
-        {entityAvatarSrc}
-        {entityInitials}
-        {jurisdictionBadgeText}
-        {formatEntityNetworkLabel}
-        {hubJurisdictionLabel}
-        {applyOrderPercent}
-      />
-
-      <SwapRouteBuilder
-        {syncOrderAmountContainerAction}
-        {liveOrderAmountInput}
-        {orderAmountInput}
-        {latestOrderAmountDomValue}
-        {hasLatestOrderAmountDomValue}
-        {orderAmountRevision}
-        {orderAmountDomRevision}
-        orderAmountNodeValue={String(orderAmountInputElement?.value ?? '')}
-        {giveToken}
-        {wantToken}
-        {giveTokenDecimals}
-        {giveAmount}
-        {canonicalGiveAmount}
-        {routeSummaryLabel}
-        {routePathLabel}
-        {routeVenueDisplayLabel}
-        {routeSummaryAssetsLabel}
-        bind:routeDetailsOpen
-        {swapRouteMode}
-        {liveSelectedRouteValue}
-        {routePathSourceLabel}
-        {routePathTargetLabel}
-        {selectedRouteLabel}
-        {sourceRouteEntityLabel}
-        {targetRouteEntityLabel}
-        {canAutoPrepareCrossInboundCapacity}
-        bind:autoExtendCrossInbound
-        bind:crossPriceImprovementMode
-        {showManualRouteRecommendation}
-        {routedRouteRecommendations}
-        {manualRouteEstimateLabel}
-      />
-
-      <div class="avbl-row size-stats">
-        <span data-testid="swap-available-stat">Available: <strong>{formattedAvailableGive}</strong></span>
-        {#if capacityWarning}
-          <span class="capacity-warn">{capacityWarning}</span>
-        {/if}
-      </div>
-
-      {#if autoCapacityNote}
-        <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
-      {/if}
-      {#if showCrossAutoCapacityNote}
-        <p class="auto-capacity-note" data-testid="swap-cross-auto-capacity-note">{crossAutoCapacityNote}</p>
-      {/if}
-
-      {#if selectedOrderLevel}
-        <p class="size-hint" data-testid="swap-size-hint">
-          Filled from book level at {formatPriceTicks(selectedOrderLevel.inputPriceTicks > 0n
-            ? selectedOrderLevel.inputPriceTicks
-            : selectedOrderLevel.priceTicks)}
-          from {accountLabel(selectedOrderLevel.accountId)}
-        </p>
-      {/if}
-
-      <button
-        class="primary-btn"
-        class:buy-action={orderMode === 'buy-base'}
-        class:sell-action={orderMode === 'sell-base'}
-        data-testid="swap-submit-order"
-        on:click={placeSwapOffer}
-        disabled={placingSwapOffer || Boolean(swapActionDisabledReason)}
-      >
-        {swapSubmitLabel}
-      </button>
-      {#if canCreateTargetAccount}
-        <button
-          type="button"
-          class="secondary-setup-btn"
-          data-testid="swap-create-target-account"
-          on:click={prepareSelectedTargetAccount}
-        >
-          Create target account
-        </button>
-      {/if}
-      {#if swapActionDisabledReason || submitError}
-        <p class="form-error" data-testid="swap-form-error">{submitError || swapActionDisabledReason}</p>
-      {/if}
-    </div>
+    <SwapTradeTicket
+      bind:showOrderbook
+      {swapRouteMode}
+      {sourceAssetLabel}
+      {targetAssetLabel}
+      {swapRouteTitle}
+      {selectedSourceEntity}
+      bind:selectedSourceEntityValue
+      {selectedSourceEntityLabel}
+      {sourceEntityIdValue}
+      {sourceJurisdictionLabel}
+      {sourceMenuOpen}
+      {sourceEntityOptions}
+      {toggleSourceMenu}
+      {handleSourceEntityChange}
+      {selectSourceEntityOption}
+      {accountLabel}
+      {entityAvatarSrc}
+      bind:orderAmountInput
+      bind:orderAmountInputElement
+      {handleOrderAmountInput}
+      {openTokenMenu}
+      {toggleTokenMenu}
+      {tokenClass}
+      {tokenIconText}
+      bind:giveTokenId
+      {giveToken}
+      {giveTokenSymbol}
+      {giveTokenOptions}
+      {handleGiveTokenChange}
+      {selectGiveTokenOption}
+      {formattedAvailableGive}
+      {formattedAvailableGiveAmount}
+      {flipSwapTokens}
+      {routeMenuButtonAction}
+      {routeMenuOpenStore}
+      {routeMenuToggleCount}
+      {routeMenuNativeClickCount}
+      {routeMenuSetCount}
+      {routeMenuLastSetReason}
+      {selectedRouteLabel}
+      {selectedRouteEntityId}
+      {selectedRouteEntityName}
+      {selectedRouteJurisdictionLabel}
+      bind:routeSelectElement
+      bind:selectedRouteValue
+      {liveSelectedRouteValue}
+      {committedRouteSelectionValue}
+      {routeSelectionCommitNonce}
+      {visibleRouteOptions}
+      {handleRouteSelectChange}
+      {selectRouteOption}
+      {wantAmount}
+      {wantToken}
+      bind:wantTokenId
+      {wantTokenSymbol}
+      {wantTokenOptions}
+      {handleWantTokenChange}
+      {selectWantTokenOption}
+      {targetAccountReady}
+      {formattedTargetCapacityAmount}
+      {targetCapacityLabel}
+      bind:priceRatioInput
+      bind:createOrderAccountId
+      {quoteTokenSymbol}
+      {marketPriceTicks}
+      {marketPriceSideLabel}
+      {marketPriceLabel}
+      {bookVenueLabel}
+      {hubMenuOpen}
+      {activeOrderAccountId}
+      {selectedHubDisplayLabel}
+      {selectedHubLabel}
+      {selectedHubJurisdictionLabel}
+      {selectedHubOptions}
+      {orderPercent}
+      {handlePriceRatioInput}
+      {stepPrice}
+      {useMarketPrice}
+      {toggleHubMenu}
+      {handleSelectedHubChange}
+      {selectHubOption}
+      {hubJurisdictionLabel}
+      {applyOrderPercent}
+      {syncOrderAmountContainerAction}
+      {liveOrderAmountInput}
+      {latestOrderAmountDomValue}
+      {hasLatestOrderAmountDomValue}
+      {orderAmountRevision}
+      {orderAmountDomRevision}
+      {giveTokenDecimals}
+      {giveAmount}
+      {canonicalGiveAmount}
+      {routeSummaryLabel}
+      {routePathLabel}
+      {routeVenueDisplayLabel}
+      {routeSummaryAssetsLabel}
+      bind:routeDetailsOpen
+      {routePathSourceLabel}
+      {routePathTargetLabel}
+      {sourceRouteEntityLabel}
+      {targetRouteEntityLabel}
+      {canAutoPrepareCrossInboundCapacity}
+      bind:autoExtendCrossInbound
+      bind:crossPriceImprovementMode
+      {showManualRouteRecommendation}
+      {routedRouteRecommendations}
+      {manualRouteEstimateLabel}
+      {capacityWarning}
+      {autoCapacityNote}
+      {showCrossAutoCapacityNote}
+      {crossAutoCapacityNote}
+      {selectedOrderLevel}
+      {formatPriceTicks}
+      {formatAmount}
+      {orderMode}
+      {placingSwapOffer}
+      {swapActionDisabledReason}
+      {placeSwapOffer}
+      {swapSubmitLabel}
+      {canCreateTargetAccount}
+      {prepareSelectedTargetAccount}
+      {submitError}
+    />
 
     {#if showOrderbook}
       <SwapOrderbookSection
