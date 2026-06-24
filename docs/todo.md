@@ -54,15 +54,15 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Runtime import stdout logs redact token-bearing URLs by default; `bun run dev` is the explicit local exception via `XLN_RUNTIME_IMPORT_LOG_URL=1` so the operator gets one clickable bootstrap link. Hub inspect URLs are still logged without query/hash secrets.
   - Evidence: unit asserts default log lines contain no `runtime-import=`, `xlnra1.`, token strings, or base64 manifest; a separate unit asserts the full URL is exposed only when explicitly requested. Focused browser e2e imported mesh/custody/MM runtimes from the manifest.
 
-- [x] Replace per-runtime paste links with one-click `runtimeList` auto-import.
+- [x] Replace per-runtime paste links with one prefilled remote-import manager link.
   - Impact: critical.
-  - Status: done. `bun run dev` suppresses the early keygen/Vite URLs and lets the orchestrator print the single final `/app?runtimeList=...` link after H1/H2/H3/MM/Custody are bootstrapped with real runtimeId-bound tokens. `/app` strips token params, validates every host, stores the imports, activates the first runtime, and reloads without rendering the textarea/confirm screen on the success path.
-  - Evidence: focused unit asserts standalone keygen still can print one app link and dev-mode can suppress that early URL. Focused browser e2e expects `runtimeList=`, no `runtime-import=`, no bulk import screen, no textarea, no confirm button, then verifies mesh/custody/MM runtimes are imported and live.
+  - Status: done. `bun run dev` suppresses early keygen/Vite URLs and lets the orchestrator print one final `/radapter/manage#runtime-import=...` link after H1/H2/H3/MM/Custody are bootstrapped with real runtimeId-bound tokens. Tokens live in the URL fragment, the manager pre-fills the bulk textarea, immediately scrubs the fragment from the address bar, and imports only after the operator presses Confirm.
+  - Evidence: focused unit PASS `6/6` asserts standalone keygen prints one manager fragment link and dev-mode can suppress it. Focused browser e2e PASS `2/2`, run `20260624-135733-077`, expects no `?runtimeList`, no query token, visible prefilled textarea, empty import summary before Confirm, then verifies mesh/custody/MM runtimes are imported and live after Confirm.
 
 - [x] Move manual Remote Manager out of the main app dropdowns.
   - Impact: high.
   - Status: done. Context/runtime dropdowns no longer render the attach/bulk form or a remote-manager link. Manual attach/bulk import now lives only on the dedicated `/radapter/manage` page.
-  - Evidence: focused radapter e2e asserts the context dropdown has no `remote-runtime-manager` and no `.remote-manager-link`, opens `/radapter/manage`, attaches H2 by token, then opens `/app` and verifies the remote runtime is active. The bulk import e2e still validates the single `runtimeList` URL for H1/H2/H3/MM/Custody.
+  - Evidence: focused radapter e2e PASS `2/2`, run `20260624-135733-077`, asserts the context dropdown has no `remote-runtime-manager` and no `.remote-manager-link`, opens `/radapter/manage`, attaches H2 by token, redirects to `/app`, and verifies the remote runtime is active. The bulk import e2e validates the single fragment manager URL for H1/H2/H3/MM/Custody.
 
 - [x] Fix reserve faucet missing-event invariant.
   - Impact: high.
