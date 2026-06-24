@@ -37,6 +37,17 @@
     writeBirdViewSettings,
     type BirdViewSettings,
   } from './graph3d-settings';
+  import type {
+    GraphConnectionData,
+    GraphDerivedAccountData,
+    GraphEntityData,
+    GraphFrameActivity,
+    GraphJBlockHistoryEntry,
+    GraphPaymentJob,
+    GraphRendererMode,
+    GraphRipple,
+    GraphXLNRuntime,
+  } from './graph3d-types';
   let showMiniPanel = false;
   let miniPanelEntityId = '';
   let miniPanelEntityName = '';
@@ -93,24 +104,7 @@
     }
     return liveEnv;
   }
-  interface JBlockHistoryEntry {
-    blockNumber: bigint;
-    container: THREE.Group;
-    txCubes: THREE.Object3D[];
-    yOffset: number;
-  }
-  interface XLNRuntime {
-    deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => DerivedAccountData;
-    getTokenInfo: (tokenId: number) => { symbol: string; decimals: number } | undefined;
-    getEntityShortId: (entityId: string) => string;
-    isLeft: (myEntityId: string, counterpartyEntityId: string) => boolean;
-    executeScenario: (env: unknown, scenario: unknown) => Promise<{ success: boolean; framesGenerated: number; errors?: string[] }>;
-    process: (env: unknown, inputs: unknown[]) => Promise<void>;
-    parseScenario: (text: string) => { errors: unknown[]; scenario: unknown };
-    classifyBilateralState: (myAccount: unknown, peerCurrentHeight: number | undefined, isLeft: boolean) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
-    getAccountBarVisual: (leftState: unknown, rightState: unknown) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
-  }
-  let XLN: XLNRuntime | null = null;
+  let XLN: GraphXLNRuntime | null = null;
   const debug = {
     warn: (...args: unknown[]) => console.warn('[Graph3D]', ...args),
     error: (...args: unknown[]) => console.error('[Graph3D]', ...args)
@@ -144,7 +138,6 @@
       return null;
     }
   };
-  type RendererMode = 'webgl' | 'webgpu';
   function disposeObject3D(obj: THREE.Object3D): void {
     obj.traverse((child: any) => {
       if (child.geometry) child.geometry.dispose();
@@ -159,47 +152,6 @@
     });
   }
   let OrbitControls: typeof OrbitControlsType;
-  interface EntityData {
-    id: string;
-    position: THREE.Vector3;
-    mesh: THREE.Mesh;
-    label?: THREE.Sprite; // Label sprite that follows entity
-    profile?: any;
-    isHub?: boolean;
-    lastActivity?: number;
-    isPinned?: boolean;  // User has manually positioned this entity
-    isHovered?: boolean; // Mouse is over this entity
-    isDragging?: boolean; // Currently being dragged
-    activityRing?: THREE.Mesh | null; // Activity indicator ring
-    mempoolIndicator?: THREE.Sprite; // Mempool count indicator
-  }
-  interface FrameActivity {
-    activeEntities: Set<string>;
-    incomingFlows: Map<string, string[]>; // entityId -> source entity IDs
-    outgoingFlows: Map<string, string[]>; // entityId -> destination entity IDs
-  }
-  interface ConnectionData {
-    from: string;
-    to: string;
-    line: THREE.Line;
-    progressBars?: THREE.Group | undefined;
-    mempoolBoxes?: { leftBox: THREE.Group; rightBox: THREE.Group } | null | undefined;
-  }
-  interface DerivedAccountData {
-    delta: number;
-    totalCapacity: number;
-    ownCreditLimit: number;
-    peerCreditLimit: number;
-    inCapacity: number;
-    outCapacity: number;
-    collateral: number;
-    outOwnCredit: number;      // our unused credit
-    inCollateral: number;      // our collateral
-    outPeerCredit: number;     // their used credit
-    inOwnCredit: number;       // our used credit
-    outCollateral: number;     // their collateral
-    inPeerCredit: number;      // their unused credit
-  }
   let container: HTMLDivElement;
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
@@ -212,7 +164,7 @@
   let jMachines: Map<string, THREE.Group> = new Map(); // jurisdiction name → J-Machine mesh
   $: jMachine = activeJurisdictionName ? jMachines.get(activeJurisdictionName) || null : null;
   let jMachineTxBoxes: (THREE.Group | THREE.Mesh)[] = []; // Yellow tx cubes inside J-Machine (current mempool)
-  let jBlockHistory: JBlockHistoryEntry[] = []; // Last 3 committed blocks stacked above J-machine
+  let jBlockHistory: GraphJBlockHistoryEntry[] = []; // Last 3 committed blocks stacked above J-machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
   let jAutoProposerInterval: ReturnType<typeof setInterval> | null = null;
@@ -220,8 +172,8 @@
   let jLastProposalTime = 0; // Track last proposal timestamp
   let jAutoProposerEnabled = true; // Enable/disable auto-proposer
   let lastAnimatedFrameIndex = -1; // Track which frame we last animated (to avoid re-animating)
-  let entities: EntityData[] = [];
-  let connections: ConnectionData[] = [];
+  let entities: GraphEntityData[] = [];
+  let connections: GraphConnectionData[] = [];
   let particles: Array<{
     mesh: THREE.Mesh;
     connectionIndex: number;
@@ -236,7 +188,7 @@
     startTime: number;
     duration: number;
   }> = [];
-  let currentFrameActivity: FrameActivity = {
+  let currentFrameActivity: GraphFrameActivity = {
     activeEntities: new Set(),
     incomingFlows: new Map(),
     outgoingFlows: new Map()
@@ -255,7 +207,7 @@
     leftEntity: '',
     rightEntity: ''
   };
-  let draggedEntity: EntityData | null = null;
+  let draggedEntity: GraphEntityData | null = null;
   let dragPlane: THREE.Plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Plane for 3D dragging
   let dragOffset: THREE.Vector3 = new THREE.Vector3();
   let isDragging: boolean = false;
@@ -306,7 +258,7 @@
   let rotationY: number = savedSettings.rotationY; // 0-10000 (0 = stopped, 10000 = fast)
   let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 = fast)
   let availableTokens: number[] = []; // Will be populated from actual token data
-  let rendererMode: RendererMode = 'webgl';
+  let rendererMode: GraphRendererMode = 'webgl';
   let labelScale: number = 2.0;
   let lightningSpeed: number = 100;
   let forceLayoutEnabled: boolean = true;
@@ -353,20 +305,10 @@
     const themeColors = getThemeColors(settings.theme);
     scene.background = new THREE.Color(themeColors.background);
   }
-  interface PaymentJob {
-    id: string;
-    from: string;
-    to: string;
-    amount: string;
-    tps: number;
-    sentCount: number;
-    startedAt: number;
-    intervalId?: number;
-  }
   let selectedScenarioFile: string = '';
   let isLoadingScenario: boolean = false;
   let scenarioSteps: Array<{timestamp: number; title: string; description: string; actions: any[]}> = [];
-  let activeJobs: PaymentJob[] = [];
+  let activeJobs: GraphPaymentJob[] = [];
   $: if (selectedScenarioFile) {
     loadScenarioSteps(selectedScenarioFile);
   }
@@ -731,13 +673,7 @@
   let isVRSupported: boolean = false;
   let isVRActive: boolean = false;
   let handTrackingController: VRHandTrackingController | null = null;
-  interface Ripple {
-    mesh: THREE.Mesh;
-    startTime: number;
-    duration: number;
-    maxRadius: number;
-  }
-  let activeRipples: Ripple[] = [];
+  let activeRipples: GraphRipple[] = [];
   let availableRoutes: GraphPaymentRoute[] = [];
   let selectedRouteIndex: number = 0;
   let graphInitialized = false;
@@ -2329,7 +2265,7 @@
     }
     return accountData.deltas.get(tokenId) ?? null;
   }
-  function deriveEntry(tokenDelta: any, isLeft: boolean): DerivedAccountData {
+  function deriveEntry(tokenDelta: any, isLeft: boolean): GraphDerivedAccountData {
     if (!XLN?.deriveDelta) {
       throw new Error('FINTECH-SAFETY: xlnFunctions.deriveDelta not available');
     }
@@ -2340,7 +2276,7 @@
     if (!derived) {
       return { delta: 0, totalCapacity: 0, ownCreditLimit: 0, peerCreditLimit: 0, inCapacity: 0, outCapacity: 0, collateral: 0, outOwnCredit: 0, inCollateral: 0, outPeerCredit: 0, inOwnCredit: 0, outCollateral: 0, inPeerCredit: 0 };
     }
-    const result: DerivedAccountData = {
+    const result: GraphDerivedAccountData = {
       delta: Number(derived.delta),
       totalCapacity: Number(derived.totalCapacity || 0n),
       ownCreditLimit: Number(derived.ownCreditLimit || 0n),
@@ -3589,7 +3525,7 @@
       }
       getLiveEnvForAction('Graph payment');
       const jobId = `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-      const job: PaymentJob = {
+      const job: GraphPaymentJob = {
         id: jobId,
         from: paymentFrom,
         to: paymentTo,
@@ -3615,7 +3551,7 @@
       alert(`Payment failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  async function executeSinglePayment(job: PaymentJob) {
+  async function executeSinglePayment(job: GraphPaymentJob) {
     try {
       if (!XLN) {
         throw new Error('XLN runtime not loaded');
@@ -3716,7 +3652,7 @@
     rippleMesh.rotation.y = Math.random() * Math.PI;
     rippleMesh.rotation.z = Math.random() * Math.PI;
     scene.add(rippleMesh);
-    const ripple: Ripple = {
+    const ripple: GraphRipple = {
       mesh: rippleMesh,
       startTime: Date.now(),
       duration: 1500, // 1.5 seconds
