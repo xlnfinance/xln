@@ -1,10 +1,15 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import { Check, Link, Upload } from 'lucide-svelte';
   import { runtimeOperations } from '$lib/stores/runtimeStore';
   import {
     MAX_REMOTE_RUNTIME_IMPORTS,
+    REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+    REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
+    formatRemoteRuntimeImportLines,
     normalizeRemoteRuntimeWsUrl,
+    parseRemoteRuntimeImportPayload,
     parseRemoteRuntimeImportText,
     type RemoteRuntimeImportAccess,
     type RemoteRuntimeImportEntry,
@@ -25,7 +30,7 @@
 
   const dispatch = createEventDispatcher<{ imported: { runtimeId: string; count: number } }>();
 
-  let mode: ImportMode = 'single';
+  let mode: ImportMode = 'bulk';
   let label = '';
   let access: RemoteRuntimeImportAccess = 'read';
   let wsUrl = '';
@@ -65,6 +70,70 @@
     }));
   };
 
+  const readImportPayloadFromHash = (): string => {
+    if (typeof window === 'undefined') return '';
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (!hash.trim()) return '';
+    const params = new URLSearchParams(hash);
+    return String(
+      params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) ||
+      params.get('runtimeList') ||
+      params.get('runtime-list') ||
+      params.get('runtimeImport') ||
+      params.get('runtimes') ||
+      params.get('remote-runtimes') ||
+      params.get('xlnRemoteRuntimes') ||
+      '',
+    ).trim();
+  };
+
+  const scrubImportHash = (): void => {
+    if (typeof window === 'undefined' || !window.location.hash) return;
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  };
+
+  const writeImportSummary = (
+    validated: StoredRemoteRuntimeImportEntry[],
+    total: number,
+    importedAt: number,
+  ): void => {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY, JSON.stringify({
+      ok: true,
+      importedAt,
+      count: validated.length,
+      total,
+      entries: validated.map(entry => ({
+        label: entry.label,
+        access: entry.access,
+        wsUrl: entry.wsUrl,
+        runtimeId: entry.runtimeId,
+        height: entry.height,
+        entityCount: entry.entityCount,
+      })),
+    }));
+  };
+
+  const prefillFromHash = (): void => {
+    const payload = readImportPayloadFromHash();
+    if (!payload) return;
+    mode = 'bulk';
+    try {
+      const entries = parseRemoteRuntimeImportPayload(payload);
+      bulkText = formatRemoteRuntimeImportLines(entries);
+      resetRows(entries);
+      status = `Ready to import ${entries.length} remote runtime${entries.length === 1 ? '' : 's'}`;
+      error = '';
+    } catch (err) {
+      bulkText = payload;
+      rows = [];
+      status = 'Import list needs review';
+      error = errorMessage(err);
+    } finally {
+      scrubImportHash();
+    }
+  };
+
   const importEntries = async (entries: RemoteRuntimeImportEntry[]): Promise<void> => {
     if (working) return;
     working = true;
@@ -86,11 +155,12 @@
         }));
       }
       if (validated.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_EMPTY');
-      runtimeOperations.upsertRemoteRuntimeImports(validated);
+      const persisted = runtimeOperations.upsertRemoteRuntimeImports(validated);
+      writeImportSummary(validated, persisted.length, importedAt);
       status = `Imported ${validated.length} remote runtime${validated.length === 1 ? '' : 's'}`;
       const first = validated[0]!;
       dispatch('imported', { runtimeId: first.runtimeId, count: validated.length });
-      runtimeOperations.activateRemoteRuntime(first.runtimeId);
+      runtimeOperations.activateRemoteRuntime(first.runtimeId, { href: '/app' });
     } catch (err) {
       error = errorMessage(err);
       status = 'Import failed';
@@ -106,6 +176,10 @@
   async function importBulk(): Promise<void> {
     await importEntries(parseRemoteRuntimeImportText(bulkText));
   }
+
+  onMount(() => {
+    prefillFromHash();
+  });
 </script>
 
 <section class="manager" data-testid="remote-runtime-manager">
@@ -148,7 +222,7 @@
   {/if}
 
   {#if status}
-    <div class="manager-status">{status}</div>
+    <div class="manager-status" data-testid="remote-runtime-manager-status">{status}</div>
   {/if}
   {#if error}
     <div class="manager-error" data-testid="remote-runtime-manager-error">{error}</div>

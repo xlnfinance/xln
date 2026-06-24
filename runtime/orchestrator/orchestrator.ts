@@ -311,8 +311,9 @@ const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string => {
   const lines = manifest.entries
     .map(entry => `${entry.label} | ${entry.access} | ${entry.wsUrl} | ${entry.token}`)
     .join('\n');
-  url.searchParams.set('runtimeList', lines);
-  url.hash = '';
+  url.pathname = '/radapter/manage';
+  url.search = '';
+  url.hash = `runtime-import=${encodeURIComponent(lines)}`;
   return url.toString();
 };
 

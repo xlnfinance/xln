@@ -195,12 +195,15 @@ export const runtimeOperations = {
     activeRuntimeId.set(id);
   },
 
-  activateRemoteRuntime(runtimeId: string): boolean {
+  activateRemoteRuntime(runtimeId: string, options: { href?: string } = {}): boolean {
     const runtime = get(runtimes).get(runtimeId);
     if (!runtime || runtime.type !== 'remote') return false;
     if (!persistActiveRemoteRuntime(runtime)) return false;
     activeRuntimeId.set(runtimeId);
-    if (typeof window !== 'undefined') window.location.reload();
+    if (typeof window !== 'undefined') {
+      if (options.href) window.location.assign(options.href);
+      else window.location.reload();
+    }
     return true;
   },
 

@@ -67,7 +67,7 @@ const formatRuntimeImportLines = (manifest: RuntimeImportManifest): string =>
   manifest.entries.map(entry => `${entry.label} | ${entry.access} | ${entry.wsUrl} | ${entry.token}`).join('\n');
 
 const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string =>
-  `https://localhost:${webPort}/app?runtimeList=${encodeURIComponent(formatRuntimeImportLines(manifest))}`;
+  `https://localhost:${webPort}/radapter/manage#runtime-import=${encodeURIComponent(formatRuntimeImportLines(manifest))}`;
 
 const seeds: Record<string, string> = {};
 const entries = RUNTIMES.map(runtime => {

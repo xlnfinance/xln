@@ -656,6 +656,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   await expect(page.locator('.remote-manager-link')).toHaveCount(0);
   await page.goto(`${APP_BASE_URL}/radapter/manage`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('remote-runtime-manager')).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'Attach' }).click();
   await page.getByTestId('remote-runtime-label').fill('H2 dropdown');
   await page.getByTestId('remote-runtime-ws').fill(h2WsUrl);
   await page.getByTestId('remote-runtime-token').fill(h2Key);
@@ -663,7 +664,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   await page.getByTestId('remote-runtime-attach').click();
   await reloadAfterAttach;
   await page.waitForLoadState('domcontentloaded');
-  await expect(page.getByTestId('remote-runtime-manager')).toBeVisible({ timeout: 10_000 });
+  await expect(page).toHaveURL(/\/app$/);
 
   await page.waitForFunction(
     (expectedWsUrl) => localStorage.getItem('xln-runtime-adapter-ws') === expectedWsUrl,
@@ -688,7 +689,6 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   expect(managerState.h2Import?.access).toBe('read');
   expect(managerState.h2Import?.entityCount ?? 0).toBeGreaterThan(0);
 
-  await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(
     (expectedRuntimeId) => String((window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv?.runtimeId || '') === expectedRuntimeId,
     `radapter:${h2WsUrl}`,
@@ -713,12 +713,31 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     expectMarketMakerBooksHealthy(baseline);
 
     const importUrl = await readRuntimeImportUrl(page);
-    expect(importUrl).toContain('runtimeList=');
-    expect(importUrl).not.toContain('runtime-import=');
+    const parsedImportUrl = new URL(importUrl);
+    expect(parsedImportUrl.pathname).toBe('/radapter/manage');
+    expect(parsedImportUrl.search).toBe('');
+    expect(parsedImportUrl.hash).toContain('runtime-import=');
+    expect(importUrl).not.toContain('?runtimeList=');
+    expect(importUrl).not.toContain('&token=');
     await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toHaveCount(0);
-    await expect(page.getByTestId('remote-runtime-import-textarea')).toHaveCount(0);
-    await expect(page.getByTestId('remote-runtime-import-confirm')).toHaveCount(0);
+    await expect(page.getByTestId('remote-runtime-manager')).toBeVisible();
+    await expect(page.getByTestId('remote-runtime-bulk-textarea')).toBeVisible();
+    await expect(page.getByTestId('remote-runtime-bulk-confirm')).toBeEnabled();
+    await expect(page.getByTestId('remote-runtime-manager-status')).toContainText('Ready to import');
+    await expect(page).toHaveURL(/\/radapter\/manage$/);
+
+    const importText = await page.getByTestId('remote-runtime-bulk-textarea').inputValue();
+    for (const label of ['H1', 'H2', 'H3', 'MM', 'Custody']) {
+      expect(importText).toContain(label);
+    }
+    expect(importText).toContain('xlnra1.read.');
+    expect(importText).not.toContain('xlnra1.full.');
+    await expect.poll(async () => page.evaluate(
+      (storageKey) => sessionStorage.getItem(storageKey),
+      REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
+    )).toBeNull();
+
+    await page.getByTestId('remote-runtime-bulk-confirm').click();
     await page.waitForFunction((storageKey) => {
       const raw = sessionStorage.getItem(storageKey);
       if (!raw) return false;
@@ -732,7 +751,6 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
 
     const importSummary = await readRuntimeImportSummary(page);
     await expect(page.getByTestId('remote-runtime-bulk-import-screen')).toHaveCount(0);
-    await expect(page.getByTestId('remote-runtime-import-textarea')).toHaveCount(0);
 
     expect(importSummary.ok).toBe(true);
     expect(importSummary.entries.length).toBeGreaterThanOrEqual(5);
