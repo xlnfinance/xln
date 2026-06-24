@@ -265,7 +265,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - UI: read scope sees the full QA evidence surface, including redacted text artifacts, while privileged controls remain visible but disabled. Admin/open scope can plan/backfill/purge, and restart run still requires reason, `RUN`, expected HEAD, and server-side `XLN_QA_RESTART_ALLOWED=1`.
   - Status: done. Secret-bearing text artifacts are readable with read tokens after redaction; admin scope is now reserved for mutating operations (`restart`, `abort`, `history/backfill`, `retention`). QA cockpit read-mode e2e verifies verdict/gallery/runs/player remain visible while restart/backfill/purge buttons stay disabled and do not call admin endpoints.
-  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `39/39`; `bun run check` PASS; focused QA cockpit e2e PASS `2/2`, run `20260624-133945-061`, wall `21.4s`, benchmark OK vs `20260624-133913-569`.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `39/39`; `bun run check` PASS; focused QA cockpit e2e PASS `3/3`, run `20260624-134259-361`, wall `30.8s`, benchmark OK vs `20260624-134214-230`.
 
 - [x] Implement `/qa?embed=1` properly or remove it.
   - Impact: medium.
@@ -441,7 +441,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [ ] E2E: scenario transcript cue scrubs video to real marker timestamp.
 - [x] E2E: verdict banner shows FAIL on failed fixture and PASS on green fixture.
 - [x] E2E: history compare renders deltas and regression badge.
-- [ ] E2E: restart run disabled in read mode and enabled only in admin mode.
+- [x] E2E: restart run disabled in read mode and enabled only in admin mode.
+  - Status: done. Read-mode QA fixture keeps verdict, gallery, runs, and player visible but verifies restart/backfill/retention controls are disabled and do not call admin endpoints. Admin/open fixture verifies `Restart run` stays disabled before plan/confirm, then becomes enabled only after a restart plan fills expected HEAD and the operator enters operator id, reason, and `RUN`.
+  - Evidence: focused QA cockpit e2e PASS `3/3`, run `20260624-134259-361`, wall `30.8s`.
 - [ ] E2E: 1M account health snapshot renders aggregate view without freezing.
 - [ ] Failure fixtures: browser console error, pageerror, network 502, fatal log marker, phase budget exceeded, corrupt manifest, empty logs dir.
 - [ ] Golden regulator scenarios: baseline mesh reserves, payment smoke, multi-hop HTLC, dispute lifecycle return, reserve faucet, rebalance, market-maker order placement.

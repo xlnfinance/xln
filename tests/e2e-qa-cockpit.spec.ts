@@ -1562,4 +1562,133 @@ test.describe('QA cockpit scenario player', () => {
     expect(historyBackfillCalled).toBe(false);
     expect(retentionPurgeCalled).toBe(false);
   });
+
+  test('enables restart run only after admin plan and typed confirmation', async ({ page }) => {
+    test.setTimeout(60_000);
+    let runRestartCalled = false;
+
+    await page.route('**/api/qa/runs?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          runs: [QA_FIXTURE_SUMMARY],
+          ledger: [QA_FAIL_LEDGER],
+          regression: QA_REGRESSION_REPORT,
+          verdict: QA_FAIL_VERDICT,
+        }),
+      });
+    });
+    await page.route('**/api/qa/run?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, run: QA_FIXTURE_RUN }),
+      });
+    });
+    await page.route('**/api/qa/catalog', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          catalog: QA_CATALOG,
+          restart: { active: false },
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/history?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          history: QA_HISTORY,
+          restart: { active: false },
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/restart-audit?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, audit: QA_RESTART_AUDIT }),
+      });
+    });
+    await page.route('**/api/qa/stories?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          total: QA_STORIES.length,
+          releasePack: QA_RELEASE_PACK,
+          stories: QA_STORIES,
+        }),
+      });
+    });
+    await page.route('**/api/qa/restart?**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      if (requestUrl.searchParams.get('mode') === 'run') runRestartCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          mode: requestUrl.searchParams.get('mode') ?? 'plan',
+          target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
+          title: 'QA cockpit fixture records playback transcript',
+          command: [
+            'bun',
+            'runtime/scripts/run-e2e-parallel-isolated.ts',
+            '--pw-project=chromium',
+            '--pw-files=["tests/e2e-qa-cockpit-fixture.spec.ts::QA cockpit fixture records playback transcript"]',
+            '--video=on',
+          ],
+          expectedGitHead: QA_FIXTURE_RUN.code.gitHead,
+          gitBranch: QA_FIXTURE_RUN.code.gitBranch,
+          codeHash: QA_FIXTURE_RUN.code.codeHash,
+          dirty: false,
+          restart: { active: false },
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/artifact?**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const artifactPath = requestUrl.searchParams.get('path') || '';
+      const isPng = artifactPath.endsWith('.png');
+      const isVtt = artifactPath.endsWith('.vtt');
+      await route.fulfill({
+        status: 200,
+        contentType: isPng ? 'image/png' : isVtt ? 'text/vtt; charset=utf-8' : 'video/webm',
+        body: isPng ? QA_FIXTURE_PNG : isVtt ? QA_FIXTURE_VTT : QA_FIXTURE_WEBM,
+      });
+    });
+
+    await page.goto('/qa');
+    await expect(page.getByTestId('qa-auth-panel')).toContainText('open', { timeout: 30_000 });
+    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await page.getByTestId('qa-suite-row').first().click();
+
+    const restartRunButton = page.getByRole('button', { name: 'Restart run' });
+    await expect(page.getByRole('button', { name: 'Restart plan' })).toBeEnabled();
+    await expect(restartRunButton).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Restart plan' }).click();
+    await expect(page.getByTestId('qa-restart-plan')).toContainText('run-e2e-parallel-isolated');
+    await expect(restartRunButton).toBeDisabled();
+    await page.getByPlaceholder('operator id').fill('operator-read-admin-test');
+    await page.getByPlaceholder('why this rerun is needed').fill('verify admin restart enablement');
+    await page.getByRole('textbox', { name: 'confirm' }).fill('RUN');
+    await expect(restartRunButton).toBeEnabled();
+    expect(runRestartCalled).toBe(false);
+  });
 });
