@@ -1827,4 +1827,153 @@ test.describe('QA cockpit scenario player', () => {
     await expect.poll(() => abortConfirm).toBe('ABORT_RESTART');
     await expect(page.getByTestId('qa-restart-abort-card')).toHaveCount(0);
   });
+
+  test('windows large shard and artifact lists behind show-more controls', async ({ page }) => {
+    test.setTimeout(60_000);
+    const baseShard = QA_FIXTURE_RUN.shards[0]!;
+    const largeArtifacts = Array.from({ length: 90 }, (_, index) => ({
+      name: `artifact-${String(index + 1).padStart(3, '0')}.json`,
+      relativePath: `test-results-shard-0/large/artifact-${index + 1}.json`,
+      sizeBytes: 128 + index,
+      kind: 'text',
+      sensitivity: 'internal',
+      contentType: 'application/json',
+      url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent(`test-results-shard-0/large/artifact-${index + 1}.json`)}`,
+    }));
+    const largeShards = Array.from({ length: 240 }, (_, index) => ({
+      ...baseShard,
+      shard: index,
+      status: 'passed',
+      durationMs: 700 + index,
+      target: `large-shard-${index}`,
+      logTail: `large shard ${index}`,
+      artifacts: index === 0 ? largeArtifacts : [],
+      hasVideo: false,
+      hasTrace: false,
+    }));
+    const largeRun = {
+      ...QA_FIXTURE_RUN,
+      status: 'passed',
+      passedShards: largeShards.length,
+      failedShards: 0,
+      totalShards: largeShards.length,
+      failingTargets: [],
+      shards: largeShards,
+    };
+    const largeSummary = {
+      ...QA_FIXTURE_SUMMARY,
+      status: 'passed',
+      passedShards: largeShards.length,
+      failedShards: 0,
+      totalShards: largeShards.length,
+      failingTargets: [],
+      shards: undefined,
+    };
+
+    await page.route('**/api/qa/runs?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          runs: [largeSummary],
+          ledger: [],
+          regression: QA_REGRESSION_REPORT,
+          verdict: QA_PASS_VERDICT,
+        }),
+      });
+    });
+    await page.route('**/api/qa/run?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, run: largeRun }),
+      });
+    });
+    await page.route('**/api/qa/catalog', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          catalog: QA_CATALOG,
+          restart: { active: false },
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/history?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          history: [],
+          restart: { active: false },
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/restart-audit?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, audit: [] }),
+      });
+    });
+    await page.route('**/api/qa/stories?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          total: QA_STORIES.length,
+          releasePack: QA_RELEASE_PACK,
+          stories: QA_STORIES,
+        }),
+      });
+    });
+    await page.route('**/api/qa/artifact?**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const artifactPath = requestUrl.searchParams.get('path') || '';
+      const isPng = artifactPath.endsWith('.png');
+      const isVtt = artifactPath.endsWith('.vtt');
+      const isJson = artifactPath.endsWith('.json');
+      await route.fulfill({
+        status: 200,
+        contentType: isPng ? 'image/png' : isVtt ? 'text/vtt; charset=utf-8' : isJson ? 'application/json' : 'video/webm',
+        body: isPng
+          ? QA_FIXTURE_PNG
+          : isVtt
+            ? QA_FIXTURE_VTT
+            : isJson
+              ? JSON.stringify({ ok: true, artifactPath })
+              : QA_FIXTURE_WEBM,
+      });
+    });
+
+    await page.goto('/qa');
+    await expect(page.getByTestId('qa-auth-panel')).toContainText('open', { timeout: 30_000 });
+    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await expect(page.getByTestId('qa-suite-row')).toHaveCount(80);
+    await expect(page.getByTestId('qa-shards-show-more')).toContainText('80/240');
+    await page.getByTestId('qa-shards-show-more').click();
+    await expect(page.getByTestId('qa-suite-row')).toHaveCount(160);
+    await page.getByTestId('qa-shards-show-more').click();
+    await expect(page.getByTestId('qa-suite-row')).toHaveCount(240);
+    await expect(page.getByTestId('qa-shards-show-more')).toHaveCount(0);
+
+    const artifactRows = page.locator('[data-testid="qa-evidence-artifacts"] .artifact-list button');
+    await expect(artifactRows).toHaveCount(40);
+    await expect(page.getByTestId('qa-artifacts-show-more')).toContainText('40/90');
+    await page.getByTestId('qa-artifacts-show-more').click();
+    await expect(artifactRows).toHaveCount(80);
+    await page.getByTestId('qa-artifacts-show-more').click();
+    await expect(artifactRows).toHaveCount(90);
+    await expect(page.getByTestId('qa-artifacts-show-more')).toHaveCount(0);
+  });
 });

@@ -323,9 +323,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Current-height `view-frame` and paged account/book reads now prefer persisted storage pages when the persisted head can serve the requested height; live env projection is only fallback for unpersisted/local reads.
   - Evidence: L1 `runtime adapter 1M account view-frame stays aggregate-first and under wire budget` uses a fake 1M hub, returns 10 visible accounts plus `summary.totalItems`, cursors, sample IDs, state hashes, and top deltas; encoded response stays below 100KB and resolves under 100ms.
 
-- [ ] Virtualize large run/shard/artifact lists.
+- [x] Virtualize large run/shard/artifact lists.
   - Impact: medium.
   - Tests: 200+ shard run remains responsive; no layout shift on hover/status changes.
+  - Status: done. QA cockpit now windows runs, history rows, canonical ledger rows, suite shards, and non-media evidence artifacts behind explicit `Show more` controls instead of rendering the whole run at once.
+  - Evidence: focused QA cockpit e2e `20260624-141128-750` PASS `1/1`, wall `9.2s`, code hash `ed3ed21412cc6f36`; validates 240 shards render 80 -> 160 -> 240 and 90 artifacts render 40 -> 80 -> 90. Browser event capture stayed clean: no 404/console error file emitted.
 
 ## p2 data quality and simplification
 
