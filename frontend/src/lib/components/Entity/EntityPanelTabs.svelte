@@ -31,15 +31,15 @@
   import { formatEntityId } from '$lib/utils/format';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { Landmark, Users, Settings as SettingsIcon } from 'lucide-svelte';
-  import AccountPanel from './AccountPanel.svelte';
   import AccountWorkspaceView from './AccountWorkspaceView.svelte';
   import EntityAssetsTab from './EntityAssetsTab.svelte';
+  import EntityFocusedAccountView from './EntityFocusedAccountView.svelte';
   import EntityPanelChrome from './EntityPanelChrome.svelte';
   import EntityPanelHeroTabs from './EntityPanelHeroTabs.svelte';
+  import EntitySelectionEmptyState from './EntitySelectionEmptyState.svelte';
   import EntitySettingsPanel from '$lib/components/Settings/EntitySettingsPanel.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import ContextSwitcher from './ContextSwitcher.svelte';
-  import RuntimeStateCard from '../shared/RuntimeStateCard.svelte';
   import {
     attachOffchainFaucetRequestId,
     faucetPendingKey,
@@ -3426,35 +3426,24 @@
 
   <main class="main-scroll">
     {#if !tab.entityId || !tab.signerId}
-      <div class="empty-state">
-        <RuntimeStateCard
-          compact={true}
-          title="Select Entity"
-          description={userModeHeader ? 'Choose an entity from the active context.' : 'Choose an entity from the header dropdown.'}
-          status={null}
-          actionLabel={resettingEverything ? 'Resetting...' : 'Reset local data'}
-          actionDisabled={resettingEverything}
-          onAction={handleResetEverything}
-          testId="entity-empty-card"
-        />
-      </div>
+      <EntitySelectionEmptyState
+        {userModeHeader}
+        {resettingEverything}
+        {handleResetEverything}
+      />
 
     {:else if activeEnv && isAccountFocused && selectedAccount && selectedAccountId}
-      <div class="focused-view">
-        {#key selectedAccountId}
-        <AccountPanel
-          account={selectedAccount}
-          counterpartyId={selectedAccountId}
-          entityId={tab.entityId}
-          {replica}
-          env={activeEnv}
-          pendingFaucetKeys={pendingOffchainFaucetKeys}
-          on:back={handleBackToAccounts}
-          on:faucet={handleAccountFaucet}
-          on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
-        />
-        {/key}
-      </div>
+      <EntityFocusedAccountView
+        {selectedAccount}
+        {selectedAccountId}
+        {tab}
+        {replica}
+        {activeEnv}
+        {pendingOffchainFaucetKeys}
+        {handleBackToAccounts}
+        {handleAccountFaucet}
+        {handleAccountPanelGoToOpenAccounts}
+      />
 
     {:else if activeEnv && replica}
       <EntityPanelHeroTabs
@@ -3735,19 +3724,6 @@
   /* Main content - NO own scrollbar, parent .panel-content scrolls */
   .main-scroll {
     display: contents;
-  }
-
-  /* Empty State */
-  .empty-state {
-    display: flex;
-    justify-content: center;
-    height: 300px;
-    align-items: center;
-  }
-
-  /* Focused Account View */
-  .focused-view {
-    min-height: 0;
   }
 
   /* Content */
