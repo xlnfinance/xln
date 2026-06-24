@@ -73,7 +73,10 @@
   import {
     buildMoveArrowPath,
     buildMoveRouteSteps,
+    canAddMoveRouteToDraft,
+    getMovePrimaryActionLabel as getMovePrimaryActionLabelForRoute,
     getMoveRouteKey,
+    isImmediateMoveExecutionRoute,
     isMoveRouteSupported,
     moveNeedsExternalRecipient,
     moveNeedsReserveRecipient,
@@ -81,6 +84,7 @@
     MOVE_ENDPOINTS,
     type MoveEndpoint,
   } from './move-routes';
+  import { getMoveValidationErrorForContext, type MoveValidationMode } from './move-validation';
   import { createMoveVisualController } from './move-visual-controller';
   import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
   import {
@@ -497,80 +501,31 @@
         return null;
     }
   }
-  function getMoveValidationError(mode: 'draft' | 'broadcast'): string | null {
-    const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
-    if (!isMoveRouteSupported(moveFromEndpoint, moveToEndpoint)) {
-      return 'Selected route is not available';
-    }
-    if (moveExecuting) return 'Move already in progress';
-    if (!activeIsLive && routeKey !== 'external->external') {
-      return mode === 'draft'
-        ? 'Switch to LIVE mode to add this route to batch'
-        : 'Switch to LIVE mode to submit this route';
-    }
-    if ((moveFromEndpoint === 'account' || moveToEndpoint === 'account') && isMoveAwaitingCounterparty()) {
-      return 'Wait for the current account settlement to finish';
-    }
-    if (!moveAmount.trim()) return 'Enter amount first';
-    if (mode === 'draft' && hasSentBatch) {
-      return 'Wait for current batch confirmation or clear it before adding a new move';
-    }
-    if (mode === 'draft' && !canAddMoveToExistingBatch()) {
-      return 'Add to batch is not available for this route';
-    }
-    const sourceAccountId = getCurrentMoveSourceAccountId();
-    const targetEntityId = getCurrentMoveTargetEntityId();
-    const targetHubId = getCurrentMoveTargetHubId();
-    const selfEntityId = resolveSelfEntityId();
-    const selfEoa = resolveSelfEoaAddress().toLowerCase();
-    const reserveRecipient = String(moveReserveRecipientEntityId || '').trim().toLowerCase();
-    const externalRecipient = String(moveExternalRecipient || '').trim().toLowerCase();
-    if (moveFromEndpoint === 'account' && !sourceAccountId) return 'Select source account';
-    if (moveToEndpoint === 'account' && (!targetEntityId || !targetHubId)) return 'Select recipient and counterparty';
-    if (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !reserveRecipient) return 'Select recipient entity';
-    if (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !externalRecipient) return 'Enter recipient EOA';
-    if (moveNeedsExternalRecipient(moveFromEndpoint, moveToEndpoint) && !isAddress(externalRecipient)) {
-      return 'Recipient must be a valid EOA address';
-    }
-    if (
-      moveFromEndpoint === 'account' &&
-      moveToEndpoint === 'account' &&
-      sourceAccountId &&
-      targetEntityId === selfEntityId &&
-      targetHubId.toLowerCase() === sourceAccountId.toLowerCase()
-    ) {
-      return 'Cannot transfer to same account';
-    }
-    if (moveFromEndpoint === 'reserve' && moveToEndpoint === 'reserve' && reserveRecipient === selfEntityId) {
-      return 'Reserve → Reserve to self is meaningless';
-    }
-    if (moveFromEndpoint === 'external' && moveToEndpoint === 'external' && externalRecipient === selfEoa) {
-      return 'External → External to self is meaningless';
-    }
-    const reserveToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-    const externalToken = findExternalTokenBySymbol(moveAssetSymbol);
-    if (moveFromEndpoint === 'external' && moveToEndpoint === 'external') {
-      if (!externalToken) return 'Select external asset first';
-    } else if (!reserveToken) {
-      return 'Select reserve-compatible asset first';
-    }
-    let parsedAmount: bigint;
-    try {
-      const maxAmount = getCurrentMoveSourceAvailableBalance();
-      parsedAmount = parsePositiveAssetAmount(moveAmount, moveFromEndpoint === 'external' && moveToEndpoint === 'external'
-        ? (externalToken as { decimals: number })
-        : (reserveToken as { decimals: number }), maxAmount ?? undefined);
-    } catch (error) {
-      return toErrorMessage(error, 'Invalid move amount');
-    }
-    if (mode === 'draft' && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint)) {
-      if (moveAllowanceLoading) return 'Checking ERC20 allowance';
-      if (moveAllowanceError) return moveAllowanceError;
-      if (moveAllowanceRaw === null || moveAllowanceRaw < parsedAmount) {
-        return 'Allow ERC20 before adding to batch';
-      }
-    }
-    return null;
+  function getMoveValidationError(mode: MoveValidationMode): string | null {
+    return getMoveValidationErrorForContext({
+      mode,
+      from: moveFromEndpoint,
+      to: moveToEndpoint,
+      amountInput: moveAmount,
+      executing: moveExecuting,
+      activeIsLive,
+      awaitingCounterparty: isMoveAwaitingCounterparty(),
+      hasSentBatch,
+      sourceAccountId: getCurrentMoveSourceAccountId(),
+      targetEntityId: getCurrentMoveTargetEntityId(),
+      targetHubId: getCurrentMoveTargetHubId(),
+      selfEntityId: resolveSelfEntityId(),
+      selfExternalAddress: resolveSelfEoaAddress(),
+      reserveRecipientEntityId: moveReserveRecipientEntityId,
+      externalRecipient: moveExternalRecipient,
+      reserveToken: findReserveTransferTokenBySymbol(moveAssetSymbol),
+      externalToken: findExternalTokenBySymbol(moveAssetSymbol),
+      sourceAvailableBalance: getCurrentMoveSourceAvailableBalance(),
+      allowanceRequired: routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint),
+      allowanceLoading: moveAllowanceLoading,
+      allowanceError: moveAllowanceError,
+      allowanceRaw: moveAllowanceRaw,
+    });
   }
   $: moveAllowanceRouteEnabled = assetWorkspaceTab === 'move'
     && activeIsLive
@@ -2523,15 +2478,7 @@
     throw new Error(`${label} did not complete in time`);
   }
   function canAddMoveToExistingBatch(): boolean {
-    const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
-    return routeKey === 'external->reserve'
-      || routeKey === 'external->account'
-      || routeKey === 'reserve->reserve'
-      || routeKey === 'reserve->external'
-      || routeKey === 'reserve->account'
-      || routeKey === 'account->reserve'
-      || routeKey === 'account->external'
-      || routeKey === 'account->account';
+    return canAddMoveRouteToDraft(moveFromEndpoint, moveToEndpoint);
   }
   async function queueReserveToReserveDraft(
     tokenId: number,
@@ -2738,15 +2685,8 @@
       return;
     }
   }
-  function isExternalTransferMoveRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return getMoveRouteKey(from, to) === 'external->external';
-  }
-  function isImmediateMoveExecutionRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return getMoveRouteKey(from, to) === 'external->external';
-  }
   function getMovePrimaryActionLabel(): string {
-    if (isExternalTransferMoveRoute(moveFromEndpoint, moveToEndpoint)) return 'Send Direct';
-    return 'Add to Batch';
+    return getMovePrimaryActionLabelForRoute(moveFromEndpoint, moveToEndpoint);
   }
   function handleMoveAllowanceAmountInput(nextValue: string): void {
     moveAllowanceAmountDirty = true;

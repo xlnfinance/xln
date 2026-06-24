@@ -31,6 +31,22 @@ export function isMoveRouteSupported(from: MoveEndpoint, to: MoveEndpoint): bool
   }
 }
 
+export function canAddMoveRouteToDraft(from: MoveEndpoint, to: MoveEndpoint): boolean {
+  return isMoveRouteSupported(from, to) && getMoveRouteKey(from, to) !== 'external->external';
+}
+
+export function isExternalTransferMoveRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
+  return getMoveRouteKey(from, to) === 'external->external';
+}
+
+export function isImmediateMoveExecutionRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
+  return isExternalTransferMoveRoute(from, to);
+}
+
+export function getMovePrimaryActionLabel(from: MoveEndpoint, to: MoveEndpoint): string {
+  return isExternalTransferMoveRoute(from, to) ? 'Send Direct' : 'Add to Batch';
+}
+
 export function moveNeedsExternalRecipient(_from: MoveEndpoint, to: MoveEndpoint): boolean {
   return to === 'external';
 }
@@ -164,4 +180,3 @@ export function buildMoveRouteMeta(
       return '';
   }
 }
-
