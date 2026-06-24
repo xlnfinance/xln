@@ -495,12 +495,7 @@ async function flushRuntime(page: Page, rounds = 3): Promise<void> {
       await runtimeModule.process(env, [], 0);
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    try {
-      const runtimeStore = await import(/* @vite-ignore */ new URL('/src/lib/stores/runtimeStore.ts', window.location.origin).href);
-      runtimeStore.runtimeOperations?.updateLocalEnv?.(env as never);
-    } catch {
-      // Dev-only e2e synchronization; the app store may not be importable in every build mode.
-    }
+    view.isolatedEnv = env as NonNullable<CrossRuntimeWindow['isolatedEnv']>;
   }, rounds);
 }
 
