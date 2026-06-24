@@ -91,6 +91,12 @@
     getMoveRequiredAllowanceAmount,
     isMoveAllowanceSatisfied,
   } from './move-allowance';
+  import {
+    choosePreferredMoveAssetSymbol as choosePreferredMoveAssetSymbolFromBalances,
+    computeMoveSourceAvailableBalanceForEndpoint,
+    getMoveMaxAmountForEndpoint,
+    getPreferredMoveSourceAccountId as getPreferredMoveSourceAccountIdFromBalances,
+  } from './move-balance';
   import { getMoveValidationErrorForContext, type MoveValidationMode } from './move-validation';
   import { createMoveVisualController } from './move-visual-controller';
   import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
@@ -495,23 +501,16 @@
     externalToken: ExternalToken | null,
     sourceAccountId: string,
   ): bigint | null {
-    switch (from) {
-      case 'external':
-        return externalToken?.balance ?? 0n;
-      case 'reserve':
-        if (!reserveToken) return 0n;
-        return (() => {
-          const effective = (onchainReserves.get(reserveToken.tokenId) ?? 0n) + getMoveDraftReserveDelta(reserveToken.tokenId);
-          const outgoingDebt = getOpenOutgoingDebtForToken(reserveToken.tokenId);
-          return effective > outgoingDebt ? effective - outgoingDebt : 0n;
-        })();
-      case 'account':
-        return reserveToken && sourceAccountId
-          ? getAccountSpendableCapacity(sourceAccountId, reserveToken.tokenId)
-          : 0n;
-      default:
-        return null;
-    }
+    return getMoveMaxAmountForEndpoint({
+      from,
+      reserveToken,
+      externalToken,
+      sourceAccountId,
+      reserveBalance: (tokenId) => onchainReserves.get(tokenId) ?? 0n,
+      draftReserveDelta: getMoveDraftReserveDelta,
+      outgoingDebt: getOpenOutgoingDebtForToken,
+      accountSpendable: getAccountSpendableCapacity,
+    });
   }
   function getMoveValidationError(mode: MoveValidationMode): string | null {
     return getMoveValidationErrorForContext({
@@ -678,66 +677,50 @@
     }
   }
   function getPreferredMoveSourceAccountId(tokenId: number, requestedAmount: bigint): string {
-    const current = String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim();
-    const currentAvailable = current ? getAccountSpendableCapacity(current, tokenId) : 0n;
-    if (current && workspaceAccountIds.includes(current)) {
-      if (requestedAmount > 0n && currentAvailable >= requestedAmount) return current;
-      if (requestedAmount <= 0n && currentAvailable > 0n) return current;
-    }
-    const preferred =
-      (requestedAmount > 0n
-        ? workspaceAccountIds.find((id) => getAccountSpendableCapacity(id, tokenId) >= requestedAmount)
-        : '')
-      || workspaceAccountIds.find((id) => getAccountSpendableCapacity(id, tokenId) > 0n)
-      || current
-      || workspaceAccountIds[0]
-      || '';
-    return preferred;
+    return getPreferredMoveSourceAccountIdFromBalances({
+      current: String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim(),
+      workspaceAccountIds,
+      tokenId,
+      requestedAmount,
+      accountSpendable: getAccountSpendableCapacity,
+    });
   }
   function computeMoveSourceAvailableBalance(
     row: AssetLedgerRow | null,
     liveTransferToken: ReserveTransferAsset | null,
   ): bigint {
-    switch (moveFromEndpoint) {
-      case 'external':
-        return row?.externalBalance ?? findExternalTokenBySymbol(moveAssetSymbol)?.balance ?? 0n;
-      case 'reserve':
-        if (!liveTransferToken) return row?.reserveBalance ?? 0n;
-        return (() => {
-          const baseReserve = row?.reserveBalance ?? (onchainReserves.get(liveTransferToken.tokenId) ?? 0n);
-          const effective = baseReserve + getMoveDraftReserveDelta(liveTransferToken.tokenId);
-          const outgoingDebt = getOpenOutgoingDebtForToken(liveTransferToken.tokenId);
-          return effective > outgoingDebt ? effective - outgoingDebt : 0n;
-        })();
-      case 'account':
-        return liveTransferToken && getCurrentMoveSourceAccountId()
-          ? getAccountSpendableCapacity(getCurrentMoveSourceAccountId(), liveTransferToken.tokenId)
-          : row?.accountBalance ?? 0n;
-      default:
-        return 0n;
-    }
+    return computeMoveSourceAvailableBalanceForEndpoint({
+      from: moveFromEndpoint,
+      row,
+      liveTransferToken,
+      externalToken: findExternalTokenBySymbol(moveAssetSymbol),
+      reserveBalance: (tokenId) => onchainReserves.get(tokenId) ?? 0n,
+      draftReserveDelta: getMoveDraftReserveDelta,
+      outgoingDebt: getOpenOutgoingDebtForToken,
+      sourceAccountId: getCurrentMoveSourceAccountId(),
+      accountSpendable: getAccountSpendableCapacity,
+    });
   }
   function getCurrentMoveSourceAvailableBalance(): bigint {
     return computeMoveSourceAvailableBalance(moveUiState.ledgerRow, selectedMoveTransferToken);
   }
   function choosePreferredMoveAssetSymbol(): string {
-    const candidates = moveAssetOptions;
-    const preferredUsdc = candidates.find((token) => String(token.symbol || '').trim().toUpperCase() === 'USDC');
-    if (preferredUsdc) return preferredUsdc.symbol;
     const sourceAccountId = getCurrentMoveSourceAccountId();
-    const preferredWithBalance = candidates.find((token) => {
-      const externalToken = findExternalTokenBySymbol(token.symbol);
-      const reserveToken = findReserveTransferTokenBySymbol(token.symbol);
-      return (
-        getMoveMaxAmount(
-          moveFromEndpoint,
-          reserveToken,
-          externalToken,
-          sourceAccountId,
-        ) ?? 0n
-      ) > 0n;
+    return choosePreferredMoveAssetSymbolFromBalances({
+      candidates: moveAssetOptions,
+      availableBalance: (symbol) => {
+        const externalToken = findExternalTokenBySymbol(symbol);
+        const reserveToken = findReserveTransferTokenBySymbol(symbol);
+        return (
+          getMoveMaxAmount(
+            moveFromEndpoint,
+            reserveToken,
+            externalToken,
+            sourceAccountId,
+          ) ?? 0n
+        );
+      },
     });
-    return preferredWithBalance?.symbol ?? candidates[0]?.symbol ?? '';
   }
   function toErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error && error.message) return error.message;
