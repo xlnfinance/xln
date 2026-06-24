@@ -133,6 +133,13 @@
     type ViewTab,
   } from './entity-panel-routing';
   import {
+    openDisputedAccountNavigation,
+    returnToAccountsWorkspace,
+    selectAccountNavigation,
+    selectTopLevelTabNavigation,
+    type AccountWorkspaceNavigationPatch,
+  } from './account-workspace-navigation';
+  import {
     buildEntityActivityAccounts,
     buildEntityActivityRows,
     filterEntityActivityRows,
@@ -3560,12 +3567,14 @@
   function handleHeaderDeleteRuntime(event: CustomEvent<{ runtimeId: string }>) {
     dispatch('deleteRuntime', event.detail);
   }
+  function applyAccountNavigationPatch(patch: AccountWorkspaceNavigationPatch): void {
+    if (patch.activeTab) activeTab = patch.activeTab;
+    if (patch.accountWorkspaceTab) accountWorkspaceTab = patch.accountWorkspaceTab;
+    if (patch.workspaceAccountId !== undefined) workspaceAccountId = patch.workspaceAccountId;
+    if (patch.selectedAccountId !== undefined) selectedAccountId = patch.selectedAccountId;
+  }
   function handleAccountSelect(event: CustomEvent) {
-    const nextRaw = String(event.detail?.accountId || '').trim();
-    selectedAccountId = nextRaw || null;
-    if (!nextRaw) return;
-    const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
-    if (matched) workspaceAccountId = matched;
+    applyAccountNavigationPatch(selectAccountNavigation(workspaceAccountIds, event.detail?.accountId || ''));
   }
   function handleJurisdictionSelect(event: CustomEvent<{ selected: string | null }>) {
     const next = event.detail?.selected ?? null;
@@ -3573,40 +3582,16 @@
     if (next) selectedJurisdictionName = next;
   }
   function handleBackToAccounts() {
-    const nextWorkspaceId = String(selectedAccountId || '').trim();
-    if (nextWorkspaceId) {
-      const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextWorkspaceId.toLowerCase());
-      workspaceAccountId = matched || nextWorkspaceId;
-    }
-    selectedAccountId = null;
-    activeTab = 'accounts';
-    accountWorkspaceTab = 'activity';
+    applyAccountNavigationPatch(returnToAccountsWorkspace({ selectedAccountId }, workspaceAccountIds, 'activity'));
   }
   function selectTopLevelTab(nextTab: ViewTab) {
-    if (nextTab === 'accounts' && selectedAccountId) {
-      handleBackToAccounts();
-      return;
-    }
-    if (selectedAccountId) {
-      selectedAccountId = null;
-    }
-    activeTab = nextTab;
+    applyAccountNavigationPatch(selectTopLevelTabNavigation({ selectedAccountId }, workspaceAccountIds, nextTab));
   }
   function handleAccountPanelGoToOpenAccounts() {
-    const nextWorkspaceId = String(selectedAccountId || '').trim();
-    if (nextWorkspaceId) {
-      const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextWorkspaceId.toLowerCase());
-      workspaceAccountId = matched || nextWorkspaceId;
-    }
-    selectedAccountId = null;
-    activeTab = 'accounts';
-    accountWorkspaceTab = 'open';
+    applyAccountNavigationPatch(returnToAccountsWorkspace({ selectedAccountId }, workspaceAccountIds, 'open'));
   }
   function openDisputedAccount(counterpartyEntityId: string) {
-    const next = String(counterpartyEntityId || '').trim();
-    if (!next) return;
-    selectedAccountId = next;
-    activeTab = 'accounts';
+    applyAccountNavigationPatch(openDisputedAccountNavigation(counterpartyEntityId));
   }
   function goToLive() {
     onGoToLive();
