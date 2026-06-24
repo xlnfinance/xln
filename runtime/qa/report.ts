@@ -229,6 +229,16 @@ export type QaRunTimingSummary = {
   phaseP95: QaPhaseTimings | null;
 };
 
+export type QaFatalMarker = {
+  shard: number;
+  handle: string | null;
+  title: string | null;
+  target: string | null;
+  failureClass: QaFailureClass;
+  source: 'error' | 'logTail';
+  line: string;
+};
+
 export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmark' | 'release' | 'unknown';
 
 export type QaShardManifest = {
@@ -291,6 +301,7 @@ export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
   suiteLabel: string;
   category: QaRunCategory;
   failingTargets: string[];
+  fatalMarkers: QaFatalMarker[];
   artifactBytes: number;
   childCpuP95Pct: number | null;
 };
@@ -687,7 +698,13 @@ const classifyQaFailureText = (value: string): QaFailureClass | null => {
   const lower = value.toLowerCase();
   if (!lower.trim()) return null;
   if (lower.includes('timeout') || lower.includes('timed out') || lower.includes('timeoutexceeded')) return 'timeout';
-  if (lower.includes('e2e_fatal_runtime_log') || lower.includes('segmentation fault') || lower.includes('page crashed') || lower.includes('sigsegv')) return 'crash';
+  if (
+    lower.includes('e2e_fatal_runtime_log') ||
+    lower.includes('fatal runtime') ||
+    lower.includes('segmentation fault') ||
+    lower.includes('page crashed') ||
+    lower.includes('sigsegv')
+  ) return 'crash';
   if (lower.includes('unauthorized') || lower.includes('forbidden') || lower.includes('token') || lower.includes('secret') || lower.includes('cors')) return 'security';
   if (lower.includes('flake') || lower.includes('retry')) return 'flake';
   if (
@@ -722,6 +739,46 @@ export const classifyQaShardFailure = (options: {
   if (browserIssues.some(issue => issue.type === 'requestfailed' || issue.type === 'http')) return 'infra';
   if (browserIssues.some(issue => issue.type === 'pageerror')) return 'crash';
   return 'unknown';
+};
+
+const fatalMarkerLine = (value: string): string | null => {
+  for (const line of value.split('\n')) {
+    const normalized = line.trim();
+    const lower = normalized.toLowerCase();
+    if (!normalized) continue;
+    if (
+      lower.includes('e2e_fatal_runtime_log') ||
+      lower.includes('fatal runtime') ||
+      lower.includes('segmentation fault') ||
+      lower.includes('sigsegv')
+    ) return redactQaSecretText(normalized).slice(0, 500);
+  }
+  return null;
+};
+
+export const summarizeQaFatalMarkers = (run: Pick<QaRunManifest, 'shards'>): QaFatalMarker[] => {
+  const markers: QaFatalMarker[] = [];
+  for (const shard of run.shards) {
+    const sources = [
+      ['error', shard.error ?? ''],
+      ['logTail', shard.logTail ?? ''],
+    ] as const;
+    for (const [source, text] of sources) {
+      const line = fatalMarkerLine(text);
+      if (!line) continue;
+      markers.push({
+        shard: shard.shard,
+        handle: shard.handle ?? null,
+        title: shard.title ?? null,
+        target: shard.target ?? null,
+        failureClass: classifyQaFailureText(line) ?? 'crash',
+        source,
+        line,
+      });
+      break;
+    }
+  }
+  return markers.slice(0, 10);
 };
 
 export const summarizeQaFailureClasses = (shards: readonly QaShardFailureInput[]): QaFailureClass[] =>
@@ -2945,12 +3002,13 @@ export const summarizeQaRun = (run: QaRunManifest): QaRunSummary => ({
   totalShards: run.totalShards,
   passedShards: run.passedShards,
   failedShards: run.failedShards,
-  failureClasses: run.failureClasses ?? summarizeQaFailureClasses(run.shards),
+  failureClasses: Array.from(new Set([...(run.failureClasses ?? []), ...summarizeQaFailureClasses(run.shards)])).sort(compareStableText),
   args: run.args ?? null,
   failingTargets: run.shards
     .filter(shard => shard.status === 'failed')
     .map(shard => shard.handle || shard.target || shard.title || `shard-${shard.shard}`)
     .slice(0, 5),
+  fatalMarkers: summarizeQaFatalMarkers(run),
   artifactBytes: qaRunArtifactBytes(run),
   childCpuP95Pct: qaRunChildCpuP95(run),
 });

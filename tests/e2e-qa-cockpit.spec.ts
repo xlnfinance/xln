@@ -127,6 +127,15 @@ const QA_FIXTURE_RUN = {
   passedShards: 2,
   failedShards: 1,
   failureClasses: ['assertion'],
+  fatalMarkers: [{
+    shard: 1,
+    handle: 'qa.cockpit-fixture',
+    title: 'QA cockpit fixture records playback transcript',
+    target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
+    failureClass: 'crash',
+    source: 'logTail',
+    line: 'E2E_FATAL_RUNTIME_LOG scenario playback runtime crashed',
+  }],
   args: { fixture: 'qa-cockpit-scenario-player' },
   shards: [
     {
@@ -330,6 +339,7 @@ const QA_FAST_SUMMARY = {
   passedShards: 1,
   failedShards: 0,
   failureClasses: [],
+  fatalMarkers: [],
   code: {
     ...QA_FIXTURE_RUN.code,
     gitHead: '95174ad2c2d9d8db1d7f07b6f4a4e9ec0c000000',
@@ -1154,14 +1164,16 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('SLOWER');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('Phase budget exceeded');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('playwright 5.7s > budget 5.0s');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('Fatal runtime marker');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('E2E_FATAL_RUNTIME_LOG scenario playback runtime crashed');
     await expect(page.getByTestId('qa-failure-class-filter')).toContainText('assertion');
     await page.getByTestId('qa-failure-class-filter').getByRole('button', { name: 'assertion' }).click();
     await expect(page.getByTestId('qa-run-row')).toHaveCount(1);
     await expect(page.getByTestId('qa-run-row').first()).toContainText('assertion');
-    await expect(page.getByTestId('qa-failure-inbox')).toContainText('1 / 4 reasons');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('1 / 5 reasons');
     await expect(page.getByTestId('qa-failure-inbox')).not.toContainText('Browser health failed');
     await page.getByTestId('qa-failure-class-filter').getByRole('button', { name: 'all' }).click();
-    await expect(page.getByTestId('qa-failure-inbox')).toContainText('4 / 4 reasons');
+    await expect(page.getByTestId('qa-failure-inbox')).toContainText('5 / 5 reasons');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
     await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('UX Screenshot Gallery');
     await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('desktop payment composer');
@@ -1183,6 +1195,10 @@ test.describe('QA cockpit scenario player', () => {
     await page.getByTestId('qa-failure-item').filter({ hasText: 'Phase budget exceeded' }).click();
     await expect(page.locator('[data-testid="qa-suite-row"][data-shard="1"]')).toHaveClass(/selected/);
     await expect(page.locator('[data-testid="qa-phase-row"][data-phase="playwright"]')).toContainText('over budget');
+    await page.getByTestId('qa-failure-class-filter').getByRole('button', { name: 'all' }).click();
+    await page.getByTestId('qa-failure-item').filter({ hasText: 'Fatal runtime marker' }).click();
+    await expect(page.locator('[data-testid="qa-suite-row"][data-shard="1"]')).toHaveClass(/selected/);
+    await expect(page.locator('.shard-detail')).toContainText('qa.cockpit-fixture');
     await page.getByTestId('qa-failure-class-filter').getByRole('button', { name: 'all' }).click();
     await page.getByTestId('qa-failure-item').first().click();
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/);

@@ -282,6 +282,39 @@ test('qa phase waterfall keeps stable phase labels and flags budget breach', () 
   expect(waterfall?.overLimitCount).toBe(1);
 });
 
+test('qa run summary extracts fatal runtime marker lines per shard', () => {
+  const run = benchmarkRun('fatal-marker-run', 1_000, 800);
+  const fatalRun = applyQaRunSeverity({
+    ...run,
+    status: 'failed',
+    passedShards: 0,
+    failedShards: 1,
+    shards: run.shards.map(shard => ({
+      ...shard,
+      status: 'failed',
+      error: null,
+      logTail: [
+        'normal setup line',
+        'E2E_FATAL_RUNTIME_LOG runtime crashed privateKey=0xabc123',
+        'ignored trailing line',
+      ].join('\n'),
+      failureClass: null,
+    })),
+  });
+  const summary = summarizeQaRun(fatalRun);
+
+  expect(summary.failureClasses).toContain('crash');
+  expect(summary.fatalMarkers).toHaveLength(1);
+  expect(summary.fatalMarkers[0]).toMatchObject({
+    shard: 0,
+    handle: 'qa cockpit',
+    failureClass: 'crash',
+    source: 'logTail',
+  });
+  expect(summary.fatalMarkers[0]?.line).toContain('E2E_FATAL_RUNTIME_LOG runtime crashed');
+  expect(summary.fatalMarkers[0]?.line).toContain('privateKey=[REDACTED]');
+});
+
 test('qa regression report compares latest run against previous same code head and last green main', () => {
   const at = (minute: number): number => Date.UTC(2026, 5, 23, 0, minute, 0);
   const make = (

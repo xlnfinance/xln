@@ -43,6 +43,7 @@
     suiteKey?: string;
     suiteLabel?: string;
     failingTargets: string[];
+    fatalMarkers?: QaFatalMarker[];
   };
 
   type QaArtifact = {
@@ -410,6 +411,15 @@
     | 'operations'
     | 'unknown';
   type QaFailureClassFilter = QaFailureClass | 'all';
+  type QaFatalMarker = {
+    shard: number;
+    handle: string | null;
+    title: string | null;
+    target: string | null;
+    failureClass: QaFailureClass;
+    source: 'error' | 'logTail';
+    line: string;
+  };
   type QaFailureInboxItem = {
     id: string;
     severity: QaFailureSeverity;
@@ -418,6 +428,7 @@
     detail: string;
     runId: string | null;
     createdAt: number;
+    shard?: number;
     phaseKey?: QaPhaseKey;
     phaseLimitMs?: number;
   };
@@ -799,6 +810,7 @@
   function runMatchesFailureClass(run: QaSummary, failureClass: QaFailureClassFilter): boolean {
     if (failureClass === 'all') return true;
     if ((run.failureClasses ?? []).includes(failureClass)) return true;
+    if ((run.fatalMarkers ?? []).some((marker) => marker.failureClass === failureClass)) return true;
     const health = browserHealth(run);
     if (failureClass === 'performance') {
       return (
@@ -866,6 +878,19 @@
       runId: run.runId,
       createdAt: run.createdAt,
     };
+  }
+
+  function fatalMarkerFailureItems(run: QaSummary): QaFailureInboxItem[] {
+    return (run.fatalMarkers ?? []).slice(0, 3).map((marker, index) => ({
+      id: `fatal:${run.runId}:${marker.shard}:${index}`,
+      severity: 'FAIL',
+      failureClass: marker.failureClass,
+      title: 'Fatal runtime marker',
+      detail: `${marker.handle || marker.target || marker.title || `shard-${marker.shard}`}: ${marker.line}`,
+      runId: run.runId,
+      createdAt: run.createdAt,
+      shard: marker.shard,
+    }));
   }
 
   function phaseObservedMs(run: QaSummary, key: QaPhaseKey): number | null {
@@ -945,6 +970,7 @@
       browserFailureItem(run),
       benchmarkFailureItem(run),
       phaseBudgetFailureItem(run, runRows),
+      ...fatalMarkerFailureItems(run),
     ].filter(Boolean) as QaFailureInboxItem[]);
     const restartItems = auditRows.map(restartFailureItem).filter(Boolean) as QaFailureInboxItem[];
     return [...runItems, ...restartItems].sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
@@ -1171,6 +1197,10 @@
   }
 
   function pickFailureShardIndex(run: QaRun, item: QaFailureInboxItem): number {
+    if (typeof item.shard === 'number' && Number.isSafeInteger(item.shard)) {
+      const shardIndex = run.shards.findIndex((shard) => shard.shard === item.shard);
+      if (shardIndex >= 0) return shardIndex;
+    }
     if (item.phaseKey) {
       const limitMs = typeof item.phaseLimitMs === 'number' && Number.isFinite(item.phaseLimitMs)
         ? item.phaseLimitMs
