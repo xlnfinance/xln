@@ -324,13 +324,15 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun test tests/frontend/move-allowance.test.ts tests/frontend/move-validation.test.ts` PASS `8/8`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused move routed-path e2e `20260624-181234-162` PASS `1/1`, wall `32.3s`, code hash `5853a31d48cc7b66`, benchmark OK vs `20260624-180654-835`, browser errors `0`, browser warnings `8` all `GOSSIP_PROFILE_MISS` retry warnings.
   - Progress: twentieth extraction done. Move hub options, target-hub fallback, workspace account normalization, and configure-token option selection moved into `entity-panel-options.ts`; `EntityPanelTabs.svelte` is down to 4,121 lines.
   - Evidence: L1 `bun test tests/frontend/entity-panel-options.test.ts tests/frontend/move-allowance.test.ts` PASS `12/12`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused move routed-path e2e `20260624-181822-857` PASS `1/1`, wall `30.5s`, code hash `2af2c548daffeeff`, benchmark OK vs `20260624-181234-162`, browser errors `0`, browser warnings `8` all `GOSSIP_PROFILE_MISS` retry warnings.
+  - Progress: twenty-first extraction done. Move max amount, preferred source account, current source balance, and preferred move asset selection moved into `move-balance.ts`; `EntityPanelTabs.svelte` is down to 4,104 lines and now sits below `SwapPanel.svelte`.
+  - Evidence: L1 `bun test tests/frontend/move-balance.test.ts tests/frontend/entity-panel-options.test.ts` PASS `12/12`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused move routed-path e2e `20260624-182305-156` PASS `1/1`, wall `32.5s`, code hash `18e2fa4f04798b37`, benchmark OK vs `20260624-181822-857`, browser errors `0`, browser warnings `8` all `GOSSIP_PROFILE_MISS` retry warnings.
   - Remaining: keep reducing this parent below the limit with real component ownership, not just line pruning. Next cuts should move account form actions and account-tab state machines out of the parent.
 
 - [x] Enforce frontend source file-size invariant in the main check.
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 4,238 lines, `EntityPanelTabs.svelte` 4,121 lines, `SwapPanel.svelte` 4,119 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 4,238 lines, `SwapPanel.svelte` 4,119 lines, `EntityPanelTabs.svelte` 4,104 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move Graph3D pure helpers out of the Svelte panel.
   - Impact: medium.
