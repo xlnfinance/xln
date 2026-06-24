@@ -1394,6 +1394,7 @@
     balance: bigint;
     decimals: number;
     tokenId: number | undefined;
+    readError?: string;
   }
 
   interface ReserveTransferAsset {
@@ -1413,6 +1414,8 @@
     sourceHash?: string;
     finalityDepth?: number;
     headBlockNumber?: number;
+    tokenErrors?: Array<{ tokenAddress: string; error: string }>;
+    allowanceErrors?: Array<{ tokenAddress: string; spender: string; error: string }>;
   };
   type ExternalWalletSnapshotResponse = {
     success?: boolean;
@@ -1426,8 +1429,10 @@
     headBlockNumber?: number;
     transactionHash?: string;
     nativeBalance?: string;
-    tokenBalances?: Array<{ tokenAddress?: string; tokenId?: number; balance?: string }>;
-    allowances?: Array<{ tokenAddress?: string; spender?: string; allowance?: string }>;
+    tokenBalances?: Array<{ tokenAddress?: string; tokenId?: number; balance?: string; error?: string }>;
+    allowances?: Array<{ tokenAddress?: string; spender?: string; allowance?: string; error?: string }>;
+    tokenErrors?: Array<{ tokenAddress?: string; error?: string }>;
+    allowanceErrors?: Array<{ tokenAddress?: string; spender?: string; error?: string }>;
     error?: string;
   };
 
@@ -1632,6 +1637,7 @@
     reserveUsd: number;
     accountUsd: number;
     totalUsd: number;
+    externalError?: string;
   };
 
   type MoveUiState = {
@@ -2420,6 +2426,7 @@
         reserveUsd,
         accountUsd,
         totalUsd: externalUsd + reserveUsd + accountUsd,
+        ...(token.readError ? { externalError: token.readError } : {}),
       });
     }
     for (const [tokenId, reserveBalance] of onchainReserves.entries()) {
@@ -2703,22 +2710,42 @@
       assertExternalSnapshotCount(snapshot.tokenBalances, tokenAddresses.length, 'tokenBalances');
       assertExternalSnapshotCount(snapshot.allowances, allowanceReads.length, 'allowances');
       const nativeBalance = requireExternalSnapshotBigInt(snapshot.nativeBalance, 'nativeBalance');
+      const tokenErrorByAddress = new Map(
+        (snapshot.tokenErrors ?? []).map((entry) => [
+          String(entry.tokenAddress || '').trim().toLowerCase(),
+          String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_TOKEN_READ_FAILED'),
+        ]),
+      );
+      const allowanceErrorByKey = new Map(
+        (snapshot.allowanceErrors ?? []).map((entry) => [
+          `${String(entry.tokenAddress || '').trim().toLowerCase()}:${String(entry.spender || '').trim().toLowerCase()}`,
+          String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_READ_FAILED'),
+        ]),
+      );
       const tokenBalances = tokenAddresses.map((tokenAddress, index) => {
         const normalizedTokenAddress = String(tokenAddress || '').trim().toLowerCase();
         const token = tokenList.find((candidate) =>
           String(candidate.address || '').trim().toLowerCase() === normalizedTokenAddress
         );
+        const tokenError = tokenErrorByAddress.get(normalizedTokenAddress);
         return {
           tokenAddress: normalizedTokenAddress,
           ...(typeof token?.tokenId === 'number' ? { tokenId: token.tokenId } : {}),
           balance: requireExternalSnapshotBigInt(snapshot.tokenBalances[index], `tokenBalance:${tokenAddress}`).toString(),
+          ...(tokenError ? { error: tokenError } : {}),
         };
       });
-      const allowances = allowanceReads.map((entry, index) => ({
-        tokenAddress: String(entry.tokenAddress || '').trim().toLowerCase(),
-        spender: String(entry.spender || '').trim().toLowerCase(),
-        allowance: requireExternalSnapshotBigInt(snapshot.allowances[index], `allowance:${entry.tokenAddress}:${entry.spender}`).toString(),
-      }));
+      const allowances = allowanceReads.map((entry, index) => {
+        const tokenAddress = String(entry.tokenAddress || '').trim().toLowerCase();
+        const spender = String(entry.spender || '').trim().toLowerCase();
+        const allowanceError = allowanceErrorByKey.get(`${tokenAddress}:${spender}`);
+        return {
+          tokenAddress,
+          spender,
+          allowance: requireExternalSnapshotBigInt(snapshot.allowances[index], `allowance:${entry.tokenAddress}:${entry.spender}`).toString(),
+          ...(allowanceError ? { error: allowanceError } : {}),
+        };
+      });
       const transactionHash = [
         'external-wallet-snapshot',
         source.sourceHeight,
@@ -2737,8 +2764,8 @@
             sourceHash: source.sourceHash,
             finalityDepth: source.finalityDepth,
             nativeBalance: nativeBalance.toString(),
-            tokenBalances,
-            allowances,
+            tokenBalances: tokenBalances.filter((entry) => !entry.error),
+            allowances: allowances.filter((entry) => !entry.error),
           },
           blockNumber: source.sourceHeight,
           blockHash: source.sourceHash,
@@ -2760,6 +2787,8 @@
           allowanceByKey.get(`${String(read.tokenAddress || '').trim().toLowerCase()}:${String(read.spender || '').trim().toLowerCase()}`) ?? 0n
         ),
         ...source,
+        ...(snapshot.tokenErrors?.length ? { tokenErrors: snapshot.tokenErrors } : {}),
+        ...(snapshot.allowanceErrors?.length ? { allowanceErrors: snapshot.allowanceErrors } : {}),
       };
     }
 
@@ -2790,8 +2819,8 @@
           sourceHash: data.sourceHash ?? data.blockHash,
           finalityDepth: data.finalityDepth ?? 0,
           nativeBalance: String(data.nativeBalance ?? '0'),
-          tokenBalances: data.tokenBalances ?? [],
-          allowances: data.allowances ?? [],
+          tokenBalances: (data.tokenBalances ?? []).filter((entry) => !entry.error),
+          allowances: (data.allowances ?? []).filter((entry) => !entry.error),
         },
         blockNumber: Number(data.blockNumber),
         blockHash: data.blockHash,
@@ -2802,13 +2831,13 @@
       setXlnEnvironment(env);
     }
     const balanceByToken = new Map(
-      (data.tokenBalances ?? []).map((entry) => [
+      (data.tokenBalances ?? []).filter((entry) => !entry.error).map((entry) => [
         String(entry.tokenAddress || '').trim().toLowerCase(),
         BigInt(String(entry.balance ?? '0')),
       ]),
     );
     const allowanceByKey = new Map(
-      (data.allowances ?? []).map((entry) => [
+      (data.allowances ?? []).filter((entry) => !entry.error).map((entry) => [
         `${String(entry.tokenAddress || '').trim().toLowerCase()}:${String(entry.spender || '').trim().toLowerCase()}`,
         BigInt(String(entry.allowance ?? '0')),
       ]),
@@ -2825,6 +2854,19 @@
       ...(data.sourceHash ?? data.blockHash ? { sourceHash: String(data.sourceHash ?? data.blockHash) } : {}),
       ...(data.finalityDepth !== undefined ? { finalityDepth: Number(data.finalityDepth) } : {}),
       ...(data.headBlockNumber !== undefined ? { headBlockNumber: Number(data.headBlockNumber) } : {}),
+      ...(data.tokenErrors?.length
+        ? { tokenErrors: data.tokenErrors.map((entry) => ({
+            tokenAddress: String(entry.tokenAddress || '').trim().toLowerCase(),
+            error: String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_TOKEN_READ_FAILED'),
+          })) }
+        : {}),
+      ...(data.allowanceErrors?.length
+        ? { allowanceErrors: data.allowanceErrors.map((entry) => ({
+            tokenAddress: String(entry.tokenAddress || '').trim().toLowerCase(),
+            spender: String(entry.spender || '').trim().toLowerCase(),
+            error: String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_READ_FAILED'),
+          })) }
+        : {}),
     };
   }
 
@@ -2902,6 +2944,7 @@
         let balances: bigint[] = tokenList.map(() => 0n);
         let allowanceValues: bigint[] = [];
         let snapshotSource: ExternalWalletSnapshotSource | null = null;
+        let tokenErrors: ExternalWalletReadResult['tokenErrors'] = [];
 
         const observed = !forceSnapshot
           ? readExternalWalletState(tokenList, owner, allowanceReads)
@@ -2929,6 +2972,7 @@
           nativeBalance = snapshot.nativeBalance;
           balances = snapshot.balances;
           allowanceValues = snapshot.allowanceValues;
+          tokenErrors = snapshot.tokenErrors ?? [];
           if (snapshot.sourceHeight !== undefined) {
             snapshotSource = {
               sourceHeight: snapshot.sourceHeight,
@@ -2943,6 +2987,20 @@
 
         balances.forEach((balance: bigint, idx: number) => {
           if (tokenList[idx]) tokenList[idx].balance = balance;
+        });
+        const tokenErrorByAddress = new Map(
+          (tokenErrors ?? []).map((entry) => [
+            String(entry.tokenAddress || '').trim().toLowerCase(),
+            String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_TOKEN_READ_FAILED'),
+          ]),
+        );
+        tokenList.forEach((token) => {
+          const error = tokenErrorByAddress.get(String(token.address || '').trim().toLowerCase());
+          if (error) {
+            token.readError = error;
+          } else {
+            delete token.readError;
+          }
         });
 
         const runtimeIdNow = getRuntimeId(activeEnv);
@@ -5483,7 +5541,17 @@
                   >
                     {formatAmount(row.externalBalance, row.decimals)}
                   </span>
-                  <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
+                  {#if row.externalError}
+                    <span
+                      class="value-text subtle asset-read-error"
+                      data-testid={`external-token-error-${row.symbol}`}
+                      title={row.externalError}
+                    >
+                      Read error
+                    </span>
+                  {:else}
+                    <span class="value-text subtle">{formatApproxUsd(row.externalUsd)}</span>
+                  {/if}
                 </div>
                 <div class="col-balance asset-balance-block">
                   <span
@@ -7662,6 +7730,10 @@
     font-size: 11px;
     color: #a8a29e;
     max-width: none;
+  }
+
+  .asset-read-error {
+    color: #fca5a5;
   }
 
   /* Table Header */

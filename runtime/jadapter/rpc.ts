@@ -102,6 +102,18 @@ export const readRequiredRpcBatchBigInt = (
   }
 };
 
+export const readOptionalRpcBatchBigInt = (
+  responses: Map<number, RpcBatchResponse>,
+  id: number,
+  label: string,
+): { ok: true; value: bigint } | { ok: false; error: string } => {
+  try {
+    return { ok: true, value: readRequiredRpcBatchBigInt(responses, id, label) };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
 export type ExternalWalletTrackedOwnerCursor = {
   entityId: string;
   watchAfterBlock: number;
@@ -975,38 +987,58 @@ export async function createRpcAdapter(
         }
 
         const responses = await sendRpcBatch(rpcUrl, batch);
+        const tokenErrors: NonNullable<JWalletSnapshot['tokenErrors']> = [];
+        const allowanceErrors: NonNullable<JWalletSnapshot['allowanceErrors']> = [];
+        const tokenBalances = tokenIds.map((id, index) => {
+          const tokenAddress = tokenAddresses[index] ?? 'unknown';
+          const result = readOptionalRpcBatchBigInt(responses, id, `balance:${tokenAddress}:${owner}`);
+          if (result.ok) return result.value;
+          tokenErrors.push({ tokenAddress, error: result.error });
+          return 0n;
+        });
+        const allowanceValues = allowanceIds.map((id, index) => {
+          const allowanceRead = allowances[index];
+          const tokenAddress = allowanceRead?.tokenAddress ?? 'unknown';
+          const spender = allowanceRead?.spender ?? 'unknown';
+          const result = readOptionalRpcBatchBigInt(
+            responses,
+            id,
+            `allowance:${tokenAddress}:${owner}:${spender}`,
+          );
+          if (result.ok) return result.value;
+          allowanceErrors.push({ tokenAddress, spender, error: result.error });
+          return 0n;
+        });
 
         return {
           nativeBalance: nativeBalanceId === null
             ? null
             : readRequiredRpcBatchBigInt(responses, nativeBalanceId, `native:${owner}`),
-          tokenBalances: tokenIds.map((id, index) =>
-            readRequiredRpcBatchBigInt(responses, id, `balance:${tokenAddresses[index] ?? 'unknown'}:${owner}`),
-          ),
-          allowances: allowanceIds.map((id, index) => {
-            const allowanceRead = allowances[index];
-            return readRequiredRpcBatchBigInt(
-              responses,
-              id,
-              `allowance:${allowanceRead?.tokenAddress ?? 'unknown'}:${owner}:${allowanceRead?.spender ?? 'unknown'}`,
-            );
-          }),
+          tokenBalances,
+          allowances: allowanceValues,
+          ...(tokenErrors.length > 0 ? { tokenErrors } : {}),
+          ...(allowanceErrors.length > 0 ? { allowanceErrors } : {}),
         };
       }
 
-      const readViewUint = async (functionName: 'balanceOf' | 'allowance', to: string, data: string): Promise<bigint> => {
+      const readViewUint = async (
+        functionName: 'balanceOf' | 'allowance',
+        to: string,
+        data: string,
+      ): Promise<{ ok: true; value: bigint } | { ok: false; error: string }> => {
         try {
           const result = await provider.call({ to, data, blockTag });
           const decoded = erc20Interface.decodeFunctionResult(functionName, result);
-          return BigInt(decoded[0] ?? 0n);
+          return { ok: true, value: BigInt(decoded[0] ?? 0n) };
         } catch (error) {
-          throw new Error(
-            `EXTERNAL_WALLET_SNAPSHOT_CALL_FAILED:${functionName}:${to}:${error instanceof Error ? error.message : String(error)}`,
-          );
+          return {
+            ok: false,
+            error: `EXTERNAL_WALLET_SNAPSHOT_CALL_FAILED:${functionName}:${to}:${error instanceof Error ? error.message : String(error)}`,
+          };
         }
       };
 
-      const [nativeBalance, tokenBalances, allowanceValues] = await Promise.all([
+      const [nativeBalance, tokenBalanceResults, allowanceResults] = await Promise.all([
         includeNativeBalance ? provider.getBalance(owner, blockTag) : Promise.resolve<bigint | null>(null),
         Promise.all(tokenAddresses.map((tokenAddress) =>
           readViewUint('balanceOf', tokenAddress, erc20Interface.encodeFunctionData('balanceOf', [owner])),
@@ -1019,11 +1051,30 @@ export async function createRpcAdapter(
           ),
         )),
       ]);
+      const tokenErrors: NonNullable<JWalletSnapshot['tokenErrors']> = [];
+      const allowanceErrors: NonNullable<JWalletSnapshot['allowanceErrors']> = [];
+      const tokenBalances = tokenBalanceResults.map((result, index) => {
+        if (result.ok) return result.value;
+        tokenErrors.push({ tokenAddress: tokenAddresses[index] ?? 'unknown', error: result.error });
+        return 0n;
+      });
+      const allowanceValues = allowanceResults.map((result, index) => {
+        const allowanceRead = allowances[index];
+        if (result.ok) return result.value;
+        allowanceErrors.push({
+          tokenAddress: allowanceRead?.tokenAddress ?? 'unknown',
+          spender: allowanceRead?.spender ?? 'unknown',
+          error: result.error,
+        });
+        return 0n;
+      });
 
       return {
         nativeBalance,
         tokenBalances,
         allowances: allowanceValues,
+        ...(tokenErrors.length > 0 ? { tokenErrors } : {}),
+        ...(allowanceErrors.length > 0 ? { allowanceErrors } : {}),
       };
     },
 

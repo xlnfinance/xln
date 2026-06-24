@@ -64,6 +64,8 @@ export interface JWalletSnapshot {
   nativeBalance: bigint | null;
   tokenBalances: bigint[];
   allowances: bigint[];
+  tokenErrors?: Array<{ tokenAddress: string; error: string }>;
+  allowanceErrors?: Array<{ tokenAddress: string; spender: string; error: string }>;
 }
 
 export interface JReserveMint {
