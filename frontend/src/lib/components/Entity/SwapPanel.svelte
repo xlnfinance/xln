@@ -19,7 +19,6 @@
   import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
   import { amountToUsd } from '$lib/utils/assetPricing';
-  import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
   import {
@@ -97,6 +96,8 @@
   } from './swap-order-history';
   import SwapOrderList from './SwapOrderList.svelte';
   import SwapCompletionDialog from './SwapCompletionDialog.svelte';
+  import SwapOrderbookSection from './SwapOrderbookSection.svelte';
+  import type { SwapOrderbookLevelClickDetail, SwapOrderbookPairOption } from './swap-orderbook-view';
   import './SwapPanel.css';
 
   export let replica: EntityReplica | null;
@@ -132,13 +133,6 @@
     quoteTokenId: number;
     accountId: string;
     accountIds: string[];
-  };
-  type OrderbookLevelClickDetail = {
-    side: BookSide;
-    priceTicks: string;
-    size: string;
-    accountIds: string[];
-    displayPrice?: string;
   };
   type FrameLike = Env | EnvSnapshot | EntityState | null | undefined;
   let selectedOrderLevel: ClickedOrderLevel | null = null;
@@ -178,7 +172,7 @@
   let preparedOrder: PreparedSwapOrderLike | null = null;
   let parsedOrderbookPair: { baseTokenId: number; quoteTokenId: number } | null = null;
   let orderbookPairDisplayLabel = '';
-  let orderbookPairOptions: OrderbookPairOption[] = [];
+  let orderbookPairOptions: SwapOrderbookPairOption[] = [];
   let orderbookPairSelectValue = '';
   let lastOrderbookPairSelectValue = '';
   let lastOrderbookPairSelectMode = '';
@@ -1061,21 +1055,6 @@
     liquidScore: number;
   };
 
-  type OrderbookPairOption = {
-    value: string;
-    label: string;
-    mode: 'same' | 'cross';
-    pairId: string;
-    baseTokenId: number;
-    quoteTokenId: number;
-    sourceTokenId: number;
-    targetTokenId: number;
-    routeValue: string;
-    sourceJurisdiction: string;
-    targetJurisdiction: string;
-    sourceJurisdictionRef: string;
-    targetJurisdictionRef: string;
-  };
 
   function resolvePairOrientation(tokenA: number, tokenB: number): { baseTokenId: number; quoteTokenId: number; pairId: string } {
     const runtimeResolver = activeXlnFunctions?.getSwapPairOrientation;
@@ -1210,7 +1189,7 @@
     return normalizeJurisdictionDisplayName(parsed.jurisdictionRef);
   }
 
-  function buildSameOrderbookPairOptions(hubId: string): OrderbookPairOption[] {
+  function buildSameOrderbookPairOptions(hubId: string): SwapOrderbookPairOption[] {
     const hub = String(hubId || '').trim().toLowerCase();
     if (!hub) return [];
     const jurisdictionRef = getReplicaJurisdictionRef(currentReplica) || sourceJurisdictionLabel;
@@ -1231,9 +1210,9 @@
     }));
   }
 
-  function buildCrossOrderbookPairOptions(): OrderbookPairOption[] {
+  function buildCrossOrderbookPairOptions(): SwapOrderbookPairOption[] {
     const sourceTokens = tokenIdsForJurisdiction(sourceJurisdictionLabel);
-    const options: OrderbookPairOption[] = [];
+    const options: SwapOrderbookPairOption[] = [];
     const routes = swapRouteMode === 'cross' && selectedRouteOption?.mode === 'cross'
       ? [selectedRouteOption]
       : [];
@@ -1287,7 +1266,7 @@
       .sort((a, b) => compareStableText(a.label, b.label));
   }
 
-  function buildOrderbookPairOptions(): OrderbookPairOption[] {
+  function buildOrderbookPairOptions(): SwapOrderbookPairOption[] {
     const sameOptions = buildSameOrderbookPairOptions(activeOrderAccountId || selectedBookAccountId || createOrderAccountId);
     const crossOptions = buildCrossOrderbookPairOptions();
     return [...sameOptions, ...crossOptions];
@@ -2402,7 +2381,7 @@
     hasUserEditedPriceInput = false;
   }
 
-  function commitOrderbookCrossRoute(option: OrderbookPairOption): boolean {
+  function commitOrderbookCrossRoute(option: SwapOrderbookPairOption): boolean {
     const route = visibleRouteOptions.find((candidate) => candidate.value === option.routeValue)
       || (
         selectedRouteOption?.value === option.routeValue && routeMatchesCurrentSource(selectedRouteOption)
@@ -2527,7 +2506,7 @@
     }
   }
 
-  function handleOrderbookLevelClick(event: CustomEvent<OrderbookLevelClickDetail>) {
+  function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDetail>) {
     submitError = '';
     const pair = parsedOrderbookPair;
     if (!pair) {
@@ -3886,82 +3865,40 @@
     </div>
 
     {#if showOrderbook}
-      <div
-        class="section section-market"
-        data-testid="swap-market-section"
-        data-active-book-hub-id={activeBookHubId}
-        data-orderbook-hub-ids={orderbookHubIds.join(',')}
-        data-active-order-account-id={activeOrderAccountId}
-        data-selected-book-account-id={selectedBookAccountId}
-        data-create-order-account-id={createOrderAccountId}
-        data-selected-route-source-hub={selectedRouteOption?.sourceHubEntityId || ''}
-        data-selected-route-target-hub={selectedRouteOption?.targetHubEntityId || ''}
-        data-selected-cross-target-hub={selectedCrossTarget?.targetHubEntityId || ''}
-        data-route-mode={swapRouteMode}
-        data-orderbook-pair-select-value={orderbookPairSelectValue}
-        data-last-orderbook-pair-select-value={lastOrderbookPairSelectValue}
-        data-last-orderbook-pair-select-mode={lastOrderbookPairSelectMode}
-        data-last-orderbook-pair-select-route={lastOrderbookPairSelectRoute}
-        data-last-orderbook-pair-select-commit={lastOrderbookPairSelectCommit}
-      >
-        <div class="book-toolbar">
-          <div class="book-title">
-            <span>Orderbook</span>
-            <label class="orderbook-pair-select">
-              <strong>{orderbookPairDisplayLabel}</strong>
-              <select
-                value={orderbookPairSelectValue}
-                data-testid="swap-orderbook-pair-select"
-                aria-label="Orderbook pair"
-                title={orderbookPairDisplayLabel}
-                on:change={handleOrderbookPairSelectChange}
-              >
-                {#each orderbookPairOptions as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </label>
-          </div>
-          <button
-            type="button"
-            class="scope-btn"
-            class:active={orderbookScopeMode === 'aggregated'}
-            data-testid="swap-scope-toggle"
-            data-scope-mode={orderbookScopeMode}
-            disabled={swapRouteMode === 'cross'}
-            on:click={toggleOrderbookScope}
-          >
-            {orderbookScopeMode === 'aggregated' ? 'All hubs' : 'Selected'}
-          </button>
-        </div>
-        {#if orderbookHubIds.length > 0}
-          <div class="orderbook-wrap" data-testid="swap-orderbook">
-            <OrderbookPanel
-              hubIds={visibleOrderbookHubIds}
-              hubId={activeBookHubId || selectedBookAccountId}
-              relayUrl={activeOrderbookRelayUrl}
-              pairId={orderbookPairId}
-              pairLabel={orderbookPairDisplayLabel}
-              depth={orderbookDepth}
-              showSources={true}
-              sourceLabels={orderbookSourceLabels}
-              sourceAvatars={orderbookSourceAvatars}
-              ownEntityIds={ownOrderbookEntityIds}
-              compactHeader={true}
-              showPriceStepControl={false}
-              priceScale={Number(ORDERBOOK_PRICE_SCALE)}
-              sizeDisplayScale={orderbookSizeDisplayScale}
-              disablePriceAggregation={true}
-              preferredClickSide={orderMode === 'buy-base' ? 'ask' : 'bid'}
-              refreshNonce={orderbookRefreshNonce}
-              on:levelclick={handleOrderbookLevelClick}
-              on:snapshot={handleOrderbookSnapshot}
-            />
-          </div>
-        {:else}
-          <div class="orderbook-empty" data-testid="swap-orderbook-empty">No connected account orderbooks yet.</div>
-        {/if}
-      </div>
+      <SwapOrderbookSection
+        {activeBookHubId}
+        {orderbookHubIds}
+        {activeOrderAccountId}
+        {selectedBookAccountId}
+        {createOrderAccountId}
+        selectedRouteSourceHub={selectedRouteOption?.sourceHubEntityId || ''}
+        selectedRouteTargetHub={selectedRouteOption?.targetHubEntityId || ''}
+        selectedCrossTargetHub={selectedCrossTarget?.targetHubEntityId || ''}
+        {swapRouteMode}
+        {orderbookPairSelectValue}
+        {lastOrderbookPairSelectValue}
+        {lastOrderbookPairSelectMode}
+        {lastOrderbookPairSelectRoute}
+        {lastOrderbookPairSelectCommit}
+        {orderbookPairDisplayLabel}
+        {orderbookPairOptions}
+        {orderbookScopeMode}
+        {visibleOrderbookHubIds}
+        {activeOrderbookRelayUrl}
+        {orderbookPairId}
+        {orderbookDepth}
+        {orderbookSourceLabels}
+        {orderbookSourceAvatars}
+        {ownOrderbookEntityIds}
+        orderbookPriceScale={Number(ORDERBOOK_PRICE_SCALE)}
+        {orderbookSizeDisplayScale}
+        {orderMode}
+        {orderbookRefreshNonce}
+        {handleOrderbookPairSelectChange}
+        {toggleOrderbookScope}
+        {handleOrderbookLevelClick}
+        {handleOrderbookSnapshot}
+      />
     {/if}
   </div>
 

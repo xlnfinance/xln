@@ -338,7 +338,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `SwapPanel.svelte` 4,006 lines, `Graph3DPanel.svelte` 4,003 lines, `EntityPanelTabs.svelte` 3,892 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 4,003 lines, `SwapPanel.svelte` 3,943 lines, `EntityPanelTabs.svelte` 3,892 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move Graph3D pure helpers out of the Svelte panel.
   - Impact: medium.
@@ -371,6 +371,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused swap price-reject e2e `20260624-185520-590` PASS `1/1`, wall `24.5s`, HEAD `85547bf6077c`, code hash `a294df2b2ca1e10f`, benchmark `INSUFFICIENT` because no previous comparable price-reject run exists.
   - Progress: fourth extraction done. Swap completion modal rendering moved into `SwapCompletionDialog.svelte`; `SwapPanel.svelte` is down to 4,006 lines.
   - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused swap price-reject e2e `20260624-191743-590` PASS `1/1`, wall `25.4s`, browser issues `0`, but benchmark flagged one nonpersistent `max child CPU` spike (`49.2% -> 76.4%`). Immediate rerun `20260624-191840-390` PASS `1/1`, wall `23.4s`, max child CPU `47.3%`, benchmark OK.
+  - Progress: fifth extraction done. Orderbook market section rendering and browser-safe orderbook UI types moved into `SwapOrderbookSection.svelte` / `swap-orderbook-view.ts`; `SwapPanel.svelte` is down to 3,943 lines.
+  - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused orderbook pair dropdown e2e `20260624-192407-034` PASS `1/1`, wall `19.8s`, code hash `d7ba9723be496ed1`, browser issues `0`, benchmark `INSUFFICIENT` because no previous comparable pair-dropdown run exists.
 
 - [x] Move QA cockpit API/UI types out of the Svelte route.
   - Impact: medium-high.
