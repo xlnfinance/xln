@@ -2733,6 +2733,47 @@
           {/if}
 
           <div class="detail-layout">
+            <aside class="evidence-playlist" data-testid="qa-evidence-playlist">
+              <div class="playlist-head">
+                <div>
+                  <div class="eyebrow">Evidence Playlist</div>
+                  <h4>Recorded Scenarios</h4>
+                </div>
+                <span>{visibleShardEntries.length}/{sortedShardEntries.length}</span>
+              </div>
+              <div class="playlist-list">
+                {#each visibleShardEntries as { shard, index }}
+                  <button
+                    type="button"
+                    class="playlist-row"
+                    class:selected={index === selectedShardIndex}
+                    class:fail={shard.status === 'failed'}
+                    data-testid="qa-playlist-row"
+                    data-selected={index === selectedShardIndex ? 'true' : 'false'}
+                    data-shard={shard.shard}
+                    onclick={() => selectShard(index)}
+                  >
+                    <div class="playlist-thumb">
+                      {#if shardPreviewUrl(shard)}
+                        <QaProtectedImage url={shardPreviewUrl(shard)} alt={describeShard(shard)} loading="lazy" />
+                      {:else}
+                        <span>{artifactCount(shard, 'video') > 0 ? 'Play' : 'No video'}</span>
+                      {/if}
+                    </div>
+                    <div class="playlist-copy">
+                      <strong>{describeShard(shard)}</strong>
+                      <small>{shardPreviewText(shard)}</small>
+                      <span>
+                        {shard.status}
+                        · {formatMs(shard.durationMs)}
+                        · {plural(artifactCount(shard, 'video'), 'video', 'videos')}
+                      </span>
+                    </div>
+                  </button>
+                {/each}
+              </div>
+            </aside>
+
             <div class="media-panel">
               <QaScenarioPlayer
                 runId={selectedRun.runId}
@@ -2821,35 +2862,42 @@
                 {/if}
               </section>
 
-              <section class="panel-block" data-testid="qa-evidence-artifacts">
-                <h4>Evidence Files</h4>
-                {#if selectedShardEvidenceArtifacts.length > 0}
-                  <div class="artifact-list">
-                    {#each visibleSelectedShardEvidenceArtifacts as artifact}
-                      <button type="button" onclick={() => openProtectedArtifact(artifact.url)}>
-                        <span>{artifactLabel(artifact)}</span>
-                        <strong>{artifact.name}</strong>
-                        <small>{formatBytes(artifact.sizeBytes)}</small>
-                        <small>{artifact.sensitivity}</small>
-                      </button>
-                    {/each}
-                  </div>
-                  {#if visibleSelectedShardEvidenceArtifacts.length < selectedShardEvidenceArtifacts.length}
-                    <button
-                      class="window-more"
-                      type="button"
-                      data-testid="qa-artifacts-show-more"
-                      onclick={() => (artifactWindowSize += ARTIFACT_WINDOW_STEP)}
-                    >
-                      Show {Math.min(ARTIFACT_WINDOW_STEP, selectedShardEvidenceArtifacts.length - visibleSelectedShardEvidenceArtifacts.length)} more artifacts · {visibleSelectedShardEvidenceArtifacts.length}/{selectedShardEvidenceArtifacts.length}
-                    </button>
-                  {/if}
-                {:else}
-                  <div class="empty">No non-media artifact files captured</div>
-                {/if}
-              </section>
             </div>
           </div>
+
+          <section class="panel-block evidence-files-strip" data-testid="qa-evidence-artifacts">
+            <div class="evidence-files-head">
+              <div>
+                <div class="eyebrow">Artifacts Below Playback</div>
+                <h4>Evidence Files</h4>
+              </div>
+              <span>{selectedShardEvidenceArtifacts.length} files</span>
+            </div>
+            {#if selectedShardEvidenceArtifacts.length > 0}
+              <div class="artifact-list">
+                {#each visibleSelectedShardEvidenceArtifacts as artifact}
+                  <button type="button" onclick={() => openProtectedArtifact(artifact.url)}>
+                    <span>{artifactLabel(artifact)}</span>
+                    <strong>{artifact.name}</strong>
+                    <small>{formatBytes(artifact.sizeBytes)}</small>
+                    <small>{artifact.sensitivity}</small>
+                  </button>
+                {/each}
+              </div>
+              {#if visibleSelectedShardEvidenceArtifacts.length < selectedShardEvidenceArtifacts.length}
+                <button
+                  class="window-more"
+                  type="button"
+                  data-testid="qa-artifacts-show-more"
+                  onclick={() => (artifactWindowSize += ARTIFACT_WINDOW_STEP)}
+                >
+                  Show {Math.min(ARTIFACT_WINDOW_STEP, selectedShardEvidenceArtifacts.length - visibleSelectedShardEvidenceArtifacts.length)} more artifacts · {visibleSelectedShardEvidenceArtifacts.length}/{selectedShardEvidenceArtifacts.length}
+                </button>
+              {/if}
+            {:else}
+              <div class="empty">No non-media artifact files captured</div>
+            {/if}
+          </section>
 
           <section class="log-panel">
             <div class="log-head">
@@ -3996,15 +4044,127 @@
 
   .detail-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.44fr);
+    grid-template-columns: minmax(220px, 0.32fr) minmax(0, 1fr) minmax(300px, 0.38fr);
     gap: 1rem;
     align-items: start;
   }
 
+  .evidence-playlist,
   .media-panel,
   .info-panel {
     display: grid;
     gap: 1rem;
+  }
+
+  .evidence-playlist {
+    align-self: stretch;
+    min-width: 0;
+  }
+
+  .playlist-head,
+  .evidence-files-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .playlist-head h4,
+  .evidence-files-head h4 {
+    margin: 0.15rem 0 0;
+  }
+
+  .playlist-head span,
+  .evidence-files-head span {
+    color: #9b978a;
+    font-size: 0.76rem;
+    white-space: nowrap;
+  }
+
+  .playlist-list {
+    display: grid;
+    gap: 0.55rem;
+    max-height: min(62vh, 760px);
+    overflow: auto;
+    padding-right: 0.2rem;
+  }
+
+  .playlist-row {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 0.65rem;
+    width: 100%;
+    min-height: 72px;
+    padding: 0.45rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .playlist-row:hover,
+  .playlist-row.selected {
+    border-color: rgba(216, 175, 79, 0.46);
+    background: rgba(216, 175, 79, 0.08);
+  }
+
+  .playlist-row.fail {
+    border-left: 3px solid #ff7b72;
+  }
+
+  .playlist-thumb {
+    position: relative;
+    overflow: hidden;
+    border-radius: 6px;
+    aspect-ratio: 16 / 10;
+    background: rgba(255, 255, 255, 0.05);
+    color: #b7b2a4;
+    display: grid;
+    place-items: center;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+  }
+
+  .playlist-thumb :global(img) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .playlist-copy {
+    display: grid;
+    gap: 0.22rem;
+    min-width: 0;
+  }
+
+  .playlist-copy strong,
+  .playlist-copy small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .playlist-copy strong {
+    color: #f1efe7;
+    font-size: 0.84rem;
+  }
+
+  .playlist-copy small {
+    color: #b7b2a4;
+    font-size: 0.75rem;
+  }
+
+  .playlist-copy span {
+    color: #9b978a;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+  }
+
+  .evidence-files-strip {
+    margin-top: 1rem;
   }
 
   .empty-state {

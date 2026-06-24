@@ -1367,15 +1367,20 @@ test.describe('QA cockpit scenario player', () => {
     await expect(videoShard).toContainText('assertion');
     await videoShard.click();
 
-    const watchPanel = page.getByTestId('qa-watch-panel');
-    await expect(page.getByTestId('qa-browser-health')).toContainText('Unhandled promise rejection');
-    await expect(page.locator('.detail-artifacts')).toContainText('assertion');
-    await expect(page.getByTestId('qa-browser-health')).toContainText('HTTP 404');
-    await expect(watchPanel).toBeVisible();
-    await expect(page.getByTestId('qa-video-player')).toBeVisible();
-    await expect(page.getByTestId('qa-video-player')).toHaveAttribute('src', /^blob:/);
-    await expect(page.getByTestId('qa-video-track')).toHaveAttribute('src', /^blob:/);
-    await expect(page.getByTestId('qa-evidence-artifacts')).toContainText('No non-media artifact files captured');
+	    const watchPanel = page.getByTestId('qa-watch-panel');
+	    const evidencePlaylist = page.getByTestId('qa-evidence-playlist');
+	    await expect(evidencePlaylist).toContainText('Evidence Playlist');
+	    await expect(evidencePlaylist.getByTestId('qa-playlist-row').first()).toHaveAttribute('data-selected', 'true');
+	    await expect(evidencePlaylist.getByTestId('qa-playlist-row').first()).toContainText('1 video');
+	    await expect(page.getByTestId('qa-browser-health')).toContainText('Unhandled promise rejection');
+	    await expect(page.locator('.detail-artifacts')).toContainText('assertion');
+	    await expect(page.getByTestId('qa-browser-health')).toContainText('HTTP 404');
+	    await expect(watchPanel).toBeVisible();
+	    await expect(page.getByTestId('qa-video-player')).toBeVisible();
+	    await expect(page.getByTestId('qa-video-player')).toHaveAttribute('src', /^blob:/);
+	    await expect(page.getByTestId('qa-video-track')).toHaveAttribute('src', /^blob:/);
+	    await expect(page.getByTestId('qa-evidence-artifacts')).toContainText('Artifacts Below Playback');
+	    await expect(page.getByTestId('qa-evidence-artifacts')).toContainText('No non-media artifact files captured');
     await expect(page.getByTestId('qa-evidence-artifacts')).not.toContainText('video.webm');
     await expect(page.getByTestId('qa-evidence-artifacts')).not.toContainText('cues.vtt');
 
@@ -1387,9 +1392,14 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-restart-plan')).toContainText('Code hash changed');
     await expect(page.getByRole('button', { name: 'Restart run' })).toBeDisabled();
 
-    await expect(page.getByTestId('qa-scenario-transcript')).toBeVisible();
-    await expect
-      .poll(async () => page.getByTestId('qa-subtitle-cue').count(), {
+	    await expect(page.getByTestId('qa-scenario-transcript')).toBeVisible();
+	    const videoBox = await page.getByTestId('qa-video-player').boundingBox();
+	    const transcriptBox = await page.getByTestId('qa-scenario-transcript').boundingBox();
+	    expect(videoBox).not.toBeNull();
+	    expect(transcriptBox).not.toBeNull();
+	    expect(transcriptBox!.x).toBeGreaterThan(videoBox!.x + videoBox!.width - 1);
+	    await expect
+	      .poll(async () => page.getByTestId('qa-subtitle-cue').count(), {
         timeout: 10_000,
         message: 'scenario transcript should expose multiple cues',
       })
