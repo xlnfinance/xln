@@ -1,10 +1,9 @@
 /**
  * xln push-wake module types.
  *
- * Server-only. Never imported by the browser runtime bundle or the RJEA
- * consensus path. The push module lets a watchtower observe on-chain
- * DisputeStarted events and wake the victim's device so the user can open the
- * wallet, sync, and respond before the dispute window closes.
+ * Push-wake data contract. Registration message builders are shared by the
+ * wallet client and watchtower server; storage/sending/watch loops stay
+ * server-only and outside the RJEA consensus path.
  *
  * It holds NO keys and NO spend authority. It stores only a registry mapping an
  * entity to opaque device push tokens plus a pluggable notification transport.
@@ -32,7 +31,8 @@ export type PushUnregisterRequestV1 = {
   type: 'push_unregister';
   version: 1;
   runtimeId: string;
-  token: string;
+  token?: string;
+  tokenHash?: string;
   signedAt: number;
   ownerSignature: string;
 };

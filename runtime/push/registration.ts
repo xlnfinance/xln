@@ -55,6 +55,12 @@ const normalizeToken = (value: unknown): string => {
   return token;
 };
 
+const normalizeTokenHash = (value: unknown): string => {
+  const tokenHash = String(value || '').trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(tokenHash)) throw new Error('PUSH_TOKEN_HASH_INVALID');
+  return tokenHash;
+};
+
 const normalizeChainId = (value: unknown): number => {
   const chainId = Math.floor(Number(value));
   if (!Number.isFinite(chainId) || chainId <= 0) throw new Error('PUSH_CHAIN_ID_INVALID');
@@ -147,10 +153,10 @@ export const verifyPushUnregister = (
     throw new Error('PUSH_UNREGISTER_INVALID');
   }
   const runtimeId = normalizeRuntimeId(request.runtimeId);
-  const token = normalizeToken(request.token);
+  const token = String(request.token || '').trim();
+  const tokenHash = token ? hashPushToken(normalizeToken(token)) : normalizeTokenHash(request.tokenHash);
   const signedAt = normalizeSignedAt(request.signedAt);
   assertFresh(signedAt, options);
-  const tokenHash = hashPushToken(token);
   const message = buildPushUnregisterMessage(runtimeId, tokenHash, signedAt);
   const recovered = ethers.verifyMessage(message, String(request.ownerSignature || '')).toLowerCase();
   if (recovered !== runtimeId) {

@@ -19,6 +19,7 @@ type NativeEventName =
 type XlnDesktopBridge = {
 	platform: 'desktop';
 	notifyPaymentWake?: (payload: { title: string; body: string; extra?: Record<string, unknown> }) => Promise<void>;
+	getPushWakeToken?: () => Promise<{ value: string; platform?: 'desktop' | 'web' } | string>;
 };
 
 declare global {
@@ -118,7 +119,8 @@ export const initializeNativeShell = async (): Promise<void> => {
 
 	await App.addListener('appUrlOpen', ({ url }) => routeDeepLink(url));
 	await PushNotifications.addListener('registration', token => {
-		dispatchNativeEvent('xln-native-push-token', { value: token.value });
+		const nativePlatform = Capacitor.getPlatform() === 'ios' ? 'ios' : 'android';
+		dispatchNativeEvent('xln-native-push-token', { value: token.value, platform: nativePlatform });
 	});
 	await PushNotifications.addListener('pushNotificationReceived', notification => {
 		dispatchNativeEvent('xln-native-payment-wake', { source: 'push', notification });

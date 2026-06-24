@@ -7,6 +7,7 @@ import {
   discoverRuntimeRecoveryCandidates,
   parseRuntimeRecoveryCandidateFile,
   resolveDefaultRecoveryTowerUrls,
+  shouldSkipRuntimeRecoveryUploadAtHeight,
   tryRestoreRuntimeEnvFromTower,
 } from '../../frontend/src/lib/stores/vaultStore';
 import * as xln from '../../runtime/runtime';
@@ -61,6 +62,23 @@ test('runtime recovery modes keep tower setup out of seed creation defaults', ()
     useDefaultTowers: false,
     towers: [{ url: 'http://127.0.0.1:9100', towerMode: 'delayed_last_resort', enabled: true }],
   });
+});
+
+test('runtime recovery upload skips already uploaded height instead of building empty journal tail', () => {
+  expect(shouldSkipRuntimeRecoveryUploadAtHeight({
+    lastUploadedHeight: 8,
+    lastBundleHash: `0x${'11'.repeat(32)}`,
+  }, 8)).toBe(true);
+
+  expect(shouldSkipRuntimeRecoveryUploadAtHeight({
+    lastUploadedHeight: 8,
+    lastBundleHash: `0x${'11'.repeat(32)}`,
+  }, 9)).toBe(false);
+
+  expect(shouldSkipRuntimeRecoveryUploadAtHeight({
+    lastUploadedHeight: 8,
+    lastBundleHash: null,
+  }, 8)).toBe(false);
 });
 
 const testMnemonic = 'test test test test test test test test test test test junk';

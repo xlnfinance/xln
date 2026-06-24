@@ -201,6 +201,15 @@ const DEFAULT_DISPUTE_WINDOW_BLOCKS = 5760;
 const WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS = Math.max(1, Math.ceil(DEFAULT_DISPUTE_WINDOW_BLOCKS * 0.2));
 const WATCHTOWER_SAFETY_MARGIN_BLOCKS = 12;
 
+export const shouldSkipRuntimeRecoveryUploadAtHeight = (
+  previous: { lastUploadedHeight: number; lastBundleHash: string | null } | undefined,
+  height: unknown,
+): boolean => {
+  const currentHeight = Math.max(0, Math.floor(Number(height || 0)));
+  const previousHeight = Math.max(0, Math.floor(Number(previous?.lastUploadedHeight || 0)));
+  return Boolean(previous?.lastBundleHash && currentHeight <= previousHeight);
+};
+
 type FrameLogEntry = Env['frameLogs'][number];
 type HealthMachine = { name?: string; status?: string; chainId?: number; lastBlock?: unknown };
 type HealthPayload = {
@@ -1015,6 +1024,7 @@ async function uploadRuntimeRecoverySnapshot(
   if (previous && Number(env.height || 0) < previous.lastUploadedHeight) return;
 
   const height = Math.max(0, Math.floor(Number(env.height || 0)));
+  if (shouldSkipRuntimeRecoveryUploadAtHeight(previous, height)) return;
   const signers = buildRuntimeRecoverySigners(runtime);
   const meta = buildRuntimeRecoveryMeta(runtime);
   const shouldUploadSnapshot =
@@ -2553,6 +2563,18 @@ export const vaultOperations = {
   ) {
     const xln = await getXLN();
     return xln.verifyRuntimeChain(runtimeId, runtimeSeed, options);
+  },
+
+  async signRuntimeOwnerMessage(runtimeId: string | null | undefined, message: string): Promise<string> {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId || get(activeRuntimeId));
+    if (!normalizedRuntimeId) throw new Error('No active runtime selected');
+    const runtime = get(runtimesState).runtimes[normalizedRuntimeId];
+    if (!runtime?.seed) throw new Error(`Runtime seed unavailable: ${normalizedRuntimeId}`);
+    const wallet = new Wallet(derivePrivateKey(runtime.seed, 0));
+    if (normalizeRuntimeId(wallet.address) !== normalizedRuntimeId) {
+      throw new Error(`RUNTIME_OWNER_KEY_MISMATCH:${normalizedRuntimeId}:${wallet.address.toLowerCase()}`);
+    }
+    return wallet.signMessage(message);
   },
 
   async readPersistedFrameJournal(env: Env, height: number): Promise<PersistedFrameJournal | null> {

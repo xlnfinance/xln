@@ -40,6 +40,7 @@
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import GossipPanel from '$lib/components/Entity/GossipPanel.svelte';
   import ChatMessages from '$lib/components/Entity/ChatMessages.svelte';
+  import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
   import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
   import { TAB_STYLE_OPTIONS, UI_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
 
@@ -981,6 +982,15 @@
       </section>
 
       {#if $activeRuntime}
+        <PushWakePanel
+          runtime={$activeRuntime}
+          env={$xlnEnvironment}
+          entityId={currentEntityId}
+          jurisdictionName={currentJurisdictionLabel}
+          towers={recoveryTowerDraft}
+          {activeIsLive}
+        />
+
         {@const officialUrl = resolveOfficialRecoveryTowerUrl()}
         <section class="section-card">
           <div class="section-head">
