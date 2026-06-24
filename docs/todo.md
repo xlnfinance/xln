@@ -1,6 +1,6 @@
 # todo
 
-Last updated: 2026-06-23
+Last updated: 2026-06-24
 
 Scope: synthesized from four external admin/QA/runtime audits. This is the operator-grade backlog for `/health`, `/qa`, runtime adapter import, test history, scenario playback, restart controls, and regulator evidence.
 
@@ -203,11 +203,14 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: unit enforces at least 20 curated screens and required groups `Payments`, `Swap`, `On-chain Batch`, `Disputes`, `History`; focused QA cockpit e2e verifies default gallery rendering, counts, and categories.
   - Revalidated: run `20260623-200141-886` regenerated 30 gallery artifacts on HEAD `20aa9c0d`; QA cockpit run `20260623-200321-059` passed gallery visibility.
 
-- [ ] Make the UX screenshot gallery a mandatory 30-screen release audit pack.
+- [x] Make the UX screenshot gallery a mandatory 30-screen release audit pack.
   - Impact: high.
+  - User-confirmed: keep at least 30 different screenshots from different parts of the app as a stable visual audit source.
   - Requirement: every release-quality e2e run refreshes at least 30 named PNG screens across desktop and mobile covering onboarding, home/assets, payments, receive, swap, cross-chain swap, disputes, on-chain batch compose/queue/history, account history, settings, QA cockpit, health, remote runtime import, and Time Machine.
   - UI: QA cockpit shows the 30-screen pack as a first-class gallery with category filters, viewport badges, scenario names, git HEAD/code hash, and missing-screen warnings.
   - Tests: unit fails if fewer than 30 curated screens or required categories are missing; focused QA e2e verifies the gallery renders 30 distinct screens and every image resolves.
+  - Status: done. `/api/qa/stories` now returns a release-pack audit computed from the full static story catalog; QA cockpit shows READY/MISSING, counts, missing reasons, and group filters. `/embed` initializes settings so Time Machine screenshots can be captured deterministically.
+  - Evidence: static gallery has 37 PNGs; L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `32/32`; focused screenshot e2e `20260624-002946-321` PASS `1/1`, wall `10.0s`, code hash `63d9425a3d266fea`; focused QA cockpit e2e `20260624-003232-055` PASS `1/1`, wall `11.0s`, code hash `addca66df356e7c8`.
 
 - [x] Make `/health` read only its dedicated health surface.
   - Impact: medium.
@@ -218,6 +221,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [ ] Make Time Machine production-debuggable for local and remote runtimes.
   - Impact: high.
+  - User-confirmed: this must be a real working Time Machine when enabled in settings, not just a visual toggle.
   - Requirement: when Time Machine is enabled in settings, every wallet/workspace panel reads the selected historical frame instead of live state, with clear live vs historical status.
   - Remote hub debug: radapter must expose bounded historical frame scans from a remote hub by height/range/cursor, returning aggregate/cursor/hash snapshots and paged entity/account views, never full 1M-account arrays.
   - UI: operator can scrub local history, pick a remote hub, scan past runtime states, compare current vs selected frame, and deep-link a historical height for debugging.
@@ -383,7 +387,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [x] E2E: failed run opens directly to failed shard and first failure cue.
   - Status: done. Failure Inbox clicks now select the failed shard, keep `runId/shard` in the URL, add a first-class `Failure` transcript cue from the shard error/log, and seek the scenario video to that cue once metadata is ready.
   - Evidence: focused QA cockpit e2e asserts the failed shard `1` is selected, the active transcript cue is marked `data-failure-cue="true"`, the cue text contains the fixture assertion failure, and video currentTime seeks to the failure cue.
-- [ ] E2E: missing video shows stable empty state with no console errors.
+- [x] E2E: missing video shows stable empty state with no console errors.
+  - Status: done. QA cockpit fixture includes a passed shard with no video artifacts; the Scenario Player renders `No recorded video for this shard` without mounting video or subtitle track elements.
+  - Evidence: focused QA cockpit e2e `20260624-003232-055` asserts `qa-video-missing`, `qa-video-player` count `0`, `qa-video-track` count `0`, and no new browser runtime errors.
 - [ ] E2E: scenario transcript cue scrubs video to real marker timestamp.
 - [ ] E2E: verdict banner shows FAIL on failed fixture and PASS on green fixture.
 - [ ] E2E: history compare renders deltas and regression badge.
@@ -416,6 +422,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [ ] Finish the existing AI Court app as a full XLN-money game.
   - Impact: product expansion after the core admin/runtime backlog is green.
+  - Placement: do this after the core admin/runtime/evidence backlog, not before the current QA/health/runtime reliability work.
   - Requirement: use real XLN token/account flows, not mocks. A user can create a case, deposit/stake tokens, accept a challenge, submit evidence/arguments, resolve the challenge, and the winner receives the escrowed pot.
   - UI: case lobby, case detail, funding/deposit flow, challenge flow, evidence timeline, judgement/result screen, and payout history.
   - Runtime: escrow state is auditable through XLN accounts/batches; challenge settlement is deterministic; failed/expired cases refund by explicit rule.

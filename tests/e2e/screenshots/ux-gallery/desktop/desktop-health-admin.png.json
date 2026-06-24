@@ -1,0 +1,12 @@
+{
+  "title": "desktop health admin",
+  "group": "Health",
+  "description": "Health admin summary for runtime, relay, hubs, custody, and QA links.",
+  "platform": "desktop",
+  "tags": [
+    "health",
+    "admin"
+  ],
+  "sourceTest": "ui screenshot smoke captures operator admin surfaces",
+  "project": "chromium"
+}

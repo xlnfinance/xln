@@ -1,0 +1,13 @@
+{
+  "title": "desktop time machine",
+  "group": "Time Machine",
+  "description": "Workspace time machine enabled for historical frame scrubbing and replay.",
+  "platform": "desktop",
+  "tags": [
+    "time-machine",
+    "debug",
+    "history"
+  ],
+  "sourceTest": "ui screenshot smoke captures operator admin surfaces",
+  "project": "chromium"
+}

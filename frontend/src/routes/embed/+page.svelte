@@ -6,9 +6,15 @@
    * Scenario loading is manual-only from Dock panels.
    */
 
+  import { onMount } from 'svelte';
   import View from '$lib/view/View.svelte';
+  import { settingsOperations } from '$lib/stores/settingsStore';
 
   let embedMode = true;
+
+  onMount(() => {
+    settingsOperations.initialize();
+  });
 </script>
 
 <svelte:head>
