@@ -212,8 +212,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Inputs: fatal runtime markers, browser/page errors, network failures, phase budget breaches, restart failures.
   - UI: one page/list of latest failure causes linking directly to shard, log tail, video time, artifact.
-  - Partial shipped: initial inbox covers failed runs, browser/page/network/HTTP health, benchmark regressions, and failed restart audit rows.
-  - Remaining: fatal log line linking, phase budget breaches, and video-time deep links.
+  - Partial shipped: inbox covers failed runs, browser/page/network/HTTP health, benchmark regressions, phase budget breaches, failed restart audit rows, selected-shard deep links, and failure-cue video focus.
+  - Evidence: focused QA cockpit e2e `20260624-130628-512` PASS `1/1`, wall `12.3s`, code hash `36dbc2aaf5893ecd`, benchmark OK. Fixture verifies `Phase budget exceeded` inbox item and shard focus.
+  - Remaining: fatal log line extraction/linking into its own inbox item.
   - Tests: fatal marker fixture maps to exact shard and log line.
 
 - [x] Add e2e UX screenshot gallery for design audits.
