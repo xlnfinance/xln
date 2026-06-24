@@ -51,7 +51,7 @@
   import EntityAssetsTab from './EntityAssetsTab.svelte';
   import AccountAppearancePanel from './AccountAppearancePanel.svelte';
   import AccountConfigurePanel from './AccountConfigurePanel.svelte';
-  import AccountOpenPanel, { type DisputedAccountView } from './AccountOpenPanel.svelte';
+  import AccountOpenPanel from './AccountOpenPanel.svelte';
   import EntityActivityPanel from './EntityActivityPanel.svelte';
   import EntityPanelHeroTabs from './EntityPanelHeroTabs.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
@@ -182,7 +182,6 @@
   } from './entity-asset-values';
   import {
     choosePreferredAssetSymbol,
-    compareEntityAssetText,
     compareTokenSymbols,
     findAssetLedgerRowBySymbol as findAssetLedgerRowBySymbolInList,
     findExternalTokenBySymbol as findExternalTokenBySymbolInList,
@@ -224,6 +223,12 @@
     type MovePostSettleOp,
     type PendingAssetAutoC2R,
   } from './entity-action-txs';
+  import {
+    buildDisputedAccountViews,
+    formatCrossJTargetDisputeRiskLabel,
+    getCrossJTargetDisputeRiskForState,
+    type CrossJTargetDisputeRisk,
+  } from './account-dispute-view';
   export let tab: Tab;
   export let hideHeader: boolean = false;
   export let showJurisdiction: boolean = true;
@@ -1055,9 +1060,6 @@
     displayDecimals: number;
     sourceAvailableBalance: bigint;
   };
-  function compareText(left: string, right: string): number {
-    return compareEntityAssetText(left, right);
-  }
   function findExternalTokenBySymbol(symbol: string): ExternalToken | null {
     return findExternalTokenBySymbolInList(externalTokens, symbol);
   }
@@ -2875,31 +2877,15 @@
     unsafeCrossJTargetDisputeAccepted = false;
     unsafeCrossJTargetDisputeAccountId = workspaceAccountId;
   }
-  function getCrossJTargetDisputeRisk(counterpartyEntityId: string): { amount: bigint; tokenId: number } | null {
-    const state = replica?.state;
-    const account = state?.accounts?.get?.(counterpartyEntityId);
-    if (!state || !account) return null;
-    const self = String(state.entityId || '').toLowerCase();
-    const counterparty = String(counterpartyEntityId || '').toLowerCase();
-    let amount = 0n;
-    let tokenId = 0;
-    for (const route of state.crossJurisdictionSwaps?.values?.() || []) {
-      if (
-        String(route?.target?.counterpartyEntityId || '').toLowerCase() === self &&
-        String(route?.target?.entityId || '').toLowerCase() === counterparty &&
-        route?.targetPull?.pullId &&
-        account.pulls?.has?.(route.targetPull.pullId)
-      ) {
-        amount += BigInt(route.target.amount || 0n);
-        tokenId = Number(route.target.tokenId || tokenId);
-      }
-    }
-    return amount > 0n ? { amount, tokenId } : null;
+  function getCrossJTargetDisputeRisk(counterpartyEntityId: string): CrossJTargetDisputeRisk | null {
+    return getCrossJTargetDisputeRiskForState(replica?.state, counterpartyEntityId);
   }
-  function formatCrossJTargetDisputeRisk(risk: { amount: bigint; tokenId: number }): string {
-    const token = resolveReserveTokenMeta(risk.tokenId);
-    const amount = formatTokenInputAmount(risk.amount, token.decimals) || '0';
-    return `${amount} ${token.symbol}`;
+  function formatCrossJTargetDisputeRisk(risk: CrossJTargetDisputeRisk): string {
+    return formatCrossJTargetDisputeRiskLabel({
+      risk,
+      resolveToken: resolveReserveTokenMeta,
+      formatTokenInputAmount,
+    });
   }
   async function confirmAndQueueDisputePrepare(
     counterpartyEntityId: string,
@@ -3287,28 +3273,7 @@
     deriveDelta: activeXlnFunctions?.deriveDelta,
     getTokenInfo,
   });
-  type DisputedAccountView = {
-    counterpartyId: string;
-    status: 'active' | 'finalized';
-  };
-  $: disputedAccounts = (() => {
-    const out: DisputedAccountView[] = [];
-    const accounts = replica?.state?.accounts;
-    if (!(accounts instanceof Map)) return out;
-    for (const [counterpartyId, account] of accounts.entries()) {
-      const activeDispute = account.activeDispute;
-      const status = String(account.status || '');
-      if (status !== 'disputed') continue;
-      out.push({
-        counterpartyId: String(counterpartyId),
-        status: activeDispute ? 'active' : 'finalized',
-      });
-    }
-    return out.sort((a, b) => {
-      if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
-      return compareText(a.counterpartyId, b.counterpartyId);
-    });
-  })();
+  $: disputedAccounts = buildDisputedAccountViews(replica?.state?.accounts);
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
   $: entityActivityRows = buildEntityActivityRows({
     replica,
