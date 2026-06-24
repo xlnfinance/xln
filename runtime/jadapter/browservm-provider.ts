@@ -600,6 +600,7 @@ export class BrowserVMProvider {
           this.blockHeight,
           this.blockHash,
           this.blockTimestamp,
+          bytesToHex(tx.hash()),
         );
         for (const ev of events) {
           console.log(`   Event: ${ev.name}`, ev.args);
@@ -610,7 +611,7 @@ export class BrowserVMProvider {
 
     const txHash = bytesToHex(tx.hash());
     if (options?.emitEvents) {
-      const events = this.emitEvents(result.execResult.logs || []);
+      const events = this.emitEvents(result.execResult.logs || [], txHash);
       return { txHash, events };
     }
     return { txHash };
@@ -761,7 +762,7 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] debugFundReserves: logs=${result.execResult.logs?.length || 0}`);
 
     // Emit events to j-watcher subscribers
-    return this.emitEvents(result.execResult.logs || []);
+    return this.emitEvents(result.execResult.logs || [], bytesToHex(tx.hash()));
   }
 
   /** Get contract address */
@@ -1166,6 +1167,15 @@ export class BrowserVMProvider {
     return this.processBatchWithSigner(encodedBatch, hankoData, nonce, this.deployerPrivKey);
   }
 
+  async processBatchAs(
+    encodedBatch: string,
+    hankoData: string,
+    nonce: bigint,
+    txPrivKey: Uint8Array,
+  ): Promise<EVMEvent[]> {
+    return this.processBatchWithSigner(encodedBatch, hankoData, nonce, txPrivKey);
+  }
+
   private async processBatchWithSigner(
     encodedBatch: string,
     hankoData: string,
@@ -1261,7 +1271,7 @@ export class BrowserVMProvider {
       console.log(`   Log ${i}: topics=${log[1]?.length || 0}, data=${log[2]?.length || 0} bytes`);
     });
 
-    const events = this.emitEvents(rawLogs);
+    const events = this.emitEvents(rawLogs, bytesToHex(tx.hash()));
     console.log(`[BrowserVM] ✅ Batch processed: ${events.length} events`);
     events.forEach(e => console.log(`   - ${e.name}`));
 
@@ -1419,7 +1429,7 @@ export class BrowserVMProvider {
    * Emit events to all registered callbacks as a BATCH.
    * All events from one transaction are sent together, matching blockchain behavior.
    */
-  private emitEvents(logs: EthereumLog[]): EVMEvent[] {
+  private emitEvents(logs: EthereumLog[], transactionHash?: string): EVMEvent[] {
     this.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
     const events = decodeBrowserVmEvents(
       logs,
@@ -1427,6 +1437,7 @@ export class BrowserVMProvider {
       this.blockHeight,
       this.blockHash,
       this.blockTimestamp,
+      transactionHash,
     );
     this.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
 

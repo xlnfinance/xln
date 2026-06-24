@@ -13,6 +13,8 @@ export type EVMEvent = {
   args: Record<string, unknown>;
   blockNumber?: number;
   blockHash?: string;
+  transactionHash?: string;
+  logIndex?: number;
   timestamp?: number;
 };
 
@@ -54,12 +56,13 @@ export const decodeBrowserVmEvents = (
   blockNumber: number,
   blockHash: string,
   timestamp: number,
+  transactionHash?: string,
 ): EVMEvent[] => {
   const parsers = interfaces.filter((iface): iface is ethers.Interface => iface !== null);
   if (parsers.length === 0) return [];
 
   const decoded: EVMEvent[] = [];
-  for (const log of logs) {
+  for (const [logIndex, log] of logs.entries()) {
     const topics = log[1].map((topic: Uint8Array) => bytesToHex(topic));
     const data = bytesToHex(log[2]);
 
@@ -72,6 +75,7 @@ export const decodeBrowserVmEvents = (
           args: Object.fromEntries(parsed.fragment.inputs.map((input, index) => [input.name, parsed.args[index]])),
           blockNumber,
           blockHash,
+          ...(transactionHash ? { transactionHash, logIndex } : {}),
           timestamp,
         });
         break;
