@@ -4,6 +4,7 @@ const QA_FIXTURE_RUN_ID = '20260623-235959-999';
 const QA_FAST_RUN_ID = '20260623-225959-888';
 const QA_FIXTURE_ARTIFACT = 'test-results-shard-1/qa-cockpit-fixture/video.webm';
 const QA_AUTH = { scope: 'admin', disabled: true, actorKeyId: 'fixture-auth-disabled' };
+const QA_READ_AUTH = { scope: 'read', disabled: false, actorKeyId: 'fixture-read' };
 const qaSignal = (
   severity: 'OK' | 'WARN' | 'DEGRADED' | 'FAIL' | 'BLOCKED' | 'UNKNOWN',
   reason: string,
@@ -1429,5 +1430,136 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('browser 0 err / 0 warn');
 
     expect(runtimeErrors).toEqual([]);
+  });
+
+  test('keeps QA evidence visible but privileged actions disabled in read mode', async ({ page }) => {
+    test.setTimeout(60_000);
+    let restartPlanCalled = false;
+    let historyBackfillCalled = false;
+    let retentionPurgeCalled = false;
+
+    await page.route('**/api/qa/runs?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_READ_AUTH,
+          runs: [QA_FIXTURE_SUMMARY],
+          ledger: [QA_FAIL_LEDGER],
+          regression: QA_REGRESSION_REPORT,
+          verdict: QA_FAIL_VERDICT,
+        }),
+      });
+    });
+    await page.route('**/api/qa/run?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_READ_AUTH, run: QA_FIXTURE_RUN }),
+      });
+    });
+    await page.route('**/api/qa/catalog', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_READ_AUTH,
+          catalog: QA_CATALOG,
+          restart: { active: false },
+          restartAllowed: false,
+        }),
+      });
+    });
+    await page.route('**/api/qa/history?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_READ_AUTH,
+          history: QA_HISTORY,
+          restart: { active: false },
+          restartAllowed: false,
+        }),
+      });
+    });
+    await page.route('**/api/qa/restart-audit?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_READ_AUTH, audit: QA_RESTART_AUDIT }),
+      });
+    });
+    await page.route('**/api/qa/stories?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_READ_AUTH,
+          total: QA_STORIES.length,
+          releasePack: QA_RELEASE_PACK,
+          stories: QA_STORIES,
+        }),
+      });
+    });
+    await page.route('**/api/qa/restart?**', async (route) => {
+      restartPlanCalled = true;
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, qaAuth: QA_READ_AUTH, error: 'QA_AUTH_ADMIN_REQUIRED' }),
+      });
+    });
+    await page.route('**/api/qa/history/backfill', async (route) => {
+      historyBackfillCalled = true;
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, qaAuth: QA_READ_AUTH, error: 'QA_AUTH_ADMIN_REQUIRED' }),
+      });
+    });
+    await page.route('**/api/qa/retention', async (route) => {
+      retentionPurgeCalled = true;
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, qaAuth: QA_READ_AUTH, error: 'QA_AUTH_ADMIN_REQUIRED' }),
+      });
+    });
+    await page.route('**/api/qa/artifact?**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const artifactPath = requestUrl.searchParams.get('path') || '';
+      const isPng = artifactPath.endsWith('.png');
+      const isVtt = artifactPath.endsWith('.vtt');
+      await route.fulfill({
+        status: 200,
+        contentType: isPng ? 'image/png' : isVtt ? 'text/vtt; charset=utf-8' : 'video/webm',
+        body: isPng ? QA_FIXTURE_PNG : isVtt ? QA_FIXTURE_VTT : QA_FIXTURE_WEBM,
+      });
+    });
+
+    await page.goto('/qa');
+    await expect(page.getByTestId('qa-auth-panel')).toContainText('read', { timeout: 30_000 });
+    await expect(page.getByTestId('qa-verdict-banner')).toContainText('FAIL');
+    await expect(page.getByTestId('qa-ux-gallery-preview')).toBeVisible();
+
+    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
+    await page.getByTestId('qa-suite-row').first().click();
+    await expect(page.getByTestId('qa-watch-panel')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Restart plan' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Restart run' })).toBeDisabled();
+
+    await page.getByTestId('qa-test-tabs').getByRole('button', { name: 'History' }).click();
+    await expect(page.getByTestId('qa-history-backfill')).toBeDisabled();
+    await page.getByPlaceholder('DELETE_OLDER_THAN_30_DAYS').fill('DELETE_OLDER_THAN_30_DAYS');
+    await expect(page.getByTestId('qa-retention-purge')).toBeDisabled();
+
+    expect(restartPlanCalled).toBe(false);
+    expect(historyBackfillCalled).toBe(false);
+    expect(retentionPurgeCalled).toBe(false);
   });
 });
