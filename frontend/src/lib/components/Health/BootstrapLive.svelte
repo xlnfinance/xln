@@ -23,6 +23,47 @@
 
   type IconComponent = typeof Activity;
 
+  type BootstrapTimeline = {
+    readyHash?: string | null;
+    runtimeStateHash?: string | null;
+    entityStateHash?: string | null;
+    readyAt?: number | null;
+    healthPoll?: {
+      actualMs?: number | null;
+      budgetMs?: number | null;
+    };
+    backlog?: {
+      processing?: boolean;
+      runtimeTxs?: number;
+      entityInputs?: number;
+      jInputs?: number;
+      queuedEntityInputCount?: number;
+      queuedEntityTxCount?: number;
+      total?: number;
+    } | null;
+    lastEvent?: {
+      event?: string;
+      stage?: string | null;
+      at?: string | null;
+      height?: number | null;
+    } | null;
+    stages?: Array<{
+      key: string;
+      label: string;
+      status: 'done' | 'active' | 'blocked' | 'pending' | 'disabled';
+      reason: string;
+      budgetMs?: number | null;
+      actualMs?: number | null;
+      startedAt?: number | null;
+      completedAt?: number | null;
+      evidence?: Array<{
+        label: string;
+        value: string | number | boolean | null;
+        unit?: string;
+      }>;
+    }>;
+  };
+
   type HealthData = {
     timestamp: number;
     coreOk?: boolean | undefined;
@@ -151,6 +192,7 @@
         }>;
       }>;
     };
+    bootstrapTimeline?: BootstrapTimeline;
   };
 
   type Props = {
@@ -195,6 +237,7 @@
   const mmHubs = $derived(health.marketMaker?.hubs ?? []);
   const mmCrossRoutes = $derived(health.marketMaker?.cross?.routes ?? []);
   const reserveEntities = $derived(health.bootstrapReserves?.entities ?? []);
+  const timeline = $derived(health.bootstrapTimeline ?? null);
 
   function numberOrZero(value: unknown): number {
     const n = Number(value);
@@ -222,6 +265,12 @@
     return `${Math.max(0, Math.round(ms))}ms`;
   }
 
+  function formatDuration(ms: number | null | undefined): string {
+    if (typeof ms !== 'number' || !Number.isFinite(ms)) return 'n/a';
+    if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`;
+    return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  }
+
   function formatTime(ts: number | null | undefined): string {
     if (!ts) return '-';
     return new Date(ts).toLocaleTimeString();
@@ -231,6 +280,37 @@
     const value = String(id || '');
     if (!value) return '-';
     return value.length <= len ? value : `${value.slice(0, len)}...${value.slice(-4)}`;
+  }
+
+  function shortHash(value?: string | null, len = 8): string {
+    const text = String(value || '').trim();
+    if (!text) return 'n/a';
+    const clean = text.replace(/-dirty$/, '');
+    const suffix = text.endsWith('-dirty') ? '-dirty' : '';
+    return `${clean.slice(0, len)}${suffix}`;
+  }
+
+  function statusLabel(status?: string): string {
+    if (!status) return 'pending';
+    return status.replace('-', ' ');
+  }
+
+  function timelineBacklogLabel(input: BootstrapTimeline['backlog']): string {
+    if (!input) return 'n/a';
+    const total = Number(input.total ?? 0);
+    const queued = Number(input.queuedEntityTxCount ?? 0);
+    const processing = input.processing ? ' + processing' : '';
+    return `${formatCount(total)} queued${queued > 0 ? ` / ${formatCount(queued)} tx` : ''}${processing}`;
+  }
+
+  function timelineStageStatus(input: BootstrapTimeline | null, key: string): string {
+    return input?.stages?.find((stage) => stage.key === key)?.status ?? 'pending';
+  }
+
+  function timelineReadyHashLabel(input: BootstrapTimeline | null): string {
+    const hash = shortHash(input?.readyHash);
+    if (hash !== 'n/a') return hash;
+    return timelineStageStatus(input, 'ready-hash') === 'disabled' ? 'disabled' : 'pending';
   }
 
   function progressStyle(progress: number): string {
@@ -495,6 +575,58 @@
       </div>
     </div>
   </div>
+
+  {#if timeline}
+    <div class="timeline-panel" data-testid="bootstrap-timeline">
+      <div class="timeline-summary">
+        <div>
+          <span>ready hash</span>
+          <strong data-testid="bootstrap-timeline-ready-hash">{timelineReadyHashLabel(timeline)}</strong>
+        </div>
+        <div>
+          <span>health poll</span>
+          <strong data-testid="bootstrap-timeline-health-poll">
+            {formatDuration(timeline.healthPoll?.actualMs)} / {formatDuration(timeline.healthPoll?.budgetMs)}
+          </strong>
+        </div>
+        <div>
+          <span>backlog</span>
+          <strong data-testid="bootstrap-timeline-backlog">{timelineBacklogLabel(timeline.backlog)}</strong>
+        </div>
+        <div>
+          <span>last event</span>
+          <strong data-testid="bootstrap-timeline-last-event">
+            {timeline.lastEvent?.event ?? 'n/a'}{timeline.lastEvent?.stage ? ` · ${timeline.lastEvent.stage}` : ''}
+          </strong>
+        </div>
+      </div>
+
+      <div class="timeline-rail" aria-label="Bootstrap timeline stages">
+        {#each (timeline.stages ?? []) as item (item.key)}
+          <article
+            class="timeline-stage"
+            class:done={item.status === 'done'}
+            class:active={item.status === 'active'}
+            class:blocked={item.status === 'blocked'}
+            class:disabled={item.status === 'disabled'}
+            data-testid={`bootstrap-timeline-stage-${item.key}`}
+          >
+            <div class="timeline-dot"></div>
+            <div>
+              <div class="timeline-stage-top">
+                <strong>{item.label}</strong>
+                <span>{statusLabel(item.status)}</span>
+              </div>
+              <p>{item.reason}</p>
+              <small>
+                actual {formatDuration(item.actualMs)} · budget {formatDuration(item.budgetMs)}
+              </small>
+            </div>
+          </article>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <div class="stage-rail" aria-label="Bootstrap stages">
     {#each stages as stage, index (stage.key)}
@@ -761,6 +893,124 @@
     text-transform: uppercase;
   }
 
+  .timeline-panel {
+    margin-bottom: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    padding: 12px;
+    background: rgba(8, 10, 12, 0.58);
+  }
+
+  .timeline-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .timeline-summary div {
+    min-height: 58px;
+    display: grid;
+    align-content: center;
+    gap: 4px;
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+  .timeline-summary span {
+    color: #8fa0ae;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .timeline-summary strong {
+    color: #f3f7fb;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .timeline-rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 8px;
+  }
+
+  .timeline-stage {
+    min-height: 96px;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 9px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .timeline-dot {
+    width: 10px;
+    height: 10px;
+    margin-top: 4px;
+    border-radius: 50%;
+    background: #7c8a99;
+    box-shadow: 0 0 0 4px rgba(124, 138, 153, 0.12);
+  }
+
+  .timeline-stage.done .timeline-dot {
+    background: #1bd985;
+    box-shadow: 0 0 0 4px rgba(27, 217, 133, 0.12);
+  }
+
+  .timeline-stage.active .timeline-dot {
+    background: #4fb1ff;
+    box-shadow: 0 0 0 4px rgba(79, 177, 255, 0.14);
+  }
+
+  .timeline-stage.blocked .timeline-dot {
+    background: #ff5b73;
+    box-shadow: 0 0 0 4px rgba(255, 91, 115, 0.14);
+  }
+
+  .timeline-stage.disabled {
+    opacity: 0.64;
+  }
+
+  .timeline-stage-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .timeline-stage-top strong {
+    color: #eef5fb;
+    font-size: 12px;
+  }
+
+  .timeline-stage-top span {
+    color: #f4c76d;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .timeline-stage p {
+    margin: 5px 0 0;
+    color: #b9c6d2;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .timeline-stage small {
+    display: block;
+    margin-top: 6px;
+    color: #8fa0ae;
+    font-size: 10px;
+  }
+
   .stage-rail {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1019,8 +1269,9 @@
       grid-template-columns: 1fr;
     }
 
-    .boot-summary {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+    .boot-summary,
+    .timeline-summary {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
@@ -1051,7 +1302,8 @@
       align-items: stretch;
     }
 
-    .boot-summary {
+    .boot-summary,
+    .timeline-summary {
       grid-template-columns: 1fr;
     }
 

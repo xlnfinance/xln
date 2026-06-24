@@ -464,11 +464,17 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. The health readiness banner now renders one operator verdict plus blocking reason, payload age, source runtime height, code hash, and owner. `/api/health` refreshes child hub/MM health with a bounded response window so the banner does not depend on stale readiness-cache data.
   - Fix: `normalizeHealthData()` preserves the backend `source` payload; the prior UI dropped `source.height/codeHash` even though backend/redaction already returned it.
   - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun test runtime/__tests__/health-admin-isolation.test.ts` PASS `1/1`. Focused e2e `20260624-143132-199` PASS `1/1`, wall `10.1s`, code hash `b9299a48e6e467f2`, browser health `0` issues. Benchmark recovered from the failed timeout run: browser test `33154ms -> 4131ms` (`-87.54%`).
-- [ ] Bootstrap timeline shows preflight, hub mesh, same-chain, cross-chain, market maker, custody, health poll, ready hash, budget vs actual, backlog, and last event.
+- [x] Bootstrap timeline shows preflight, hub mesh, same-chain, cross-chain, market maker, custody, health poll, ready hash, budget vs actual, backlog, and last event.
+  - Status: done. `/api/health` now emits a compact `bootstrapTimeline` with stage status/reason/evidence, budget vs actual timings, health-poll timing, ready hash fields when MM is enabled, aggregate backlog counts, and a safe last event. The UI renders it above the detailed BootstrapLive stage grid.
+  - Security/perf: public health keeps `readyHash` and aggregate counts but strips runtime/entity state hashes and queued tx details; bootstrap event ingestion reads only a bounded JSONL tail.
+  - Evidence: L1 `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun test runtime/__tests__/health-redaction.test.ts` PASS `4/4`; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`. Focused e2e `20260624-144548-959` PASS `1/1`, wall `10.1s`, code hash `fceb8ca027a4744e`, browser health `0` issues. Benchmark recovered from timeout regression: browser test `33263ms -> 4268ms` (`-87.17%`); host load rose but app timings stayed green.
 - [ ] `/qa` feels like a regulator-grade video evidence system: run playlist left, video center, real transcript right, failed cue highlighted, artifacts below.
 - [ ] `/runs` is a ledger across unit, contract, e2e, scenario, benchmark, and release gates.
 - [ ] `/ops` is gated and audited: release gate, bootstrap soundcheck, MM soak, shard rerun, restart.
 - [ ] Every chart compares current vs same-codeHash baseline, previous HEAD, and last green.
+- [ ] Centralize system constants in one typed registry so budgets, limits, polling intervals, and UI labels do not drift across orchestrator/runtime/frontend.
+  - User-confirmed 2026-06-24: keep system constants in one place for operator/developer convenience.
+  - First step done in WIP: health response refresh budget moved into `orchestrator-config.ts` and reused by bootstrap timeline.
 - [ ] Remote runtime state is always aggregate/cursor/hash based; no full 1M arrays in browser.
 - [ ] Regulator export produces one evidence bundle: health snapshot, run ledger, videos, WebVTT, hashes, audit trail, failure explanations, and redacted artifacts.
 

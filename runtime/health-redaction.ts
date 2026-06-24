@@ -116,6 +116,7 @@ export const publicAggregatedHealth = (health: unknown): Record<string, unknown>
   const processHealth = optionalRecordOf(root, 'process');
   const reset = optionalRecordOf(root, 'reset');
   const source = optionalRecordOf(root, 'source');
+  const bootstrapTimeline = optionalRecordOf(root, 'bootstrapTimeline');
 
   return {
     timestamp: valueOf(root, 'timestamp'),
@@ -163,6 +164,7 @@ export const publicAggregatedHealth = (health: unknown): Record<string, unknown>
     storage: publicStorageHealth(storage),
     hubMesh: publicHubMeshHealth(hubMesh),
     marketMaker: publicMarketMakerHealth(marketMaker),
+    bootstrapTimeline: bootstrapTimeline ? publicBootstrapTimeline(bootstrapTimeline) : undefined,
     custody: {
       enabled: valueOf(custody, 'enabled') === true,
       ok: valueOf(custody, 'ok') === true,
@@ -256,6 +258,54 @@ const publicBootstrapReserveHealth = (bootstrapReserves: PublicHealthRecord): Re
   requiredTokenCount: valueOf(bootstrapReserves, 'requiredTokenCount'),
   entityCount: valueOf(bootstrapReserves, 'entityCount'),
 });
+
+const publicBootstrapTimeline = (timeline: PublicHealthRecord): Record<string, unknown> => {
+  const healthPoll = recordOf(timeline, 'healthPoll');
+  const backlog = optionalRecordOf(timeline, 'backlog');
+  const lastEvent = optionalRecordOf(timeline, 'lastEvent');
+  return {
+    readyHash: valueOf(timeline, 'readyHash'),
+    readyAt: valueOf(timeline, 'readyAt'),
+    healthPoll: {
+      actualMs: valueOf(healthPoll, 'actualMs'),
+      budgetMs: valueOf(healthPoll, 'budgetMs'),
+    },
+    backlog: backlog
+      ? {
+        processing: valueOf(backlog, 'processing') === true,
+        runtimeTxs: valueOf(backlog, 'runtimeTxs'),
+        entityInputs: valueOf(backlog, 'entityInputs'),
+        jInputs: valueOf(backlog, 'jInputs'),
+        queuedEntityInputCount: valueOf(backlog, 'queuedEntityInputCount'),
+        queuedEntityTxCount: valueOf(backlog, 'queuedEntityTxCount'),
+        total: valueOf(backlog, 'total'),
+      }
+      : null,
+    lastEvent: lastEvent
+      ? {
+        event: valueOf(lastEvent, 'event'),
+        stage: valueOf(lastEvent, 'stage'),
+        at: valueOf(lastEvent, 'at'),
+        height: valueOf(lastEvent, 'height'),
+      }
+      : null,
+    stages: recordArrayOf(timeline, 'stages').map(stage => ({
+      key: valueOf(stage, 'key'),
+      label: valueOf(stage, 'label'),
+      status: valueOf(stage, 'status'),
+      reason: valueOf(stage, 'reason'),
+      budgetMs: valueOf(stage, 'budgetMs'),
+      actualMs: valueOf(stage, 'actualMs'),
+      startedAt: valueOf(stage, 'startedAt'),
+      completedAt: valueOf(stage, 'completedAt'),
+      evidence: recordArrayOf(stage, 'evidence').map(item => ({
+        label: valueOf(item, 'label'),
+        value: valueOf(item, 'value'),
+        unit: valueOf(item, 'unit'),
+      })),
+    })),
+  };
+};
 
 const publicDiskHealth = (disk: PublicHealthRecord): Record<string, unknown> => ({
   ok: valueOf(disk, 'ok'),

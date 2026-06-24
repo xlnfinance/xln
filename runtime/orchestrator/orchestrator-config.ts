@@ -10,6 +10,14 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 };
 
 export const STARTUP_TIMEOUT_MS = readPositiveIntEnv('XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS', 180_000);
+export const CHILD_HEALTH_TIMEOUT_MS = Math.max(
+  1_500,
+  readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000),
+);
+export const HEALTH_RESPONSE_REFRESH_TIMEOUT_MS = Math.max(
+  250,
+  Math.min(CHILD_HEALTH_TIMEOUT_MS, readPositiveIntEnv('XLN_HEALTH_RESPONSE_REFRESH_TIMEOUT_MS', 1_500)),
+);
 export const HUB_SELF_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_SELF_READY_TIMEOUT_MS', STARTUP_TIMEOUT_MS);
 export const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', 5_000);
 export const HUB_BASELINE_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
