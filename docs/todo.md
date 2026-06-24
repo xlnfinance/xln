@@ -334,7 +334,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 4,091 lines, `SwapPanel.svelte` 4,082 lines, `EntityPanelTabs.svelte` 4,069 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `SwapPanel.svelte` 4,082 lines, `EntityPanelTabs.svelte` 4,069 lines, `Graph3DPanel.svelte` 4,068 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move Graph3D pure helpers out of the Svelte panel.
   - Impact: medium.
@@ -345,6 +345,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts tests/frontend/graph3d-settings.test.ts` PASS `10/10`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; Playwright `/embed` Graph3D smoke PASS with canvas `720x965`, WebGL `true`, dockview `true`, page/console errors `0`, screenshot `/tmp/xln-graph3d-embed-smoke.png`.
   - Progress: third extraction done. Graph scenario timeline parsing moved into `parseGraphScenarioSteps()` in `graph3d-helpers.ts`; `Graph3DPanel.svelte` is down to 4,091 lines and still only owns fetch/state updates for scenario preview.
   - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts tests/frontend/graph3d-settings.test.ts` PASS `11/11`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; Playwright `/embed` Graph3D smoke PASS with canvas `720x965`, WebGL `true`, dockview `true`, page/console errors `0`.
+  - Progress: fourth extraction done. Replica lookup wrappers for entity balance tooltips, entity display names, and dual-account connection tooltips moved into `graph3d-helpers.ts`; `Graph3DPanel.svelte` is down to 4,068 lines.
+  - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts tests/frontend/graph3d-settings.test.ts` PASS `12/12`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused BrowserVM/Graph3D e2e `20260624-185150-017` PASS `1/1`, wall `11.3s`, HEAD `29cba6c89a55`, code hash `3b8672296bb335c0`, benchmark `INSUFFICIENT` because no previous comparable BrowserVM jurisdiction run exists, browser errors `0`, browser warnings `4` all WebGL `ReadPixels` performance warnings.
 
 - [x] Move Graph3D settings persistence out of the Svelte panel.
   - Impact: medium.
