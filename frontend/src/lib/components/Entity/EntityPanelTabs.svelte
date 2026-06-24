@@ -168,15 +168,8 @@
   } from './entity-activity';
   import {
     buildAccountPortfolioData,
-    calculatePortfolioValueUsd,
-    formatApproxUsd as formatApproxUsdLabel,
-    formatCompactUsd,
-    formatTokenAmount,
+    createEntityAssetValueFormatters,
     formatTokenInputAmount,
-    formatUsdExact as formatUsdExactLabel,
-    getAssetPriceUsd,
-    getAssetValueUsd,
-    getExternalTokenValueUsd,
     parsePositiveAssetAmount,
     parseTokenAmountInput,
   } from './entity-asset-values';
@@ -3232,30 +3225,34 @@
   function getTokenInfo(tokenId: number) {
     return activeXlnFunctions?.getTokenInfo(tokenId) ?? { symbol: 'UNK', decimals: 18 };
   }
-  function formatAmount(amount: bigint, decimals = 18): string {
-    return formatTokenAmount(amount, decimals, $settings?.tokenPrecision);
-  }
-  function formatCompact(value: number): string {
-    return formatCompactUsd(value, $settings.compactNumbers);
-  }
-  function formatApproxUsd(value: number): string {
-    return formatApproxUsdLabel(value, $settings.compactNumbers);
-  }
-  function formatUsdExact(value: number): string {
-    return formatUsdExactLabel(value);
-  }
-  function getAssetPrice(symbol: string): number {
-    return getAssetPriceUsd(symbol);
-  }
-  function getAssetValue(tokenId: number, amount: bigint, symbolOverride?: string): number {
-    return getAssetValueUsd(amount, getTokenInfo(tokenId), symbolOverride);
-  }
-  function getExternalValue(token: ExternalToken): number {
-    return getExternalTokenValueUsd(token);
-  }
-  function calculatePortfolioValue(reserves: Map<number | string, bigint>): number {
-    return calculatePortfolioValueUsd(reserves, getTokenInfo);
-  }
+  let {
+    formatAmount,
+    formatCompact,
+    formatApproxUsd,
+    formatUsdExact,
+    getAssetPrice,
+    getAssetValue,
+    getExternalValue,
+    calculatePortfolioValue,
+  } = createEntityAssetValueFormatters({
+    getTokenInfo,
+    tokenPrecision: undefined,
+    compactNumbers: false,
+  });
+  $: ({
+    formatAmount,
+    formatCompact,
+    formatApproxUsd,
+    formatUsdExact,
+    getAssetPrice,
+    getAssetValue,
+    getExternalValue,
+    calculatePortfolioValue,
+  } = createEntityAssetValueFormatters({
+    getTokenInfo,
+    tokenPrecision: $settings?.tokenPrecision,
+    compactNumbers: Boolean($settings?.compactNumbers),
+  }));
   // Calculate totals for the three buckets
   $: externalTotal = (() => {
     let total = 0;
