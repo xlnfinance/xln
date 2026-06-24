@@ -70,6 +70,150 @@ const capabilityToken = (seed: string, role: 'read' | 'full', expiresAtMs: numbe
   ].join('.');
 };
 
+const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/test').Page): Promise<void> => {
+  await page.addInitScript(() => {
+    const entityId = `0x${'a'.repeat(64)}`;
+    const leftEntity = entityId;
+    const head = {
+      schemaVersion: 1,
+      latestHeight: 42,
+      latestMaterializedHeight: 42,
+      latestSnapshotHeight: 40,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 4096,
+    };
+    const counterparties = Array.from({ length: 10 }, (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`);
+    const accounts = counterparties.map((rightEntity, index) => ({
+      leftEntity,
+      rightEntity,
+      status: 'open',
+      currentHeight: 42,
+      currentFrame: {
+        stateHash: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+      },
+    }));
+    const viewFrame = {
+      head,
+      height: 42,
+      entities: [{
+        entityId,
+        label: '1M Aggregate Hub',
+        height: 42,
+        isHub: true,
+      }],
+      activeEntityId: entityId,
+      activeEntity: {
+        summary: {
+          entityId,
+          label: '1M Aggregate Hub',
+          height: 42,
+          isHub: true,
+        },
+        core: {
+          entityId,
+          signerId: `0x${'b'.repeat(64)}`,
+          height: 42,
+          profile: {
+            name: '1M Aggregate Hub',
+            isHub: true,
+          },
+        },
+        accounts: {
+          items: accounts,
+          nextCursor: counterparties[counterparties.length - 1],
+          firstCursor: counterparties[0],
+          lastCursor: counterparties[counterparties.length - 1],
+          pageIndex: 0,
+          pageCount: 100_000,
+          totalItems: 1_000_000,
+          limit: 10,
+          summary: {
+            totalItems: 1_000_000,
+            visibleItems: 10,
+            limit: 10,
+            pageIndex: 0,
+            pageCount: 100_000,
+            hasMore: true,
+            sampleIds: counterparties.slice(0, 8),
+            pageStateHashes: counterparties.slice(0, 8),
+            visibleTopDeltas: counterparties.slice(0, 3).map((counterpartyId, index) => ({
+              counterpartyId,
+              tokenId: 1,
+              delta: String((index + 1) * 10_000),
+            })),
+          },
+        },
+        books: {
+          items: [],
+          nextCursor: null,
+          pageIndex: 0,
+          pageCount: 0,
+          totalItems: 0,
+          limit: 10,
+        },
+      },
+    };
+    const encoder = new TextEncoder();
+    const stats = {
+      sentCount: 0,
+      maxPayloadBytes: 0,
+      viewFrameBytes: 0,
+      maxAccountItems: 0,
+    };
+    (window as unknown as { __xlnOneMillionRuntimeAdapterStats: typeof stats }).__xlnOneMillionRuntimeAdapterStats = stats;
+
+    class OneMillionRuntimeAdapterSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readonly url: string;
+      binaryType = 'arraybuffer';
+      readyState = OneMillionRuntimeAdapterSocket.CONNECTING;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+
+      constructor(url: string) {
+        this.url = url;
+        setTimeout(() => {
+          this.readyState = OneMillionRuntimeAdapterSocket.OPEN;
+          this.onopen?.();
+        }, 0);
+      }
+
+      send(_raw: unknown): void {
+        stats.sentCount += 1;
+        const id = `r-${stats.sentCount}`;
+        const payload = stats.sentCount === 1
+          ? { authLevel: 'inspect', currentHeight: 42 }
+          : stats.sentCount === 2
+            ? head
+            : viewFrame;
+        const response = JSON.stringify({ v: 1, inReplyTo: id, ok: true, payload });
+        const byteLength = encoder.encode(response).byteLength;
+        stats.maxPayloadBytes = Math.max(stats.maxPayloadBytes, byteLength);
+        if (stats.sentCount === 3) {
+          stats.viewFrameBytes = byteLength;
+          stats.maxAccountItems = viewFrame.activeEntity.accounts.items.length;
+        }
+        setTimeout(() => this.onmessage?.({ data: response }), 0);
+      }
+
+      close(): void {
+        this.readyState = OneMillionRuntimeAdapterSocket.CLOSED;
+        setTimeout(() => this.onclose?.(), 0);
+      }
+    }
+
+    (window as unknown as { WebSocket: typeof WebSocket }).WebSocket = OneMillionRuntimeAdapterSocket as unknown as typeof WebSocket;
+  });
+};
+
 const readAdminControlProbe = async (
   page: import('@playwright/test').Page,
   args: { hubId: string; minHeight: number; expectedName: string },
@@ -396,6 +540,40 @@ test('health admin keeps QA evidence link-only and runtime adapter local', async
   await page.goto(`${API_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(/\/health$/);
   await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: 30_000 });
+});
+
+test('health runtime adapter renders 1M aggregate snapshot without freezing', async ({ page }) => {
+  await installOneMillionRuntimeAdapterSocket(page);
+
+  await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: 30_000 });
+
+  const adapterPanel = page.locator('#runtime-adapter');
+  await expect(adapterPanel).toBeVisible({ timeout: 30_000 });
+  await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill('ws://one-million-runtime.invalid/rpc');
+  await adapterPanel.locator('input[placeholder="read/admin token"]').fill('inspect-fixture');
+  await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
+
+  await expect(adapterPanel).toContainText('connected', { timeout: 30_000 });
+  await expect(adapterPanel.getByTestId('radapter-account-total')).toContainText('1,000,000');
+  await expect(adapterPanel.getByTestId('radapter-account-visible')).toContainText('10');
+  await expect(adapterPanel.getByTestId('radapter-account-page')).toContainText('1/100,000');
+  await expect(adapterPanel.getByTestId('radapter-account-has-more')).toContainText('cursor available');
+  await expect(adapterPanel.getByTestId('radapter-account-row')).toHaveCount(10);
+  await expect(adapterPanel.getByTestId('radapter-state-hash')).toHaveCount(3);
+  await expect(adapterPanel.getByTestId('radapter-top-delta')).toHaveCount(3);
+
+  const stats = await page.evaluate(() => (window as unknown as {
+    __xlnOneMillionRuntimeAdapterStats?: {
+      sentCount: number;
+      viewFrameBytes: number;
+      maxPayloadBytes: number;
+      maxAccountItems: number;
+    };
+  }).__xlnOneMillionRuntimeAdapterStats);
+  expect(stats?.sentCount).toBeGreaterThanOrEqual(3);
+  expect(stats?.viewFrameBytes ?? Number.POSITIVE_INFINITY).toBeLessThan(100_000);
+  expect(stats?.maxAccountItems).toBe(10);
 });
 
 test('admin remote runtime control advances live state and exposes past frames', async ({ page }) => {

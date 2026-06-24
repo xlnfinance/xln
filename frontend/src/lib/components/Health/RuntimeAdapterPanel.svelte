@@ -33,6 +33,7 @@
   const entities = $derived(viewFrame?.entities ?? []);
   const activeEntity = $derived(viewFrame?.activeEntity ?? null);
   const activeAccounts = $derived(activeEntity?.accounts?.items ?? []);
+  const activeAccountSummary = $derived(activeEntity?.accounts?.summary ?? null);
   const activeBooks = $derived(activeEntity?.books?.items ?? []);
   const adapterSeverity = $derived.by<QaSeveritySignal>(() => {
     if (error) {
@@ -98,6 +99,17 @@
     const text = String(value || '');
     if (!text) return '-';
     return text.length <= len ? text : `${text.slice(0, len)}...${text.slice(-4)}`;
+  }
+
+  function formatCount(value: unknown): string {
+    const count = Math.max(0, Math.floor(Number(value ?? 0)));
+    return Number.isFinite(count) ? count.toLocaleString('en-US') : '0';
+  }
+
+  function formatPageLabel(pageIndex?: number | null, pageCount?: number | null): string {
+    const current = pageIndex === null || pageIndex === undefined ? 1 : Math.max(1, Math.floor(pageIndex) + 1);
+    const total = pageCount === null || pageCount === undefined ? null : Math.max(1, Math.floor(pageCount));
+    return total ? `${current}/${formatCount(total)}` : `${current}`;
   }
 
   function formatJson(value: unknown): string {
@@ -267,8 +279,18 @@
         <div class="bounded-grid">
           <article>
             <span>Accounts shown</span>
-            <strong>{activeAccounts.length}</strong>
-            <small>limit 10</small>
+            <strong data-testid="radapter-account-visible">{formatCount(activeAccountSummary?.visibleItems ?? activeAccounts.length)}</strong>
+            <small>limit {activeAccountSummary?.limit ?? activeEntity.accounts.limit ?? 10}</small>
+          </article>
+          <article>
+            <span>Accounts total</span>
+            <strong data-testid="radapter-account-total">{formatCount(activeAccountSummary?.totalItems ?? activeEntity.accounts.totalItems ?? activeAccounts.length)}</strong>
+            <small data-testid="radapter-account-has-more">{activeAccountSummary?.hasMore || activeEntity.accounts.nextCursor ? 'cursor available' : 'complete page'}</small>
+          </article>
+          <article>
+            <span>Account page</span>
+            <strong data-testid="radapter-account-page">{formatPageLabel(activeAccountSummary?.pageIndex ?? activeEntity.accounts.pageIndex, activeAccountSummary?.pageCount ?? activeEntity.accounts.pageCount)}</strong>
+            <small>{activeEntity.accounts.nextCursor ? 'more accounts' : 'no next cursor'}</small>
           </article>
           <article>
             <span>Books shown</span>
@@ -282,6 +304,33 @@
           </article>
         </div>
 
+        {#if activeAccountSummary}
+          <div class="aggregate-strip" data-testid="radapter-account-aggregate">
+            <div>
+              <span>Sample IDs</span>
+              <strong>{activeAccountSummary.sampleIds.map((id) => short(id, 12)).join(' · ') || '-'}</strong>
+            </div>
+            <div>
+              <span>Page hashes</span>
+              <strong>
+                {#each activeAccountSummary.pageStateHashes.slice(0, 3) as hash}
+                  <code data-testid="radapter-state-hash">{short(hash, 12)}</code>
+                {/each}
+                {#if activeAccountSummary.pageStateHashes.length === 0}-{/if}
+              </strong>
+            </div>
+            <div>
+              <span>Top deltas</span>
+              <strong>
+                {#each activeAccountSummary.visibleTopDeltas.slice(0, 3) as delta}
+                  <code data-testid="radapter-top-delta">T{delta.tokenId}:{delta.delta}</code>
+                {/each}
+                {#if activeAccountSummary.visibleTopDeltas.length === 0}-{/if}
+              </strong>
+            </div>
+          </div>
+        {/if}
+
         <div class="table">
           <div class="table-head">
             <span>Counterparty</span>
@@ -289,7 +338,7 @@
             <span>Height</span>
           </div>
           {#each activeAccounts as account}
-            <div class="table-row">
+            <div class="table-row" data-testid="radapter-account-row">
               <span>{short(account.leftEntity?.toLowerCase() === selectedEntityId.toLowerCase() ? account.rightEntity : account.leftEntity, 14)}</span>
               <span>{account.status}</span>
               <span>{account.currentHeight}</span>
@@ -509,6 +558,47 @@
     font-size: 20px;
   }
 
+  .aggregate-strip {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 1fr;
+    gap: 10px;
+    margin: -2px 0 14px;
+  }
+
+  .aggregate-strip div {
+    min-width: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.18);
+  }
+
+  .aggregate-strip span {
+    display: block;
+    color: #8b949e;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .aggregate-strip strong {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 7px;
+    color: #f8fafc;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .aggregate-strip code {
+    border: 1px solid rgba(125, 167, 247, 0.2);
+    border-radius: 5px;
+    padding: 3px 5px;
+    color: #dbeafe;
+    background: rgba(125, 167, 247, 0.08);
+  }
+
   .workspace {
     display: grid;
     grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
@@ -611,7 +701,8 @@
     .connect-band,
     .workspace,
     .summary-grid,
-    .bounded-grid {
+    .bounded-grid,
+    .aggregate-strip {
       grid-template-columns: 1fr;
     }
 

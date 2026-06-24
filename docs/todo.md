@@ -449,7 +449,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 - [x] E2E: restart run disabled in read mode and enabled only in admin mode.
   - Status: done. Read-mode QA fixture keeps verdict, gallery, runs, and player visible but verifies restart/backfill/retention controls are disabled and do not call admin endpoints. Admin/open fixture verifies `Restart run` stays disabled before plan/confirm, then becomes enabled only after a restart plan fills expected HEAD and the operator enters operator id, reason, and `RUN`.
   - Evidence: focused QA cockpit e2e PASS `3/3`, run `20260624-134259-361`, wall `30.8s`.
-- [ ] E2E: 1M account health snapshot renders aggregate view without freezing.
+- [x] E2E: 1M account health snapshot renders aggregate view without freezing.
+  - Status: done. `/health` Runtime Adapter panel now renders aggregate account totals, page/cursor state, sample IDs, page hashes, and top deltas while keeping the DOM row count bounded to the visible account page.
+  - Evidence: L1 `bun test runtime/__tests__/radapter.test.ts --test-name-pattern "1M account view-frame"` PASS `1/1`; focused radapter e2e `20260624-141628-013` PASS `1/1`, wall `9.3s`, code hash `9252fd58e32cf351`; browser test asserts `1,000,000` total accounts, `10` visible rows, page `1/100,000`, cursor available, state hashes/top deltas, and view-frame wire payload under `100KB`.
 - [ ] Failure fixtures: browser console error, pageerror, network 502, fatal log marker, phase budget exceeded, corrupt manifest, empty logs dir.
 - [ ] Golden regulator scenarios: baseline mesh reserves, payment smoke, multi-hop HTLC, dispute lifecycle return, reserve faucet, rebalance, market-maker order placement.
 
