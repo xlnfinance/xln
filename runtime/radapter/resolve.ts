@@ -539,22 +539,21 @@ const compactBookSideForView = (
       if (levels >= maxLevels) break;
       const sourceLevel = sourceBucket.levels.get(String(priceTicks));
       if (!sourceLevel) continue;
+      if (sourceLevel.totalQtyLots <= 0n) continue;
       const selectedOrderIds: string[] = [];
-      let totalQtyLots = 0n;
       for (const orderId of sourceLevel.orderIds) {
         if (selectedOrderIds.length >= maxOrdersPerLevel) break;
         const order = orderSource.get(orderId);
         if (!order || order.qtyLots <= 0n) continue;
         selectedOrderIds.push(orderId);
         nextOrders.set(orderId, order);
-        totalQtyLots += order.qtyLots;
       }
       if (selectedOrderIds.length === 0) continue;
       nextPrices.push(priceTicks);
       nextLevels.set(String(priceTicks), {
         priceTicks: sourceLevel.priceTicks,
         orderIds: selectedOrderIds,
-        totalQtyLots,
+        totalQtyLots: sourceLevel.totalQtyLots,
       });
       levels += 1;
     }

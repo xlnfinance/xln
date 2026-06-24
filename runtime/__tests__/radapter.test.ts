@@ -131,6 +131,36 @@ const makeBook = (price: bigint): BookState => ({
   eventHash: 0n,
 });
 
+const makeCrowdedBidLevelBook = (price: bigint, orderCount: number): BookState => {
+  const orderIds = Array.from({ length: orderCount }, (_, index) => `order-${index.toString().padStart(2, '0')}`);
+  const orders = new Map(orderIds.map((orderId, index) => [
+    orderId,
+    {
+      orderId,
+      ownerId: `0x${(index + 1).toString(16).padStart(64, '0')}`,
+      side: 0 as const,
+      priceTicks: price,
+      qtyLots: 1n,
+      seq: index + 1,
+      bucketId: price,
+    },
+  ]));
+  return {
+    ...makeBook(price),
+    orders,
+    bidBuckets: new Map([[price.toString(), {
+      bucketId: price,
+      pricesAsc: [price],
+      levels: new Map([[price.toString(), {
+        priceTicks: price,
+        orderIds,
+        totalQtyLots: BigInt(orderCount),
+      }]]),
+    }]]),
+    nextSeq: orderCount + 1,
+  };
+};
+
 const makeOrderbookExt = (books: Map<string, BookState>): OrderbookExtState => ({
   books,
   orderPairs: new Map(),
@@ -1153,6 +1183,31 @@ test('runtime adapter books path is bounded and paged', async () => {
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, `entity/${entityId}/books`);
   expect(books.items).toHaveLength(10);
   expect(books.nextCursor).toBeTruthy();
+});
+
+test('runtime adapter compact book view preserves full level depth while trimming visible orders', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  replica.state.orderbookExt = makeOrderbookExt(new Map([
+    ['1/2', makeCrowdedBidLevelBook(100n, 25)],
+  ]));
+
+  const frame = await resolveRuntimeAdapterRead<{
+    activeEntity: {
+      books: {
+        items: Array<{ pairId: string; book: BookState }>;
+      };
+    } | null;
+  }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame', {
+    entityId,
+    booksLimit: 1,
+  });
+  const book = frame.activeEntity?.books.items[0]?.book;
+  const level = book?.bidBuckets.get('100')?.levels.get('100');
+
+  expect(book?.orders.size).toBe(20);
+  expect(level?.orderIds).toHaveLength(20);
+  expect(level?.totalQtyLots).toBe(25n);
 });
 
 test('runtime adapter binary codec preserves structured payloads', () => {
