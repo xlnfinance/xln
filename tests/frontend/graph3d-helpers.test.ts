@@ -10,6 +10,7 @@ import {
   graphReserveValue,
   graphReserveValues,
   graphTotalReserves,
+  parseGraphScenarioSteps,
 } from '../../frontend/src/lib/view/panels/graph3d-helpers';
 
 describe('graph3d helpers', () => {
@@ -118,5 +119,39 @@ describe('graph3d helpers', () => {
       leftEntity: 'ALICE',
       rightEntity: 'BOB',
     });
+  });
+
+  test('parses scenario timeline sections for the graph overlay', () => {
+    expect(parseGraphScenarioSteps(`
+===
+t=10
+title: Open account
+description: Alice opens a hub account.
+# ignored comment
+pay alice hub
+BroadcastFrame
+===
+t=25
+title: Settle
+description: Settlement finalizes.
+settle alice hub
+===
+t=30
+description: Missing title should be ignored.
+noop
+    `)).toEqual([
+      {
+        timestamp: 10,
+        title: 'Open account',
+        description: 'Alice opens a hub account.',
+        actions: ['pay alice hub'],
+      },
+      {
+        timestamp: 25,
+        title: 'Settle',
+        description: 'Settlement finalizes.',
+        actions: ['settle alice hub'],
+      },
+    ]);
   });
 });

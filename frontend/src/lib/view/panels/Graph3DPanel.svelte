@@ -24,6 +24,7 @@
     graphReserveValue,
     graphReserveValues,
     graphTotalReserves,
+    parseGraphScenarioSteps,
   } from './graph3d-helpers';
   import {
     buildBirdViewSettings,
@@ -716,28 +717,7 @@
       const response = await fetch(`/worlds/${filename}`);
       if (!response.ok) return;
       const text = await response.text();
-      const parsed: typeof scenarioSteps = [];
-      const sections = text.split('===').filter(s => s.trim());
-      for (const section of sections) {
-        const lines = section.trim().split('\n');
-        let timestamp = 0;
-        let title = '';
-        let description = '';
-        const actions: string[] = [];
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('t=')) timestamp = parseInt(trimmed.slice(2));
-          else if (trimmed.startsWith('title:')) title = trimmed.slice(6).trim();
-          else if (trimmed.startsWith('description:')) description = trimmed.slice(12).trim();
-          else if (trimmed && !trimmed.startsWith('#') && !trimmed.match(/^[A-Z]/)) {
-            actions.push(trimmed);
-          }
-        }
-        if (title) {
-          parsed.push({ timestamp, title, description, actions });
-        }
-      }
-      scenarioSteps = parsed;
+      scenarioSteps = parseGraphScenarioSteps(text);
     } catch (error) {
       console.error('Failed to load scenario steps:', error);
       scenarioSteps = [];

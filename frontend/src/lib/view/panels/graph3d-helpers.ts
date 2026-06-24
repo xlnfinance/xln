@@ -13,6 +13,13 @@ export type GraphDualConnectionAccountInfo = {
   rightEntity: string;
 };
 
+export type GraphScenarioStep = {
+  timestamp: number;
+  title: string;
+  description: string;
+  actions: string[];
+};
+
 const BANK_NAMES: string[] = [];
 const SP500_TICKERS = [
   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',
@@ -244,4 +251,29 @@ export function formatGraphDualConnectionAccountInfo(input: {
     leftEntity,
     rightEntity,
   };
+}
+
+export function parseGraphScenarioSteps(text: string): GraphScenarioStep[] {
+  const parsed: GraphScenarioStep[] = [];
+  const sections = String(text || '').split('===').filter(section => section.trim());
+  for (const section of sections) {
+    const lines = section.trim().split('\n');
+    let timestamp = 0;
+    let title = '';
+    let description = '';
+    const actions: string[] = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('t=')) timestamp = Number.parseInt(trimmed.slice(2), 10);
+      else if (trimmed.startsWith('title:')) title = trimmed.slice(6).trim();
+      else if (trimmed.startsWith('description:')) description = trimmed.slice(12).trim();
+      else if (trimmed && !trimmed.startsWith('#') && !trimmed.match(/^[A-Z]/)) {
+        actions.push(trimmed);
+      }
+    }
+    if (title) {
+      parsed.push({ timestamp, title, description, actions });
+    }
+  }
+  return parsed;
 }
