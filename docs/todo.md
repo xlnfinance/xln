@@ -325,9 +325,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. QA report parsing now preserves authored `scenario.summary10w`, `steps[]`, `owner`, and `severityPolicy` from `targets.json`/manifest while keeping old heuristic fallback for legacy runs. QA Scenario Player and preview cards prefer authored summaries and authored video-clock cues when real timestamps exist.
   - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `39/39`; L2 isolated QA cockpit e2e PASS `1/1`, run `20260624-133006-710`, wall `12.9s`, code hash `54e9e8749fc2b1fb`.
 
-- [ ] Remove duplicated media blocks; Scenario Player owns video/screenshots.
+- [x] Remove duplicated media blocks; Scenario Player owns video/screenshots.
   - Impact: medium.
   - UI: QA detail page has one player and one right-side evidence panel.
+  - Status: done. QA shard detail now treats `video`, `image`, and `qa-cues` artifacts as Scenario Player-owned. The right panel shows only non-media evidence files, so the operator sees one canonical video/screenshot/transcript surface.
+  - Evidence: `bun run check` PASS; focused QA cockpit e2e PASS `1/1`, run `20260624-133405-526`, wall `12.6s`, benchmark OK vs `20260624-133006-710`.
 
 - [ ] Merge overlapping Runs/Suites/Benchmarks surfaces.
   - Impact: medium.

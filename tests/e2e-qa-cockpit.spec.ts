@@ -1365,6 +1365,9 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-video-player')).toBeVisible();
     await expect(page.getByTestId('qa-video-player')).toHaveAttribute('src', /^blob:/);
     await expect(page.getByTestId('qa-video-track')).toHaveAttribute('src', /^blob:/);
+    await expect(page.getByTestId('qa-evidence-artifacts')).toContainText('No non-media artifact files captured');
+    await expect(page.getByTestId('qa-evidence-artifacts')).not.toContainText('video.webm');
+    await expect(page.getByTestId('qa-evidence-artifacts')).not.toContainText('cues.vtt');
 
     const shortDescription = (await page.getByTestId('qa-short-description').textContent())?.trim() ?? '';
     expect(shortDescription).toBe('Authored cockpit evidence summary stays exact for central bank');
