@@ -23,6 +23,21 @@
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
   import {
+    crossOrderbookPairLabel,
+    entityInitials,
+    firstAvailableHubId,
+    formatEntityNetworkLabel,
+    getTokenMapValue,
+    jurisdictionBadgeText,
+    normalizeJurisdictionDisplayName,
+    nonNegative,
+    parseCrossAssetKey,
+    resolveHubIdCandidate,
+    sameOrderbookPairLabel,
+    tokenNetworkLabel,
+    type TokenKeyedMap,
+  } from './swap-panel-helpers';
+  import {
     compareStableText,
     decimalPlacesFromScale,
     normalizeDecimalInput,
@@ -273,43 +288,26 @@
     const profile = getGossipProfiles().find((entry) => String(entry?.entityId || '').trim().toLowerCase() === normalized);
     return profile?.metadata?.isHub === true;
   }
-  function normalizeEntityId(value: string): string {
-    return String(value || '').trim().toLowerCase();
-  }
-  function resolveHubIdCandidate(candidate: string, knownHubIds: string[]): string {
-    const normalized = normalizeEntityId(candidate);
-    if (!normalized) return '';
-    const matchedAccount = knownHubIds.find((id) => normalizeEntityId(id) === normalized);
-    if (matchedAccount) return matchedAccount;
-    return isHubAccount(normalized) ? normalized : '';
-  }
-  function firstAvailableHubId(knownHubIds: string[], candidates: string[]): string {
-    for (const candidate of candidates) {
-      const resolved = resolveHubIdCandidate(candidate, knownHubIds);
-      if (resolved) return resolved;
-    }
-    return knownHubIds[0] || '';
-  }
   $: hubAccountIds = accountIds.filter((id) => isHubAccount(id)).slice(0, 10);
   $: hiddenAccountCount = Math.max(0, accountIds.length - hubAccountIds.length);
   $: fallbackHubAccountId = firstAvailableHubId(hubAccountIds, [
     counterpartyId,
-  ]);
-  $: if (!resolveHubIdCandidate(selectedBookAccountId, hubAccountIds) && fallbackHubAccountId) {
+  ], isHubAccount);
+  $: if (!resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) && fallbackHubAccountId) {
     selectedBookAccountId = fallbackHubAccountId;
   }
-  $: if (!resolveHubIdCandidate(createOrderAccountId, hubAccountIds) && fallbackHubAccountId) {
+  $: if (!resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) && fallbackHubAccountId) {
     createOrderAccountId = fallbackHubAccountId;
   }
   $: if (orderbookScopeMode === 'selected' && selectedBookAccountId) {
     createOrderAccountId = selectedBookAccountId;
   }
   $: currentHubSelection = orderbookScopeMode === 'aggregated'
-    ? (resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId)
-    : (resolveHubIdCandidate(selectedBookAccountId, hubAccountIds) || resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId);
+    ? (resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || fallbackHubAccountId)
+    : (resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) || resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || fallbackHubAccountId);
   $: activeOrderAccountId = orderbookScopeMode === 'aggregated'
-    ? (resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId)
-    : (resolveHubIdCandidate(selectedBookAccountId, hubAccountIds) || resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId);
+    ? (resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || fallbackHubAccountId)
+    : (resolveHubIdCandidate(selectedBookAccountId, hubAccountIds, isHubAccount) || resolveHubIdCandidate(createOrderAccountId, hubAccountIds, isHubAccount) || fallbackHubAccountId);
   $: activeBookHubId = (() => {
     const sourceHubId = String(
       activeOrderAccountId
@@ -357,51 +355,6 @@
     return resolved || formatEntityId(accountIdValue);
   }
 
-  function escapeRegExp(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  function stripJurisdictionSuffix(name: string, jurisdiction: string): string {
-    const cleanName = String(name || '').trim();
-    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
-    if (!cleanName || !cleanJurisdiction) return cleanName;
-    return cleanName
-      .replace(new RegExp(`\\s*\\(${escapeRegExp(cleanJurisdiction)}\\)\\s*$`, 'i'), '')
-      .replace(new RegExp(`\\s+${escapeRegExp(cleanJurisdiction)}\\s*$`, 'i'), '')
-      .trim() || cleanName;
-  }
-
-  function formatEntityNetworkLabel(name: string, jurisdiction: string): string {
-    const cleanName = stripJurisdictionSuffix(String(name || '').trim() || 'Unknown', jurisdiction);
-    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
-    return cleanJurisdiction ? `${cleanName} (${cleanJurisdiction})` : cleanName;
-  }
-
-  function normalizeJurisdictionDisplayName(value: unknown): string {
-    const name = String(value || '').trim();
-    const normalized = name.toLowerCase();
-    if (
-      normalized === 'arrakis'
-      || normalized === 'arrakis (shared anvil)'
-      || normalized === 'shared anvil'
-      || normalized === 'wakanda'
-    ) {
-      return 'Testnet';
-    }
-    return name;
-  }
-
-  function parseCrossAssetKey(value: string): { jurisdictionRef: string; tokenId: number } | null {
-    const match = String(value || '').trim().match(/^(.+):(\d+)$/);
-    if (!match) return null;
-    const tokenIdValue = Number(match[2]);
-    if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
-    return {
-      jurisdictionRef: String(match[1] || '').trim(),
-      tokenId: Math.floor(tokenIdValue),
-    };
-  }
-
   function jurisdictionLabelForAssetKey(assetKey: string): string {
     const parsed = parseCrossAssetKey(assetKey);
     if (!parsed) return sourceJurisdictionLabel;
@@ -413,44 +366,10 @@
     return normalizeJurisdictionDisplayName(parsed.jurisdictionRef);
   }
 
-  function tokenNetworkLabel(tokenIdValue: number, jurisdiction: string): string {
-    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
-    return cleanJurisdiction ? `${tokenSymbol(tokenIdValue)} (${cleanJurisdiction})` : tokenSymbol(tokenIdValue);
-  }
-
-  function sameOrderbookPairLabel(baseTokenIdValue: number, quoteTokenIdValue: number, jurisdiction: string): string {
-    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
-    const pair = `${tokenSymbol(baseTokenIdValue)}-${tokenSymbol(quoteTokenIdValue)}`;
-    return cleanJurisdiction ? `${pair} (${cleanJurisdiction})` : pair;
-  }
-
-  function crossOrderbookPairLabel(
-    baseTokenIdValue: number,
-    baseJurisdiction: string,
-    quoteTokenIdValue: number,
-    quoteJurisdiction: string,
-  ): string {
-    return `${tokenNetworkLabel(baseTokenIdValue, baseJurisdiction)} - ${tokenNetworkLabel(quoteTokenIdValue, quoteJurisdiction)}`;
-  }
-
   function entityAvatarSrc(entityIdValue: string): string {
     const normalized = String(entityIdValue || '').trim();
     if (!normalized || !activeXlnFunctions?.isReady) return '';
     return activeXlnFunctions.generateEntityAvatar?.(normalized) || '';
-  }
-
-  function entityInitials(entityIdValue: string, fallbackLabel = ''): string {
-    const label = String(fallbackLabel || '').trim();
-    if (label) return label.slice(0, 2).toUpperCase();
-    return formatEntityId(entityIdValue).slice(0, 2).toUpperCase();
-  }
-
-  function jurisdictionBadgeText(jurisdiction: string): string {
-    const clean = normalizeJurisdictionDisplayName(jurisdiction).replace(/[^a-zA-Z0-9\s._-]/g, ' ');
-    if (!clean) return 'J';
-    const words = clean.split(/[\s._-]+/).map((word) => word.replace(/[^a-zA-Z0-9]/g, '')).filter(Boolean);
-    if (words.length >= 2) return `${words[0]?.[0] || ''}${words[1]?.[0] || ''}`.toUpperCase();
-    return (words[0] || clean).slice(0, 2).toUpperCase();
   }
 
   function hubJurisdictionLabel(entityIdValue: string): string {
@@ -561,7 +480,7 @@
     : routeVenueLabel || accountLabel(selectedRouteOption?.sourceHubEntityId || '') || 'Select venue';
   $: routeSummaryLabel = swapRouteMode === 'cross' ? 'Direct route' : 'Same account';
   $: routeSummaryAssetsLabel = swapRouteMode === 'cross'
-    ? `${tokenNetworkLabel(giveToken, sourceJurisdictionLabel)} -> ${tokenNetworkLabel(wantToken, targetJurisdictionLabel)}`
+    ? `${tokenNetworkLabel(giveToken, sourceJurisdictionLabel, tokenSymbol)} -> ${tokenNetworkLabel(wantToken, targetJurisdictionLabel, tokenSymbol)}`
     : `${giveTokenSymbol} -> ${wantTokenSymbol}`;
   $: swapTokenPairLabel = `${giveTokenSymbol} -> ${wantTokenSymbol}`;
   $: targetAccountReady = swapRouteMode !== 'cross' || Boolean(selectedCrossTarget && hasReplicaAccount(
@@ -582,7 +501,6 @@
     orderbookHubIds.map((id) => [id, activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(id) || '') : '']),
   );
 
-  type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
   type CrossTargetOption = {
     value: string;
     label: string;
@@ -626,17 +544,6 @@
     baseKey: string;
     quoteKey: string;
   };
-
-  function getTokenMapValue<V>(map: TokenKeyedMap<V> | undefined, tokenIdValue: number): V | undefined {
-    if (!(map instanceof Map) || !Number.isFinite(tokenIdValue)) return undefined;
-    const byNumber = (map as Map<number, V>).get(tokenIdValue);
-    if (byNumber !== undefined) return byNumber;
-    return (map as Map<string, V>).get(String(tokenIdValue));
-  }
-
-  function nonNegative(value: bigint): bigint {
-    return value < 0n ? 0n : value;
-  }
 
   function getAccountDelta(counterpartyEntityId: string, tokenIdValue: number): { delta: Delta; isLeft: boolean } | null {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || !sourceEntityIdValue) return null;
@@ -1306,7 +1213,7 @@
     const jurisdictionRef = getReplicaJurisdictionRef(currentReplica) || sourceJurisdictionLabel;
     return tradingPairsForHub(hub).map((pair) => ({
       value: `same:${pair.pairId}`,
-      label: sameOrderbookPairLabel(pair.baseTokenId, pair.quoteTokenId, sourceJurisdictionLabel),
+      label: sameOrderbookPairLabel(pair.baseTokenId, pair.quoteTokenId, sourceJurisdictionLabel, tokenSymbol),
       mode: 'same',
       pairId: pair.pairId,
       baseTokenId: pair.baseTokenId,
@@ -1349,6 +1256,7 @@
               baseJurisdiction,
               market.sourceIsBase ? targetTokenId : sourceTokenId,
               quoteJurisdiction,
+              tokenSymbol,
             ),
             mode: 'cross',
             pairId: market.venueId,
@@ -2888,8 +2796,9 @@
         jurisdictionLabelForAssetKey(activeCrossMarket.baseKey),
         quoteTokenId,
         jurisdictionLabelForAssetKey(activeCrossMarket.quoteKey),
+        tokenSymbol,
       )
-    : sameOrderbookPairLabel(baseTokenId, quoteTokenId, sourceJurisdictionLabel);
+    : sameOrderbookPairLabel(baseTokenId, quoteTokenId, sourceJurisdictionLabel, tokenSymbol);
   $: orderbookPairOptions = (
     activeOrderAccountId,
     selectedBookAccountId,
