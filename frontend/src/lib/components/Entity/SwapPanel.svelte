@@ -96,6 +96,7 @@
     type SwapCompletionModal,
   } from './swap-order-history';
   import SwapOrderList from './SwapOrderList.svelte';
+  import SwapCompletionDialog from './SwapCompletionDialog.svelte';
   import './SwapPanel.css';
 
   export let replica: EntityReplica | null;
@@ -3993,32 +3994,13 @@
   />
 
   {#if swapCompletionModal}
-    <div class="swap-modal-overlay">
-      <div class="swap-modal">
-        <div class="swap-modal-kicker">Swap Filled</div>
-        <h3>{swapCompletionModal.side} {swapCompletionModal.pairLabel}</h3>
-        <p class="swap-modal-copy">
-          {formatAmount(swapCompletionModal.filledGiveAmount, swapCompletionModal.giveTokenId)} {tokenSymbol(swapCompletionModal.giveTokenId)}
-          → {formatAmount(swapCompletionModal.filledWantAmount, swapCompletionModal.wantTokenId)} {tokenSymbol(swapCompletionModal.wantTokenId)}
-        </p>
-        {#if swapCompletionModal.priceImprovementAmount > 0n}
-          <p class="swap-modal-improvement">
-            Price Improvement: <strong>{formatPriceImprovement(swapCompletionModal.priceImprovementAmount, swapCompletionModal.priceImprovementTokenId)}</strong>
-          </p>
-        {/if}
-        {#if swapCompletionModal.feeAmount > 0n}
-          <p class="swap-modal-improvement">
-            Fee: <strong>{formatSwapFee(swapCompletionModal.feeAmount, swapCompletionModal.feeTokenId)}</strong>
-          </p>
-        {/if}
-        <div class="swap-modal-actions">
-          <button
-            class="scope-btn active"
-            data-testid="swap-completion-close"
-            on:click={() => (swapCompletionModal = null)}
-          >Close</button>
-        </div>
-      </div>
-    </div>
+    <SwapCompletionDialog
+      modal={swapCompletionModal}
+      {formatAmount}
+      {tokenSymbol}
+      {formatPriceImprovement}
+      {formatSwapFee}
+      on:close={() => (swapCompletionModal = null)}
+    />
   {/if}
 </div>
