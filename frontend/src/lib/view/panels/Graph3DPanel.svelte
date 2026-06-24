@@ -9,10 +9,8 @@
   import { panelBridge } from '../utils/panelBridge';
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
   import { entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
-  import VRControlsHUD from '../components/VRControlsHUD.svelte';
-  import Graph3DFpsOverlay from '../components/Graph3DFpsOverlay.svelte';
+  import Graph3DViewport from '../components/Graph3DViewport.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
-  import EntityMiniPanel from '../components/EntityMiniPanel.svelte';
   import { compareStableText } from '$lib/utils/stableSort';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import {
@@ -3764,79 +3762,44 @@
     barsMode = barsMode === 'close' ? 'spread' : 'close';
     saveBirdViewSettings();
   }
+
+  function handleVrPaymentClick(): void {
+    if (entities.length < 2) return;
+    const from = entities[Math.floor(Math.random() * entities.length)];
+    const to = entities[Math.floor(Math.random() * entities.length)];
+    if (from && to && from.id !== to.id) {
+      panelBridge.emit('vr:payment', { from: from.id, to: to.id });
+    }
+  }
+
+  function handleVrAutoRotateClick(): void {
+    autoRotate = !autoRotate;
+    panelBridge.emit('settings:update', { key: 'autoRotate', value: autoRotate });
+  }
 </script>
 
-<div class="graph3d-wrapper">
-  <div bind:this={container} class="graph3d-panel"></div>
-
-  {#if showMiniPanel}
-    <EntityMiniPanel
-      entityId={miniPanelEntityId}
-      entityName={miniPanelEntityName}
-      position={miniPanelPosition}
-      {isolatedEnv}
-      {isolatedHistory}
-      {isolatedTimeIndex}
-      on:close={closeMiniPanel}
-      on:action={handleMiniPanelAction}
-      on:openFull={handleOpenFullPanel}
-    />
-  {/if}
-  {#if showFpsOverlay}
-    <Graph3DFpsOverlay
-      {renderFps}
-      {frameTime}
-      entityCount={entities.length}
-      connectionCount={connections.length}
-      particleCount={particles.length}
-      {barsMode}
-      onToggleBars={toggleBarsMode}
-    />
-  {/if}
-
-  <VRControlsHUD
-    isVRActive={isVRActive}
-    entityCount={entities.length}
-    currentFPS={renderFps}
-    onPaymentClick={() => {
-      // Trigger random R2R payment
-      if (entities.length >= 2) {
-        const from = entities[Math.floor(Math.random() * entities.length)];
-        const to = entities[Math.floor(Math.random() * entities.length)];
-        if (from && to && from.id !== to.id) {
-          panelBridge.emit('vr:payment', { from: from.id, to: to.id });
-        }
-      }
-    }}
-    onAutoRotateClick={() => {
-      autoRotate = !autoRotate;
-      panelBridge.emit('settings:update', { key: 'autoRotate', value: autoRotate });
-    }}
-    onExitVR={exitVR}
-  />
-</div>
-
-<style>
-  .graph3d-wrapper {
-    width: 100%;
-    height: 100%;
-    position: relative;
-    overflow: hidden;
-    background: #000;
-  }
-
-  .graph3d-panel {
-    width: 100%;
-    height: 100%;
-    position: absolute;
-    top: 0;
-    left: 0;
-  }
-
-  :global(.graph3d-panel canvas) {
-    display: block;
-    width: 100%;
-    height: 100%;
-  }
-
-</style>
+<Graph3DViewport
+  bind:container
+  {showMiniPanel}
+  {miniPanelEntityId}
+  {miniPanelEntityName}
+  {miniPanelPosition}
+  {isolatedEnv}
+  {isolatedHistory}
+  {isolatedTimeIndex}
+  {showFpsOverlay}
+  {renderFps}
+  {frameTime}
+  entityCount={entities.length}
+  connectionCount={connections.length}
+  particleCount={particles.length}
+  {barsMode}
+  {isVRActive}
+  {closeMiniPanel}
+  {handleMiniPanelAction}
+  {handleOpenFullPanel}
+  {toggleBarsMode}
+  {handleVrPaymentClick}
+  {handleVrAutoRotateClick}
+  {exitVR}
+/>
