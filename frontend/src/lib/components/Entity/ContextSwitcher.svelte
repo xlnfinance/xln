@@ -374,11 +374,6 @@
       {/each}
 	    </div>
 
-      <a class="remote-manager-link" href="/radapter/manage">
-        <span>Remote runtimes</span>
-        <strong>{Array.from($runtimeEntries.values()).filter((runtime) => runtime.type === 'remote').length}/100</strong>
-      </a>
-
 	    <div class="menu-footer">
       {#if allowAddJurisdiction}
         <button class="add-runtime-btn" on:click={handleAddJurisdiction}>+ Add Jurisdiction</button>
@@ -572,34 +567,6 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-  }
-
-  .remote-manager-link {
-    margin-top: 6px;
-    border: 1px solid #292524;
-    border-radius: 12px;
-    background: #141210;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 12px;
-    color: #a8a29e;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0;
-    text-decoration: none;
-  }
-
-  .remote-manager-link:hover {
-    border-color: rgba(122, 168, 255, 0.36);
-    color: #dbeafe;
-  }
-
-  .remote-manager-link strong {
-    color: #e5e7eb;
-    font-size: 11px;
   }
 
   .runtime-group {
