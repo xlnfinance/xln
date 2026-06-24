@@ -45,13 +45,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [x] Replace per-runtime paste links with one-click `runtimeList` auto-import.
   - Impact: critical.
-  - Status: done. `bun run dev` suppresses the early keygen URL and lets the orchestrator print the single final `/app?runtimeList=...` link after H1/H2/H3/MM/Custody are bootstrapped with real runtimeId-bound tokens. `/app` strips token params, validates every host, stores the imports, activates the first runtime, and reloads without rendering the textarea/confirm screen on the success path.
+  - Status: done. `bun run dev` suppresses the early keygen/Vite URLs and lets the orchestrator print the single final `/app?runtimeList=...` link after H1/H2/H3/MM/Custody are bootstrapped with real runtimeId-bound tokens. `/app` strips token params, validates every host, stores the imports, activates the first runtime, and reloads without rendering the textarea/confirm screen on the success path.
   - Evidence: focused unit asserts standalone keygen still can print one app link and dev-mode can suppress that early URL. Focused browser e2e expects `runtimeList=`, no `runtime-import=`, no bulk import screen, no textarea, no confirm button, then verifies mesh/custody/MM runtimes are imported and live.
 
 - [x] Move manual Remote Manager out of the main app dropdowns.
   - Impact: high.
-  - Status: done. Context/runtime dropdowns no longer render the attach/bulk form; they show only a compact `/radapter/manage` link. Manual attach/bulk import now lives on the dedicated `/radapter/manage` page.
-  - Evidence: focused radapter e2e asserts the context dropdown has no `remote-runtime-manager`, opens `/radapter/manage`, attaches H2 by token, then opens `/app` and verifies the remote runtime is active. The bulk import e2e still validates the single `runtimeList` URL for H1/H2/H3/MM/Custody.
+  - Status: done. Context/runtime dropdowns no longer render the attach/bulk form or a remote-manager link. Manual attach/bulk import now lives only on the dedicated `/radapter/manage` page.
+  - Evidence: focused radapter e2e asserts the context dropdown has no `remote-runtime-manager` and no `.remote-manager-link`, opens `/radapter/manage`, attaches H2 by token, then opens `/app` and verifies the remote runtime is active. The bulk import e2e still validates the single `runtimeList` URL for H1/H2/H3/MM/Custody.
 
 - [x] Fix reserve faucet missing-event invariant.
   - Impact: high.
