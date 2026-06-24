@@ -12,6 +12,13 @@ import {
 } from '../recovery/crypto';
 import type { WatchtowerStore } from './store';
 import { runWatchtowerSweep } from './action';
+import type { PushStore } from '../push/store';
+import {
+  PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
+  verifyPushRegistration,
+  verifyPushUnregister,
+} from '../push/registration';
+import type { PushRegistrationRequestV1, PushUnregisterRequestV1 } from '../push/types';
 
 const DEFAULT_MAX_JSON_BODY_BYTES = 128 * 1024;
 const SMALL_MAX_JSON_BODY_BYTES = 8 * 1024;
@@ -381,6 +388,38 @@ export const handleWatchtowerActions = async (lookupKey: string, store: Watchtow
     const normalized = normalizeLookupKey(lookupKey);
     const receipts = await store.listActionReceipts(normalized);
     return new Response(serializeTaggedJson({ ok: true, receipts }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+};
+
+export const handlePushRegister = async (req: Request, store: PushStore): Promise<Response> => {
+  try {
+    const body = await parseJsonBody<PushRegistrationRequestV1>(req, SMALL_MAX_JSON_BODY_BYTES);
+    const registration = verifyPushRegistration(body, {
+      now: Date.now(),
+      maxClockSkewMs: PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
+    });
+    const stored = await store.registerToken(registration);
+    return new Response(serializeTaggedJson({ ok: true, updatedAt: stored.updatedAt }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+};
+
+export const handlePushUnregister = async (req: Request, store: PushStore): Promise<Response> => {
+  try {
+    const body = await parseJsonBody<PushUnregisterRequestV1>(req, SMALL_MAX_JSON_BODY_BYTES);
+    const { runtimeId, tokenHash } = verifyPushUnregister(body, {
+      now: Date.now(),
+      maxClockSkewMs: PUSH_REGISTRATION_MAX_CLOCK_SKEW_MS,
+    });
+    const removed = await store.removeToken(runtimeId, tokenHash);
+    return new Response(serializeTaggedJson({ ok: true, removed }), {
       headers: { 'content-type': 'application/json' },
     });
   } catch (error) {

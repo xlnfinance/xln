@@ -111,6 +111,18 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Fix: compute min height only for entities whose depository/jurisdiction matches the watcher.
   - Tests: two-jurisdiction env with low unrelated entity does not lower watcher cursor.
 
+- [x] Add opt-in watchtower push-wake for dispute victims.
+  - Impact: high.
+  - Goal: if a `DisputeStarted` event targets an offline entity, the standalone watchtower can wake the victim's registered device so the user can sync and respond before the dispute window closes.
+  - Status: done. The watchtower has signed `/api/push/register` and `/api/push/unregister` handlers, a LevelDB push registry, cursor/dedup storage, opt-in `--enable-push-wake` sweep scheduler, console/webhook senders, and health stats. Wakes are matched to the counterentity/victim, never the starter, and unregister is scoped to `(runtimeId, tokenHash)`.
+  - Evidence: L1 `bun test runtime/__tests__/push-dispute-wake.test.ts` PASS `7/7`; runtime `tsc` PASS. The test covers victim-only targeting, wrong-chain/depository filtering, signed registration tamper rejection, runtime-scoped unregister, HTTP register/unregister handlers, sweep dedup, and tappable notification payload.
+
+- [ ] Wire wallet/native push-token registration to the watchtower push-wake API.
+  - Impact: medium-high.
+  - Current state: server-side push-wake is ready, but browser/native clients still need a real device-token bridge and UI/settings flow to register/unregister push tokens.
+  - Requirement: no mock tokens in production UX. The wallet signs the registration message with the runtime owner key, sends the real APNs/FCM/Web Push token, shows registration status, and lets users revoke it.
+  - Tests: browser/native-capable e2e registers a token, starts a dispute against the offline entity, receives exactly one wake through a capture webhook, then unregisters and verifies no further wake.
+
 - [x] Consolidate the duplicated reserve faucet implementation.
   - Impact: high.
   - Current issue: `runtime/server/reserve-faucet.ts` is the canonical handler, but `runtime/orchestrator/hub-node.ts` still had a stale inline `/api/faucet/reserve` copy with old wait helpers.
