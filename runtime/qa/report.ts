@@ -2796,6 +2796,66 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
   } as QaRunManifest);
 };
 
+const buildCorruptManifestRun = async (
+  runId: string,
+  runDir: string,
+  cause: unknown,
+  rawManifest: string,
+): Promise<QaRunManifest> => {
+  const runStat = await stat(runDir);
+  const createdAt = parseRunIdTimestamp(runId) ?? runStat.mtimeMs;
+  const causeText = cause instanceof Error ? cause.message : String(cause || 'unknown manifest parse error');
+  const rawPreview = rawManifest.trim() ? `\n${redactQaSecretText(rawManifest).slice(0, 1_000)}` : '';
+  const error = redactQaSecretText(`QA_CORRUPT_MANIFEST: ${causeText}${rawPreview}`);
+  const shard = normalizeQaShardSeverity({
+    shard: 0,
+    status: 'failed',
+    durationMs: null,
+    handle: 'qa.corrupt-manifest',
+    description: 'QA run manifest could not be parsed or did not contain a shard list.',
+    scenario: null,
+    target: null,
+    title: 'corrupt QA manifest',
+    requireMarketMaker: null,
+    logRelativePath: 'manifest.json',
+    logTail: error,
+    error,
+    failureClass: 'infra',
+    phaseMs: null,
+    browserIssues: [],
+    browserHealth: summarizeQaBrowserIssues([], createdAt),
+    timelineSteps: [],
+    slowSteps: [],
+    artifacts: [],
+    hasVideo: false,
+    hasTrace: false,
+    severity: 'FAIL',
+    reason: 'QA run manifest is corrupt',
+    since: createdAt,
+    owner: 'qa',
+    evidence: [
+      { label: 'failure class', value: 'infra' },
+      { label: 'artifact', value: 'manifest.json' },
+    ],
+  }, createdAt);
+
+  return applyQaRunSeverity({
+    manifestVersion: 1,
+    runId,
+    createdAt,
+    completedAt: runStat.mtimeMs,
+    status: 'failed',
+    totalMs: null,
+    totalShards: 1,
+    passedShards: 0,
+    failedShards: 1,
+    failureClasses: ['infra'],
+    args: null,
+    browserHealth: summarizeQaRunBrowserHealth({ shards: [shard] }),
+    shards: [shard],
+  } as QaRunManifest);
+};
+
 const listQaRunIds = async (limit: number): Promise<string[]> => {
   if (!existsSync(QA_LOGS_ROOT)) return [];
   const entries = await readdir(QA_LOGS_ROOT, { withFileTypes: true });
@@ -2824,7 +2884,13 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
   const manifestPath = join(runDir, 'manifest.json');
   if (existsSync(manifestPath)) {
     const raw = await readFile(manifestPath, 'utf8');
-    const parsed = JSON.parse(raw) as QaRunManifest;
+    let parsed: QaRunManifest;
+    try {
+      parsed = JSON.parse(raw) as QaRunManifest;
+      if (!Array.isArray(parsed.shards)) throw new Error('QA_MANIFEST_SHARDS_MISSING');
+    } catch (error) {
+      return await buildCorruptManifestRun(runId, runDir, error, raw);
+    }
     const targetMetadata = await readTargetsMetadata(runDir);
     const shards = await Promise.all(
       parsed.shards.map(async shard => {

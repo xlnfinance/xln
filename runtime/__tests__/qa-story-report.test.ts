@@ -593,6 +593,109 @@ test('qa shard failure classifier maps operator failure classes', () => {
   })).toBeNull();
 });
 
+test('qa failure fixtures classify browser, log, network, and phase failures', () => {
+  const at = Date.UTC(2026, 5, 23);
+  const browserIssue = (
+    type: 'console' | 'pageerror' | 'requestfailed' | 'http',
+    message: string,
+    extra: { status?: number | null; url?: string | null; method?: string | null } = {},
+  ) => ({
+    type,
+    severity: 'error' as const,
+    message,
+    url: extra.url ?? 'https://localhost:8080/qa',
+    method: extra.method ?? 'GET',
+    status: extra.status ?? null,
+    testId: `fixture:${type}`,
+    timestamp: at,
+  });
+
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    browserIssues: [browserIssue('console', 'Expected: 1 Received: 2')],
+  })).toBe('assertion');
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    browserIssues: [browserIssue('pageerror', 'Unhandled app exception')],
+  })).toBe('crash');
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    browserIssues: [browserIssue('requestfailed', 'net::ERR_CONNECTION_REFUSED')],
+  })).toBe('infra');
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    browserIssues: [browserIssue('http', 'HTTP 502', { status: 502, url: 'https://localhost:8080/api/health' })],
+  })).toBe('infra');
+  expect(classifyQaShardFailure({
+    status: 'failed',
+    logTail: 'E2E_FATAL_RUNTIME_LOG runtime crashed',
+  })).toBe('crash');
+
+  const phaseBudget = buildQaPhaseWaterfall({
+    preflight: 100,
+    anvilBoot: 100,
+    apiBoot: 100,
+    apiHealthy: 100,
+    viteBoot: 100,
+    playwright: 6_000,
+  });
+  expect(phaseBudget?.overLimitCount).toBe(1);
+  expect(phaseBudget?.segments.find(segment => segment.key === 'playwright')?.overLimit).toBe(true);
+});
+
+test('readQaRun surfaces corrupt manifests as failed redacted evidence', async () => {
+  const runId = '20000101-000004-128';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  await rm(runDir, { recursive: true, force: true });
+  try {
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, 'manifest.json'),
+      '{"authorization":"Bearer corrupt-secret-123456789","shards":',
+    );
+
+    const run = await readQaRun(runId);
+    const summary = summarizeQaRun(run);
+    expect(run.status).toBe('failed');
+    expect(run.totalShards).toBe(1);
+    expect(run.failedShards).toBe(1);
+    expect(run.failureClasses).toContain('infra');
+    expect(run.shards[0]?.handle).toBe('qa.corrupt-manifest');
+    expect(run.shards[0]?.failureClass).toBe('infra');
+    expect(run.shards[0]?.error).toContain('QA_CORRUPT_MANIFEST');
+    expect(run.shards[0]?.error).toContain('[REDACTED]');
+    expect(run.shards[0]?.error).not.toContain('corrupt-secret-123456789');
+    expect(summary.status).toBe('failed');
+    expect(summary.failingTargets).toEqual(['qa.corrupt-manifest']);
+  } finally {
+    deleteQaHistoryRows([runId]);
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
+test('readQaRun keeps empty legacy log directories as unknown zero-shard evidence', async () => {
+  const runId = '20000101-000005-129';
+  const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
+  await rm(runDir, { recursive: true, force: true });
+  try {
+    await mkdir(runDir, { recursive: true });
+
+    const run = await readQaRun(runId);
+    const summary = summarizeQaRun(run);
+    expect(run.manifestVersion).toBe(1);
+    expect(run.status).toBe('unknown');
+    expect(run.totalShards).toBe(0);
+    expect(run.passedShards).toBe(0);
+    expect(run.failedShards).toBe(0);
+    expect(run.shards).toEqual([]);
+    expect(summary.status).toBe('unknown');
+    expect(summary.failingTargets).toEqual([]);
+  } finally {
+    deleteQaHistoryRows([runId]);
+    await rm(runDir, { recursive: true, force: true });
+  }
+});
+
 test('qa stories catalog indexes real e2e screenshots', async () => {
   const stories = await listQaStoryScreenshots(20);
   const e2eStory = stories.find(story => story.source === 'e2e-screenshots');
