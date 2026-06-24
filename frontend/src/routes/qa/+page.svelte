@@ -552,6 +552,7 @@
   let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
   let restartAbortConfirm = $state('');
   let restartAbortBusy = $state(false);
+  let selectedLedgerCategory = $state('all');
   let runWindowSize = $state(QA.RUN_WINDOW_STEP);
   let shardWindowSize = $state(QA.SHARD_WINDOW_STEP);
   let historyWindowSize = $state(QA.HISTORY_WINDOW_STEP);
@@ -656,7 +657,13 @@
   const filteredRuns = $derived(runs.filter(run => runMatchesFailureClass(run, selectedFailureClass)));
   const sortedRuns = $derived([...filteredRuns].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedHistory = $derived([...history].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
-  const sortedLedger = $derived([...ledger].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
+  const ledgerCategoryOptions = $derived(Array.from(new Set(ledger.map(row => row.category))).sort());
+  const filteredLedger = $derived(
+    selectedLedgerCategory === 'all'
+      ? ledger
+      : ledger.filter(row => row.category === selectedLedgerCategory),
+  );
+  const sortedLedger = $derived([...filteredLedger].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedShardEntries = $derived((selectedRun?.shards ?? [])
     .map((shard, index) => ({ shard, index }))
     .sort((a, b) => compareShardsForSort(a, b, shardSortKey)));
@@ -1920,11 +1927,11 @@
 
     <nav class="qa-tabs" data-testid="qa-test-tabs">
       <button class:active={activeView === 'gallery'} onclick={() => (activeView = 'gallery')}>UX Gallery</button>
-      <button class:active={activeView === 'e2e'} onclick={() => (activeView = 'e2e')}>E2E Runs</button>
+      <button class:active={activeView === 'e2e'} onclick={() => (activeView = 'e2e')}>Runs Ledger</button>
       <button class:active={activeView === 'scenarios'} onclick={() => (activeView = 'scenarios')}>Scenario Player</button>
       <button class:active={activeView === 'suites'} onclick={() => (activeView = 'suites')}>Suites</button>
       <button class:active={activeView === 'benchmarks'} onclick={() => (activeView = 'benchmarks')}>Benchmarks</button>
-      <button class:active={activeView === 'history'} onclick={() => (activeView = 'history')}>History</button>
+      <button class:active={activeView === 'history'} onclick={() => (activeView = 'history')}>Database</button>
     </nav>
 
     <section
@@ -2261,21 +2268,50 @@
             </div>
           </section>
         {/if}
-        <div class="history-table compact">
+        <section class="benchmark-trend" data-testid="qa-benchmark-trend">
+          <div class="suite-list-head compact-head">
+            <div>
+              <div class="eyebrow">Recent Load</div>
+              <h3>Wall / CPU / Browser Trend</h3>
+            </div>
+            <span class="chip">{Math.min(QA.HISTORY_PREVIEW_LIMIT, sortedHistory.length)} runs</span>
+          </div>
           {#each sortedHistory.slice(0, QA.HISTORY_PREVIEW_LIMIT) as row}
-            <article class:bad={row.status === 'failed'} class:ok={row.status === 'passed'}>
-              <strong>{statusLabel(row)}</strong>
-              <span>{formatMs(row.totalMs)}</span>
-              <span>load {row.peakLoad1 ?? 'n/a'}</span>
-              <span>cpu {row.maxChildCpuPct ?? 'n/a'}%</span>
-              <span class:warn={row.browserErrorCount > 0}>browser {formatBrowserHealth(browserHealthFromHistory(row))}</span>
-              <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
-                {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
-              </span>
-              <code>{shortHash(row.codeHash)}</code>
+            <article
+              class:bad={row.status === 'failed'}
+              class:ok={row.status === 'passed'}
+              data-testid="qa-benchmark-metric-row"
+              data-run-id={row.runId}
+            >
+              <div>
+                <strong>{statusLabel(row)}</strong>
+                <code title={row.codeHash ?? ''}>code {shortHash(row.codeHash)}</code>
+              </div>
+              <div class="benchmark-metric">
+                <span>wall</span>
+                <b>{formatMs(row.totalMs)}</b>
+              </div>
+              <div class="benchmark-metric">
+                <span>load</span>
+                <b>{row.peakLoad1 ?? 'n/a'}</b>
+              </div>
+              <div class="benchmark-metric">
+                <span>cpu</span>
+                <b>{row.maxChildCpuPct ?? 'n/a'}%</b>
+              </div>
+              <div class="benchmark-metric">
+                <span>browser</span>
+                <b class:warn={row.browserErrorCount > 0}>{formatBrowserHealth(browserHealthFromHistory(row))}</b>
+              </div>
+              <div class="benchmark-metric">
+                <span>bench</span>
+                <b class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
+                  {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
+                </b>
+              </div>
             </article>
           {/each}
-        </div>
+        </section>
       </section>
     {:else if activeView === 'history'}
       <section class="admin-card" data-testid="qa-history">
@@ -2304,59 +2340,6 @@
             <span class="chip">{history.length} rows</span>
           </div>
         </div>
-        <section class="run-ledger-panel" data-testid="qa-run-ledger">
-          <div class="suite-list-head compact-head">
-            <div>
-              <div class="eyebrow">Canonical Ledger</div>
-              <h3>Runs Across Test Surfaces</h3>
-            </div>
-            <span class="chip">{ledger.length} ledger rows</span>
-          </div>
-          {#if sortedLedger.length === 0}
-            <div class="empty">No canonical ledger rows indexed yet</div>
-          {:else}
-            <div class="history-table ledger-table">
-              {#each visibleLedger as row}
-                <article
-                  class:bad={row.status === 'failed'}
-                  class:ok={row.status === 'passed'}
-                  data-testid="qa-ledger-row"
-                  data-run-id={row.runId}
-                >
-                  <strong>{statusLabel(row)}</strong>
-                  <span>{row.category}</span>
-                  <span title={row.suiteKey}>{row.suiteLabel}</span>
-                  <span>by {row.startedBy}</span>
-                  <span>{formatMs(row.durationMs)}</span>
-                  <span class:warn={Boolean(row.failedShard)}>{row.failedShard ?? 'no failed shard'}</span>
-                  <span>{formatBytes(row.artifactBytes)} artifacts</span>
-                  <span>cpu p95 {row.cpuP95Pct ?? 'n/a'}%</span>
-                  <span>cpu peak {row.cpuPeakPct ?? 'n/a'}%</span>
-                  <span>ram {row.ramPeakKb ? formatBytes(row.ramPeakKb * 1024) : 'n/a'}</span>
-                  <span class:warn={row.browserErrors > 0}>browser {row.browserErrors} err / {row.browserWarnings} warn</span>
-                  <span class:warn={row.networkFailures > 0}>network {row.networkFailures}</span>
-                  <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
-                    {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
-                  </span>
-                  <code title={row.gitHead ?? ''}>head {shortHash(row.gitHead)}</code>
-                  <code title={row.codeHash ?? ''}>code {shortHash(row.codeHash)}</code>
-                  {#if row.auditAction}<em>{row.auditAction}</em>{/if}
-                  {#if row.dirty}<em>dirty</em>{/if}
-                </article>
-              {/each}
-            </div>
-            {#if visibleLedger.length < sortedLedger.length}
-              <button
-                class="window-more"
-                type="button"
-                data-testid="qa-ledger-show-more"
-                onclick={() => (ledgerWindowSize += LEDGER_WINDOW_STEP)}
-              >
-                Show {Math.min(LEDGER_WINDOW_STEP, sortedLedger.length - visibleLedger.length)} more ledger rows · {visibleLedger.length}/{sortedLedger.length}
-              </button>
-            {/if}
-          {/if}
-        </section>
         <div class="history-table">
           {#each visibleHistory as row}
             <article
@@ -2464,6 +2447,80 @@
         </div>
       </section>
     {:else if selectedRun}
+      <section class="run-ledger-panel" data-testid="qa-run-ledger">
+        <div class="suite-list-head compact-head">
+          <div>
+            <div class="eyebrow">Canonical Ledger</div>
+            <h3>Runs Across Test Surfaces</h3>
+          </div>
+          <span class="chip">{filteredLedger.length}/{ledger.length} ledger rows</span>
+        </div>
+        {#if ledgerCategoryOptions.length > 0}
+          <div class="filter-chips inline" data-testid="qa-ledger-category-filter">
+            <button
+              type="button"
+              class:active={selectedLedgerCategory === 'all'}
+              onclick={() => (selectedLedgerCategory = 'all')}
+            >
+              all
+            </button>
+            {#each ledgerCategoryOptions as category}
+              <button
+                type="button"
+                class:active={selectedLedgerCategory === category}
+                onclick={() => (selectedLedgerCategory = category)}
+              >
+                {category}
+              </button>
+            {/each}
+          </div>
+        {/if}
+        {#if sortedLedger.length === 0}
+          <div class="empty">No canonical ledger rows indexed yet</div>
+        {:else}
+          <div class="history-table ledger-table">
+            {#each visibleLedger as row}
+              <article
+                class:bad={row.status === 'failed'}
+                class:ok={row.status === 'passed'}
+                data-testid="qa-ledger-row"
+                data-run-id={row.runId}
+              >
+                <strong>{statusLabel(row)}</strong>
+                <span>{row.category}</span>
+                <span title={row.suiteKey}>{row.suiteLabel}</span>
+                <span>by {row.startedBy}</span>
+                <span>{formatMs(row.durationMs)}</span>
+                <span class:warn={Boolean(row.failedShard)}>{row.failedShard ?? 'no failed shard'}</span>
+                <span>{formatBytes(row.artifactBytes)} artifacts</span>
+                <span>cpu p95 {row.cpuP95Pct ?? 'n/a'}%</span>
+                <span>cpu peak {row.cpuPeakPct ?? 'n/a'}%</span>
+                <span>ram {row.ramPeakKb ? formatBytes(row.ramPeakKb * 1024) : 'n/a'}</span>
+                <span class:warn={row.browserErrors > 0}>browser {row.browserErrors} err / {row.browserWarnings} warn</span>
+                <span class:warn={row.networkFailures > 0}>network {row.networkFailures}</span>
+                <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
+                  {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
+                </span>
+                <code title={row.gitHead ?? ''}>head {shortHash(row.gitHead)}</code>
+                <code title={row.codeHash ?? ''}>code {shortHash(row.codeHash)}</code>
+                {#if row.auditAction}<em>{row.auditAction}</em>{/if}
+                {#if row.dirty}<em>dirty</em>{/if}
+              </article>
+            {/each}
+          </div>
+          {#if visibleLedger.length < sortedLedger.length}
+            <button
+              class="window-more"
+              type="button"
+              data-testid="qa-ledger-show-more"
+              onclick={() => (ledgerWindowSize += LEDGER_WINDOW_STEP)}
+            >
+              Show {Math.min(LEDGER_WINDOW_STEP, sortedLedger.length - visibleLedger.length)} more ledger rows · {visibleLedger.length}/{sortedLedger.length}
+            </button>
+          {/if}
+        {/if}
+      </section>
+
       <section class="run-summary">
         <div>
           <div class="eyebrow">Selected Run</div>
@@ -3528,6 +3585,7 @@
   }
 
   .history-table,
+  .benchmark-trend,
   .restart-audit-table {
     display: grid;
     gap: 0.5rem;
@@ -3581,11 +3639,16 @@
     overflow-wrap: anywhere;
   }
 
+  .benchmark-trend {
+    margin-top: 0.8rem;
+  }
+
   .restart-audit-head {
     margin-top: 0.65rem;
   }
 
   .history-table article,
+  .benchmark-trend article,
   .restart-audit-table article {
     display: grid;
     align-items: center;
@@ -3600,12 +3663,12 @@
     grid-template-columns: 80px minmax(170px, 1fr) repeat(6, minmax(86px, auto));
   }
 
-  .restart-audit-table article {
-    grid-template-columns: 92px minmax(160px, 0.8fr) minmax(120px, 0.5fr) minmax(180px, 1fr) repeat(3, minmax(90px, auto));
+  .benchmark-trend article {
+    grid-template-columns: minmax(140px, 1fr) repeat(5, minmax(88px, auto));
   }
 
-  .history-table.compact article {
-    grid-template-columns: 80px repeat(6, minmax(76px, auto));
+  .restart-audit-table article {
+    grid-template-columns: 92px minmax(160px, 0.8fr) minmax(120px, 0.5fr) minmax(180px, 1fr) repeat(3, minmax(90px, auto));
   }
 
   .history-table.ledger-table article {
@@ -3613,11 +3676,13 @@
   }
 
   .history-table article.ok,
+  .benchmark-trend article.ok,
   .restart-audit-table article.ok {
     border-left-color: #3fb950;
   }
 
   .history-table article.bad,
+  .benchmark-trend article.bad,
   .restart-audit-table article.bad,
   .summary-card.bad {
     border-left-color: #ff7b72;
@@ -3625,9 +3690,28 @@
 
   .history-table code,
   .history-table em,
+  .benchmark-trend code,
   .restart-audit-table code {
     color: #9ec2ff;
     font-style: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .benchmark-metric {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 0;
+  }
+
+  .benchmark-metric span {
+    color: #9b978a;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+  }
+
+  .benchmark-metric b {
+    color: #f1efe7;
+    font-size: 0.88rem;
     overflow-wrap: anywhere;
   }
 
@@ -4220,7 +4304,7 @@
     }
 
     .history-table article,
-    .history-table.compact article,
+    .benchmark-trend article,
     .failure-list button,
     .retention-card,
     .restart-audit-table article {
