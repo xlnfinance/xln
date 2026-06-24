@@ -9,6 +9,7 @@ import {
   getFaucetReserveTokenMeta,
   isReserveTransferToken,
   requireExternalTokenBySymbol,
+  resolveReserveTokenMetaFromCatalog,
   resolveReserveTransferTokenBySymbol,
   sortExternalTokens,
   type ExternalToken,
@@ -91,5 +92,29 @@ describe('entity asset catalog helpers', () => {
       resolveReserveTokenMeta,
     })).toMatchObject({ symbol: 'USDT', tokenId: 2, balance: 9n });
     expect(getFaucetReserveTokenMeta(rows, 'USDT')).toEqual({ tokenId: 2, symbol: 'USDT' });
+  });
+
+  test('resolves reserve token meta from catalog before runtime fallback', () => {
+    const tokens = [
+      token({ symbol: 'USDC', tokenId: 1, decimals: 6 }),
+      token({ symbol: 'DAI', tokenId: 3, decimals: 18 }),
+    ];
+
+    expect(resolveReserveTokenMetaFromCatalog({
+      tokenId: 1,
+      externalTokens: tokens,
+      getTokenInfo: () => ({ symbol: 'FALLBACK', decimals: 8 }),
+    })).toEqual({ tokenId: 1, symbol: 'USDC', decimals: 6 });
+    expect(resolveReserveTokenMetaFromCatalog({
+      tokenId: 99,
+      symbolHint: 'dai',
+      externalTokens: tokens,
+      getTokenInfo: () => ({ symbol: 'FALLBACK', decimals: 8 }),
+    })).toEqual({ tokenId: 3, symbol: 'DAI', decimals: 18 });
+    expect(resolveReserveTokenMetaFromCatalog({
+      tokenId: 99,
+      externalTokens: tokens,
+      getTokenInfo: () => ({ symbol: 'FALLBACK', decimals: 8 }),
+    })).toEqual({ tokenId: 99, symbol: 'FALLBACK', decimals: 8 });
   });
 });
