@@ -161,6 +161,7 @@
     passedShards: number;
     failedShards: number;
     failureClasses?: QaFailureClass[];
+    fatalMarkers?: QaFatalMarker[];
     args?: Record<string, unknown> | null;
     shards: QaShard[];
   };
@@ -532,6 +533,7 @@
   let historyBackfillBusy = $state(false);
   let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
   let systemVerdict = $state<QaSystemVerdict | null>(null);
+  let showRawLogTail = $state(false);
 
   const phaseOrder: QaPhaseKey[] = ['preflight', 'anvilBoot', 'apiBoot', 'apiHealthy', 'viteBoot', 'playwright'];
   const phaseLabels: Record<QaPhaseKey, string> = {
@@ -1058,6 +1060,7 @@
     activeView = 'e2e';
     if (item.runId === selectedRunId && selectedRun) {
       selectedShardIndex = pickFailureShardIndex(selectedRun, item);
+      showRawLogTail = false;
       rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
       focusFailureCue(item, selectedRun, selectedShardIndex);
       return;
@@ -1065,6 +1068,7 @@
     await selectRun(item.runId);
     if (selectedRun) {
       selectedShardIndex = pickFailureShardIndex(selectedRun, item);
+      showRawLogTail = false;
       rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
       focusFailureCue(item, selectedRun, selectedShardIndex);
     }
@@ -1160,6 +1164,36 @@
 
   const selectedShardWaterfall = $derived(shardPhaseWaterfall(selectedShard));
 
+  function shardLogText(shard: QaShard | null): string {
+    if (!shard) return '';
+    return shard.logTail || shard.error || '';
+  }
+
+  function fatalMarkerLineFromText(value: string): string | null {
+    for (const line of value.split('\n')) {
+      const trimmed = line.trim();
+      const lower = trimmed.toLowerCase();
+      if (
+        lower.includes('e2e_fatal_runtime_log') ||
+        lower.includes('fatal runtime') ||
+        lower.includes('segmentation fault') ||
+        lower.includes('sigsegv')
+      ) return trimmed;
+    }
+    return null;
+  }
+
+  function selectedShardFatalLine(): string | null {
+    if (!selectedRun || !selectedShard) return null;
+    const marker = (selectedRun.fatalMarkers ?? []).find((item) => item.shard === selectedShard.shard);
+    return marker?.line ?? fatalMarkerLineFromText(shardLogText(selectedShard));
+  }
+
+  function selectedShardPrimaryError(): string | null {
+    if (!selectedShard?.error) return null;
+    return selectedShard.error.split('\n').map((line) => line.trim()).find(Boolean) ?? null;
+  }
+
   function shardSortValue(shard: QaShard, key: ShardSortKey): number {
     if (key.startsWith('bootstrap')) return finiteSortValue(shardBootstrapMs(shard), Number.POSITIVE_INFINITY);
     if (key.startsWith('playwright')) return finiteSortValue(shard.phaseMs?.playwright, Number.POSITIVE_INFINITY);
@@ -1252,6 +1286,7 @@
     const shard = selectedRun.shards[index];
     if (!shard) return;
     selectedShardIndex = index;
+    showRawLogTail = false;
     rememberRunInUrl(selectedRun.runId, shard.shard);
   }
 
@@ -1259,6 +1294,7 @@
     selectedFailureClass = failureClass;
     if (selectedRun) {
       selectedShardIndex = pickDefaultShard(selectedRun, failureClass);
+      showRawLogTail = false;
       rememberRunInUrl(selectedRun.runId, selectedRun.shards[selectedShardIndex]?.shard);
     }
   }
@@ -1387,6 +1423,7 @@
       }
       selectedRun = payload.run;
       selectedShardIndex = pickUrlShardIndex(payload.run) ?? pickDefaultShard(payload.run);
+      showRawLogTail = false;
       rememberRunInUrl(payload.run.runId, payload.run.shards[selectedShardIndex]?.shard);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -2594,7 +2631,7 @@
 
           <section class="log-panel">
             <div class="log-head">
-              <h4>Log Tail</h4>
+              <h4>Evidence Summary</h4>
               {#if selectedShard.logRelativePath}
                 <button
                   class="inline-link"
@@ -2605,7 +2642,37 @@
                 </button>
               {/if}
             </div>
-            <pre>{selectedShard.logTail || selectedShard.error || 'No log tail available.'}</pre>
+            <div class="log-summary" data-testid="qa-log-summary">
+              <dl class="phase-list">
+                <div><dt>status</dt><dd>{selectedShard.status}</dd></div>
+                <div><dt>class</dt><dd>{selectedShard.failureClass ?? 'none'}</dd></div>
+                <div><dt>browser</dt><dd>{formatBrowserHealth(shardBrowserHealth(selectedShard))}</dd></div>
+                <div><dt>raw lines</dt><dd>{shardLogText(selectedShard) ? 'captured' : 'none'}</dd></div>
+              </dl>
+              {#if selectedShardFatalLine()}
+                <div class="log-summary-line fatal">
+                  <strong>fatal marker</strong>
+                  <span>{selectedShardFatalLine()}</span>
+                </div>
+              {/if}
+              {#if selectedShardPrimaryError()}
+                <div class="log-summary-line">
+                  <strong>primary error</strong>
+                  <span>{selectedShardPrimaryError()}</span>
+                </div>
+              {/if}
+            </div>
+            <button
+              class="raw-log-toggle"
+              type="button"
+              data-testid="qa-raw-log-toggle"
+              onclick={() => showRawLogTail = !showRawLogTail}
+            >
+              {showRawLogTail ? 'Hide raw log tail' : 'Show raw log tail'}
+            </button>
+            {#if showRawLogTail}
+              <pre data-testid="qa-raw-log">{shardLogText(selectedShard) || 'No log tail available.'}</pre>
+            {/if}
           </section>
         </section>
       {/if}
@@ -3868,6 +3935,50 @@
     font-size: 0.85rem;
     line-height: 1.55;
     color: #d8d4c8;
+  }
+
+  .log-summary {
+    display: grid;
+    gap: 0.7rem;
+  }
+
+  .log-summary-line {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.7rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.035);
+  }
+
+  .log-summary-line strong {
+    color: #8f8b80;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.72rem;
+  }
+
+  .log-summary-line span {
+    color: #d8d4c8;
+    line-height: 1.45;
+    word-break: break-word;
+  }
+
+  .log-summary-line.fatal {
+    border-color: rgba(255, 146, 132, 0.26);
+    background: rgba(255, 91, 76, 0.07);
+  }
+
+  .raw-log-toggle {
+    justify-self: start;
+    min-height: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    padding: 0 0.75rem;
+    color: #f1efe7;
+    background: rgba(255, 255, 255, 0.04);
+    font: inherit;
+    cursor: pointer;
   }
 
   .error-banner {

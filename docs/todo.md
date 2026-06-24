@@ -331,9 +331,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: medium.
   - UI: one Runs ledger with category chips: unit, contract, e2e, benchmark, scenario. Benchmarks tab should chart bench metrics, not duplicate history rows.
 
-- [ ] Collapse raw log tail by default and show structured summary first.
+- [x] Collapse raw log tail by default and show structured summary first.
   - Impact: medium.
   - UI: raw logs behind explicit expand/open artifact. Summary shows severity, failure class, fatal marker, browser/network errors.
+  - Status: done. QA shard detail now opens on an Evidence Summary with status, failure class, browser health, fatal marker, and primary error; raw log tail is hidden behind `Show raw log tail` plus the protected full-log artifact button.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `38/38`; focused QA cockpit e2e `20260624-131548-261` PASS `1/1`, wall `12.2s`, code hash `a49c66059e94f9b6`, benchmark OK. Fixture verifies fatal/primary-error summary and raw-log expand/collapse.
 
 - [ ] Stop using future/test run IDs that pollute history.
   - Impact: medium.
