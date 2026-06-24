@@ -8,6 +8,7 @@ import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,
   auditQaUxReleasePack,
+  buildQaRunLedger,
   backfillQaHistoryFromLogs,
   buildQaSystemVerdict,
   classifyQaArtifactSensitivity,
@@ -1212,6 +1213,7 @@ export async function maybeHandleQaRequest(
           ok: true,
           qaAuth: authInfo,
           runs,
+          ledger: buildQaRunLedger(runs),
           verdict: buildQaSystemVerdict(runs),
         },
         headers,
