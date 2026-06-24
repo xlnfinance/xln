@@ -332,13 +332,15 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 4,238 lines, `SwapPanel.svelte` 4,119 lines, `EntityPanelTabs.svelte` 4,104 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `SwapPanel.svelte` 4,119 lines, `Graph3DPanel.svelte` 4,111 lines, `EntityPanelTabs.svelte` 4,104 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move Graph3D pure helpers out of the Svelte panel.
   - Impact: medium.
   - Current issue: `Graph3DPanel.svelte` mixed reserve snapshot parsing and J-machine tx label formatting into the Three.js scene component, making visual debugger changes harder to audit.
   - Status: done. Added `graph3d-helpers.ts` for reserve map/object normalization, total reserve calculation, single-token reserve lookup, and mempool tx label formatting. The BrowserVM/Graph3D visual path remains intact; renderer, scene lifecycle, and BrowserVM behavior were not removed or replaced.
   - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts` PASS `3/3`; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused BrowserVM/Graph3D e2e `20260624-170344-945` PASS `1/1`, wall `12.8s`, code hash `b62ef19304a2c9f6`, browser errors `0`.
+  - Progress: second extraction done. Entity reserve tooltip formatting, reserve badge labels, short-name/Fed flag resolution, and dual-account tooltip text moved into `graph3d-helpers.ts`; `Graph3DPanel.svelte` is down to 4,111 lines and the BrowserVM/Graph3D visual debugger path is unchanged.
+  - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts tests/frontend/graph3d-settings.test.ts` PASS `10/10`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; Playwright `/embed` Graph3D smoke PASS with canvas `720x965`, WebGL `true`, dockview `true`, page/console errors `0`, screenshot `/tmp/xln-graph3d-embed-smoke.png`.
 
 - [x] Move Graph3D settings persistence out of the Svelte panel.
   - Impact: medium.

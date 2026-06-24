@@ -15,7 +15,12 @@
   import { compareStableText } from '$lib/utils/stableSort';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import {
+    formatGraphDualConnectionAccountInfo,
+    formatGraphEntityReserveBalances,
+    formatGraphEntityShortName,
     formatGraphMempoolTxLabel,
+    formatGraphReserveBadge,
+    getGraphEntityFlag,
     graphReserveValue,
     graphReserveValues,
     graphTotalReserves,
@@ -2493,29 +2498,11 @@
     const currentReplicas = getTimeAwareReplicas();
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
-    let flag = '';
-    if (replica?.signerId) {
-      for (const [key, emoji] of FED_FLAGS) {
-        if (replica.signerId.toLowerCase().includes(key)) {
-          flag = emoji;
-          break;
-        }
-      }
-    }
+    const flag = getGraphEntityFlag(replica?.signerId);
     let balanceStr = '';
     if (replica?.state?.reserves) {
       const totalReserves = graphTotalReserves(replica);
-      const reserveValue = Number(totalReserves) / 1e18;
-      if (reserveValue >= 1000000) {
-        const millions = reserveValue / 1000000;
-        balanceStr = ` $${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}M`;
-      } else if (reserveValue >= 1000) {
-        balanceStr = ` $${(reserveValue / 1000).toFixed(0)}K`;
-      } else if (reserveValue > 0) {
-        balanceStr = ` $${reserveValue.toFixed(0)}`;
-      } else {
-        balanceStr = ' $0';
-      }
+      balanceStr = formatGraphReserveBadge(totalReserves);
     }
     const labelText = entityName + balanceStr;
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -3891,99 +3878,22 @@
     const currentReplicas = getTimeAwareReplicas();
     const replica = [...currentReplicas.entries()]
       .find(([key]) => key.startsWith(entityId + ':'));
-    if (!replica?.[1]?.state?.reserves) {
-      return "  Reserves loading...";
-    }
-    const reserves = replica[1].state.reserves;
-    const balanceLines: string[] = [];
-    if (reserves.size === 0) {
-      return "  No token reserves";
-    }
-    reserves.forEach((amount: bigint, tokenIdStr: string) => {
-      const tokenId = Number(tokenIdStr);
-      if (isNaN(tokenId)) return; // Skip invalid token IDs
-      const formattedAmount = (Number(amount) / 1000).toFixed(2);
-      const marker = tokenId === selectedTokenId ? '▸ ' : '  ';
-      balanceLines.push(`${marker}${getTokenSymbol(tokenId)}: ${formattedAmount}k`);
+    return formatGraphEntityReserveBalances({
+      reserves: replica?.[1]?.state?.reserves,
+      selectedTokenId,
+      getTokenSymbol,
     });
-    return balanceLines.join('\n');
   }
-  function formatFinancialAmount(amount: bigint, decimals: number = 18): string {
-    if (amount === 0n) return '0';
-    const isNegative = amount < 0n;
-    const absoluteAmount = isNegative ? -amount : amount;
-    const divisor = BigInt(10 ** decimals);
-    const wholePart = absoluteAmount / divisor;
-    const fractionalPart = absoluteAmount % divisor;
-    if (fractionalPart === 0n) {
-      return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}`;
-    }
-    const fractionalStr = fractionalPart.toString().padStart(decimals, '0');
-    const trimmed = fractionalStr.replace(/0+$/, ''); // Remove trailing zeros
-    const formatted = trimmed.slice(0, 4); // Max 4 decimal places for readability
-    return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
-  }
-  const BANK_NAMES: string[] = [];
-  const SP500_TICKERS = [
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',
-    'BRK.B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS',
-    'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV', 'TMO', 'MRK',
-    'WMT', 'PG', 'KO', 'PEP', 'COST', 'HD', 'MCD', 'NKE',
-    'XOM', 'CVX', 'BA', 'CAT', 'GE', 'MMM',
-    'DIS', 'NFLX', 'CMCSA', 'T', 'VZ',
-    'INTC', 'CSCO', 'ORCL', 'CRM', 'AMD'
-  ];
-  const FED_NAMES = new Map([
-    ['federal_reserve', 'Federal Reserve'],
-    ['ecb', 'European Central Bank'],
-    ['boc', 'Bank of China'],
-    ['boj', 'Bank of Japan'],
-    ['boe', 'Bank of England'],
-    ['snb', 'Swiss National Bank'],
-    ['rbi', 'Reserve Bank of India'],
-    ['cbr', 'Central Bank of Russia'],
-    ['bundesbank', 'Bundesbank']
-  ]);
-  const FED_FLAGS = new Map([
-    ['federal_reserve', ''],
-    ['ecb', ''],
-    ['boc', ''],
-    ['boj', ''],
-    ['boe', ''],
-    ['snb', ''],
-    ['rbi', ''],
-    ['cbr', ''],
-    ['bundesbank', '']
-  ]);
-  const AHB_NAMES: Map<string, string> = new Map([
-    ['2', 'Alice'],
-    ['3', 'Hub'],
-    ['4', 'Bob'],
-  ]);
   function getEntityShortName(entityId: string): string {
     const shortId = XLN?.getEntityShortId?.(entityId);
-    if (shortId && AHB_NAMES.has(shortId)) {
-      return `${AHB_NAMES.get(shortId)!} (${entityId})`;
-    }
     const currentReplicas = getTimeAwareReplicas();
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
-    if (replica?.signerId) {
-      for (const ticker of SP500_TICKERS) {
-        if (replica.signerId.includes(ticker)) {
-          return `${ticker} (${entityId})`;
-        }
-      }
-      for (const [key, name] of FED_NAMES) {
-        if (replica.signerId.toLowerCase().includes(key)) {
-          return `${name} (${entityId})`;
-        }
-      }
-      const hash = entityId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      const bankIndex = hash % BANK_NAMES.length;
-      return `${BANK_NAMES[bankIndex] || 'Bank'} (${entityId})`;
-    }
-    return entityId;
+    return formatGraphEntityShortName({
+      entityId,
+      runtimeShortId: shortId,
+      signerId: replica?.signerId,
+    });
   }
   function getDualConnectionAccountInfo(entityA: string, entityB: string): { left: string, right: string, leftEntity: string, rightEntity: string } {
     const currentReplicas = getTimeAwareReplicas();
@@ -4003,52 +3913,15 @@
         accountData = rightReplica[1].state.accounts.get(leftId);
       }
     }
-    if (!accountData) {
-      return {
-        left: "No account",
-        right: "No account",
-        leftEntity: getEntityShortName(leftId),
-        rightEntity: getEntityShortName(rightId)
-      };
-    }
-    const availableTokens = accountData.deltas ? Array.from(accountData.deltas.keys() as IterableIterator<number>).sort((a, b) => a - b) : [];
-    if (availableTokens.length === 0) {
-      return {
-        left: "No tokens",
-        right: "No tokens",
-        leftEntity: getEntityShortName(leftId),
-        rightEntity: getEntityShortName(rightId)
-      };
-    }
-    let tokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
-    let displayTokenId = selectedTokenId;
-    if (!tokenDelta && availableTokens.length > 0) {
-      displayTokenId = availableTokens[0]!;
-      tokenDelta = getAccountTokenDelta(accountData, displayTokenId);
-    }
-    if (!tokenDelta) {
-      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens`);
-    }
-    const leftDerived = deriveEntry(tokenDelta, true);  // Left entity's view
-    const rightDerived = deriveEntry(tokenDelta, false); // Right entity's view
-    const leftCollateral = formatFinancialAmount(BigInt(Math.floor(leftDerived.collateral)));
-    const leftNet = formatFinancialAmount(BigInt(Math.floor(leftDerived.delta)));
-    const leftPeerCredit = formatFinancialAmount(BigInt(Math.floor(leftDerived.peerCreditLimit)));
-    const leftOwnCredit = formatFinancialAmount(BigInt(Math.floor(leftDerived.ownCreditLimit)));
-    const rightCollateral = formatFinancialAmount(BigInt(Math.floor(rightDerived.collateral)));
-    const rightNet = formatFinancialAmount(BigInt(Math.floor(rightDerived.delta)));
-    const rightPeerCredit = formatFinancialAmount(BigInt(Math.floor(rightDerived.peerCreditLimit)));
-    const rightOwnCredit = formatFinancialAmount(BigInt(Math.floor(rightDerived.ownCreditLimit)));
-    const leftName = getEntityShortName(leftId);
-    const rightName = getEntityShortName(rightId);
-    const leftContent = `Their Credit: ${leftPeerCredit}\nCollateral: ${leftCollateral}\nOur Credit: ${leftOwnCredit}\nNet: ${leftNet}`;
-    const rightContent = `Our Credit: ${rightOwnCredit}\nCollateral: ${rightCollateral}\nTheir Credit: ${rightPeerCredit}\nNet: ${rightNet}`;
-    return {
-      left: leftContent,
-      right: rightContent,
-      leftEntity: leftName,
-      rightEntity: rightName
-    };
+    return formatGraphDualConnectionAccountInfo({
+      leftId,
+      rightId,
+      accountData,
+      selectedTokenId,
+      getAccountTokenDelta,
+      deriveEntry,
+      getEntityShortName,
+    });
   }
   function onWindowResize() {
     if (!camera || !renderer || !container) return;
