@@ -107,6 +107,30 @@ export function resolveReserveTransferTokenBySymbol(options: {
   };
 }
 
+export function resolveReserveTokenMetaFromCatalog(options: {
+  tokenId: number;
+  symbolHint?: string;
+  externalTokens: ExternalToken[];
+  getTokenInfo: (tokenId: number) => { symbol?: string; decimals?: number };
+}): ReserveTokenMeta {
+  const byId = options.externalTokens.find(
+    (token) => typeof token.tokenId === 'number' && token.tokenId === options.tokenId,
+  );
+  if (byId) {
+    return { tokenId: byId.tokenId as number, symbol: byId.symbol, decimals: byId.decimals ?? 18 };
+  }
+  if (options.symbolHint) {
+    const bySymbol = options.externalTokens.find(
+      (token) => token.symbol?.toUpperCase?.() === options.symbolHint!.toUpperCase(),
+    );
+    if (bySymbol && typeof bySymbol.tokenId === 'number') {
+      return { tokenId: bySymbol.tokenId, symbol: bySymbol.symbol, decimals: bySymbol.decimals ?? 18 };
+    }
+  }
+  const info = options.getTokenInfo(options.tokenId);
+  return { tokenId: options.tokenId, symbol: info.symbol ?? 'UNK', decimals: info.decimals ?? 18 };
+}
+
 export function getFaucetReserveTokenMeta(rows: AssetLedgerRow[], symbol: string): { tokenId: number; symbol: string } | null {
   const row = findAssetLedgerRowBySymbol(rows, symbol);
   if (!row || row.isNative || typeof row.tokenId !== 'number' || row.tokenId <= 0) return null;

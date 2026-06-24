@@ -8,11 +8,14 @@ import {
   formatApproxUsd,
   formatCompactUsd,
   formatTokenAmount,
+  formatTokenInputAmount,
   formatUsdExact,
   getAssetPriceUsd,
   getAssetValueUsd,
   getExternalTokenValueUsd,
   normalizeTokenPrecision,
+  parsePositiveAssetAmount,
+  parseTokenAmountInput,
 } from '../../frontend/src/lib/components/Entity/entity-asset-values';
 
 describe('entity asset value helpers', () => {
@@ -23,6 +26,18 @@ describe('entity asset value helpers', () => {
     expect(formatTokenAmount(123456789n, 6, 4)).toBe('123.4567');
     expect(formatTokenAmount(-1200000n, 6, 4)).toBe('-1.2');
     expect(formatTokenAmount(1000000n, 6, 4)).toBe('1');
+  });
+
+  test('parses positive asset input and formats input values', () => {
+    expect(parseTokenAmountInput('1.23456789', 6)).toBe(1_234_567n);
+    expect(parseTokenAmountInput('.5', 6)).toBe(500_000n);
+    expect(formatTokenInputAmount(1_230_000n, 6)).toBe('1.23');
+    expect(formatTokenInputAmount(0n, 6)).toBe('');
+    expect(parsePositiveAssetAmount(' 1.5 ', { decimals: 6 }, 2_000_000n)).toBe(1_500_000n);
+    expect(() => parsePositiveAssetAmount('', { decimals: 6 })).toThrow('Amount is required');
+    expect(() => parsePositiveAssetAmount('abc', { decimals: 6 })).toThrow('Invalid amount format');
+    expect(() => parsePositiveAssetAmount('0', { decimals: 6 })).toThrow('Amount must be greater than zero');
+    expect(() => parsePositiveAssetAmount('3', { decimals: 6 }, 2_000_000n)).toThrow('Amount exceeds available balance');
   });
 
   test('formats compact and exact USD labels', () => {

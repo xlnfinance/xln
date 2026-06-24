@@ -45,6 +45,33 @@ export function formatTokenAmount(amount: bigint, decimals = 18, rawPrecision: u
   return `${negative ? '-' : ''}${text}`;
 }
 
+export function parseTokenAmountInput(amount: string, decimals: number): bigint {
+  const [wholeRaw, fracRaw = ''] = amount.split('.');
+  const whole = wholeRaw && wholeRaw.length > 0 ? BigInt(wholeRaw) : 0n;
+  const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);
+  const frac = fracPadded.length > 0 ? BigInt(fracPadded) : 0n;
+  return whole * 10n ** BigInt(decimals) + frac;
+}
+
+export function formatTokenInputAmount(amount: bigint, decimals: number): string {
+  if (amount <= 0n) return '';
+  const divisor = 10n ** BigInt(decimals);
+  const whole = amount / divisor;
+  const frac = amount % divisor;
+  if (frac === 0n) return whole.toString();
+  return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
+}
+
+export function parsePositiveAssetAmount(raw: string, token: { decimals: number }, maxAmount?: bigint): bigint {
+  const trimmed = raw.trim();
+  if (!trimmed) throw new Error('Amount is required');
+  if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(trimmed)) throw new Error('Invalid amount format');
+  const parsed = parseTokenAmountInput(trimmed, token.decimals);
+  if (parsed <= 0n) throw new Error('Amount must be greater than zero');
+  if (typeof maxAmount === 'bigint' && parsed > maxAmount) throw new Error('Amount exceeds available balance');
+  return parsed;
+}
+
 export function formatCompactUsd(value: number, compactNumbers: boolean): string {
   if (!compactNumbers) {
     return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

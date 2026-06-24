@@ -143,10 +143,13 @@
     formatApproxUsd as formatApproxUsdLabel,
     formatCompactUsd,
     formatTokenAmount,
+    formatTokenInputAmount,
     formatUsdExact as formatUsdExactLabel,
     getAssetPriceUsd,
     getAssetValueUsd,
     getExternalTokenValueUsd,
+    parsePositiveAssetAmount,
+    parseTokenAmountInput,
   } from './entity-asset-values';
   import {
     choosePreferredAssetSymbol,
@@ -157,6 +160,7 @@
     getFaucetReserveTokenMeta as getFaucetReserveTokenMetaFromRows,
     isReserveTransferToken,
     requireExternalTokenBySymbol as requireExternalTokenBySymbolInList,
+    resolveReserveTokenMetaFromCatalog,
     resolveReserveTransferTokenBySymbol,
     sortExternalTokens,
     type ExternalToken,
@@ -1156,15 +1160,6 @@
   function requireExternalTokenBySymbol(symbol: string): ExternalToken {
     return requireExternalTokenBySymbolInList(externalTokens, symbol);
   }
-  function parsePositiveAssetAmount(raw: string, token: { decimals: number }, maxAmount?: bigint): bigint {
-    const trimmed = raw.trim();
-    if (!trimmed) throw new Error('Amount is required');
-    if (!/^(?:\d+|\d+\.\d*|\.\d+)$/.test(trimmed)) throw new Error('Invalid amount format');
-    const parsed = parseTokenAmount(trimmed, token.decimals);
-    if (parsed <= 0n) throw new Error('Amount must be greater than zero');
-    if (typeof maxAmount === 'bigint' && parsed > maxAmount) throw new Error('Amount exceeds available balance');
-    return parsed;
-  }
   function routeRequiresExplicitExternalAllowance(from: MoveEndpoint, to: MoveEndpoint): boolean {
     const routeKey = getMoveRouteKey(from, to);
     return routeKey === 'external->reserve' || routeKey === 'external->account';
@@ -1320,33 +1315,12 @@
   }
   // Faucet: fund entity reserves with test tokens
   function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
-    const byId = externalTokens.find(t => typeof t.tokenId === 'number' && t.tokenId === tokenId);
-    if (byId) {
-      return { tokenId: byId.tokenId as number, symbol: byId.symbol, decimals: byId.decimals ?? 18 };
-    }
-    if (symbolHint) {
-      const bySymbol = externalTokens.find(t => t.symbol?.toUpperCase?.() === symbolHint.toUpperCase());
-      if (bySymbol && typeof bySymbol.tokenId === 'number') {
-        return { tokenId: bySymbol.tokenId, symbol: bySymbol.symbol, decimals: bySymbol.decimals ?? 18 };
-      }
-    }
-    const info = getTokenInfo(tokenId);
-    return { tokenId, symbol: info.symbol ?? 'UNK', decimals: info.decimals ?? 18 };
-  }
-  function parseTokenAmount(amount: string, decimals: number): bigint {
-    const [wholeRaw, fracRaw = ''] = amount.split('.');
-    const whole = wholeRaw && wholeRaw.length > 0 ? BigInt(wholeRaw) : 0n;
-    const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);
-    const frac = fracPadded.length > 0 ? BigInt(fracPadded) : 0n;
-    return whole * 10n ** BigInt(decimals) + frac;
-  }
-  function formatTokenInputAmount(amount: bigint, decimals: number): string {
-    if (amount <= 0n) return '';
-    const divisor = 10n ** BigInt(decimals);
-    const whole = amount / divisor;
-    const frac = amount % divisor;
-    if (frac === 0n) return whole.toString();
-    return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
+    return resolveReserveTokenMetaFromCatalog({
+      tokenId,
+      ...(symbolHint === undefined ? {} : { symbolHint }),
+      externalTokens,
+      getTokenInfo,
+    });
   }
   async function resolveCurrentExternalAddress(): Promise<string> {
     const signerId = String(currentSignerId || '').trim();
@@ -1450,7 +1424,7 @@
       const requestApiBase = resolveApiBase();
       const tokenMeta = resolveReserveTokenMeta(tokenId, symbolHint);
       const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.1' : '100';
-      const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
+      const amountWei = parseTokenAmountInput(amountStr, tokenMeta.decimals);
       const currentBalance = onchainReserves.get(tokenMeta.tokenId) ?? 0n;
       const existingForToken = pendingReserveFaucets
         .filter((req) => req.tokenId === tokenMeta.tokenId)
@@ -1508,7 +1482,7 @@
         throw new Error('Offchain faucet requires a target hub account.');
       }
       const pendingKey = faucetPendingKey(hubEntityId, tokenMeta.tokenId);
-      const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
+      const amountWei = parseTokenAmountInput(amountStr, tokenMeta.decimals);
       const baselineOut = getDerivedDeltaForAccount(hubEntityId, tokenMeta.tokenId)?.outCapacity ?? 0n;
       const pendingRequest = {
         hubEntityId,
