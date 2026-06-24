@@ -4,6 +4,17 @@ Last updated: 2026-06-24
 
 Scope: synthesized from four external admin/QA/runtime audits. This is the operator-grade backlog for `/health`, `/qa`, runtime adapter import, test history, scenario playback, restart controls, and regulator evidence.
 
+## architecture decisions 2026-06-24
+
+- Remote runtime multi-import opens a dedicated settings/manager screen, pre-fills a textarea, and waits for a human `Confirm` click before validating/importing.
+- Remote runtime import secrets travel in the URL `#fragment`, not query params, so tokens do not hit server/proxy logs. Lines may be raw URLs that already contain token/connect/scope data; labels are optional and can be edited later.
+- `/health` is current live system state. `/qa` is integration/test/process history and the long-lived evidence cockpit. Read mode can see full data, but privileged actions stay visible and disabled.
+- QA/scenario evidence should live in one DB/UI surface across unit, contract, e2e, benchmark, scenario, and release gates. Screenshots are release evidence, not throwaway artifacts.
+- Scenario commentary is authored text over real video-clock timestamps. Video speed and commentary must stay synchronized, with no duplicate transcript surfaces.
+- Benchmark regression threshold is 20%; unexpected important regressions should ask the operator for a decision. Restart workflow may include abort/kill controls.
+- Time Machine is remote-server-backed through R-adapter snapshots/subsets, not local browser replay. Large runtime state uses aggregate/cursor/hash slices, defaulting to 10-20 items per page.
+- Remote runtime creation is not mandatory yet; console/server-side creation is acceptable until a wallet-side manager is designed.
+
 ## audit scores
 
 - ideas1: 910/1000. Strong target spec and good product framing. Less grounded in current code, but correctly emphasizes run ledger, severity, audit trail, read/admin split, and 1M snapshot discipline.
@@ -250,10 +261,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - UI: operator can scrub local history, pick a remote hub, scan past runtime states, compare current vs selected frame, and deep-link a historical height for debugging.
   - Tests: local Time Machine e2e proves panels change when scrubbing; remote radapter e2e queries old hub heights and renders bounded historical snapshots without freezing; 1M fixture stays aggregate-first.
 
-- [ ] Separate privileged operations from read-only QA views.
+- [x] Separate privileged operations from read-only QA views.
   - Impact: high.
-  - UI: read-only by default. Put restart/run controls in an `Operations` or `Admin` tab, hidden until admin scope is active.
-  - Tests: read mode cannot see or trigger run controls; admin mode requires confirm.
+  - UI: read scope sees the full QA evidence surface, including redacted text artifacts, while privileged controls remain visible but disabled. Admin/open scope can plan/backfill/purge, and restart run still requires reason, `RUN`, expected HEAD, and server-side `XLN_QA_RESTART_ALLOWED=1`.
+  - Status: done. Secret-bearing text artifacts are readable with read tokens after redaction; admin scope is now reserved for mutating operations (`restart`, `abort`, `history/backfill`, `retention`). QA cockpit read-mode e2e verifies verdict/gallery/runs/player remain visible while restart/backfill/purge buttons stay disabled and do not call admin endpoints.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `39/39`; `bun run check` PASS; focused QA cockpit e2e PASS `2/2`, run `20260624-133945-061`, wall `21.4s`, benchmark OK vs `20260624-133913-569`.
 
 - [x] Implement `/qa?embed=1` properly or remove it.
   - Impact: medium.

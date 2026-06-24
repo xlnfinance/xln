@@ -772,12 +772,14 @@ test('qa run and text artifact surfaces redact stored secrets', async () => {
         '/api/qa/artifact',
         JSON_HEADERS,
       );
-      expect(readResponse?.status).toBe(403);
-      expect(await readResponse!.json()).toMatchObject({
-        ok: false,
-        error: 'QA_ARTIFACT_ADMIN_REQUIRED',
-        sensitivity: 'secret-bearing',
-      });
+      expect(readResponse?.status).toBe(200);
+      const readArtifactText = await readResponse!.text();
+      expect(readArtifactText).toContain('[REDACTED]');
+      expect(readArtifactText).not.toContain('bearer-secret-123456789');
+      expect(readArtifactText).not.toContain('remote-secret-token');
+      expect(readArtifactText).not.toContain('encoded-secret');
+      expect(readArtifactText).not.toContain('read-secret');
+      expect(readArtifactText).not.toContain('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
 
       const adminResponse = await maybeHandleQaRequest(
         qaRequest(`http://127.0.0.1:8080/api/qa/artifact?runId=${runId}&path=secret.log`, {}, QA_ADMIN_TOKEN),
