@@ -1,6 +1,6 @@
 # todo
 
-Last updated: 2026-06-24
+Last updated: 2026-06-25
 
 Scope: synthesized from four external admin/QA/runtime audits. This is the operator-grade backlog for `/health`, `/qa`, runtime adapter import, test history, scenario playback, restart controls, and regulator evidence.
 
@@ -391,6 +391,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused cross no-market route-builder e2e `20260624-193449-543` PASS `1/1`, wall `16.8s`, code hash `245d9563c84567cd`, browser issues `0`, benchmark OK vs `20260624-193238-803`.
   - Progress: seventh extraction done. Limit-rate input, market-price strip, hub selector, and size slider moved into `SwapPriceVenueControls.svelte`; `SwapPanel.svelte` is down to 3,798 lines.
   - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused orderbook pair-dropdown e2e `20260624-195232-023` PASS `1/1`, wall `20.4s`, browser issues `0`, benchmark flagged one Playwright max-child-CPU spike (`51.8% -> 101.2%`). Immediate rerun `20260624-195325-575` PASS `1/1`, wall `20.2s`, browser issues `0`, max child CPU `55.9%`, benchmark OK.
+  - Progress: eighth extraction done. The whole swap trade ticket island, including source/route/token selectors, amount input, route builder, price/venue controls, capacity warnings, and submit controls, moved into `SwapTradeTicket.svelte`; `SwapPanel.svelte` is down to 3,501 lines and the new trade-ticket component is 600 lines.
+  - Evidence: L1 `bun test tests/frontend/swap-panel-helpers.test.ts tests/frontend/swap-order-math.test.ts` PASS `9/9`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused orderbook pair-dropdown e2e `20260624-230112-183` PASS `1/1`, wall `21.0s`, HEAD `f4e2dc6d4334 dirty`, code hash `bed855f82d11db77`, benchmark `INSUFFICIENT` because no previous comparable run exists; final `bun run check` PASS.
 
 - [x] Move QA cockpit API/UI types out of the Svelte route.
   - Impact: medium-high.
