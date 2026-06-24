@@ -5,6 +5,7 @@ import type { FrontendXlnFunctions } from '../../frontend/src/lib/stores/xlnStor
 import {
   buildAccountPortfolioData,
   calculatePortfolioValueUsd,
+  createEntityAssetValueFormatters,
   formatApproxUsd,
   formatCompactUsd,
   formatTokenAmount,
@@ -52,6 +53,23 @@ describe('entity asset value helpers', () => {
     expect(getAssetValueUsd(2_500_000n, { symbol: 'USDC', decimals: 6 })).toBe(2.5);
     expect(getExternalTokenValueUsd({ symbol: 'USDT', decimals: 6, balance: 3_000_000n })).toBe(3);
     expect(calculatePortfolioValueUsd(new Map([[1, 2_000_000n]]), () => ({ symbol: 'USDC', decimals: 6 }))).toBe(2);
+  });
+
+  test('builds entity asset value formatter bundles from settings and token metadata', () => {
+    const helpers = createEntityAssetValueFormatters({
+      getTokenInfo: (tokenId) => tokenId === 1 ? { symbol: 'USDC', decimals: 6 } : { symbol: 'WETH', decimals: 18 },
+      tokenPrecision: 2,
+      compactNumbers: true,
+    });
+
+    expect(helpers.formatAmount(1_234_567n, 6)).toBe('1.23');
+    expect(helpers.formatCompact(12_345)).toBe('$12.35K');
+    expect(helpers.formatApproxUsd(5)).toBe('~$5.00');
+    expect(helpers.formatUsdExact(5)).toBe('$5.00');
+    expect(helpers.getAssetPrice('USDC')).toBe(1);
+    expect(helpers.getAssetValue(1, 2_500_000n)).toBe(2.5);
+    expect(helpers.getExternalValue({ symbol: 'USDC', decimals: 6, balance: 3_000_000n })).toBe(3);
+    expect(helpers.calculatePortfolioValue(new Map([[1, 4_000_000n]]))).toBe(4);
   });
 
   test('builds account portfolio totals from derived deltas', () => {

@@ -22,6 +22,17 @@ export type AccountPortfolioData = {
   total: number;
 };
 
+export type EntityAssetValueFormatters = {
+  formatAmount: (amount: bigint, decimals?: number) => string;
+  formatCompact: (value: number) => string;
+  formatApproxUsd: (value: number) => string;
+  formatUsdExact: (value: number) => string;
+  getAssetPrice: (symbol: string) => number;
+  getAssetValue: (tokenId: number, amount: bigint, symbolOverride?: string) => number;
+  getExternalValue: (token: ExternalTokenValueInput) => number;
+  calculatePortfolioValue: (reserves: Map<number | string, bigint>) => number;
+};
+
 export function normalizeTokenPrecision(rawPrecision: unknown): number {
   return Math.max(0, Math.min(18, Math.floor(Number(rawPrecision ?? 4))));
 }
@@ -111,6 +122,23 @@ export function calculatePortfolioValueUsd(
     total += getAssetValueUsd(amount, getTokenInfo(Number(tokenId)));
   }
   return total;
+}
+
+export function createEntityAssetValueFormatters(input: {
+  getTokenInfo: (tokenId: number) => AssetTokenInfo;
+  tokenPrecision: unknown;
+  compactNumbers: boolean;
+}): EntityAssetValueFormatters {
+  return {
+    formatAmount: (amount, decimals = 18) => formatTokenAmount(amount, decimals, input.tokenPrecision),
+    formatCompact: (value) => formatCompactUsd(value, input.compactNumbers),
+    formatApproxUsd: (value) => formatApproxUsd(value, input.compactNumbers),
+    formatUsdExact,
+    getAssetPrice: getAssetPriceUsd,
+    getAssetValue: (tokenId, amount, symbolOverride) => getAssetValueUsd(amount, input.getTokenInfo(tokenId), symbolOverride),
+    getExternalValue: getExternalTokenValueUsd,
+    calculatePortfolioValue: (reserves) => calculatePortfolioValueUsd(reserves, input.getTokenInfo),
+  };
 }
 
 function emptyAccountPortfolioData(): AccountPortfolioData {
