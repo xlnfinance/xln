@@ -19,7 +19,6 @@
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { getXLN, resolveConfiguredApiBase, setXlnEnvironment } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
-  import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
   import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
@@ -138,6 +137,17 @@
     buildEntityActivityRows,
     filterEntityActivityRows,
   } from './entity-activity';
+  import {
+    buildAccountPortfolioData,
+    calculatePortfolioValueUsd,
+    formatApproxUsd as formatApproxUsdLabel,
+    formatCompactUsd,
+    formatTokenAmount,
+    formatUsdExact as formatUsdExactLabel,
+    getAssetPriceUsd,
+    getAssetValueUsd,
+    getExternalTokenValueUsd,
+  } from './entity-asset-values';
   import {
     buildOpenOutgoingDebtTotals,
     buildPendingBatchPreview,
@@ -3539,54 +3549,28 @@
     return activeXlnFunctions?.getTokenInfo(tokenId) ?? { symbol: 'UNK', decimals: 18 };
   }
   function formatAmount(amount: bigint, decimals = 18): string {
-    const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 4))));
-    const negative = amount < 0n;
-    const abs = negative ? -amount : amount;
-    const divisor = BigInt(10) ** BigInt(decimals);
-    const whole = abs / divisor;
-    const frac = abs % divisor;
-    let text = whole.toLocaleString('en-US');
-    if (precision > 0 && frac > 0n) {
-      const fracStr = frac
-        .toString()
-        .padStart(decimals, '0')
-        .slice(0, Math.min(decimals, precision))
-        .replace(/0+$/, '');
-      if (fracStr.length > 0) text = `${text}.${fracStr}`;
-    }
-    return `${negative ? '-' : ''}${text}`;
+    return formatTokenAmount(amount, decimals, $settings?.tokenPrecision);
   }
   function formatCompact(value: number): string {
-    if (!$settings.compactNumbers) {
-      return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-    if (value >= 1_000_000) return '$' + (value / 1_000_000).toFixed(2) + 'M';
-    if (value >= 1_000) return '$' + (value / 1_000).toFixed(2) + 'K';
-    return '$' + value.toFixed(2);
+    return formatCompactUsd(value, $settings.compactNumbers);
   }
   function formatApproxUsd(value: number): string {
-    return `~${formatCompact(value)}`;
+    return formatApproxUsdLabel(value, $settings.compactNumbers);
   }
   function formatUsdExact(value: number): string {
-    return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return formatUsdExactLabel(value);
   }
   function getAssetPrice(symbol: string): number {
-    return getAssetUsdPrice(symbol);
+    return getAssetPriceUsd(symbol);
   }
   function getAssetValue(tokenId: number, amount: bigint, symbolOverride?: string): number {
-    const info = getTokenInfo(tokenId);
-    const symbol = symbolOverride ?? info.symbol ?? 'UNK';
-    return amountToUsd(amount, info.decimals, symbol);
+    return getAssetValueUsd(amount, getTokenInfo(tokenId), symbolOverride);
   }
   function getExternalValue(token: ExternalToken): number {
-    return amountToUsd(token.balance, token.decimals ?? 18, token.symbol);
+    return getExternalTokenValueUsd(token);
   }
   function calculatePortfolioValue(reserves: Map<number | string, bigint>): number {
-    let total = 0;
-    for (const [tokenId, amount] of reserves.entries()) {
-      total += getAssetValue(Number(tokenId), amount);
-    }
-    return total;
+    return calculatePortfolioValueUsd(reserves, getTokenInfo);
   }
   // Calculate totals for the three buckets
   $: externalTotal = (() => {
@@ -3599,42 +3583,12 @@
     return total;
   })();
   $: reservesTotal = calculatePortfolioValue(onchainReserves);
-  $: accountsData = (() => {
-    let outbound = 0;
-    let inbound = 0;
-    let outCollateral = 0; // collateral on our out side
-    let outOurCredit = 0;  // unused credit we set (our risk)
-    let count = 0;
-    if (replica?.state?.accounts) {
-      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-        count++;
-        if (account.deltas) {
-          for (const [tokenId, delta] of account.deltas.entries()) {
-            const info = getTokenInfo(Number(tokenId));
-            const divisor = BigInt(10) ** BigInt(info.decimals);
-            const price = getAssetPrice(info.symbol ?? 'UNK');
-            const valueOf = (amount: bigint) => (Number(amount) / Number(divisor)) * price;
-            const isLeftEntity = String(tab.entityId || '').toLowerCase() < String(counterpartyId || '').toLowerCase();
-            const derived = activeXlnFunctions?.deriveDelta?.(delta, isLeftEntity);
-            if (!derived) continue;
-            if (derived.outCapacity > 0n) outbound += valueOf(derived.outCapacity);
-            if (derived.inCapacity > 0n) inbound += valueOf(derived.inCapacity);
-            // outCapacity = outPeerCredit + outCollateral + outOwnCredit
-            if (derived.outCollateral > 0n) outCollateral += valueOf(derived.outCollateral);
-            if (derived.outOwnCredit > 0n) outOurCredit += valueOf(derived.outOwnCredit);
-          }
-        }
-      }
-    }
-    return {
-      outbound,
-      inbound,
-      outCollateral,
-      outOurCredit,
-      count,
-      total: outbound,
-    };
-  })();
+  $: accountsData = buildAccountPortfolioData({
+    accounts: replica?.state?.accounts,
+    localEntityId: tab.entityId,
+    deriveDelta: activeXlnFunctions?.deriveDelta,
+    getTokenInfo,
+  });
   type DisputedAccountView = {
     counterpartyId: string;
     status: 'active' | 'finalized';
