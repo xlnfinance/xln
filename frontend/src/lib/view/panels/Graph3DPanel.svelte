@@ -20,6 +20,12 @@
     graphReserveValues,
     graphTotalReserves,
   } from './graph3d-helpers';
+  import {
+    buildBirdViewSettings,
+    readBirdViewSettings,
+    writeBirdViewSettings,
+    type BirdViewSettings,
+  } from './graph3d-settings';
   let showMiniPanel = false;
   let miniPanelEntityId = '';
   let miniPanelEntityName = '';
@@ -183,21 +189,6 @@
     outCollateral: number;     // their collateral
     inPeerCredit: number;      // their unused credit
   }
-  interface BirdViewSettings {
-    barsMode: 'close' | 'spread';
-    selectedTokenId: number;
-    viewMode: '2d' | '3d';
-    entityMode: 'sphere' | 'identicon';
-    wasLastOpened: boolean;
-    rotationX: number; // 0-10000 (0 = stopped, 10000 = fast rotation around X-axis)
-    rotationY: number; // 0-10000 (0 = stopped, 10000 = fast rotation around Y-axis)
-    rotationZ: number; // 0-10000 (0 = stopped, 10000 = fast rotation around Z-axis)
-    camera?: {
-      position: {x: number, y: number, z: number};
-      target: {x: number, y: number, z: number};
-      zoom: number;
-    } | undefined;
-  }
   let container: HTMLDivElement;
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
@@ -260,43 +251,10 @@
   let hasMoved: boolean = false; // Track if actual movement occurred during drag
   let justDragged: boolean = false; // Flag to prevent click after drag
   function loadBirdViewSettings(): BirdViewSettings {
-    try {
-      const saved = localStorage.getItem('xln-bird-view-settings');
-      const parsed = saved ? JSON.parse(saved) : {
-        barsMode: 'close',  // Center mode by default
-        selectedTokenId: 1, // Default to USDC
-        viewMode: '3d',
-        entityMode: 'sphere',
-        wasLastOpened: false,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        camera: undefined
-      };
-      if (typeof parsed.selectedTokenId === 'string') {
-        parsed.selectedTokenId = Number(parsed.selectedTokenId);
-      }
-      if (parsed.rotationX === undefined) parsed.rotationX = 0;
-      if (parsed.rotationY === undefined) parsed.rotationY = 0;
-      if (parsed.rotationZ === undefined) parsed.rotationZ = 0;
-      if (parsed.barsMode === undefined) parsed.barsMode = 'close';
-      return parsed;
-    } catch {
-      return {
-        barsMode: 'close',  // Center mode by default
-        selectedTokenId: 1, // Default to USDC
-        viewMode: '3d',
-        entityMode: 'sphere',
-        wasLastOpened: false,
-        rotationX: 0,
-        rotationY: 0,
-        rotationZ: 0,
-        camera: undefined
-      };
-    }
+    return readBirdViewSettings(typeof localStorage === 'undefined' ? null : localStorage);
   }
   function saveBirdViewSettings(wasOpened: boolean = true) {
-    const settings: BirdViewSettings = {
+    const nextSettings = buildBirdViewSettings({
       barsMode,
       selectedTokenId,
       viewMode,
@@ -310,8 +268,8 @@
         target: {x: controls.target.x, y: controls.target.y, z: controls.target.z},
         zoom: camera.zoom
       } : undefined
-    };
-    localStorage.setItem('xln-bird-view-settings', JSON.stringify(settings));
+    });
+    writeBirdViewSettings(typeof localStorage === 'undefined' ? null : localStorage, nextSettings);
   }
   function saveEntityPositions() {
     try {
