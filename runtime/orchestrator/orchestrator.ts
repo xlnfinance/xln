@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
@@ -119,10 +119,39 @@ const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
 
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
+const readGitValue = (gitArgs: string[]): string | null => {
+  try {
+    const value = execFileSync('git', gitArgs, {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+};
+const orchestratorCodeFingerprint = (() => {
+  const gitHead = readGitValue(['rev-parse', 'HEAD']);
+  const gitBranch = readGitValue(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const gitStatus = readGitValue(['status', '--porcelain']) ?? '';
+  const dirty = gitStatus.length > 0;
+  return {
+    gitHead,
+    gitBranch,
+    dirty,
+    codeHash: gitHead ? `${gitHead}${dirty ? '-dirty' : ''}` : null,
+    computedAt: Date.now(),
+  };
+})();
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
 const CHILD_HEALTH_TIMEOUT_MS = Math.max(
   1_500,
   Math.floor(Number(process.env['XLN_CHILD_HEALTH_TIMEOUT_MS'] || '30000')),
+);
+const HEALTH_RESPONSE_REFRESH_TIMEOUT_MS = Math.max(
+  250,
+  Math.min(CHILD_HEALTH_TIMEOUT_MS, Math.floor(Number(process.env['XLN_HEALTH_RESPONSE_REFRESH_TIMEOUT_MS'] || '1500'))),
 );
 const MARKET_MAKER_INFO_TIMEOUT_MS = Math.max(
   500,
@@ -722,6 +751,16 @@ const pollMarketMakerHealthOnce = async (): Promise<void> => {
     marketMakerChild.lastInfo?.startupPhase ||
     '',
   ).trim() || null;
+};
+
+const refreshChildHealthForResponse = async (): Promise<void> => {
+  await Promise.race([
+    Promise.allSettled([
+      pollAllHubHealth(),
+      pollMarketMakerHealth(),
+    ]).then(() => undefined),
+    delay(HEALTH_RESPONSE_REFRESH_TIMEOUT_MS).then(() => undefined),
+  ]);
 };
 
 const getHubSpecsArg = (): string => HUB_NAMES.join(',');
@@ -1386,9 +1425,18 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     bootstrapReservesOk ? null : 'bootstrapReserves',
     bootstrapReserveTargetsMet ? null : 'bootstrapReserveTargets',
   ].filter((value): value is string => Boolean(value));
+  const sourceHeights = [
+    ...hubChildren.map(child => Number(child.lastHealth?.height || 0)),
+    Number(marketMakerChild.lastHealth?.height || 0),
+  ].filter(height => Number.isFinite(height) && height > 0);
 
   return {
     timestamp: Date.now(),
+    source: {
+      height: sourceHeights.length > 0 ? Math.max(...sourceHeights) : null,
+      ...orchestratorCodeFingerprint,
+      owner: 'orchestrator',
+    },
     coreOk,
     systemOk,
     degraded,
@@ -2020,16 +2068,14 @@ const server = Bun.serve({
 
     if (pathname === '/api/health') {
       void getStorageHealth().catch(() => {});
-      void pollAllHubHealth().catch(() => {});
-      void pollMarketMakerHealth().catch(() => {});
+      await refreshChildHealthForResponse();
       const health = await buildAggregatedHealthResponse();
       return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicAggregatedHealth(health)), { headers });
     }
 
     if (pathname === '/api/metrics') {
       void getStorageHealth().catch(() => {});
-      void pollAllHubHealth().catch(() => {});
-      void pollMarketMakerHealth().catch(() => {});
+      await refreshChildHealthForResponse();
       const health = await buildAggregatedHealthResponse();
       return new Response(buildPrometheusMetrics(health), {
         headers: {

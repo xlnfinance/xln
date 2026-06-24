@@ -9,6 +9,15 @@
 
   type HealthData = {
     timestamp: number;
+    source?: {
+      height?: number | null;
+      codeHash?: string | null;
+      gitHead?: string | null;
+      gitBranch?: string | null;
+      dirty?: boolean;
+      computedAt?: number;
+      owner?: string;
+    };
     coreOk?: boolean | undefined;
     systemOk?: boolean | undefined;
     degraded?: string[];
@@ -322,6 +331,7 @@
       : undefined;
     const custody = (input['custody'] && typeof input['custody'] === 'object') ? input['custody'] as HealthData['custody'] : undefined;
     const reset = (input['reset'] && typeof input['reset'] === 'object') ? input['reset'] as HealthData['reset'] : undefined;
+    const source = (input['source'] && typeof input['source'] === 'object') ? input['source'] as HealthData['source'] : undefined;
 
     const normalizedRelay: NonNullable<HealthData['relay']> = {
       activeClients: relay?.activeClients ?? activeClientIds,
@@ -361,6 +371,7 @@
     if (hubMesh) normalized.hubMesh = hubMesh;
     if (custody) normalized.custody = custody;
     if (bootstrapReserves) normalized.bootstrapReserves = bootstrapReserves;
+    if (source) normalized.source = source;
     return normalized;
   }
 
@@ -391,8 +402,9 @@
   const flowEdges = $derived.by(() => buildFlowEdges(events).slice(0, 12));
   const testnetGates = $derived.by<TestnetGate[]>(() => buildTestnetGates(health, rpcOk));
   const healthSeverity = $derived.by<QaSeveritySignal>(() => buildHealthSeverity(health, rpcOk, criticalSignals.length));
+  const healthVerdict = $derived(healthVerdictLabel(healthSeverity.severity));
   const overallOk = $derived(
-    healthSeverity.severity === 'OK'
+    healthVerdict === 'READY'
   );
 
   function applyFilters(): void {
@@ -500,6 +512,33 @@
     return new Intl.NumberFormat('en-US').format(Number(value));
   }
 
+  function formatAgeMs(timestamp: number | null | undefined): string {
+    if (!Number.isFinite(Number(timestamp)) || Number(timestamp) <= 0) return 'n/a';
+    const ageMs = Math.max(0, Date.now() - Number(timestamp));
+    if (ageMs < 1_000) return `${Math.round(ageMs)}ms`;
+    if (ageMs < 60_000) return `${Math.round(ageMs / 1_000)}s`;
+    return `${Math.round(ageMs / 60_000)}m`;
+  }
+
+  function shortHash(value?: string | null): string {
+    const text = String(value || '').trim();
+    if (!text) return 'n/a';
+    const clean = text.replace(/-dirty$/, '');
+    const suffix = text.endsWith('-dirty') ? '-dirty' : '';
+    return `${clean.slice(0, 12)}${suffix}`;
+  }
+
+  function healthVerdictLabel(severity: QaSeverity): 'READY' | 'DEGRADED' | 'FAIL' {
+    if (severity === 'OK') return 'READY';
+    if (severity === 'FAIL' || severity === 'BLOCKED') return 'FAIL';
+    return 'DEGRADED';
+  }
+
+  function healthSourceHeightLabel(data: HealthData | null): string {
+    const sourceHeight = Number(data?.source?.height ?? data?.jMachines?.[0]?.lastBlock ?? 0);
+    return Number.isFinite(sourceHeight) && sourceHeight > 0 ? `#${Math.floor(sourceHeight)}` : 'n/a';
+  }
+
   function endpointLabel(value?: string): string {
     if (!value) return 'local';
     if (value.length <= 14) return value;
@@ -538,6 +577,8 @@
       { label: 'critical signals', value: criticalCount },
       { label: 'hubs online', value: onlineHubs },
       { label: 'hubs total', value: totalHubs },
+      { label: 'source height', value: data.source?.height ?? data.jMachines?.[0]?.lastBlock ?? null },
+      { label: 'code hash', value: data.source?.codeHash ?? null },
     ];
     if (rpcHealthy === false) {
       return makeQaSeveritySignal({
@@ -812,12 +853,23 @@
     />
 
     <section id="overview" class="hero-console">
-      <div class="readiness-tile" class:ready={overallOk} class:failed={!overallOk}>
+      <div
+        class="readiness-tile"
+        class:ready={overallOk}
+        class:failed={!overallOk}
+        data-testid="health-verdict-banner"
+      >
         <span class="pulse"></span>
         <div>
           <div class="eyebrow">readiness</div>
-          <strong>{healthSeverity.severity}</strong>
-          <p>{healthSeverity.reason}</p>
+          <strong data-testid="health-verdict-status">{healthVerdict}</strong>
+          <p data-testid="health-verdict-reason">{healthSeverity.reason}</p>
+          <div class="verdict-meta">
+            <span data-testid="health-verdict-age">age {formatAgeMs(health.timestamp)}</span>
+            <span data-testid="health-verdict-source-height">source {healthSourceHeightLabel(health)}</span>
+            <span data-testid="health-verdict-code-hash">code {shortHash(health.source?.codeHash)}</span>
+            <span data-testid="health-verdict-owner">owner {healthSeverity.owner || health.source?.owner || 'health'}</span>
+          </div>
         </div>
       </div>
 
@@ -1375,6 +1427,23 @@
     margin: 5px 0 0;
     color: #9d9689;
     font-size: 12px;
+  }
+
+  .verdict-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+  }
+
+  .verdict-meta span {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 4px 6px;
+    color: #cfc6b6;
+    background: rgba(0, 0, 0, 0.2);
+    font-size: 11px;
+    font-weight: 700;
   }
 
   .pulse {

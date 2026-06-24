@@ -210,6 +210,7 @@ type HubBootstrapEntry = {
 type LocalHealthResponse = {
   ok: boolean;
   name: string;
+  height: number;
   entityId: string | null;
   runtimeId: string | null;
   relayUrl: string;
@@ -1311,6 +1312,7 @@ const buildLocalHealth = (
   return {
     ok: Boolean(entityId) && pairs.length === Math.max(0, requiredNames.length - 1) && pairs.every(pair => pair.ready),
     name: resolvedArgs.name,
+    height: Math.max(0, Math.floor(Number(env.height || 0))),
     entityId,
     runtimeId: String(env.runtimeId || '') || null,
     relayUrl: resolvedArgs.relayUrl,
