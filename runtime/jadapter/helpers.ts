@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, Env, JurisdictionEvent } from '../types';
+import type { DisputeFinalizationEvidence, EntityInput, Env, JReplica, JurisdictionConfig, JurisdictionEvent } from '../types';
 import { createEmptyBatch, type JBatch } from '../j-batch';
 import { enqueueRuntimeInput } from '../runtime';
 import { signAccountFrame } from '../account-crypto';
@@ -154,6 +154,12 @@ export type EventBatchCounter = {
 
 export type PendingWatcherJBlockMap = Map<number, Set<string>>;
 
+const normalizeJurisdictionLabel = (value: unknown): string =>
+  String(value || '').trim().toLowerCase();
+
+const normalizeJurisdictionAddress = (value: unknown): string =>
+  String(value || '').trim().toLowerCase();
+
 const findWatcherJurisdictionReplica = (env: Env, depositoryAddress?: string) => {
   const replicas = Array.from(env?.jReplicas?.values?.() || []);
   if (replicas.length === 0) return null;
@@ -177,10 +183,41 @@ const findWatcherJurisdictionReplica = (env: Env, depositoryAddress?: string) =>
   return replicas[0] || null;
 };
 
+const watcherDepositoryOf = (replica: JReplica | null | undefined): string =>
+  normalizeJurisdictionAddress(replica?.depositoryAddress || replica?.contracts?.depository || '');
+
+const watcherNameOf = (replica: JReplica | null | undefined): string =>
+  normalizeJurisdictionLabel(replica?.name);
+
+const watcherChainIdOf = (replica: JReplica | null | undefined): number | null => {
+  const chainId = Number(replica?.chainId);
+  return Number.isFinite(chainId) && chainId > 0 ? Math.floor(chainId) : null;
+};
+
+const isEntityReplicaRelevantToWatcher = (
+  env: Env,
+  replica: { state?: { config?: { jurisdiction?: JurisdictionConfig } } },
+  watcherReplica: JReplica,
+): boolean => {
+  const jurisdiction = replica?.state?.config?.jurisdiction;
+  if (!jurisdiction) {
+    return (env.jReplicas?.size ?? 0) <= 1;
+  }
+  const watcherDepository = watcherDepositoryOf(watcherReplica);
+  const entityDepository = normalizeJurisdictionAddress(jurisdiction.depositoryAddress);
+  if (watcherDepository && entityDepository) return watcherDepository === entityDepository;
+  const watcherName = watcherNameOf(watcherReplica);
+  const entityName = normalizeJurisdictionLabel(jurisdiction.name);
+  const watcherChainId = watcherChainIdOf(watcherReplica);
+  const entityChainId = Number(jurisdiction.chainId);
+  const chainMatches = !watcherChainId || !Number.isFinite(entityChainId) || watcherChainId === Math.floor(entityChainId);
+  return Boolean(watcherName && entityName && watcherName === entityName && chainMatches);
+};
+
 export function getWatcherStartBlock(env: Env, depositoryAddress?: string): number {
   const replica = findWatcherJurisdictionReplica(env, depositoryAddress);
   const replicaBlockNumber = Number(replica?.blockNumber ?? 0n);
-  const signerBlockNumber = getMinimumCommittedSignerJHeight(env);
+  const signerBlockNumber = replica ? getMinimumCommittedSignerJHeight(env, replica) : getMinimumCommittedSignerJHeight(env);
   const blockNumber = signerBlockNumber === null
     ? replicaBlockNumber
     : Math.min(replicaBlockNumber, signerBlockNumber);
@@ -188,9 +225,10 @@ export function getWatcherStartBlock(env: Env, depositoryAddress?: string): numb
   return Math.max(1, Math.floor(blockNumber) + 1);
 }
 
-export function getMinimumCommittedSignerJHeight(env: Env): number | null {
+export function getMinimumCommittedSignerJHeight(env: Env, watcherReplica?: JReplica): number | null {
   let minHeight: number | null = null;
   for (const replica of env.eReplicas?.values?.() || []) {
+    if (watcherReplica && !isEntityReplicaRelevantToWatcher(env, replica, watcherReplica)) continue;
     const height = Number(replica?.state?.lastFinalizedJHeight ?? 0);
     if (!Number.isFinite(height) || height <= 0) continue;
     minHeight = minHeight === null ? Math.floor(height) : Math.min(minHeight, Math.floor(height));

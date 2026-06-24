@@ -105,11 +105,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Constraint: consensus/crypto path; require explicit design approval before changing. Candidate fix is cache numeric derivations by `(seed fingerprint, signerId)` while keeping registered EOA keys keyed by address.
   - Tests: two envs with different seeds and same numeric signer process frames in one Bun process without cache cross-contamination.
 
-- [ ] Scope watcher start-block clamp to the watcher's own jurisdiction/depository.
+- [x] Scope watcher start-block clamp to the watcher's own jurisdiction/depository.
   - Impact: high.
   - Current issue: minimum finalized J height is taken across all entity replicas, so an unrelated entity/jurisdiction can drag a watcher backward and cause re-scan storms.
   - Fix: compute min height only for entities whose depository/jurisdiction matches the watcher.
   - Tests: two-jurisdiction env with low unrelated entity does not lower watcher cursor.
+  - Status: done. `getWatcherStartBlock()` now computes the signer finalized-height cap through the matched watcher `JReplica`. Entity replicas are relevant by matching `config.jurisdiction.depositoryAddress` first, then jurisdiction name/chain; legacy unbound replicas still preserve the old single-jurisdiction behavior.
+  - Evidence: new L1 regression failed before fix with Arrakis start block `6` instead of `101`, then passed. `bun test runtime/__tests__/jadapter-helpers.test.ts` PASS `15/15`; L2 watcher runtime suite PASS `18/18`; runtime `tsc` PASS.
 
 - [x] Add opt-in watchtower push-wake for dispute victims.
   - Impact: high.
