@@ -19,6 +19,7 @@
     WalletCards,
     Wifi,
   } from 'lucide-svelte';
+  import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
 
   type IconComponent = typeof Activity;
 
@@ -159,7 +160,7 @@
     criticalCount?: number;
   };
 
-  type BootstrapStage = {
+  type BootstrapStage = QaSeveritySignal & {
     key: string;
     label: string;
     value: string;
@@ -242,6 +243,17 @@
     return 35;
   }
 
+  function stageSeverity(
+    owner: string,
+    ok: boolean | null,
+    reason: string,
+    since: number,
+    evidence: QaSeveritySignal['evidence'] = [],
+  ): QaSeveritySignal {
+    const severity: QaSeverity = ok === true ? 'OK' : ok === false ? 'FAIL' : 'UNKNOWN';
+    return makeQaSeveritySignal({ severity, reason, since, owner, evidence });
+  }
+
   function buildBootstrapStages(data: HealthData, rpcHealthy: boolean | null): BootstrapStage[] {
     const hubs = data.hubs ?? [];
     const onlineHubs = hubs.filter((hub) => hub.online === true).length;
@@ -280,6 +292,7 @@
 
     return [
       {
+        ...stageSeverity('bootstrap.reset', resetOk, data.reset?.lastError || 'Reset barrier is clear', data.timestamp),
         key: 'reset',
         label: 'Reset barrier',
         value: data.reset?.inProgress ? 'running' : data.reset?.completedAt ? 'complete' : 'clear',
@@ -290,6 +303,10 @@
         icon: LoaderCircle,
       },
       {
+        ...stageSeverity('bootstrap.runtime', data.system.runtime && rpcHealthy !== false ? true : rpcHealthy === null ? null : false, 'Runtime process and RPC health', data.timestamp, [
+          { label: 'rpc latency', value: rpcLatencyMs, unit: 'ms' },
+          { label: 'healthy j-machines', value: healthyJ },
+        ]),
         key: 'runtime',
         label: 'Runtime + RPC',
         value: data.system.runtime ? formatLatency(rpcLatencyMs) : 'down',
@@ -300,6 +317,10 @@
         icon: Activity,
       },
       {
+        ...stageSeverity('bootstrap.hubs', totalHubs > 0 ? onlineHubs === totalHubs : null, 'Hub process readiness', data.timestamp, [
+          { label: 'online hubs', value: onlineHubs },
+          { label: 'total hubs', value: totalHubs },
+        ]),
         key: 'hubs',
         label: 'Hub processes',
         value: `${onlineHubs}/${totalHubs || 3} online`,
@@ -310,6 +331,10 @@
         icon: Server,
       },
       {
+        ...stageSeverity('bootstrap.mesh', data.hubMesh?.ok ?? null, 'Direct hub mesh readiness', data.timestamp, [
+          { label: 'ready pairs', value: meshReadyPairs },
+          { label: 'total pairs', value: meshPairs.length },
+        ]),
         key: 'mesh',
         label: 'Direct mesh',
         value: `${formatCount(data.hubMesh?.direct?.openLinkCount ?? 0)} links`,
@@ -320,6 +345,9 @@
         icon: GitBranch,
       },
       {
+        ...stageSeverity('bootstrap.relay', data.system.relay === true, 'Relay socket readiness', data.timestamp, [
+          { label: 'clients', value: data.relay?.activeClientCount ?? data.relay?.clientCount ?? 0 },
+        ]),
         key: 'relay',
         label: 'Relay sockets',
         value: `${formatCount(data.relay?.activeClientCount ?? data.relay?.clientCount ?? 0)} clients`,
@@ -330,6 +358,7 @@
         icon: Radio,
       },
       {
+        ...stageSeverity('bootstrap.custody', custodyOk, custodyEnabled ? 'Custody is enabled and must be healthy' : 'Custody disabled for this boot', data.timestamp),
         key: 'custody',
         label: 'Custody',
         value: custodyEnabled ? (custodyOk ? 'ready' : 'blocked') : 'disabled',
@@ -340,6 +369,10 @@
         icon: WalletCards,
       },
       {
+        ...stageSeverity('bootstrap.reserves', reservesOk, 'Bootstrap reserve targets', data.timestamp, [
+          { label: 'ready entities', value: readyReserveEntities },
+          { label: 'reserve entities', value: reserveEntities.length },
+        ]),
         key: 'reserves',
         label: 'Bootstrap reserves',
         value: `${readyReserveEntities}/${reserveEntities.length || data.bootstrapReserves?.entityCount || 0} entities`,
@@ -352,6 +385,11 @@
         icon: Coins,
       },
       {
+        ...stageSeverity('bootstrap.mm-books', mmEnabled ? mmFullHubs > 0 && mmFullHubs >= (mmHubCount || 3) : true, 'Market-maker same-chain book depth', data.timestamp, [
+          { label: 'full hubs', value: mmFullHubs },
+          { label: 'hub count', value: mmHubCount },
+          { label: 'offers', value: mmOfferTotal },
+        ]),
         key: 'mm-books',
         label: 'MM same-chain books',
         value: mmEnabled ? `${mmFullHubs}/${mmHubCount || 3} hubs` : 'disabled',
@@ -362,6 +400,10 @@
         icon: Store,
       },
       {
+        ...stageSeverity('bootstrap.mm-cross', mmEnabled && crossApplicable ? cross?.ok === true : true, 'Market-maker cross-route depth', data.timestamp, [
+          { label: 'depth routes', value: crossDepthRoutes },
+          { label: 'expected routes', value: expectedRoutes },
+        ]),
         key: 'mm-cross',
         label: 'MM cross routes',
         value: crossApplicable ? `${crossDepthRoutes || (cross?.ok ? expectedRoutes : 0)}/${expectedRoutes || routeCount} routes` : 'neutral',
@@ -376,6 +418,9 @@
         icon: Route,
       },
       {
+        ...stageSeverity('bootstrap.terminal', terminalReady && criticalCount === 0, terminalReady ? 'Terminal bootstrap gate is ready' : (data.degraded ?? []).join(', ') || 'Terminal bootstrap pending', data.timestamp, [
+          { label: 'critical signals', value: criticalCount },
+        ]),
         key: 'terminal',
         label: 'Terminal ready',
         value: terminalReady ? 'offers-ready' : (data.degraded ?? []).join(', ') || 'pending',
@@ -386,6 +431,9 @@
         icon: CheckCircle2,
       },
       {
+        ...stageSeverity('bootstrap.storage', storageOk, 'Storage and disk health', data.timestamp, [
+          { label: 'used percent', value: data.disk?.usedPct ?? null },
+        ]),
         key: 'storage',
         label: 'Storage',
         value: data.disk?.freeGiB !== undefined ? `${data.disk.freeGiB.toFixed(1)} GiB free` : 'tracked',
@@ -464,7 +512,7 @@
         <div class="stage-body">
           <div class="stage-top">
             <strong>{stage.label}</strong>
-            <span>{stage.progress}%</span>
+            <span>{stage.severity} · {stage.progress}%</span>
           </div>
           <p>{stage.value}</p>
           <small>{stage.detail}</small>
