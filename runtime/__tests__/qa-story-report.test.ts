@@ -19,6 +19,7 @@ import {
   applyQaRunSeverity,
   assertQaReleaseRunSeverity,
   auditQaUxReleasePack,
+  buildQaRegressionReport,
   buildQaRunLedger,
   buildQaSystemVerdict,
   classifyQaArtifactSensitivity,
@@ -249,6 +250,71 @@ test('qa benchmark comparison flags sharp runtime deltas', () => {
   expect(higherHostLoadOnly.metrics.find(metric => metric.metric === 'peakLoad1')?.verdict).toBe('slower');
   expect(higherHostLoadOnly.reason).toContain('host load');
   expect(higherHostLoadOnly.likelyCauses).toContain('host load increased without app timing regression');
+});
+
+test('qa regression report compares latest run against previous same code head and last green main', () => {
+  const at = (minute: number): number => Date.UTC(2026, 5, 23, 0, minute, 0);
+  const make = (
+    runId: string,
+    minute: number,
+    totalMs: number,
+    playwrightMs: number,
+    codeHash: string,
+    gitHead: string,
+    gitBranch = 'main',
+    status: QaRunManifest['status'] = 'passed',
+  ): QaRunManifest => {
+    const base = benchmarkRun(runId, totalMs, playwrightMs, codeHash, gitHead);
+    return applyQaRunSeverity({
+      ...base,
+      createdAt: at(minute),
+      completedAt: at(minute) + totalMs,
+      status,
+      passedShards: status === 'passed' ? 1 : 0,
+      failedShards: status === 'failed' ? 1 : 0,
+      code: {
+        ...base.code!,
+        gitBranch,
+      },
+      shards: base.shards.map(shard => ({
+        ...shard,
+        status,
+        error: status === 'failed' ? 'Expected regression fixture failure' : null,
+        failureClass: status === 'failed' ? 'assertion' : null,
+      })),
+    });
+  };
+  const latest = make('latest-regression', 50, 1500, 1200, 'new-code', 'new-head', 'feature', 'failed');
+  const previous = make('previous-regression', 40, 1000, 800, 'old-code', 'old-head', 'feature');
+  const sameCode = make('same-code-regression', 30, 1100, 820, 'new-code', 'older-head', 'feature');
+  const sameHead = make('same-head-regression', 20, 1050, 790, 'other-code', 'new-head', 'feature');
+  const greenMain = make('green-main-regression', 10, 900, 720, 'green-code', 'green-head', 'main');
+  const report = buildQaRegressionReport([
+    latest,
+    previous,
+    sameCode,
+    sameHead,
+    greenMain,
+  ].map(summarizeQaRun));
+
+  expect(report.status).toBe('failed');
+  expect(report.severity).toBe('FAIL');
+  expect(report.latestRunId).toBe('latest-regression');
+  expect(report.reason).toContain('New failing target');
+  expect(report.comparisons.map(item => item.kind)).toEqual([
+    'previous',
+    'same-code-hash',
+    'same-git-head',
+    'last-green-main',
+  ]);
+  const previousComparison = report.comparisons.find(item => item.kind === 'previous');
+  expect(previousComparison?.comparedRunId).toBe('previous-regression');
+  expect(previousComparison?.status).toBe('failed');
+  expect(previousComparison?.metrics.find(metric => metric.metric === 'totalMs')?.deltaPct).toBe(50);
+  expect(previousComparison?.newFailingTargets).toEqual(['qa cockpit']);
+  expect(report.comparisons.find(item => item.kind === 'same-code-hash')?.comparedRunId).toBe('same-code-regression');
+  expect(report.comparisons.find(item => item.kind === 'same-git-head')?.comparedRunId).toBe('same-head-regression');
+  expect(report.comparisons.find(item => item.kind === 'last-green-main')?.comparedRunId).toBe('green-main-regression');
 });
 
 test('qa severity model normalizes legacy runs and gates release manifests', () => {
@@ -1445,6 +1511,7 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
           cpuPeakPct?: number | null;
           failedShard?: string | null;
         }>;
+        regression?: { latestRunId?: string | null; status?: string; comparisons?: unknown[] };
         verdict?: { status?: string; latestRunId?: string | null; reason?: string; activeCount?: number };
       };
       expect(payload.ok).toBe(true);
@@ -1466,6 +1533,9 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       expect(ledgerRow?.cpuP95Pct).toBe(42);
       expect(ledgerRow?.cpuPeakPct).toBe(42);
       expect(ledgerRow?.failedShard).toBe('qa cockpit');
+      expect(payload.regression?.latestRunId).toBe(runId);
+      expect(payload.regression?.status).toBe('insufficient');
+      expect(payload.regression?.comparisons?.length).toBe(4);
     });
   } finally {
     deleteQaHistoryRows([runId]);

@@ -447,6 +447,88 @@ const QA_FAST_LEDGER = {
   auditAction: null,
 };
 
+const QA_REGRESSION_REPORT = {
+  ...qaSignal('FAIL', 'New failing target vs 20260623-225959-888: qa.cockpit-fixture', 'qa-regression', QA_FIXTURE_RUN.createdAt),
+  status: 'failed',
+  latestRunId: QA_FIXTURE_RUN_ID,
+  suiteKey: 'fixture-suite',
+  suiteLabel: 'qa.cockpit-fixture',
+  comparisons: [
+    {
+      kind: 'previous',
+      label: 'previous comparable',
+      status: 'failed',
+      comparedRunId: QA_FAST_RUN_ID,
+      comparedGitHead: QA_FAST_SUMMARY.code.gitHead,
+      comparedCodeHash: QA_FAST_SUMMARY.code.codeHash,
+      reason: `New failing target vs ${QA_FAST_RUN_ID}: qa.cockpit-fixture`,
+      metrics: [
+        {
+          metric: 'totalMs',
+          label: 'wall time',
+          unit: 'ms',
+          current: QA_FIXTURE_RUN.totalMs,
+          baseline: QA_FAST_SUMMARY.totalMs,
+          delta: QA_FIXTURE_RUN.totalMs - QA_FAST_SUMMARY.totalMs,
+          deltaPct: 80,
+          thresholdPct: 20,
+          verdict: 'slower',
+        },
+      ],
+      newFailingTargets: ['qa.cockpit-fixture'],
+      likelyCauses: ['new failing target: qa.cockpit-fixture', 'largest delta: wall time +80%'],
+    },
+    {
+      kind: 'same-code-hash',
+      label: 'previous same code hash',
+      status: 'insufficient',
+      comparedRunId: null,
+      comparedGitHead: null,
+      comparedCodeHash: null,
+      reason: 'No previous same code hash baseline found',
+      metrics: [],
+      newFailingTargets: [],
+      likelyCauses: [],
+    },
+    {
+      kind: 'same-git-head',
+      label: 'previous same HEAD',
+      status: 'insufficient',
+      comparedRunId: null,
+      comparedGitHead: null,
+      comparedCodeHash: null,
+      reason: 'No previous same HEAD baseline found',
+      metrics: [],
+      newFailingTargets: [],
+      likelyCauses: [],
+    },
+    {
+      kind: 'last-green-main',
+      label: 'last green on main',
+      status: 'slower',
+      comparedRunId: QA_FAST_RUN_ID,
+      comparedGitHead: QA_FAST_SUMMARY.code.gitHead,
+      comparedCodeHash: QA_FAST_SUMMARY.code.codeHash,
+      reason: `wall time +80% vs ${QA_FAST_RUN_ID}`,
+      metrics: [
+        {
+          metric: 'totalMs',
+          label: 'wall time',
+          unit: 'ms',
+          current: QA_FIXTURE_RUN.totalMs,
+          baseline: QA_FAST_SUMMARY.totalMs,
+          delta: QA_FIXTURE_RUN.totalMs - QA_FAST_SUMMARY.totalMs,
+          deltaPct: 80,
+          thresholdPct: 20,
+          verdict: 'slower',
+        },
+      ],
+      newFailingTargets: [],
+      likelyCauses: ['code hash changed', 'largest delta: wall time +80%'],
+    },
+  ],
+};
+
 const QA_CATALOG = [
   {
     id: 'e2e-isolated',
@@ -915,6 +997,7 @@ test.describe('QA cockpit scenario player', () => {
       qaAuth: QA_AUTH,
       runs: [QA_FIXTURE_SUMMARY, QA_FAST_SUMMARY],
       ledger: [QA_FAIL_LEDGER, QA_FAST_LEDGER],
+      regression: QA_REGRESSION_REPORT,
       verdict: QA_FAIL_VERDICT,
     };
     await page.route('**/api/qa/runs?**', async (route) => {
@@ -1147,6 +1230,13 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-system-suites')).toContainText('Contract Tests');
     await page.getByRole('button', { name: 'Benchmarks' }).click();
     await expect(page.getByTestId('qa-benchmarks')).toContainText('Swap Runtime TPS');
+    await expect(page.getByTestId('qa-regression-comparator')).toContainText('Regression Comparator');
+    await expect(page.getByTestId('qa-regression-comparator')).toContainText('FAIL');
+    await expect(page.getByTestId('qa-regression-comparator')).toContainText('previous comparable');
+    await expect(page.getByTestId('qa-regression-comparator')).toContainText('last green on main');
+    await expect(page.getByTestId('qa-regression-comparator')).toContainText('new fail qa.cockpit-fixture');
+    await expect(page.getByTestId('qa-regression-comparator')).toContainText('wall time +80.0%');
+    await expect(page.locator('[data-testid="qa-regression-row"][data-kind="previous"]')).toContainText(QA_FAST_RUN_ID);
     await expect(page.getByTestId('qa-benchmarks')).toContainText('cpu 44.2%');
     await expect(page.getByTestId('qa-benchmarks')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-benchmarks')).toContainText('SLOWER +25.0%');
@@ -1244,6 +1334,14 @@ test.describe('QA cockpit scenario player', () => {
       qaAuth: QA_AUTH,
       runs: [QA_FAST_SUMMARY],
       ledger: [QA_FAST_LEDGER],
+      regression: {
+        ...QA_REGRESSION_REPORT,
+        ...qaSignal('OK', 'Within thresholds vs baseline', 'qa-regression', QA_FAST_SUMMARY.createdAt),
+        status: 'ok',
+        latestRunId: QA_FAST_RUN_ID,
+        suiteLabel: 'qa.cockpit-green',
+        comparisons: [],
+      },
       verdict: QA_PASS_VERDICT,
     };
     await page.reload();
