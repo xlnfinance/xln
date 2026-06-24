@@ -201,10 +201,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - UI: Benchmarks tab shows a Regression Comparator with `FAIL/SLOWER/MIXED/OK/NEW`, baseline run IDs, top percent deltas, new failing handles, and likely causes.
   - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `36/36`; focused QA cockpit e2e `20260624-123022-236` PASS `1/1`, wall `12.0s`, code hash `9adf798a4948d81f`, benchmark OK. Fixture verifies previous/same-code/same-HEAD/last-green comparison and rendered regression badge/delta.
 
-- [ ] Add phase-time waterfall per shard.
+- [x] Add phase-time waterfall per shard.
   - Impact: medium.
   - UI: stacked bar for preflight, anvil, API boot, health, Vite, Playwright. Flag phase above p95 historical.
   - Tests: phase fixture renders stable labels and flags budget breach.
+  - Status: done. `/api/qa/run` now includes `phaseWaterfall` per shard, `/api/qa/runs` and history rows persist `timing.phaseP95`, and the QA cockpit selected-shard panel renders a stacked phase waterfall with per-phase ms, share %, p95/budget label, and `over budget` breach state.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `37/37`; focused QA cockpit e2e `20260624-130238-476` PASS `1/1`, wall `12.1s`, code hash `cd7c8bca7c21b171`, benchmark OK. Fixture verifies stable phase labels plus `playwright` budget breach rendering.
 
 - [ ] Add failure inbox.
   - Impact: high.

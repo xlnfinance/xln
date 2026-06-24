@@ -42,6 +42,51 @@ export type QaPhaseTimings = {
   playwright: number;
 };
 
+export type QaPhaseKey = keyof QaPhaseTimings;
+
+export type QaPhaseWaterfallSegment = {
+  key: QaPhaseKey;
+  label: string;
+  ms: number;
+  pct: number;
+  limitMs: number;
+  limitKind: 'budget' | 'historical-p95';
+  overLimit: boolean;
+};
+
+export type QaPhaseWaterfall = {
+  totalMs: number;
+  overLimitCount: number;
+  segments: QaPhaseWaterfallSegment[];
+};
+
+export const QA_PHASE_WATERFALL_ORDER = [
+  'preflight',
+  'anvilBoot',
+  'apiBoot',
+  'apiHealthy',
+  'viteBoot',
+  'playwright',
+] as const satisfies readonly QaPhaseKey[];
+
+export const QA_PHASE_WATERFALL_LABELS: Record<QaPhaseKey, string> = {
+  preflight: 'preflight',
+  anvilBoot: 'anvil',
+  apiBoot: 'api boot',
+  apiHealthy: 'health',
+  viteBoot: 'vite',
+  playwright: 'playwright',
+};
+
+export const QA_PHASE_WATERFALL_BUDGET_MS: Record<QaPhaseKey, number> = {
+  preflight: 1_000,
+  anvilBoot: 5_000,
+  apiBoot: 5_000,
+  apiHealthy: 5_000,
+  viteBoot: 5_000,
+  playwright: 5_000,
+};
+
 export type QaCodeFingerprint = {
   gitHead: string | null;
   gitBranch: string | null;
@@ -181,6 +226,7 @@ export type QaRunTimingSummary = {
   bootstrapMs: number | null;
   apiHealthyMs: number | null;
   playwrightMs: number | null;
+  phaseP95: QaPhaseTimings | null;
 };
 
 export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmark' | 'release' | 'unknown';
@@ -230,6 +276,7 @@ export type QaRunManifest = {
 
 export type QaShardView = Omit<QaShardManifest, 'perf'> & {
   perf?: QaPerfSummaryView;
+  phaseWaterfall?: QaPhaseWaterfall | null;
 };
 
 export type QaRunView = Omit<QaRunManifest, 'perf' | 'shards'> & {
@@ -335,6 +382,7 @@ export type QaHistoryEntry = {
   bootstrapMs: number | null;
   apiHealthyMs: number | null;
   playwrightMs: number | null;
+  phaseP95: QaPhaseTimings | null;
   logsDir: string;
 };
 
@@ -1310,6 +1358,38 @@ const percentile95 = (values: number[]): number | null => {
   return Math.round(sorted[index]! * 100) / 100;
 };
 
+const phaseValue = (phaseMs: QaPhaseTimings, key: QaPhaseKey): number =>
+  Math.max(0, Math.floor(Number(phaseMs[key]) || 0));
+
+export const buildQaPhaseWaterfall = (
+  phaseMs: QaPhaseTimings | null,
+  historicalP95: Partial<Record<QaPhaseKey, number | null>> | null = null,
+): QaPhaseWaterfall | null => {
+  if (!phaseMs) return null;
+  const totalMs = QA_PHASE_WATERFALL_ORDER.reduce((sum, key) => sum + phaseValue(phaseMs, key), 0);
+  const denominator = totalMs > 0 ? totalMs : 1;
+  const segments = QA_PHASE_WATERFALL_ORDER.map((key): QaPhaseWaterfallSegment => {
+    const ms = phaseValue(phaseMs, key);
+    const p95 = historicalP95?.[key];
+    const hasHistoricalP95 = typeof p95 === 'number' && Number.isFinite(p95) && p95 > 0;
+    const limitMs = Math.max(0, Math.floor(hasHistoricalP95 ? p95 : QA_PHASE_WATERFALL_BUDGET_MS[key]));
+    return {
+      key,
+      label: QA_PHASE_WATERFALL_LABELS[key],
+      ms,
+      pct: Math.round((ms / denominator) * 10_000) / 100,
+      limitMs,
+      limitKind: hasHistoricalP95 ? 'historical-p95' : 'budget',
+      overLimit: limitMs > 0 && ms > limitMs,
+    };
+  });
+  return {
+    totalMs,
+    overLimitCount: segments.filter(segment => segment.overLimit).length,
+    segments,
+  };
+};
+
 const qaRunChildCpuP95 = (run: Pick<QaRunManifest, 'perf'>): number | null =>
   percentile95((run.perf?.samples ?? []).flatMap(sample => sample.children.map(child => child.cpuPct)));
 
@@ -1349,6 +1429,17 @@ const averagePhaseMs = (run: QaRunManifest, key: keyof QaPhaseTimings): number |
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 };
 
+const p95PhaseMs = (run: QaRunManifest, key: QaPhaseKey): number | null =>
+  percentile95(run.shards
+    .map(shard => shard.phaseMs?.[key])
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)));
+
+const summarizeQaRunPhaseP95 = (run: QaRunManifest): QaPhaseTimings | null => {
+  const entries = QA_PHASE_WATERFALL_ORDER.map((key): [QaPhaseKey, number | null] => [key, p95PhaseMs(run, key)]);
+  if (entries.some(([, value]) => value === null)) return null;
+  return Object.fromEntries(entries) as QaPhaseTimings;
+};
+
 const averageShardMs = (run: QaRunManifest): number | null => {
   const values = run.shards
     .map(shard => shard.durationMs)
@@ -1382,6 +1473,7 @@ export const summarizeQaRunTiming = (run: QaRunManifest): QaRunTimingSummary => 
   bootstrapMs: averageBootstrapMs(run),
   apiHealthyMs: averagePhaseMs(run, 'apiHealthy'),
   playwrightMs: averagePhaseMs(run, 'playwright'),
+  phaseP95: summarizeQaRunPhaseP95(run),
 });
 
 const benchmarkSnapshot = (run: QaRunManifest): BenchmarkMetricSnapshot[] => [
@@ -1588,6 +1680,12 @@ const openQaHistoryDb = (): Database => {
       bootstrap_ms REAL,
       api_healthy_ms REAL,
       playwright_ms REAL,
+      phase_p95_preflight_ms REAL,
+      phase_p95_anvil_boot_ms REAL,
+      phase_p95_api_boot_ms REAL,
+      phase_p95_api_healthy_ms REAL,
+      phase_p95_vite_boot_ms REAL,
+      phase_p95_playwright_ms REAL,
       logs_dir TEXT NOT NULL,
       manifest_json TEXT NOT NULL
     );
@@ -1615,12 +1713,31 @@ const openQaHistoryDb = (): Database => {
   addColumn('bootstrap_ms', 'REAL');
   addColumn('api_healthy_ms', 'REAL');
   addColumn('playwright_ms', 'REAL');
+  addColumn('phase_p95_preflight_ms', 'REAL');
+  addColumn('phase_p95_anvil_boot_ms', 'REAL');
+  addColumn('phase_p95_api_boot_ms', 'REAL');
+  addColumn('phase_p95_api_healthy_ms', 'REAL');
+  addColumn('phase_p95_vite_boot_ms', 'REAL');
+  addColumn('phase_p95_playwright_ms', 'REAL');
   db.exec(`CREATE INDEX IF NOT EXISTS qa_runs_suite_key_idx ON qa_runs(suite_key, created_at DESC);`);
   return db;
 };
 
 const toNullableNumber = (value: unknown): number | null =>
   typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+const rowToPhaseP95 = (row: Record<string, unknown>): QaPhaseTimings | null => {
+  const phase = {
+    preflight: toNullableNumber(row['phase_p95_preflight_ms']),
+    anvilBoot: toNullableNumber(row['phase_p95_anvil_boot_ms']),
+    apiBoot: toNullableNumber(row['phase_p95_api_boot_ms']),
+    apiHealthy: toNullableNumber(row['phase_p95_api_healthy_ms']),
+    viteBoot: toNullableNumber(row['phase_p95_vite_boot_ms']),
+    playwright: toNullableNumber(row['phase_p95_playwright_ms']),
+  };
+  if (QA_PHASE_WATERFALL_ORDER.some(key => phase[key] === null)) return null;
+  return phase as QaPhaseTimings;
+};
 
 const stripQaHistoryPerfSamples = (run: QaRunManifest): QaRunManifest => ({
   ...run,
@@ -1671,6 +1788,12 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         bootstrap_ms,
         api_healthy_ms,
         playwright_ms,
+        phase_p95_preflight_ms,
+        phase_p95_anvil_boot_ms,
+        phase_p95_api_boot_ms,
+        phase_p95_api_healthy_ms,
+        phase_p95_vite_boot_ms,
+        phase_p95_playwright_ms,
         logs_dir,
         manifest_json
       ) VALUES (
@@ -1705,6 +1828,12 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         $bootstrapMs,
         $apiHealthyMs,
         $playwrightMs,
+        $phaseP95PreflightMs,
+        $phaseP95AnvilBootMs,
+        $phaseP95ApiBootMs,
+        $phaseP95ApiHealthyMs,
+        $phaseP95ViteBootMs,
+        $phaseP95PlaywrightMs,
         $logsDir,
         $manifestJson
       )
@@ -1739,6 +1868,12 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         bootstrap_ms = excluded.bootstrap_ms,
         api_healthy_ms = excluded.api_healthy_ms,
         playwright_ms = excluded.playwright_ms,
+        phase_p95_preflight_ms = excluded.phase_p95_preflight_ms,
+        phase_p95_anvil_boot_ms = excluded.phase_p95_anvil_boot_ms,
+        phase_p95_api_boot_ms = excluded.phase_p95_api_boot_ms,
+        phase_p95_api_healthy_ms = excluded.phase_p95_api_healthy_ms,
+        phase_p95_vite_boot_ms = excluded.phase_p95_vite_boot_ms,
+        phase_p95_playwright_ms = excluded.phase_p95_playwright_ms,
         logs_dir = excluded.logs_dir,
         manifest_json = excluded.manifest_json
     `).run({
@@ -1773,6 +1908,12 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
       $bootstrapMs: timing.bootstrapMs,
       $apiHealthyMs: timing.apiHealthyMs,
       $playwrightMs: timing.playwrightMs,
+      $phaseP95PreflightMs: timing.phaseP95?.preflight ?? null,
+      $phaseP95AnvilBootMs: timing.phaseP95?.anvilBoot ?? null,
+      $phaseP95ApiBootMs: timing.phaseP95?.apiBoot ?? null,
+      $phaseP95ApiHealthyMs: timing.phaseP95?.apiHealthy ?? null,
+      $phaseP95ViteBootMs: timing.phaseP95?.viteBoot ?? null,
+      $phaseP95PlaywrightMs: timing.phaseP95?.playwright ?? null,
       $logsDir: logsDir,
       $manifestJson: JSON.stringify(stripQaHistoryPerfSamples(normalizedRun)),
     });
@@ -1819,7 +1960,17 @@ const rowToQaHistoryEntry = (row: Record<string, unknown>): QaHistoryEntry => ({
   bootstrapMs: toNullableNumber(row['bootstrap_ms']),
   apiHealthyMs: toNullableNumber(row['api_healthy_ms']),
   playwrightMs: toNullableNumber(row['playwright_ms']),
+  phaseP95: rowToPhaseP95(row),
   logsDir: String(row['logs_dir'] || ''),
+});
+
+const historyTimingSummary = (history: QaHistoryEntry): QaRunTimingSummary => ({
+  avgShardMs: history.avgShardMs,
+  maxShardMs: history.maxShardMs,
+  bootstrapMs: history.bootstrapMs,
+  apiHealthyMs: history.apiHealthyMs,
+  playwrightMs: history.playwrightMs,
+  phaseP95: history.phaseP95,
 });
 
 const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
@@ -1829,6 +1980,10 @@ const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
     const summary = summarizeQaRun(parsed);
     return {
       ...summary,
+      timing: {
+        ...summary.timing,
+        phaseP95: history.phaseP95 ?? summary.timing.phaseP95,
+      },
       childCpuP95Pct: history.childCpuP95Pct ?? summary.childCpuP95Pct,
     };
   }
@@ -1856,6 +2011,7 @@ const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
   } as unknown as QaRunManifest));
   return {
     ...summary,
+    timing: historyTimingSummary(history),
     childCpuP95Pct: history.childCpuP95Pct ?? summary.childCpuP95Pct,
   };
 };
@@ -1944,6 +2100,12 @@ export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
         bootstrap_ms,
         api_healthy_ms,
         playwright_ms,
+        phase_p95_preflight_ms,
+        phase_p95_anvil_boot_ms,
+        phase_p95_api_boot_ms,
+        phase_p95_api_healthy_ms,
+        phase_p95_vite_boot_ms,
+        phase_p95_playwright_ms,
         logs_dir
       FROM qa_runs
       ORDER BY
@@ -1994,6 +2156,12 @@ export const listQaRunSummaries = async (limit = 20): Promise<QaRunSummary[]> =>
         bootstrap_ms,
         api_healthy_ms,
         playwright_ms,
+        phase_p95_preflight_ms,
+        phase_p95_anvil_boot_ms,
+        phase_p95_api_boot_ms,
+        phase_p95_api_healthy_ms,
+        phase_p95_vite_boot_ms,
+        phase_p95_playwright_ms,
         logs_dir,
         manifest_json
       FROM qa_runs
@@ -2677,6 +2845,7 @@ export const stripQaRunPerfSamples = (run: QaRunManifest): QaRunView => ({
   ...(run.perf ? { perf: summarizeQaPerf(run.perf) } : {}),
   shards: run.shards.map(shard => ({
     ...shard,
+    phaseWaterfall: buildQaPhaseWaterfall(shard.phaseMs),
     ...(shard.perf ? { perf: summarizeQaPerf(shard.perf) } : {}),
   })),
 });

@@ -1182,6 +1182,11 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/);
     await expect(page.locator('[data-testid="qa-suite-row"][data-shard="1"]')).toHaveClass(/selected/);
     await expect(page.locator('.shard-detail')).toContainText('qa.cockpit-fixture');
+    await expect(page.getByTestId('qa-phase-waterfall')).toContainText('playwright');
+    await expect(page.getByTestId('qa-phase-waterfall')).toContainText('7.2s');
+    await expect(page.locator('[data-testid="qa-phase-row"][data-phase="playwright"]')).toContainText('5.7s');
+    await expect(page.locator('[data-testid="qa-phase-row"][data-phase="playwright"]')).toContainText('budget 5.0s');
+    await expect(page.locator('[data-testid="qa-phase-row"][data-phase="playwright"]')).toContainText('over budget');
     await expect(page.getByTestId('qa-video-player')).toBeVisible();
     const activeFailureCue = page.locator('[data-testid="qa-subtitle-cue"][aria-current="step"][data-failure-cue="true"]');
     await expect(activeFailureCue).toContainText('Failure');

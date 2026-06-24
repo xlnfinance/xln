@@ -19,6 +19,7 @@ import {
   applyQaRunSeverity,
   assertQaReleaseRunSeverity,
   auditQaUxReleasePack,
+  buildQaPhaseWaterfall,
   buildQaRegressionReport,
   buildQaRunLedger,
   buildQaSystemVerdict,
@@ -250,6 +251,35 @@ test('qa benchmark comparison flags sharp runtime deltas', () => {
   expect(higherHostLoadOnly.metrics.find(metric => metric.metric === 'peakLoad1')?.verdict).toBe('slower');
   expect(higherHostLoadOnly.reason).toContain('host load');
   expect(higherHostLoadOnly.likelyCauses).toContain('host load increased without app timing regression');
+});
+
+test('qa phase waterfall keeps stable phase labels and flags budget breach', () => {
+  const waterfall = buildQaPhaseWaterfall({
+    preflight: 100,
+    anvilBoot: 200,
+    apiBoot: 300,
+    apiHealthy: 400,
+    viteBoot: 500,
+    playwright: 5_700,
+  });
+
+  expect(waterfall?.totalMs).toBe(7_200);
+  expect(waterfall?.segments.map(segment => segment.label)).toEqual([
+    'preflight',
+    'anvil',
+    'api boot',
+    'health',
+    'vite',
+    'playwright',
+  ]);
+  expect(waterfall?.segments.find(segment => segment.key === 'playwright')).toMatchObject({
+    ms: 5_700,
+    limitMs: 5_000,
+    limitKind: 'budget',
+    overLimit: true,
+  });
+  expect(waterfall?.segments.find(segment => segment.key === 'playwright')?.pct).toBe(79.17);
+  expect(waterfall?.overLimitCount).toBe(1);
 });
 
 test('qa regression report compares latest run against previous same code head and last green main', () => {
