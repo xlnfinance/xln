@@ -821,11 +821,17 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(frameProbe.afterBooks).toBeLessThanOrEqual(1);
 
   await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('time-machine-remote-target')).toBeVisible();
+  await expect(page.getByTestId('time-machine-remote-target')).toContainText(/hub/i);
   await page.getByTestId('time-machine-remote-height').fill(String(controlResult.beforeHeight));
   await page.getByTestId('time-machine-remote-scan-button').click();
   await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: 30_000 });
   await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(/ms/);
   await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
+  await expect(page.getByTestId('time-machine-remote-diff')).toContainText(/Δh/);
+  await page.getByTestId('time-machine-remote-deeplink').click();
+  await expect.poll(() => new URL(page.url()).hash).toContain(`tmHeight=${controlResult.beforeHeight}`);
+  await expect.poll(() => new URL(page.url()).hash).toContain('tmEntity=');
   const timeMachineProbe = await page.evaluate((height) => {
     const view = window as typeof window & {
       isolatedEnv?: { history?: Array<{ height?: number }> };
@@ -841,6 +847,12 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(timeMachineProbe.historyLength).toBeLessThanOrEqual(24);
   expect(timeMachineProbe.hasRequestedHeight).toBe(true);
   expect(timeMachineProbe.maxHistoryHeight).toBeGreaterThanOrEqual(after.envHeight);
+
+  const deepLinkUrl = page.url();
+  await page.goto(deepLinkUrl, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: 60_000 });
+  await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
 });
 
 test('runtime dropdown manager attaches a remote radapter by token', async ({ page }) => {

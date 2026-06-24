@@ -257,6 +257,12 @@ export const REMOTE_RUNTIME = {
   MAX_IMPORTS: 100,
 } as const;
 
+export const TIME_MACHINE = {
+  HASH_HEIGHT_PARAM: 'tmHeight',
+  HASH_ENTITY_PARAM: 'tmEntity',
+  HASH_RUNTIME_PARAM: 'tmRuntime',
+} as const;
+
 // ═══════════════════════════════════════════════════════════════
 // QA / RELEASE EVIDENCE
 // ═══════════════════════════════════════════════════════════════
