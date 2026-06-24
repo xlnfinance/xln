@@ -10,6 +10,7 @@
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
   import { entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
   import VRControlsHUD from '../components/VRControlsHUD.svelte';
+  import Graph3DFpsOverlay from '../components/Graph3DFpsOverlay.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
   import EntityMiniPanel from '../components/EntityMiniPanel.svelte';
   import { compareStableText } from '$lib/utils/stableSort';
@@ -3823,6 +3824,10 @@
     camera.updateProjectionMatrix();
     renderer.setSize(containerWidth, containerHeight);
   }
+  function toggleBarsMode() {
+    barsMode = barsMode === 'close' ? 'spread' : 'close';
+    saveBirdViewSettings();
+  }
 </script>
 
 <div class="graph3d-wrapper">
@@ -3842,40 +3847,15 @@
     />
   {/if}
   {#if showFpsOverlay}
-  <div class="fps-overlay">
-    <div class="fps-stat" class:fps-good={renderFps >= 55} class:fps-ok={renderFps >= 30 && renderFps < 55} class:fps-bad={renderFps < 30}>
-      <span class="fps-label">Render FPS</span>
-      <span class="fps-value">{renderFps.toFixed(1)}</span>
-    </div>
-    <div class="fps-stat-secondary">
-      <span>{frameTime.toFixed(2)}ms/frame</span>
-    </div>
-
-    <div class="stats-divider"></div>
-
-    <div class="network-stat">
-      <span class="stat-label">Entities</span>
-      <span class="stat-value">{entities.length}</span>
-    </div>
-
-    <div class="network-stat">
-      <span class="stat-label">Connections</span>
-      <span class="stat-value">{connections.length}</span>
-    </div>
-
-    <div class="network-stat">
-      <span class="stat-label">Particles</span>
-      <span class="stat-value">{particles.length}</span>
-    </div>
-
-    <button
-      class="bars-mode-toggle"
-      on:click={() => { barsMode = barsMode === 'close' ? 'spread' : 'close'; saveBirdViewSettings(); }}
-      title="Toggle bars positioning: {barsMode === 'close' ? 'Center (close)' : 'Sides (spread)'}"
-    >
-      Bars: {barsMode === 'close' ? '⬌ Center' : '↔ Sides'}
-    </button>
-  </div>
+    <Graph3DFpsOverlay
+      {renderFps}
+      {frameTime}
+      entityCount={entities.length}
+      connectionCount={connections.length}
+      particleCount={particles.length}
+      {barsMode}
+      onToggleBars={toggleBarsMode}
+    />
   {/if}
 
   <VRControlsHUD
@@ -3923,81 +3903,4 @@
     height: 100%;
   }
 
-  .fps-overlay {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    background: rgba(0, 0, 0, 0.7);
-    border: 1px solid rgba(0, 255, 65, 0.3);
-    border-radius: 6px;
-    padding: 8px 12px;
-    font-family: 'Courier New', monospace;
-    pointer-events: none;
-    z-index: 100;
-  }
-
-  .fps-stat {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 4px;
-  }
-
-  .fps-label {
-    font-size: 11px;
-    color: #888;
-    text-transform: uppercase;
-  }
-
-  .fps-value {
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.5px;
-  }
-
-  .fps-good .fps-value {
-    color: #00ff41;
-  }
-
-  .fps-ok .fps-value {
-    color: #ffaa00;
-  }
-
-  .fps-bad .fps-value {
-    color: #ff4646;
-  }
-
-  .fps-stat-secondary {
-    font-size: 10px;
-    color: #666;
-    text-align: right;
-  }
-
-  .stats-divider {
-    height: 1px;
-    background: rgba(0, 255, 65, 0.2);
-    margin: 8px 0;
-  }
-
-  .network-stat {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 4px;
-  }
-
-  .stat-label {
-    font-size: 10px;
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .stat-value {
-    font-size: 14px;
-    font-weight: 700;
-    color: #00ff88;
-    font-family: 'Courier New', monospace;
-  }
 </style>
