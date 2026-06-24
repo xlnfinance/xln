@@ -288,6 +288,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused move-direct browser flow PASS `1/1`, run `20260624-154411-170`, wall `17.0s`, code hash `e76441fa4ea4fa6c`, benchmark OK vs `20260624-154004-542`.
   - Progress: third assets-owned extraction done. External EOA/source metadata moved into `AssetWalletMeta.svelte`; shared snapshot source type moved into `asset-ledger.ts`; generic content button override now excludes asset action buttons.
   - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused move-direct browser flow PASS `1/1`, run `20260624-154751-725`, wall `16.6s`, code hash `e182691a8ac002c5`, benchmark OK vs `20260624-154411-170`.
+  - Progress: fourth extraction done. Shared debt/pending batch banner moved into `PendingBatchNotice.svelte`, replacing duplicate Assets and Accounts markup while preserving separate history handlers and debt notes.
+  - Evidence: L1 first exposed an implicit `string | null` mode type and then passed after source typing; L2 focused move routed-path browser flow PASS `1/1`, run `20260624-155300-762`, wall `32.7s`, code hash `129dd604efcaa79c`, benchmark OK with host-load-only delta. Updated three move batch UX gallery PNGs from the e2e run.
 
 ## p2 performance and scale
 
