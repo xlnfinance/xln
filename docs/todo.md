@@ -342,7 +342,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 3,842 lines, `EntityPanelTabs.svelte` 3,801 lines, `SwapPanel.svelte` 3,798 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 3,805 lines, `EntityPanelTabs.svelte` 3,801 lines, `SwapPanel.svelte` 3,798 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move Graph3D pure helpers out of the Svelte panel.
   - Impact: medium.
@@ -361,6 +361,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts` PASS `10/10`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused BrowserVM/Graph3D e2e `20260624-192909-783` PASS `1/1`, wall `11.3s`, HEAD `cba021ea99c0`, code hash `dabd163262f4cfa5`, benchmark OK vs `20260624-190432-235`, browser errors `0`, browser warnings `4` all WebGL `ReadPixels` performance warnings.
   - Progress: seventh extraction done. Scene/runtime/entity/connection/payment/ripple TypeScript contracts moved into `graph3d-types.ts`; `Graph3DPanel.svelte` is down to 3,842 lines. This is type-only ownership cleanup; renderer, BrowserVM, and visual debugger graph behavior are unchanged.
   - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts tests/frontend/graph3d-settings.test.ts` PASS `13/13`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused BrowserVM/Graph3D e2e `20260624-193827-970` PASS `1/1`, wall `11.3s`, HEAD `ed441fe2bef3`, code hash `942b1a92afd33b57`, benchmark OK vs `20260624-192909-783`, browser errors `0`, browser warnings `4` all WebGL `ReadPixels` performance warnings.
+  - Progress: eighth extraction done. Graph viewport shell, mini panel mount, FPS overlay mount, and VR HUD mount moved into `Graph3DViewport.svelte`; `Graph3DPanel.svelte` is down to 3,805 lines. Three.js scene lifecycle, BrowserVM runtime behavior, and renderer ownership stay in the panel.
+  - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts tests/frontend/graph3d-settings.test.ts` PASS `13/13`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused BrowserVM/Graph3D e2e `20260624-195745-520` PASS `1/1`, wall `11.3s`, HEAD `d27996c2583b`, code hash `1b3ccb3ff240ea9f`, benchmark OK vs `20260624-193827-970`, browser errors/network/http `0`, browser warnings `4` all WebGL `ReadPixels` performance warnings.
 
 - [x] Move Graph3D settings persistence out of the Svelte panel.
   - Impact: medium.
