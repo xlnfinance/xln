@@ -9,6 +9,7 @@
   } from '$lib/qa/scenarioPlayer';
   import { clearQaToken, consumeQaTokenFromUrl, qaFetch, writeQaToken } from '$lib/qa/apiClient';
   import type { QaSeverity, QaSeverityEvidence } from '@xln/runtime/qa/severity';
+  import { DISPLAY, QA } from '@xln/runtime/constants';
 
   type QaAuthInfo = {
     scope?: 'read' | 'admin';
@@ -551,19 +552,19 @@
   let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
   let restartAbortConfirm = $state('');
   let restartAbortBusy = $state(false);
-  let runWindowSize = $state(80);
-  let shardWindowSize = $state(80);
-  let historyWindowSize = $state(80);
-  let ledgerWindowSize = $state(80);
-  let artifactWindowSize = $state(40);
+  let runWindowSize = $state(QA.RUN_WINDOW_STEP);
+  let shardWindowSize = $state(QA.SHARD_WINDOW_STEP);
+  let historyWindowSize = $state(QA.HISTORY_WINDOW_STEP);
+  let ledgerWindowSize = $state(QA.LEDGER_WINDOW_STEP);
+  let artifactWindowSize = $state(QA.ARTIFACT_WINDOW_STEP);
   let systemVerdict = $state<QaSystemVerdict | null>(null);
   let showRawLogTail = $state(false);
 
-  const RUN_WINDOW_STEP = 80;
-  const SHARD_WINDOW_STEP = 80;
-  const HISTORY_WINDOW_STEP = 80;
-  const LEDGER_WINDOW_STEP = 80;
-  const ARTIFACT_WINDOW_STEP = 40;
+  const RUN_WINDOW_STEP = QA.RUN_WINDOW_STEP;
+  const SHARD_WINDOW_STEP = QA.SHARD_WINDOW_STEP;
+  const HISTORY_WINDOW_STEP = QA.HISTORY_WINDOW_STEP;
+  const LEDGER_WINDOW_STEP = QA.LEDGER_WINDOW_STEP;
+  const ARTIFACT_WINDOW_STEP = QA.ARTIFACT_WINDOW_STEP;
 
   const phaseOrder: QaPhaseKey[] = ['preflight', 'anvilBoot', 'apiBoot', 'apiHealthy', 'viteBoot', 'playwright'];
   const phaseLabels: Record<QaPhaseKey, string> = {
@@ -575,12 +576,12 @@
     playwright: 'playwright',
   };
   const phaseBudgets: Record<QaPhaseKey, number> = {
-    preflight: 1_000,
-    anvilBoot: 5_000,
-    apiBoot: 5_000,
-    apiHealthy: 5_000,
-    viteBoot: 5_000,
-    playwright: 5_000,
+    preflight: QA.PHASE_BUDGET_MS.preflight,
+    anvilBoot: QA.PHASE_BUDGET_MS.anvilBoot,
+    apiBoot: QA.PHASE_BUDGET_MS.apiBoot,
+    apiHealthy: QA.PHASE_BUDGET_MS.apiHealthy,
+    viteBoot: QA.PHASE_BUDGET_MS.viteBoot,
+    playwright: QA.PHASE_BUDGET_MS.playwright,
   };
 
   const selectedShard = $derived(
@@ -618,7 +619,7 @@
   const durationDeltaMs = $derived(
     latestRun?.totalMs && previousRun?.totalMs ? latestRun.totalMs - previousRun.totalMs : null,
   );
-  const latestTrend = $derived(runs.slice(0, 12));
+  const latestTrend = $derived(runs.slice(0, QA.RECENT_TREND_LIMIT));
   const hashChanged = $derived(Boolean(latestRun?.code?.codeHash && previousRun?.code?.codeHash && latestRun.code.codeHash !== previousRun.code.codeHash));
   const selectedHistoryPrevious = $derived.by(() => {
     const run = selectedRun;
@@ -640,16 +641,16 @@
     !restart.active &&
     restartOperatorId.trim() &&
     restartReason.trim() &&
-    restartConfirm.trim() === 'RUN' &&
+    restartConfirm.trim() === QA.RESTART_CONFIRM &&
     restartExpectedGitHead.trim(),
   ));
-  const retentionReady = $derived(Boolean(qaCanPlanRestart && retentionConfirm.trim() === 'DELETE_OLDER_THAN_30_DAYS' && !retentionBusy));
-  const historyBackfillReady = $derived(Boolean(qaCanPlanRestart && historyBackfillConfirm.trim() === 'BACKFILL_QA_HISTORY' && !historyBackfillBusy));
+  const retentionReady = $derived(Boolean(qaCanPlanRestart && retentionConfirm.trim() === QA.RETENTION_CONFIRM && !retentionBusy));
+  const historyBackfillReady = $derived(Boolean(qaCanPlanRestart && historyBackfillConfirm.trim() === QA.HISTORY_BACKFILL_CONFIRM && !historyBackfillBusy));
   const restartAbortReady = $derived(Boolean(
     qaCanPlanRestart &&
     restartAllowed &&
     restart.active &&
-    restartAbortConfirm.trim() === 'ABORT_RESTART' &&
+    restartAbortConfirm.trim() === QA.RESTART_ABORT_CONFIRM &&
     !restartAbortBusy,
   ));
   const filteredRuns = $derived(runs.filter(run => runMatchesFailureClass(run, selectedFailureClass)));
@@ -807,7 +808,7 @@
     return `${issue.type}${status}`;
   }
 
-  function shortHash(value: string | null | undefined, len = 12): string {
+  function shortHash(value: string | null | undefined, len = DISPLAY.SHORT_HASH_HEX_CHARS): string {
     const raw = String(value || '').trim();
     return raw ? raw.slice(0, len) : 'n/a';
   }
@@ -2162,7 +2163,7 @@
               <input
                 bind:value={restartAbortConfirm}
                 autocomplete="off"
-                placeholder="ABORT_RESTART"
+                placeholder={QA.RESTART_ABORT_CONFIRM}
                 disabled={!qaCanPlanRestart || restartAbortBusy}
               />
             </label>
@@ -2261,7 +2262,7 @@
           </section>
         {/if}
         <div class="history-table compact">
-          {#each sortedHistory.slice(0, 12) as row}
+          {#each sortedHistory.slice(0, QA.HISTORY_PREVIEW_LIMIT) as row}
             <article class:bad={row.status === 'failed'} class:ok={row.status === 'passed'}>
               <strong>{statusLabel(row)}</strong>
               <span>{formatMs(row.totalMs)}</span>
@@ -2396,7 +2397,7 @@
           </div>
           <label>
             <span>confirm phrase</span>
-            <input bind:value={historyBackfillConfirm} autocomplete="off" placeholder="BACKFILL_QA_HISTORY" />
+            <input bind:value={historyBackfillConfirm} autocomplete="off" placeholder={QA.HISTORY_BACKFILL_CONFIRM} />
           </label>
           <button
             class="mini-action"
@@ -2421,7 +2422,7 @@
           </div>
           <label>
             <span>confirm phrase</span>
-            <input bind:value={retentionConfirm} autocomplete="off" placeholder="DELETE_OLDER_THAN_30_DAYS" />
+            <input bind:value={retentionConfirm} autocomplete="off" placeholder={QA.RETENTION_CONFIRM} />
           </label>
           <button
             class="mini-action danger"
@@ -2660,7 +2661,7 @@
                 </label>
                 <label>
                   <span>confirm</span>
-                  <input bind:value={restartConfirm} autocomplete="off" placeholder="RUN" />
+                  <input bind:value={restartConfirm} autocomplete="off" placeholder={QA.RESTART_CONFIRM} />
                 </label>
                 <label>
                   <span>expected HEAD</span>
@@ -2737,7 +2738,7 @@
                 </dl>
                 {#if (selectedShard.browserIssues ?? []).length > 0}
                   <ul class="browser-issue-list">
-                    {#each (selectedShard.browserIssues ?? []).slice(0, 8) as issue}
+                    {#each (selectedShard.browserIssues ?? []).slice(0, QA.BROWSER_ISSUE_PREVIEW_LIMIT) as issue}
                       <li class:error={issue.severity === 'error'}>
                         <strong>{browserIssueLabel(issue)}</strong>
                         <span>{issue.message}</span>

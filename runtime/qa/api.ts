@@ -4,6 +4,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../serialization-utils';
+import { DISPLAY, QA } from '../constants';
 import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,
@@ -169,7 +170,7 @@ const tokenMatches = (token: string, candidates: string[]): boolean =>
   candidates.some(candidate => safeTokenEquals(token, candidate));
 
 const actorKeyIdForToken = (token: string): string =>
-  createHash('sha256').update(token).digest('hex').slice(0, 16);
+  createHash('sha256').update(token).digest('hex').slice(0, DISPLAY.SHORT_HASH_HEX_CHARS);
 
 const extractQaToken = (request: Request): string => {
   const auth = String(request.headers.get('authorization') || '').trim();
@@ -392,8 +393,8 @@ const qaRestartAuditSeverity = (entry: QaRestartAuditRecord): QaSeveritySignal =
     { label: 'audit', value: entry.auditId },
     { label: 'target', value: entry.target },
     ...(entry.exitCode !== null ? [{ label: 'exit code', value: entry.exitCode }] : []),
-    ...(entry.actualGitHead ? [{ label: 'git head', value: entry.actualGitHead.slice(0, 12) }] : []),
-    ...(entry.codeHash ? [{ label: 'code hash', value: entry.codeHash.slice(0, 16) }] : []),
+    ...(entry.actualGitHead ? [{ label: 'git head', value: entry.actualGitHead.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS) }] : []),
+    ...(entry.codeHash ? [{ label: 'code hash', value: entry.codeHash.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS) }] : []),
   ];
   if (entry.status === 'started') {
     return makeQaSeveritySignal({
@@ -847,7 +848,7 @@ const readRestartIntent = async (
   const expectedGitHead = String(body['expectedGitHead'] || '').trim();
   if (!operatorId) throw new Error('QA_RESTART_OPERATOR_REQUIRED');
   if (!reason) throw new Error('QA_RESTART_REASON_REQUIRED');
-  if (confirm !== 'RUN') throw new Error('QA_RESTART_CONFIRM_REQUIRED');
+  if (confirm !== QA.RESTART_CONFIRM) throw new Error('QA_RESTART_CONFIRM_REQUIRED');
   if (!expectedGitHead) throw new Error('QA_RESTART_EXPECTED_HEAD_REQUIRED');
   if (!fingerprint.gitHead) throw new Error('QA_RESTART_GIT_HEAD_UNAVAILABLE');
   if (expectedGitHead !== fingerprint.gitHead) throw new Error('QA_RESTART_HEAD_MISMATCH');
@@ -901,8 +902,8 @@ export async function maybeHandleQaRequest(
   if (pathname === '/api/qa/history' && request.method === 'GET') {
     try {
       const url = new URL(request.url);
-      const limitRaw = Number(url.searchParams.get('limit') || '120');
-      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 120;
+      const limitRaw = Number(url.searchParams.get('limit') || String(QA.HISTORY_DEFAULT_LIMIT));
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(QA.HISTORY_MAX_LIMIT, Math.floor(limitRaw))) : QA.HISTORY_DEFAULT_LIMIT;
       const history = await listQaHistory(limit);
       return jsonEtagResponse(request, { ok: true, qaAuth: authInfo, history, restart: restartStatus(), restartAllowed }, headers);
     } catch (error) {
@@ -915,14 +916,14 @@ export async function maybeHandleQaRequest(
     try {
       const body = await request.json().catch(() => null) as Record<string, unknown> | null;
       const confirm = String(body?.['confirm'] || '').trim();
-      if (confirm !== 'BACKFILL_QA_HISTORY') {
+      if (confirm !== QA.HISTORY_BACKFILL_CONFIRM) {
         return new Response(safeStringify({ ok: false, error: 'QA_HISTORY_BACKFILL_CONFIRM_REQUIRED' }), {
           status: 400,
           headers,
         });
       }
-      const limitRaw = Number(body?.['limit'] ?? 500);
-      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(2_000, Math.floor(limitRaw))) : 500;
+      const limitRaw = Number(body?.['limit'] ?? QA.HISTORY_BACKFILL_DEFAULT_LIMIT);
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(QA.HISTORY_BACKFILL_MAX_LIMIT, Math.floor(limitRaw))) : QA.HISTORY_BACKFILL_DEFAULT_LIMIT;
       const result = await backfillQaHistoryFromLogs(limit);
       return new Response(safeStringify({ ok: true, qaAuth: authInfo, result }), {
         headers: { ...headers, 'Cache-Control': 'no-store' },
@@ -954,7 +955,7 @@ export async function maybeHandleQaRequest(
       }
       const body = await request.json().catch(() => null) as Record<string, unknown> | null;
       const confirm = String(body?.['confirm'] || '').trim();
-      if (confirm !== 'ABORT_RESTART') {
+      if (confirm !== QA.RESTART_ABORT_CONFIRM) {
         return new Response(safeStringify({ ok: false, error: 'QA_RESTART_ABORT_CONFIRM_REQUIRED' }), {
           status: 400,
           headers,
@@ -981,13 +982,13 @@ export async function maybeHandleQaRequest(
     try {
       const body = await request.json().catch(() => null) as Record<string, unknown> | null;
       const confirm = String(body?.['confirm'] || '').trim();
-      if (confirm !== 'DELETE_OLDER_THAN_30_DAYS') {
+      if (confirm !== QA.RETENTION_CONFIRM) {
         return new Response(safeStringify({ ok: false, error: 'QA_RETENTION_CONFIRM_REQUIRED' }), {
           status: 400,
           headers,
         });
       }
-      const result = purgeQaRunsOlderThan(30);
+      const result = purgeQaRunsOlderThan(QA.RETENTION_MIN_DAYS);
       return new Response(safeStringify({ ok: true, qaAuth: authInfo, result }), {
         headers: { ...headers, 'Cache-Control': 'no-store' },
       });

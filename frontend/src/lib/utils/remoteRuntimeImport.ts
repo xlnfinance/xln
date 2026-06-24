@@ -1,9 +1,10 @@
 import { normalizeWsUrl } from './wsUrl';
+import { REMOTE_RUNTIME } from '@xln/runtime/constants';
 
-export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = 'runtime-import';
-export const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
-export const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
-export const MAX_REMOTE_RUNTIME_IMPORTS = 100;
+export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;
+export const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_STORAGE_KEY;
+export const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_RESULT_STORAGE_KEY;
+export const MAX_REMOTE_RUNTIME_IMPORTS = REMOTE_RUNTIME.MAX_IMPORTS;
 
 export type RemoteRuntimeImportAccess = 'read' | 'admin';
 
