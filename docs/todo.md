@@ -332,11 +332,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: medium.
   - Tests: Playwright should route fixtures or use temp DB/log root, never persistent future `.logs` entries.
 
-- [ ] Fix remote orderbook compact depth.
+- [x] Fix remote orderbook compact depth.
   - Impact: low-medium.
   - Current issue: compact view recomputes `totalQtyLots` from selected first 20 orders only.
   - Fix: preserve source level total while still truncating visible order IDs.
   - Tests: level with 25 orders shows full depth and only 20 visible orders.
+  - Status: done. Remote radapter compact book views now trim visible `orderIds`/orders for browser payload size but keep canonical `PriceLevelState.totalQtyLots` from the source book level.
+  - Evidence: L1 `bun test runtime/__tests__/radapter.test.ts` PASS `39/39`; regression first failed with `Expected: 25n, Received: 20n`, then passed with 20 visible orders and full level depth `25n`.
 
 - [ ] Decide strict `0x` RPC result behavior for external wallet snapshots.
   - Impact: low.
