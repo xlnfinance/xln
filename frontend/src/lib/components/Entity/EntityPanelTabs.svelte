@@ -6,8 +6,6 @@
   import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
-    AccountFrame,
-    AccountTx,
     Env,
     EnvSnapshot,
     JAdapter,
@@ -17,14 +15,10 @@
     RoutedEntityInput,
     EntityTx,
   } from '@xln/runtime/xln-api';
-  import {
-    getDraftBatchReserveDelta,
-    simulateDraftBatchReserveAvailability,
-    type DraftBatchReserveIssue,
-  } from '@xln/runtime/j-batch';
+  import { getDraftBatchReserveDelta } from '@xln/runtime/j-batch';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { getXLN, resolveConfiguredApiBase, setXlnEnvironment } from '../../stores/xlnStore';
-  import { settings, settingsOperations } from '../../stores/settingsStore';
+  import { settings } from '../../stores/settingsStore';
   import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
   import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
@@ -37,13 +31,11 @@
   import { getJurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
   import { formatEntityId } from '$lib/utils/format';
   import { resetEverything } from '$lib/utils/resetEverything';
-
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     Settings as SettingsIcon,
     ChevronDown, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal, Banknote
   } from 'lucide-svelte';
-
   import EntityDropdown from './EntityDropdown.svelte';
   import AccountDropdown from './AccountDropdown.svelte';
   import AccountPanel from './AccountPanel.svelte';
@@ -53,20 +45,17 @@
   import ReceivePanel from './ReceivePanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
   import LendingPanel from './LendingPanel.svelte';
-  import SettlementPanel from './SettlementPanel.svelte';
   import MoveWorkspace from './MoveWorkspace.svelte';
-  import DebtPanel from './DebtPanel.svelte';
-  import AssetLedgerTable from './AssetLedgerTable.svelte';
-  import AssetFaucetCard from './AssetFaucetCard.svelte';
-  import AssetWalletMeta from './AssetWalletMeta.svelte';
+  import SettlementPanel from './SettlementPanel.svelte';
   import PendingBatchNotice from './PendingBatchNotice.svelte';
   import LiveRequiredState from './LiveRequiredState.svelte';
-  import ConfigureWorkspaceTabs from './ConfigureWorkspaceTabs.svelte';
-  import CreditForm from './CreditForm.svelte';
-  import CollateralForm from './CollateralForm.svelte';
+  import EntityAssetsTab from './EntityAssetsTab.svelte';
+  import AccountAppearancePanel from './AccountAppearancePanel.svelte';
+  import AccountConfigurePanel from './AccountConfigurePanel.svelte';
+  import AccountOpenPanel, { type DisputedAccountView } from './AccountOpenPanel.svelte';
+  import EntityActivityPanel from './EntityActivityPanel.svelte';
+  import EntityPanelHeroTabs from './EntityPanelHeroTabs.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
-  import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
-  import EntityInput from '../shared/EntityInput.svelte';
   import EntitySettingsPanel from '$lib/components/Settings/EntitySettingsPanel.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import ContextSwitcher from './ContextSwitcher.svelte';
@@ -121,7 +110,19 @@
     type SettingsSubview,
     type ViewTab,
   } from './entity-panel-routing';
-
+  import {
+    buildEntityActivityAccounts,
+    buildEntityActivityRows,
+    filterEntityActivityRows,
+  } from './entity-activity';
+  import {
+    buildOpenOutgoingDebtTotals,
+    buildPendingBatchPreview,
+    countBatchOps,
+    formatBatchReserveIssue,
+    getPendingBatchReserveIssue,
+    pendingBatchEntityLabel,
+  } from './pending-batch-preview';
   export let tab: Tab;
   export let hideHeader: boolean = false;
   export let showJurisdiction: boolean = true;
@@ -140,9 +141,7 @@
   export let timeIndex: number;
   export let isLive: boolean;
   export let onGoToLive: () => void;
-
   const dispatch = createEventDispatcher();
-
   type DebtDrainRequest = {
     tokenId: number;
     symbol: string;
@@ -153,7 +152,6 @@
     payableAmount: bigint;
     nextDebtIndex: number | null;
   };
-
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
     return 'accounts';
@@ -173,7 +171,6 @@
   let pendingBatchSubmitting = false;
   let debtEnforcingTokenId: number | null = null;
   let pendingBatchMode: 'draft' | 'sent' | null = null;
-
   // State
   let replica: EntityReplica | null = null;
   let selectedAccountId: string | null = null;
@@ -186,33 +183,26 @@
   let entityActivityAccountFilter = 'all';
   let firstFaucetAccountId = '';
   let hasAnyAccounts = false;
-
   $: if (userModeHeader) {
     selectedJurisdictionName = selectedJurisdiction;
   }
-
   function resolveApiBase(): string {
     if (typeof window === 'undefined') return 'https://xln.finance';
     return resolveConfiguredApiBase(window.location.origin);
   }
-
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
   function getUrlHashRoute(): string | null {
     if (typeof window === 'undefined') return null;
     return getLocationHashRoute(window.location);
   }
-
   function getUrlHashParams(): URLSearchParams | null {
     if (typeof window === 'undefined') return null;
     return getLocationHashParams(window.location);
   }
-
   function getUrlParamValue(keys: string[]): string | null {
     if (typeof window === 'undefined') return null;
     return getLocationParamValue(window.location, keys);
   }
-
   function buildHashRouteFromState(): string {
     return buildEntityPanelHashRouteFromState({
       activeTab,
@@ -221,15 +211,12 @@
       accountWorkspaceTab,
     });
   }
-
   function applyDeepLinkViewFromUrl(): void {
     if (typeof window === 'undefined') return;
-
     const hashRoute = canonicalizeEntityPanelRoute(getUrlHashRoute());
     const view = String(getUrlParamValue(['view']) || hashRoute || '').trim().toLowerCase();
     const subview = String(getUrlParamValue(['subview', 'sub']) || '').trim().toLowerCase();
     const jurisdiction = String(getUrlParamValue(['jId', 'jurisdiction', 'j']) || '').trim();
-
     switch (view) {
       case 'assets':
         activeTab = 'assets';
@@ -307,14 +294,12 @@
       default:
         break;
     }
-
     if (view === 'settings' && subview) {
       const nextSettingsSubview = ['wallet', 'recovery', 'display', 'network', 'data', 'log', 'entity'].includes(subview)
         ? subview as SettingsSubview
         : null;
       if (nextSettingsSubview) settingsSubview = nextSettingsSubview;
     }
-
     if (view === 'configure' && subview) {
       const nextConfigureTab =
         subview === 'credit'
@@ -324,7 +309,6 @@
             : null;
       if (nextConfigureTab) configureWorkspaceTab = nextConfigureTab;
     }
-
     if (jurisdiction) {
       const matched = availableJurisdictions.find((candidate) =>
         String(candidate?.name || '').trim().toLowerCase() === jurisdiction.toLowerCase(),
@@ -332,7 +316,6 @@
       selectedJurisdictionName = matched?.name ?? jurisdiction;
     }
   }
-
   function syncHashToCurrentView(): void {
     if (typeof window === 'undefined') return;
     const nextRoute = buildHashRouteFromState();
@@ -348,70 +331,40 @@
     if (currentHash === nextHash) return;
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#${nextHash}`);
   }
-
-
-  const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
-  const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
-
-  function clampAccountBarUsdPer100Px(raw: unknown): number {
-    const numeric = Number(raw);
-    if (!Number.isFinite(numeric)) return 10_000;
-    return Math.max(
-      ACCOUNT_BAR_USD_PER_100PX_MIN,
-      Math.min(ACCOUNT_BAR_USD_PER_100PX_MAX, Math.round(numeric)),
-    );
-  }
-
-  $: accountBarUsdPer100Px = clampAccountBarUsdPer100Px(($settings.accountBarUsdPerPx ?? 100) * 100);
-
-  function setAccountBarScale(event: Event): void {
-    const target = event.currentTarget as HTMLInputElement;
-    settingsOperations.setAccountBarUsdPer100Px(clampAccountBarUsdPer100Px(target.value));
-  }
-
   type TokenCatalogItem = {
     symbol: string;
     address: string;
     decimals?: number;
     tokenId?: number;
   };
-
   type TokenCatalogResponse = {
     tokens?: TokenCatalogItem[];
   };
-
   type IconTabConfig<T extends string> = {
     id: T;
     icon: ComponentType;
     label: string;
   };
-
   type IconBadgeTabConfig<T extends string> = IconTabConfig<T> & {
     showBadge?: boolean;
     badgeType?: 'pending';
   };
-
   type IconPendingTabConfig<T extends string> = IconTabConfig<T> & {
     showPendingBatch?: boolean;
   };
-
   type IndexedDbWithDatabases = IDBFactory & {
     databases?: () => Promise<IDBDatabaseInfo[]>;
   };
-
   type JTokenRegistryItem = Awaited<ReturnType<JAdapter['getTokenRegistry']>>[number];
-
   function getCurrentEntityJurisdictionName(env: Env | EnvSnapshot | null | undefined): string | null {
     const configured = String(replica?.state?.config?.jurisdiction?.name || '').trim();
     return configured || getActiveJurisdictionName(env);
   }
-
   function getCurrentEntityJurisdictionKey(env: Env | EnvSnapshot | null | undefined): string {
     return jurisdictionKey(replica?.state?.config?.jurisdiction)
       || jurisdictionKey(replica?.position?.jurisdiction)
       || jurisdictionKey(getActiveJurisdictionName(env));
   }
-
   function getEntityJurisdictionKey(entityId: string): string {
     const normalized = String(entityId || '').trim().toLowerCase();
     if (!normalized) return '';
@@ -436,7 +389,6 @@
     );
     return jurisdictionKey(profile?.metadata?.jurisdiction);
   }
-
   function isSameJurisdictionEntity(leftEntityId: string, rightEntityId: string): boolean {
     const currentEntityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     const normalizedLeftEntityId = String(leftEntityId || '').trim().toLowerCase();
@@ -450,7 +402,6 @@
     if (!leftJurisdiction && !rightJurisdiction) return true;
     return Boolean(leftJurisdiction && rightJurisdiction && leftJurisdiction === rightJurisdiction);
   }
-
   function getCurrentEntityJAdapter(xln: XLNModule, env: Env, context: string): JAdapter {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
     const signerId = String(currentSignerId || tab.signerId || '').trim();
@@ -460,11 +411,9 @@
     if (!jadapter) throw new Error(`J-adapter not available for ${context}`);
     return jadapter;
   }
-
   function buildEntityInput(entityId: string, signerId: string, entityTxs: EntityTx[]): RoutedEntityInput {
     return { entityId, signerId, entityTxs };
   }
-
   let moveNodeLayoutVersion = 0;
   let moveNodeLayoutRaf: number | null = null;
   let moveNodeLayoutSettleRaf: number | null = null;
@@ -475,7 +424,6 @@
   let moveCommittedLineTimeout: ReturnType<typeof setTimeout> | null = null;
   let moveHubEntityOptions: string[] = [];
   let moveValidationSignature = '';
-
   function resetMoveLineMeasurement(): void {
     moveLineReady = false;
     moveCommittedLineReady = false;
@@ -493,7 +441,6 @@
       moveCommittedLineTimeout = null;
     }
   }
-
   function scheduleMoveCommittedLineReady(): void {
     if (moveCommittedLineTimeout) clearTimeout(moveCommittedLineTimeout);
     if (moveDragSource) return;
@@ -510,7 +457,6 @@
       moveCommittedLinePrimed = true;
     }, 200);
   }
-
   function bumpMoveNodeLayout(): void {
     moveNodeLayoutVersion += 1;
     if (typeof requestAnimationFrame !== 'function') {
@@ -529,7 +475,6 @@
       clearTimeout(moveCommittedLineTimeout);
       moveCommittedLineTimeout = null;
     }
-
     // Wait for child node refs to be available before measuring.
     // First RAF: layout pass. Second RAF: paint pass.
     // Third RAF: guarantees all Svelte action bindings (setMoveNodeRef) have fired.
@@ -556,7 +501,6 @@
       });
     });
   }
-
   function setMoveNodeRef(side: 'from' | 'to', endpoint: MoveEndpoint, node: HTMLButtonElement | null): void {
     const key = `${side}:${endpoint}`;
     if (node) {
@@ -566,7 +510,6 @@
     }
     bumpMoveNodeLayout();
   }
-
   function moveNodeAction(
     node: HTMLButtonElement,
     params: { side: 'from' | 'to'; endpoint: MoveEndpoint },
@@ -583,7 +526,6 @@
       },
     };
   }
-
   function getMoveNodeAnchor(side: 'from' | 'to', endpoint: MoveEndpoint): { x: number; y: number } | null {
     const rootRect = moveVisualRoot?.getBoundingClientRect();
     const node = moveNodeRefs.get(`${side}:${endpoint}`)
@@ -607,7 +549,6 @@
       y: nodeRect.top - rootRect.top + (nodeRect.height / 2),
     };
   }
-
   function beginMoveDrag(endpoint: MoveEndpoint, event: PointerEvent | MouseEvent): void {
     event.preventDefault();
     moveDragSource = endpoint;
@@ -619,7 +560,6 @@
       moveCommittedLineTimeout = null;
     }
   }
-
   function applyMoveRoute(from: MoveEndpoint, to: MoveEndpoint): void {
     const selfEntityId = resolveSelfEntityId();
     const selfEoa = resolveSelfEoaAddress();
@@ -639,7 +579,6 @@
     clearMoveDrag();
     bumpMoveNodeLayout();
   }
-
   function setMoveSource(endpoint: MoveEndpoint): void {
     if (moveSelectedTarget) {
       if (isMoveRouteSupported(endpoint, moveSelectedTarget)) {
@@ -651,7 +590,6 @@
     moveFromEndpoint = endpoint;
     moveSelectedSource = endpoint;
   }
-
   function completeMoveSelection(target: MoveEndpoint): void {
     const source = moveDragSource ?? moveSelectedSource;
     if (!source) return;
@@ -664,7 +602,6 @@
     moveSelectedTarget = target;
     clearMoveDrag();
   }
-
   function setMoveTarget(endpoint: MoveEndpoint): void {
     if (moveDragSource) {
       completeMoveSelection(endpoint);
@@ -677,13 +614,11 @@
     moveToEndpoint = endpoint;
     moveSelectedTarget = endpoint;
   }
-
   function clearMoveDrag(): void {
     moveDragSource = null;
     moveDragHoverTarget = null;
     if (moveLineReady) scheduleMoveCommittedLineReady();
   }
-
   function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
     const targetEntity = getCurrentMoveTargetEntityId();
     const targetHub = getCurrentMoveTargetHubId();
@@ -701,22 +636,18 @@
       ),
     });
   }
-
   function isMoveAwaitingCounterparty(): boolean {
     return pendingAssetAutoC2Rs.length > 0 || resolvingAssetAutoC2R;
   }
-
   function refreshPendingCollateralFundingToken(): void {
     collateralFundingToken = pendingAssetAutoC2Rs[0]?.symbol ?? null;
   }
-
   function getMoveDraftReserveDelta(tokenId: number): bigint {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     const batch = replica?.state?.jBatchState?.batch;
     if (!entityId || !batch) return 0n;
     return getDraftBatchReserveDelta(entityId, batch, tokenId);
   }
-
   function getOpenOutgoingDebtForToken(tokenId: number): bigint {
     const bucket = replica?.state?.outDebtsByToken?.get?.(tokenId);
     if (!bucket) return 0n;
@@ -728,7 +659,6 @@
     }
     return total;
   }
-
   function getMoveMaxAmount(
     from: MoveEndpoint,
     reserveToken: ReserveTransferAsset | null,
@@ -753,7 +683,6 @@
         return null;
     }
   }
-
   function getMoveValidationError(mode: 'draft' | 'broadcast'): string | null {
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     if (!isMoveRouteSupported(moveFromEndpoint, moveToEndpoint)) {
@@ -775,7 +704,6 @@
     if (mode === 'draft' && !canAddMoveToExistingBatch()) {
       return 'Add to batch is not available for this route';
     }
-
     const sourceAccountId = getCurrentMoveSourceAccountId();
     const targetEntityId = getCurrentMoveTargetEntityId();
     const targetHubId = getCurrentMoveTargetHubId();
@@ -783,7 +711,6 @@
     const selfEoa = resolveSelfEoaAddress().toLowerCase();
     const reserveRecipient = String(moveReserveRecipientEntityId || '').trim().toLowerCase();
     const externalRecipient = String(moveExternalRecipient || '').trim().toLowerCase();
-
     if (moveFromEndpoint === 'account' && !sourceAccountId) return 'Select source account';
     if (moveToEndpoint === 'account' && (!targetEntityId || !targetHubId)) return 'Select recipient and counterparty';
     if (moveNeedsReserveRecipient(moveFromEndpoint, moveToEndpoint) && !reserveRecipient) return 'Select recipient entity';
@@ -806,7 +733,6 @@
     if (moveFromEndpoint === 'external' && moveToEndpoint === 'external' && externalRecipient === selfEoa) {
       return 'External → External to self is meaningless';
     }
-
     const reserveToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
     const externalToken = findExternalTokenBySymbol(moveAssetSymbol);
     if (moveFromEndpoint === 'external' && moveToEndpoint === 'external') {
@@ -814,7 +740,6 @@
     } else if (!reserveToken) {
       return 'Select reserve-compatible asset first';
     }
-
     let parsedAmount: bigint;
     try {
       const maxAmount = getCurrentMoveSourceAvailableBalance();
@@ -824,7 +749,6 @@
     } catch (error) {
       return toErrorMessage(error, 'Invalid move amount');
     }
-
     if (mode === 'draft' && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint)) {
       if (moveAllowanceLoading) return 'Checking ERC20 allowance';
       if (moveAllowanceError) return moveAllowanceError;
@@ -832,10 +756,8 @@
         return 'Allow ERC20 before adding to batch';
       }
     }
-
     return null;
   }
-
   $: moveAllowanceRouteEnabled = assetWorkspaceTab === 'move'
     && activeIsLive
     && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint);
@@ -891,7 +813,6 @@
     const required = formatAmount(moveRequiredAllowanceAmount, decimals);
     return `Current allowance ${available} ${moveAssetSymbol} · required ${required} ${moveAssetSymbol}`;
   })();
-
   $: moveValidationSignature = [
     moveFromEndpoint,
     moveToEndpoint,
@@ -922,7 +843,6 @@
     moveDraftError = getMoveValidationError('draft');
     moveBroadcastError = getMoveValidationError('broadcast');
   }
-
   function resolveSelfEoaAddress(): string {
     const signerId = String(currentSignerId || '').trim();
     if (isAddress(signerId)) return signerId;
@@ -930,25 +850,20 @@
     if (isAddress(vaultId)) return vaultId;
     return '';
   }
-
   function resolveSelfEntityId(): string {
     return String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
   }
-
   function handleMoveReserveRecipientChange(event: CustomEvent<{ value?: string }>) {
     moveReserveRecipientEntityId = String(event.detail?.value || '').trim().toLowerCase();
   }
-
   function normalizeMoveAccountId(raw: string): string {
     const nextRaw = String(raw || '').trim();
     const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
     return matched || nextRaw;
   }
-
   function handleMoveSourceAccountChange(event: CustomEvent<{ value?: string }>) {
     moveSourceAccountId = normalizeMoveAccountId(String(event.detail?.value || ''));
   }
-
   function handleMoveTargetEntityChange(event: CustomEvent<{ value?: string }>) {
     const next = String(event.detail?.value || '').trim().toLowerCase();
     if (next !== moveTargetEntityId) {
@@ -957,7 +872,6 @@
     }
     moveTargetEntityId = next;
   }
-
   function handleMoveTargetHubChange(event: CustomEvent<{ value?: string }>) {
     const next = String(event.detail?.value || '').trim().toLowerCase();
     if (!next) {
@@ -977,7 +891,6 @@
     }
     moveTargetHubEntityId = next;
   }
-
   function getCurrentMoveSourceAccountId(): string {
     const current = String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim();
     if (moveFromEndpoint !== 'account') return current;
@@ -985,15 +898,12 @@
     if (!token) return current;
     return getPreferredMoveSourceAccountId(token.tokenId, getRequestedMoveAmount(token));
   }
-
   function getCurrentMoveTargetEntityId(): string {
     return String(moveTargetEntityId || resolveSelfEntityId() || '').trim().toLowerCase();
   }
-
   function getCurrentMoveTargetHubId(): string {
     return String(moveTargetHubEntityId || workspaceAccountId || selectedAccountId || '').trim().toLowerCase();
   }
-
   function getRequestedMoveAmount(token: { decimals: number }): bigint {
     try {
       return moveAmount.trim() ? parsePositiveAssetAmount(moveAmount, token) : 0n;
@@ -1001,7 +911,6 @@
       return 0n;
     }
   }
-
   function getPreferredMoveSourceAccountId(tokenId: number, requestedAmount: bigint): string {
     const current = String(moveSourceAccountId || workspaceAccountId || selectedAccountId || '').trim();
     const currentAvailable = current ? getAccountSpendableCapacity(current, tokenId) : 0n;
@@ -1019,7 +928,6 @@
       || '';
     return preferred;
   }
-
   function computeMoveSourceAvailableBalance(
     row: AssetLedgerRow | null,
     liveTransferToken: ReserveTransferAsset | null,
@@ -1043,11 +951,9 @@
         return 0n;
     }
   }
-
   function getCurrentMoveSourceAvailableBalance(): bigint {
     return computeMoveSourceAvailableBalance(moveUiState.ledgerRow, selectedMoveTransferToken);
   }
-
   function choosePreferredMoveAssetSymbol(): string {
     const candidates = moveAssetOptions;
     const preferredUsdc = candidates.find((token) => String(token.symbol || '').trim().toUpperCase() === 'USDC');
@@ -1067,17 +973,14 @@
     });
     return preferredWithBalance?.symbol ?? candidates[0]?.symbol ?? '';
   }
-
   function toErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error && error.message) return error.message;
     return fallback;
   }
-
   function notifyUserActionError(context: string, message: string): void {
     console.error(`[EntityPanel] ${context}: ${message}`);
     toasts.error(message);
   }
-
   async function copyMetaValue(value: string, field: 'entity' | 'external'): Promise<void> {
     const normalizedValue = String(value || '').trim();
     if (!normalizedValue) return;
@@ -1091,7 +994,6 @@
       console.error('Failed to copy:', err);
     }
   }
-
   // Get avatar URL without tripping early boot fail-fast guards.
   $: avatar = resolveEntityAvatar(activeXlnFunctions, tab.entityId);
   $: currentEntityValue = String(replica && replica.state ? (replica.state.entityId || tab.entityId || '') : (tab.entityId || '')).trim();
@@ -1109,7 +1011,6 @@
     }
   })();
   $: currentExternalEoaValue = String(currentSignerId || '').trim();
-
   // Resolve entity name from gossip profiles
   $: gossipName = (() => {
     const entityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
@@ -1118,7 +1019,6 @@
     const profile = profiles.find((p: GossipProfile) => p.entityId.toLowerCase() === entityId);
     return profile?.name || '';
   })();
-
   function isPlaceholderName(value: string): boolean {
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized) return true;
@@ -1126,7 +1026,6 @@
     if (/^entity\s+[0-9a-f]{4,}$/i.test(normalized)) return true;
     return false;
   }
-
   $: heroDisplayName = (() => {
     const fallbackId = replica?.state?.entityId || tab.entityId || '';
     const gossip = (gossipName ?? '').trim();
@@ -1136,14 +1035,17 @@
     replica?.state?.config?.jurisdiction?.name || selectedJurisdictionName || tab.jurisdiction || null,
     replica?.state?.config?.jurisdiction?.chainId ?? null,
   );
-
   // Format short address for display
   function formatAddress(addr: string): string {
     if (!addr) return '';
     if (addr.length <= 18) return addr;
     return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
-
+  function shortHash(value: unknown): string {
+    const text = String(value || '').trim();
+    if (!text) return '-';
+    return formatAddress(text);
+  }
   $: activeReplicas = getEnvReplicaMap(activeEnv, envRevision);
   $: activeXlnFunctions = $xlnFunctions;
   $: activeHistory = history;
@@ -1153,7 +1055,6 @@
   $: activeIsLive = isLive;
   $: liveRuntimeEnv = getRuntimeEnv(activeEnv);
   $: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === 'function' ? liveEnvResolver() : null) ?? liveRuntimeEnv;
-
   function resolveEntitySigner(entityId: string, reason: string): string {
     const env = getRuntimeEnv(actionRuntimeEnv);
     if (env && activeXlnFunctions?.resolveEntityProposerId) {
@@ -1161,18 +1062,15 @@
     }
     return requireSignerIdForEntity(requireRuntimeEnv(actionRuntimeEnv, reason), entityId, reason);
   }
-
   function findReplicaForTab(
     replicas: Map<string, EntityReplica> | null | undefined,
     entityId: string,
     signerId: string,
   ): EntityReplica | null {
     if (!replicas || !entityId) return null;
-
     const exactKey = signerId ? `${entityId}:${signerId}` : '';
     const exact = exactKey ? materializeReplicaView(replicas.get(exactKey) ?? null) : null;
     if (exact) return exact;
-
     const normalizedEntityId = String(entityId || '').trim().toLowerCase();
     for (const [replicaKey, candidate] of replicas.entries()) {
       const [replicaEntityId] = String(replicaKey).split(':');
@@ -1180,10 +1078,8 @@
         return materializeReplicaView(candidate);
       }
     }
-
     return null;
   }
-
   function findLiveReplicaForEntity(entityId: string, signerId: string): EntityReplica | null {
     const env = getRuntimeEnv(activeEnv);
     if (!env?.eReplicas) return null;
@@ -1192,13 +1088,11 @@
       : materializeReplicaMap(null);
     return findReplicaForTab(replicas, entityId, signerId);
   }
-
   function getCurrentLiveEntityReplica(): EntityReplica | null {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
     const signerId = String(currentSignerId || tab.signerId || '').trim();
     return (entityId ? findLiveReplicaForEntity(entityId, signerId) : null) ?? replica;
   }
-
   // Get replica
   $: {
     if (tab.entityId && tab.signerId) {
@@ -1207,7 +1101,6 @@
       replica = null;
     }
   }
-
   // Navigation
   $: isAccountFocused = selectedAccountId !== null;
   $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
@@ -1307,38 +1200,31 @@
       configureTokenId = configureTokenOptions[0]?.id ?? 1;
     }
   }
-
   // Jurisdictions
   $: availableJurisdictions = (() => {
     const env = activeEnv;
     if (!env?.jReplicas) return [];
     return Array.from(env.jReplicas.values());
   })() as Array<{ name?: string }>;
-
   $: {
     if (showJurisdiction && availableJurisdictions.length > 0 && !selectedJurisdictionName) {
       selectedJurisdictionName = getCurrentEntityJurisdictionName(activeEnv) ?? availableJurisdictions[0]?.name ?? null;
     }
   }
-
   let openAccountEntityOptions: string[] = [];
   let moveEntityOptions: string[] = [];
   let moveSourceAccountOptions: string[] = [];
-
   function isFullEntityId(value: string): boolean {
     return /^0x[0-9a-fA-F]{64}$/.test(String(value || '').trim());
   }
-
   function handleOpenAccountTargetChange(event: CustomEvent<{ value?: string }>) {
     openAccountEntityId = String(event.detail?.value || '').trim();
   }
-
   function handleWorkspaceAccountChange(event: CustomEvent<{ value?: string }>) {
     const nextRaw = String(event.detail?.value || '').trim();
     const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
     workspaceAccountId = matched || nextRaw;
   }
-
   $: openAccountEntityOptions = (() => {
     const ids = new Map<string, string>();
     const selfId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
@@ -1350,12 +1236,10 @@
       if (!normalized || normalized === selfId || existingAccountIds.has(normalized)) return;
       if (!ids.has(normalized)) ids.set(normalized, normalized);
     };
-
     for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
     for (const profile of getGossipProfiles(activeEnv)) add(profile.entityId);
     return Array.from(ids.values()).sort();
   })();
-
   $: moveEntityOptions = (() => {
     const ids = new Map<string, string>();
     const selfId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
@@ -1365,7 +1249,6 @@
       const normalized = raw.toLowerCase();
       if (!ids.has(normalized)) ids.set(normalized, normalized);
     };
-
     if (selfId) add(selfId);
     for (const id of accountIds) add(id);
     for (const id of openAccountEntityOptions) add(id);
@@ -1385,7 +1268,6 @@
     }
     return Array.from(ordered.values());
   })();
-
   // On-chain reserves are derived directly from replica.state.reserves.
   let onchainReserves: Map<number, bigint> = new Map();
   let pendingReserveFaucets: PendingReserveFaucet[] = [];
@@ -1394,7 +1276,6 @@
   $: pendingOffchainFaucetKeys = new Set(
     pendingOffchainFaucets.map(req => faucetPendingKey(req.hubEntityId, req.tokenId)),
   );
-
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
     symbol: string;
@@ -1404,7 +1285,6 @@
     tokenId: number | undefined;
     readError?: string;
   }
-
   interface ReserveTransferAsset {
     symbol: string;
     address: string;
@@ -1412,7 +1292,6 @@
     decimals: number;
     tokenId: number;
   }
-
   type ExternalAllowanceRead = { tokenAddress: string; spender: string };
   type ExternalWalletReadResult = {
     nativeBalance: bigint;
@@ -1443,20 +1322,17 @@
     allowanceErrors?: Array<{ tokenAddress?: string; spender?: string; error?: string }>;
     error?: string;
   };
-
   function requireExternalSnapshotBigInt(value: bigint | null | undefined, label: string): bigint {
     if (typeof value !== 'bigint') {
       throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FIELD_MISSING:${label}`);
     }
     return value;
   }
-
   function assertExternalSnapshotCount(values: unknown[], expected: number, label: string): void {
     if (values.length !== expected) {
       throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FIELD_COUNT_MISMATCH:${label}:expected=${expected}:actual=${values.length}`);
     }
   }
-
   function normalizeOptionalTokenId(value: unknown): number | undefined {
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
     if (typeof value === 'bigint') {
@@ -1469,13 +1345,11 @@
     }
     return undefined;
   }
-
   type ResolvedExternalWalletSnapshotSource = ExternalWalletSnapshotSource & {
     sourceHash: string;
     finalityDepth: number;
     headBlockNumber: number;
   };
-
   function resolveExternalWalletFinalityDepth(jadapter: JAdapter): number {
     const rawDepth = Number(jadapter.getFinalityDepth?.() ?? 0);
     if (!Number.isFinite(rawDepth) || rawDepth < 0) {
@@ -1483,7 +1357,6 @@
     }
     return Math.floor(rawDepth);
   }
-
   async function readExternalWalletSnapshotSource(jadapter: JAdapter): Promise<ResolvedExternalWalletSnapshotSource> {
     const headBlockNumber = Number(await (jadapter.getCurrentBlockNumber?.() ?? jadapter.provider.getBlockNumber()));
     if (!Number.isFinite(headBlockNumber) || !Number.isInteger(headBlockNumber) || headBlockNumber < 0) {
@@ -1505,7 +1378,6 @@
       finalityDepth,
     };
   }
-
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
   let externalWalletSnapshotSource: ExternalWalletSnapshotSource | null = null;
@@ -1597,7 +1469,6 @@
   let moveAssetOptions: Array<{ symbol: string }> = [];
   let selectedMoveExternalToken: ExternalToken | null = null;
   let selectedMoveTransferToken: ReserveTransferAsset | null = null;
-
   $: if (moveVisualRoot !== previousMoveVisualRoot) {
     moveVisualResizeObserver?.disconnect();
     moveVisualResizeObserver = null;
@@ -1625,38 +1496,31 @@
     void moveLayoutSignature;
     bumpMoveNodeLayout();
   }
-
   type MoveUiState = {
     ledgerRow: AssetLedgerRow | null;
     displayBalances: Record<MoveEndpoint, bigint>;
     displayDecimals: number;
     sourceAvailableBalance: bigint;
   };
-
   function isReserveTransferToken(token: ExternalToken): token is ExternalToken & { tokenId: number } {
     return typeof token.tokenId === 'number' && token.tokenId > 0;
   }
-
   const TOKEN_UI_ORDER = ['ETH', 'WETH', 'USDT', 'USDC'];
-
   function getTokenUiRank(symbol: string): number {
     const normalized = String(symbol || '').trim().toUpperCase();
     const index = TOKEN_UI_ORDER.indexOf(normalized);
     return index >= 0 ? index : TOKEN_UI_ORDER.length + 100;
   }
-
   function compareText(left: string, right: string): number {
     if (left === right) return 0;
     return left < right ? -1 : 1;
   }
-
   function compareTokenSymbols(left: string, right: string): number {
     const leftRank = getTokenUiRank(left);
     const rightRank = getTokenUiRank(right);
     if (leftRank !== rightRank) return leftRank - rightRank;
     return compareText(left, right);
   }
-
   function sortExternalTokens(tokens: ExternalToken[]): ExternalToken[] {
     const deduped = new Map<string, ExternalToken>();
     for (const token of tokens) {
@@ -1677,23 +1541,19 @@
     }
     return [...deduped.values()].sort((left, right) => compareTokenSymbols(left.symbol, right.symbol));
   }
-
   function choosePreferredAssetSymbol(tokens: ExternalToken[]): string {
     const ordered = sortExternalTokens(tokens);
     return ordered[0]?.symbol ?? 'USDC';
   }
-
   function findExternalTokenBySymbol(symbol: string): ExternalToken | null {
     const normalized = symbol.trim().toUpperCase();
     return externalTokens.find((token) => token.symbol.toUpperCase() === normalized) ?? null;
   }
-
   function findAssetLedgerRowBySymbol(symbol: string): AssetLedgerRow | null {
     const normalized = String(symbol || '').trim().toUpperCase();
     if (!normalized) return null;
     return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === normalized) ?? null;
   }
-
   function findReserveTransferTokenBySymbol(symbol: string): ReserveTransferAsset | null {
     const token = findExternalTokenBySymbol(symbol);
     if (token && isReserveTransferToken(token)) {
@@ -1710,7 +1570,6 @@
       tokenId: row.tokenId,
     };
   }
-
   function getFaucetReserveTokenMeta(symbol: string): { tokenId: number; symbol: string } | null {
     const row = findAssetLedgerRowBySymbol(symbol);
     if (!row || row.isNative || typeof row.tokenId !== 'number' || row.tokenId <= 0) return null;
@@ -1719,13 +1578,11 @@
       symbol: row.symbol,
     };
   }
-
   function requireExternalTokenBySymbol(symbol: string): ExternalToken {
     const token = findExternalTokenBySymbol(symbol);
     if (!token) throw new Error(`Unknown asset ${symbol}`);
     return token;
   }
-
   function parsePositiveAssetAmount(raw: string, token: { decimals: number }, maxAmount?: bigint): bigint {
     const trimmed = raw.trim();
     if (!trimmed) throw new Error('Amount is required');
@@ -1735,12 +1592,10 @@
     if (typeof maxAmount === 'bigint' && parsed > maxAmount) throw new Error('Amount exceeds available balance');
     return parsed;
   }
-
   function routeRequiresExplicitExternalAllowance(from: MoveEndpoint, to: MoveEndpoint): boolean {
     const routeKey = getMoveRouteKey(from, to);
     return routeKey === 'external->reserve' || routeKey === 'external->account';
   }
-
   function getMoveAllowanceToken(): ExternalToken {
     const token = requireExternalTokenBySymbol(moveAssetSymbol);
     if (!isAddress(token.address) || token.address === ZeroAddress) {
@@ -1748,7 +1603,6 @@
     }
     return token;
   }
-
   async function getMoveAllowanceContext(context: string): Promise<{
     env: Env;
     jadapter: JAdapter;
@@ -1773,7 +1627,6 @@
       spender,
     };
   }
-
   async function requestExternalGasFaucet(owner: string, amount = '0.1'): Promise<void> {
     const requestApiBase = resolveApiBase();
     const response = await fetch(`${requestApiBase}/api/faucet/gas`, {
@@ -1786,7 +1639,6 @@
       throw new Error(result?.error || `Gas faucet failed (${response.status})`);
     }
   }
-
   async function ensureMoveAllowanceOwnerGas(jadapter: JAdapter, owner: string): Promise<void> {
     if (!jadapter.provider || typeof jadapter.provider.getBalance !== 'function') return;
     const minNativeBalance = parseEther('0.01');
@@ -1814,7 +1666,6 @@
     const nextBalance = await jadapter.provider.getBalance(owner);
     throw new Error(`External wallet lacks gas for approve owner=${owner} nativeBalance=${nextBalance}`);
   }
-
   async function approveMoveExternalAllowance(mode: 'amount' | 'max'): Promise<void> {
     const { jadapter, token, owner, spender } = await getMoveAllowanceContext('move-erc20-allowance-approve');
     const privKey = await getActiveSignerPrivateKey();
@@ -1873,7 +1724,6 @@
       moveExecuting = false;
     }
   }
-
   function getDerivedDeltaForAccount(counterpartyEntityId: string, tokenId: number) {
     const account = counterpartyEntityId ? findLocalAccountByCounterparty(String(replica?.state?.entityId || tab.entityId || ''), replica?.state?.accounts, counterpartyEntityId) : null;
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
@@ -1883,13 +1733,11 @@
     if (!delta) return null;
     return activeXlnFunctions.deriveDelta(delta, isAccountLeftPerspective(entityId, account));
   }
-
   function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: number): bigint {
     const derived = getDerivedDeltaForAccount(counterpartyEntityId, tokenId);
     if (!derived) return 0n;
     return derived.outCapacity;
   }
-
   function isLocalExecutorForWorkspace(counterpartyEntityId: string, account: AccountMachine | null): boolean {
     const workspace = account?.settlementWorkspace;
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
@@ -1897,7 +1745,6 @@
     if (!workspace || workspace.status !== 'ready_to_submit' || !entityId || !counterparty) return false;
     return workspace.executorIsLeft === isAccountLeftPerspective(entityId, account);
   }
-
   // Faucet: fund entity reserves with test tokens
   function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
     const byId = externalTokens.find(t => typeof t.tokenId === 'number' && t.tokenId === tokenId);
@@ -1913,7 +1760,6 @@
     const info = getTokenInfo(tokenId);
     return { tokenId, symbol: info.symbol ?? 'UNK', decimals: info.decimals ?? 18 };
   }
-
   function parseTokenAmount(amount: string, decimals: number): bigint {
     const [wholeRaw, fracRaw = ''] = amount.split('.');
     const whole = wholeRaw && wholeRaw.length > 0 ? BigInt(wholeRaw) : 0n;
@@ -1921,7 +1767,6 @@
     const frac = fracPadded.length > 0 ? BigInt(fracPadded) : 0n;
     return whole * 10n ** BigInt(decimals) + frac;
   }
-
   function formatTokenInputAmount(amount: bigint, decimals: number): string {
     if (amount <= 0n) return '';
     const divisor = 10n ** BigInt(decimals);
@@ -1930,11 +1775,9 @@
     if (frac === 0n) return whole.toString();
     return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
   }
-
   async function resolveCurrentExternalAddress(): Promise<string> {
     const signerId = String(currentSignerId || '').trim();
     if (isAddress(signerId)) return signerId;
-
     const xln = await getXLN();
     const getCachedSignerPrivateKey = xln.getCachedSignerPrivateKey;
     if (!getCachedSignerPrivateKey) throw new Error('Cached signer key reader unavailable');
@@ -1942,7 +1785,6 @@
     if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
     return new EthersWallet(hexlify(privKey)).address;
   }
-
   async function withdrawReserveToExternal(tokenId: number, amountOverride?: bigint, recipientEoaOverride?: string): Promise<void> {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) {
@@ -1953,7 +1795,6 @@
       toasts.error('Withdraw requires LIVE mode');
       return;
     }
-
     const info = resolveReserveTokenMeta(tokenId);
     withdrawingExternalToken = info.symbol;
     try {
@@ -1966,7 +1807,6 @@
       );
       const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
       const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
-
       await enqueueEntityInputs(env, [{
         entityId,
         signerId,
@@ -1985,7 +1825,6 @@
           },
         ],
       }]);
-
       pendingAssetBridgeSync = {
         tokenId,
         symbol: info.symbol,
@@ -2000,7 +1839,6 @@
     } finally {
     }
   }
-
   async function reserveToReserve(tokenId: number, amount: bigint, recipientEntityIdOverride?: string): Promise<void> {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     if (!entityId) throw new Error('Active entity missing for reserve transfer');
@@ -2029,7 +1867,6 @@
       ],
     }]);
   }
-
   async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) {
@@ -2058,13 +1895,11 @@
           amount: amountStr
         })
       });
-
       const result = await readJsonResponse<FaucetApiResult>(response);
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
       await applyCanonicalJEventsToActiveEnv(result.events ?? [], `reserve-faucet-${tokenMeta.symbol}`);
-
       pendingReserveFaucets = [...pendingReserveFaucets, {
         tokenId: tokenMeta.tokenId,
         amount: amountWei,
@@ -2078,7 +1913,6 @@
       toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
     }
   }
-
 	  async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
 	    const entityId = replica?.state?.entityId || tab.entityId;
 	    if (!entityId) {
@@ -2114,7 +1948,6 @@
       };
       pendingOffchainFaucets = [...pendingOffchainFaucets, pendingRequest];
       toasts.info(`Funding ${tokenMeta.symbol} account...`);
-
       const requestTimeoutMs = 12000;
       let response: Response | null = null;
       let result: FaucetApiResult | null = null;
@@ -2144,7 +1977,6 @@
       } finally {
         if (timeout) clearTimeout(timeout);
       }
-
       if (!response?.ok || !result?.success) {
         const status = response ? response.status : 'fetch-error';
         const code = typeof result?.code === 'string' ? result.code : '';
@@ -2156,7 +1988,6 @@
         });
         throw new Error(result?.error || `Faucet failed (${status})`);
       }
-
       pendingOffchainFaucets = attachOffchainFaucetRequestId(
         pendingOffchainFaucets,
         pendingKey,
@@ -2168,11 +1999,9 @@
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
     }
   }
-
   function handleAccountFaucet(event: CustomEvent<{ counterpartyId: string; tokenId: number }>) {
     faucetOffchain(event.detail.counterpartyId, event.detail.tokenId);
   }
-
   async function handleQuickSettleApprove(event: CustomEvent<{ counterpartyId: string }>) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) {
@@ -2183,12 +2012,10 @@
       toasts.error('Settlement signature requires LIVE mode');
       return;
     }
-
     try {
       const env = requireRuntimeEnv(activeEnv, 'quick-settle-approve');
       const signerId = resolveEntitySigner(entityId, 'quick-settle-approve');
       if (!signerId) throw new Error('No signer available');
-
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'settle_approve',
           data: { counterpartyEntityId: event.detail.counterpartyId },
@@ -2199,12 +2026,10 @@
       toasts.error(`Settlement signature failed: ${(err as Error).message}`);
     }
   }
-
   function cloneExternalTokenCatalog(tokens: ExternalToken[] | null): ExternalToken[] {
     if (!tokens) return [];
     return tokens.map((token) => ({ ...token, balance: 0n }));
   }
-
   async function getTokenList(
     jadapter: JAdapter | null | undefined,
     runtimeId: string,
@@ -2214,7 +2039,6 @@
     if (cacheKey === externalTokenCatalogCacheKey && externalTokenCatalogCache !== null) {
       return cloneExternalTokenCatalog(externalTokenCatalogCache);
     }
-
     let tokens = await fetchTokenCatalog();
     if (tokens.length === 0 && jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
@@ -2228,12 +2052,10 @@
         }));
       }
     }
-
     externalTokenCatalogCacheKey = cacheKey;
     externalTokenCatalogCache = tokens.map((token) => ({ ...token, balance: 0n }));
     return cloneExternalTokenCatalog(externalTokenCatalogCache);
   }
-
   function buildOnchainReserves(
     reserves: Map<number | string, bigint> | undefined,
     tokens: ExternalToken[],
@@ -2246,7 +2068,6 @@
     for (const tokenId of defaultTokenIds) {
       next.set(tokenId, 0n);
     }
-
     if (reserves && typeof reserves.entries === 'function') {
       for (const [tokenId, amount] of reserves.entries()) {
         const numericId = Number(tokenId);
@@ -2255,7 +2076,6 @@
     }
     return next;
   }
-
   $: {
     activeEnv;
     envRevision;
@@ -2333,7 +2153,6 @@
       }
     }
   }
-
   $: transferableAssetOptions = externalTokens.filter(isReserveTransferToken);
   $: selectedExternalToReserveToken = findReserveTransferTokenBySymbol(externalToReserveSymbol);
   $: selectedReserveToCollateralToken = findReserveTransferTokenBySymbol(reserveToCollateralSymbol);
@@ -2509,7 +2328,6 @@
     };
     moveUiState = nextState;
   }
-
   $: {
     const preferred = choosePreferredAssetSymbol(externalTokens);
     const preferredFaucetSymbol =
@@ -2528,7 +2346,6 @@
       moveAssetSymbol = movePreferred;
     }
   }
-
   $: {
     const moveAmountContextKey = [
       assetWorkspaceTab,
@@ -2542,7 +2359,6 @@
       lastMoveAmountContextKey = moveAmountContextKey;
     }
   }
-
   $: if (pendingReserveFaucets.length > 0) {
     const now = Date.now();
     const { remaining, received, timedOut } = reconcilePendingReserveFaucets(
@@ -2560,7 +2376,6 @@
       pendingReserveFaucets = remaining;
     }
   }
-
   $: if (pendingOffchainFaucets.length > 0) {
     const now = Date.now();
     const accountStateSignal = [
@@ -2587,7 +2402,6 @@
       pendingOffchainFaucets = remaining;
     }
   }
-
   // Known token addresses for RPC mode (from deploy-tokens.cjs on anvil)
   async function fetchTokenCatalog(): Promise<ExternalToken[]> {
     try {
@@ -2608,7 +2422,6 @@
       return [];
     }
   }
-
   function readExternalWalletState(
     tokenList: ExternalToken[],
     owner: string,
@@ -2649,7 +2462,6 @@
       ...(sourceHeight !== undefined ? { sourceHeight } : {}),
     };
   }
-
   function readObservedExternalAllowance(owner: string, tokenAddress: string, spender: string): bigint | null {
     const externalWallet = getCurrentLiveEntityReplica()?.state?.externalWallet;
     const ownerKey = String(owner || '').trim().toLowerCase();
@@ -2661,7 +2473,6 @@
       ?.get?.(`${tokenKey}:${spenderKey}`)
       ?.allowance ?? null;
   }
-
   async function applyCanonicalJEventsToActiveEnv(
     events: NonNullable<FaucetApiResult['events']>,
     label: string,
@@ -2675,7 +2486,6 @@
     await xln.process(env, undefined, 0);
     setXlnEnvironment(env);
   }
-
   async function requestExternalWalletSnapshot(
     entityId: string,
     owner: string,
@@ -2777,7 +2587,6 @@
         ...(snapshot.allowanceErrors?.length ? { allowanceErrors: snapshot.allowanceErrors } : {}),
       };
     }
-
     const requestApiBase = resolveApiBase();
     const response = await fetch(`${requestApiBase}/api/external-wallet/snapshot`, {
       method: 'POST',
@@ -2855,7 +2664,6 @@
         : {}),
     };
   }
-
   function buildExternalWalletStateSyncSignature(): string {
     const ownerKey = String(resolveSelfEoaAddress() || '').trim().toLowerCase();
     const externalWallet = getCurrentLiveEntityReplica()?.state?.externalWallet;
@@ -2877,7 +2685,6 @@
       : '';
     return `${ownerKey}|${balances}|${allowances}`;
   }
-
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
   async function fetchExternalTokens(forceSnapshot = false) {
     if (externalFetchInFlight) {
@@ -2901,7 +2708,6 @@
         externalTokensLoading = false;
         return;
       }
-
       try {
         const xln = await getXLN();
         const envAtStart = getRuntimeEnv(activeEnv);
@@ -2925,13 +2731,11 @@
           moveAllowanceLoading = allowanceReads.length > 0 && moveAllowanceRaw === null;
           moveAllowanceError = null;
         }
-
         let nativeBalance = 0n;
         let balances: bigint[] = tokenList.map(() => 0n);
         let allowanceValues: bigint[] = [];
         let snapshotSource: ExternalWalletSnapshotSource | null = null;
         let tokenErrors: ExternalWalletReadResult['tokenErrors'] = [];
-
         const observed = !forceSnapshot
           ? readExternalWalletState(tokenList, owner, allowanceReads)
           : null;
@@ -2970,7 +2774,6 @@
         } else {
           throw new Error('Active entity missing for external wallet snapshot');
         }
-
         balances.forEach((balance: bigint, idx: number) => {
           if (tokenList[idx]) tokenList[idx].balance = balance;
         });
@@ -2988,7 +2791,6 @@
             delete token.readError;
           }
         });
-
         const runtimeIdNow = getRuntimeId(activeEnv);
         const jurisdictionNow = String(getCurrentEntityJurisdictionName(activeEnv) || '');
         const currentKey = `${resolveSelfEoaAddress()}|${String(runtimeIdNow || '').trim()}|${jurisdictionNow.trim()}`;
@@ -3037,7 +2839,6 @@
     });
     return await externalFetchInFlight;
   }
-
   async function getActiveSignerPrivateKey(): Promise<Uint8Array> {
     const signerId = String(currentSignerId || '').trim();
     if (!signerId) throw new Error('No active signer selected');
@@ -3048,7 +2849,6 @@
     if (!privKey) throw new Error(`No registered signer key for ${signerId}`);
     return privKey;
   }
-
   async function sendExternalAsset(): Promise<void> {
     const token = requireExternalTokenBySymbol(sendAssetSymbol);
     const recipient = sendAssetRecipient.trim();
@@ -3073,7 +2873,6 @@
       sendingExternalToken = null;
     }
   }
-
   async function collateralToReserve(
     tokenId: number,
     amount: bigint,
@@ -3099,7 +2898,6 @@
       const env = requireRuntimeEnv(activeEnv, 'collateral-to-reserve');
       const signerId = resolveEntitySigner(entityId, 'collateral-to-reserve');
       const info = getTokenInfo(tokenId);
-
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
         {
           type: 'settle_propose' as const,
@@ -3117,7 +2915,6 @@
           },
         },
       ])]);
-
       pendingAssetAutoC2Rs = [...pendingAssetAutoC2Rs, {
         counterpartyEntityId,
         tokenId,
@@ -3134,7 +2931,6 @@
       toasts.error(`Collateral → Reserve failed: ${(err as Error).message}`);
     }
   }
-
   function openAssetMoveWorkspace(): void {
     assetWorkspaceTab = 'move';
     moveFromEndpoint = 'external';
@@ -3145,7 +2941,6 @@
     resetMoveLineMeasurement();
     bumpMoveNodeLayout();
   }
-
   function openAccountMoveWorkspace(): void {
     accountWorkspaceTab = 'move';
     moveFromEndpoint = 'account';
@@ -3161,23 +2956,18 @@
     resetMoveLineMeasurement();
     bumpMoveNodeLayout();
   }
-
   function openAssetHistoryWorkspace(): void {
     assetWorkspaceTab = 'history';
   }
-
   function openAccountHistoryWorkspace(): void {
     accountWorkspaceTab = 'history';
   }
-
   function handleMoveWorkspaceError(err: unknown): void {
     toasts.error(`Move failed: ${toErrorMessage(err, 'Unknown error')}`);
   }
-
   function setMoveProgress(label: string): void {
     moveProgressLabel = label;
   }
-
   async function waitForMoveCondition(
     predicate: () => boolean,
     label: string,
@@ -3192,7 +2982,6 @@
     }
     throw new Error(`${label} did not complete in time`);
   }
-
   function buildMovePostSettleTxs(entityId: string, pending: PendingAssetAutoC2R): EntityTx[] {
     const needsFollowUpReserveOp = pending.postSettleOp.type !== 'none';
     const entityTxs: EntityTx[] = [
@@ -3245,7 +3034,6 @@
     }
     return entityTxs;
   }
-
   function canAddMoveToExistingBatch(): boolean {
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     return routeKey === 'external->reserve'
@@ -3257,7 +3045,6 @@
       || routeKey === 'account->external'
       || routeKey === 'account->account';
   }
-
   async function queueReserveToReserveDraft(
     tokenId: number,
     amount: bigint,
@@ -3284,7 +3071,6 @@
       }],
     }]);
   }
-
   async function queueReserveToExternalDraft(
     tokenId: number,
     amount: bigint,
@@ -3323,7 +3109,6 @@
       'Waiting for reserve withdrawal to appear in draft batch',
     );
   }
-
   async function queueReserveToCollateralDraft(
     tokenId: number,
     amount: bigint,
@@ -3338,12 +3123,10 @@
     if (!signerId) throw new Error('Active signer missing for account funding');
     if (!counterpartyEntityId) throw new Error('Select account first');
     if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
-
     const accounts = replica?.state?.accounts;
     if (receivingEntityId === String(entityId).trim().toLowerCase() && (!accounts || !findLocalAccountByCounterparty(entityId, accounts, counterpartyEntityId))) {
       throw new Error('No account found for selected counterparty');
     }
-
     const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-account-draft');
     await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
       type: 'r2c' as const,
@@ -3355,7 +3138,6 @@
       },
     }])]);
   }
-
   async function queueExternalToReserveDraft(
     tokenAddress: string,
     amount: bigint,
@@ -3383,7 +3165,6 @@
       }],
     }]);
   }
-
   async function addMoveToExistingBatch(skipValidation = false): Promise<void> {
     if (!skipValidation) {
       const validationError = getMoveValidationError('draft');
@@ -3486,25 +3267,20 @@
       return;
     }
   }
-
   function isExternalTransferMoveRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
     return getMoveRouteKey(from, to) === 'external->external';
   }
-
   function isImmediateMoveExecutionRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
     return getMoveRouteKey(from, to) === 'external->external';
   }
-
   function getMovePrimaryActionLabel(): string {
     if (isExternalTransferMoveRoute(moveFromEndpoint, moveToEndpoint)) return 'Send Direct';
     return 'Add to Batch';
   }
-
   function handleMoveAllowanceAmountInput(nextValue: string): void {
     moveAllowanceAmountDirty = true;
     moveAllowanceAmount = nextValue;
   }
-
   async function submitMovePrimaryAction(): Promise<void> {
     if (isImmediateMoveExecutionRoute(moveFromEndpoint, moveToEndpoint)) {
       await executeMovePlan();
@@ -3524,16 +3300,13 @@
       moveExecuting = false;
     }
   }
-
   async function executeMovePlan(): Promise<void> {
     const validationError = getMoveValidationError('broadcast');
     if (validationError) throw new Error(validationError);
-
     const moveSourceAccount = getCurrentMoveSourceAccountId();
     const moveTargetAccount = getCurrentMoveTargetHubId();
     const moveTargetEntity = getCurrentMoveTargetEntityId();
     const moveReserveRecipient = String(moveReserveRecipientEntityId || '').trim().toLowerCase();
-
     moveExecuting = true;
     moveProgressLabel = '';
     try {
@@ -3550,7 +3323,6 @@
         moveAmount = '';
         return;
       }
-
       const token = findReserveTransferTokenBySymbol(moveAssetSymbol);
       if (!token) {
         throw new Error('Select reserve-compatible asset first');
@@ -3559,7 +3331,6 @@
       const amount = parsePositiveAssetAmount(moveAmount, token, maxAmount ?? undefined);
       const selfEntityId = resolveSelfEntityId();
       const reserveRecipientIsSelf = !moveReserveRecipient || moveReserveRecipient === selfEntityId;
-
       switch (routeKey) {
         case 'reserve->reserve':
           setMoveProgress(`Transferring reserve balance to ${formatAddress(moveReserveRecipient)}`);
@@ -3609,7 +3380,6 @@
         default:
           throw new Error('Route not implemented');
       }
-
       moveAmount = '';
       moveProgressLabel = '';
       toasts.success(`Queued ${MOVE_ENDPOINT_LABEL[moveFromEndpoint]} → ${MOVE_ENDPOINT_LABEL[moveToEndpoint]}`);
@@ -3620,7 +3390,6 @@
       moveExecuting = false;
     }
   }
-
   // Reserve → Collateral (deposit reserves into selected bilateral account)
   async function reserveToCollateral(
     tokenId: number,
@@ -3640,34 +3409,28 @@
       notifyUserActionError('reserve-to-collateral', 'Active signer missing for account funding');
       return;
     }
-
     if (!counterpartyEntityId) {
       toasts.error('Select an account to deposit collateral');
       return;
     }
-
     if (!activeIsLive) {
       toasts.error('Deposit requires LIVE mode');
       return;
     }
-
     const amount = amountOverride ?? (onchainReserves.get(tokenId) ?? 0n);
     if (amount <= 0n) {
       toasts.error('No reserve balance for this token');
       return;
     }
-
     const accounts = replica?.state?.accounts;
     if (receivingEntityId === String(entityId).trim().toLowerCase() && (!accounts || !findLocalAccountByCounterparty(entityId, accounts, counterpartyEntityId))) {
       toasts.error('No account found for selected counterparty');
       return;
     }
-
     const info = getTokenInfo(tokenId);
     collateralFundingToken = info.symbol;
     try {
       const env = requireRuntimeEnv(activeEnv, 'reserve-to-collateral');
-
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
           {
             type: 'r2c' as const,
@@ -3683,7 +3446,6 @@
             data: {},
           },
         ])]);
-
       toasts.info(`R→C pending on-chain confirmation for ${info.symbol}.`);
     } catch (err) {
       console.error('[EntityPanel] Reserve → Collateral failed:', err);
@@ -3692,7 +3454,6 @@
       collateralFundingToken = null;
     }
   }
-
   async function openAccountWithFullId(targetEntityId: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'open-account');
@@ -3743,12 +3504,11 @@
       toasts.error(`Open account failed: ${(err as Error).message}`);
     }
   }
-
   function confirmDisputeAction(
     kind: 'prepare' | 'start' | 'finalize',
     counterpartyEntityId: string,
   ): boolean {
-    const label = pendingBatchEntityLabel(counterpartyEntityId);
+    const label = pendingBatchEntityLabel(counterpartyEntityId, getPendingBatchLabelOptions());
     if (kind === 'prepare') {
       return confirm(
         `Prepare dispute with ${label}?\n\nThis freezes normal account traffic, removes orderbook exposure, and waits for stable dispute evidence before any on-chain batch is queued.`,
@@ -3763,14 +3523,12 @@
       `Finalize on-chain dispute with ${label}?\n\nThis adds Dispute Finalize to the pending batch. Only do this after the dispute timeout has passed.`,
     );
   }
-
   let unsafeCrossJTargetDisputeAccepted = false;
   let unsafeCrossJTargetDisputeAccountId = '';
   $: if (workspaceAccountId !== unsafeCrossJTargetDisputeAccountId) {
     unsafeCrossJTargetDisputeAccepted = false;
     unsafeCrossJTargetDisputeAccountId = workspaceAccountId;
   }
-
   function getCrossJTargetDisputeRisk(counterpartyEntityId: string): { amount: bigint; tokenId: number } | null {
     const state = replica?.state;
     const account = state?.accounts?.get?.(counterpartyEntityId);
@@ -3792,13 +3550,11 @@
     }
     return amount > 0n ? { amount, tokenId } : null;
   }
-
   function formatCrossJTargetDisputeRisk(risk: { amount: bigint; tokenId: number }): string {
     const token = resolveReserveTokenMeta(risk.tokenId);
     const amount = formatTokenInputAmount(risk.amount, token.decimals) || '0';
     return `${amount} ${token.symbol}`;
   }
-
   async function confirmAndQueueDisputePrepare(
     counterpartyEntityId: string,
     description = 'dispute-prepare-from-configure',
@@ -3806,7 +3562,6 @@
     if (!confirmDisputeAction('prepare', counterpartyEntityId)) return;
     await queueDisputePrepare(counterpartyEntityId, description);
   }
-
   async function confirmAndQueueDisputeStart(
     counterpartyEntityId: string,
     description = 'dispute-from-configure',
@@ -3815,12 +3570,10 @@
     if (!confirmDisputeAction('start', counterpartyEntityId)) return;
     await queueDisputeStart(counterpartyEntityId, description, options);
   }
-
   async function confirmAndQueueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
     if (!confirmDisputeAction('finalize', counterpartyEntityId)) return;
     await queueDisputeFinalize(counterpartyEntityId, description);
   }
-
   async function queueDisputePrepare(
     counterpartyEntityId: string,
     description = 'dispute-prepare-from-configure',
@@ -3848,7 +3601,6 @@
       toasts.error(`Dispute prepare failed: ${(err as Error).message}`);
     }
   }
-
   async function queueDisputeStart(
     counterpartyEntityId: string,
     description = 'dispute-from-configure',
@@ -3884,7 +3636,6 @@
       toasts.error(`Dispute failed: ${(err as Error).message}`);
     }
   }
-
   async function queueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'dispute-finalize');
@@ -3912,7 +3663,6 @@
       toasts.error(`Dispute finalize failed: ${(err as Error).message}`);
     }
   }
-
   async function reopenDisputedAccount(counterpartyEntityId: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'reopen-disputed-account');
@@ -3940,7 +3690,6 @@
       toasts.error(`Reopen failed: ${(err as Error).message}`);
     }
   }
-
   async function enforceOutstandingDebt(request: DebtDrainRequest): Promise<void> {
     const { tokenId, symbol, maxIterations, openCount, outstandingAmount, reserveAmount, payableAmount, nextDebtIndex } = request;
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
@@ -3977,7 +3726,6 @@
       debtEnforcingTokenId = null;
     }
   }
-
   async function addTokenToAccount() {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'add-token-to-account');
@@ -4019,12 +3767,10 @@
       toasts.error(`Add token failed: ${(err as Error).message}`);
     }
   }
-
   // Faucet external tokens (ERC20 to signer EOA)
   async function faucetExternalTokens(tokenSymbol: string = 'USDC') {
     const signerId = currentSignerId;
     if (!signerId) return;
-
     try {
       const requestApiBase = resolveApiBase();
       const amount = tokenSymbol === 'ETH' ? '0.1' : '100';
@@ -4039,14 +3785,11 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       const result = await readJsonResponse<FaucetApiResult>(response);
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
-
       toasts.success(`Received ${amount} ${tokenSymbol} in external!`);
-
       if (isEth) {
         void fetchExternalTokens(true);
       }
@@ -4055,7 +3798,6 @@
       toasts.error(`External faucet failed: ${(err as Error).message}`);
     }
   }
-
   async function submitAssetFaucet(target: 'external' | 'reserve' | 'account'): Promise<void> {
     if (assetFaucetSubmitting) return;
     assetFaucetSubmitting = true;
@@ -4083,11 +3825,9 @@
       assetFaucetSubmitting = false;
     }
   }
-
   function refreshBalances(): void {
     void fetchExternalTokens(true);
   }
-
   $: {
     activeEnv;
     envRevision;
@@ -4103,7 +3843,6 @@
       }
     }
   }
-
   async function handleResetEverything(): Promise<void> {
     if (resettingEverything) return;
     const confirmed = window.confirm('Reset ALL local XLN data? Wallets, runtimes, settings, and IndexedDB databases will be deleted.');
@@ -4115,9 +3854,7 @@
       resettingEverything = false;
     }
   }
-
   let externalBalancePollKey = '';
-
   $: {
     if (typeof window === 'undefined') {
       externalBalancePollKey = '';
@@ -4139,15 +3876,12 @@
       }
     }
   }
-
   onDestroy(() => {
     resetMoveLineMeasurement();
     moveVisualResizeObserver?.disconnect();
   });
-
   onMount(() => {
     applyDeepLinkViewFromUrl();
-
     const handleMovePointer = (event: PointerEvent | MouseEvent) => {
       if (!moveDragSource) return;
       const hovered = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('[data-move-side="to"]');
@@ -4179,12 +3913,10 @@
       window.removeEventListener('popstate', handleUrlNavigation);
     };
   });
-
   // Formatting
   function getTokenInfo(tokenId: number) {
     return activeXlnFunctions?.getTokenInfo(tokenId) ?? { symbol: 'UNK', decimals: 18 };
   }
-
   function formatAmount(amount: bigint, decimals = 18): string {
     const precision = Math.max(0, Math.min(18, Math.floor(Number($settings?.tokenPrecision ?? 4))));
     const negative = amount < 0n;
@@ -4203,7 +3935,6 @@
     }
     return `${negative ? '-' : ''}${text}`;
   }
-
   function formatCompact(value: number): string {
     if (!$settings.compactNumbers) {
       return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -4212,29 +3943,23 @@
     if (value >= 1_000) return '$' + (value / 1_000).toFixed(2) + 'K';
     return '$' + value.toFixed(2);
   }
-
   function formatApproxUsd(value: number): string {
     return `~${formatCompact(value)}`;
   }
-
   function formatUsdExact(value: number): string {
     return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-
   function getAssetPrice(symbol: string): number {
     return getAssetUsdPrice(symbol);
   }
-
   function getAssetValue(tokenId: number, amount: bigint, symbolOverride?: string): number {
     const info = getTokenInfo(tokenId);
     const symbol = symbolOverride ?? info.symbol ?? 'UNK';
     return amountToUsd(amount, info.decimals, symbol);
   }
-
   function getExternalValue(token: ExternalToken): number {
     return amountToUsd(token.balance, token.decimals ?? 18, token.symbol);
   }
-
   function calculatePortfolioValue(reserves: Map<number | string, bigint>): number {
     let total = 0;
     for (const [tokenId, amount] of reserves.entries()) {
@@ -4242,7 +3967,6 @@
     }
     return total;
   }
-
   // Calculate totals for the three buckets
   $: externalTotal = (() => {
     let total = 0;
@@ -4253,9 +3977,7 @@
     }
     return total;
   })();
-
   $: reservesTotal = calculatePortfolioValue(onchainReserves);
-
   $: accountsData = (() => {
     let outbound = 0;
     let inbound = 0;
@@ -4274,7 +3996,6 @@
             const isLeftEntity = String(tab.entityId || '').toLowerCase() < String(counterpartyId || '').toLowerCase();
             const derived = activeXlnFunctions?.deriveDelta?.(delta, isLeftEntity);
             if (!derived) continue;
-
             if (derived.outCapacity > 0n) outbound += valueOf(derived.outCapacity);
             if (derived.inCapacity > 0n) inbound += valueOf(derived.inCapacity);
             // outCapacity = outPeerCredit + outCollateral + outOwnCredit
@@ -4293,12 +4014,10 @@
       total: outbound,
     };
   })();
-
   type DisputedAccountView = {
     counterpartyId: string;
     status: 'active' | 'finalized';
   };
-
   $: disputedAccounts = (() => {
     const out: DisputedAccountView[] = [];
     const accounts = replica?.state?.accounts;
@@ -4317,493 +4036,20 @@
       return compareText(a.counterpartyId, b.counterpartyId);
     });
   })();
-
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
-
-  type EntityActivityChip = {
-    label: string;
-    tone?: 'neutral' | 'good' | 'warn' | 'danger';
-  };
-
-  type EntityActivityRow = {
-    id: string;
-    height: number;
-    timestamp: number;
-    source: 'frame' | 'batch';
-    accountId: string;
-    accountLabel: string;
-    kind: 'pending' | 'mempool' | 'confirmed' | 'batch';
-    actor: 'you' | 'peer' | 'system';
-    actorSide: 'L' | 'R' | '';
-    actorLabel: string;
-    actorEntityId: string;
-    actorName: string;
-    actorAvatar: string;
-    actorInitials: string;
-    headline: string;
-    bodyLines: string[];
-    chips: EntityActivityChip[];
-    footerLeft: string;
-    footerRight: string;
-  };
-
-  function formatTime(ms: number): string {
-    if (!Number.isFinite(ms) || ms <= 0) return '-';
-    return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as Intl.DateTimeFormatOptions);
-  }
-
-  function entityTxTypeLabel(type: string): string {
-    const known: Record<string, string> = {
-      htlcPayment: 'HTLC Payment',
-      directPayment: 'Direct Payment',
-      openAccount: 'Open Account',
-      extendCredit: 'Extend Credit',
-      requestCollateral: 'Request Collateral',
-      set_rebalance_policy: 'Set Rebalance Policy',
-      r2c: 'Deposit Collateral',
-      settle_approve: 'Settle Approve',
-      settle_finalize: 'Settle Finalize',
-      disputeStart: 'Dispute Start',
-      disputeFinalize: 'Dispute Finalize',
-      reopenDisputedAccount: 'Reopen Disputed',
-      placeSwapOffer: 'Swap Offer',
-      requestSwapCancel: 'Swap Cancel Request',
-      j_broadcast: 'J Broadcast',
-      j_rebroadcast: 'J Rebroadcast',
-      j_clear_batch: 'J Clear Batch',
-      j_abort_sent_batch: 'J Abort Sent Batch',
-      'profile-update': 'Profile Update',
-      setHubConfig: 'Hub Config',
-    };
-    if (known[type]) return known[type];
-    return String(type || 'unknown')
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/_/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase())
-      .trim();
-  }
-
-  $: entityHeightBadge = Number(replica?.state?.height ?? 0);
-  $: finalizedJHeightBadge = Number(replica?.state?.lastFinalizedJHeight ?? 0);
-  function activityAccountLabel(counterpartyId: string): string {
-    const raw = String(counterpartyId || '');
-    if (!raw) return 'Unknown account';
-    return resolveEntityName(raw, activeEnv) || formatEntityId(raw);
-  }
-
-  function frameActorMeta(account: AccountMachine, byLeft: boolean | undefined): {
-    actor: 'you' | 'peer' | 'system';
-    actorSide: 'L' | 'R' | '';
-    actorLabel: string;
-    actorEntityId: string;
-    actorName: string;
-    actorAvatar: string;
-    actorInitials: string;
-  } {
-    const localEntityId = String(replica?.state?.entityId || tab.entityId || '').trim();
-    const localEntity = localEntityId.toLowerCase();
-    const leftEntityId = String(account?.leftEntity || '').trim();
-    const rightEntityId = String(account?.rightEntity || '').trim();
-    const leftEntity = leftEntityId.toLowerCase();
-    const localIsLeft = Boolean(localEntity && leftEntity && localEntity === leftEntity);
-    const actorEntityId = typeof byLeft === 'boolean'
-      ? (byLeft ? leftEntityId : rightEntityId)
-      : '';
-    const actorName = actorEntityId
-      ? getEntityDisplayName(actorEntityId, {
-          source: activeEnv,
-          selfEntityId: localEntityId,
-          fallback: actorEntityId,
-        })
-      : 'System';
-    const actorAvatar = actorEntityId ? resolveEntityAvatar(activeXlnFunctions, actorEntityId) : '';
-    const actorInitials = actorName
-      .split(/[\s_-]+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase() || '')
-      .join('') || 'SY';
-    if (typeof byLeft !== 'boolean') {
-      return {
-        actor: 'system',
-        actorSide: '',
-        actorLabel: 'System',
-        actorEntityId: '',
-        actorName,
-        actorAvatar,
-        actorInitials,
-      };
-    }
-    const actorSide = byLeft ? 'L' : 'R';
-    const actor = byLeft === localIsLeft ? 'you' : 'peer';
-    return {
-      actor,
-      actorSide,
-      actorLabel: `${actor === 'you' ? 'You' : 'Counterparty'} · ${actorSide}`,
-      actorEntityId,
-      actorName,
-      actorAvatar,
-      actorInitials,
-    };
-  }
-
-  function activityTokenAmount(tokenIdRaw: unknown, amountRaw: unknown): string {
-    const tokenId = Number(tokenIdRaw || 0);
-    const amount = (() => {
-      if (typeof amountRaw === 'bigint') return amountRaw;
-      try {
-        return BigInt(String(amountRaw ?? 0));
-      } catch {
-        return 0n;
-      }
-    })();
-    if (tokenId > 0 && activeXlnFunctions?.formatTokenAmount) {
-      return activeXlnFunctions.formatTokenAmount(tokenId, amount);
-    }
-    const token = tokenId > 0 ? getTokenInfo(tokenId) : { symbol: 'TOKEN', decimals: 18 };
-    return `${formatAmount(amount, Number(token.decimals ?? 18))} ${token.symbol || `#${tokenId}`}`;
-  }
-
-  function activityEntityName(entityIdRaw: unknown, fallback: string): string {
-    const entityId = String(entityIdRaw || '').trim();
-    if (!entityId) return fallback;
-    return getEntityDisplayName(entityId, {
-      source: activeEnv,
-      selfEntityId: replica?.state?.entityId || tab.entityId,
-      fallback,
-    });
-  }
-
-  function shortHash(value: unknown): string {
-    const text = String(value || '').trim();
-    if (!text) return '-';
-    return text.length > 18 ? `${text.slice(0, 10)}...${text.slice(-6)}` : text;
-  }
-
-  function describeClaimedEvents(eventsRaw: unknown): string {
-    if (!Array.isArray(eventsRaw) || eventsRaw.length === 0) return 'no events';
-    const grouped = new Map<string, number>();
-    for (const event of eventsRaw) {
-      const type = String((event as { type?: unknown })?.type || 'event');
-      grouped.set(type, (grouped.get(type) || 0) + 1);
-    }
-    return Array.from(grouped.entries())
-      .map(([type, count]) => `${entityTxTypeLabel(type)}${count > 1 ? ` ×${count}` : ''}`)
-      .join(' · ');
-  }
-
-  function summarizeAccountTx(
-    tx: AccountTx,
-    accountId: string,
-    accountLabel: string,
-    actor: 'you' | 'peer' | 'system',
-  ): string {
-    const data = tx?.data && typeof tx.data === 'object'
-      ? tx.data as Record<string, unknown>
-      : {};
-
-    switch (tx.type) {
-      case 'direct_payment':
-      {
-        const amount = activityTokenAmount(data['tokenId'], data['amount']);
-        const description = String(data['description'] || '').trim();
-        const route = Array.isArray(data['route'])
-          ? data['route'].map((hop) => activityEntityName(hop, formatEntityId(String(hop || '')))).join(' → ')
-          : '';
-        let line = `${actor === 'peer' ? 'Received payment' : 'Sent payment'} ${amount}`;
-        line += actor === 'peer' ? ` from ${accountLabel}` : ` to ${accountLabel}`;
-        if (route) line += ` via ${route}`;
-        if (description) line += ` · ${description}`;
-        return line;
-      }
-      case 'swap_offer':
-        return `Created order · sell ${activityTokenAmount(data['giveTokenId'], data['giveAmount'])} for ${activityTokenAmount(data['wantTokenId'], data['wantAmount'])}`;
-      case 'swap_cancel_request':
-        return `Cancelled order · ${String(data['offerId'] || 'unknown')}`;
-      case 'swap_resolve': {
-        const offerId = String(data['offerId'] || 'unknown');
-        const cancelRemainder = Boolean(data['cancelRemainder']);
-        const executionGive = data['executionGiveAmount'];
-        const executionWant = data['executionWantAmount'];
-        const giveToken = data['restingGiveTokenId'] ?? data['giveTokenId'];
-        const wantToken = data['restingWantTokenId'] ?? data['wantTokenId'];
-        const filled = executionGive !== undefined && executionWant !== undefined
-          ? `${activityTokenAmount(giveToken, executionGive)} ↔ ${activityTokenAmount(wantToken, executionWant)}`
-          : offerId;
-        if (cancelRemainder && executionGive !== undefined && executionWant !== undefined) return `Resolved order · ${filled} and closed remainder`;
-        if (cancelRemainder) return `Closed order · ${offerId}`;
-        return `Resolved order · ${filled}`;
-      }
-      case 'request_collateral': {
-        const amount = activityTokenAmount(data['tokenId'], data['amount']);
-        const fee = typeof data['feeAmount'] !== 'undefined'
-          ? activityTokenAmount(data['feeTokenId'] ?? data['tokenId'], data['feeAmount'])
-          : '';
-        return fee ? `Requested collateral · ${amount} (+ fee ${fee})` : `Requested collateral · ${amount}`;
-      }
-      case 'set_rebalance_policy':
-        return `Updated rebalance policy · soft ${activityTokenAmount(data['tokenId'], data['r2cRequestSoftLimit'])} / hard ${activityTokenAmount(data['tokenId'], data['hardLimit'])}`;
-      case 'set_credit_limit':
-        return `Set credit limit · ${activityTokenAmount(data['tokenId'], data['amount'])}`;
-      case 'add_delta':
-        return `Opened token lane · ${activityEntityName(accountId, accountLabel)} / ${getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
-      case 'account_settle':
-        return `Claimed on-chain settlement · ${getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
-      case 'reserve_to_collateral':
-        return `Claimed reserve → collateral move · ${getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
-      case 'htlc_lock':
-        return `Opened HTLC · ${activityTokenAmount(data['tokenId'], data['amount'])}`;
-      case 'htlc_resolve':
-        return `Resolved HTLC · ${String(data['outcome'] || 'unknown')}`;
-      case 'settle_hold': {
-        const diffs = Array.isArray(data['diffs']) ? data['diffs'].length : 0;
-        return `Placed settlement hold · ${diffs || 1} token${diffs === 1 ? '' : 's'}`;
-      }
-      case 'settle_release': {
-        const diffs = Array.isArray(data['diffs']) ? data['diffs'].length : 0;
-        return `Released settlement hold · ${diffs || 1} token${diffs === 1 ? '' : 's'}`;
-      }
-      case 'reopen_disputed':
-        return 'Reopened disputed account';
-      case 'j_event_claim':
-        return `Claimed J#${Number(data['jHeight'] || 0)} · ${describeClaimedEvents(data['events'])}`;
-      default:
-        return entityTxTypeLabel(String(tx.type || 'unknown'));
-    }
-  }
-
-  function batchCounterpartyId(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>): string {
-    const batch = entry.batch;
-    if (!batch) return '';
-    const fromStart = String(batch.disputeStarts?.[0]?.counterentity || '').trim();
-    if (fromStart) return fromStart;
-    const fromFinalize = String(batch.disputeFinalizations?.[0]?.counterentity || '').trim();
-    if (fromFinalize) return fromFinalize;
-    const fromR2C = String(batch.reserveToCollateral?.[0]?.receivingEntity || '').trim();
-    if (fromR2C) return fromR2C;
-    return '';
-  }
-
-  function batchActorMeta(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>) {
-    if (entry.source === 'self-batch') {
-      const selfId = String(replica?.state?.entityId || tab.entityId || '').trim();
-      const selfName = activityEntityName(selfId, 'You');
-      return {
-        actor: 'you' as const,
-        actorSide: '' as const,
-        actorLabel: 'You · on-chain',
-        actorEntityId: selfId,
-        actorName: selfName,
-        actorAvatar: resolveEntityAvatar(activeXlnFunctions, selfId),
-        actorInitials: selfName
-          .split(/[\s_-]+/)
-          .filter(Boolean)
-          .slice(0, 2)
-          .map((part) => part[0]?.toUpperCase() || '')
-          .join('') || 'YO',
-      };
-    }
-    const counterpartyId = batchCounterpartyId(entry);
-    const actorName = activityEntityName(counterpartyId, counterpartyId ? formatEntityId(counterpartyId) : 'Counterparty');
-    return {
-      actor: counterpartyId ? 'peer' as const : 'system' as const,
-      actorSide: '' as const,
-      actorLabel: counterpartyId ? 'Counterparty · on-chain' : 'System',
-      actorEntityId: counterpartyId,
-      actorName,
-      actorAvatar: counterpartyId ? resolveEntityAvatar(activeXlnFunctions, counterpartyId) : '',
-      actorInitials: actorName
-        .split(/[\s_-]+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((part) => part[0]?.toUpperCase() || '')
-        .join('') || 'CP',
-    };
-  }
-
-  function summarizeBatchOperations(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>): string[] {
-    const ops = entry.operations;
-    if (!ops) {
-      return entry.opCount > 0 ? [`${entry.opCount} on-chain op${entry.opCount === 1 ? '' : 's'}`] : [];
-    }
-    const lines: string[] = [];
-    const push = (count: number | undefined, label: string) => {
-      const normalized = Number(count || 0);
-      if (normalized > 0) lines.push(`${normalized} ${label}${normalized === 1 ? '' : 's'}`);
-    };
-    push(ops.settlements, 'settlement');
-    push(ops.reserveToCollateral, 'reserve → collateral move');
-    push(ops.collateralToReserve, 'collateral → reserve move');
-    push(ops.reserveToReserve, 'reserve transfer');
-    push(ops.disputeStarts, 'dispute start');
-    push(ops.disputeFinalizations, 'dispute finalize');
-    push(ops.externalTokenToReserve, 'external deposit');
-    push(ops.reserveToExternalToken, 'reserve withdrawal');
-    push(ops.revealSecrets, 'secret reveal');
-    push(ops.flashloans, 'flashloan');
-    return lines;
-  }
-
-  $: entityActivityRows = (() => {
-    const rows: EntityActivityRow[] = [];
-    const accounts = replica?.state?.accounts;
-    if (accounts instanceof Map && accounts.size > 0) {
-      for (const [counterpartyId, account] of accounts.entries()) {
-        const accountId = String(counterpartyId || '');
-        const accountLabel = activityAccountLabel(accountId);
-        const pushFrameRow = (
-          kind: 'pending' | 'mempool' | 'confirmed',
-          frameLabel: string,
-          statusLabel: string,
-          height: number,
-          timestamp: number,
-          txs: AccountTx[],
-          byLeft?: boolean,
-        ) => {
-          if (!Array.isArray(txs) || txs.length === 0) return;
-          const actorMeta = frameActorMeta(account, byLeft);
-          const allLines = txs.map((tx) => summarizeAccountTx(tx, accountId, accountLabel, actorMeta.actor));
-          const headline = allLines.length === 1 ? allLines[0] ?? 'Account frame action' : `${txs.length} actions in account frame`;
-          const bodyLines = allLines.length <= 1
-            ? []
-            : (allLines.length > 4 ? [...allLines.slice(0, 4), `+${allLines.length - 4} more actions`] : allLines);
-          rows.push({
-            id: `entity-activity-frame-${accountId}-${kind}-${height}-${timestamp}`,
-            height,
-            timestamp,
-            source: 'frame',
-            accountId,
-            accountLabel,
-            kind,
-            actor: actorMeta.actor,
-            actorSide: actorMeta.actorSide,
-            actorLabel: actorMeta.actorLabel,
-            actorEntityId: actorMeta.actorEntityId,
-            actorName: actorMeta.actorName,
-            actorAvatar: actorMeta.actorAvatar,
-            actorInitials: actorMeta.actorInitials || '',
-            headline,
-            bodyLines,
-            chips: [
-              { label: frameLabel },
-              { label: `${actorMeta.actor === 'peer' ? accountLabel : activityEntityName(tab.entityId, 'You')} → ${actorMeta.actor === 'peer' ? activityEntityName(tab.entityId, 'You') : accountLabel}` },
-              { label: statusLabel, tone: kind === 'confirmed' ? 'good' : (kind === 'mempool' ? 'warn' : 'neutral') },
-              { label: `${txs.length} tx` },
-            ],
-            footerLeft: formatEntityId(accountId),
-            footerRight: height > 0 ? `E#${height}` : statusLabel,
-          });
-        };
-
-        if (account.pendingFrame) {
-          pushFrameRow(
-            'pending',
-            'Pending frame',
-            'Awaiting consensus',
-            Number(account.pendingFrame.height || 0),
-            Number(account.pendingFrame.timestamp || 0),
-            Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
-            account.pendingFrame.byLeft,
-          );
-        }
-
-        if (Array.isArray(account.mempool) && account.mempool.length > 0) {
-          pushFrameRow(
-            'mempool',
-            'Queued broadcast',
-            `${account.mempool.length} queued`,
-            Number(account.pendingFrame?.height || account.currentHeight || 0),
-            Number(account.pendingFrame?.timestamp || account.currentFrame?.timestamp || 0),
-            account.mempool,
-            account.leftEntity === (replica?.state?.entityId || tab.entityId),
-          );
-        }
-
-        const frameHistory = (account as { frameHistory?: AccountFrame[] }).frameHistory;
-        const frames = Array.isArray(frameHistory) ? frameHistory.slice(-12) : [];
-        for (const frame of frames) {
-          pushFrameRow(
-            'confirmed',
-            'Confirmed frame',
-            'Confirmed',
-            Number(frame.height || 0),
-            Number(frame.timestamp || 0),
-            Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
-            frame.byLeft,
-          );
-        }
-      }
-    }
-
-    const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
-    for (let index = 0; index < history.length; index += 1) {
-      const entry = history[index];
-      if (!entry) continue;
-      const actorMeta = batchActorMeta(entry);
-      const accountId = batchCounterpartyId(entry);
-      const accountLabel = accountId ? activityAccountLabel(accountId) : 'On-chain';
-      rows.push({
-        id: `entity-activity-batch-${entry.txHash || entry.batchHash || index}`,
-        height: Number(entry.entityNonce || 0),
-        timestamp: Number(entry.confirmedAt || entry.broadcastedAt || 0),
-        source: 'batch',
-        accountId,
-        accountLabel,
-        kind: 'batch',
-        actor: actorMeta.actor,
-        actorSide: actorMeta.actorSide,
-        actorLabel: actorMeta.actorLabel,
-        actorEntityId: actorMeta.actorEntityId,
-        actorName: actorMeta.actorName,
-        actorAvatar: actorMeta.actorAvatar,
-        actorInitials: actorMeta.actorInitials,
-        headline: entry.eventType === 'DisputeStarted'
-          ? 'Dispute started on-chain'
-          : entry.eventType === 'DisputeFinalized'
-            ? 'Dispute finalized on-chain'
-            : entry.status === 'confirmed'
-              ? 'On-chain batch confirmed'
-              : 'On-chain batch failed',
-        bodyLines: [
-          ...(entry.note ? [entry.note] : []),
-          ...summarizeBatchOperations(entry),
-        ],
-        chips: [
-          { label: entry.status === 'confirmed' ? 'On-chain' : 'Failed', tone: entry.status === 'confirmed' ? 'good' : 'danger' },
-          ...(accountId ? [{ label: accountLabel }] : []),
-          { label: `Nonce ${Number(entry.entityNonce || 0)}` },
-          ...(entry.jBlockNumber ? [{ label: `J#${Number(entry.jBlockNumber)}` }] : []),
-        ],
-        footerLeft: shortHash(entry.txHash || entry.batchHash),
-        footerRight: `Batch ${Number(entry.opCount || 0)} op${Number(entry.opCount || 0) === 1 ? '' : 's'}`,
-      });
-    }
-
-    return rows.sort((a, b) => {
-      if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
-      if (a.height !== b.height) return b.height - a.height;
-      return compareText(a.accountLabel, b.accountLabel);
-    });
-  })();
-
-  $: entityActivityAccounts = (() => {
-    const labels = new Map<string, string>();
-    for (const row of entityActivityRows) {
-      if (!row.accountId) continue;
-      labels.set(row.accountId, row.accountLabel);
-    }
-    return Array.from(labels.entries())
-      .map(([accountId, accountLabel]) => ({ accountId, accountLabel }))
-      .sort((a, b) => compareText(a.accountLabel, b.accountLabel));
-  })();
-
-  $: filteredEntityActivityRows = entityActivityAccountFilter === 'all'
-    ? entityActivityRows
-    : entityActivityRows.filter((row) => row.accountId === entityActivityAccountFilter);
+  $: entityActivityRows = buildEntityActivityRows({
+    replica,
+    tabEntityId: tab.entityId,
+    activeEnv,
+    activeXlnFunctions,
+    getTokenInfo,
+    formatAmount,
+  });
+  $: entityActivityAccounts = buildEntityActivityAccounts(entityActivityRows);
+  $: filteredEntityActivityRows = filterEntityActivityRows(entityActivityRows, entityActivityAccountFilter);
   $: if (entityActivityAccountFilter !== 'all' && !entityActivityAccounts.some((row) => row.accountId === entityActivityAccountFilter)) {
     entityActivityAccountFilter = 'all';
   }
-
   // Handlers
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signerId, entityId } = event.detail;
@@ -4812,23 +4058,18 @@
     if (userModeHeader) return;
     tab = { ...tab, jurisdiction, signerId, entityId };
   }
-
   function handleHeaderAddEntity() {
     dispatch('addEntity');
   }
-
   function handleHeaderAddJurisdiction() {
     dispatch('addJurisdiction');
   }
-
   function handleHeaderAddRuntime() {
     dispatch('addRuntime');
   }
-
   function handleHeaderDeleteRuntime(event: CustomEvent<{ runtimeId: string }>) {
     dispatch('deleteRuntime', event.detail);
   }
-
   function handleAccountSelect(event: CustomEvent) {
     const nextRaw = String(event.detail?.accountId || '').trim();
     selectedAccountId = nextRaw || null;
@@ -4836,13 +4077,11 @@
     const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
     if (matched) workspaceAccountId = matched;
   }
-
   function handleJurisdictionSelect(event: CustomEvent<{ selected: string | null }>) {
     const next = event.detail?.selected ?? null;
     dispatch('jurisdictionSelect', next ? { name: next } : { name: null });
     if (next) selectedJurisdictionName = next;
   }
-
   function handleBackToAccounts() {
     const nextWorkspaceId = String(selectedAccountId || '').trim();
     if (nextWorkspaceId) {
@@ -4853,7 +4092,6 @@
     activeTab = 'accounts';
     accountWorkspaceTab = 'activity';
   }
-
   function selectTopLevelTab(nextTab: ViewTab) {
     if (nextTab === 'accounts' && selectedAccountId) {
       handleBackToAccounts();
@@ -4864,7 +4102,6 @@
     }
     activeTab = nextTab;
   }
-
   function handleAccountPanelGoToOpenAccounts() {
     const nextWorkspaceId = String(selectedAccountId || '').trim();
     if (nextWorkspaceId) {
@@ -4875,270 +4112,33 @@
     activeTab = 'accounts';
     accountWorkspaceTab = 'open';
   }
-
   function openDisputedAccount(counterpartyEntityId: string) {
     const next = String(counterpartyEntityId || '').trim();
     if (!next) return;
     selectedAccountId = next;
     activeTab = 'accounts';
   }
-
   function goToLive() {
     onGoToLive();
   }
-
-  function countBatchOps(batch: JBatch | null | undefined): number {
-    if (!batch) return 0;
-    return (batch.reserveToCollateral?.length || 0) +
-           (batch.collateralToReserve?.length || 0) +
-           (batch.settlements?.length || 0) +
-           (batch.reserveToReserve?.length || 0) +
-           (batch.disputeStarts?.length || 0) +
-           (batch.disputeFinalizations?.length || 0) +
-           (batch.externalTokenToReserve?.length || 0) +
-           (batch.reserveToExternalToken?.length || 0) +
-           (batch.revealSecrets?.length || 0);
-  }
-
-  type PendingBatchPreviewItem = {
-    key: string;
-    title: string;
-    subtitle: string;
-  };
-
-  function pendingBatchEntityLabel(entityId: string): string {
-    const raw = String(entityId || '').trim();
-    return getEntityDisplayName(raw, {
-      source: activeEnv,
-      selfEntityId: replica?.state?.entityId || tab.entityId,
-      fallback: 'Unknown',
-    });
-  }
-
-  function pendingBatchTokenAmountLabel(tokenIdRaw: unknown, amountRaw: unknown): string {
-    const tokenId = Number(tokenIdRaw || 0);
-    const amount = typeof amountRaw === 'bigint'
-      ? amountRaw
-      : (() => {
-          try {
-            return BigInt(String(amountRaw ?? 0));
-          } catch {
-            return 0n;
-          }
-        })();
-    if (tokenId > 0 && activeXlnFunctions?.formatTokenAmount) {
-      return activeXlnFunctions.formatTokenAmount(tokenId, amount);
-    }
-    return `${amount.toString()} ${tokenId > 0 ? `Token #${tokenId}` : 'token'}`;
-  }
-
-  function pendingBatchShortHex(value: unknown): string {
-    const text = String(value || '');
-    if (!text) return '—';
-    if (text.length <= 18) return text;
-    return `${text.slice(0, 10)}...${text.slice(-6)}`;
-  }
-
-  function pendingBatchToBigInt(value: unknown): bigint {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.trunc(value));
-    if (typeof value === 'string' && value.trim()) {
-      try {
-        return BigInt(value);
-      } catch {
-        return 0n;
-      }
-    }
-    return 0n;
-  }
-
-  function pendingBatchIsSelfEntity(value: unknown): boolean {
-    const selfEntityId = String(resolveSelfEntityId() || '').trim().toLowerCase();
-    const candidate = String(value || '').trim().toLowerCase();
-    return !!selfEntityId && !!candidate && selfEntityId === candidate;
-  }
-
-  type PendingBatchSettlementLike = {
-    leftEntity?: unknown;
-    rightEntity?: unknown;
-    diffs?: Array<{ leftDiff?: unknown; rightDiff?: unknown }>;
-  };
-
-  function pendingBatchSettlementReserveDelta(settlement: PendingBatchSettlementLike | null | undefined): bigint {
-    const leftIsSelf = pendingBatchIsSelfEntity(settlement?.leftEntity);
-    const rightIsSelf = pendingBatchIsSelfEntity(settlement?.rightEntity);
-    if (!leftIsSelf && !rightIsSelf) return 0n;
-
-    let delta = 0n;
-    for (const diff of Array.isArray(settlement?.diffs) ? settlement.diffs : []) {
-      if (leftIsSelf) {
-        delta += pendingBatchToBigInt(diff?.leftDiff);
-      } else if (rightIsSelf) {
-        delta += pendingBatchToBigInt(diff?.rightDiff);
-      }
-    }
-    return delta;
-  }
-
-  function buildPendingBatchPreview(batch: JBatch | null | undefined): PendingBatchPreviewItem[] {
-    if (!batch) return [];
-    const reserveIncreaseItems: PendingBatchPreviewItem[] = [];
-    const reserveDecreaseItems: PendingBatchPreviewItem[] = [];
-    const neutralItems: PendingBatchPreviewItem[] = [];
-    const pushItem = (phase: 'increase' | 'decrease' | 'neutral', item: PendingBatchPreviewItem): void => {
-      if (phase === 'increase') reserveIncreaseItems.push(item);
-      else if (phase === 'decrease') reserveDecreaseItems.push(item);
-      else neutralItems.push(item);
+  function getPendingBatchLabelOptions() {
+    return {
+      activeEnv,
+      selfEntityId: resolveSelfEntityId(),
+      activeXlnFunctions,
     };
-
-    for (const [index, op] of (batch.flashloans || []).entries()) {
-      pushItem('increase', {
-        key: `flash-${index}`,
-        title: 'Flashloan',
-        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} temporary reserve liquidity`,
-      });
-    }
-
-    for (const [index, op] of (batch.externalTokenToReserve || []).entries()) {
-      pushItem('increase', {
-        key: `e2r-${index}`,
-        title: 'External → Reserve',
-        subtitle: `${pendingBatchTokenAmountLabel(op.internalTokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.entity || resolveSelfEntityId()))}`,
-      });
-    }
-
-    for (const [index, op] of (batch.reserveToReserve || []).entries()) {
-      const isIncrease = pendingBatchIsSelfEntity(op.receivingEntity);
-      pushItem(isIncrease ? 'increase' : 'decrease', {
-        key: `r2r-${index}`,
-        title: isIncrease ? 'Reserve ← Reserve' : 'Reserve → Reserve',
-        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || ''))}`,
-      });
-    }
-
-    for (const [index, op] of (batch.collateralToReserve || []).entries()) {
-      pushItem('increase', {
-        key: `c2r-${index}`,
-        title: 'Account → Reserve',
-        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} from ${pendingBatchEntityLabel(String(op.counterparty || ''))}`,
-      });
-    }
-
-    for (const [index, op] of (batch.settlements || []).entries()) {
-      const reserveDelta = pendingBatchSettlementReserveDelta(op);
-      const phase = reserveDelta > 0n ? 'increase' : reserveDelta < 0n ? 'decrease' : 'neutral';
-      const reserveLabel = reserveDelta > 0n ? 'Settlement (+Reserve)' : reserveDelta < 0n ? 'Settlement (-Reserve)' : 'Settlement';
-      pushItem(phase, {
-        key: `settle-${index}`,
-        title: reserveLabel,
-        subtitle: `${pendingBatchEntityLabel(String(op.leftEntity || ''))} ↔ ${pendingBatchEntityLabel(String(op.rightEntity || ''))}`,
-      });
-    }
-
-    for (const [index, op] of (batch.reserveToCollateral || []).entries()) {
-      for (const [pairIndex, pair] of (op.pairs || []).entries()) {
-        pushItem('decrease', {
-          key: `r2c-${index}-${pairIndex}`,
-          title: 'Reserve → Account',
-          subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, pair.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || ''))} via ${pendingBatchEntityLabel(String(pair.entity || ''))}`,
-        });
-      }
-    }
-
-    for (const [index, op] of (batch.reserveToExternalToken || []).entries()) {
-      pushItem('decrease', {
-        key: `r2e-${index}`,
-        title: 'Reserve → External',
-        subtitle: `${pendingBatchTokenAmountLabel(op.tokenId, op.amount)} to ${pendingBatchEntityLabel(String(op.receivingEntity || resolveSelfEntityId()))}`,
-      });
-    }
-
-    for (const [index, op] of (batch.disputeStarts || []).entries()) {
-      pushItem('neutral', {
-        key: `dstart-${index}`,
-        title: 'Dispute Start',
-        subtitle: `Lock account with ${pendingBatchEntityLabel(String(op.counterentity || ''))}`,
-      });
-    }
-
-    for (const [index, op] of (batch.disputeFinalizations || []).entries()) {
-      pushItem('neutral', {
-        key: `dfinal-${index}`,
-        title: 'Dispute Finalize',
-        subtitle: `Finalize against ${pendingBatchEntityLabel(String(op.counterentity || ''))}`,
-      });
-    }
-
-    for (const [index, op] of (batch.revealSecrets || []).entries()) {
-      pushItem('neutral', {
-        key: `secret-${index}`,
-        title: 'Reveal Secret',
-        subtitle: pendingBatchShortHex(op.secret),
-      });
-    }
-
-    return [...reserveIncreaseItems, ...reserveDecreaseItems, ...neutralItems];
   }
-
-  function buildOpenOutgoingDebtTotals(): {
-    count: number;
-    usdTotal: number;
-    byToken: Map<number, bigint>;
-  } {
-    const byToken = new Map<number, bigint>();
-    let count = 0;
-    let usdTotal = 0;
-    for (const [tokenId, bucket] of replica?.state?.outDebtsByToken?.entries?.() || []) {
-      let tokenTotal = 0n;
-      for (const debt of bucket.values()) {
-        if (debt.status !== 'open') continue;
-        count += 1;
-        tokenTotal += BigInt(debt.remainingAmount || 0);
-        const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenId);
-        usdTotal += amountToUsd(
-          BigInt(debt.remainingAmount || 0),
-          Number(tokenInfo?.decimals ?? 18),
-          String(tokenInfo?.symbol || `Token #${tokenId}`),
-        );
-      }
-      if (tokenTotal > 0n) byToken.set(tokenId, tokenTotal);
-    }
-    return { count, usdTotal, byToken };
-  }
-
-  function formatBatchReserveIssue(issue: DraftBatchReserveIssue | null): string | null {
-    if (!issue) return null;
-    const tokenLabel = pendingBatchTokenAmountLabel(issue.tokenId, issue.requiredAmount).replace(/^[\d.,\s]+/, '').trim();
-    const spendable = pendingBatchTokenAmountLabel(issue.tokenId, issue.availableAfterDebt);
-    const debtClaim = pendingBatchTokenAmountLabel(issue.tokenId, issue.debtClaimPaid);
-    if (issue.opType === 'reserveToExternalToken') {
-      return `Reserve withdrawal will fail: debt sweep consumes ${debtClaim} first, leaving only ${spendable} spendable.`;
-    }
-    if (issue.opType === 'reserveToCollateral') {
-      return `Reserve → Account will fail for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
-    }
-    return `Reserve → Reserve will fail for ${tokenLabel}: debt sweep consumes ${debtClaim} first, leaving only ${spendable}.`;
-  }
-
-  function getPendingBatchReserveIssue(batch: JBatch | null | undefined): DraftBatchReserveIssue | null {
-    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
-    if (!entityId || !batch) return null;
-    const simulation = simulateDraftBatchReserveAvailability(
-      entityId,
-      onchainReserves,
-      batch,
-      openOutgoingDebtSummary.byToken,
-    );
-    return simulation.issues[0] ?? null;
-  }
-
-  $: openOutgoingDebtSummary = buildOpenOutgoingDebtTotals();
+  $: openOutgoingDebtSummary = buildOpenOutgoingDebtTotals({ replica, activeXlnFunctions });
   $: hasDraftBatch = !!(replica?.state?.jBatchState?.batch && countBatchOps(replica.state.jBatchState.batch) > 0);
   $: hasSentBatch = !!(replica?.state?.jBatchState?.sentBatch?.batch && countBatchOps(replica.state.jBatchState.sentBatch.batch) > 0);
-  $: pendingBatchReserveIssue = getPendingBatchReserveIssue(replica?.state?.jBatchState?.batch);
-  $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue);
+  $: pendingBatchReserveIssue = getPendingBatchReserveIssue({
+    entityId: String(replica?.state?.entityId || tab.entityId || ''),
+    batch: replica?.state?.jBatchState?.batch,
+    onchainReserves,
+    openDebtByToken: openOutgoingDebtSummary.byToken,
+  });
+  $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue, getPendingBatchLabelOptions());
   $: canBroadcastPendingBatch = hasDraftBatch && !hasSentBatch && !pendingBatchReserveIssue;
-
   async function clearPendingBatch(): Promise<void> {
     if (!pendingBatchCount || pendingBatchSubmitting) return;
     if (!confirm('Clear current draft and any sent batch state?')) return;
@@ -5159,7 +4159,6 @@
       pendingBatchSubmitting = false;
     }
   }
-
   async function broadcastPendingBatch(): Promise<void> {
     if (pendingBatchReserveIssueText) {
       toasts.error(pendingBatchReserveIssueText);
@@ -5183,7 +4182,6 @@
       pendingBatchSubmitting = false;
     }
   }
-
   async function rebroadcastPendingBatch(): Promise<void> {
     if (!hasSentBatch || pendingBatchSubmitting) return;
     pendingBatchSubmitting = true;
@@ -5203,7 +4201,6 @@
       pendingBatchSubmitting = false;
     }
   }
-
   // Tab config
   // Pending batch count for Accounts tab badge
   $: pendingBatchCount = (() => {
@@ -5220,14 +4217,13 @@
     pendingBatchMode === 'draft'
       ? (replica?.state?.jBatchState?.batch || null)
       : (replica?.state?.jBatchState?.sentBatch?.batch || null),
+    getPendingBatchLabelOptions(),
   );
-
   const tabs: IconBadgeTabConfig<ViewTab>[] = [
     { id: 'assets', icon: Landmark, label: 'Assets' },
     { id: 'accounts', icon: Users, label: 'Accounts' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
-
   const accountWorkspaceTabs: IconPendingTabConfig<AccountWorkspaceTab>[] = [
     { id: 'open', icon: PlusCircle, label: 'Open Account' },
     { id: 'send', icon: ArrowUpRight, label: 'Pay' },
@@ -5251,7 +4247,6 @@
   $: if (!hasWorkspaceAccounts && accountWorkspaceTab !== 'open') {
     accountWorkspaceTab = 'open';
   }
-
   function selectAccountWorkspaceTab(next: string): void {
     const target = next as AccountWorkspaceTab;
     if (target === 'move') {
@@ -5335,242 +4330,132 @@
       </div>
 
     {:else if activeEnv && replica}
-      <section class="hero">
-        <div class="hero-left" class:user-mode={userModeHeader}>
-          {#if !userModeHeader}
-            <div class="hero-avatar-wrap">
-              {#if avatar}
-                <img src={avatar} alt="Entity avatar" class="hero-avatar" />
-              {:else}
-                <div class="hero-avatar placeholder">
-                  {activeXlnFunctions?.getEntityShortId?.(tab.entityId)?.slice(0,2) || '??'}
-                </div>
-              {/if}
-              {#if entityJurisdictionBadge}
-                <span
-                  class={`jurisdiction-avatar-badge ${entityJurisdictionBadge.className}`}
-                  title={entityJurisdictionBadge.title}
-                  aria-label={entityJurisdictionBadge.title}
-                >
-                  {entityJurisdictionBadge.symbol}
-                </span>
-              {/if}
-            </div>
-          {/if}
-          <div class="hero-identity" class:user-mode={userModeHeader}>
-            {#if userModeHeader}
-              <div class="hero-context-switcher">
-	                <ContextSwitcher
-	                  {tab}
-	                  allowAddRuntime={allowHeaderAddRuntime}
-	                  allowDeleteRuntime={allowHeaderDeleteRuntime}
-	                  allowAddJurisdiction={true}
-	                  allowAddEntity={true}
-	                  addRuntimeLabel={headerRuntimeAddLabel}
-	                  on:addRuntime={handleHeaderAddRuntime}
-	                  on:deleteRuntime={handleHeaderDeleteRuntime}
-	                  on:addJurisdiction={handleHeaderAddJurisdiction}
-	                  on:addEntity={handleHeaderAddEntity}
-	                  on:entitySelect={handleEntitySelect}
-	                />
-              </div>
-            {:else}
-              <span class="hero-name">{heroDisplayName}</span>
-            {/if}
-            <div class="wallet-meta-block hero-meta-block">
-              <p class="muted wallet-label">Entity</p>
-              <button
-                class="wallet-meta-copy"
-                type="button"
-                title="Copy entity id"
-                on:click={() => copyMetaValue(currentEntityValue, 'entity')}
-              >
-                <span class="wallet-meta-value">{currentEntityValue}</span>
-                {#if copiedMetaField === 'entity'}
-                  <Check size={12} />
-                {:else}
-                  <Copy size={12} />
-                {/if}
-              </button>
-            </div>
-          </div>
-        </div>
-        <div class="hero-right">
-          <div class="hero-networth">{formatUsdExact(netWorth)}</div>
-          <div class="hero-label">Net Worth</div>
-        </div>
-      </section>
-
-      <nav class="tabs">
-        {#each tabs as t}
-          <button
-            class="tab"
-            class:active={activeTab === t.id}
-            data-testid={`tab-${t.id}`}
-            on:click={() => selectTopLevelTab(t.id)}
-          >
-            <svelte:component this={t.icon} size={14} />
-            <span>{t.label}</span>
-            {#if t.showBadge && t.badgeType === 'pending' && pendingBatchCount > 0}
-              <span class="badge pending">{pendingBatchCount}</span>
-            {/if}
-          </button>
-        {/each}
-      </nav>
+      <EntityPanelHeroTabs
+        {tab}
+        {userModeHeader}
+        {avatar}
+        {activeXlnFunctions}
+        {entityJurisdictionBadge}
+        {heroDisplayName}
+        {allowHeaderAddRuntime}
+        {allowHeaderDeleteRuntime}
+        {headerRuntimeAddLabel}
+        {currentEntityValue}
+        {copiedMetaField}
+        {netWorth}
+        {tabs}
+        {activeTab}
+        {pendingBatchCount}
+        {formatUsdExact}
+        {copyMetaValue}
+        {selectTopLevelTab}
+        {handleHeaderAddRuntime}
+        {handleHeaderDeleteRuntime}
+        {handleHeaderAddJurisdiction}
+        {handleHeaderAddEntity}
+        {handleEntitySelect}
+      />
 
       <section class="content">
         {#if activeTab === 'assets'}
-          <div class="tab-header-row">
-            <div class="asset-title-block">
-              <h4 class="section-head" style="margin: 0;">Assets</h4>
-              <p class="muted asset-ledger-note">External, reserve, and account balances.</p>
-            </div>
-            <div class="header-actions">
-              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances()} disabled={externalTokensLoading || assetFaucetSubmitting}>
-                {externalTokensLoading || assetFaucetSubmitting ? '...' : 'Refresh'}
-              </button>
-            </div>
-          </div>
-          <AssetFaucetCard
-            rows={assetLedgerRows}
-            bind:selectedSymbol={faucetAssetSymbol}
-            supportsReserve={faucetSupportsReserve}
-            canShowAccountFaucet={canShowAccountFaucet}
-            submitting={assetFaucetSubmitting}
-            submitFaucet={submitAssetFaucet}
-          />
-          <AssetWalletMeta
-            externalEoaValue={currentExternalEoaValue}
-            copied={copiedMetaField === 'external'}
-            snapshotSource={externalWalletSnapshotSource}
-            copyExternal={() => copyMetaValue(currentExternalEoaValue, 'external')}
-            {shortHash}
-          />
-
-          <AssetLedgerTable
-            rows={assetLedgerRows}
-            totals={assetLedgerTotals}
-            grandTotal={assetLedgerGrandTotal}
-            loading={externalTokensLoading}
+          <EntityAssetsTab
+            {replica}
+            {tab}
+            {activeEnv}
+            {activeLiveEnv}
+            {activeIsLive}
+            {envRevision}
+            {liveEnvResolver}
+            {liveEnvStore}
+            {currentSignerId}
+            {currentExternalEoaValue}
+            {copiedMetaField}
+            {externalWalletSnapshotSource}
+            {externalTokensLoading}
+            {assetFaucetSubmitting}
+            {assetLedgerRows}
+            {assetLedgerTotals}
+            {assetLedgerGrandTotal}
+            bind:faucetAssetSymbol
+            {faucetSupportsReserve}
+            {canShowAccountFaucet}
+            {openOutgoingDebtSummary}
+            {pendingBatchCount}
+            {pendingBatchMode}
+            {pendingBatchReserveIssueText}
+            {pendingBatchPreview}
+            {pendingBatchSubmitting}
+            {hasSentBatch}
+            {canBroadcastPendingBatch}
+            {assetWorkspaceTab}
+            bind:moveAmount
+            bind:moveAssetSymbol
+            bind:moveFromEndpoint
+            bind:moveToEndpoint
+            bind:moveExternalRecipient
+            bind:moveReserveRecipientEntityId
+            bind:moveSourceAccountId
+            bind:moveTargetEntityId
+            bind:moveTargetHubEntityId
+            {moveExecuting}
+            {moveProgressLabel}
+            {moveDraftError}
+            {moveBroadcastError}
+            {moveAllowanceRouteEnabled}
+            {moveAllowanceSatisfied}
+            {moveAllowanceLoading}
+            {moveAllowanceStatusLabel}
+            {moveAllowanceAmount}
+            {moveAllowanceSubmittingMode}
+            {moveSelectedSource}
+            {moveSelectedTarget}
+            {moveDragSource}
+            {moveDragHoverTarget}
+            {moveLineReady}
+            {moveCommittedLineReady}
+            {moveNodeLayoutVersion}
+            {moveNeedsReserveRecipient}
+            {moveNeedsExternalRecipient}
+            {isMoveRouteSupported}
+            {moveUiState}
+            {setMoveSource}
+            {setMoveTarget}
+            {beginMoveDrag}
+            {getMoveNodeAnchor}
+            {buildMoveArrowPath}
+            {moveRouteSteps}
+            {canAddMoveToExistingBatch}
+            {submitMovePrimaryAction}
+            {approveMoveExternalAllowance}
+            {handleMoveAllowanceAmountInput}
+            {handleMoveSourceAccountChange}
+            {handleMoveReserveRecipientChange}
+            {handleMoveTargetEntityChange}
+            {handleMoveTargetHubChange}
+            {moveNodeAction}
+            {moveEntityOptions}
+            {moveHubEntityOptions}
+            {moveSourceAccountOptions}
+            {resolveSelfEntityId}
+            {moveAssetOptions}
+            moveEndpointLabels={MOVE_ENDPOINT_LABEL}
+            moveEndpoints={MOVE_ENDPOINTS}
             {formatAmount}
             {formatApproxUsd}
+            {getMovePrimaryActionLabel}
+            setMoveVisualRoot={(node) => moveVisualRoot = node}
+            {handleMoveWorkspaceError}
+            {refreshBalances}
+            {submitAssetFaucet}
+            {copyMetaValue}
+            {shortHash}
+            {enforceOutstandingDebt}
+            {openAssetMoveWorkspace}
+            {openAssetHistoryWorkspace}
+            {clearPendingBatch}
+            {rebroadcastPendingBatch}
+            {broadcastPendingBatch}
           />
-
-          <DebtPanel
-            entityId={replica.state?.entityId || tab.entityId}
-            signerId={currentSignerId}
-            sourceEnv={activeLiveEnv ?? activeEnv}
-            entityStateOverride={replica.state ?? null}
-            sourceRevision={envRevision}
-            sourceEnvResolver={liveEnvResolver}
-            sourceEnvStore={liveEnvStore}
-            canEnforce={activeIsLive}
-            enforcingTokenId={debtEnforcingTokenId}
-            on:enforce={(event) => enforceOutstandingDebt(event.detail)}
-          />
-
-          <section class="asset-action-card">
-            <PendingBatchNotice
-              debtCount={openOutgoingDebtSummary.count}
-              debtUsdLabel={formatApproxUsd(openOutgoingDebtSummary.usdTotal)}
-              debtNote="Reserve spends sweep debts first. Enforce or refill before broadcasting risky reserve moves."
-              pendingCount={pendingBatchCount}
-              pendingMode={pendingBatchMode}
-              reserveIssueText={pendingBatchReserveIssueText}
-              previewItems={pendingBatchPreview}
-              submitting={pendingBatchSubmitting}
-              {hasSentBatch}
-              canBroadcast={canBroadcastPendingBatch}
-              openHistory={openAssetHistoryWorkspace}
-              clearBatch={clearPendingBatch}
-              rebroadcastBatch={rebroadcastPendingBatch}
-              broadcastBatch={broadcastPendingBatch}
-            />
-
-            <nav class="account-workspace-tabs asset-workspace-tabs" aria-label="Asset workspace">
-              <button class="account-workspace-tab" data-testid="asset-tab-move" class:active={assetWorkspaceTab === 'move'} on:click={openAssetMoveWorkspace}>
-                <span>Move</span>
-              </button>
-              <button class="account-workspace-tab" data-testid="asset-tab-history" class:active={assetWorkspaceTab === 'history'} on:click={openAssetHistoryWorkspace}>
-                <span>History</span>
-              </button>
-            </nav>
-
-            {#if assetWorkspaceTab === 'move'}
-              <MoveWorkspace
-                mode="assets"
-                bind:moveAmount
-                bind:moveAssetSymbol
-                bind:moveFromEndpoint
-                bind:moveToEndpoint
-                bind:moveExternalRecipient
-                bind:moveReserveRecipientEntityId
-                bind:moveSourceAccountId
-                bind:moveTargetEntityId
-                bind:moveTargetHubEntityId
-                {moveExecuting}
-                {moveProgressLabel}
-                {moveDraftError}
-                {moveBroadcastError}
-                moveRequiresExplicitAllowance={moveAllowanceRouteEnabled}
-                moveAllowanceSatisfied={moveAllowanceSatisfied}
-                moveAllowanceLoading={moveAllowanceLoading}
-                moveAllowanceStatusLabel={moveAllowanceStatusLabel}
-                moveAllowanceAmount={moveAllowanceAmount}
-                moveAllowanceSubmittingMode={moveAllowanceSubmittingMode}
-                {moveSelectedSource}
-                {moveSelectedTarget}
-                {moveDragSource}
-                {moveDragHoverTarget}
-                {moveLineReady}
-                {moveCommittedLineReady}
-                {moveNodeLayoutVersion}
-                {moveNeedsReserveRecipient}
-                {moveNeedsExternalRecipient}
-                {isMoveRouteSupported}
-                moveDisplayBalances={moveUiState.displayBalances}
-                moveDisplayDecimals={moveUiState.displayDecimals}
-                moveSourceAvailableBalance={moveUiState.sourceAvailableBalance}
-                {setMoveSource}
-                {setMoveTarget}
-                {beginMoveDrag}
-                {getMoveNodeAnchor}
-                {buildMoveArrowPath}
-                {moveRouteSteps}
-                {canAddMoveToExistingBatch}
-                {submitMovePrimaryAction}
-                approveMoveAllowanceAmount={() => approveMoveExternalAllowance('amount')}
-                approveMoveAllowanceMax={() => approveMoveExternalAllowance('max')}
-                {handleMoveAllowanceAmountInput}
-                {handleMoveSourceAccountChange}
-                {handleMoveReserveRecipientChange}
-                {handleMoveTargetEntityChange}
-                {handleMoveTargetHubChange}
-                {moveNodeAction}
-                {moveEntityOptions}
-                {moveHubEntityOptions}
-                {moveSourceAccountOptions}
-                reserveRecipientPreferredId={resolveSelfEntityId()}
-                targetEntityPreferredId={resolveSelfEntityId()}
-                entityId={replica?.state?.entityId || tab.entityId}
-                moveAssetOptions={moveAssetOptions}
-                moveEndpointLabels={MOVE_ENDPOINT_LABEL}
-                moveEndpoints={MOVE_ENDPOINTS}
-                {formatAmount}
-                movePrimaryActionLabel={getMovePrimaryActionLabel()}
-                onMoveVisualRoot={(node) => moveVisualRoot = node}
-                toastMoveError={handleMoveWorkspaceError}
-              />
-            {:else}
-              <SettlementPanel
-                entityId={replica.state?.entityId || tab.entityId}
-                {replica}
-                env={activeEnv}
-                isLive={activeIsLive}
-                historyOnly={true}
-              />
-            {/if}
-          </section>
         {:else if activeTab === 'accounts'}
           {#if accountIds.length > 5}
             <div class="accounts-selector-row">
@@ -5723,439 +4608,53 @@
               />
 
             {:else if accountWorkspaceTab === 'configure'}
-              <div class="configure-panel">
-                <div class="workspace-inline-selector">
-                  <EntityInput
-                    label="Manage Account"
-                    value={workspaceAccountId}
-                    entities={workspaceAccountIds}
-                    testId="configure-account-selector"
-                    excludeId={replica?.state?.entityId || tab.entityId}
-                    placeholder="Select account for manage..."
-                    disabled={!activeIsLive || workspaceAccountIds.length === 0}
-                    on:change={handleWorkspaceAccountChange}
-                  />
-                </div>
-                <ConfigureWorkspaceTabs
-                  activeTab={configureWorkspaceTab}
-                  selectTab={(tab) => configureWorkspaceTab = tab}
-                />
-
-                {#if !workspaceAccountId}
-                  <LiveRequiredState message="Select workspace account above first." />
-                {:else if !liveRuntimeEnv || !activeIsLive}
-                  <LiveRequiredState message="Account actions are only available in LIVE mode." />
-                {:else if configureWorkspaceTab === 'extend-credit'}
-                  <CreditForm
-                    entityId={replica.state?.entityId || tab.entityId}
-                    env={liveRuntimeEnv}
-                    isLive={activeIsLive}
-                    signerId={tab.signerId || null}
-                    counterpartyId={workspaceAccountId}
-                    accountIds={workspaceAccountIds}
-                    mode="extend"
-                  />
-                {:else if configureWorkspaceTab === 'request-credit'}
-                  <CreditForm
-                    entityId={replica.state?.entityId || tab.entityId}
-                    env={liveRuntimeEnv}
-                    isLive={activeIsLive}
-                    signerId={tab.signerId || null}
-                    counterpartyId={workspaceAccountId}
-                    accountIds={workspaceAccountIds}
-                    mode="request"
-                  />
-                {:else if configureWorkspaceTab === 'collateral'}
-                  <CollateralForm
-                    entityId={replica.state?.entityId || tab.entityId}
-                    env={liveRuntimeEnv}
-                    isLive={activeIsLive}
-                    signerId={tab.signerId || null}
-                    counterpartyId={workspaceAccountId}
-                    accountIds={workspaceAccountIds}
-                  />
-                {:else if configureWorkspaceTab === 'dispute'}
-                  {@const configureAccount = replica?.state?.accounts?.get?.(workspaceAccountId)}
-                  {@const crossJTargetRisk = getCrossJTargetDisputeRisk(workspaceAccountId)}
-                  <div class="configure-token-card danger-card">
-                    <h4 class="section-head">Dispute Account</h4>
-                    <p class="muted">
-                      Dispute preparation first freezes local account traffic and removes orderbook exposure. Start the on-chain dispute only after evidence is stable.
-                    </p>
-                    {#if configureAccount?.activeDispute}
-                      <p class="danger-note">
-                        Active dispute in progress. Finalize only after the timeout passes on-chain.
-                      </p>
-                      <button
-                        class="btn-danger-batch"
-                        data-testid="configure-dispute-finalize"
-                        on:click={() => confirmAndQueueDisputeFinalize(workspaceAccountId, 'dispute-finalize-from-configure')}
-                        disabled={!activeIsLive}
-                      >
-                        Add Dispute Finalize To Batch
-                      </button>
-                    {:else if configureAccount?.status === 'dispute_preparing'}
-                      <p class="danger-note">
-                        Dispute is prepared locally. Normal account traffic is frozen; orderbook exposure is being removed before on-chain calldata is committed.
-                      </p>
-                      <button
-                        class="btn-danger-batch"
-                        data-testid="configure-dispute-start"
-                        on:click={() => confirmAndQueueDisputeStart(
-                          workspaceAccountId,
-                          'dispute-start-from-configure',
-                          crossJTargetRisk
-                            ? {
-                                allowUnsafeCrossJTargetDispute: unsafeCrossJTargetDisputeAccepted,
-                                acceptedCrossJTargetLossAmount: unsafeCrossJTargetDisputeAccepted ? crossJTargetRisk.amount : 0n,
-                              }
-                            : {},
-                        )}
-                        disabled={!activeIsLive}
-                      >
-                        Add Dispute Start To Batch
-                      </button>
-                    {:else}
-                      <p class="danger-note">
-                        Prepare first. This removes orders and stops normal account traffic without committing an on-chain dispute hash yet.
-                      </p>
-                      {#if crossJTargetRisk}
-                        <label class="danger-confirm-row">
-                          <input
-                            type="checkbox"
-                            bind:checked={unsafeCrossJTargetDisputeAccepted}
-                          />
-                          <span>
-                            I accept possible cross-jurisdiction loss up to {formatCrossJTargetDisputeRisk(crossJTargetRisk)}
-                            if the hub pulls source funds before the target account has pull arguments.
-                          </span>
-                        </label>
-                      {/if}
-                      <button
-                        class="btn-danger-batch"
-                        data-testid="configure-dispute-prepare"
-                        on:click={() => confirmAndQueueDisputePrepare(
-                          workspaceAccountId,
-                          'dispute-prepare-from-configure',
-                        )}
-                        disabled={!activeIsLive}
-                      >
-                        Prepare Dispute
-                      </button>
-                    {/if}
-                  </div>
-                {:else}
-                  <div class="configure-token-card">
-                    <h4 class="section-head">Add Token To Account</h4>
-                    <p class="muted">
-                      Adds token delta to selected account (zero credit). Use Extend Credit next to set limit.
-                    </p>
-                    <div class="configure-token-row">
-                      <select class="configure-token-select" bind:value={configureTokenId}>
-                        {#each configureTokenOptions as token}
-                          <option value={token.id}>{token.symbol}</option>
-                        {/each}
-                      </select>
-                      <button
-                        class="btn-add-token"
-                        data-testid="configure-token-add"
-                        on:click={addTokenToAccount}
-                        disabled={!activeIsLive || !workspaceAccountId}
-                      >
-                        Add Token
-                      </button>
-                    </div>
-                  </div>
-                {/if}
-              </div>
+              <AccountConfigurePanel
+                {replica}
+                {tab}
+                {activeIsLive}
+                {liveRuntimeEnv}
+                {workspaceAccountId}
+                {workspaceAccountIds}
+                {configureWorkspaceTab}
+                bind:configureTokenId
+                {configureTokenOptions}
+                bind:unsafeCrossJTargetDisputeAccepted
+                {handleWorkspaceAccountChange}
+                selectConfigureTab={(nextTab) => configureWorkspaceTab = nextTab}
+                {getCrossJTargetDisputeRisk}
+                {formatCrossJTargetDisputeRisk}
+                {confirmAndQueueDisputeFinalize}
+                {confirmAndQueueDisputeStart}
+                {confirmAndQueueDisputePrepare}
+                {addTokenToAccount}
+              />
 
             {:else if accountWorkspaceTab === 'appearance'}
-              <section class="account-appearance-panel">
-                <div class="appearance-card">
-                  <div class="appearance-head">
-                    <div>
-                      <h4 class="section-head">Account Bars</h4>
-                      <p class="muted">Layout and scale for capacity bars.</p>
-                    </div>
-                  </div>
-
-                  <div class="appearance-block">
-                    <span class="appearance-label">Layout</span>
-                    <div class="appearance-pill-group" role="tablist" aria-label="Account bar layout">
-                      <button
-                        class="appearance-pill"
-                        class:active={$settings.barLayout === 'center'}
-                        on:click={() => settingsOperations.setBarLayout('center')}
-                      >
-                        <span class="pill-icon">&#9646;&#9646;</span> Center
-                      </button>
-                      <button
-                        class="appearance-pill"
-                        class:active={$settings.barLayout === 'sides'}
-                        on:click={() => settingsOperations.setBarLayout('sides')}
-                      >
-                        <span class="pill-icon">&#9664;&#9654;</span> Sides
-                      </button>
-                    </div>
-                  </div>
-
-                  <div class="appearance-block">
-                    <span class="appearance-label">Skin (A/B)</span>
-                    <div class="appearance-pill-group" role="tablist" aria-label="Account skin">
-                      <button
-                        class="appearance-pill"
-                        class:active={$settings.accountSkin === 'classic'}
-                        on:click={() => settingsOperations.setAccountSkin('classic')}
-                      >
-                        <span class="pill-icon">&#9776;</span> Classic
-                      </button>
-                      <button
-                        class="appearance-pill"
-                        class:active={$settings.accountSkin === 'apple'}
-                        on:click={() => settingsOperations.setAccountSkin('apple')}
-                      >
-                        <span class="pill-icon">&#9679;</span> Apple
-                      </button>
-                    </div>
-                  </div>
-
-                  {#if $settings.accountSkin === 'apple'}
-                    <div class="appearance-block">
-                      <span class="appearance-label">Bar style</span>
-                      <select
-                        class="appearance-select"
-                        value={$settings.accountBarStyle}
-                        on:change={(e) => settingsOperations.setAccountBarStyle(e.currentTarget.value as 'hairline' | 'pips' | 'twin' | 'capsule' | 'thread')}
-                        style="margin-top:6px; width:100%; background:#11151a; color:#e5e7eb; border:1px solid #2c333d; border-radius:6px; padding:6px 8px; font-size:12px;"
-                      >
-                        <option value="hairline">Hairline · line + dot</option>
-                        <option value="pips">Pips · signal dots</option>
-                        <option value="twin">Twin · out / in lines</option>
-                        <option value="capsule">Capsule · iOS fill</option>
-                        <option value="thread">Thread · fine + diamond</option>
-                      </select>
-                    </div>
-                  {/if}
-
-                  <div class="appearance-block">
-                    <div class="appearance-scale-row">
-                      <span class="appearance-label">Scale</span>
-                      <div class="appearance-scale-meta">
-                        <span class="appearance-scale-bound">$10</span>
-                        <strong class="appearance-scale-value">100px = ${accountBarUsdPer100Px.toLocaleString('en-US')}</strong>
-                        <span class="appearance-scale-bound">$10k</span>
-                      </div>
-                    </div>
-                    <div class="slider-container">
-                      <input
-                        class="appearance-slider"
-                        type="range"
-                        min={ACCOUNT_BAR_USD_PER_100PX_MIN}
-                        max={ACCOUNT_BAR_USD_PER_100PX_MAX}
-                        step="10"
-                        value={accountBarUsdPer100Px}
-                        on:input={setAccountBarScale}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div class="appearance-card">
-                  <div class="appearance-head">
-                    <div>
-                      <h4 class="section-head">Bar Effects</h4>
-                      <p class="muted">Toggle visual effects on capacity bars.</p>
-                    </div>
-                  </div>
-
-                  <label class="appearance-switch-row">
-                    <span class="appearance-label">Credit Gradient</span>
-                    <span class="appearance-hint">Cap credit segments with fade-out</span>
-                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barCreditGradient}
-                      on:change={(e) => settingsOperations.update({ barCreditGradient: e.currentTarget.checked })} />
-                  </label>
-
-                  <label class="appearance-switch-row">
-                    <span class="appearance-label">Smooth Resize</span>
-                    <span class="appearance-hint">Animate bar width changes</span>
-                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimTransition}
-                      on:change={(e) => settingsOperations.update({ barAnimTransition: e.currentTarget.checked })} />
-                  </label>
-
-                  <label class="appearance-switch-row">
-                    <span class="appearance-label">Sweep</span>
-                    <span class="appearance-hint">Light beam sweeps right-to-left on update</span>
-                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimSweep}
-                      on:change={(e) => settingsOperations.update({ barAnimSweep: e.currentTarget.checked })} />
-                  </label>
-
-                  <label class="appearance-switch-row">
-                    <span class="appearance-label">Glow</span>
-                    <span class="appearance-hint">Brightness pulse on bar change</span>
-                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimGlow}
-                      on:change={(e) => settingsOperations.update({ barAnimGlow: e.currentTarget.checked })} />
-                  </label>
-
-                  <label class="appearance-switch-row">
-                    <span class="appearance-label">Delta Flash</span>
-                    <span class="appearance-hint">Show +/- amount text overlay</span>
-                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimDeltaFlash}
-                      on:change={(e) => settingsOperations.update({ barAnimDeltaFlash: e.currentTarget.checked })} />
-                  </label>
-
-                  <label class="appearance-switch-row">
-                    <span class="appearance-label">Ripple</span>
-                    <span class="appearance-hint">Expanding ring from bar center</span>
-                    <input type="checkbox" class="appearance-checkbox" checked={$settings.barAnimRipple}
-                      on:change={(e) => settingsOperations.update({ barAnimRipple: e.currentTarget.checked })} />
-                  </label>
-                </div>
-              </section>
+              <AccountAppearancePanel />
 
             {:else if accountWorkspaceTab === 'open'}
-              <div class="account-open-sections">
-                <div class="open-section">
-                  <div class="open-section-head">
-                    <div class="open-section-copy">
-                      <span class="open-section-kicker">Network</span>
-                      <h4 class="section-head">Open Account</h4>
-                    </div>
-                  </div>
-                  {#if activeIsLive && actionRuntimeEnv}
-                    <HubDiscoveryPanel
-                      entityId={replica?.state?.entityId || tab.entityId}
-                      env={requireRuntimeEnv(actionRuntimeEnv, 'hub-discovery')}
-                    />
-                  {/if}
-                </div>
-                <div class="open-section">
-                  <div class="open-section-head compact">
-                    <div class="open-section-copy">
-                      <span class="open-section-kicker">Direct</span>
-                      <h4 class="section-head">Open by ID</h4>
-                    </div>
-                  </div>
-                  <div class="open-private-form">
-                    <EntityInput
-                      variant="move"
-                      label="Recipient"
-                      value={openAccountEntityId}
-                      entities={openAccountEntityOptions}
-                      excludeId={replica?.state?.entityId || tab.entityId}
-                      placeholder="Select or paste entity ID"
-                      disabled={!activeIsLive}
-                      on:change={handleOpenAccountTargetChange}
-                    />
-                    <button class="btn-add" on:click={() => openAccountWithFullId(openAccountEntityId)} disabled={!activeIsLive || !openAccountEntityId.trim()}>
-                      Open
-                    </button>
-                  </div>
-                </div>
-
-                {#if disputedAccounts.length > 0}
-                  <div class="open-section disputed-section">
-                    <h4 class="section-head">Disputed Accounts</h4>
-                    <p class="muted" style="margin-top: 0;">Hidden from the main list. Open active disputes, reopen only after finalize.</p>
-                    <div class="disputed-list">
-                      {#each disputedAccounts as item (item.counterpartyId)}
-                        <div class="disputed-row">
-                          <div class="disputed-meta">
-                            <div class="disputed-id">{item.counterpartyId}</div>
-                            <div class="disputed-state">
-                              {item.status === 'active'
-                                ? 'Active dispute in progress'
-                                : 'Finalized disputed account'}
-                            </div>
-                          </div>
-                          {#if item.status === 'active'}
-                            <button
-                              class="btn-reopen-disputed"
-                              on:click={() => openDisputedAccount(item.counterpartyId)}
-                            >
-                              Open
-                            </button>
-                          {:else}
-                            <button
-                              class="btn-reopen-disputed"
-                              on:click={() => reopenDisputedAccount(item.counterpartyId)}
-                              disabled={!activeIsLive}
-                            >
-                              Reopen
-                            </button>
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-              </div>
+              <AccountOpenPanel
+                {replica}
+                {tab}
+                {activeIsLive}
+                {actionRuntimeEnv}
+                {openAccountEntityId}
+                {openAccountEntityOptions}
+                {disputedAccounts}
+                {handleOpenAccountTargetChange}
+                {openAccountWithFullId}
+                {openDisputedAccount}
+                {reopenDisputedAccount}
+              />
 
             {:else if accountWorkspaceTab === 'activity'}
-              <h4 class="section-head">Entity Activity</h4>
-              {#if entityActivityRows.length === 0}
-                <p class="muted">No entity frames with activity yet.</p>
-              {:else}
-                <div class="entity-activity-toolbar">
-                  <label class="entity-activity-filter">
-                    <span>Account</span>
-                    <select bind:value={entityActivityAccountFilter}>
-                      <option value="all">All accounts</option>
-                      {#each entityActivityAccounts as accountOption}
-                        <option value={accountOption.accountId}>{accountOption.accountLabel}</option>
-                      {/each}
-                    </select>
-                  </label>
-                </div>
-                <div class="entity-activity-list">
-                  {#if filteredEntityActivityRows.length === 0}
-                    <p class="muted">No activity for this account yet.</p>
-                  {:else}
-                    {#each filteredEntityActivityRows as row (row.id)}
-                      <article
-                        class="entity-activity-row"
-                        class:ours={row.actor === 'you'}
-                        class:peer={row.actor === 'peer'}
-                        class:system={row.actor === 'system'}
-                        class:queue={row.kind === 'pending' || row.kind === 'mempool'}
-                      >
-                        <div class="entity-activity-actor">
-                          {#if row.actorAvatar}
-                            <img class="entity-activity-avatar" src={row.actorAvatar} alt="" />
-                          {:else}
-                            <div class="entity-activity-avatar entity-activity-avatar-fallback">{row.actorInitials}</div>
-                          {/if}
-                          <div class="entity-activity-author-meta">
-                            <div class="entity-activity-author-name">{row.actorName}</div>
-                            <div class="entity-activity-author-badge">{row.actorLabel}</div>
-                          </div>
-                        </div>
-                        <div class="entity-activity-bubble">
-                          <div class="entity-activity-bubble-head">
-                            <div class="entity-activity-headline">{row.headline}</div>
-                            <div class="entity-activity-time">{formatTime(row.timestamp)}</div>
-                          </div>
-                          {#if row.bodyLines.length > 0}
-                            <div class="entity-activity-lines">
-                              {#each row.bodyLines as line}
-                                <div class="entity-activity-line">{line}</div>
-                              {/each}
-                            </div>
-                          {/if}
-                          <div class="entity-activity-chips">
-                            {#each row.chips as chip}
-                              <span class="entity-activity-chip tone-{chip.tone || 'neutral'}">{chip.label}</span>
-                            {/each}
-                          </div>
-                          <div class="entity-activity-footer">
-                            <span>{row.footerLeft}</span>
-                            <span>{row.footerRight}</span>
-                          </div>
-                        </div>
-                      </article>
-                    {/each}
-                  {/if}
-                </div>
-              {/if}
+              <EntityActivityPanel
+                rows={entityActivityRows}
+                filteredRows={filteredEntityActivityRows}
+                accountOptions={entityActivityAccounts}
+                accountFilter={entityActivityAccountFilter}
+                on:filterChange={(event) => entityActivityAccountFilter = event.detail.accountFilter}
+              />
 
             {/if}
           </section>
@@ -6271,210 +4770,6 @@
     min-height: 0;
   }
 
-  /* Hero Section - Entity + Net Worth */
-  .hero {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-3) var(--panel-gutter-x);
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, var(--theme-background, #09090b)) 0%,
-      color-mix(in srgb, var(--theme-background, #09090b) 100%, transparent) 100%
-    );
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
-    box-shadow: 0 8px 20px color-mix(in srgb, var(--theme-background, #09090b) 5%, transparent);
-  }
-
-  .hero-left {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-width: 0;
-  }
-
-  .hero-left.user-mode {
-    align-items: flex-start;
-  }
-
-  .hero-avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 12px;
-    flex-shrink: 0;
-  }
-
-  .hero-avatar-wrap {
-    position: relative;
-    width: 48px;
-    height: 48px;
-    flex-shrink: 0;
-  }
-
-  .hero-avatar.placeholder {
-    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    font-weight: 700;
-    color: #0c0a09;
-  }
-
-  .jurisdiction-avatar-badge {
-    position: absolute;
-    right: -4px;
-    bottom: -4px;
-    width: 19px;
-    height: 19px;
-    border-radius: 7px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 800;
-    line-height: 1;
-    color: #fff;
-    border: 2px solid var(--theme-card-bg, var(--theme-surface, #18181b));
-    box-shadow: 0 2px 8px color-mix(in srgb, #000 22%, transparent);
-  }
-
-  .jurisdiction-avatar-badge.ethereum,
-  .jurisdiction-avatar-badge.sepolia {
-    background: #3b82f6;
-  }
-
-  .jurisdiction-avatar-badge.base {
-    background: #0052ff;
-  }
-
-  .jurisdiction-avatar-badge.tron {
-    background: #ef4444;
-  }
-
-  .jurisdiction-avatar-badge.local,
-  .jurisdiction-avatar-badge.generic {
-    background: #52525b;
-  }
-
-  .hero-identity {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .hero-identity.user-mode {
-    gap: 8px;
-  }
-
-  .hero-meta-block {
-    margin-top: 2px;
-    max-width: min(820px, 100%);
-  }
-
-  .hero-context-switcher {
-    max-width: min(360px, 100%);
-    width: fit-content;
-  }
-
-  .hero-name {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--theme-text-primary, #e4e4e7);
-    letter-spacing: -0.01em;
-    word-break: break-word;
-  }
-
-  .hero-right {
-    text-align: right;
-    min-width: 0;
-  }
-
-  .hero-networth {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 24px;
-    font-weight: 700;
-    color: var(--theme-text-primary, #e4e4e7);
-    letter-spacing: -0.3px;
-    line-height: 1;
-  }
-
-  .hero-label {
-    font-size: 9px;
-    color: var(--theme-text-muted, #71717a);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-top: 3px;
-    font-weight: 500;
-  }
-
-  /* Tabs */
-  .tabs {
-    display: flex;
-    padding: 0 var(--panel-gutter-x);
-    background: transparent;
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 58%, transparent);
-    overflow-x: auto;
-    flex-shrink: 0;
-    gap: 4px;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .tabs::-webkit-scrollbar {
-    display: none;
-  }
-
-  .tab {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-height: 40px;
-    padding: 10px 14px;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--theme-text-muted, #71717a);
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s;
-    border-radius: 6px 6px 0 0;
-  }
-
-  .tab:hover {
-    color: var(--theme-text-secondary, #a1a1aa);
-  }
-
-  .tab.active {
-    color: var(--theme-text-primary, #e4e4e7);
-    border-bottom-color: transparent;
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 9%, transparent);
-    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 82%, transparent);
-  }
-
-  .badge {
-    background: #dc2626;
-    color: white;
-    font-size: 9px;
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-weight: 600;
-    min-width: 16px;
-    text-align: center;
-    line-height: 1;
-    box-shadow: 0 1px 3px rgba(220, 38, 38, 0.3);
-  }
-
-  .badge.pending {
-    background: #b91c1c;
-    color: #fee2e2;
-    box-shadow: 0 1px 3px rgba(185, 28, 28, 0.35);
-  }
-
   /* Content */
   .content {
     padding: var(--space-3) var(--panel-gutter-x);
@@ -6503,609 +4798,8 @@
     font-size: 13px;
   }
 
-  .account-workspace-tabs {
-    display: flex;
-    gap: 4px;
-    margin-top: var(--space-3);
-    padding: 0 0 2px;
-    border: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 56%, transparent);
-    border-radius: 0;
-    background: transparent;
-    overflow-x: auto;
-  }
-
-  .account-workspace-tabs::-webkit-scrollbar {
-    display: none;
-  }
-
-  .account-workspace-tab {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    min-height: 40px;
-    padding: 8px 12px;
-    border: 1px solid transparent;
-    border-radius: 10px 10px 0 0;
-    background: transparent;
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 11px;
-    font-weight: 650;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    touch-action: manipulation;
-  }
-
-  .account-workspace-tab:hover {
-    color: var(--theme-text-primary, #e4e4e7);
-    border-color: transparent;
-    background: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 58%, transparent);
-  }
-
-  .account-workspace-tab.active {
-    color: var(--theme-text-primary, #e4e4e7);
-    border-color: color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 50%, transparent);
-    border-bottom-color: transparent;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--theme-accent, #fbbf24) 8%, transparent), transparent),
-      color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 94%, transparent);
-    box-shadow: inset 0 2px 0 color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, transparent);
-  }
-
   .account-workspace-content {
     margin-top: var(--space-3);
-  }
-
-  .workspace-inline-selector {
-    margin-bottom: 10px;
-    padding: 12px;
-    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
-    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 6%, transparent);
-  }
-
-  .configure-panel {
-    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
-    padding: 10px;
-    box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 6%, transparent);
-  }
-
-  .configure-token-card {
-    border: 1px solid #27272a;
-    border-radius: 10px;
-    padding: 14px;
-    background: #16171c;
-  }
-
-  .danger-card {
-    border-color: rgba(239, 68, 68, 0.35);
-    background: linear-gradient(180deg, rgba(60, 15, 18, 0.92), rgba(24, 10, 12, 0.96));
-  }
-
-  .danger-note {
-    margin: 10px 0 14px;
-    font-size: 12px;
-    line-height: 1.45;
-    color: #fecaca;
-  }
-
-  .danger-confirm-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin: 10px 0 14px;
-    font-size: 12px;
-    line-height: 1.4;
-    color: #fee2e2;
-  }
-
-  .danger-confirm-row input {
-    margin-top: 2px;
-    flex: 0 0 auto;
-  }
-
-  .account-appearance-panel {
-    border: 1px solid #27272a;
-    border-radius: 10px;
-    background: #101114;
-    padding: 14px;
-  }
-
-  .appearance-card {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-  }
-
-  .appearance-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: flex-start;
-  }
-
-  .appearance-block {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding-top: 2px;
-  }
-
-  .appearance-label {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: #a1a1aa;
-  }
-
-  .appearance-pill-group {
-    display: inline-flex;
-    align-items: center;
-    gap: 0;
-    padding: 3px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.03);
-    width: fit-content;
-  }
-
-  .appearance-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 100px;
-    padding: 7px 14px;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: #71717a;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .pill-icon {
-    font-size: 10px;
-    letter-spacing: -2px;
-    opacity: 0.6;
-  }
-
-  .appearance-pill:hover {
-    color: #d4d4d8;
-    background: rgba(255, 255, 255, 0.04);
-  }
-
-  .appearance-pill.active {
-    color: #fbbf24;
-    background: rgba(251, 191, 36, 0.12);
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2) inset;
-  }
-
-  .appearance-pill.active .pill-icon {
-    opacity: 1;
-  }
-
-  .appearance-scale-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
-    min-width: 0;
-    max-width: 100%;
-    box-sizing: border-box;
-  }
-
-  .appearance-scale-meta {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    min-width: 0;
-    max-width: 100%;
-    box-sizing: border-box;
-  }
-
-  .appearance-scale-value {
-    color: #f3f4f6;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .appearance-scale-bound {
-    color: #71717a;
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .slider-container {
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    padding: 0;
-    box-sizing: border-box;
-  }
-
-  .appearance-switch-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .appearance-switch-row .appearance-label {
-    flex: 0 0 auto;
-    min-width: 110px;
-  }
-
-  .appearance-hint {
-    flex: 1;
-    font-size: 11px;
-    color: #71717a;
-  }
-
-  .appearance-checkbox {
-    flex: 0 0 auto;
-    cursor: pointer;
-  }
-
-  .configure-token-row {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .configure-token-select {
-    min-width: 140px;
-    padding: 9px 10px;
-    border-radius: 8px;
-    border: 1px solid #2f3138;
-    background: #0d0e11;
-    color: #e5e7eb;
-    font-size: 12px;
-  }
-
-  .btn-add-token {
-    padding: 9px 14px;
-    border-radius: 8px;
-    border: 1px solid #3b82f6;
-    background: linear-gradient(180deg, rgba(59, 130, 246, 0.24), rgba(37, 99, 235, 0.16));
-    color: #dbeafe;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .btn-add-token:hover:not(:disabled) {
-    border-color: #60a5fa;
-    color: #eff6ff;
-  }
-
-  .btn-add-token:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-danger-batch {
-    padding: 10px 14px;
-    border-radius: 9px;
-    border: 1px solid rgba(248, 113, 113, 0.6);
-    background: linear-gradient(180deg, rgba(185, 28, 28, 0.34), rgba(127, 29, 29, 0.22));
-    color: #fee2e2;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .btn-danger-batch:hover:not(:disabled) {
-    border-color: rgba(252, 165, 165, 0.95);
-    color: #fff1f2;
-  }
-
-  .btn-danger-batch:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .section-head {
-    font-size: 12px;
-    font-weight: 600;
-    color: #71717a;
-    text-transform: none;
-    letter-spacing: 0.01em;
-    margin: 18px 0 10px;
-  }
-
-  .section-head:first-child {
-    margin-top: 2px;
-  }
-
-  .muted {
-    font-size: 11px;
-    color: #52525b;
-    line-height: 1.5;
-    margin: 0 0 12px;
-  }
-
-  .entity-activity-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .entity-activity-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 12px;
-  }
-
-  .entity-activity-filter {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    color: #a1a1aa;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .entity-activity-filter select {
-    min-height: 36px;
-    min-width: 220px;
-    padding: 0 12px;
-    border-radius: 12px;
-    border: 1px solid #2f333b;
-    background: #111315;
-    color: #f5f5f5;
-    font-size: 13px;
-  }
-
-  .entity-activity-row {
-    display: flex;
-    align-items: flex-end;
-    gap: 12px;
-  }
-
-  .entity-activity-row.ours {
-    flex-direction: row-reverse;
-  }
-
-  .entity-activity-row.system {
-    align-items: flex-start;
-  }
-
-  .entity-activity-actor {
-    width: 108px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-  }
-
-  .entity-activity-row.ours .entity-activity-actor {
-    flex-direction: row-reverse;
-    text-align: right;
-  }
-
-  .entity-activity-avatar {
-    width: 40px;
-    height: 40px;
-    border-radius: 14px;
-    border: 1px solid #2c3139;
-    background: #121416;
-    flex-shrink: 0;
-  }
-
-  .entity-activity-avatar-fallback {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: #f5f5f5;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-  }
-
-  .entity-activity-author-meta {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .entity-activity-author-name {
-    color: #f5f5f5;
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1.2;
-  }
-
-  .entity-activity-author-badge {
-    color: #a1a1aa;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .entity-activity-bubble {
-    flex: 1;
-    max-width: min(760px, calc(100% - 132px));
-    border-radius: 18px;
-    border: 1px solid #2a2d31;
-    background: linear-gradient(180deg, rgba(19, 21, 24, 0.98), rgba(13, 14, 16, 0.98));
-    padding: 14px 16px;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.22);
-  }
-
-  .entity-activity-row.ours .entity-activity-bubble {
-    border-color: #454545;
-    background: linear-gradient(180deg, rgba(23, 23, 23, 0.98), rgba(15, 15, 15, 0.98));
-  }
-
-  .entity-activity-row.peer .entity-activity-bubble {
-    border-color: #303030;
-  }
-
-  .entity-activity-row.queue .entity-activity-bubble {
-    border-style: dashed;
-  }
-
-  .entity-activity-bubble-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    margin-bottom: 8px;
-  }
-
-  .entity-activity-headline {
-    color: #fafafa;
-    font-size: 15px;
-    font-weight: 700;
-    line-height: 1.35;
-  }
-
-  .entity-activity-time {
-    font-size: 11px;
-    color: #8b8b8b;
-    font-family: 'JetBrains Mono', monospace;
-    white-space: nowrap;
-  }
-
-  .entity-activity-lines {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
-  }
-
-  .entity-activity-line {
-    color: #d4d4d4;
-    font-size: 13px;
-    line-height: 1.45;
-  }
-
-  .entity-activity-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 10px;
-  }
-
-  .entity-activity-chip {
-    display: inline-flex;
-    align-items: center;
-    min-height: 24px;
-    padding: 0 10px;
-    border-radius: 999px;
-    border: 1px solid #353535;
-    background: #121212;
-    color: #d4d4d4;
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-
-  .entity-activity-chip.tone-good {
-    border-color: #27543a;
-    color: #b7f7c6;
-  }
-
-  .entity-activity-chip.tone-warn {
-    border-color: #61491c;
-    color: #f3d089;
-  }
-
-  .entity-activity-chip.tone-danger {
-    border-color: #633131;
-    color: #f0b4b4;
-  }
-
-  .entity-activity-footer {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    color: #7a7a7a;
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  @media (max-width: 720px) {
-    .entity-activity-toolbar {
-      justify-content: stretch;
-    }
-
-    .entity-activity-filter,
-    .entity-activity-filter select {
-      width: 100%;
-    }
-
-    .entity-activity-row,
-    .entity-activity-row.ours {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .entity-activity-actor,
-    .entity-activity-row.ours .entity-activity-actor {
-      width: 100%;
-      flex-direction: row;
-      text-align: left;
-    }
-
-    .entity-activity-bubble {
-      max-width: 100%;
-    }
-
-    .entity-activity-bubble-head,
-    .entity-activity-footer {
-      flex-direction: column;
-      align-items: flex-start;
-    }
-  }
-
-  .btn-add {
-    min-height: 48px;
-    padding: 0 16px;
-    background: linear-gradient(135deg, #b45309, #92400e);
-    border: 1px solid rgba(251, 191, 36, 0.22);
-    border-radius: 12px;
-    color: #fef3c7;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    cursor: pointer;
-    box-shadow: 0 18px 34px rgba(180, 83, 9, 0.18);
-  }
-
-  /* Override child component styling */
-  .content :global(.payment-panel),
-  .content :global(.swap-panel),
-  .content :global(.settlement-panel),
-  .content :global(.account-list) {
-    background: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    height: auto !important;
-    overflow: visible !important;
   }
 
   .content :global(input:not([type="range"]):not([type="checkbox"]):not(.entity-input-field):not(.move-amount-input):not(.move-external-input)),
@@ -7148,201 +4842,6 @@
      HORIZONTAL TABLE LAYOUT (External/Reserves)
      ============================================ */
 
-  .tab-header-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 10px;
-  }
-
-  .asset-title-block {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .asset-ledger-note {
-    margin: 0;
-    max-width: 520px;
-  }
-
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .btn-refresh-small {
-    padding: 5px 10px;
-    background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent);
-    border-radius: 6px;
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 11px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .btn-refresh-small:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 85%, white 15%);
-    color: var(--theme-text-primary, #e4e4e7);
-    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 92%, transparent);
-  }
-
-  .btn-refresh-small:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .asset-workspace-tabs {
-    margin-top: 16px;
-    flex-wrap: wrap;
-  }
-
-  .asset-action-card {
-    margin-top: 12px;
-    padding: 16px;
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--theme-surface, #18181b) 92%, transparent),
-      color-mix(in srgb, var(--theme-background, #09090b) 94%, transparent)
-    );
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 54%, transparent);
-    border-radius: 10px;
-  }
-
-  .account-open-sections {
-    display: grid;
-    grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.95fr);
-    gap: 14px;
-    margin-top: 8px;
-    align-items: start;
-  }
-
-  .open-section {
-    padding: 15px 16px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 56%, transparent);
-    border-radius: 14px;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--theme-accent, #fbbf24) 2%, transparent), transparent 24%),
-      linear-gradient(
-        180deg,
-        color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent),
-        color-mix(in srgb, var(--theme-input-bg, #09090b) 100%, transparent)
-      );
-    box-shadow: 0 6px 16px color-mix(in srgb, var(--theme-background, #09090b) 4%, transparent);
-    min-width: 0;
-  }
-
-  .open-section-head {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-bottom: 12px;
-  }
-
-  .open-section-head.compact {
-    margin-bottom: 12px;
-  }
-
-  .open-section-copy {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .open-section-kicker {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.01em;
-    text-transform: none;
-    color: var(--theme-accent, #fbbf24);
-  }
-
-  .open-section-note {
-    margin: 0;
-    font-size: 11px;
-    line-height: 1.4;
-    color: var(--theme-text-muted, #71717a);
-  }
-
-  .open-private-form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .disputed-section {
-    grid-column: 1 / -1;
-    padding: 16px 18px;
-    border-color: rgba(244, 63, 94, 0.25);
-    background: linear-gradient(
-      180deg,
-      rgba(244, 63, 94, 0.08),
-      rgba(15, 23, 42, 0.16)
-    );
-    border: 1px solid rgba(244, 63, 94, 0.25);
-    border-radius: 16px;
-  }
-
-  .disputed-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .disputed-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 12px 14px;
-    border: 1px solid rgba(244, 63, 94, 0.2);
-    border-radius: 14px;
-    background: rgba(15, 23, 42, 0.5);
-  }
-
-  .disputed-meta {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .disputed-id {
-    color: #e2e8f0;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    word-break: break-all;
-  }
-
-  .disputed-state {
-    color: #fda4af;
-    font-size: 11px;
-  }
-
-  .btn-reopen-disputed {
-    min-height: 38px;
-    padding: 0 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(251, 191, 36, 0.35);
-    background: rgba(251, 191, 36, 0.12);
-    color: #fde68a;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .btn-reopen-disputed:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
   @media (max-width: 900px) {
     .entity-panel {
       --panel-gutter-x: 10px;
@@ -7350,139 +4849,6 @@
       --space-3: 12px;
     }
 
-    .hero {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 12px;
-    }
-
-    .hero-right {
-      width: 100%;
-      min-width: 0;
-      text-align: left;
-    }
-
-    .tab-header-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .asset-ledger-note {
-      max-width: none;
-    }
-
-    .header-actions {
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
-
-    .account-workspace-tabs {
-      gap: 4px;
-    }
-
-    .account-workspace-tab {
-      min-height: 38px;
-      padding: 8px 10px;
-      font-size: 10px;
-    }
-
-    .header.user-mode-header {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .account-open-sections {
-      grid-template-columns: 1fr;
-    }
-  }
-
-  @media (max-width: 760px) {
-    .entity-panel {
-      --panel-gutter-x: 8px;
-      --space-1: 6px;
-      --space-2: 8px;
-      --space-3: 12px;
-      --space-4: 16px;
-      max-width: 100%;
-      overflow-x: clip;
-    }
-
-    .header {
-      padding: 8px 10px;
-    }
-
-    .header.user-mode-header {
-      padding: 8px var(--panel-gutter-x);
-      gap: 8px;
-    }
-
-    .hero {
-      padding: 12px var(--panel-gutter-x);
-      gap: 10px;
-    }
-
-    .hero-left {
-      gap: 10px;
-      align-items: flex-start;
-    }
-
-    .hero-avatar,
-    .hero-avatar.placeholder {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      font-size: 12px;
-    }
-
-    .hero-identity {
-      gap: 5px;
-    }
-
-    .hero-context-switcher {
-      max-width: 100%;
-      width: 100%;
-    }
-
-    .hero-name {
-      font-size: 14px;
-      line-height: 1.15;
-      overflow-wrap: anywhere;
-    }
-
-    .hero-networth {
-      font-size: 24px;
-    }
-
-    .hero-label {
-      margin-top: 2px;
-    }
-
-    .tabs {
-      padding: 4px var(--panel-gutter-x) 0;
-      gap: 4px;
-      flex-wrap: nowrap;
-      overflow: visible;
-      border-bottom: none;
-      box-sizing: border-box;
-    }
-
-    .tab {
-      flex: 1 1 0;
-      justify-content: center;
-      min-width: 0;
-      min-height: 34px;
-      padding: 7px 9px;
-      font-size: 9.5px;
-      border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 40%, transparent);
-      border-radius: 11px;
-      background: color-mix(in srgb, var(--theme-surface, var(--theme-card-bg, #18181b)) 66%, transparent);
-      box-shadow: none;
-    }
-
-    .badge {
-      font-size: 8px;
-      padding: 2px 5px;
-    }
 
     .content {
       padding: 12px var(--panel-gutter-x);
@@ -7491,12 +4857,9 @@
     }
 
     .header,
-    .hero,
-    .tabs,
     .content,
     .content > *,
     .accounts-selector-row,
-    .asset-action-card,
     .account-workspace-content {
       width: 100%;
       max-width: 100%;
@@ -7504,57 +4867,9 @@
       box-sizing: border-box;
     }
 
-    .tab-header-row {
-      flex-direction: column;
-      align-items: stretch;
-    }
 
-    .header-actions {
-      width: 100%;
-      justify-content: flex-start;
-    }
-
-    .btn-refresh-small {
-      width: 100%;
-      min-height: 38px;
-    }
-
-    .account-open-sections {
-      gap: 8px;
-    }
-
-    .open-section,
-    .disputed-section {
-      padding: 12px;
-    }
-
-    .open-section-head,
-    .open-section-head.compact {
-      margin-bottom: 10px;
-      gap: 4px;
-    }
-
-    .open-section-copy {
-      gap: 6px;
-    }
-
-    .open-section-kicker {
-      font-size: 8.5px;
-    }
-
-    .open-section-note {
-      font-size: 10.5px;
-    }
   }
 
   @media (max-width: 460px) {
-    .tab {
-      min-height: 32px;
-      padding: 6px 8px;
-    }
-
-    .hero-networth {
-      font-size: 20px;
-    }
   }
 </style>
