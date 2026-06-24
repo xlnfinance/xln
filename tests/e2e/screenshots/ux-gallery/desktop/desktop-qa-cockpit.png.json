@@ -1,0 +1,13 @@
+{
+  "title": "desktop QA cockpit",
+  "group": "QA Cockpit",
+  "description": "Operator QA cockpit with run ledger, gallery, failures, and benchmarks.",
+  "platform": "desktop",
+  "tags": [
+    "qa",
+    "cockpit",
+    "evidence"
+  ],
+  "sourceTest": "ui screenshot smoke captures operator admin surfaces",
+  "project": "chromium"
+}

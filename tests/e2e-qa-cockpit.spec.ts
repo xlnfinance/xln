@@ -106,8 +106,8 @@ const QA_FIXTURE_RUN = {
     ],
     likelyCauses: ['code hash changed', 'git HEAD changed', 'largest delta: wall time +25%'],
   },
-  totalShards: 2,
-  passedShards: 1,
+  totalShards: 3,
+  passedShards: 2,
   failedShards: 1,
   failureClasses: ['assertion'],
   args: { fixture: 'qa-cockpit-scenario-player' },
@@ -253,6 +253,40 @@ const QA_FIXTURE_RUN = {
       hasVideo: true,
       hasTrace: false,
     },
+    {
+      shard: 9,
+      status: 'passed',
+      durationMs: 1_200,
+      handle: 'qa.missing-video-empty-state',
+      description: 'Shard has timing evidence and transcript but no recorded video artifact.',
+      target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
+      title: 'QA cockpit missing video empty state',
+      requireMarketMaker: false,
+      logRelativePath: 'e2e-shard-09.log',
+      logTail: 'Missing video fixture passed with transcript only',
+      error: null,
+      failureClass: null,
+      phaseMs: {
+        preflight: 40,
+        anvilBoot: 80,
+        apiBoot: 120,
+        apiHealthy: 160,
+        viteBoot: 180,
+        playwright: 620,
+      },
+      browserIssues: [],
+      browserHealth: QA_CLEAN_BROWSER_HEALTH,
+      timelineSteps: [
+        { label: 'E2E-TIMING:render missing video empty state', ms: 60, startMs: 0, endMs: 60 },
+        { label: 'E2E-TIMING:keep transcript available without video', ms: 70, startMs: 60, endMs: 130 },
+      ],
+      slowSteps: [
+        { label: 'E2E-TIMING:keep transcript available without video', ms: 70, startMs: 60, endMs: 130 },
+      ],
+      artifacts: [],
+      hasVideo: false,
+      hasTrace: false,
+    },
   ],
 };
 
@@ -268,6 +302,7 @@ const QA_FAST_SUMMARY = {
   createdAt: Date.UTC(2026, 5, 23, 22, 59, 59, 888),
   completedAt: Date.UTC(2026, 5, 23, 23, 0, 3, 888),
   status: 'passed',
+  totalShards: 1,
   totalMs: 4_000,
   timing: QA_FAST_TIMING,
   browserHealth: QA_CLEAN_BROWSER_HEALTH,
@@ -454,7 +489,273 @@ const QA_STORIES = [
     'mobile',
     ['history', 'batch'],
   ),
+  qaFixtureStory(
+    'desktop-onboarding-seed.png',
+    'desktop onboarding seed',
+    'Onboarding',
+    'New operator creates a browser runtime wallet.',
+    'desktop',
+    ['onboarding', 'wallet'],
+  ),
+  qaFixtureStory(
+    'mobile-onboarding-seed.png',
+    'mobile onboarding seed',
+    'Onboarding',
+    'Mobile operator creates a browser runtime wallet.',
+    'mobile',
+    ['onboarding', 'wallet'],
+  ),
+  qaFixtureStory(
+    'desktop-assets-ledger.png',
+    'desktop assets ledger',
+    'Portfolio',
+    'Portfolio ledger with external, reserve, and account balances.',
+    'desktop',
+    ['assets', 'balances'],
+  ),
+  qaFixtureStory(
+    'mobile-assets-ledger.png',
+    'mobile assets ledger',
+    'Portfolio',
+    'Mobile portfolio ledger with external, reserve, and account balances.',
+    'mobile',
+    ['assets', 'balances'],
+  ),
+  qaFixtureStory(
+    'desktop-accounts-overview.png',
+    'desktop accounts overview',
+    'Accounts',
+    'Hub account list with balances and counterparty capacity.',
+    'desktop',
+    ['accounts', 'credit'],
+  ),
+  qaFixtureStory(
+    'mobile-accounts-overview.png',
+    'mobile accounts overview',
+    'Accounts',
+    'Mobile hub account list with balances and counterparty capacity.',
+    'mobile',
+    ['accounts', 'credit'],
+  ),
+  qaFixtureStory(
+    'desktop-accounts-receive.png',
+    'desktop receive request',
+    'Payments',
+    'User prepares a receive invoice for inbound liquidity.',
+    'desktop',
+    ['payment', 'invoice'],
+  ),
+  qaFixtureStory(
+    'mobile-accounts-pay.png',
+    'mobile payment composer',
+    'Payments',
+    'Mobile user prepares a payment from an open hub account.',
+    'mobile',
+    ['payment', 'account'],
+  ),
+  qaFixtureStory(
+    'desktop-swap-route-menu.png',
+    'desktop swap route menu',
+    'Swap',
+    'Route selector for cross-chain liquidity paths.',
+    'desktop',
+    ['swap', 'route'],
+  ),
+  qaFixtureStory(
+    'mobile-swap-route-menu.png',
+    'mobile swap route menu',
+    'Swap',
+    'Mobile route selector for cross-chain liquidity paths.',
+    'mobile',
+    ['swap', 'route'],
+  ),
+  qaFixtureStory(
+    'mobile-accounts-move.png',
+    'mobile asset move ticket',
+    'On-chain Batch',
+    'Mobile move ticket for reserve, collateral, and external token flows.',
+    'mobile',
+    ['move', 'batch'],
+  ),
+  qaFixtureStory(
+    'desktop-batch-queued.png',
+    'desktop on-chain batch queued',
+    'On-chain Batch',
+    'Queued batch ready for on-chain submission.',
+    'desktop',
+    ['move', 'batch', 'queue'],
+  ),
+  qaFixtureStory(
+    'mobile-dispute-controls.png',
+    'mobile dispute controls',
+    'Disputes',
+    'Mobile account management panel for preparing and starting a dispute.',
+    'mobile',
+    ['dispute', 'account'],
+  ),
+  qaFixtureStory(
+    'desktop-dispute-history.png',
+    'desktop dispute history',
+    'Disputes',
+    'Dispute lifecycle history after finalization.',
+    'desktop',
+    ['dispute', 'history'],
+  ),
+  qaFixtureStory(
+    'desktop-settings.png',
+    'desktop wallet settings',
+    'Settings',
+    'Wallet settings and display controls for the runtime.',
+    'desktop',
+    ['settings'],
+  ),
+  qaFixtureStory(
+    'mobile-settings.png',
+    'mobile wallet settings',
+    'Settings',
+    'Mobile settings and display controls for the runtime.',
+    'mobile',
+    ['settings'],
+  ),
+  qaFixtureStory(
+    'desktop-qa-cockpit.png',
+    'desktop QA cockpit',
+    'QA Cockpit',
+    'Operator QA cockpit with run ledger, gallery, failures, and benchmarks.',
+    'desktop',
+    ['qa', 'cockpit', 'evidence'],
+  ),
+  qaFixtureStory(
+    'mobile-qa-cockpit.png',
+    'mobile QA cockpit',
+    'QA Cockpit',
+    'Mobile QA cockpit evidence view.',
+    'mobile',
+    ['qa', 'cockpit', 'evidence'],
+  ),
+  qaFixtureStory(
+    'desktop-health-admin.png',
+    'desktop health admin',
+    'Health',
+    'Health admin summary for runtime, relay, hubs, custody, and QA links.',
+    'desktop',
+    ['health', 'admin'],
+  ),
+  qaFixtureStory(
+    'mobile-health-admin.png',
+    'mobile health admin',
+    'Health',
+    'Mobile health admin summary for runtime and relay status.',
+    'mobile',
+    ['health', 'admin'],
+  ),
+  qaFixtureStory(
+    'desktop-remote-runtime-import.png',
+    'desktop remote runtime import',
+    'Remote Runtime Import',
+    'Dedicated remote runtime manager for bulk URL and token imports.',
+    'desktop',
+    ['remote-runtime', 'radapter', 'bulk-import'],
+  ),
+  qaFixtureStory(
+    'mobile-remote-runtime-import.png',
+    'mobile remote runtime import',
+    'Remote Runtime Import',
+    'Mobile remote runtime manager for bulk URL and token imports.',
+    'mobile',
+    ['remote-runtime', 'radapter', 'bulk-import'],
+  ),
+  qaFixtureStory(
+    'desktop-time-machine.png',
+    'desktop time machine',
+    'Time Machine',
+    'Workspace time machine enabled for historical frame scrubbing and replay.',
+    'desktop',
+    ['time-machine', 'debug', 'history'],
+  ),
+  qaFixtureStory(
+    'mobile-time-machine.png',
+    'mobile time machine',
+    'Time Machine',
+    'Mobile time machine enabled for historical frame scrubbing and replay.',
+    'mobile',
+    ['time-machine', 'debug', 'history'],
+  ),
+  qaFixtureStory(
+    'desktop-history-ledger.png',
+    'desktop history ledger',
+    'History',
+    'Desktop history ledger for finalized and pending account batches.',
+    'desktop',
+    ['history', 'batch'],
+  ),
+  qaFixtureStory(
+    'desktop-swap-token-menu.png',
+    'desktop swap token picker',
+    'Swap',
+    'Token selector with balances during swap preparation.',
+    'desktop',
+    ['swap', 'token-picker'],
+  ),
+  qaFixtureStory(
+    'mobile-swap-token-menu.png',
+    'mobile swap token picker',
+    'Swap',
+    'Mobile token selector with balances during swap preparation.',
+    'mobile',
+    ['swap', 'token-picker'],
+  ),
+  qaFixtureStory(
+    'desktop-account-capacity.png',
+    'desktop account capacity detail',
+    'Accounts',
+    'Expanded account row showing directional credit capacity.',
+    'desktop',
+    ['accounts', 'capacity'],
+  ),
+  qaFixtureStory(
+    'mobile-account-capacity.png',
+    'mobile account capacity detail',
+    'Accounts',
+    'Mobile expanded account row showing directional credit capacity.',
+    'mobile',
+    ['accounts', 'capacity'],
+  ),
+  qaFixtureStory(
+    'mobile-receive-request.png',
+    'mobile receive request',
+    'Payments',
+    'Mobile receive invoice for inbound liquidity.',
+    'mobile',
+    ['payment', 'invoice'],
+  ),
 ];
+
+const QA_RELEASE_PACK = {
+  status: 'ready',
+  minScreens: 30,
+  curatedCount: QA_STORIES.length,
+  desktopCount: QA_STORIES.filter(story => story.platform === 'desktop').length,
+  mobileCount: QA_STORIES.filter(story => story.platform === 'mobile').length,
+  requiredGroups: [
+    'Onboarding',
+    'Portfolio',
+    'Accounts',
+    'Payments',
+    'Swap',
+    'On-chain Batch',
+    'Disputes',
+    'History',
+    'Settings',
+    'QA Cockpit',
+    'Health',
+    'Remote Runtime Import',
+    'Time Machine',
+  ],
+  presentGroups: Array.from(new Set(QA_STORIES.map(story => story.group))).sort(),
+  missingGroups: [],
+  missingReasons: [],
+} as const;
 
 const QA_RESTART_AUDIT = [
   {
@@ -544,6 +845,7 @@ test.describe('QA cockpit scenario player', () => {
           ok: true,
           qaAuth: QA_AUTH,
           total: QA_STORIES.length,
+          releasePack: QA_RELEASE_PACK,
           stories: QA_STORIES,
         }),
       });
@@ -644,9 +946,11 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('UX Screenshot Gallery');
     await expect(page.getByTestId('qa-ux-gallery-preview')).toContainText('desktop payment composer');
     await expect(page.getByTestId('qa-ux-gallery')).toBeVisible();
-    await expect(page.getByTestId('qa-ux-gallery-count')).toContainText('5 curated');
-    await expect(page.getByTestId('qa-ux-gallery-count')).toContainText('3 desktop');
-    await expect(page.getByTestId('qa-ux-gallery-count')).toContainText('2 mobile');
+    await expect(page.getByTestId('qa-ux-gallery-count')).toContainText(`${QA_STORIES.length} curated`);
+    await expect(page.getByTestId('qa-ux-release-pack')).toContainText('READY');
+    await expect(page.getByTestId('qa-ux-release-pack')).toContainText(`${QA_STORIES.length}/30 screens`);
+    await expect(page.getByTestId('qa-ux-gallery-count')).toContainText(`${QA_RELEASE_PACK.desktopCount} desktop`);
+    await expect(page.getByTestId('qa-ux-gallery-count')).toContainText(`${QA_RELEASE_PACK.mobileCount} mobile`);
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('On-chain Batch');
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('Disputes');
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('History');
@@ -678,9 +982,27 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.locator('[data-testid="qa-suite-row"][data-shard="7"]')).toHaveClass(/selected/);
     await expect(page.locator('.shard-detail')).toContainText('qa.deep-link-video');
 
+    const errorsBeforeMissingVideo = runtimeErrors.length;
+    await page.goto(`/qa?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&shard=9`);
+    await expect(page.locator(`[data-testid="qa-run-row"][data-run-id="${QA_FIXTURE_RUN_ID}"]`)).toHaveClass(/selected/, { timeout: 30_000 });
+    await page.getByRole('button', { name: 'E2E Runs' }).click();
+    await expect(page.locator('[data-testid="qa-suite-row"][data-shard="9"]')).toHaveClass(/selected/);
+    await expect(page.locator('[data-testid="qa-suite-row"][data-shard="9"]')).toHaveAttribute('data-has-video', 'false');
+    await expect(page.locator('.shard-detail')).toContainText('qa.missing-video-empty-state');
+    await expect(page.getByTestId('qa-video-missing')).toContainText('No recorded video for this shard');
+    await expect(page.getByTestId('qa-video-player')).toHaveCount(0);
+    await expect(page.getByTestId('qa-video-track')).toHaveCount(0);
+    expect(runtimeErrors).toHaveLength(errorsBeforeMissingVideo);
+
     await page.getByRole('button', { name: 'Scenario Player' }).click();
     await expect(page.getByTestId('qa-scenario-player-frame')).toBeVisible();
     await page.getByRole('button', { name: 'UX Gallery' }).click();
+    await expect(page.getByTestId('qa-ux-gallery-release-pack')).toContainText('release ready');
+    await expect(page.getByTestId('qa-ux-gallery-filter')).toContainText('Remote Runtime Import');
+    await page.getByTestId('qa-ux-gallery-filter').getByRole('button', { name: 'Remote Runtime Import' }).click();
+    await expect(page.getByTestId('qa-ux-gallery')).toContainText('desktop remote runtime import');
+    await expect(page.getByTestId('qa-ux-gallery')).not.toContainText('desktop payment composer');
+    await page.getByTestId('qa-ux-gallery-filter').getByRole('button', { name: 'all' }).click();
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('Payments');
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('mobile swap ticket');
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('desktop dispute controls');

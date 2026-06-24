@@ -14,6 +14,9 @@ import {
   type QaRestartAuditEntry,
 } from '../qa/api';
 import {
+  QA_UX_RELEASE_PACK_MIN_SCREENS,
+  QA_UX_RELEASE_REQUIRED_GROUPS,
+  auditQaUxReleasePack,
   classifyQaArtifactSensitivity,
   classifyQaShardFailure,
   compareQaBenchmarkRuns,
@@ -291,13 +294,16 @@ test('qa curated ux gallery covers core operator surfaces', async () => {
   const curated = stories.filter(story => story.curated);
   const platforms = new Set(curated.map(story => story.platform));
   const groups = new Set(curated.map(story => story.group));
+  const audit = auditQaUxReleasePack(stories);
 
-  expect(curated.length).toBeGreaterThanOrEqual(20);
+  expect(curated.length).toBeGreaterThanOrEqual(QA_UX_RELEASE_PACK_MIN_SCREENS);
   expect(platforms.has('desktop')).toBe(true);
   expect(platforms.has('mobile')).toBe(true);
-  for (const group of ['Payments', 'Swap', 'On-chain Batch', 'Disputes', 'History']) {
+  for (const group of QA_UX_RELEASE_REQUIRED_GROUPS) {
     expect(groups.has(group), `missing curated UX group ${group}`).toBe(true);
   }
+  expect(audit.status).toBe('ready');
+  expect(audit.missingReasons).toEqual([]);
 });
 
 test('qa story image resolver rejects path traversal', async () => {
@@ -490,9 +496,13 @@ test('qa stories api returns screenshot catalog', async () => {
 
     const payload = await response?.json() as {
       ok?: boolean;
+      releasePack?: { status?: string; curatedCount?: number; missingReasons?: string[] };
       stories?: Array<{ source?: string; url?: string }>;
     };
     expect(payload.ok).toBe(true);
+    expect(payload.releasePack?.status).toBe('ready');
+    expect(payload.releasePack?.curatedCount ?? 0).toBeGreaterThanOrEqual(QA_UX_RELEASE_PACK_MIN_SCREENS);
+    expect(payload.releasePack?.missingReasons).toEqual([]);
     expect(payload.stories?.length).toBeGreaterThan(0);
     expect(payload.stories?.[0]?.url?.startsWith('/api/qa/')).toBe(true);
   });

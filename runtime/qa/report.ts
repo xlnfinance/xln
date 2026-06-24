@@ -273,6 +273,63 @@ export type QaStoryScreenshot = {
   status?: QaShardManifest['status'];
 };
 
+export const QA_UX_RELEASE_PACK_MIN_SCREENS = 30;
+export const QA_UX_RELEASE_REQUIRED_GROUPS = [
+  'Onboarding',
+  'Portfolio',
+  'Accounts',
+  'Payments',
+  'Swap',
+  'On-chain Batch',
+  'Disputes',
+  'History',
+  'Settings',
+  'QA Cockpit',
+  'Health',
+  'Remote Runtime Import',
+  'Time Machine',
+] as const;
+
+export type QaUxReleasePackAudit = {
+  status: 'ready' | 'missing';
+  minScreens: number;
+  curatedCount: number;
+  desktopCount: number;
+  mobileCount: number;
+  requiredGroups: string[];
+  presentGroups: string[];
+  missingGroups: string[];
+  missingReasons: string[];
+};
+
+export const auditQaUxReleasePack = (stories: QaStoryScreenshot[]): QaUxReleasePackAudit => {
+  const curated = stories.filter(story => story.curated);
+  const presentGroups = Array.from(new Set(curated.map(story => story.group))).sort(compareStableText);
+  const presentGroupSet = new Set(presentGroups);
+  const missingGroups = QA_UX_RELEASE_REQUIRED_GROUPS.filter(group => !presentGroupSet.has(group));
+  const desktopCount = curated.filter(story => story.platform === 'desktop').length;
+  const mobileCount = curated.filter(story => story.platform === 'mobile').length;
+  const missingReasons = [
+    curated.length < QA_UX_RELEASE_PACK_MIN_SCREENS
+      ? `needs ${QA_UX_RELEASE_PACK_MIN_SCREENS - curated.length} more curated screen(s)`
+      : '',
+    desktopCount <= 0 ? 'missing desktop viewport' : '',
+    mobileCount <= 0 ? 'missing mobile viewport' : '',
+    ...missingGroups.map(group => `missing ${group}`),
+  ].filter(Boolean);
+  return {
+    status: missingReasons.length === 0 ? 'ready' : 'missing',
+    minScreens: QA_UX_RELEASE_PACK_MIN_SCREENS,
+    curatedCount: curated.length,
+    desktopCount,
+    mobileCount,
+    requiredGroups: [...QA_UX_RELEASE_REQUIRED_GROUPS],
+    presentGroups,
+    missingGroups,
+    missingReasons,
+  };
+};
+
 type QaUxScreenshotMetadata = {
   title: string | null;
   group: string | null;

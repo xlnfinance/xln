@@ -382,6 +382,53 @@ test('ui screenshot smoke captures onboarding screens', async ({ page }, testInf
   await captureOnboardingScreens(page, testInfo);
 });
 
+test('ui screenshot smoke captures operator admin surfaces', async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+
+  await page.goto(`${APP_BASE_URL}/qa`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: 'Test Cockpit' })).toBeVisible({ timeout: 30_000 });
+  await captureUxPage(page, testInfo, 'desktop-qa-cockpit.png', {
+    title: 'desktop QA cockpit',
+    group: 'QA Cockpit',
+    description: uxDescription('Operator QA cockpit with run ledger, gallery, failures, and benchmarks.'),
+    platform: 'desktop',
+    tags: ['qa', 'cockpit', 'evidence'],
+  });
+
+  await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { name: /xln health admin/i })).toBeVisible({ timeout: 30_000 });
+  await captureUxPage(page, testInfo, 'desktop-health-admin.png', {
+    title: 'desktop health admin',
+    group: 'Health',
+    description: uxDescription('Health admin summary for runtime, relay, hubs, custody, and QA links.'),
+    platform: 'desktop',
+    tags: ['health', 'admin'],
+  });
+
+  await page.goto(`${APP_BASE_URL}/radapter/manage`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('Remote runtimes')).toBeVisible({ timeout: 30_000 });
+  await captureUxPage(page, testInfo, 'desktop-remote-runtime-import.png', {
+    title: 'desktop remote runtime import',
+    group: 'Remote Runtime Import',
+    description: uxDescription('Dedicated remote runtime manager for bulk URL and token imports.'),
+    platform: 'desktop',
+    tags: ['remote-runtime', 'radapter', 'bulk-import'],
+  });
+
+  await page.evaluate(() => {
+    localStorage.setItem('xln-settings', JSON.stringify({ showTimeMachine: true }));
+  });
+  await page.goto(`${APP_BASE_URL}/embed`, { waitUntil: 'domcontentloaded' });
+  await expect(page.locator('.time-machine')).toBeVisible({ timeout: 30_000 });
+  await captureUxPage(page, testInfo, 'desktop-time-machine.png', {
+    title: 'desktop time machine',
+    group: 'Time Machine',
+    description: uxDescription('Workspace time machine enabled for historical frame scrubbing and replay.'),
+    platform: 'desktop',
+    tags: ['time-machine', 'debug', 'history'],
+  });
+});
+
 test('ui screenshot smoke captures desktop and mobile main tabs', async ({ browser, page }, testInfo) => {
   test.setTimeout(240_000);
 

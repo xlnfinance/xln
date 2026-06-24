@@ -6,6 +6,7 @@ import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import {
   QA_HISTORY_DB_PATH,
+  auditQaUxReleasePack,
   backfillQaHistoryFromLogs,
   classifyQaArtifactSensitivity,
   enrichQaRunUrls,
@@ -1065,13 +1066,16 @@ export async function maybeHandleQaRequest(
       const url = new URL(request.url);
       const limitRaw = Number(url.searchParams.get('limit') || '200');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, Math.floor(limitRaw))) : 200;
-      const stories = await listQaStoryScreenshots(limit);
+      const allStories = await listQaStoryScreenshots(500);
+      const stories = allStories.slice(0, limit);
+      const releasePack = auditQaUxReleasePack(allStories);
       return jsonEtagResponse(
         request,
         {
           ok: true,
           qaAuth: authInfo,
           total: stories.length,
+          releasePack,
           stories,
         },
         headers,

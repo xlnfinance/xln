@@ -63,6 +63,18 @@
     status?: 'passed' | 'failed' | 'unknown';
   };
 
+  type QaUxReleasePackAudit = {
+    status: 'ready' | 'missing';
+    minScreens: number;
+    curatedCount: number;
+    desktopCount: number;
+    mobileCount: number;
+    requiredGroups: string[];
+    presentGroups: string[];
+    missingGroups: string[];
+    missingReasons: string[];
+  };
+
   type QaSlowStep = {
     label: string;
     ms: number;
@@ -353,6 +365,8 @@
   let runs = $state<QaSummary[]>([]);
   let catalog = $state<QaCatalogEntry[]>([]);
   let stories = $state<QaStoryScreenshot[]>([]);
+  let uxReleasePack = $state<QaUxReleasePackAudit | null>(null);
+  let uxGalleryGroupFilter = $state('all');
   let history = $state<QaHistoryEntry[]>([]);
   let restartAudit = $state<QaRestartAuditEntry[]>([]);
   let restart = $state<RestartStatus>({ active: false });
@@ -444,6 +458,11 @@
     ...stories.filter(story => !story.curated),
   ]);
   const uxGalleryGroups = $derived(Array.from(new Set(uxGalleryStories.map(story => story.group))));
+  const uxGalleryVisibleGroups = $derived(
+    uxGalleryGroupFilter === 'all'
+      ? uxGalleryGroups
+      : uxGalleryGroups.filter(group => group === uxGalleryGroupFilter),
+  );
   const uxGalleryCuratedCount = $derived(uxGalleryStories.filter(story => story.curated).length);
   const uxGalleryDesktopCount = $derived(uxGalleryStories.filter(story => story.platform === 'desktop').length);
   const uxGalleryMobileCount = $derived(uxGalleryStories.filter(story => story.platform === 'mobile').length);
@@ -964,6 +983,7 @@
         ok?: boolean;
         qaAuth?: QaAuthInfo;
         stories?: QaStoryScreenshot[];
+        releasePack?: QaUxReleasePackAudit;
         error?: string;
       };
       if (!storiesResponse.ok || !storiesPayload.ok || !Array.isArray(storiesPayload.stories)) {
@@ -972,6 +992,7 @@
       applyQaAuth(storiesPayload);
       catalog = catalogPayload.catalog;
       stories = storiesPayload.stories;
+      uxReleasePack = storiesPayload.releasePack ?? null;
       history = historyPayload.history;
       restartAudit = auditPayload.audit;
       restart = historyPayload.restart ?? catalogPayload.restart ?? { active: false };
@@ -1345,6 +1366,22 @@
           </div>
           <button class="mini-action" type="button" onclick={() => (activeView = 'gallery')}>Open gallery</button>
         </div>
+        {#if uxReleasePack}
+          <div class="artifact-chips release-pack" data-testid="qa-ux-release-pack">
+            <span class:warn={uxReleasePack.status === 'missing'}>{uxReleasePack.status === 'ready' ? 'READY' : 'MISSING'}</span>
+            <span>{uxReleasePack.curatedCount}/{uxReleasePack.minScreens} screens</span>
+            <span>{uxReleasePack.desktopCount} desktop</span>
+            <span>{uxReleasePack.mobileCount} mobile</span>
+            <span>{uxReleasePack.presentGroups.length}/{uxReleasePack.requiredGroups.length} groups</span>
+          </div>
+          {#if uxReleasePack.missingReasons.length > 0}
+            <div class="release-pack-warnings" data-testid="qa-ux-gallery-missing">
+              {#each uxReleasePack.missingReasons.slice(0, 6) as reason}
+                <span>{reason}</span>
+              {/each}
+            </div>
+          {/if}
+        {/if}
         <div class="ux-preview-strip">
           {#each uxGalleryStories.slice(0, 6) as story}
             <button type="button" class="ux-preview-card" onclick={() => (activeView = 'gallery')} title={story.description ?? story.title}>
@@ -1443,12 +1480,40 @@
             <span>{uxGalleryGroups.length} groups</span>
           </div>
         </div>
+        {#if uxReleasePack}
+          <div class="artifact-chips release-pack" data-testid="qa-ux-gallery-release-pack">
+            <span class:warn={uxReleasePack.status === 'missing'}>{uxReleasePack.status === 'ready' ? 'release ready' : 'release incomplete'}</span>
+            <span>{uxReleasePack.curatedCount}/{uxReleasePack.minScreens}</span>
+            <span>{uxReleasePack.desktopCount} desktop</span>
+            <span>{uxReleasePack.mobileCount} mobile</span>
+          </div>
+        {/if}
+        {#if uxGalleryGroups.length > 1}
+          <div class="filter-chips inline" data-testid="qa-ux-gallery-filter">
+            <button
+              type="button"
+              class:active={uxGalleryGroupFilter === 'all'}
+              onclick={() => (uxGalleryGroupFilter = 'all')}
+            >
+              all
+            </button>
+            {#each uxGalleryGroups as group}
+              <button
+                type="button"
+                class:active={uxGalleryGroupFilter === group}
+                onclick={() => (uxGalleryGroupFilter = group)}
+              >
+                {group}
+              </button>
+            {/each}
+          </div>
+        {/if}
         {#if loadingMeta && uxGalleryStories.length === 0}
           <div class="empty">Loading screenshots...</div>
         {:else if uxGalleryStories.length === 0}
           <div class="empty">No UX screenshots captured yet</div>
         {:else}
-          {#each uxGalleryGroups as group}
+          {#each uxGalleryVisibleGroups as group}
             <div class="ux-gallery-group">
               <h3>{group}</h3>
               <div class="ux-gallery-grid">
@@ -2402,6 +2467,26 @@
   .ux-preview-card strong {
     padding-bottom: 0.55rem;
     font-size: 0.78rem;
+  }
+
+  .release-pack {
+    margin-top: 0.75rem;
+  }
+
+  .release-pack-warnings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.55rem;
+  }
+
+  .release-pack-warnings span {
+    border: 1px solid rgba(248, 113, 113, 0.28);
+    border-radius: 999px;
+    padding: 0.32rem 0.55rem;
+    background: rgba(248, 113, 113, 0.08);
+    color: #fecaca;
+    font-size: 0.72rem;
   }
 
   .ux-gallery-group {
