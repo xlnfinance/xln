@@ -3941,20 +3941,39 @@ describe('cross-jurisdiction hashledger swap', () => {
       transactionHash: secret('9c'),
       events: [disputeStartedEvent],
     });
-    const result = await applyEntityTx(env, targetState, {
-      type: 'j_event',
-      data: {
-        from: targetSigner,
-        event: disputeStartedEvent,
-        observedAt: env.timestamp,
-        blockNumber: 2,
-        blockHash: secret('9b'),
-        transactionHash: secret('9c'),
-        ...signed,
-      },
-    });
+    const originalError = console.error;
+    const originalWarn = console.warn;
+    const errors: string[] = [];
+    const warnings: string[] = [];
+    let result: Awaited<ReturnType<typeof applyEntityTx>> | null = null;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    };
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+    try {
+      result = await applyEntityTx(env, targetState, {
+        type: 'j_event',
+        data: {
+          from: targetSigner,
+          event: disputeStartedEvent,
+          observedAt: env.timestamp,
+          blockNumber: 2,
+          blockHash: secret('9b'),
+          transactionHash: secret('9c'),
+          ...signed,
+        },
+      });
+    } finally {
+      console.error = originalError;
+      console.warn = originalWarn;
+    }
 
-    const sourceOutput = result.outputs.find(output => output.entityId === sourceUser);
+    expect(errors).toEqual([]);
+    expect(warnings.some((message) => message.includes('dispute.proof_hash_not_current'))).toBe(true);
+
+    const sourceOutput = result!.outputs.find(output => output.entityId === sourceUser);
     expect(sourceOutput?.entityTxs?.map(tx => tx.type)).toEqual(['disputeStart', 'j_broadcast']);
     expect((sourceOutput?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(sourceHub);
   });
