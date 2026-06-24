@@ -143,10 +143,14 @@ describe('external wallet API faucet transaction gate', () => {
     const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
     Object.assign(provider, {
       getBlockNumber: async () => 77,
-      getBlock: async () => ({ hash: `0x${'77'.repeat(32)}` }),
+      getBlock: async (blockTag: number) => {
+        expect(blockTag).toBe(76);
+        return { hash: `0x${'76'.repeat(32)}` };
+      },
     });
     const adapter = {
       ...makeBrowserVmAdapter(provider),
+      getFinalityDepth: () => 1,
       readWalletSnapshot: async (request: {
         owner: string;
         tokenAddresses: string[];
@@ -159,7 +163,7 @@ describe('external wallet API faucet transaction gate', () => {
           tokenAddress: '0x1111111111111111111111111111111111111111',
           spender: '0x0000000000000000000000000000000000000002',
         }]);
-        expect(request.blockTag).toBe(77);
+        expect(request.blockTag).toBe(76);
         return {
           nativeBalance: 5n,
           tokenBalances: [9n],
@@ -192,15 +196,27 @@ describe('external wallet API faucet transaction gate', () => {
           }],
         }),
       }));
-      const body = await response.json() as { success?: boolean; tokenBalances?: Array<{ balance?: string }> };
+      const body = await response.json() as {
+        success?: boolean;
+        tokenBalances?: Array<{ balance?: string }>;
+        sourceHeight?: number;
+        sourceHash?: string;
+        finalityDepth?: number;
+      };
       expect(response.status).toBe(200);
       expect(body.success).toBe(true);
       expect(body.tokenBalances?.[0]?.balance).toBe('9');
+      expect(body.sourceHeight).toBe(76);
+      expect(body.sourceHash).toBe(`0x${'76'.repeat(32)}`);
+      expect(body.finalityDepth).toBe(1);
       expect(observed).toHaveLength(1);
       expect(observed[0]).toMatchObject({
         name: 'ExternalWalletSnapshot',
         args: {
           owner: USER_ADDRESS.toLowerCase(),
+          sourceHeight: 76,
+          sourceHash: `0x${'76'.repeat(32)}`,
+          finalityDepth: 1,
           nativeBalance: '5',
           tokenBalances: [{
             tokenAddress: '0x1111111111111111111111111111111111111111',
@@ -213,7 +229,8 @@ describe('external wallet API faucet transaction gate', () => {
             allowance: '7',
           }],
         },
-        blockNumber: 77,
+        blockNumber: 76,
+        blockHash: `0x${'76'.repeat(32)}`,
       });
     } finally {
       provider.destroy();

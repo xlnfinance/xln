@@ -238,8 +238,11 @@ describe('production startup wiring', () => {
     expect(runtimeTxHandlers).toContain('IMPORT_J_CURRENT_BLOCK_INVALID');
     expect(runtimeTxHandlers).toContain('blockNumber: initialBlockNumber');
     expect(jadapterTypes).toContain('getCurrentBlockNumber?(): Promise<number>;');
+    expect(jadapterTypes).toContain('getFinalityDepth?(): number;');
     expect(rpcAdapter).toContain('async getCurrentBlockNumber(): Promise<number> {');
     expect(rpcAdapter).toContain('return await provider.getBlockNumber();');
+    expect(rpcAdapter).toContain('getFinalityDepth(): number {');
+    expect(rpcAdapter).toContain('return resolveFinalityDepth(false);');
     expect(mmNode).toContain('const selectMarketMakerBootstrapTokenIds = (tokenIds: readonly number[]): number[] => {');
     expect(mmNode).toContain('return unique;');
     expect(mmNode).not.toContain('return unique.slice(0, HUB_REQUIRED_TOKEN_COUNT);');

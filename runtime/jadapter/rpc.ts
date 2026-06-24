@@ -2372,6 +2372,10 @@ export async function createRpcAdapter(
       return await provider.getBlockNumber();
     },
 
+    getFinalityDepth(): number {
+      return resolveFinalityDepth(false);
+    },
+
     async syncRuntimeState(): Promise<null> {
       return null;
     },

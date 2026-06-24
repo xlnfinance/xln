@@ -100,6 +100,45 @@ const assertSnapshotArrayLength = (values: unknown, expected: number, label: str
   }
 };
 
+const resolveSnapshotFinalityDepth = (adapter: JAdapter): number => {
+  const rawDepth = Number(adapter.getFinalityDepth?.() ?? 0);
+  if (!Number.isFinite(rawDepth) || rawDepth < 0) {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FINALITY_INVALID:${String(rawDepth)}`);
+  }
+  return Math.floor(rawDepth);
+};
+
+const readExternalWalletSnapshotSource = async (
+  adapter: JAdapter,
+): Promise<{
+  headBlockNumber: number;
+  sourceHeight: number;
+  sourceHash: string;
+  finalityDepth: number;
+}> => {
+  const headBlockNumber = Number(await (adapter.getCurrentBlockNumber?.() ?? adapter.provider.getBlockNumber()));
+  if (!Number.isFinite(headBlockNumber) || !Number.isInteger(headBlockNumber) || headBlockNumber < 0) {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_HEAD_INVALID:${String(headBlockNumber)}`);
+  }
+  const finalityDepth = resolveSnapshotFinalityDepth(adapter);
+  const sourceHeight = headBlockNumber - finalityDepth;
+  if (sourceHeight < 0) {
+    throw new Error(
+      `EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=${headBlockNumber}:depth=${finalityDepth}`,
+    );
+  }
+  const block = await adapter.provider.getBlock(sourceHeight);
+  if (!block?.hash) {
+    throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${sourceHeight}`);
+  }
+  return {
+    headBlockNumber,
+    sourceHeight,
+    sourceHash: block.hash,
+    finalityDepth,
+  };
+};
+
 const createFaucetLock = (): FaucetLock => ({
   locked: false,
   queue: [],
@@ -570,26 +609,20 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         : tokenCatalog.map((token) => token.address)
       ).filter((address) => ethers.isAddress(address));
       const normalizedOwner = ethers.getAddress(owner).toLowerCase();
-      const blockNumber = Number(
-        await (adapter.getCurrentBlockNumber?.() ?? adapter.provider.getBlockNumber()),
-      );
-      const block = await adapter.provider.getBlock(blockNumber);
-      if (!block?.hash) {
-        throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${blockNumber}`);
-      }
+      const source = await readExternalWalletSnapshotSource(adapter);
       const snapshot = await adapter.readWalletSnapshot({
         owner: normalizedOwner,
         tokenAddresses: requestedTokenAddresses,
         allowances: allowances ?? [],
         includeNativeBalance: true,
-        blockTag: blockNumber,
+        blockTag: source.sourceHeight,
       });
       assertSnapshotArrayLength(snapshot.tokenBalances, requestedTokenAddresses.length, 'tokenBalances');
       assertSnapshotArrayLength(snapshot.allowances, (allowances ?? []).length, 'allowances');
       const nativeBalance = requireSnapshotBigInt(snapshot.nativeBalance, 'nativeBalance');
       const transactionHash = [
         'external-wallet-snapshot',
-        blockNumber,
+        source.sourceHeight,
         entityId,
         normalizedOwner,
       ].join(':');
@@ -620,12 +653,15 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         args: {
           entityId,
           owner: normalizedOwner,
+          sourceHeight: source.sourceHeight,
+          sourceHash: source.sourceHash,
+          finalityDepth: source.finalityDepth,
           nativeBalance: nativeBalance.toString(),
           tokenBalances,
           allowances: allowancePayload,
         },
-        blockNumber,
-        blockHash: block.hash,
+        blockNumber: source.sourceHeight,
+        blockHash: source.sourceHash,
         transactionHash,
       };
       context.observeExternalWalletSnapshot?.([jEvent], 'external-wallet-snapshot');
@@ -633,8 +669,12 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         success: true,
         entityId,
         owner: normalizedOwner,
-        blockNumber,
-        blockHash: block.hash,
+        blockNumber: source.sourceHeight,
+        blockHash: source.sourceHash,
+        headBlockNumber: source.headBlockNumber,
+        sourceHeight: source.sourceHeight,
+        sourceHash: source.sourceHash,
+        finalityDepth: source.finalityDepth,
         transactionHash,
         nativeBalance: nativeBalance.toString(),
         tokenBalances,
