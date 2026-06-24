@@ -774,8 +774,16 @@ async function applyFinalizedJEvent(
 
       const { buildAccountProofBody } = await import('../proof-builder');
       const localProof = buildAccountProofBody(account);
-      if (localProof.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
-        jEventLog.error('dispute.proof_hash_mismatch', { counterparty: shortId(counterpartyId), local: shortHash(localProof.proofBodyHash), onChain: shortHash(account.activeDispute.initialProofbodyHash) });
+      const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
+      const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
+        .some((hash) => hash.toLowerCase() === onChainProofHash);
+      if (localProof.proofBodyHash.toLowerCase() !== onChainProofHash) {
+        jEventLog.warn('dispute.proof_hash_not_current', {
+          counterparty: shortId(counterpartyId),
+          local: shortHash(localProof.proofBodyHash),
+          onChain: shortHash(account.activeDispute.initialProofbodyHash),
+          storedProofKnown,
+        });
       }
 
       const starterInitialArguments = event.data.starterInitialArguments || '0x';

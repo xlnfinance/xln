@@ -337,13 +337,26 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   const writeStartedAt = options.getPerfMs();
   const head = await readHead(historyDb, config);
-  if (options.stopStaleWriterOnHeadAhead && head.latestHeight > options.env.height) {
-    return {
-      materialized: false,
-      materializedOverlayRecords: 0,
-      frameDbCommitted: false,
-      staleWriterStopped: true,
-    };
+  if (options.stopStaleWriterOnHeadAhead) {
+    if (head.latestHeight > options.env.height) {
+      return {
+        materialized: false,
+        materializedOverlayRecords: 0,
+        frameDbCommitted: false,
+        staleWriterStopped: true,
+      };
+    }
+    if (head.latestHeight === options.env.height) {
+      const persistedFrame = await readStorageFrameRecord(historyDb, options.env.height);
+      if (persistedFrame) {
+        return {
+          materialized: false,
+          materializedOverlayRecords: 0,
+          frameDbCommitted: false,
+          staleWriterStopped: true,
+        };
+      }
+    }
   }
   if (head.latestHeight !== options.env.height - 1) {
     throw new Error(

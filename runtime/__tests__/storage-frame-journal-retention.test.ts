@@ -115,6 +115,51 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
+  test('stale same-height writer stops when the frame is already persisted', async () => {
+    const seed = `frame-stale-same-height ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.height = 1;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    const beforeFrame = await readStorageFrameRecord(getFrameDb(env), 1);
+    expect(beforeFrame).toBeTruthy();
+
+    const result = await saveRuntimeFrameToStorage({
+      env,
+      tryOpenDb: async (targetEnv) => {
+        await getRuntimeStorageDb(targetEnv).open();
+        return true;
+      },
+      getRuntimeDb: getRuntimeStorageDb,
+      tryOpenFrameDb: async (targetEnv) => {
+        await getFrameDb(targetEnv).open();
+        return true;
+      },
+      getFrameDb,
+      getPerfMs,
+      formatPerfMs: (value) => value.toFixed(2),
+      stopStaleWriterOnHeadAhead: true,
+    });
+
+    expect(result.staleWriterStopped).toBe(true);
+    expect(result.frameDbCommitted).toBe(false);
+    const head = await readStorageHead(getFrameDb(env));
+    const afterFrame = await readStorageFrameRecord(getFrameDb(env), 1);
+    expect(head?.latestHeight).toBe(1);
+    expect(afterFrame?.frameHash).toBe(beforeFrame?.frameHash);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
   test('stale lower-height writer can be stopped without appending or corrupting head', async () => {
     const seed = `frame-stale-writer ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
