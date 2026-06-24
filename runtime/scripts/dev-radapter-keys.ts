@@ -56,6 +56,7 @@ const apiPort = requireNumberArg('--api-port');
 const outPath = resolve(readArg('--out', './db/dev/radapter-keys.json')!);
 const envOutPath = resolve(readArg('--env-out', './db/dev/radapter-keys.env')!);
 const suppressUrlLog = hasFlag('--suppress-url-log');
+const quiet = hasFlag('--quiet');
 const issuedAt = Date.now();
 const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
 
@@ -139,12 +140,11 @@ writeFileSync(
 chmodSync(outPath, 0o600);
 chmodSync(envOutPath, 0o600);
 
-if (!suppressUrlLog) {
-  console.log('');
-  console.log('Open this URL to auto-import all dev runtimes:');
-  console.log(`  ${importUrl}`);
+if (!quiet && !suppressUrlLog) {
+  console.log(importUrl);
+}
+if (!quiet) {
+  console.log(`XLN dev radapter keys written to ${outPath}`);
+  console.log(`Runtime auth env written to ${envOutPath}`);
   console.log('');
 }
-console.log(`XLN dev radapter keys written to ${outPath}`);
-console.log(`Runtime auth env written to ${envOutPath}`);
-console.log('');

@@ -77,6 +77,7 @@ test('runtime import stdout log can expose the full URL only when explicitly req
     exposeUrl: true,
   });
 
-  expect(line).toContain(`wallet=${importUrl}`);
+  expect(line).toBe(importUrl);
   expect(line).toContain('xlnra1.read.secret');
+  expect(line).not.toContain('wallet=');
 });

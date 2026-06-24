@@ -188,12 +188,6 @@
       </button>
     {/if}
 
-    <div class="menu-divider"></div>
-    <a class="remote-manager-link" href="/radapter/manage">
-      <span>Remote runtimes</span>
-      <strong>{remoteRuntimes.length}/100</strong>
-    </a>
-
     <!-- Relay Status -->
     <div class="menu-divider"></div>
     <div class="status-section">
@@ -341,33 +335,6 @@
   .add-item {
     color: #7aa8ff;
     align-items: center;
-  }
-
-  .remote-manager-link {
-    margin: 4px 8px;
-    border: 1px solid rgba(122, 168, 255, 0.2);
-    border-radius: 6px;
-    background: rgba(122, 168, 255, 0.06);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 8px 10px;
-    color: #a1a1aa;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0;
-    text-decoration: none;
-  }
-
-  .remote-manager-link:hover {
-    border-color: rgba(122, 168, 255, 0.42);
-    color: #dbeafe;
-  }
-
-  .remote-manager-link strong {
-    color: #e5e7eb;
   }
 
   .empty-state {

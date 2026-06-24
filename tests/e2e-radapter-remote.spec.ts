@@ -653,6 +653,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
 
   await page.getByTestId('context-current').click();
   await expect(page.getByTestId('remote-runtime-manager')).toHaveCount(0);
+  await expect(page.locator('.remote-manager-link')).toHaveCount(0);
   await page.goto(`${APP_BASE_URL}/radapter/manage`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('remote-runtime-manager')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('remote-runtime-label').fill('H2 dropdown');

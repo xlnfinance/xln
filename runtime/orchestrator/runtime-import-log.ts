@@ -28,8 +28,9 @@ export const redactTokenBearingUrlForLog = (urlText: string): string => {
 export const redactRuntimeImportWalletUrl = redactTokenBearingUrlForLog;
 
 export const buildRuntimeImportLogLine = (input: RuntimeImportLogInput): string => {
+  if (input.exposeUrl) return input.importUrl;
   const labels = input.manifest.entries.map(entry => sanitizeLogValue(entry.label)).join(',');
-  const walletUrl = input.exposeUrl ? input.importUrl : redactRuntimeImportWalletUrl(input.importUrl);
+  const walletUrl = redactRuntimeImportWalletUrl(input.importUrl);
   return [
     '[MESH] RUNTIME_IMPORT_READY',
     `count=${input.manifest.entries.length}`,

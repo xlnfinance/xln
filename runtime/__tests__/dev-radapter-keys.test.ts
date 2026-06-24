@@ -95,3 +95,35 @@ test('dev radapter keys can suppress early URL logging for bun run dev', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('dev radapter keys can run quietly when bun run dev waits for the real manifest URL', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xln-dev-radapter-'));
+  const outPath = join(dir, 'radapter-keys.json');
+  const envOutPath = join(dir, 'radapter-keys.env');
+  try {
+    const result = spawnSync('bun', [
+      'runtime/scripts/dev-radapter-keys.ts',
+      '--web-port',
+      '8084',
+      '--api-port',
+      '8082',
+      '--out',
+      outPath,
+      '--env-out',
+      envOutPath,
+      '--suppress-url-log',
+      '--quiet',
+    ], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe('');
+    const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
+    expect(payload.importUrl).toContain('/app?runtimeList=');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
