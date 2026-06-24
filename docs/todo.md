@@ -201,12 +201,25 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: unit enforces at least 20 curated screens and required groups `Payments`, `Swap`, `On-chain Batch`, `Disputes`, `History`; focused QA cockpit e2e verifies default gallery rendering, counts, and categories.
   - Revalidated: run `20260623-200141-886` regenerated 30 gallery artifacts on HEAD `20aa9c0d`; QA cockpit run `20260623-200321-059` passed gallery visibility.
 
+- [ ] Make the UX screenshot gallery a mandatory 30-screen release audit pack.
+  - Impact: high.
+  - Requirement: every release-quality e2e run refreshes at least 30 named PNG screens across desktop and mobile covering onboarding, home/assets, payments, receive, swap, cross-chain swap, disputes, on-chain batch compose/queue/history, account history, settings, QA cockpit, health, remote runtime import, and Time Machine.
+  - UI: QA cockpit shows the 30-screen pack as a first-class gallery with category filters, viewport badges, scenario names, git HEAD/code hash, and missing-screen warnings.
+  - Tests: unit fails if fewer than 30 curated screens or required categories are missing; focused QA e2e verifies the gallery renders 30 distinct screens and every image resolves.
+
 - [x] Make `/health` read only its dedicated health surface.
   - Impact: medium.
   - Goal: avoid mixing all admin dashboards into health. Health should embed or link QA cockpit, not become the full QA implementation.
   - UI: `/health` shows verdict, bootstrap/infra health, a link-only QA evidence panel, and runtime adapter inspector.
   - Status: done. `/health` no longer imports QA fetch helpers, QA run/story panels, protected QA images, or a QA iframe; it reads `/api/health`, `/api/debug/events`, `/api/debug/entities`, and `/rpc` only.
   - Evidence: unit scans the health route against forbidden QA surfaces; focused radapter e2e blocks `/api/qa/**` while loading `/health` and asserts no QA iframe or run panel exists.
+
+- [ ] Make Time Machine production-debuggable for local and remote runtimes.
+  - Impact: high.
+  - Requirement: when Time Machine is enabled in settings, every wallet/workspace panel reads the selected historical frame instead of live state, with clear live vs historical status.
+  - Remote hub debug: radapter must expose bounded historical frame scans from a remote hub by height/range/cursor, returning aggregate/cursor/hash snapshots and paged entity/account views, never full 1M-account arrays.
+  - UI: operator can scrub local history, pick a remote hub, scan past runtime states, compare current vs selected frame, and deep-link a historical height for debugging.
+  - Tests: local Time Machine e2e proves panels change when scrubbing; remote radapter e2e queries old hub heights and renders bounded historical snapshots without freezing; 1M fixture stays aggregate-first.
 
 - [ ] Separate privileged operations from read-only QA views.
   - Impact: high.
@@ -396,3 +409,12 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 4. Make it regulator-readable: verdict banner, failure inbox, phase waterfall, UTC timestamps.
 5. Make it scale-safe: strip perf samples by default, aggregate 1M snapshots, virtualized lists.
 6. Clean up UX debt: embed mode, metadata source of truth, remove duplicate views, collapse raw logs.
+
+## after core backlog
+
+- [ ] Finish the existing AI Court app as a full XLN-money game.
+  - Impact: product expansion after the core admin/runtime backlog is green.
+  - Requirement: use real XLN token/account flows, not mocks. A user can create a case, deposit/stake tokens, accept a challenge, submit evidence/arguments, resolve the challenge, and the winner receives the escrowed pot.
+  - UI: case lobby, case detail, funding/deposit flow, challenge flow, evidence timeline, judgement/result screen, and payout history.
+  - Runtime: escrow state is auditable through XLN accounts/batches; challenge settlement is deterministic; failed/expired cases refund by explicit rule.
+  - Tests: two-user e2e funds both sides, opens a challenge, resolves it, verifies winner-takes-all balances, history, and no silent failure; unit tests cover payout/refund edge cases.
