@@ -1,0 +1,13 @@
+{
+  "title": "desktop finalized dispute",
+  "group": "Disputes",
+  "description": "Reloaded wallet shows the finalized disputed account and recovery action.",
+  "platform": "desktop",
+  "tags": [
+    "dispute",
+    "history",
+    "reload"
+  ],
+  "sourceTest": "entity workspace dispute lifecycle returns reserve",
+  "project": "chromium"
+}

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xln — screens · coinbase</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>:root{--font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--font-serif:Georgia,serif}
+body{margin:0;background:#e6e8eb;display:flex;justify-content:center;padding:28px 16px;font-family:var(--font-sans)}
+.stage{width:100%;max-width:720px}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+.cb{font-family:'Inter',var(--font-sans);color:#0A0B0D}
+.cb .num{font-variant-numeric:tabular-nums}
+.cb-mut{color:#5B616E}
+.cb-row{display:flex;justify-content:space-between;align-items:center}
+.cb-btn{height:50px;display:flex;align-items:center;justify-content:center;border-radius:25px;background:#0052FF;color:#fff;font-size:16px;font-weight:500;cursor:pointer}
+.cb-fld{background:#F5F6F8;border-radius:16px;padding:15px 16px}
+.cb-pill{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid #EBECEF;border-radius:999px;padding:6px 13px 6px 6px}
+</style>
+</head><body><div class="stage">
+
+<div id="screens-coinbase" class="cb" style="background:#EEF0F3;border-radius:20px;padding:20px;display:grid;grid-template-columns:repeat(auto-fit,minmax(282px,1fr));gap:16px">
+
+  <div style="background:#fff;border-radius:22px;padding:20px">
+    <div class="cb-row" style="margin-bottom:16px">
+      <span style="font-size:17px;font-weight:600">Send</span>
+      <i class="ti ti-x cb-mut" style="font-size:20px" aria-hidden="true"></i>
+    </div>
+
+    <div class="cb-fld cb-row" style="margin-bottom:10px">
+      <div><div class="cb-mut" style="font-size:12px;margin-bottom:2px">From</div><div style="font-size:14px;font-weight:500">Main account</div></div>
+      <div style="text-align:right"><div class="num" style="font-size:14px;font-weight:500">$48,210.00</div><div class="cb-mut" style="font-size:12px">available</div></div>
+    </div>
+
+    <div class="cb-fld cb-row" style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:11px">
+        <span style="width:38px;height:38px;border-radius:50%;background:#0052FF;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:500">G</span>
+        <div><div style="font-size:15px;font-weight:500;line-height:1.2">grace</div><div class="cb-mut num" style="font-size:12px">0x9f3c…1118</div></div>
+      </div>
+      <i class="ti ti-chevron-right cb-mut" style="font-size:18px" aria-hidden="true"></i>
+    </div>
+
+    <div style="text-align:center;margin:8px 0 22px">
+      <div class="num" style="font-size:52px;font-weight:600;letter-spacing:-.03em;line-height:1">$250</div>
+      <div style="margin-top:11px"><span class="cb-pill" style="display:inline-flex"><span style="width:22px;height:22px;border-radius:50%;background:#2775CA;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px">$</span><span style="font-size:14px;font-weight:500">USDC</span></span></div>
+    </div>
+
+    <div class="cb-row" style="margin-bottom:18px;padding:0 4px">
+      <span class="cb-mut" style="font-size:13px;display:flex;align-items:center;gap:6px"><i class="ti ti-bolt" style="font-size:15px;color:#0052FF" aria-hidden="true"></i>Instant · credit-backed</span>
+      <span style="font-size:13px;font-weight:500;color:#0E9F6E">No fee</span>
+    </div>
+
+    <div class="cb-btn" role="button" aria-label="Preview send">Preview send</div>
+  </div>
+
+  <div style="background:#fff;border-radius:22px;padding:20px">
+    <div class="cb-row" style="margin-bottom:14px">
+      <span style="font-size:17px;font-weight:600">Swap</span>
+      <i class="ti ti-settings cb-mut" style="font-size:19px" aria-hidden="true"></i>
+    </div>
+
+    <div class="cb-fld">
+      <div class="cb-row" style="margin-bottom:12px"><span class="cb-mut" style="font-size:13px">You pay</span><span class="cb-mut num" style="font-size:12px">Balance 12,480</span></div>
+      <div class="cb-row">
+        <span class="num" style="font-size:30px;font-weight:600;letter-spacing:-.02em">1,000</span>
+        <span class="cb-pill"><span style="width:24px;height:24px;border-radius:50%;background:#2775CA;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">$</span><span style="font-size:15px;font-weight:500">USDC</span><i class="ti ti-chevron-down cb-mut" style="font-size:15px" aria-hidden="true"></i></span>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:center;margin:-14px 0;position:relative;z-index:1">
+      <span style="width:40px;height:40px;border-radius:50%;background:#0052FF;color:#fff;display:flex;align-items:center;justify-content:center;border:4px solid #fff"><i class="ti ti-arrows-down-up" style="font-size:17px" aria-hidden="true"></i></span>
+    </div>
+
+    <div class="cb-fld">
+      <div class="cb-row" style="margin-bottom:12px"><span class="cb-mut" style="font-size:13px">You receive</span><span class="cb-mut" style="font-size:12px">on Tron</span></div>
+      <div class="cb-row">
+        <span class="num" style="font-size:30px;font-weight:600;letter-spacing:-.02em">919.20</span>
+        <span class="cb-pill"><span style="width:24px;height:24px;border-radius:50%;background:#0A0B0D;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">€</span><span style="font-size:15px;font-weight:500">EUROe</span><i class="ti ti-chevron-down cb-mut" style="font-size:15px" aria-hidden="true"></i></span>
+      </div>
+    </div>
+
+    <div style="background:#F5F6F8;border-radius:14px;padding:12px 14px;margin:16px 0 18px">
+      <div class="cb-row" style="margin-bottom:8px"><span class="cb-mut" style="font-size:13px">Rate</span><span class="num" style="font-size:13px;font-weight:500">1 USDC = 0.919 EUROe</span></div>
+      <div class="cb-row"><span class="cb-mut" style="font-size:13px">Fill</span><span style="font-size:13px;font-weight:500;color:#0052FF">99.4% · atomic</span></div>
+    </div>
+
+    <div class="cb-btn" role="button" aria-label="Preview swap">Preview swap</div>
+  </div>
+</div>
+
+</div></body></html>

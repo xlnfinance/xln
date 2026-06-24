@@ -1,0 +1,12 @@
+{
+  "title": "desktop open resting order",
+  "group": "Swap",
+  "description": "Open order row after a resting limit order is placed.",
+  "platform": "desktop",
+  "tags": [
+    "swap",
+    "open-order"
+  ],
+  "sourceTest": "swap keeps a within-band wide limit as a resting order instead of filling immediately",
+  "project": "chromium"
+}

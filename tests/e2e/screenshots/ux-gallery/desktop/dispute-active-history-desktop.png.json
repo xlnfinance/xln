@@ -1,0 +1,12 @@
+{
+  "title": "desktop active dispute history",
+  "group": "Disputes",
+  "description": "Account history while a dispute is active and waiting for finality.",
+  "platform": "desktop",
+  "tags": [
+    "dispute",
+    "history"
+  ],
+  "sourceTest": "creates one mirrored debt on both sides after dispute finalize",
+  "project": "chromium"
+}

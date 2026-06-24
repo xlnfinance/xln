@@ -1,0 +1,12 @@
+{
+  "title": "desktop resting limit form",
+  "group": "Swap",
+  "description": "Limit order configured inside the current orderbook band.",
+  "platform": "desktop",
+  "tags": [
+    "swap",
+    "limit-order"
+  ],
+  "sourceTest": "swap keeps a within-band wide limit as a resting order instead of filling immediately",
+  "project": "chromium"
+}
