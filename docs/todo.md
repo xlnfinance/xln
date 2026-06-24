@@ -208,14 +208,14 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `/api/qa/run` now includes `phaseWaterfall` per shard, `/api/qa/runs` and history rows persist `timing.phaseP95`, and the QA cockpit selected-shard panel renders a stacked phase waterfall with per-phase ms, share %, p95/budget label, and `over budget` breach state.
   - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `37/37`; focused QA cockpit e2e `20260624-130238-476` PASS `1/1`, wall `12.1s`, code hash `cd7c8bca7c21b171`, benchmark OK. Fixture verifies stable phase labels plus `playwright` budget breach rendering.
 
-- [ ] Add failure inbox.
+- [x] Add failure inbox.
   - Impact: high.
   - Inputs: fatal runtime markers, browser/page errors, network failures, phase budget breaches, restart failures.
   - UI: one page/list of latest failure causes linking directly to shard, log tail, video time, artifact.
   - Partial shipped: inbox covers failed runs, browser/page/network/HTTP health, benchmark regressions, phase budget breaches, failed restart audit rows, selected-shard deep links, and failure-cue video focus.
   - Evidence: focused QA cockpit e2e `20260624-130628-512` PASS `1/1`, wall `12.3s`, code hash `36dbc2aaf5893ecd`, benchmark OK. Fixture verifies `Phase budget exceeded` inbox item and shard focus.
-  - Remaining: fatal log line extraction/linking into its own inbox item.
-  - Tests: fatal marker fixture maps to exact shard and log line.
+  - Status: done. Backend summaries now extract redacted fatal marker lines per shard, and the cockpit renders them as `FAIL crash` inbox items that deep-link to the exact shard/log panel alongside browser, benchmark, phase, and restart failures.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `38/38`; focused QA cockpit e2e `20260624-131200-583` PASS `1/1`, wall `12.4s`, code hash `e5e36c3736265c36`, benchmark FASTER. Fixture verifies fatal marker inbox copy, exact shard focus, and phase breach inbox item.
 
 - [x] Add e2e UX screenshot gallery for design audits.
   - Impact: high.
