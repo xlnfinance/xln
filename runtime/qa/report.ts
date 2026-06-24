@@ -146,6 +146,8 @@ export type QaRunTimingSummary = {
   playwrightMs: number | null;
 };
 
+export type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmark' | 'release' | 'unknown';
+
 export type QaShardManifest = {
   shard: number;
   status: 'passed' | 'failed' | 'unknown';
@@ -201,7 +203,12 @@ export type QaRunView = Omit<QaRunManifest, 'perf' | 'shards'> & {
 export type QaRunSummary = Omit<QaRunManifest, 'perf' | 'shards'> & {
   perf?: QaPerfSummaryView;
   timing: QaRunTimingSummary;
+  suiteKey: string;
+  suiteLabel: string;
+  category: QaRunCategory;
   failingTargets: string[];
+  artifactBytes: number;
+  childCpuP95Pct: number | null;
 };
 
 export type QaSystemVerdictStatus = 'PASS' | 'DEGRADED' | 'FAIL' | 'UNKNOWN';
@@ -219,6 +226,36 @@ export type QaSystemVerdict = QaSeveritySignal & {
   regressionStatus: QaBenchmarkStatus | null;
   browserErrorCount: number;
   browserWarningCount: number;
+};
+
+export type QaRunLedgerEntry = QaSeveritySignal & {
+  runId: string;
+  createdAt: number;
+  completedAt: number | null;
+  status: QaRunManifest['status'];
+  category: QaRunCategory;
+  suiteKey: string;
+  suiteLabel: string;
+  gitHead: string | null;
+  gitBranch: string | null;
+  codeHash: string | null;
+  dirty: boolean;
+  startedBy: string;
+  durationMs: number | null;
+  timing: QaRunTimingSummary;
+  failedShard: string | null;
+  failedTargets: string[];
+  artifactBytes: number;
+  cpuP95Pct: number | null;
+  cpuPeakPct: number | null;
+  ramPeakKb: number | null;
+  browserErrors: number;
+  browserWarnings: number;
+  networkFailures: number;
+  benchmarkStatus: QaBenchmarkStatus | null;
+  benchmarkDeltaPct: number | null;
+  benchmarkComparedRunId: string | null;
+  auditAction: string | null;
 };
 
 type QaShardFailureInput = Pick<QaShardManifest, 'status' | 'error' | 'logTail'> & {
@@ -255,6 +292,7 @@ export type QaHistoryEntry = {
   browserWarningCount: number;
   networkFailureCount: number;
   httpErrorCount: number;
+  childCpuP95Pct: number | null;
   avgShardMs: number | null;
   maxShardMs: number | null;
   bootstrapMs: number | null;
@@ -874,6 +912,46 @@ export const buildQaSystemVerdict = (runs: readonly QaRunSummary[]): QaSystemVer
   };
 };
 
+export const buildQaRunLedger = (runs: readonly QaRunSummary[]): QaRunLedgerEntry[] =>
+  runs.map((run): QaRunLedgerEntry => {
+    const browserHealth = run.browserHealth;
+    const benchmarkDeltaPct = run.benchmark?.metrics.find(metric => metric.metric === 'totalMs')?.deltaPct ?? null;
+    return {
+      severity: run.severity,
+      reason: run.reason,
+      since: run.since,
+      owner: run.owner,
+      evidence: run.evidence,
+      runId: run.runId,
+      createdAt: run.createdAt,
+      completedAt: run.completedAt,
+      status: run.status,
+      category: run.category,
+      suiteKey: run.suiteKey,
+      suiteLabel: run.suiteLabel,
+      gitHead: run.code?.gitHead ?? null,
+      gitBranch: run.code?.gitBranch ?? null,
+      codeHash: run.code?.codeHash ?? null,
+      dirty: run.code?.dirty === true,
+      startedBy: qaRunStartedBy(run),
+      durationMs: run.totalMs,
+      timing: run.timing,
+      failedShard: run.failingTargets[0] ?? null,
+      failedTargets: run.failingTargets,
+      artifactBytes: run.artifactBytes,
+      cpuP95Pct: run.childCpuP95Pct,
+      cpuPeakPct: run.perf?.maxChildCpuPct ?? null,
+      ramPeakKb: run.perf?.maxChildRssKb ?? null,
+      browserErrors: browserHealth?.errorCount ?? 0,
+      browserWarnings: browserHealth?.warningCount ?? 0,
+      networkFailures: (browserHealth?.networkFailureCount ?? 0) + (browserHealth?.httpErrorCount ?? 0),
+      benchmarkStatus: run.benchmark?.status ?? null,
+      benchmarkDeltaPct,
+      benchmarkComparedRunId: run.benchmark?.comparedRunId ?? null,
+      auditAction: qaRunAuditAction(run),
+    };
+  });
+
 const parseRunIdTimestamp = (runId: string): number | null => {
   const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/.exec(runId);
   if (!match) return null;
@@ -948,6 +1026,65 @@ export const qaRunSuiteLabel = (run: Pick<QaRunManifest, 'args' | 'shards'>): st
   if (pwFiles.length > 0) return pwFiles.length === 1 ? pwFiles[0]! : `${pwFiles.length} files`;
   return `${run.shards.length} shards`;
 };
+
+const normalizeArgsArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.map(normalizeSuiteText).filter(Boolean);
+  const normalized = normalizeSuiteText(value);
+  return normalized ? [normalized] : [];
+};
+
+const qaRunArgText = (run: Pick<QaRunManifest, 'args'>, keys: readonly string[]): string | null => {
+  const args = run.args ?? {};
+  for (const key of keys) {
+    const value = args[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+};
+
+const qaRunCategory = (run: Pick<QaRunManifest, 'args' | 'shards' | 'benchmark'>): QaRunCategory => {
+  const explicit = qaRunArgText(run, ['category', 'suiteCategory', 'runCategory']);
+  if (
+    explicit === 'unit' ||
+    explicit === 'contract' ||
+    explicit === 'e2e' ||
+    explicit === 'scenario' ||
+    explicit === 'benchmark' ||
+    explicit === 'release'
+  ) return explicit;
+  const args = run.args ?? {};
+  const files = normalizeArgsArray(args['pwFiles']);
+  const targets = run.shards.map(shard => normalizeSuiteText(shard.target));
+  const text = [...files, ...targets, normalizeSuiteText(args['pwGrep'])].join(' ').toLowerCase();
+  if (text.includes('benchmark') || text.includes('bench:')) return 'benchmark';
+  if (text.includes('runtime/__tests__') || text.includes('bun test')) return 'unit';
+  if (text.includes('jurisdictions') || text.includes('contract')) return 'contract';
+  if (text.includes('scenario') || text.includes('/scenarios')) return 'scenario';
+  if (text.includes('release')) return 'release';
+  if (text.includes('tests/e2e') || run.shards.length > 0) return 'e2e';
+  return 'unknown';
+};
+
+const qaRunArtifactBytes = (run: Pick<QaRunManifest, 'shards'>): number =>
+  run.shards
+    .flatMap(shard => shard.artifacts ?? [])
+    .reduce((sum, artifact) => sum + Math.max(0, Math.floor(artifact.sizeBytes || 0)), 0);
+
+const percentile95 = (values: number[]): number | null => {
+  const sorted = values.filter(value => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * 0.95) - 1));
+  return Math.round(sorted[index]! * 100) / 100;
+};
+
+const qaRunChildCpuP95 = (run: Pick<QaRunManifest, 'perf'>): number | null =>
+  percentile95((run.perf?.samples ?? []).flatMap(sample => sample.children.map(child => child.cpuPct)));
+
+const qaRunStartedBy = (run: Pick<QaRunManifest, 'args'>): string =>
+  qaRunArgText(run, ['startedBy', 'operatorId', 'actor', 'user']) ?? 'runner';
+
+const qaRunAuditAction = (run: Pick<QaRunManifest, 'args'>): string | null =>
+  qaRunArgText(run, ['auditAction', 'action']);
 
 type BenchmarkMetricSnapshot = {
   metric: string;
@@ -1212,6 +1349,7 @@ const openQaHistoryDb = (): Database => {
       browser_warning_count INTEGER NOT NULL DEFAULT 0,
       network_failure_count INTEGER NOT NULL DEFAULT 0,
       http_error_count INTEGER NOT NULL DEFAULT 0,
+      child_cpu_p95_pct REAL,
       avg_shard_ms REAL,
       max_shard_ms REAL,
       bootstrap_ms REAL,
@@ -1238,6 +1376,7 @@ const openQaHistoryDb = (): Database => {
   addColumn('browser_warning_count', 'INTEGER NOT NULL DEFAULT 0');
   addColumn('network_failure_count', 'INTEGER NOT NULL DEFAULT 0');
   addColumn('http_error_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumn('child_cpu_p95_pct', 'REAL');
   addColumn('avg_shard_ms', 'REAL');
   addColumn('max_shard_ms', 'REAL');
   addColumn('bootstrap_ms', 'REAL');
@@ -1293,6 +1432,7 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         browser_warning_count,
         network_failure_count,
         http_error_count,
+        child_cpu_p95_pct,
         avg_shard_ms,
         max_shard_ms,
         bootstrap_ms,
@@ -1326,6 +1466,7 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         $browserWarningCount,
         $networkFailureCount,
         $httpErrorCount,
+        $childCpuP95Pct,
         $avgShardMs,
         $maxShardMs,
         $bootstrapMs,
@@ -1359,6 +1500,7 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         browser_warning_count = excluded.browser_warning_count,
         network_failure_count = excluded.network_failure_count,
         http_error_count = excluded.http_error_count,
+        child_cpu_p95_pct = excluded.child_cpu_p95_pct,
         avg_shard_ms = excluded.avg_shard_ms,
         max_shard_ms = excluded.max_shard_ms,
         bootstrap_ms = excluded.bootstrap_ms,
@@ -1392,6 +1534,7 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
       $browserWarningCount: browserHealth.warningCount,
       $networkFailureCount: browserHealth.networkFailureCount,
       $httpErrorCount: browserHealth.httpErrorCount,
+      $childCpuP95Pct: qaRunChildCpuP95(normalizedRun),
       $avgShardMs: timing.avgShardMs,
       $maxShardMs: timing.maxShardMs,
       $bootstrapMs: timing.bootstrapMs,
@@ -1437,6 +1580,7 @@ const rowToQaHistoryEntry = (row: Record<string, unknown>): QaHistoryEntry => ({
   browserWarningCount: Number(row['browser_warning_count'] || 0),
   networkFailureCount: Number(row['network_failure_count'] || 0),
   httpErrorCount: Number(row['http_error_count'] || 0),
+  childCpuP95Pct: toNullableNumber(row['child_cpu_p95_pct']),
   avgShardMs: toNullableNumber(row['avg_shard_ms']),
   maxShardMs: toNullableNumber(row['max_shard_ms']),
   bootstrapMs: toNullableNumber(row['bootstrap_ms']),
@@ -1447,8 +1591,14 @@ const rowToQaHistoryEntry = (row: Record<string, unknown>): QaHistoryEntry => ({
 
 const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
   const parsed = parseManifestJson(row['manifest_json']);
-  if (parsed) return summarizeQaRun(parsed);
   const history = rowToQaHistoryEntry(row);
+  if (parsed) {
+    const summary = summarizeQaRun(parsed);
+    return {
+      ...summary,
+      childCpuP95Pct: history.childCpuP95Pct ?? summary.childCpuP95Pct,
+    };
+  }
   const browserHealth = normalizeQaBrowserHealthSummary({
     issueCount: history.browserIssueCount,
     errorCount: history.browserErrorCount,
@@ -1456,7 +1606,7 @@ const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
     networkFailureCount: history.networkFailureCount,
     httpErrorCount: history.httpErrorCount,
   } as QaBrowserHealthSummary, history.createdAt);
-  return summarizeQaRun(applyQaRunSeverity({
+  const summary = summarizeQaRun(applyQaRunSeverity({
     manifestVersion: 1,
     runId: history.runId,
     createdAt: history.createdAt,
@@ -1471,6 +1621,10 @@ const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
     args: null,
     shards: [],
   } as unknown as QaRunManifest));
+  return {
+    ...summary,
+    childCpuP95Pct: history.childCpuP95Pct ?? summary.childCpuP95Pct,
+  };
 };
 
 export const findComparableQaBenchmarkRun = (run: QaRunManifest): QaRunManifest | null => {
@@ -1551,6 +1705,7 @@ export const listQaHistory = async (limit = 100): Promise<QaHistoryEntry[]> => {
         browser_warning_count,
         network_failure_count,
         http_error_count,
+        child_cpu_p95_pct,
         avg_shard_ms,
         max_shard_ms,
         bootstrap_ms,
@@ -1600,6 +1755,7 @@ export const listQaRunSummaries = async (limit = 20): Promise<QaRunSummary[]> =>
         browser_warning_count,
         network_failure_count,
         http_error_count,
+        child_cpu_p95_pct,
         avg_shard_ms,
         max_shard_ms,
         bootstrap_ms,
@@ -2364,11 +2520,7 @@ export const resolveQaStoryScreenshotPath = async (
   return realImagePath;
 };
 
-export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'perf' | 'shards'> & {
-  perf?: QaPerfSummaryView;
-  timing: QaRunTimingSummary;
-  failingTargets: string[];
-} => ({
+export const summarizeQaRun = (run: QaRunManifest): QaRunSummary => ({
   manifestVersion: run.manifestVersion,
   severity: run.severity,
   reason: run.reason,
@@ -2381,6 +2533,9 @@ export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'perf' |
   status: run.status,
   totalMs: run.totalMs,
   timing: summarizeQaRunTiming(run),
+  suiteKey: qaRunSuiteKey(run),
+  suiteLabel: qaRunSuiteLabel(run),
+  category: qaRunCategory(run),
   ...(run.code ? { code: run.code } : {}),
   ...(run.perf ? { perf: summarizeQaPerf(run.perf) } : {}),
   browserHealth: run.browserHealth ?? summarizeQaRunBrowserHealth(run),
@@ -2394,6 +2549,8 @@ export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'perf' |
     .filter(shard => shard.status === 'failed')
     .map(shard => shard.handle || shard.target || shard.title || `shard-${shard.shard}`)
     .slice(0, 5),
+  artifactBytes: qaRunArtifactBytes(run),
+  childCpuP95Pct: qaRunChildCpuP95(run),
 });
 
 export const qaArtifactContentType = (filePath: string): string => detectContentType(basename(filePath));

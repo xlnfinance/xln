@@ -385,6 +385,68 @@ const QA_PASS_VERDICT = {
   browserWarningCount: 0,
 };
 
+const QA_FAIL_LEDGER = {
+  ...qaSignal('FAIL', '1/3 shard(s) failed', 'qa', QA_FIXTURE_RUN.createdAt),
+  runId: QA_FIXTURE_RUN_ID,
+  createdAt: QA_FIXTURE_RUN.createdAt,
+  completedAt: QA_FIXTURE_RUN.completedAt,
+  status: 'failed',
+  category: 'e2e',
+  suiteKey: 'fixture-suite',
+  suiteLabel: 'qa.cockpit-fixture',
+  gitHead: QA_FIXTURE_RUN.code.gitHead,
+  gitBranch: QA_FIXTURE_RUN.code.gitBranch,
+  codeHash: QA_FIXTURE_RUN.code.codeHash,
+  dirty: false,
+  startedBy: 'regulator-auditor',
+  durationMs: QA_FIXTURE_RUN.totalMs,
+  timing: QA_FIXTURE_TIMING,
+  failedShard: 'qa.cockpit-fixture',
+  failedTargets: ['qa.cockpit-fixture'],
+  artifactBytes: 2048 + QA_FIXTURE_VTT.length,
+  cpuP95Pct: 41.5,
+  cpuPeakPct: QA_FIXTURE_RUN.perf.maxChildCpuPct,
+  ramPeakKb: QA_FIXTURE_RUN.perf.maxChildRssKb,
+  browserErrors: QA_FIXTURE_BROWSER_HEALTH.errorCount,
+  browserWarnings: QA_FIXTURE_BROWSER_HEALTH.warningCount,
+  networkFailures: QA_FIXTURE_BROWSER_HEALTH.networkFailureCount + QA_FIXTURE_BROWSER_HEALTH.httpErrorCount,
+  benchmarkStatus: QA_FIXTURE_RUN.benchmark.status,
+  benchmarkDeltaPct: 25,
+  benchmarkComparedRunId: QA_FIXTURE_RUN.benchmark.comparedRunId,
+  auditAction: 'release-gate',
+};
+
+const QA_FAST_LEDGER = {
+  ...qaSignal('OK', 'QA run is green', 'qa', QA_FAST_SUMMARY.createdAt),
+  runId: QA_FAST_RUN_ID,
+  createdAt: QA_FAST_SUMMARY.createdAt,
+  completedAt: QA_FAST_SUMMARY.completedAt,
+  status: 'passed',
+  category: 'e2e',
+  suiteKey: 'fixture-fast-suite',
+  suiteLabel: 'qa.cockpit-green',
+  gitHead: QA_FAST_SUMMARY.code.gitHead,
+  gitBranch: QA_FAST_SUMMARY.code.gitBranch,
+  codeHash: QA_FAST_SUMMARY.code.codeHash,
+  dirty: false,
+  startedBy: 'runner',
+  durationMs: QA_FAST_SUMMARY.totalMs,
+  timing: QA_FAST_TIMING,
+  failedShard: null,
+  failedTargets: [],
+  artifactBytes: 0,
+  cpuP95Pct: null,
+  cpuPeakPct: QA_FAST_SUMMARY.perf.maxChildCpuPct,
+  ramPeakKb: QA_FAST_SUMMARY.perf.maxChildRssKb,
+  browserErrors: 0,
+  browserWarnings: 0,
+  networkFailures: 0,
+  benchmarkStatus: 'ok',
+  benchmarkDeltaPct: 0,
+  benchmarkComparedRunId: null,
+  auditAction: null,
+};
+
 const QA_CATALOG = [
   {
     id: 'e2e-isolated',
@@ -852,6 +914,7 @@ test.describe('QA cockpit scenario player', () => {
       ok: true,
       qaAuth: QA_AUTH,
       runs: [QA_FIXTURE_SUMMARY, QA_FAST_SUMMARY],
+      ledger: [QA_FAIL_LEDGER, QA_FAST_LEDGER],
       verdict: QA_FAIL_VERDICT,
     };
     await page.route('**/api/qa/runs?**', async (route) => {
@@ -1092,6 +1155,15 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-history')).toContainText('code b4e0f2401f81');
     await expect(page.getByTestId('qa-history')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-history')).toContainText('SLOWER +25.0%');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('Canonical Ledger');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('qa.cockpit-fixture');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('regulator-auditor');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('release-gate');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('cpu p95 41.5%');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('browser 1 err / 2 warn');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('network 1');
+    await expect(page.getByTestId('qa-run-ledger')).toContainText('SLOWER +25.0%');
+    await expect(page.getByTestId('qa-ledger-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await expect(page.getByTestId('qa-history')).toContainText('regulator-auditor');
     await expect(page.getByTestId('qa-history')).toContainText('verify evidence playback');
     await expect(page.getByTestId('qa-history-backfill-card')).toContainText('Backfill History Index');
@@ -1105,8 +1177,10 @@ test.describe('QA cockpit scenario player', () => {
     await page.getByTestId('qa-retention-purge').click();
     await expect(page.getByTestId('qa-retention-result')).toContainText('deleted 1 log dirs / 1 history rows');
     await page.getByTestId('qa-history-sort').selectOption('stack-fast');
+    await expect(page.getByTestId('qa-ledger-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
     await expect(page.getByTestId('qa-history-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
     await page.getByTestId('qa-history-sort').selectOption('date-desc');
+    await expect(page.getByTestId('qa-ledger-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await expect(page.getByTestId('qa-history-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await page.getByRole('button', { name: 'E2E Runs' }).click();
     await expect(page.locator('.run-summary')).toContainText('Benchmark');
@@ -1169,6 +1243,7 @@ test.describe('QA cockpit scenario player', () => {
       ok: true,
       qaAuth: QA_AUTH,
       runs: [QA_FAST_SUMMARY],
+      ledger: [QA_FAST_LEDGER],
       verdict: QA_PASS_VERDICT,
     };
     await page.reload();

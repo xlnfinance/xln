@@ -19,6 +19,7 @@ import {
   applyQaRunSeverity,
   assertQaReleaseRunSeverity,
   auditQaUxReleasePack,
+  buildQaRunLedger,
   buildQaSystemVerdict,
   classifyQaArtifactSensitivity,
   classifyQaShardFailure,
@@ -327,6 +328,106 @@ test('qa system verdict is schema-backed by latest run severity', () => {
   expect(passed.status).toBe('PASS');
   expect(passed.activeCount).toBe(0);
   expect(passed.failingSurfaceCount).toBe(0);
+});
+
+test('qa run ledger exposes canonical operator fields', () => {
+  const baseline = benchmarkRun('ledger-baseline', 1000, 800);
+  const current = benchmarkRun('ledger-current', 1500, 1200, 'ledger-code', 'ledger-head');
+  const run = applyQaRunSeverity({
+    ...current,
+    status: 'failed',
+    passedShards: 0,
+    failedShards: 1,
+    args: {
+      pwFiles: ['tests/e2e-ledger.spec.ts'],
+      startedBy: 'regulator-operator',
+      auditAction: 'release-gate',
+    },
+    benchmark: compareQaBenchmarkRuns(current, baseline),
+    browserHealth: {
+      severity: 'FAIL',
+      reason: '1 browser error(s) captured',
+      since: Date.UTC(2026, 5, 23),
+      owner: 'browser',
+      evidence: [{ label: 'errors', value: 1 }],
+      issueCount: 1,
+      errorCount: 1,
+      warningCount: 0,
+      networkFailureCount: 0,
+      httpErrorCount: 1,
+    },
+    perf: {
+      ...current.perf!,
+      maxChildCpuPct: 90,
+      samples: [
+        {
+          ts: Date.UTC(2026, 5, 23, 0, 0, 0),
+          load1: 1,
+          load5: 1,
+          load15: 1,
+          freeMemBytes: 100,
+          totalMemBytes: 200,
+          runnerRssBytes: 300,
+          children: [
+            { name: 'playwright', pid: 1, cpuPct: 10, memPct: 1, rssKb: 200 },
+            { name: 'vite', pid: 2, cpuPct: 90, memPct: 2, rssKb: 300 },
+          ],
+        },
+      ],
+    },
+    shards: [{
+      ...current.shards[0]!,
+      status: 'failed',
+      handle: 'qa.ledger-fixture',
+      failureClass: 'assertion',
+      error: 'Expected ledger fixture failure',
+      browserIssues: [{
+        type: 'http',
+        severity: 'error',
+        message: 'HTTP 502',
+        url: 'http://127.0.0.1:8080/api/qa/run',
+        method: 'GET',
+        status: 502,
+        testId: 'ledger',
+        timestamp: Date.UTC(2026, 5, 23),
+      }],
+      artifacts: [
+        {
+          name: 'video.webm',
+          relativePath: 'video.webm',
+          sizeBytes: 1024,
+          kind: 'video',
+          sensitivity: 'internal',
+          contentType: 'video/webm',
+        },
+        {
+          name: 'trace.zip',
+          relativePath: 'trace.zip',
+          sizeBytes: 2048,
+          kind: 'archive',
+          sensitivity: 'internal',
+          contentType: 'application/zip',
+        },
+      ],
+    }],
+  });
+  const [row] = buildQaRunLedger([summarizeQaRun(run)]);
+  expect(row?.status).toBe('failed');
+  expect(row?.category).toBe('e2e');
+  expect(row?.suiteLabel).toBe('qa.ledger-fixture');
+  expect(row?.startedBy).toBe('regulator-operator');
+  expect(row?.auditAction).toBe('release-gate');
+  expect(row?.failedShard).toBe('qa.ledger-fixture');
+  expect(row?.artifactBytes).toBe(3072);
+  expect(row?.cpuP95Pct).toBe(90);
+  expect(row?.cpuPeakPct).toBe(90);
+  expect(row?.ramPeakKb).toBe(4096);
+  expect(row?.browserErrors).toBe(1);
+  expect(row?.networkFailures).toBe(1);
+  expect(row?.benchmarkStatus).toBe('slower');
+  expect(row?.benchmarkDeltaPct).toBe(50);
+  expect(row?.gitHead).toBe('ledger-head');
+  expect(row?.codeHash).toBe('ledger-code');
 });
 
 test('qa run id formatter uses UTC fields', () => {
@@ -1281,6 +1382,25 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       passedShards: 0,
       failedShards: 1,
       failureClasses: ['assertion'],
+      args: {
+        ...base.args,
+        startedBy: 'ledger-api-operator',
+        auditAction: 'restart-run',
+      },
+      perf: {
+        ...base.perf!,
+        maxChildCpuPct: 42,
+        samples: [{
+          ts: createdAt,
+          load1: 1,
+          load5: 1,
+          load15: 1,
+          freeMemBytes: 100,
+          totalMemBytes: 200,
+          runnerRssBytes: 300,
+          children: [{ name: 'playwright', pid: 10, cpuPct: 42, memPct: 1, rssKb: 512 }],
+        }],
+      },
       shards: [{
         ...base.shards[0]!,
         status: 'failed',
@@ -1290,6 +1410,14 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
         logTail: 'stored summary tail',
         timelineSteps: [{ label: 'stored summary cue', ms: 111 }],
         slowSteps: [{ label: 'stored summary cue', ms: 111 }],
+        artifacts: [{
+          name: 'video.webm',
+          relativePath: 'video.webm',
+          sizeBytes: 2048,
+          kind: 'video',
+          sensitivity: 'internal',
+          contentType: 'video/webm',
+        }],
       }],
     };
     recordQaRunHistory(run, runDir);
@@ -1305,6 +1433,18 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       const payload = await response!.json() as {
         ok?: boolean;
         runs?: Array<{ runId?: string; status?: string; failingTargets?: string[]; timing?: { playwrightMs?: number | null } }>;
+        ledger?: Array<{
+          runId?: string;
+          status?: string;
+          suiteLabel?: string;
+          category?: string;
+          startedBy?: string;
+          auditAction?: string | null;
+          artifactBytes?: number;
+          cpuP95Pct?: number | null;
+          cpuPeakPct?: number | null;
+          failedShard?: string | null;
+        }>;
         verdict?: { status?: string; latestRunId?: string | null; reason?: string; activeCount?: number };
       };
       expect(payload.ok).toBe(true);
@@ -1316,6 +1456,16 @@ test('qa runs endpoint reads SQLite summaries without requiring run logs', async
       expect(payload.verdict?.latestRunId).toBe(runId);
       expect(payload.verdict?.reason).toContain('qa cockpit');
       expect(payload.verdict?.activeCount).toBeGreaterThan(0);
+      const ledgerRow = payload.ledger?.find(item => item.runId === runId);
+      expect(ledgerRow?.status).toBe('failed');
+      expect(ledgerRow?.suiteLabel).toBe('qa cockpit');
+      expect(ledgerRow?.category).toBe('e2e');
+      expect(ledgerRow?.startedBy).toBe('ledger-api-operator');
+      expect(ledgerRow?.auditAction).toBe('restart-run');
+      expect(ledgerRow?.artifactBytes).toBe(2048);
+      expect(ledgerRow?.cpuP95Pct).toBe(42);
+      expect(ledgerRow?.cpuPeakPct).toBe(42);
+      expect(ledgerRow?.failedShard).toBe('qa cockpit');
     });
   } finally {
     deleteQaHistoryRows([runId]);

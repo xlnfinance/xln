@@ -172,13 +172,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `/api/qa/runs` now returns a schema-backed `QaSystemVerdict` built from the latest run summary, including active/failing surface counts, UTC run time, git HEAD, code hash, dirty flag, benchmark status, and browser error/warning counts. `/qa` renders that backend verdict and only overlays local operations failures.
   - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `34/34`; focused QA cockpit e2e `20260624-023242-580` PASS `1/1`, wall `11.3s`, code hash `c9ffc08fe7c195ab`, benchmark OK. Fixture proves backend-driven FAIL and green PASS verdicts.
 
-- [ ] Build canonical run ledger.
+- [x] Build canonical run ledger.
   - Impact: high.
   - UI/API fields: status, severity, suite, category, gitHead, codeHash, dirty, startedBy, duration, failedShard, artifactBytes, cpuP95, ramPeak, browserErrors, networkFailures, audit action.
   - API: `/api/qa/runs` reads SQLite history as canonical source; manifest JSON is ingest/backfill only.
-  - Partial shipped: `/api/qa/runs` now serves DB-backed summaries when history rows exist and falls back to log-dir manifests only for an empty legacy DB.
-  - Evidence: unit removes a recorded run directory and still gets the run from `/api/qa/runs`.
-  - Tests: fixture with three HEADs renders sortable ledger and regression deltas.
+  - Status: done. `/api/qa/runs` now returns `ledger` rows with canonical operator fields: severity/status, suite key/label, category, git HEAD/branch, code hash, dirty flag, startedBy, duration/timings, failed shard/targets, artifact bytes, CPU p95, CPU peak, RAM peak, browser/network counts, benchmark delta, compared run, and audit action. SQLite persists `child_cpu_p95_pct` separately so sample stripping does not erase ledger evidence.
+  - UI: History includes a `Canonical Ledger` table sorted by the shared run speed/date selector, so benchmark deltas and failed surfaces are visible without opening a shard.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `35/35`; focused QA cockpit e2e `20260624-024105-955` PASS `1/1`, wall `10.8s`, code hash `be6241adbd805baa`, benchmark OK. Fixture verifies rendered ledger fields and sort order.
 
 - [x] Add operator sorting by run/test speed and launch time.
   - Impact: high.

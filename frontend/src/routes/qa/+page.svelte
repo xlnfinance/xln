@@ -248,6 +248,7 @@
     browserWarningCount: number;
     networkFailureCount: number;
     httpErrorCount: number;
+    childCpuP95Pct: number | null;
     avgShardMs: number | null;
     maxShardMs: number | null;
     bootstrapMs: number | null;
@@ -317,6 +318,7 @@
   };
 
   type QaView = 'e2e' | 'scenarios' | 'gallery' | 'suites' | 'benchmarks' | 'history';
+  type QaRunCategory = 'unit' | 'contract' | 'e2e' | 'scenario' | 'benchmark' | 'release' | 'unknown';
   type RunSortKey =
     | 'date-desc'
     | 'date-asc'
@@ -374,6 +376,36 @@
     browserErrorCount: number;
     browserWarningCount: number;
   };
+  type QaRunLedgerEntry = QaSeveritySignal & {
+    runId: string;
+    createdAt: number;
+    completedAt: number | null;
+    status: 'passed' | 'failed' | 'unknown';
+    category: QaRunCategory;
+    suiteKey: string;
+    suiteLabel: string;
+    gitHead: string | null;
+    gitBranch: string | null;
+    codeHash: string | null;
+    dirty: boolean;
+    startedBy: string;
+    durationMs: number | null;
+    totalMs?: number | null;
+    timing: QaRunTimingSummary;
+    failedShard: string | null;
+    failedTargets: string[];
+    artifactBytes: number;
+    cpuP95Pct: number | null;
+    cpuPeakPct: number | null;
+    ramPeakKb: number | null;
+    browserErrors: number;
+    browserWarnings: number;
+    networkFailures: number;
+    benchmarkStatus: QaBenchmarkComparison['status'] | null;
+    benchmarkDeltaPct: number | null;
+    benchmarkComparedRunId: string | null;
+    auditAction: string | null;
+  };
   type QaSystemVerdict = QaSeveritySignal & {
     schemaVersion: 1;
     status: QaVerdictStatus;
@@ -395,6 +427,7 @@
   let uxReleasePack = $state<QaUxReleasePackAudit | null>(null);
   let uxGalleryGroupFilter = $state('all');
   let history = $state<QaHistoryEntry[]>([]);
+  let ledger = $state<QaRunLedgerEntry[]>([]);
   let restartAudit = $state<QaRestartAuditEntry[]>([]);
   let restart = $state<RestartStatus>({ active: false });
   let selectedRunId = $state('');
@@ -470,6 +503,7 @@
   const filteredRuns = $derived(runs.filter(run => runMatchesFailureClass(run, selectedFailureClass)));
   const sortedRuns = $derived([...filteredRuns].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedHistory = $derived([...history].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
+  const sortedLedger = $derived([...ledger].sort((a, b) => compareRunsForSort(a, b, runSortKey)));
   const sortedShardEntries = $derived((selectedRun?.shards ?? [])
     .map((shard, index) => ({ shard, index }))
     .sort((a, b) => compareShardsForSort(a, b, shardSortKey)));
@@ -825,9 +859,9 @@
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
   }
 
-  function runTimingValue(run: QaSummary | QaHistoryEntry, key: RunSortKey): number {
+  function runTimingValue(run: QaSummary | QaHistoryEntry | QaRunLedgerEntry, key: RunSortKey): number {
     const timing = 'timing' in run ? run.timing : null;
-    if (key.startsWith('stack')) return finiteSortValue(run.totalMs, Number.POSITIVE_INFINITY);
+    if (key.startsWith('stack')) return finiteSortValue('durationMs' in run ? run.durationMs : run.totalMs, Number.POSITIVE_INFINITY);
     if (key.startsWith('bootstrap')) {
       return finiteSortValue(timing?.bootstrapMs ?? ('bootstrapMs' in run ? run.bootstrapMs : null), Number.POSITIVE_INFINITY);
     }
@@ -840,7 +874,11 @@
     return finiteSortValue(run.createdAt, 0);
   }
 
-  function compareRunsForSort(a: QaSummary | QaHistoryEntry, b: QaSummary | QaHistoryEntry, key: RunSortKey): number {
+  function compareRunsForSort(
+    a: QaSummary | QaHistoryEntry | QaRunLedgerEntry,
+    b: QaSummary | QaHistoryEntry | QaRunLedgerEntry,
+    key: RunSortKey,
+  ): number {
     if (key === 'date-asc') return a.createdAt - b.createdAt || a.runId.localeCompare(b.runId);
     if (key === 'date-desc') return b.createdAt - a.createdAt || b.runId.localeCompare(a.runId);
     const descending = key.endsWith('slow');
@@ -1020,6 +1058,7 @@
         ok?: boolean;
         qaAuth?: QaAuthInfo;
         runs?: QaSummary[];
+        ledger?: QaRunLedgerEntry[];
         verdict?: QaSystemVerdict;
         error?: string;
       };
@@ -1028,6 +1067,7 @@
         throw new Error(payload.error || 'Failed to load QA runs');
       }
       runs = payload.runs;
+      ledger = payload.ledger ?? [];
       systemVerdict = payload.verdict ?? null;
       const requestedRunId = requestedRunIdFromUrl();
       const nextRunId = preserveSelection && selectedRunId && runs.some((run) => run.runId === selectedRunId)
@@ -1777,6 +1817,49 @@
             <span class="chip">{history.length} rows</span>
           </div>
         </div>
+        <section class="run-ledger-panel" data-testid="qa-run-ledger">
+          <div class="suite-list-head compact-head">
+            <div>
+              <div class="eyebrow">Canonical Ledger</div>
+              <h3>Runs Across Test Surfaces</h3>
+            </div>
+            <span class="chip">{ledger.length} ledger rows</span>
+          </div>
+          {#if sortedLedger.length === 0}
+            <div class="empty">No canonical ledger rows indexed yet</div>
+          {:else}
+            <div class="history-table ledger-table">
+              {#each sortedLedger as row}
+                <article
+                  class:bad={row.status === 'failed'}
+                  class:ok={row.status === 'passed'}
+                  data-testid="qa-ledger-row"
+                  data-run-id={row.runId}
+                >
+                  <strong>{statusLabel(row)}</strong>
+                  <span>{row.category}</span>
+                  <span title={row.suiteKey}>{row.suiteLabel}</span>
+                  <span>by {row.startedBy}</span>
+                  <span>{formatMs(row.durationMs)}</span>
+                  <span class:warn={Boolean(row.failedShard)}>{row.failedShard ?? 'no failed shard'}</span>
+                  <span>{formatBytes(row.artifactBytes)} artifacts</span>
+                  <span>cpu p95 {row.cpuP95Pct ?? 'n/a'}%</span>
+                  <span>cpu peak {row.cpuPeakPct ?? 'n/a'}%</span>
+                  <span>ram {row.ramPeakKb ? formatBytes(row.ramPeakKb * 1024) : 'n/a'}</span>
+                  <span class:warn={row.browserErrors > 0}>browser {row.browserErrors} err / {row.browserWarnings} warn</span>
+                  <span class:warn={row.networkFailures > 0}>network {row.networkFailures}</span>
+                  <span class:warn={row.benchmarkStatus === 'slower' || row.benchmarkStatus === 'mixed'}>
+                    {benchmarkLabel(row.benchmarkStatus)} {formatPct(row.benchmarkDeltaPct)}
+                  </span>
+                  <code title={row.gitHead ?? ''}>head {shortHash(row.gitHead)}</code>
+                  <code title={row.codeHash ?? ''}>code {shortHash(row.codeHash)}</code>
+                  {#if row.auditAction}<em>{row.auditAction}</em>{/if}
+                  {#if row.dirty}<em>dirty</em>{/if}
+                </article>
+              {/each}
+            </div>
+          {/if}
+        </section>
         <div class="history-table">
           {#each sortedHistory as row}
             <article
@@ -2844,6 +2927,12 @@
     gap: 0.5rem;
   }
 
+  .run-ledger-panel {
+    display: grid;
+    gap: 0.65rem;
+    margin-bottom: 0.8rem;
+  }
+
   .restart-audit-head {
     margin-top: 0.65rem;
   }
@@ -2869,6 +2958,10 @@
 
   .history-table.compact article {
     grid-template-columns: 80px repeat(6, minmax(76px, auto));
+  }
+
+  .history-table.ledger-table article {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   }
 
   .history-table article.ok,
