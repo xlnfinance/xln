@@ -3,7 +3,7 @@
   import { onDestroy, onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import type { ComponentType } from 'svelte';
-  import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress, zeroPadValue } from 'ethers';
+  import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress } from 'ethers';
   import type {
     AccountMachine,
     Env,
@@ -183,6 +183,25 @@
     getPendingBatchReserveIssue,
     pendingBatchEntityLabel,
   } from './pending-batch-preview';
+  import {
+    buildAddTokenToAccountTx,
+    buildBroadcastTx,
+    buildDisputeFinalizeTx,
+    buildDisputeStartTx,
+    buildExternalToReserveTx,
+    buildMovePostSettleTxs,
+    buildOpenAccountTx,
+    buildPrepareDisputeTx,
+    buildReopenDisputedAccountTx,
+    buildReserveToCollateralTx,
+    buildReserveToExternalEoaTx,
+    buildReserveToReserveTx,
+    buildSettlementApproveTx,
+    encodeExternalEoaAsEntity,
+    type DisputeStartOptions,
+    type MovePostSettleOp,
+    type PendingAssetAutoC2R,
+  } from './entity-action-txs';
   export let tab: Tab;
   export let hideHeader: boolean = false;
   export let showJurisdiction: boolean = true;
@@ -1099,20 +1118,6 @@
     baselineReserve: bigint;
   } | null = null;
   let resolvingAssetBridgeSync = false;
-  type MovePostSettleOp =
-    | { type: 'none' }
-    | { type: 'r2r'; recipientEntityId: string }
-    | { type: 'r2e'; recipientEoa: string }
-    | { type: 'reserve_to_collateral'; targetEntityId: string; counterpartyEntityId: string };
-  type PendingAssetAutoC2R = {
-    counterpartyEntityId: string;
-    tokenId: number;
-    symbol: string;
-    amount: bigint;
-    postSettleOp: MovePostSettleOp;
-    broadcast: boolean;
-    phase: 'awaiting_settlement_execute' | 'awaiting_follow_up';
-  };
   let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
   let resolvingAssetAutoC2R = false;
   let externalFetchInFlight: Promise<void> | null = null;
@@ -1363,23 +1368,12 @@
         onchainReserves.get(tokenId) ?? 0n,
       );
       const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
-      const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
       await enqueueEntityInputs(env, [{
         entityId,
         signerId,
         entityTxs: [
-          {
-            type: 'r2e',
-            data: {
-              receivingEntity,
-              tokenId,
-              amount,
-            },
-          },
-          {
-            type: 'j_broadcast',
-            data: {},
-          },
+          buildReserveToExternalEoaTx(externalAddress, tokenId, amount),
+          buildBroadcastTx(),
         ],
       }]);
       pendingAssetBridgeSync = {
@@ -1409,18 +1403,8 @@
       entityId,
       signerId,
       entityTxs: [
-        {
-          type: 'r2r',
-          data: {
-            toEntityId: recipientEntityId,
-            tokenId,
-            amount,
-          },
-        },
-        {
-          type: 'j_broadcast',
-          data: {},
-        },
+        buildReserveToReserveTx(recipientEntityId, tokenId, amount),
+        buildBroadcastTx(),
       ],
     }]);
   }
@@ -1573,10 +1557,9 @@
       const env = requireRuntimeEnv(activeEnv, 'quick-settle-approve');
       const signerId = resolveEntitySigner(entityId, 'quick-settle-approve');
       if (!signerId) throw new Error('No signer available');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-          type: 'settle_approve',
-          data: { counterpartyEntityId: event.detail.counterpartyId },
-        }])]);
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        buildSettlementApproveTx(event.detail.counterpartyId),
+      ])]);
       toasts.info('Withdrawal signature sent');
     } catch (err) {
       console.error('[EntityPanel] Quick settle approve failed:', err);
@@ -2539,58 +2522,6 @@
     }
     throw new Error(`${label} did not complete in time`);
   }
-  function buildMovePostSettleTxs(entityId: string, pending: PendingAssetAutoC2R): EntityTx[] {
-    const needsFollowUpReserveOp = pending.postSettleOp.type !== 'none';
-    const entityTxs: EntityTx[] = [
-      {
-        type: 'settle_execute' as const,
-        data: {
-          counterpartyEntityId: pending.counterpartyEntityId,
-          ...(needsFollowUpReserveOp ? { disableC2RShortcut: true } : {}),
-        },
-      },
-    ];
-    if (pending.postSettleOp.type === 'r2r') {
-      entityTxs.push({
-        type: 'r2r' as const,
-        data: {
-          toEntityId: pending.postSettleOp.recipientEntityId,
-          tokenId: pending.tokenId,
-          amount: pending.amount,
-        },
-      });
-    }
-    if (pending.postSettleOp.type === 'r2e') {
-      entityTxs.push({
-        type: 'r2e' as const,
-        data: {
-          receivingEntity: zeroPadValue(pending.postSettleOp.recipientEoa, 32).toLowerCase(),
-          tokenId: pending.tokenId,
-          amount: pending.amount,
-        },
-      });
-    }
-    if (pending.postSettleOp.type === 'reserve_to_collateral') {
-      entityTxs.push({
-        type: 'r2c' as const,
-        data: {
-          counterpartyId: pending.postSettleOp.counterpartyEntityId,
-          ...(pending.postSettleOp.targetEntityId !== String(entityId).trim().toLowerCase()
-            ? { receivingEntityId: pending.postSettleOp.targetEntityId }
-            : {}),
-          tokenId: pending.tokenId,
-          amount: pending.amount,
-        },
-      });
-    }
-    if (pending.broadcast) {
-      entityTxs.push({
-        type: 'j_broadcast' as const,
-        data: {},
-      });
-    }
-    return entityTxs;
-  }
   function canAddMoveToExistingBatch(): boolean {
     const routeKey = getMoveRouteKey(moveFromEndpoint, moveToEndpoint);
     return routeKey === 'external->reserve'
@@ -2618,14 +2549,7 @@
     await enqueueEntityInputs(env, [{
       entityId,
       signerId,
-      entityTxs: [{
-        type: 'r2r' as const,
-        data: {
-          toEntityId: recipientEntityId,
-          tokenId,
-          amount,
-        },
-      }],
+      entityTxs: [buildReserveToReserveTx(recipientEntityId, tokenId, amount)],
     }]);
   }
   async function queueReserveToExternalDraft(
@@ -2640,18 +2564,11 @@
     const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-external-draft');
     const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
     if (!isAddress(externalAddress)) throw new Error('Recipient must be a valid EOA address');
-    const receivingEntity = zeroPadValue(externalAddress, 32).toLowerCase();
+    const receivingEntity = encodeExternalEoaAsEntity(externalAddress);
     await enqueueEntityInputs(env, [{
       entityId,
       signerId,
-      entityTxs: [{
-        type: 'r2e' as const,
-        data: {
-          receivingEntity,
-          tokenId,
-          amount,
-        },
-      }],
+      entityTxs: [buildReserveToExternalEoaTx(externalAddress, tokenId, amount)],
     }]);
     await waitForMoveCondition(
       () => {
@@ -2685,15 +2602,15 @@
       throw new Error('No account found for selected counterparty');
     }
     const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-account-draft');
-    await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-      type: 'r2c' as const,
-      data: {
-        counterpartyId: counterpartyEntityId,
-        ...(receivingEntityId !== String(entityId).trim().toLowerCase() ? { receivingEntityId } : {}),
+    await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      buildReserveToCollateralTx({
+        counterpartyEntityId,
+        selfEntityId: entityId,
+        receivingEntityId,
         tokenId,
         amount,
-      },
-    }])]);
+      }),
+    ])]);
   }
   async function queueExternalToReserveDraft(
     tokenAddress: string,
@@ -2712,14 +2629,11 @@
     await enqueueEntityInputs(env, [{
       entityId,
       signerId,
-      entityTxs: [{
-        type: 'e2r' as const,
-        data: {
-          contractAddress: tokenAddress,
-          amount,
-          ...(typeof internalTokenId === 'number' ? { internalTokenId } : {}),
-        },
-      }],
+      entityTxs: [buildExternalToReserveTx({
+        contractAddress: tokenAddress,
+        amount,
+        ...(typeof internalTokenId === 'number' ? { internalTokenId } : {}),
+      })],
     }]);
   }
   async function addMoveToExistingBatch(skipValidation = false): Promise<void> {
@@ -2989,19 +2903,14 @@
     try {
       const env = requireRuntimeEnv(activeEnv, 'reserve-to-collateral');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
-          {
-            type: 'r2c' as const,
-            data: {
-              counterpartyId: counterpartyEntityId,
-              ...(receivingEntityId !== String(entityId).trim().toLowerCase() ? { receivingEntityId } : {}),
-              tokenId,
-              amount,
-            },
-          },
-          {
-            type: 'j_broadcast',
-            data: {},
-          },
+          buildReserveToCollateralTx({
+            counterpartyEntityId,
+            selfEntityId: entityId,
+            receivingEntityId,
+            tokenId,
+            amount,
+          }),
+          buildBroadcastTx(),
         ])]);
       toasts.info(`R→C pending on-chain confirmation for ${info.symbol}.`);
     } catch (err) {
@@ -3047,13 +2956,9 @@
       const env = requireRuntimeEnv(activeEnv, 'open-account');
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
       await prewarmCounterpartyProfiles(env, [trimmed]);
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-          type: 'openAccount' as const,
-          data: {
-            targetEntityId: trimmed,
-            ...(rebalancePolicy ? { rebalancePolicy } : {}),
-          },
-        }])]);
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        buildOpenAccountTx(trimmed, rebalancePolicy),
+      ])]);
       openAccountEntityId = '';
       toasts.success('Account request sent');
     } catch (err) {
@@ -3122,7 +3027,7 @@
   async function confirmAndQueueDisputeStart(
     counterpartyEntityId: string,
     description = 'dispute-from-configure',
-    options: { allowUnsafeCrossJTargetDispute?: boolean; acceptedCrossJTargetLossAmount?: bigint } = {},
+    options: DisputeStartOptions = {},
   ) {
     if (!confirmDisputeAction('start', counterpartyEntityId)) return;
     await queueDisputeStart(counterpartyEntityId, description, options);
@@ -3148,10 +3053,9 @@
     if (!activeIsLive) { toasts.error('Dispute prepare requires LIVE mode'); return; }
     try {
       const env = requireRuntimeEnv(activeEnv, 'dispute-prepare');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-        type: 'prepareDispute' as const,
-        data: { counterpartyEntityId, description },
-      }])]);
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        buildPrepareDisputeTx(counterpartyEntityId, description),
+      ])]);
       toasts.success('Dispute prepared — orderbook exposure removed');
     } catch (err) {
       console.error('[EntityPanel] Dispute prepare failed:', err);
@@ -3161,7 +3065,7 @@
   async function queueDisputeStart(
     counterpartyEntityId: string,
     description = 'dispute-from-configure',
-    options: { allowUnsafeCrossJTargetDispute?: boolean; acceptedCrossJTargetLossAmount?: bigint } = {},
+    options: DisputeStartOptions = {},
   ) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'dispute-start');
@@ -3176,17 +3080,9 @@
     if (!activeIsLive) { toasts.error('Dispute requires LIVE mode'); return; }
     try {
       const env = requireRuntimeEnv(activeEnv, 'dispute-start');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-        type: 'disputeStart' as const,
-        data: {
-          counterpartyEntityId,
-          description,
-          ...(options.allowUnsafeCrossJTargetDispute ? { allowUnsafeCrossJTargetDispute: true } : {}),
-          ...(options.acceptedCrossJTargetLossAmount !== undefined
-            ? { acceptedCrossJTargetLossAmount: options.acceptedCrossJTargetLossAmount }
-            : {}),
-        },
-      }])]);
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        buildDisputeStartTx(counterpartyEntityId, description, options),
+      ])]);
       toasts.success('Dispute queued — will be submitted on next batch broadcast');
     } catch (err) {
       console.error('[EntityPanel] Dispute start failed:', err);
@@ -3210,10 +3106,9 @@
     }
     try {
       const env = requireRuntimeEnv(activeEnv, 'dispute-finalize');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-        type: 'disputeFinalize' as const,
-        data: { counterpartyEntityId, description },
-      }])]);
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        buildDisputeFinalizeTx(counterpartyEntityId, description),
+      ])]);
       toasts.success('Dispute finalize queued — will be submitted on next batch broadcast');
     } catch (err) {
       console.error('[EntityPanel] Dispute finalize failed:', err);
@@ -3237,10 +3132,9 @@
     }
     try {
       const env = requireRuntimeEnv(activeEnv, 'reopen-disputed-account');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-          type: 'reopenDisputedAccount' as const,
-          data: { counterpartyEntityId },
-        }])]);
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        buildReopenDisputedAccountTx(counterpartyEntityId),
+      ])]);
       toasts.success('Reopen disputed account queued');
     } catch (err) {
       console.error('[EntityPanel] Reopen disputed account failed:', err);
@@ -3309,14 +3203,9 @@
     }
     try {
       const env = requireRuntimeEnv(activeEnv, 'add-token-to-account');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
-          type: 'extendCredit' as const,
-          data: {
-            counterpartyEntityId,
-            tokenId: configureTokenId,
-            amount: 0n,
-          },
-        }])]);
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+        buildAddTokenToAccountTx(counterpartyEntityId, configureTokenId),
+      ])]);
       const symbol = getTokenInfo(configureTokenId).symbol || `TKN${configureTokenId}`;
       toasts.success(`Token ${symbol} added to account`);
     } catch (err) {
