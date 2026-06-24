@@ -1362,6 +1362,16 @@
     return shard.artifacts.filter((artifact) => artifact.kind === kind).length;
   }
 
+  function scenarioPlayerOwnsArtifact(artifact: QaArtifact): boolean {
+    return artifact.kind === 'video' ||
+      artifact.kind === 'image' ||
+      artifact.relativePath.includes('/qa-cues/');
+  }
+
+  function shardEvidenceArtifacts(shard: QaShard): QaArtifact[] {
+    return shard.artifacts.filter((artifact) => !scenarioPlayerOwnsArtifact(artifact));
+  }
+
   function formatBytes(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -2625,11 +2635,11 @@
                 {/if}
               </section>
 
-              <section class="panel-block">
-                <h4>Artifacts</h4>
-                {#if selectedShard.artifacts.length > 0}
+              <section class="panel-block" data-testid="qa-evidence-artifacts">
+                <h4>Evidence Files</h4>
+                {#if shardEvidenceArtifacts(selectedShard).length > 0}
                   <div class="artifact-list">
-                    {#each selectedShard.artifacts as artifact}
+                    {#each shardEvidenceArtifacts(selectedShard) as artifact}
                       <button type="button" onclick={() => openProtectedArtifact(artifact.url)}>
                         <span>{artifactLabel(artifact)}</span>
                         <strong>{artifact.name}</strong>
@@ -2639,7 +2649,7 @@
                     {/each}
                   </div>
                 {:else}
-                  <div class="empty">No artifact files captured</div>
+                  <div class="empty">No non-media artifact files captured</div>
                 {/if}
               </section>
             </div>
