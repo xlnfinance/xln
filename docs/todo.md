@@ -302,13 +302,19 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `EntityPanelTabs.svelte` 4,875 lines, `/qa/+page.svelte` 4,503 lines, `Graph3DPanel.svelte` 4,344 lines, and `SwapPanel.svelte` 4,210 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `EntityPanelTabs.svelte` 4,875 lines, `Graph3DPanel.svelte` 4,344 lines, `SwapPanel.svelte` 4,210 lines, and `/qa/+page.svelte` 3,663 lines.
 
 - [x] Move QA cockpit API/UI types out of the Svelte route.
   - Impact: medium-high.
   - Current issue: `/qa/+page.svelte` redeclared the QA API contract locally, and importing the server report module directly into the frontend would pull `bun:sqlite` into the browser type graph.
   - Status: done. Added browser-safe `runtime/qa/types.ts` for shared QA contracts and a thin `$lib/qa/types.ts` for UI-only cockpit types. `/qa/+page.svelte` now imports those contracts instead of carrying 500 lines of duplicate type declarations. The isolated e2e runner also imports type-only QA contracts from `runtime/qa/types.ts` while keeping server functions in `runtime/qa/report.ts`.
   - Evidence: `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; `bun test runtime/__tests__/qa-story-report.test.ts` PASS `42/42`; focused QA cockpit e2e `20260624-163926-929` PASS `1/1`, wall `10.2s`, code hash `7675ff0595bcdbc1`.
+
+- [x] Move QA cockpit pure helpers out of the Svelte route.
+  - Impact: medium-high.
+  - Current issue: `/qa/+page.svelte` still owned formatting, browser-health summaries, failure inbox derivation, run sorting, verdict synthesis, and phase-waterfall math even after type extraction.
+  - Status: done. Added `$lib/qa/cockpit-helpers.ts` for pure cockpit helpers; `/qa/+page.svelte` now keeps Svelte state, IO, and event handlers while importing reusable helpers for labels, health, failure inbox, sorting, verdicts, and phase waterfall display. Route size is down to 3,663 lines.
+  - Evidence: `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused QA cockpit e2e `20260624-164605-359` PASS `1/1`, wall `9.5s`, code hash `e7d564c4d7899eb2`, benchmark OK vs `20260624-163926-929`.
 
 ## p2 performance and scale
 
