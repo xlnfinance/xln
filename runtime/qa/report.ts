@@ -138,6 +138,43 @@ export type QaBenchmarkComparison = {
   likelyCauses: string[];
 } & QaSeveritySignal;
 
+export type QaRegressionStatus = QaBenchmarkStatus | 'failed';
+
+export type QaRegressionBaselineKind = 'previous' | 'same-code-hash' | 'same-git-head' | 'last-green-main';
+
+export type QaRegressionMetricDelta = {
+  metric: string;
+  label: string;
+  unit: QaBenchmarkMetricDelta['unit'] | 'count';
+  current: number;
+  baseline: number;
+  delta: number;
+  deltaPct: number;
+  thresholdPct: number;
+  verdict: 'ok' | 'faster' | 'slower';
+};
+
+export type QaRegressionBaselineComparison = {
+  kind: QaRegressionBaselineKind;
+  label: string;
+  status: QaRegressionStatus;
+  comparedRunId: string | null;
+  comparedGitHead: string | null;
+  comparedCodeHash: string | null;
+  reason: string;
+  metrics: QaRegressionMetricDelta[];
+  newFailingTargets: string[];
+  likelyCauses: string[];
+};
+
+export type QaRegressionReport = QaSeveritySignal & {
+  status: QaRegressionStatus;
+  latestRunId: string | null;
+  suiteKey: string | null;
+  suiteLabel: string | null;
+  comparisons: QaRegressionBaselineComparison[];
+};
+
 export type QaRunTimingSummary = {
   avgShardMs: number | null;
   maxShardMs: number | null;
@@ -951,6 +988,202 @@ export const buildQaRunLedger = (runs: readonly QaRunSummary[]): QaRunLedgerEntr
       auditAction: qaRunAuditAction(run),
     };
   });
+
+const regressionMetric = (
+  metric: string,
+  label: string,
+  unit: QaRegressionMetricDelta['unit'],
+  current: number | null | undefined,
+  baseline: number | null | undefined,
+  thresholdPct: number,
+): QaRegressionMetricDelta | null => {
+  if (
+    typeof current !== 'number' ||
+    typeof baseline !== 'number' ||
+    !Number.isFinite(current) ||
+    !Number.isFinite(baseline) ||
+    baseline <= 0
+  ) return null;
+  const delta = current - baseline;
+  const deltaPct = (delta / baseline) * 100;
+  const verdict: QaRegressionMetricDelta['verdict'] =
+    deltaPct >= thresholdPct ? 'slower' : deltaPct <= -thresholdPct ? 'faster' : 'ok';
+  return {
+    metric,
+    label,
+    unit,
+    current: Math.round(current * 100) / 100,
+    baseline: Math.round(baseline * 100) / 100,
+    delta: Math.round(delta * 100) / 100,
+    deltaPct: Math.round(deltaPct * 100) / 100,
+    thresholdPct,
+    verdict,
+  };
+};
+
+const regressionMetrics = (current: QaRunSummary, baseline: QaRunSummary): QaRegressionMetricDelta[] =>
+  [
+    regressionMetric('totalMs', 'wall time', 'ms', current.totalMs, baseline.totalMs, 20),
+    regressionMetric('avgShardMs', 'avg shard', 'ms', current.timing.avgShardMs, baseline.timing.avgShardMs, 20),
+    regressionMetric('maxShardMs', 'max shard', 'ms', current.timing.maxShardMs, baseline.timing.maxShardMs, 25),
+    regressionMetric('bootstrapMs', 'bootstrap', 'ms', current.timing.bootstrapMs, baseline.timing.bootstrapMs, 25),
+    regressionMetric('apiHealthyMs', 'health wait', 'ms', current.timing.apiHealthyMs, baseline.timing.apiHealthyMs, 25),
+    regressionMetric('playwrightMs', 'browser test', 'ms', current.timing.playwrightMs, baseline.timing.playwrightMs, 25),
+    regressionMetric('peakLoad1', 'peak load1', 'load', current.perf?.peakLoad1, baseline.perf?.peakLoad1, 50),
+    regressionMetric('maxChildCpuPct', 'peak child CPU', 'percent', current.perf?.maxChildCpuPct, baseline.perf?.maxChildCpuPct, 40),
+    regressionMetric('childCpuP95Pct', 'p95 child CPU', 'percent', current.childCpuP95Pct, baseline.childCpuP95Pct, 40),
+    regressionMetric('maxRunnerRssBytes', 'runner RSS', 'bytes', current.perf?.maxRunnerRssBytes, baseline.perf?.maxRunnerRssBytes, 30),
+    regressionMetric('maxChildRssKb', 'child RSS', 'kb', current.perf?.maxChildRssKb, baseline.perf?.maxChildRssKb, 30),
+    regressionMetric('artifactBytes', 'artifact bytes', 'bytes', current.artifactBytes, baseline.artifactBytes, 50),
+  ].filter((metric): metric is QaRegressionMetricDelta => metric !== null);
+
+const compareQaRegressionBaseline = (
+  current: QaRunSummary,
+  baseline: QaRunSummary | null,
+  kind: QaRegressionBaselineKind,
+  label: string,
+): QaRegressionBaselineComparison => {
+  if (!baseline) {
+    return {
+      kind,
+      label,
+      status: 'insufficient',
+      comparedRunId: null,
+      comparedGitHead: null,
+      comparedCodeHash: null,
+      reason: `No ${label} baseline found`,
+      metrics: [],
+      newFailingTargets: [],
+      likelyCauses: [],
+    };
+  }
+  const metrics = regressionMetrics(current, baseline);
+  const slower = metrics.filter(metric => metric.verdict === 'slower').sort((a, b) => b.deltaPct - a.deltaPct);
+  const blockingSlower = slower.filter(metric => metric.metric !== 'peakLoad1');
+  const fasterTiming = metrics.filter(metric => metric.verdict === 'faster' && metric.unit === 'ms').sort((a, b) => a.deltaPct - b.deltaPct);
+  const baselineFailures = new Set(baseline.failingTargets);
+  const newFailingTargets = current.failingTargets.filter(target => !baselineFailures.has(target));
+  const status: QaRegressionStatus =
+    newFailingTargets.length > 0 || (current.status === 'failed' && baseline.status !== 'failed')
+      ? 'failed'
+      : blockingSlower.length > 0 && fasterTiming.length > 0
+        ? 'mixed'
+        : blockingSlower.length > 0
+          ? 'slower'
+          : fasterTiming.length > 0
+            ? 'faster'
+            : 'ok';
+  const top = blockingSlower[0] ?? fasterTiming[0] ?? null;
+  const hostLoadOnly = slower.length > 0 && blockingSlower.length === 0;
+  const reason =
+    status === 'failed'
+      ? `New failing target${newFailingTargets.length === 1 ? '' : 's'} vs ${baseline.runId}: ${newFailingTargets.join(', ') || current.failingTargets.join(', ') || current.status}`
+      : top
+        ? `${top.label} ${top.deltaPct > 0 ? '+' : ''}${top.deltaPct}% vs ${baseline.runId}`
+        : hostLoadOnly
+          ? `Timing within thresholds; host load changed vs ${baseline.runId}`
+          : fasterTiming.length > 0
+            ? `Timing improved vs ${baseline.runId}`
+            : `Within thresholds vs ${baseline.runId}`;
+  const likelyCauses = [
+    ...(current.code?.codeHash && baseline.code?.codeHash && current.code.codeHash !== baseline.code.codeHash ? ['code hash changed'] : []),
+    ...(current.code?.gitHead && baseline.code?.gitHead && current.code.gitHead !== baseline.code.gitHead ? ['git HEAD changed'] : []),
+    ...(current.code?.dirty ? ['current worktree is dirty'] : []),
+    ...(newFailingTargets.length > 0 ? [`new failing target: ${newFailingTargets.join(', ')}`] : []),
+    ...(hostLoadOnly ? ['host load changed without app timing regression'] : []),
+    ...(top ? [`largest delta: ${top.label} ${top.deltaPct > 0 ? '+' : ''}${top.deltaPct}%`] : []),
+  ];
+  return {
+    kind,
+    label,
+    status,
+    comparedRunId: baseline.runId,
+    comparedGitHead: baseline.code?.gitHead ?? null,
+    comparedCodeHash: baseline.code?.codeHash ?? null,
+    reason,
+    metrics,
+    newFailingTargets,
+    likelyCauses,
+  };
+};
+
+const regressionStatusRank: Record<QaRegressionStatus, number> = {
+  faster: 0,
+  ok: 0,
+  insufficient: 1,
+  slower: 2,
+  mixed: 3,
+  failed: 4,
+};
+
+export const buildQaRegressionReport = (runs: readonly QaRunSummary[]): QaRegressionReport => {
+  const latest = runs[0] ?? null;
+  if (!latest) {
+    return {
+      ...makeQaSeveritySignal({
+        severity: 'UNKNOWN',
+        reason: 'No QA runs yet',
+        since: 0,
+        owner: 'qa-regression',
+        evidence: [{ label: 'runs', value: 0 }],
+      }),
+      status: 'insufficient',
+      latestRunId: null,
+      suiteKey: null,
+      suiteLabel: null,
+      comparisons: [],
+    };
+  }
+  const candidates = runs
+    .slice(1)
+    .filter(run => run.suiteKey === latest.suiteKey && run.createdAt < latest.createdAt);
+  const previous = candidates[0] ?? null;
+  const sameCodeHash = latest.code?.codeHash
+    ? candidates.find(run => run.code?.codeHash === latest.code?.codeHash) ?? null
+    : null;
+  const sameGitHead = latest.code?.gitHead
+    ? candidates.find(run => run.code?.gitHead === latest.code?.gitHead) ?? null
+    : null;
+  const lastGreenMain = candidates.find(run =>
+    run.status === 'passed' &&
+    run.failedShards === 0 &&
+    run.code?.dirty !== true &&
+    run.code?.gitBranch === 'main'
+  ) ?? null;
+  const comparisons = [
+    compareQaRegressionBaseline(latest, previous, 'previous', 'previous comparable'),
+    compareQaRegressionBaseline(latest, sameCodeHash, 'same-code-hash', 'previous same code hash'),
+    compareQaRegressionBaseline(latest, sameGitHead, 'same-git-head', 'previous same HEAD'),
+    compareQaRegressionBaseline(latest, lastGreenMain, 'last-green-main', 'last green on main'),
+  ];
+  const blocking = comparisons
+    .filter(comparison => comparison.status !== 'insufficient')
+    .sort((a, b) => regressionStatusRank[b.status] - regressionStatusRank[a.status])[0] ?? comparisons[0]!;
+  const status = blocking.status;
+  const severity = status === 'failed' ? 'FAIL' : status === 'slower' || status === 'mixed' ? 'DEGRADED' : status === 'insufficient' ? 'UNKNOWN' : 'OK';
+  return {
+    ...makeQaSeveritySignal({
+      severity,
+      reason: blocking.reason,
+      since: latest.createdAt,
+      owner: 'qa-regression',
+      evidence: [
+        { label: 'run', value: latest.runId },
+        { label: 'suite', value: latest.suiteLabel },
+        { label: 'status', value: status },
+        ...comparisons.map(comparison => ({
+          label: comparison.kind,
+          value: comparison.comparedRunId ?? 'missing',
+        })),
+      ],
+    }),
+    status,
+    latestRunId: latest.runId,
+    suiteKey: latest.suiteKey,
+    suiteLabel: latest.suiteLabel,
+    comparisons,
+  };
+};
 
 const parseRunIdTimestamp = (runId: string): number | null => {
   const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/.exec(runId);

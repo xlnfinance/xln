@@ -192,13 +192,14 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - UI: each reason shows severity, class, detail, timestamp, and opens the related run/history surface.
   - Evidence: focused QA cockpit e2e verifies `DEGRADED` verdict from benchmark regression, performance inbox item, click-through to the related run, and no browser console errors.
 
-- [ ] Add regression comparator.
+- [x] Add regression comparator.
   - Impact: high.
   - Compare current run vs previous same code hash, previous same HEAD, and last green on main.
   - Metrics: wall time, phase time, peak load, child CPU, runner RSS, artifact bytes, new failing handles.
   - UI: `REGRESSION` badge with percent deltas and threshold reason.
-  - Partial shipped: comparator ignores `peakLoad1` as a sole blocking regression when wall/shard/browser phase, child CPU, and RSS stay within thresholds. Host load remains visible as a metric and likely cause so noisy machines do not create false `SLOWER` run status.
-  - Tests: `+25% totalMs`, `+30% RSS`, or new failing handle produces WARN/FAIL.
+  - Status: done. `/api/qa/runs` now returns a `regression` report for the latest suite, comparing against previous comparable, previous same code hash, previous same HEAD, and last green on main. The report covers wall/phase timings, host load, child CPU p95/peak, runner RSS, child RSS, artifact bytes, and new failing targets; `peakLoad1` remains non-blocking when app timings are healthy.
+  - UI: Benchmarks tab shows a Regression Comparator with `FAIL/SLOWER/MIXED/OK/NEW`, baseline run IDs, top percent deltas, new failing handles, and likely causes.
+  - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `36/36`; focused QA cockpit e2e `20260624-123022-236` PASS `1/1`, wall `12.0s`, code hash `9adf798a4948d81f`, benchmark OK. Fixture verifies previous/same-code/same-HEAD/last-green comparison and rendered regression badge/delta.
 
 - [ ] Add phase-time waterfall per shard.
   - Impact: medium.
@@ -416,7 +417,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: focused QA cockpit e2e `20260624-003232-055` asserts `qa-video-missing`, `qa-video-player` count `0`, `qa-video-track` count `0`, and no new browser runtime errors.
 - [ ] E2E: scenario transcript cue scrubs video to real marker timestamp.
 - [x] E2E: verdict banner shows FAIL on failed fixture and PASS on green fixture.
-- [ ] E2E: history compare renders deltas and regression badge.
+- [x] E2E: history compare renders deltas and regression badge.
 - [ ] E2E: restart run disabled in read mode and enabled only in admin mode.
 - [ ] E2E: 1M account health snapshot renders aggregate view without freezing.
 - [ ] Failure fixtures: browser console error, pageerror, network 502, fatal log marker, phase budget exceeded, corrupt manifest, empty logs dir.

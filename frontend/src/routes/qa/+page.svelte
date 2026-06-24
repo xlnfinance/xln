@@ -215,6 +215,39 @@
     likelyCauses: string[];
   };
 
+  type QaRegressionStatus = QaBenchmarkComparison['status'] | 'failed';
+  type QaRegressionBaselineKind = 'previous' | 'same-code-hash' | 'same-git-head' | 'last-green-main';
+  type QaRegressionMetricDelta = {
+    metric: string;
+    label: string;
+    unit: QaBenchmarkMetricDelta['unit'] | 'count';
+    current: number;
+    baseline: number;
+    delta: number;
+    deltaPct: number;
+    thresholdPct: number;
+    verdict: 'ok' | 'faster' | 'slower';
+  };
+  type QaRegressionBaselineComparison = {
+    kind: QaRegressionBaselineKind;
+    label: string;
+    status: QaRegressionStatus;
+    comparedRunId: string | null;
+    comparedGitHead: string | null;
+    comparedCodeHash: string | null;
+    reason: string;
+    metrics: QaRegressionMetricDelta[];
+    newFailingTargets: string[];
+    likelyCauses: string[];
+  };
+  type QaRegressionReport = QaSeveritySignal & {
+    status: QaRegressionStatus;
+    latestRunId: string | null;
+    suiteKey: string | null;
+    suiteLabel: string | null;
+    comparisons: QaRegressionBaselineComparison[];
+  };
+
   type QaCatalogEntry = {
     id: string;
     group: string;
@@ -428,6 +461,7 @@
   let uxGalleryGroupFilter = $state('all');
   let history = $state<QaHistoryEntry[]>([]);
   let ledger = $state<QaRunLedgerEntry[]>([]);
+  let regression = $state<QaRegressionReport | null>(null);
   let restartAudit = $state<QaRestartAuditEntry[]>([]);
   let restart = $state<RestartStatus>({ active: false });
   let selectedRunId = $state('');
@@ -664,6 +698,18 @@
     if (!status) return 'n/a';
     if (status === 'insufficient') return 'NEW';
     return status.toUpperCase();
+  }
+
+  function regressionLabel(status: QaRegressionStatus | null | undefined): string {
+    if (!status) return 'n/a';
+    if (status === 'failed') return 'FAIL';
+    return benchmarkLabel(status);
+  }
+
+  function topRegressionMetric(comparison: QaRegressionBaselineComparison): QaRegressionMetricDelta | null {
+    return comparison.metrics
+      .filter(metric => metric.verdict !== 'ok' && metric.metric !== 'peakLoad1')
+      .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct))[0] ?? null;
   }
 
   function formatPct(value: number | null | undefined): string {
@@ -1059,6 +1105,7 @@
         qaAuth?: QaAuthInfo;
         runs?: QaSummary[];
         ledger?: QaRunLedgerEntry[];
+        regression?: QaRegressionReport;
         verdict?: QaSystemVerdict;
         error?: string;
       };
@@ -1068,6 +1115,7 @@
       }
       runs = payload.runs;
       ledger = payload.ledger ?? [];
+      regression = payload.regression ?? null;
       systemVerdict = payload.verdict ?? null;
       const requestedRunId = requestedRunIdFromUrl();
       const nextRunId = preserveSelection && selectedRunId && runs.some((run) => run.runId === selectedRunId)
@@ -1774,6 +1822,49 @@
             </article>
           {/each}
         </div>
+        {#if regression}
+          <section class="regression-panel" data-testid="qa-regression-comparator">
+            <div class="suite-list-head compact-head">
+              <div>
+                <div class="eyebrow">Regression Comparator</div>
+                <h3>
+                  <span class:fail={regression.status === 'failed'} class:warn={regression.status === 'slower' || regression.status === 'mixed'}>
+                    {regressionLabel(regression.status)}
+                  </span>
+                  {regression.suiteLabel ?? 'latest suite'}
+                </h3>
+                <p>{regression.reason}</p>
+              </div>
+              <span class="chip">{regression.comparisons.length} baselines</span>
+            </div>
+            <div class="regression-grid">
+              {#each regression.comparisons as comparison}
+                {@const topMetric = topRegressionMetric(comparison)}
+                <article
+                  class:bad={comparison.status === 'failed'}
+                  class:warn={comparison.status === 'slower' || comparison.status === 'mixed'}
+                  class:ok={comparison.status === 'ok' || comparison.status === 'faster'}
+                  data-testid="qa-regression-row"
+                  data-kind={comparison.kind}
+                >
+                  <strong>{regressionLabel(comparison.status)}</strong>
+                  <span>{comparison.label}</span>
+                  <code>{comparison.comparedRunId ?? 'missing'}</code>
+                  <small>{comparison.reason}</small>
+                  {#if topMetric}
+                    <b>{topMetric.label} {formatPct(topMetric.deltaPct)}</b>
+                  {/if}
+                  {#if comparison.newFailingTargets.length > 0}
+                    <b>new fail {comparison.newFailingTargets.join(', ')}</b>
+                  {/if}
+                  {#if comparison.likelyCauses.length > 0}
+                    <em>{comparison.likelyCauses.slice(0, 2).join(' · ')}</em>
+                  {/if}
+                </article>
+              {/each}
+            </div>
+          </section>
+        {/if}
         <div class="history-table compact">
           {#each sortedHistory.slice(0, 12) as row}
             <article class:bad={row.status === 'failed'} class:ok={row.status === 'passed'}>
@@ -2931,6 +3022,48 @@
     display: grid;
     gap: 0.65rem;
     margin-bottom: 0.8rem;
+  }
+
+  .regression-panel {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0.8rem 0;
+  }
+
+  .regression-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 0.65rem;
+  }
+
+  .regression-grid article {
+    display: grid;
+    gap: 0.35rem;
+    min-width: 0;
+    border-left: 3px solid #6b7280;
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .regression-grid article.ok {
+    border-left-color: #3fb950;
+  }
+
+  .regression-grid article.warn {
+    border-left-color: #d8af4f;
+  }
+
+  .regression-grid article.bad {
+    border-left-color: #ff7b72;
+  }
+
+  .regression-grid code,
+  .regression-grid em,
+  .regression-grid small {
+    color: #9b978a;
+    font-style: normal;
+    overflow-wrap: anywhere;
   }
 
   .restart-audit-head {

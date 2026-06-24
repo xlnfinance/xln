@@ -8,6 +8,7 @@ import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,
   auditQaUxReleasePack,
+  buildQaRegressionReport,
   buildQaRunLedger,
   backfillQaHistoryFromLogs,
   buildQaSystemVerdict,
@@ -1206,7 +1207,9 @@ export async function maybeHandleQaRequest(
       const url = new URL(request.url);
       const limitRaw = Number(url.searchParams.get('limit') || '20');
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
-      const runs = await listQaRunSummaries(limit);
+      const regressionLimit = Math.max(limit, 50);
+      const regressionRuns = await listQaRunSummaries(regressionLimit);
+      const runs = regressionRuns.slice(0, limit);
       return jsonEtagResponse(
         request,
         {
@@ -1214,6 +1217,7 @@ export async function maybeHandleQaRequest(
           qaAuth: authInfo,
           runs,
           ledger: buildQaRunLedger(runs),
+          regression: buildQaRegressionReport(regressionRuns),
           verdict: buildQaSystemVerdict(runs),
         },
         headers,
