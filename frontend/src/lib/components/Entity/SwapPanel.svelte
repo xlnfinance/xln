@@ -54,11 +54,14 @@
     ORDERBOOK_PRICE_SCALE,
     ORDERBOOK_SNAPSHOT_FRESH_MS,
     SELECTED_ORDERBOOK_DEPTH,
+    computePriceDeviationBps,
     formatSwapTokenAmount,
     formatSwapTokenAmountForInput,
     parseSwapDisplayPriceTicks,
     requantizeSwapOrderAtLimitPrice,
     type PreparedSwapOrderLike,
+    type SwapFormValidationInput,
+    validateSwapForm,
   } from './swap-order-math';
   import {
     buildDeterministicSwapOfferId as buildSwapOfferId,
@@ -2092,25 +2095,6 @@
     : 0n;
   $: canAutoPrepareInboundCapacity = autoInboundCreditTarget !== null && autoInboundCreditIncrease > 0n;
 
-  type SwapFormValidationInput = {
-    isLive: boolean;
-    entityId: string;
-    counterpartyId: string;
-    accountIds: string[];
-    giveToken: number;
-    wantToken: number;
-    giveAmount: bigint;
-    limitPriceTicks: bigint | null;
-    wantAmount: bigint;
-    wantTokenPresentInAccount: boolean;
-    availableGiveCapacity: bigint;
-    availableWantInCapacity: bigint;
-    formattedAvailableGive: string;
-    formattedAvailableWantIn: string;
-    notionalUsd: number;
-    referencePriceTicks: bigint | null;
-  };
-
   function formatPriceImprovement(amount: bigint, tokenIdValue: number | null): string {
     if (!tokenIdValue || amount <= 0n) return '—';
     return `${formatAmount(amount, tokenIdValue)} ${tokenSymbol(tokenIdValue)}`;
@@ -2148,48 +2132,6 @@
       return replica?.state?.orderbookExt?.books?.get?.(normalizedPairId) || null;
     }
     return null;
-  }
-
-  function computePriceDeviationBps(limitTicks: bigint, referenceTicks: bigint): bigint {
-    if (limitTicks <= 0n || referenceTicks <= 0n) return 0n;
-    const delta = limitTicks > referenceTicks ? limitTicks - referenceTicks : referenceTicks - limitTicks;
-    return (delta * 10_000n) / referenceTicks;
-  }
-
-  function validateSwapForm(input: SwapFormValidationInput): string {
-    if (!input.isLive) return 'Switch to LIVE mode to place swap orders.';
-    if (!input.entityId) return 'Entity is not selected.';
-    if (!input.counterpartyId) return 'Select account (hub) first.';
-    const hasCounterparty = input.accountIds.some(
-      (id) => String(id || '').toLowerCase() === String(input.counterpartyId || '').toLowerCase(),
-    );
-    if (!hasCounterparty) return 'Selected account is not active.';
-    if (!Number.isFinite(input.giveToken) || !Number.isFinite(input.wantToken) || input.giveToken <= 0 || input.wantToken <= 0) {
-      return 'Select valid Sell and Buy tokens.';
-    }
-    if (input.giveToken === input.wantToken) return 'Sell token and Buy token must be different.';
-    if (input.giveAmount <= 0n) return 'Enter amount to sell.';
-    if (!input.limitPriceTicks || input.limitPriceTicks <= 0n) return 'Price is too small.';
-    if (input.referencePriceTicks && input.referencePriceTicks > 0n) {
-      const deviationBps = computePriceDeviationBps(input.limitPriceTicks, input.referencePriceTicks);
-      if (deviationBps > MAX_PRICE_DEVIATION_BPS) {
-        return 'Price must stay within 30% of the current orderbook.';
-      }
-    }
-    if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
-    if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
-      return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
-    }
-    if (!input.wantTokenPresentInAccount) {
-      return 'Inbound token is not active in this account. Add token capacity first.';
-    }
-    if (input.giveAmount > input.availableGiveCapacity) {
-      return `Insufficient outbound capacity (${input.formattedAvailableGive}).`;
-    }
-    if (input.wantAmount > input.availableWantInCapacity) {
-      return `Insufficient inbound capacity (${input.formattedAvailableWantIn}).`;
-    }
-    return '';
   }
 
   function validateCrossSwapForm(
