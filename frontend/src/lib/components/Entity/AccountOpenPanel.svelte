@@ -1,13 +1,7 @@
-<script context="module" lang="ts">
-  export type DisputedAccountView = {
-    counterpartyId: string;
-    status: 'active' | 'finalized';
-  };
-</script>
-
 <script lang="ts">
   import type { Env } from '@xln/runtime/xln-api';
   import type { EntityReplica, Tab } from '$lib/types/ui';
+  import type { DisputedAccountView } from './account-dispute-view';
   import EntityInput from '../shared/EntityInput.svelte';
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
   import { requireRuntimeEnv } from './entity-panel-model';
