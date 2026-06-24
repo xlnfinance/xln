@@ -40,6 +40,8 @@
     failedShards: number;
     failureClasses?: QaFailureClass[];
     args?: Record<string, unknown> | null;
+    suiteKey?: string;
+    suiteLabel?: string;
     failingTargets: string[];
   };
 
@@ -91,6 +93,33 @@
     endMs?: number;
   };
 
+  type QaPhaseTimings = {
+    preflight: number;
+    anvilBoot: number;
+    apiBoot: number;
+    apiHealthy: number;
+    viteBoot: number;
+    playwright: number;
+  };
+
+  type QaPhaseKey = keyof QaPhaseTimings;
+
+  type QaPhaseWaterfallSegment = {
+    key: QaPhaseKey;
+    label: string;
+    ms: number;
+    pct: number;
+    limitMs: number;
+    limitKind: 'budget' | 'historical-p95';
+    overLimit: boolean;
+  };
+
+  type QaPhaseWaterfall = {
+    totalMs: number;
+    overLimitCount: number;
+    segments: QaPhaseWaterfallSegment[];
+  };
+
   type QaShard = QaSeveritySignal & {
     shard: number;
     status: 'passed' | 'failed' | 'unknown';
@@ -104,14 +133,8 @@
     logTail: string | null;
     error: string | null;
     failureClass?: QaFailureClass | null;
-    phaseMs: {
-      preflight: number;
-      anvilBoot: number;
-      apiBoot: number;
-      apiHealthy: number;
-      viteBoot: number;
-      playwright: number;
-    } | null;
+    phaseMs: QaPhaseTimings | null;
+    phaseWaterfall?: QaPhaseWaterfall | null;
     perf?: QaPerfSummary;
     browserIssues?: QaBrowserIssue[];
     browserHealth?: QaBrowserHealthSummary;
@@ -187,6 +210,7 @@
     bootstrapMs: number | null;
     apiHealthyMs: number | null;
     playwrightMs: number | null;
+    phaseP95?: QaPhaseTimings | null;
   };
 
   type QaBenchmarkMetricDelta = {
@@ -496,9 +520,51 @@
   let historyBackfillResult = $state<QaHistoryBackfillResult | null>(null);
   let systemVerdict = $state<QaSystemVerdict | null>(null);
 
+  const phaseOrder: QaPhaseKey[] = ['preflight', 'anvilBoot', 'apiBoot', 'apiHealthy', 'viteBoot', 'playwright'];
+  const phaseLabels: Record<QaPhaseKey, string> = {
+    preflight: 'preflight',
+    anvilBoot: 'anvil',
+    apiBoot: 'api boot',
+    apiHealthy: 'health',
+    viteBoot: 'vite',
+    playwright: 'playwright',
+  };
+  const phaseBudgets: Record<QaPhaseKey, number> = {
+    preflight: 1_000,
+    anvilBoot: 5_000,
+    apiBoot: 5_000,
+    apiHealthy: 5_000,
+    viteBoot: 5_000,
+    playwright: 5_000,
+  };
+
   const selectedShard = $derived(
     selectedRun?.shards?.[selectedShardIndex] ?? null,
   );
+  const selectedSummary = $derived(
+    runs.find((run) => run.runId === selectedRunId) ?? null,
+  );
+  const selectedPhaseP95 = $derived.by(() => {
+    const summary = selectedSummary;
+    if (!summary?.suiteKey) return null;
+    const previous = runs.filter((run) =>
+      run.runId !== summary.runId &&
+      run.suiteKey === summary.suiteKey &&
+      run.createdAt < summary.createdAt &&
+      run.timing?.phaseP95
+    );
+    if (previous.length === 0) return null;
+    const values = Object.fromEntries(phaseOrder.map((key) => {
+      const samples = previous
+        .map((run) => run.timing?.phaseP95?.[key])
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+        .sort((a, b) => a - b);
+      if (samples.length === 0) return [key, null];
+      const index = Math.min(samples.length - 1, Math.max(0, Math.ceil(samples.length * 0.95) - 1));
+      return [key, samples[index]];
+    })) as Partial<Record<QaPhaseKey, number | null>>;
+    return phaseOrder.every((key) => typeof values[key] === 'number') ? values as QaPhaseTimings : null;
+  });
   const latestRun = $derived(runs[0] ?? null);
   const previousRun = $derived(runs[1] ?? null);
   const recentPassRate = $derived(
@@ -938,6 +1004,58 @@
     if (!phase) return null;
     return phase.preflight + phase.anvilBoot + phase.apiBoot + phase.apiHealthy + phase.viteBoot;
   }
+
+  function phaseValue(phaseMs: QaPhaseTimings, key: QaPhaseKey): number {
+    return Math.max(0, Math.floor(Number(phaseMs[key]) || 0));
+  }
+
+  function buildPhaseWaterfall(
+    phaseMs: QaPhaseTimings | null,
+    historicalP95: QaPhaseTimings | null = null,
+  ): QaPhaseWaterfall | null {
+    if (!phaseMs) return null;
+    const totalMs = phaseOrder.reduce((sum, key) => sum + phaseValue(phaseMs, key), 0);
+    const denominator = totalMs > 0 ? totalMs : 1;
+    const segments = phaseOrder.map((key): QaPhaseWaterfallSegment => {
+      const ms = phaseValue(phaseMs, key);
+      const p95 = historicalP95?.[key];
+      const hasHistoricalP95 = typeof p95 === 'number' && Number.isFinite(p95) && p95 > 0;
+      const limitMs = Math.max(0, Math.floor(hasHistoricalP95 ? p95 : phaseBudgets[key]));
+      return {
+        key,
+        label: phaseLabels[key],
+        ms,
+        pct: Math.round((ms / denominator) * 10_000) / 100,
+        limitMs,
+        limitKind: hasHistoricalP95 ? 'historical-p95' : 'budget',
+        overLimit: limitMs > 0 && ms > limitMs,
+      };
+    });
+    return {
+      totalMs,
+      overLimitCount: segments.filter((segment) => segment.overLimit).length,
+      segments,
+    };
+  }
+
+  function shardPhaseWaterfall(shard: QaShard | null): QaPhaseWaterfall | null {
+    if (!shard) return null;
+    if (selectedPhaseP95) return buildPhaseWaterfall(shard.phaseMs, selectedPhaseP95);
+    if (shard.phaseWaterfall) return shard.phaseWaterfall;
+    return buildPhaseWaterfall(shard.phaseMs, selectedPhaseP95);
+  }
+
+  function phaseSegmentWidth(segment: QaPhaseWaterfallSegment): string {
+    if (segment.ms <= 0) return '0%';
+    return `${Math.max(3, segment.pct)}%`;
+  }
+
+  function phaseLimitLabel(segment: QaPhaseWaterfallSegment): string {
+    const prefix = segment.limitKind === 'historical-p95' ? 'p95' : 'budget';
+    return `${prefix} ${formatMs(segment.limitMs)}`;
+  }
+
+  const selectedShardWaterfall = $derived(shardPhaseWaterfall(selectedShard));
 
   function shardSortValue(shard: QaShard, key: ShardSortKey): number {
     if (key.startsWith('bootstrap')) return finiteSortValue(shardBootstrapMs(shard), Number.POSITIVE_INFINITY);
@@ -2257,15 +2375,42 @@
             <div class="info-panel">
               <section class="panel-block">
                 <h4>Phases</h4>
-                {#if selectedShard.phaseMs}
-                  <dl class="phase-list">
-                    <div><dt>pre</dt><dd>{formatMs(selectedShard.phaseMs.preflight)}</dd></div>
-                    <div><dt>anvil</dt><dd>{formatMs(selectedShard.phaseMs.anvilBoot)}</dd></div>
-                    <div><dt>api</dt><dd>{formatMs(selectedShard.phaseMs.apiBoot)}</dd></div>
-                    <div><dt>health</dt><dd>{formatMs(selectedShard.phaseMs.apiHealthy)}</dd></div>
-                    <div><dt>vite</dt><dd>{formatMs(selectedShard.phaseMs.viteBoot)}</dd></div>
-                    <div><dt>pw</dt><dd>{formatMs(selectedShard.phaseMs.playwright)}</dd></div>
-                  </dl>
+                {#if selectedShardWaterfall}
+                  <div class="phase-waterfall" data-testid="qa-phase-waterfall">
+                    <div class="phase-waterfall-head">
+                      <strong>{formatMs(selectedShardWaterfall.totalMs)}</strong>
+                      <span class:warn={selectedShardWaterfall.overLimitCount > 0}>
+                        {selectedShardWaterfall.overLimitCount > 0 ? `${selectedShardWaterfall.overLimitCount} over budget` : 'within budget'}
+                      </span>
+                    </div>
+                    <div class="phase-stack" aria-label="QA phase time waterfall">
+                      {#each selectedShardWaterfall.segments as segment}
+                        <div
+                          class="phase-segment"
+                          class:overLimit={segment.overLimit}
+                          data-phase={segment.key}
+                          style={`width: ${phaseSegmentWidth(segment)}`}
+                          title={`${segment.label}: ${formatMs(segment.ms)} (${phaseLimitLabel(segment)})`}
+                        ></div>
+                      {/each}
+                    </div>
+                    <div class="phase-rows">
+                      {#each selectedShardWaterfall.segments as segment}
+                        <div
+                          class="phase-row"
+                          class:overLimit={segment.overLimit}
+                          data-testid="qa-phase-row"
+                          data-phase={segment.key}
+                        >
+                          <span>{segment.label}</span>
+                          <strong>{formatMs(segment.ms)}</strong>
+                          <small>{segment.pct.toFixed(1)}%</small>
+                          <small>{phaseLimitLabel(segment)}</small>
+                          {#if segment.overLimit}<em>over budget</em>{/if}
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
                 {:else}
                   <div class="empty">No phase timings</div>
                 {/if}
@@ -3410,6 +3555,111 @@
   .artifact-list {
     display: grid;
     gap: 0.65rem;
+  }
+
+  .phase-waterfall {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .phase-waterfall-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  .phase-waterfall-head span {
+    color: #8f8b80;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .phase-waterfall-head span.warn {
+    color: #f1d48a;
+  }
+
+  .phase-stack {
+    display: flex;
+    width: 100%;
+    height: 0.72rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .phase-segment {
+    min-width: 0;
+    background: #6d8dff;
+    border-right: 1px solid rgba(7, 8, 10, 0.7);
+  }
+
+  .phase-segment[data-phase="preflight"] {
+    background: #7ec8a3;
+  }
+
+  .phase-segment[data-phase="anvilBoot"] {
+    background: #f1c15f;
+  }
+
+  .phase-segment[data-phase="apiBoot"] {
+    background: #70b8e8;
+  }
+
+  .phase-segment[data-phase="apiHealthy"] {
+    background: #9ec46b;
+  }
+
+  .phase-segment[data-phase="viteBoot"] {
+    background: #c29af2;
+  }
+
+  .phase-segment[data-phase="playwright"] {
+    background: #8da1ff;
+  }
+
+  .phase-segment.overLimit {
+    background: #ff8a70;
+  }
+
+  .phase-rows {
+    display: grid;
+    gap: 0.45rem;
+  }
+
+  .phase-row {
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 1fr) max-content max-content max-content;
+    align-items: center;
+    gap: 0.65rem;
+    min-height: 1.65rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .phase-row span {
+    color: #d8d1c1;
+    min-width: 0;
+  }
+
+  .phase-row strong {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .phase-row small {
+    color: #8f8b80;
+    white-space: nowrap;
+  }
+
+  .phase-row em {
+    grid-column: 1 / -1;
+    color: #ffad9b;
+    font-style: normal;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   .phase-list div,
