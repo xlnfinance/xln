@@ -296,4 +296,75 @@ describe('external wallet API faucet transaction gate', () => {
       provider.destroy();
     }
   });
+
+  test('wallet snapshot endpoint returns structured token errors without applying fake zero balances', async () => {
+    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    Object.assign(provider, {
+      getBlockNumber: async () => 99,
+      getBlock: async () => ({ hash: `0x${'99'.repeat(32)}` }),
+    });
+    const badToken = '0x2222222222222222222222222222222222222222';
+    const adapter = {
+      ...makeBrowserVmAdapter(provider),
+      readWalletSnapshot: async () => ({
+        nativeBalance: 5n,
+        tokenBalances: [9n, 0n],
+        allowances: [],
+        tokenErrors: [{
+          tokenAddress: badToken,
+          error: 'EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT:balance',
+        }],
+      }),
+    } as unknown as JAdapter;
+    const observed: unknown[] = [];
+    const api = createExternalWalletApi({
+      ...makeContext(adapter, async () => false),
+      getTokenCatalog: async () => [
+        {
+          symbol: 'USDC',
+          address: '0x1111111111111111111111111111111111111111',
+          decimals: 18,
+          tokenId: 3,
+        },
+        {
+          symbol: 'BAD',
+          address: badToken,
+          decimals: 18,
+          tokenId: 4,
+        },
+      ],
+      observeExternalWalletSnapshot: (events) => observed.push(...events),
+    });
+
+    try {
+      const response = await api.handleWalletSnapshot(new Request('http://localhost/api/external-wallet/snapshot', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          entityId: `0x${'44'.repeat(32)}`,
+          owner: USER_ADDRESS,
+        }),
+      }));
+      const body = await response.json() as {
+        success?: boolean;
+        tokenBalances?: Array<{ tokenAddress?: string; balance?: string; error?: string }>;
+        tokenErrors?: Array<{ tokenAddress?: string; error?: string }>;
+      };
+      expect(response.status).toBe(200);
+      expect(body.success).toBe(true);
+      expect(body.tokenErrors?.[0]?.tokenAddress).toBe(badToken);
+      expect(body.tokenBalances?.find((entry) => entry.tokenAddress === badToken)?.error)
+        .toContain('EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT');
+      expect(observed[0]).toMatchObject({
+        args: {
+          tokenBalances: [{
+            tokenAddress: '0x1111111111111111111111111111111111111111',
+            balance: '9',
+          }],
+        },
+      });
+    } finally {
+      provider.destroy();
+    }
+  });
 });

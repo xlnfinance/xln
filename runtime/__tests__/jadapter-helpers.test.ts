@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isTransientRpcUnavailableError,
+  readOptionalRpcBatchBigInt,
   readRequiredRpcBatchBigInt,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
@@ -100,6 +101,10 @@ describe('jadapter helper cursors', () => {
       .toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_RESULT/);
     expect(() => readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: 'not-a-number' }]]), 1, 'balance'))
       .toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT/);
+    expect(readOptionalRpcBatchBigInt(new Map([[1, { id: 1, result: '0x' }]]), 1, 'balance')).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('EXTERNAL_WALLET_SNAPSHOT_RPC_INVALID_BIGINT'),
+    });
   });
 
   test('external wallet watcher gates deltas by committed per-key baselines only', () => {

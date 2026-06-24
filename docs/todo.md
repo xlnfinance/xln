@@ -340,11 +340,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. Remote radapter compact book views now trim visible `orderIds`/orders for browser payload size but keep canonical `PriceLevelState.totalQtyLots` from the source book level.
   - Evidence: L1 `bun test runtime/__tests__/radapter.test.ts` PASS `39/39`; regression first failed with `Expected: 25n, Received: 20n`, then passed with 20 visible orders and full level depth `25n`.
 
-- [ ] Decide strict `0x` RPC result behavior for external wallet snapshots.
+- [x] Decide strict `0x` RPC result behavior for external wallet snapshots.
   - Impact: low.
   - Current issue: strict bigint parse fails on empty `0x`.
   - Decision: for token calls, invalid result should identify bad token and degrade that token, not 500 the whole dashboard, unless release gate requires fail-fast.
   - Tests: non-contract token returns structured token error.
+  - Status: done. Native balance reads stay fail-fast, while ERC20 balance/allowance read failures return structured `tokenErrors`/`allowanceErrors`. The API response keeps the bad token visible with an error, canonical `ExternalWalletSnapshot` only applies valid token/allowance entries, and the Assets ledger shows `Read error` instead of silently treating a broken token read as ordinary zero.
+  - Evidence: L1 `bun test runtime/__tests__/jadapter-helpers.test.ts` PASS `15/15`; L1 `bun test runtime/__tests__/external-wallet-api.test.ts` PASS `5/5` with a non-contract token returning structured error and no fake zero applied to the canonical event.
 
 - [x] Align stale `RequiredBrowserVM.approveErc20` type.
   - Impact: low.

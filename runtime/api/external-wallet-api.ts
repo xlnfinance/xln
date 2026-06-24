@@ -631,23 +631,45 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
           .filter((token) => ethers.isAddress(token.address))
           .map((token) => [token.address.toLowerCase(), token.tokenId]),
       );
+      const tokenErrorByAddress = new Map(
+        (snapshot.tokenErrors ?? []).map((entry) => [
+          String(entry.tokenAddress || '').trim().toLowerCase(),
+          String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_TOKEN_READ_FAILED'),
+        ]),
+      );
+      const allowanceErrorByKey = new Map(
+        (snapshot.allowanceErrors ?? []).map((entry) => [
+          `${String(entry.tokenAddress || '').trim().toLowerCase()}:${String(entry.spender || '').trim().toLowerCase()}`,
+          String(entry.error || 'EXTERNAL_WALLET_SNAPSHOT_ALLOWANCE_READ_FAILED'),
+        ]),
+      );
       const tokenBalances = requestedTokenAddresses.map((tokenAddress, index) => {
         const normalizedAddress = ethers.getAddress(tokenAddress).toLowerCase();
         const tokenId = tokenIdByAddress.get(normalizedAddress);
+        const tokenError = tokenErrorByAddress.get(normalizedAddress);
         return {
           tokenAddress: normalizedAddress,
           ...(typeof tokenId === 'number' ? { tokenId } : {}),
           balance: requireSnapshotBigInt(snapshot.tokenBalances[index], `tokenBalance:${normalizedAddress}`).toString(),
+          ...(tokenError ? { error: tokenError } : {}),
         };
       });
-      const allowancePayload = (allowances ?? []).map((entry, index) => ({
-        tokenAddress: ethers.getAddress(entry.tokenAddress).toLowerCase(),
-        spender: ethers.getAddress(entry.spender).toLowerCase(),
-        allowance: requireSnapshotBigInt(
-          snapshot.allowances[index],
-          `allowance:${entry.tokenAddress}:${entry.spender}`,
-        ).toString(),
-      }));
+      const allowancePayload = (allowances ?? []).map((entry, index) => {
+        const tokenAddress = ethers.getAddress(entry.tokenAddress).toLowerCase();
+        const spender = ethers.getAddress(entry.spender).toLowerCase();
+        const allowanceError = allowanceErrorByKey.get(`${tokenAddress}:${spender}`);
+        return {
+          tokenAddress,
+          spender,
+          allowance: requireSnapshotBigInt(
+            snapshot.allowances[index],
+            `allowance:${entry.tokenAddress}:${entry.spender}`,
+          ).toString(),
+          ...(allowanceError ? { error: allowanceError } : {}),
+        };
+      });
+      const validTokenBalances = tokenBalances.filter((entry) => !entry.error);
+      const validAllowances = allowancePayload.filter((entry) => !entry.error);
       const jEvent: JEvent = {
         name: 'ExternalWalletSnapshot',
         args: {
@@ -657,8 +679,8 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
           sourceHash: source.sourceHash,
           finalityDepth: source.finalityDepth,
           nativeBalance: nativeBalance.toString(),
-          tokenBalances,
-          allowances: allowancePayload,
+          tokenBalances: validTokenBalances,
+          allowances: validAllowances,
         },
         blockNumber: source.sourceHeight,
         blockHash: source.sourceHash,
@@ -679,6 +701,8 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         nativeBalance: nativeBalance.toString(),
         tokenBalances,
         allowances: allowancePayload,
+        ...(snapshot.tokenErrors?.length ? { tokenErrors: snapshot.tokenErrors } : {}),
+        ...(snapshot.allowanceErrors?.length ? { allowanceErrors: snapshot.allowanceErrors } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
