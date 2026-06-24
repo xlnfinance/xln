@@ -60,6 +60,7 @@
   import AssetFaucetCard from './AssetFaucetCard.svelte';
   import AssetWalletMeta from './AssetWalletMeta.svelte';
   import PendingBatchNotice from './PendingBatchNotice.svelte';
+  import LiveRequiredState from './LiveRequiredState.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
@@ -5623,10 +5624,7 @@
                   isLive={activeIsLive}
                 />
               {:else}
-                <div class="live-required configure-empty">
-                  <AlertTriangle size={18} />
-                  <p>Payments are only available in LIVE mode.</p>
-                </div>
+                <LiveRequiredState message="Payments are only available in LIVE mode." />
               {/if}
 
             {:else if accountWorkspaceTab === 'receive'}
@@ -5781,15 +5779,9 @@
                 </nav>
 
                 {#if !workspaceAccountId}
-                  <div class="live-required configure-empty">
-                    <AlertTriangle size={18} />
-                    <p>Select workspace account above first.</p>
-                  </div>
+                  <LiveRequiredState message="Select workspace account above first." />
                 {:else if !liveRuntimeEnv || !activeIsLive}
-                  <div class="live-required configure-empty">
-                    <AlertTriangle size={18} />
-                    <p>Account actions are only available in LIVE mode.</p>
-                  </div>
+                  <LiveRequiredState message="Account actions are only available in LIVE mode." />
                 {:else if configureWorkspaceTab === 'extend-credit'}
                   <CreditForm
                     entityId={replica.state?.entityId || tab.entityId}
@@ -6664,10 +6656,6 @@
     background: rgba(127, 29, 29, 0.25);
   }
 
-  .configure-empty {
-    margin: 0;
-  }
-
   .configure-token-card {
     border: 1px solid #27272a;
     border-radius: 10px;
@@ -7185,23 +7173,6 @@
     text-transform: uppercase;
     cursor: pointer;
     box-shadow: 0 18px 34px rgba(180, 83, 9, 0.18);
-  }
-
-  /* Live Required */
-  .live-required {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 20px;
-    text-align: center;
-    color: #78716c;
-    gap: 12px;
-  }
-
-  .live-required p {
-    margin: 0;
-    font-size: 13px;
   }
 
   /* Override child component styling */
