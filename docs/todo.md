@@ -282,6 +282,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Current issue: the file is over 8k lines and keeps absorbing unrelated feature diffs.
   - Fix: move Accounts, Reserves, Swaps, J-events, External Wallet, and remote/runtime sections into `Entity/tabs/*.svelte` with a thin parent and shared typed stores.
   - Tests: smoke each tab with existing fixtures; no behavior change in active entity selection.
+  - Progress: first assets-owned extraction done. Asset ledger rows/totals moved into `AssetLedgerTable.svelte` with shared `asset-ledger.ts` types; parent still owns data derivation/actions.
+  - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused move-direct browser flow PASS `1/1`, run `20260624-154004-542`, wall `16.5s`, code hash `df2ed2f3f97b6dc1`, benchmark OK.
 
 ## p2 performance and scale
 
