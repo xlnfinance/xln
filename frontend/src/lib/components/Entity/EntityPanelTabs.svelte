@@ -1409,6 +1409,10 @@
     nativeBalance: bigint;
     balances: bigint[];
     allowanceValues: bigint[];
+    sourceHeight?: number;
+    sourceHash?: string;
+    finalityDepth?: number;
+    headBlockNumber?: number;
   };
   type ExternalWalletSnapshotResponse = {
     success?: boolean;
@@ -1416,6 +1420,10 @@
     owner?: string;
     blockNumber?: number;
     blockHash?: string;
+    sourceHeight?: number;
+    sourceHash?: string;
+    finalityDepth?: number;
+    headBlockNumber?: number;
     transactionHash?: string;
     nativeBalance?: string;
     tokenBalances?: Array<{ tokenAddress?: string; tokenId?: number; balance?: string }>;
@@ -1448,8 +1456,52 @@
     }
     return undefined;
   }
+
+  type ExternalWalletSnapshotSource = {
+    sourceHeight: number;
+    sourceHash?: string;
+    finalityDepth?: number;
+    headBlockNumber?: number;
+  };
+  type ResolvedExternalWalletSnapshotSource = ExternalWalletSnapshotSource & {
+    sourceHash: string;
+    finalityDepth: number;
+    headBlockNumber: number;
+  };
+
+  function resolveExternalWalletFinalityDepth(jadapter: JAdapter): number {
+    const rawDepth = Number(jadapter.getFinalityDepth?.() ?? 0);
+    if (!Number.isFinite(rawDepth) || rawDepth < 0) {
+      throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FINALITY_INVALID:${String(rawDepth)}`);
+    }
+    return Math.floor(rawDepth);
+  }
+
+  async function readExternalWalletSnapshotSource(jadapter: JAdapter): Promise<ResolvedExternalWalletSnapshotSource> {
+    const headBlockNumber = Number(await (jadapter.getCurrentBlockNumber?.() ?? jadapter.provider.getBlockNumber()));
+    if (!Number.isFinite(headBlockNumber) || !Number.isInteger(headBlockNumber) || headBlockNumber < 0) {
+      throw new Error(`EXTERNAL_WALLET_SNAPSHOT_HEAD_INVALID:${String(headBlockNumber)}`);
+    }
+    const finalityDepth = resolveExternalWalletFinalityDepth(jadapter);
+    const sourceHeight = headBlockNumber - finalityDepth;
+    if (sourceHeight < 0) {
+      throw new Error(`EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=${headBlockNumber}:depth=${finalityDepth}`);
+    }
+    const block = await jadapter.provider.getBlock(sourceHeight);
+    if (!block?.hash) {
+      throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${sourceHeight}`);
+    }
+    return {
+      headBlockNumber,
+      sourceHeight,
+      sourceHash: block.hash,
+      finalityDepth,
+    };
+  }
+
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
+  let externalWalletSnapshotSource: ExternalWalletSnapshotSource | null = null;
   let depositingToken: string | null = null; // symbol of token being deposited
   let withdrawingExternalToken: string | null = null; // symbol of token being withdrawn back to EOA
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
@@ -2591,10 +2643,17 @@
       return record.allowance;
     });
     if (allowanceValues.some((allowance) => allowance === null)) return null;
+    const sourceHeights = [
+      Number(nativeRecord?.jHeight ?? 0),
+      ...[...balancesByToken.values()].map((record) => Number(record?.jHeight ?? 0)),
+      ...[...(allowancesBySpender?.values?.() ?? [])].map((record) => Number(record?.jHeight ?? 0)),
+    ].filter((height) => Number.isFinite(height) && height > 0);
+    const sourceHeight = sourceHeights.length > 0 ? Math.max(...sourceHeights) : undefined;
     return {
       nativeBalance: nativeRecord?.balance ?? 0n,
       balances: balances as bigint[],
       allowanceValues: allowanceValues as bigint[],
+      ...(sourceHeight !== undefined ? { sourceHeight } : {}),
     };
   }
 
@@ -2633,17 +2692,13 @@
   ): Promise<ExternalWalletReadResult> {
     const tokenAddresses = tokenList.map((token) => token.address).filter((address) => isAddress(address));
     if (jadapter?.readWalletSnapshot && jadapter?.provider) {
-      const blockNumber = Number(await (jadapter.getCurrentBlockNumber?.() ?? jadapter.provider.getBlockNumber()));
-      const block = await jadapter.provider.getBlock(blockNumber);
-      if (!block?.hash) {
-        throw new Error(`EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:${blockNumber}`);
-      }
+      const source = await readExternalWalletSnapshotSource(jadapter);
       const snapshot = await jadapter.readWalletSnapshot({
         owner,
         tokenAddresses,
         allowances: allowanceReads,
         includeNativeBalance: true,
-        blockTag: blockNumber,
+        blockTag: source.sourceHeight,
       });
       assertExternalSnapshotCount(snapshot.tokenBalances, tokenAddresses.length, 'tokenBalances');
       assertExternalSnapshotCount(snapshot.allowances, allowanceReads.length, 'allowances');
@@ -2666,7 +2721,7 @@
       }));
       const transactionHash = [
         'external-wallet-snapshot',
-        blockNumber,
+        source.sourceHeight,
         entityId,
         String(owner || '').trim().toLowerCase(),
       ].join(':');
@@ -2678,12 +2733,15 @@
           args: {
             entityId,
             owner,
+            sourceHeight: source.sourceHeight,
+            sourceHash: source.sourceHash,
+            finalityDepth: source.finalityDepth,
             nativeBalance: nativeBalance.toString(),
             tokenBalances,
             allowances,
           },
-          blockNumber,
-          blockHash: block.hash,
+          blockNumber: source.sourceHeight,
+          blockHash: source.sourceHash,
           transactionHash,
         }], 'external-wallet-snapshot-ui-local');
         xln.startRuntimeLoop?.(env);
@@ -2701,6 +2759,7 @@
         allowanceValues: allowanceReads.map((read) =>
           allowanceByKey.get(`${String(read.tokenAddress || '').trim().toLowerCase()}:${String(read.spender || '').trim().toLowerCase()}`) ?? 0n
         ),
+        ...source,
       };
     }
 
@@ -2727,6 +2786,9 @@
         args: {
           entityId: data.entityId ?? entityId,
           owner: data.owner ?? owner,
+          sourceHeight: data.sourceHeight ?? data.blockNumber,
+          sourceHash: data.sourceHash ?? data.blockHash,
+          finalityDepth: data.finalityDepth ?? 0,
           nativeBalance: String(data.nativeBalance ?? '0'),
           tokenBalances: data.tokenBalances ?? [],
           allowances: data.allowances ?? [],
@@ -2757,6 +2819,12 @@
       allowanceValues: allowanceReads.map((read) =>
         allowanceByKey.get(`${String(read.tokenAddress || '').trim().toLowerCase()}:${String(read.spender || '').trim().toLowerCase()}`) ?? 0n
       ),
+      ...(data.sourceHeight !== undefined || data.blockNumber !== undefined
+        ? { sourceHeight: Number(data.sourceHeight ?? data.blockNumber) }
+        : {}),
+      ...(data.sourceHash ?? data.blockHash ? { sourceHash: String(data.sourceHash ?? data.blockHash) } : {}),
+      ...(data.finalityDepth !== undefined ? { finalityDepth: Number(data.finalityDepth) } : {}),
+      ...(data.headBlockNumber !== undefined ? { headBlockNumber: Number(data.headBlockNumber) } : {}),
     };
   }
 
@@ -2796,6 +2864,7 @@
       externalTokensLoading = true;
       if (!signerId || !isAddress(owner)) {
         externalTokens = [];
+        externalWalletSnapshotSource = null;
         if (moveAllowanceRouteEnabled) {
           moveAllowanceRaw = null;
           moveAllowanceError = 'Active signer EOA missing';
@@ -2832,6 +2901,7 @@
         let nativeBalance = 0n;
         let balances: bigint[] = tokenList.map(() => 0n);
         let allowanceValues: bigint[] = [];
+        let snapshotSource: ExternalWalletSnapshotSource | null = null;
 
         const observed = !forceSnapshot
           ? readExternalWalletState(tokenList, owner, allowanceReads)
@@ -2840,11 +2910,33 @@
           nativeBalance = observed.nativeBalance;
           balances = observed.balances;
           allowanceValues = observed.allowanceValues;
+          if (observed.sourceHeight !== undefined) {
+            snapshotSource = {
+              sourceHeight: observed.sourceHeight,
+              ...(externalWalletSnapshotSource?.sourceHeight === observed.sourceHeight && externalWalletSnapshotSource.sourceHash
+                ? { sourceHash: externalWalletSnapshotSource.sourceHash }
+                : {}),
+              ...(externalWalletSnapshotSource?.sourceHeight === observed.sourceHeight && externalWalletSnapshotSource.finalityDepth !== undefined
+                ? { finalityDepth: externalWalletSnapshotSource.finalityDepth }
+                : {}),
+              ...(externalWalletSnapshotSource?.sourceHeight === observed.sourceHeight && externalWalletSnapshotSource.headBlockNumber !== undefined
+                ? { headBlockNumber: externalWalletSnapshotSource.headBlockNumber }
+                : {}),
+            };
+          }
         } else if (entityId) {
           const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads, jadapter);
           nativeBalance = snapshot.nativeBalance;
           balances = snapshot.balances;
           allowanceValues = snapshot.allowanceValues;
+          if (snapshot.sourceHeight !== undefined) {
+            snapshotSource = {
+              sourceHeight: snapshot.sourceHeight,
+              ...(snapshot.sourceHash ? { sourceHash: snapshot.sourceHash } : {}),
+              ...(snapshot.finalityDepth !== undefined ? { finalityDepth: snapshot.finalityDepth } : {}),
+              ...(snapshot.headBlockNumber !== undefined ? { headBlockNumber: snapshot.headBlockNumber } : {}),
+            };
+          }
         } else {
           throw new Error('Active entity missing for external wallet snapshot');
         }
@@ -2857,6 +2949,7 @@
         const jurisdictionNow = String(getCurrentEntityJurisdictionName(activeEnv) || '');
         const currentKey = `${resolveSelfEoaAddress()}|${String(runtimeIdNow || '').trim()}|${jurisdictionNow.trim()}`;
         if (currentKey === fetchKey) {
+          externalWalletSnapshotSource = snapshotSource;
           externalTokens = sortExternalTokens([
             {
               symbol: 'ETH',
@@ -2877,6 +2970,7 @@
       } catch (err) {
         if (toErrorMessage(err, '').includes('ENTITY_JURISDICTION_MISSING')) {
           externalTokens = [];
+          externalWalletSnapshotSource = null;
           if (moveAllowanceRouteEnabled) {
             moveAllowanceRaw = null;
             moveAllowanceError = null;
@@ -2886,6 +2980,7 @@
           return;
         }
         console.error('[EntityPanel] Failed to fetch external tokens:', err);
+        externalWalletSnapshotSource = null;
         if (moveAllowanceRouteEnabled) {
           moveAllowanceRaw = null;
           moveAllowanceError = toErrorMessage(err, 'Failed to read wallet snapshot');
@@ -3994,6 +4089,7 @@
           void fetchExternalTokens();
         } else {
           externalTokens = [];
+          externalWalletSnapshotSource = null;
           externalTokensLoading = false;
         }
       }
@@ -5343,6 +5439,21 @@
                 {/if}
               </button>
               <p class="muted wallet-meta-help">External ETH and ERC20 endpoint.</p>
+              {#if externalWalletSnapshotSource}
+                <p
+                  class="muted wallet-meta-help wallet-source-line"
+                  data-testid="external-wallet-source"
+                  title={externalWalletSnapshotSource.sourceHash || ''}
+                >
+                  Snapshot J#{externalWalletSnapshotSource.sourceHeight}
+                  {#if externalWalletSnapshotSource.sourceHash}
+                    · {shortHash(externalWalletSnapshotSource.sourceHash)}
+                  {/if}
+                  {#if externalWalletSnapshotSource.finalityDepth !== undefined}
+                    · depth {externalWalletSnapshotSource.finalityDepth}
+                  {/if}
+                </p>
+              {/if}
             </div>
           </div>
 
@@ -7544,6 +7655,13 @@
   .wallet-meta-help {
     margin: 0;
     max-width: 40ch;
+  }
+
+  .wallet-source-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #a8a29e;
+    max-width: none;
   }
 
   /* Table Header */

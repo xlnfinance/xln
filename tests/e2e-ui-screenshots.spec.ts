@@ -299,6 +299,9 @@ async function captureMainTabs(
 ): Promise<void> {
   const platform = platformFromPrefix(prefix);
   await openAssetsTab(page);
+  await expect(page.getByTestId('external-wallet-source').first()).toContainText(/Snapshot J#\d+/, {
+    timeout: 30_000,
+  });
   await captureUxPage(page, output, `${prefix}-assets.png`, {
     title: `${platform} assets ledger`,
     group: 'Portfolio',

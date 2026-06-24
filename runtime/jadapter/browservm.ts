@@ -350,6 +350,10 @@ export async function createBrowserVMAdapter(
       return Number(browserVM.getBlockNumber());
     },
 
+    getFinalityDepth(): number {
+      return 0;
+    },
+
     async syncRuntimeState(accountPairs, tokenIds) {
       return {
         collaterals: await browserVM.syncAllCollaterals(accountPairs, tokenIds),

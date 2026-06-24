@@ -139,11 +139,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. BrowserVM now has a real `JAdapter` wrapper over `BrowserVMProvider`, emits transaction-bound events through the shared watcher path, supports typed contract reads/writes, snapshots/revert, and keeps the boundary documented as debug/simnet rather than release evidence.
   - Evidence: `bun x tsc -p tsconfig.runtime.json --noEmit` PASS; `bun test runtime/__tests__/browservm-adapter.test.ts` PASS `1/1`; browser-target `bun build runtime/runtime.ts --target=browser ...` PASS; focused isolated e2e `tests/e2e-jurisdiction-settings.spec.ts` PASS `2/2`, wall `22.5s`, browser errors `0`, run `20260624-001843-259`, code hash `85c16db3bd818999`.
 
-- [ ] Fix external-wallet snapshot baseline to use confirmed block, not tip.
+- [x] Fix external-wallet snapshot baseline to use confirmed block, not tip.
   - Impact: medium.
   - Current issue: snapshot block can be reorged out on non-anvil RPC. This is display state, not consensus state, but still wrong evidence.
   - Fix: snapshot at `currentBlock - confirmationDepth`, include `sourceHeight`, `sourceHash`, and `finalityDepth`.
   - Tests: snapshot uses safe block; UI shows source height/hash.
+  - Status: done. External-wallet API and local UI snapshots now resolve a safe source block from `getCurrentBlockNumber() - getFinalityDepth()`, read balances at that block tag, emit/apply the canonical `ExternalWalletSnapshot` at the source height/hash, and return source metadata to the browser. Assets shows a compact snapshot source line under the external EOA.
+  - Evidence: L1 `bun test runtime/__tests__/external-wallet-api.test.ts` PASS `4/4` and proves tip `77` with depth `1` reads block `76`; wiring unit PASS `25/25`; focused screenshot e2e PASS `3/3`, wall `53.8s`, code hash `879f68670bb0a991`, browser errors `0`, benchmark OK vs `20260624-005624-512`, and asserts `external-wallet-source` renders.
 
 - [ ] Move display-only `externalWallet` state out of consensus hot-path entity state.
   - Impact: medium-high.
@@ -219,7 +221,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [x] Make the UX screenshot gallery a mandatory 30-screen release audit pack.
   - Impact: high.
-  - User-confirmed: keep at least 30 different screenshots from different parts of the app as a stable visual audit source.
+  - User-confirmed: keep at least 30 different screenshots from different parts of the app as a stable visual audit source; reconfirmed 2026-06-24.
   - Requirement: every release-quality e2e run refreshes at least 30 named PNG screens across desktop and mobile covering onboarding, home/assets, payments, receive, swap, cross-chain swap, disputes, on-chain batch compose/queue/history, account history, settings, QA cockpit, health, remote runtime import, and Time Machine.
   - UI: QA cockpit shows the 30-screen pack as a first-class gallery with category filters, viewport badges, scenario names, git HEAD/code hash, and missing-screen warnings.
   - Tests: unit fails if fewer than 30 curated screens or required categories are missing; focused QA e2e verifies the gallery renders 30 distinct screens and every image resolves.

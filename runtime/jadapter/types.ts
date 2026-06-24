@@ -182,6 +182,7 @@ export interface JAdapter {
   registerEntityWallet?(entityId: string, privateKey: string): void;
   captureStateRoot?(): Promise<Uint8Array | null>;
   getCurrentBlockNumber?(): Promise<number>;
+  getFinalityDepth?(): number;
   syncRuntimeState?(
     accountPairs: Array<{ entityId: string; counterpartyId: string }>,
     tokenIds: number[],
