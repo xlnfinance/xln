@@ -284,6 +284,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Tests: smoke each tab with existing fixtures; no behavior change in active entity selection.
   - Progress: first assets-owned extraction done. Asset ledger rows/totals moved into `AssetLedgerTable.svelte` with shared `asset-ledger.ts` types; parent still owns data derivation/actions.
   - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused move-direct browser flow PASS `1/1`, run `20260624-154004-542`, wall `16.5s`, code hash `df2ed2f3f97b6dc1`, benchmark OK.
+  - Progress: second assets-owned extraction done. Faucet selector/actions moved into `AssetFaucetCard.svelte`; parent still owns selected symbol and faucet submission side effects.
+  - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused move-direct browser flow PASS `1/1`, run `20260624-154411-170`, wall `17.0s`, code hash `e76441fa4ea4fa6c`, benchmark OK vs `20260624-154004-542`.
 
 ## p2 performance and scale
 
