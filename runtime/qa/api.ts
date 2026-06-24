@@ -4,6 +4,7 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../serialization-utils';
+import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,
   auditQaUxReleasePack,
@@ -67,7 +68,7 @@ type QaApiDeps = {
   spawnRestart?: typeof spawn;
 };
 
-export type QaRestartAuditEntry = {
+export type QaRestartAuditRecord = {
   auditId: string;
   status: 'started' | QaRestartTerminalStatus;
   actorKeyId: string;
@@ -90,6 +91,8 @@ export type QaRestartAuditEntry = {
   requestIp: string | null;
   userAgent: string | null;
 };
+
+export type QaRestartAuditEntry = QaRestartAuditRecord & QaSeveritySignal;
 
 let activeRestart: QaRestartState | null = null;
 let restartCooldownUntil = 0;
@@ -382,29 +385,92 @@ const normalizeRestartAuditStatus = (value: unknown): QaRestartAuditEntry['statu
   return 'started';
 };
 
-const rowToRestartAuditEntry = (row: Record<string, unknown>): QaRestartAuditEntry => ({
-  auditId: String(row['audit_id'] || ''),
-  status: normalizeRestartAuditStatus(row['status']),
-  actorKeyId: String(row['actor_key_id'] || ''),
-  scope: row['scope'] === 'admin' ? 'admin' : 'read',
-  operatorId: String(row['operator_id'] || ''),
-  action: 'restart-run',
-  target: String(row['target'] || ''),
-  title: String(row['title'] || ''),
-  reason: String(row['reason'] || ''),
-  expectedGitHead: typeof row['expected_git_head'] === 'string' ? row['expected_git_head'] : null,
-  actualGitHead: typeof row['actual_git_head'] === 'string' ? row['actual_git_head'] : null,
-  gitBranch: typeof row['git_branch'] === 'string' ? row['git_branch'] : null,
-  codeHash: typeof row['code_hash'] === 'string' ? row['code_hash'] : null,
-  dirty: Number(row['dirty'] || 0) === 1,
-  startedAt: Number(row['started_at'] || 0),
-  finishedAt: nullableNumber(row['finished_at']),
-  pid: nullableNumber(row['pid']),
-  exitCode: nullableNumber(row['exit_code']),
-  logPath: publicQaPath(String(row['log_path'] || '')),
-  requestIp: typeof row['request_ip'] === 'string' ? row['request_ip'] : null,
-  userAgent: typeof row['user_agent'] === 'string' ? row['user_agent'] : null,
-});
+const qaRestartAuditSeverity = (entry: QaRestartAuditRecord): QaSeveritySignal => {
+  const evidence = [
+    { label: 'audit', value: entry.auditId },
+    { label: 'target', value: entry.target },
+    ...(entry.exitCode !== null ? [{ label: 'exit code', value: entry.exitCode }] : []),
+    ...(entry.actualGitHead ? [{ label: 'git head', value: entry.actualGitHead.slice(0, 12) }] : []),
+    ...(entry.codeHash ? [{ label: 'code hash', value: entry.codeHash.slice(0, 16) }] : []),
+  ];
+  if (entry.status === 'started') {
+    return makeQaSeveritySignal({
+      severity: 'DEGRADED',
+      reason: 'Restart run is still executing',
+      since: entry.startedAt,
+      owner: 'restart',
+      evidence,
+    });
+  }
+  if (entry.status === 'finished' && (entry.exitCode ?? 0) === 0) {
+    return makeQaSeveritySignal({
+      severity: 'OK',
+      reason: 'Restart run finished successfully',
+      since: entry.finishedAt ?? entry.startedAt,
+      owner: 'restart',
+      evidence,
+    });
+  }
+  if (entry.status === 'aborted') {
+    return makeQaSeveritySignal({
+      severity: 'WARN',
+      reason: 'Restart run was aborted by operator',
+      since: entry.finishedAt ?? entry.startedAt,
+      owner: 'restart',
+      evidence,
+    });
+  }
+  if (entry.status === 'watchdog_timeout' || entry.status === 'orphaned') {
+    return makeQaSeveritySignal({
+      severity: 'BLOCKED',
+      reason: `Restart run is ${entry.status}`,
+      since: entry.finishedAt ?? entry.startedAt,
+      owner: 'restart',
+      evidence,
+    });
+  }
+  return makeQaSeveritySignal({
+    severity: 'FAIL',
+    reason: entry.status === 'spawn_error' ? 'Restart process failed to spawn' : 'Restart run exited with failure',
+    since: entry.finishedAt ?? entry.startedAt,
+    owner: 'restart',
+    evidence,
+  });
+};
+
+const rowToRestartAuditEntry = (row: Record<string, unknown>): QaRestartAuditEntry => {
+  const entry: QaRestartAuditRecord = {
+    auditId: String(row['audit_id'] || ''),
+    status: normalizeRestartAuditStatus(row['status']),
+    actorKeyId: String(row['actor_key_id'] || ''),
+    scope: row['scope'] === 'admin' ? 'admin' : 'read',
+    operatorId: String(row['operator_id'] || ''),
+    action: 'restart-run',
+    target: String(row['target'] || ''),
+    title: String(row['title'] || ''),
+    reason: String(row['reason'] || ''),
+    expectedGitHead: typeof row['expected_git_head'] === 'string' ? row['expected_git_head'] : null,
+    actualGitHead: typeof row['actual_git_head'] === 'string' ? row['actual_git_head'] : null,
+    gitBranch: typeof row['git_branch'] === 'string' ? row['git_branch'] : null,
+    codeHash: typeof row['code_hash'] === 'string' ? row['code_hash'] : null,
+    dirty: Number(row['dirty'] || 0) === 1,
+    startedAt: Number(row['started_at'] || 0),
+    finishedAt: nullableNumber(row['finished_at']),
+    pid: nullableNumber(row['pid']),
+    exitCode: nullableNumber(row['exit_code']),
+    logPath: publicQaPath(String(row['log_path'] || '')),
+    requestIp: typeof row['request_ip'] === 'string' ? row['request_ip'] : null,
+    userAgent: typeof row['user_agent'] === 'string' ? row['user_agent'] : null,
+  };
+  const severity = qaRestartAuditSeverity(entry);
+  return {
+    ...entry,
+    severity: severity.severity,
+    since: severity.since,
+    owner: severity.owner,
+    evidence: severity.evidence,
+  };
+};
 
 const requestIp = (request: Request): string | null => {
   const forwarded = String(request.headers.get('x-forwarded-for') || '').split(',')[0]?.trim();
@@ -420,7 +486,7 @@ const buildAuditId = (startedAt: number, auth: QaAuthContext, target: string, ti
     .digest('hex')
     .slice(0, 24);
 
-export const insertQaRestartAudit = (entry: QaRestartAuditEntry): void => {
+export const insertQaRestartAudit = (entry: QaRestartAuditRecord): void => {
   const db = openQaRestartAuditDb();
   try {
     db.query(`
@@ -666,11 +732,40 @@ const reapQaRestartState = (now = Date.now()): void => {
 export const readQaRestartStatus = (now = Date.now()): Record<string, unknown> => {
   if (!activeRestart) {
     const cooldownRemainingMs = Math.max(0, restartCooldownUntil - now);
+    const severity = cooldownRemainingMs > 0
+      ? makeQaSeveritySignal({
+        severity: 'WARN',
+        reason: 'Restart cooldown is active',
+        since: restartCooldownUntil - cooldownRemainingMs,
+        owner: 'restart',
+        evidence: [{ label: 'cooldown remaining', value: cooldownRemainingMs, unit: 'ms' }],
+      })
+      : makeQaSeveritySignal({
+        severity: 'OK',
+        reason: 'No restart run is active',
+        since: 0,
+        owner: 'restart',
+        evidence: [{ label: 'active', value: false }],
+      });
     return cooldownRemainingMs > 0
-      ? { active: false, cooldownUntil: restartCooldownUntil, cooldownRemainingMs }
-      : { active: false };
+      ? { ...severity, active: false, cooldownUntil: restartCooldownUntil, cooldownRemainingMs }
+      : { ...severity, active: false };
   }
+  const severity = makeQaSeveritySignal({
+    severity: activeRestart.terminalStatus ? 'WARN' : 'DEGRADED',
+    reason: activeRestart.terminalStatus
+      ? `Restart run is terminating: ${activeRestart.terminalStatus}`
+      : 'Restart run is executing',
+    since: activeRestart.startedAt,
+    owner: 'restart',
+    evidence: [
+      { label: 'audit', value: activeRestart.auditId },
+      { label: 'target', value: activeRestart.target },
+      { label: 'watchdog at', value: activeRestart.watchdogAt },
+    ],
+  });
   return {
+    ...severity,
     active: true,
     auditId: activeRestart.auditId,
     startedAt: activeRestart.startedAt,

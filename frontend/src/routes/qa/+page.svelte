@@ -8,13 +8,22 @@
     tenWordScenarioSummary,
   } from '$lib/qa/scenarioPlayer';
   import { clearQaToken, consumeQaTokenFromUrl, qaFetch, writeQaToken } from '$lib/qa/apiClient';
+  import type { QaSeverity, QaSeverityEvidence } from '@xln/runtime/qa/severity';
 
   type QaAuthInfo = {
     scope?: 'read' | 'admin';
     disabled?: boolean;
   };
 
-  type QaSummary = {
+  type QaSeveritySignal = {
+    severity: QaSeverity;
+    reason: string;
+    since: number;
+    owner: string;
+    evidence: QaSeverityEvidence[];
+  };
+
+  type QaSummary = QaSeveritySignal & {
     manifestVersion: number;
     runId: string;
     createdAt: number;
@@ -82,7 +91,7 @@
     endMs?: number;
   };
 
-  type QaShard = {
+  type QaShard = QaSeveritySignal & {
     shard: number;
     status: 'passed' | 'failed' | 'unknown';
     durationMs: number | null;
@@ -113,7 +122,7 @@
     hasTrace: boolean;
   };
 
-  type QaRun = {
+  type QaRun = QaSeveritySignal & {
     manifestVersion: number;
     runId: string;
     createdAt: number;
@@ -164,7 +173,7 @@
     timestamp: number;
   };
 
-  type QaBrowserHealthSummary = {
+  type QaBrowserHealthSummary = QaSeveritySignal & {
     issueCount: number;
     errorCount: number;
     warningCount: number;
@@ -192,7 +201,7 @@
     verdict: 'ok' | 'faster' | 'slower';
   };
 
-  type QaBenchmarkComparison = {
+  type QaBenchmarkComparison = QaSeveritySignal & {
     status: 'ok' | 'faster' | 'slower' | 'mixed' | 'insufficient';
     suiteKey: string;
     suiteLabel: string;
@@ -246,7 +255,7 @@
     playwrightMs: number | null;
   };
 
-  type QaRestartAuditEntry = {
+  type QaRestartAuditEntry = QaSeveritySignal & {
     auditId: string;
     status: 'started' | 'finished' | 'spawn_error' | 'watchdog_timeout' | 'aborted' | 'orphaned';
     actorKeyId: string;
@@ -270,7 +279,7 @@
     userAgent: string | null;
   };
 
-  type RestartStatus = {
+  type RestartStatus = Partial<QaSeveritySignal> & {
     active: boolean;
     target?: string;
     title?: string;
@@ -497,8 +506,25 @@
     return `${run.passedShards}/${run.totalShards}`;
   }
 
+  function okSeverity(owner: string, reason: string, since = 0): QaSeveritySignal {
+    return {
+      severity: 'OK',
+      reason,
+      since,
+      owner,
+      evidence: [],
+    };
+  }
+
   function emptyBrowserHealth(): QaBrowserHealthSummary {
-    return { issueCount: 0, errorCount: 0, warningCount: 0, networkFailureCount: 0, httpErrorCount: 0 };
+    return {
+      ...okSeverity('browser', 'Browser event stream is clean'),
+      issueCount: 0,
+      errorCount: 0,
+      warningCount: 0,
+      networkFailureCount: 0,
+      httpErrorCount: 0,
+    };
   }
 
   function browserHealth(run: QaSummary | QaRun | null | undefined): QaBrowserHealthSummary {
@@ -506,7 +532,20 @@
   }
 
   function browserHealthFromHistory(row: QaHistoryEntry): QaBrowserHealthSummary {
+    const severity: QaSeverity = row.browserErrorCount > 0 ? 'FAIL' : row.browserWarningCount > 0 ? 'WARN' : 'OK';
     return {
+      severity,
+      reason: severity === 'FAIL'
+        ? `${row.browserErrorCount} browser error(s) captured`
+        : severity === 'WARN'
+          ? `${row.browserWarningCount} browser warning(s) captured`
+          : 'Browser event stream is clean',
+      since: row.createdAt,
+      owner: 'browser',
+      evidence: [
+        { label: 'errors', value: row.browserErrorCount },
+        { label: 'warnings', value: row.browserWarningCount },
+      ],
       issueCount: row.browserIssueCount,
       errorCount: row.browserErrorCount,
       warningCount: row.browserWarningCount,
@@ -528,10 +567,25 @@
   function shardBrowserHealth(shard: QaShard | null | undefined): QaBrowserHealthSummary {
     if (shard?.browserHealth) return shard.browserHealth;
     const issues = shard?.browserIssues ?? [];
+    const errorCount = issues.filter(issue => issue.severity === 'error').length;
+    const warningCount = issues.filter(issue => issue.severity === 'warning').length;
+    const severity: QaSeverity = errorCount > 0 ? 'FAIL' : warningCount > 0 ? 'WARN' : 'OK';
     return {
+      severity,
+      reason: severity === 'FAIL'
+        ? `${errorCount} browser error(s) captured`
+        : severity === 'WARN'
+          ? `${warningCount} browser warning(s) captured`
+          : 'Browser event stream is clean',
+      since: issues.map(issue => issue.timestamp).sort((a, b) => a - b)[0] ?? 0,
+      owner: 'browser',
+      evidence: [
+        { label: 'errors', value: errorCount },
+        { label: 'warnings', value: warningCount },
+      ],
       issueCount: issues.length,
-      errorCount: issues.filter(issue => issue.severity === 'error').length,
-      warningCount: issues.filter(issue => issue.severity === 'warning').length,
+      errorCount,
+      warningCount,
       networkFailureCount: issues.filter(issue => issue.type === 'requestfailed').length,
       httpErrorCount: issues.filter(issue => issue.type === 'http').length,
     };
@@ -658,17 +712,27 @@
     return [...runItems, ...restartItems].sort((a, b) => b.createdAt - a.createdAt).slice(0, 20);
   }
 
+  function verdictStatusFromSeverity(severity: QaSeverity): QaVerdictStatus {
+    if (severity === 'OK') return 'PASS';
+    if (severity === 'WARN' || severity === 'DEGRADED') return 'DEGRADED';
+    if (severity === 'FAIL' || severity === 'BLOCKED') return 'FAIL';
+    return 'UNKNOWN';
+  }
+
   function buildVerdictSummary(run: QaSummary | null, inbox: QaFailureInboxItem[]): QaVerdictSummary {
     if (!run) {
       return { status: 'UNKNOWN', reason: 'No QA runs yet', activeCount: inbox.length, latestRunId: null, latestAt: null, gitHead: null, codeHash: null, dirty: false };
     }
     const latestIssues = inbox.filter(item => item.runId === run.runId || item.failureClass === 'operations');
-    const hardFail = run.status === 'failed' || latestIssues.some(item => item.severity === 'FAIL');
-    const degraded = run.benchmark?.status === 'slower' || run.benchmark?.status === 'mixed' || run.code?.dirty === true || latestIssues.length > 0;
-    const status: QaVerdictStatus = hardFail ? 'FAIL' : degraded ? 'DEGRADED' : 'PASS';
+    const issueOverride = latestIssues.some(item => item.severity === 'FAIL')
+      ? 'FAIL'
+      : latestIssues.length > 0 && run.severity === 'OK'
+        ? 'DEGRADED'
+        : null;
+    const status: QaVerdictStatus = issueOverride ?? verdictStatusFromSeverity(run.severity);
     return {
       status,
-      reason: latestIssues[0]?.detail || run.benchmark?.reason || (run.code?.dirty ? 'Current worktree is dirty' : 'Latest QA run is green'),
+      reason: latestIssues[0]?.detail || run.reason,
       activeCount: latestIssues.length,
       latestRunId: run.runId,
       latestAt: run.createdAt,
