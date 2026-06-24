@@ -83,6 +83,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Required fields: `severity`, `reason`, `since`, `owner`, `evidence`.
   - Apply to health, QA runs, bootstrap stages, restart state, remote adapter, and benchmarks.
   - Tests: API schema rejects missing `severity`/`reason` for release runs.
+  - Status: in progress. Shared runtime severity contract exists. QA run/shard/browser-health/benchmark manifests are normalized on legacy reads; new runner manifests are `manifestVersion: 3` and gated by `assertQaReleaseRunSeverity`. Restart state and restart audit rows now expose severity fields. Remaining: health page, bootstrap stages, and remote adapter surfaces must consume the same model before this parent TODO is closed.
+  - Evidence: `bun test runtime/__tests__/qa-story-report.test.ts` covers legacy normalization, v3 schema rejection for missing `severity`/`reason`, benchmark degradation severity, and restart audit severity.
 
 - [x] Add failure class per shard/run.
   - Impact: high.
@@ -387,7 +389,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 ## missing tests
 
 - [x] Unit: manifest ingest preserves timeline order and derives slow steps sorted.
-- [ ] Unit: severity classifier.
+- [x] Unit: severity classifier.
+  - Status: done. `qa-story-report` covers legacy severity normalization, benchmark severity, v3 release schema rejection, and restart audit severity.
 - [x] Unit: failure-class classifier.
 - [x] Unit: regression threshold math against same code hash and previous HEAD.
 - [x] Unit: UTC formatter and runId timezone round-trip.

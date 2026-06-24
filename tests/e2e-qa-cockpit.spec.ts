@@ -4,6 +4,13 @@ const QA_FIXTURE_RUN_ID = '20260623-235959-999';
 const QA_FAST_RUN_ID = '20260623-225959-888';
 const QA_FIXTURE_ARTIFACT = 'test-results-shard-1/qa-cockpit-fixture/video.webm';
 const QA_AUTH = { scope: 'admin', disabled: true, actorKeyId: 'fixture-auth-disabled' };
+const qaSignal = (
+  severity: 'OK' | 'WARN' | 'DEGRADED' | 'FAIL' | 'BLOCKED' | 'UNKNOWN',
+  reason: string,
+  owner: string,
+  since = Date.UTC(2026, 5, 23, 23, 59, 59, 999),
+  evidence: Array<{ label: string; value?: string | number | boolean | null; unit?: string | null }> = [],
+) => ({ severity, reason, owner, since, evidence });
 const QA_FIXTURE_TIMING = {
   avgShardMs: 7_200,
   maxShardMs: 7_200,
@@ -19,6 +26,7 @@ const QA_FAST_TIMING = {
   playwrightMs: 3_100,
 };
 const QA_CLEAN_BROWSER_HEALTH = {
+  ...qaSignal('OK', 'Browser event stream is clean', 'browser'),
   issueCount: 0,
   errorCount: 0,
   warningCount: 0,
@@ -26,6 +34,10 @@ const QA_CLEAN_BROWSER_HEALTH = {
   httpErrorCount: 0,
 };
 const QA_FIXTURE_BROWSER_HEALTH = {
+  ...qaSignal('FAIL', '1 browser error(s) captured', 'browser', Date.UTC(2026, 5, 24, 0, 0, 2), [
+    { label: 'errors', value: 1 },
+    { label: 'warnings', value: 2 },
+  ]),
   issueCount: 3,
   errorCount: 1,
   warningCount: 2,
@@ -54,6 +66,10 @@ const QA_FIXTURE_VTT = [
 ].join('\n');
 
 const QA_FIXTURE_RUN = {
+  ...qaSignal('FAIL', '1/3 shard(s) failed', 'qa', Date.UTC(2026, 5, 23, 23, 59, 59, 999), [
+    { label: 'failed shards', value: 1 },
+    { label: 'total shards', value: 3 },
+  ]),
   manifestVersion: 2,
   runId: QA_FIXTURE_RUN_ID,
   createdAt: Date.UTC(2026, 5, 23, 23, 59, 59, 999),
@@ -82,6 +98,7 @@ const QA_FIXTURE_RUN = {
   },
   browserHealth: QA_FIXTURE_BROWSER_HEALTH,
   benchmark: {
+    ...qaSignal('DEGRADED', 'wall time +25% vs 20260623-225959-888', 'benchmark'),
     status: 'slower',
     suiteKey: 'fixture-suite',
     suiteLabel: 'qa.cockpit-fixture',
@@ -113,6 +130,7 @@ const QA_FIXTURE_RUN = {
   args: { fixture: 'qa-cockpit-scenario-player' },
   shards: [
     {
+      ...qaSignal('FAIL', 'qa.cockpit-fixture failed (assertion)', 'qa-shard'),
       shard: 1,
       status: 'failed',
       durationMs: 7_200,
@@ -201,6 +219,7 @@ const QA_FIXTURE_RUN = {
       hasTrace: false,
     },
     {
+      ...qaSignal('OK', 'qa.deep-link-video passed', 'qa-shard'),
       shard: 7,
       status: 'passed',
       durationMs: 1_800,
@@ -254,6 +273,7 @@ const QA_FIXTURE_RUN = {
       hasTrace: false,
     },
     {
+      ...qaSignal('OK', 'qa.missing-video-empty-state passed', 'qa-shard'),
       shard: 9,
       status: 'passed',
       durationMs: 1_200,
@@ -298,6 +318,7 @@ const QA_FIXTURE_SUMMARY = {
 
 const QA_FAST_SUMMARY = {
   ...QA_FIXTURE_SUMMARY,
+  ...qaSignal('OK', 'QA run is green', 'qa', Date.UTC(2026, 5, 23, 22, 59, 59, 888)),
   runId: QA_FAST_RUN_ID,
   createdAt: Date.UTC(2026, 5, 23, 22, 59, 59, 888),
   completedAt: Date.UTC(2026, 5, 23, 23, 0, 3, 888),
@@ -316,6 +337,7 @@ const QA_FAST_SUMMARY = {
   },
   benchmark: {
     ...QA_FIXTURE_RUN.benchmark,
+    ...qaSignal('OK', 'Within thresholds vs baseline', 'benchmark', Date.UTC(2026, 5, 23, 22, 59, 59, 888)),
     status: 'ok',
     reason: 'Within thresholds vs baseline',
     metrics: [],

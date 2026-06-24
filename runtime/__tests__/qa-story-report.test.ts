@@ -11,11 +11,13 @@ import {
   insertQaRestartAudit,
   listQaRestartAudit,
   maybeHandleQaRequest,
-  type QaRestartAuditEntry,
+  type QaRestartAuditRecord,
 } from '../qa/api';
 import {
   QA_UX_RELEASE_PACK_MIN_SCREENS,
   QA_UX_RELEASE_REQUIRED_GROUPS,
+  applyQaRunSeverity,
+  assertQaReleaseRunSeverity,
   auditQaUxReleasePack,
   classifyQaArtifactSensitivity,
   classifyQaShardFailure,
@@ -158,7 +160,7 @@ const benchmarkRun = (
   codeHash = 'same-code',
   gitHead = 'same-head',
   peakLoad1 = 1,
-): QaRunManifest => ({
+): QaRunManifest => applyQaRunSeverity({
   manifestVersion: 2,
   runId,
   createdAt: Date.UTC(2026, 5, 23),
@@ -219,7 +221,7 @@ const benchmarkRun = (
     hasVideo: false,
     hasTrace: false,
   }],
-});
+} as QaRunManifest);
 
 test('qa benchmark comparison flags sharp runtime deltas', () => {
   const baseline = benchmarkRun('baseline', 1000, 800);
@@ -244,6 +246,26 @@ test('qa benchmark comparison flags sharp runtime deltas', () => {
   expect(higherHostLoadOnly.metrics.find(metric => metric.metric === 'peakLoad1')?.verdict).toBe('slower');
   expect(higherHostLoadOnly.reason).toContain('host load');
   expect(higherHostLoadOnly.likelyCauses).toContain('host load increased without app timing regression');
+});
+
+test('qa severity model normalizes legacy runs and gates release manifests', () => {
+  const legacy = benchmarkRun('severity-legacy', 1000, 800);
+  expect(legacy.severity).toBe('OK');
+  expect(legacy.reason).toBe('QA run is green');
+  expect(legacy.shards[0]?.severity).toBe('OK');
+  expect(legacy.browserHealth?.severity).toBe('OK');
+
+  const degraded = compareQaBenchmarkRuns(benchmarkRun('severity-slower', 1300, 1100), legacy);
+  expect(degraded.severity).toBe('DEGRADED');
+  expect(degraded.reason).toContain('% vs severity-legacy');
+
+  const missingSeverity = { ...legacy, manifestVersion: 3 } as Record<string, unknown>;
+  delete missingSeverity['severity'];
+  expect(() => assertQaReleaseRunSeverity(missingSeverity as QaRunManifest)).toThrow('QA_RUN_SEVERITY_REQUIRED');
+
+  const missingReason = { ...legacy, manifestVersion: 3 } as Record<string, unknown>;
+  delete missingReason['reason'];
+  expect(() => assertQaReleaseRunSeverity(missingReason as QaRunManifest)).toThrow('QA_RUN_REASON_REQUIRED');
 });
 
 test('qa run id formatter uses UTC fields', () => {
@@ -780,7 +802,7 @@ test('qa restart run requires reason confirm and expected head before spawn', as
 
 test('qa restart audit ledger writes start and finish evidence', () => {
   const auditId = `test-audit-${Date.now()}`;
-  const entry: QaRestartAuditEntry = {
+  const entry: QaRestartAuditRecord = {
     auditId,
     status: 'started',
     actorKeyId: 'actor-test',
@@ -810,6 +832,7 @@ test('qa restart audit ledger writes start and finish evidence', () => {
   expect(row?.status).toBe('finished');
   expect(row?.exitCode).toBe(17);
   expect(row?.reason).toBe('verify audit trail');
+  expect(row?.severity).toBe('FAIL');
   expect(row?.actorKeyId).toBe('actor-test');
 });
 
@@ -1118,7 +1141,9 @@ test('qa run report preserves timeline order and derives slow steps', async () =
       { label: 'E2E-TIMING:subtitle synchronized', ms: 400, startMs: 1200, endMs: 1600 },
       { label: 'E2E-TIMING:first visible cockpit cue', ms: 200 },
     ]);
-    expect(run.shards[0]?.browserHealth).toEqual({
+    expect(run.shards[0]?.browserHealth).toMatchObject({
+      severity: 'FAIL',
+      reason: '1 browser error(s) captured',
       issueCount: 2,
       errorCount: 1,
       warningCount: 1,

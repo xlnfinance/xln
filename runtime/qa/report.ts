@@ -4,6 +4,14 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText } from '../serialization-utils';
+import {
+  assertQaSeveritySignal,
+  makeQaSeveritySignal,
+  normalizeQaSeveritySignal,
+  type QaSeveritySignal,
+} from './severity';
+
+export type { QaSeverity, QaSeverityEvidence, QaSeveritySignal } from './severity';
 
 export type QaSlowStep = {
   label: string;
@@ -98,7 +106,7 @@ export type QaBrowserHealthSummary = {
   warningCount: number;
   networkFailureCount: number;
   httpErrorCount: number;
-};
+} & QaSeveritySignal;
 
 export type QaFailureClass = 'assertion' | 'infra' | 'timeout' | 'flake' | 'crash' | 'security' | 'unknown';
 
@@ -128,7 +136,7 @@ export type QaBenchmarkComparison = {
   reason: string;
   metrics: QaBenchmarkMetricDelta[];
   likelyCauses: string[];
-};
+} & QaSeveritySignal;
 
 export type QaRunTimingSummary = {
   avgShardMs: number | null;
@@ -160,7 +168,7 @@ export type QaShardManifest = {
   artifacts: QaArtifact[];
   hasVideo: boolean;
   hasTrace: boolean;
-};
+} & QaSeveritySignal;
 
 export type QaRunManifest = {
   manifestVersion: number;
@@ -179,7 +187,7 @@ export type QaRunManifest = {
   failureClasses?: QaFailureClass[];
   args?: Record<string, unknown> | null;
   shards: QaShardManifest[];
-};
+} & QaSeveritySignal;
 
 export type QaShardView = Omit<QaShardManifest, 'perf'> & {
   perf?: QaPerfSummaryView;
@@ -455,13 +463,82 @@ export const normalizeQaBrowserIssues = (value: unknown): QaBrowserIssue[] => {
   return value.map(normalizeQaBrowserIssue).filter((item): item is QaBrowserIssue => Boolean(item));
 };
 
-export const summarizeQaBrowserIssues = (issues: readonly QaBrowserIssue[]): QaBrowserHealthSummary => ({
-  issueCount: issues.length,
-  errorCount: issues.filter(issue => issue.severity === 'error').length,
-  warningCount: issues.filter(issue => issue.severity === 'warning').length,
-  networkFailureCount: issues.filter(issue => issue.type === 'requestfailed').length,
-  httpErrorCount: issues.filter(issue => issue.type === 'http').length,
-});
+const qaSeveritySince = (fallback: number, values: readonly unknown[]): number => {
+  const timestamps = values
+    .map(asFiniteNumber)
+    .filter((value): value is number => value !== null && value >= 0);
+  return timestamps.length > 0 ? Math.min(...timestamps) : Math.max(0, fallback);
+};
+
+const qaBrowserHealthSeverity = (
+  summary: Omit<QaBrowserHealthSummary, keyof QaSeveritySignal>,
+  since: number,
+): QaSeveritySignal => {
+  if (summary.errorCount > 0) {
+    return makeQaSeveritySignal({
+      severity: 'FAIL',
+      reason: `${summary.errorCount} browser error(s) captured`,
+      since,
+      owner: 'browser',
+      evidence: [
+        { label: 'errors', value: summary.errorCount },
+        { label: 'warnings', value: summary.warningCount },
+        { label: 'network failures', value: summary.networkFailureCount },
+        { label: 'http errors', value: summary.httpErrorCount },
+      ],
+    });
+  }
+  if (summary.warningCount > 0) {
+    return makeQaSeveritySignal({
+      severity: 'WARN',
+      reason: `${summary.warningCount} browser warning(s) captured`,
+      since,
+      owner: 'browser',
+      evidence: [
+        { label: 'warnings', value: summary.warningCount },
+        { label: 'http warnings', value: summary.httpErrorCount },
+      ],
+    });
+  }
+  return makeQaSeveritySignal({
+    severity: 'OK',
+    reason: 'Browser event stream is clean',
+    since,
+    owner: 'browser',
+    evidence: [{ label: 'issues', value: 0 }],
+  });
+};
+
+const normalizeQaBrowserHealthSummary = (
+  value: QaBrowserHealthSummary,
+  since: number,
+): QaBrowserHealthSummary => {
+  const summary = {
+    issueCount: Number(value.issueCount || 0),
+    errorCount: Number(value.errorCount || 0),
+    warningCount: Number(value.warningCount || 0),
+    networkFailureCount: Number(value.networkFailureCount || 0),
+    httpErrorCount: Number(value.httpErrorCount || 0),
+  };
+  return {
+    ...summary,
+    ...normalizeQaSeveritySignal(value, qaBrowserHealthSeverity(summary, since)),
+  };
+};
+
+export const summarizeQaBrowserIssues = (issues: readonly QaBrowserIssue[], since = 0): QaBrowserHealthSummary => {
+  const summary = {
+    issueCount: issues.length,
+    errorCount: issues.filter(issue => issue.severity === 'error').length,
+    warningCount: issues.filter(issue => issue.severity === 'warning').length,
+    networkFailureCount: issues.filter(issue => issue.type === 'requestfailed').length,
+    httpErrorCount: issues.filter(issue => issue.type === 'http').length,
+  };
+  return {
+    ...summary,
+    ...qaBrowserHealthSeverity(summary, qaSeveritySince(since, issues.map(issue => issue.timestamp))),
+  };
+};
 
 export const summarizeQaRunBrowserHealth = (run: Pick<QaRunManifest, 'shards'>): QaBrowserHealthSummary =>
   summarizeQaBrowserIssues(run.shards.flatMap(shard => normalizeQaBrowserIssues(shard.browserIssues)));
@@ -509,6 +586,167 @@ export const classifyQaShardFailure = (options: {
 
 export const summarizeQaFailureClasses = (shards: readonly QaShardFailureInput[]): QaFailureClass[] =>
   Array.from(new Set(shards.flatMap(shard => classifyQaShardFailure(shard) ?? []))).sort(compareStableText);
+
+const buildQaShardSeveritySignal = (shard: {
+  status: QaShardManifest['status'];
+  shard: number;
+  handle?: string | null;
+  title?: string | null;
+  target?: string | null;
+  error?: string | null;
+  failureClass?: QaFailureClass | null;
+  browserHealth?: QaBrowserHealthSummary | null;
+  durationMs?: number | null;
+}, since: number): QaSeveritySignal => {
+  const label = shard.handle || shard.title || shard.target || `shard-${shard.shard}`;
+  const evidence = [
+    { label: 'shard', value: shard.shard },
+    ...(shard.durationMs !== null && shard.durationMs !== undefined ? [{ label: 'duration', value: shard.durationMs, unit: 'ms' }] : []),
+    ...(shard.failureClass ? [{ label: 'failure class', value: shard.failureClass }] : []),
+    ...(shard.browserHealth?.issueCount ? [{ label: 'browser issues', value: shard.browserHealth.issueCount }] : []),
+  ];
+  if (shard.status === 'failed') {
+    return makeQaSeveritySignal({
+      severity: 'FAIL',
+      reason: `${label} failed${shard.failureClass ? ` (${shard.failureClass})` : ''}`,
+      since,
+      owner: 'qa-shard',
+      evidence,
+    });
+  }
+  if (shard.status === 'unknown') {
+    return makeQaSeveritySignal({
+      severity: 'UNKNOWN',
+      reason: `${label} did not report a final status`,
+      since,
+      owner: 'qa-shard',
+      evidence,
+    });
+  }
+  if (shard.browserHealth?.severity === 'FAIL') {
+    return makeQaSeveritySignal({
+      severity: 'FAIL',
+      reason: `${label} has blocking browser errors`,
+      since: shard.browserHealth.since,
+      owner: 'qa-shard',
+      evidence,
+    });
+  }
+  if (shard.browserHealth?.severity === 'WARN') {
+    return makeQaSeveritySignal({
+      severity: 'WARN',
+      reason: `${label} has browser warnings`,
+      since: shard.browserHealth.since,
+      owner: 'qa-shard',
+      evidence,
+    });
+  }
+  return makeQaSeveritySignal({
+    severity: 'OK',
+    reason: `${label} passed`,
+    since,
+    owner: 'qa-shard',
+    evidence,
+  });
+};
+
+const buildQaBenchmarkSeveritySignal = (
+  benchmark: Pick<QaBenchmarkComparison, 'status' | 'reason' | 'metrics' | 'suiteLabel'>,
+  since: number,
+): QaSeveritySignal => {
+  const evidence = [
+    { label: 'suite', value: benchmark.suiteLabel },
+    ...benchmark.metrics
+      .filter(metric => metric.verdict !== 'ok')
+      .slice(0, 6)
+      .map(metric => ({ label: metric.label, value: metric.deltaPct, unit: 'percent' })),
+  ];
+  if (benchmark.status === 'slower' || benchmark.status === 'mixed') {
+    return makeQaSeveritySignal({
+      severity: 'DEGRADED',
+      reason: benchmark.reason || 'Benchmark regression detected',
+      since,
+      owner: 'benchmark',
+      evidence,
+    });
+  }
+  if (benchmark.status === 'insufficient') {
+    return makeQaSeveritySignal({
+      severity: 'UNKNOWN',
+      reason: benchmark.reason || 'Benchmark has no comparable baseline',
+      since,
+      owner: 'benchmark',
+      evidence,
+    });
+  }
+  return makeQaSeveritySignal({
+    severity: 'OK',
+    reason: benchmark.reason || 'Benchmark is within thresholds',
+    since,
+    owner: 'benchmark',
+    evidence,
+  });
+};
+
+const buildQaRunSeveritySignal = (run: Pick<QaRunManifest,
+  'runId' | 'createdAt' | 'status' | 'failedShards' | 'totalShards' | 'browserHealth' | 'benchmark' | 'code' | 'failureClasses'
+>): QaSeveritySignal => {
+  const evidence = [
+    { label: 'run', value: run.runId },
+    { label: 'failed shards', value: run.failedShards },
+    { label: 'total shards', value: run.totalShards },
+    ...(run.failureClasses?.length ? [{ label: 'failure classes', value: run.failureClasses.join(',') }] : []),
+    ...(run.browserHealth?.issueCount ? [{ label: 'browser issues', value: run.browserHealth.issueCount }] : []),
+    ...(run.benchmark ? [{ label: 'benchmark', value: run.benchmark.status }] : []),
+    ...(run.code?.gitHead ? [{ label: 'git head', value: run.code.gitHead.slice(0, 12) }] : []),
+    ...(run.code?.codeHash ? [{ label: 'code hash', value: run.code.codeHash.slice(0, 16) }] : []),
+  ];
+  if (run.status === 'failed' || run.failedShards > 0 || run.browserHealth?.severity === 'FAIL') {
+    return makeQaSeveritySignal({
+      severity: 'FAIL',
+      reason: run.failedShards > 0
+        ? `${run.failedShards}/${run.totalShards} shard(s) failed`
+        : run.browserHealth?.reason || 'QA run failed',
+      since: run.createdAt,
+      owner: 'qa',
+      evidence,
+    });
+  }
+  if (run.status === 'unknown') {
+    return makeQaSeveritySignal({
+      severity: 'UNKNOWN',
+      reason: 'QA run status is unknown',
+      since: run.createdAt,
+      owner: 'qa',
+      evidence,
+    });
+  }
+  if (run.benchmark?.severity === 'DEGRADED' || run.code?.dirty) {
+    return makeQaSeveritySignal({
+      severity: 'DEGRADED',
+      reason: run.code?.dirty ? 'Worktree was dirty during QA run' : run.benchmark?.reason || 'QA benchmark degraded',
+      since: run.createdAt,
+      owner: 'qa',
+      evidence,
+    });
+  }
+  if (run.browserHealth?.severity === 'WARN') {
+    return makeQaSeveritySignal({
+      severity: 'WARN',
+      reason: run.browserHealth.reason,
+      since: run.browserHealth.since,
+      owner: 'qa',
+      evidence,
+    });
+  }
+  return makeQaSeveritySignal({
+    severity: 'OK',
+    reason: 'QA run is green',
+    since: run.createdAt,
+    owner: 'qa',
+    evidence,
+  });
+};
 
 const parseRunIdTimestamp = (runId: string): number | null => {
   const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/.exec(runId);
@@ -669,7 +907,10 @@ export const compareQaBenchmarkRuns = (
   const suiteKey = qaRunSuiteKey(current);
   const suiteLabel = qaRunSuiteLabel(current);
   if (!baseline) {
+    const status = 'insufficient' as const;
+    const reason = 'No previous comparable E2E run found.';
     return {
+      ...buildQaBenchmarkSeveritySignal({ status, reason, metrics: [], suiteLabel }, current.createdAt),
       status: 'insufficient',
       suiteKey,
       suiteLabel,
@@ -678,7 +919,7 @@ export const compareQaBenchmarkRuns = (
       comparedCodeHash: null,
       sameGitHead: null,
       sameCodeHash: null,
-      reason: 'No previous comparable E2E run found.',
+      reason,
       metrics: [],
       likelyCauses: [],
     };
@@ -739,6 +980,7 @@ export const compareQaBenchmarkRuns = (
       : `Within thresholds vs ${baseline.runId}`;
 
   return {
+    ...buildQaBenchmarkSeveritySignal({ status, reason, metrics, suiteLabel }, current.createdAt),
     status,
     suiteKey,
     suiteLabel,
@@ -753,10 +995,62 @@ export const compareQaBenchmarkRuns = (
   };
 };
 
+const normalizeQaShardSeverity = (shard: QaShardManifest, since: number): QaShardManifest => {
+  const fallback = buildQaShardSeveritySignal(shard, since);
+  return {
+    ...shard,
+    ...normalizeQaSeveritySignal(shard, fallback),
+  };
+};
+
+const normalizeQaBenchmarkSeverity = (
+  benchmark: QaBenchmarkComparison | undefined,
+  since: number,
+): QaBenchmarkComparison | undefined => {
+  if (!benchmark) return undefined;
+  const fallback = buildQaBenchmarkSeveritySignal(benchmark, since);
+  return {
+    ...benchmark,
+    ...normalizeQaSeveritySignal(benchmark, fallback),
+  };
+};
+
+export const applyQaRunSeverity = (run: QaRunManifest): QaRunManifest => {
+  const since = run.createdAt;
+  const shards = run.shards.map(shard => normalizeQaShardSeverity(shard, since));
+  const browserHealth = normalizeQaBrowserHealthSummary(
+    run.browserHealth ?? summarizeQaRunBrowserHealth({ shards }),
+    since,
+  );
+  const benchmark = normalizeQaBenchmarkSeverity(run.benchmark, since);
+  const failureClasses = run.failureClasses ?? summarizeQaFailureClasses(shards);
+  const normalizedRun: QaRunManifest = {
+    ...run,
+    shards,
+    browserHealth,
+    ...(benchmark ? { benchmark } : {}),
+    failureClasses,
+  };
+  return {
+    ...normalizedRun,
+    ...normalizeQaSeveritySignal(normalizedRun, buildQaRunSeveritySignal(normalizedRun)),
+  };
+};
+
+export const assertQaReleaseRunSeverity = (run: QaRunManifest): void => {
+  if (run.manifestVersion < 3) return;
+  assertQaSeveritySignal(run, 'QA_RUN');
+  for (const shard of run.shards) {
+    assertQaSeveritySignal(shard, `QA_SHARD_${shard.shard}`);
+  }
+  if (run.benchmark) assertQaSeveritySignal(run.benchmark, 'QA_BENCHMARK');
+  if (run.browserHealth) assertQaSeveritySignal(run.browserHealth, 'QA_BROWSER_HEALTH');
+};
+
 const parseManifestJson = (value: unknown): QaRunManifest | null => {
   if (typeof value !== 'string' || !value.trim()) return null;
   try {
-    return JSON.parse(value) as QaRunManifest;
+    return applyQaRunSeverity(JSON.parse(value) as QaRunManifest);
   } catch {
     return null;
   }
@@ -840,8 +1134,10 @@ const stripQaHistoryPerfSamples = (run: QaRunManifest): QaRunManifest => ({
 });
 
 export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void => {
-  const timing = summarizeQaRunTiming(run);
-  const browserHealth = run.browserHealth ?? summarizeQaRunBrowserHealth(run);
+  const normalizedRun = applyQaRunSeverity(run);
+  assertQaReleaseRunSeverity(normalizedRun);
+  const timing = summarizeQaRunTiming(normalizedRun);
+  const browserHealth = normalizedRun.browserHealth ?? summarizeQaRunBrowserHealth(normalizedRun);
   const db = openQaHistoryDb();
   try {
     db.query(`
@@ -945,26 +1241,26 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
         logs_dir = excluded.logs_dir,
         manifest_json = excluded.manifest_json
     `).run({
-      $runId: run.runId,
-      $createdAt: run.createdAt,
-      $completedAt: run.completedAt,
-      $status: run.status,
-      $totalMs: run.totalMs,
-      $totalShards: run.totalShards,
-      $passedShards: run.passedShards,
-      $failedShards: run.failedShards,
-      $gitHead: run.code?.gitHead ?? null,
-      $gitBranch: run.code?.gitBranch ?? null,
-      $dirty: run.code?.dirty ? 1 : 0,
-      $codeHash: run.code?.codeHash ?? null,
-      $avgLoad1: toNullableNumber(run.perf?.avgLoad1),
-      $peakLoad1: toNullableNumber(run.perf?.peakLoad1),
-      $maxChildCpuPct: toNullableNumber(run.perf?.maxChildCpuPct),
-      $maxChildRssKb: toNullableNumber(run.perf?.maxChildRssKb),
-      $suiteKey: qaRunSuiteKey(run),
-      $benchmarkStatus: run.benchmark?.status ?? null,
-      $benchmarkDeltaPct: run.benchmark?.metrics.find(metric => metric.metric === 'totalMs')?.deltaPct ?? null,
-      $benchmarkComparedRunId: run.benchmark?.comparedRunId ?? null,
+      $runId: normalizedRun.runId,
+      $createdAt: normalizedRun.createdAt,
+      $completedAt: normalizedRun.completedAt,
+      $status: normalizedRun.status,
+      $totalMs: normalizedRun.totalMs,
+      $totalShards: normalizedRun.totalShards,
+      $passedShards: normalizedRun.passedShards,
+      $failedShards: normalizedRun.failedShards,
+      $gitHead: normalizedRun.code?.gitHead ?? null,
+      $gitBranch: normalizedRun.code?.gitBranch ?? null,
+      $dirty: normalizedRun.code?.dirty ? 1 : 0,
+      $codeHash: normalizedRun.code?.codeHash ?? null,
+      $avgLoad1: toNullableNumber(normalizedRun.perf?.avgLoad1),
+      $peakLoad1: toNullableNumber(normalizedRun.perf?.peakLoad1),
+      $maxChildCpuPct: toNullableNumber(normalizedRun.perf?.maxChildCpuPct),
+      $maxChildRssKb: toNullableNumber(normalizedRun.perf?.maxChildRssKb),
+      $suiteKey: qaRunSuiteKey(normalizedRun),
+      $benchmarkStatus: normalizedRun.benchmark?.status ?? null,
+      $benchmarkDeltaPct: normalizedRun.benchmark?.metrics.find(metric => metric.metric === 'totalMs')?.deltaPct ?? null,
+      $benchmarkComparedRunId: normalizedRun.benchmark?.comparedRunId ?? null,
       $browserIssueCount: browserHealth.issueCount,
       $browserErrorCount: browserHealth.errorCount,
       $browserWarningCount: browserHealth.warningCount,
@@ -976,7 +1272,7 @@ export const recordQaRunHistory = (run: QaRunManifest, logsDir: string): void =>
       $apiHealthyMs: timing.apiHealthyMs,
       $playwrightMs: timing.playwrightMs,
       $logsDir: logsDir,
-      $manifestJson: JSON.stringify(stripQaHistoryPerfSamples(run)),
+      $manifestJson: JSON.stringify(stripQaHistoryPerfSamples(normalizedRun)),
     });
   } finally {
     db.close();
@@ -1027,34 +1323,28 @@ const rowToQaRunSummary = (row: Record<string, unknown>): QaRunSummary => {
   const parsed = parseManifestJson(row['manifest_json']);
   if (parsed) return summarizeQaRun(parsed);
   const history = rowToQaHistoryEntry(row);
-  return {
+  const browserHealth = normalizeQaBrowserHealthSummary({
+    issueCount: history.browserIssueCount,
+    errorCount: history.browserErrorCount,
+    warningCount: history.browserWarningCount,
+    networkFailureCount: history.networkFailureCount,
+    httpErrorCount: history.httpErrorCount,
+  } as QaBrowserHealthSummary, history.createdAt);
+  return summarizeQaRun(applyQaRunSeverity({
     manifestVersion: 1,
     runId: history.runId,
     createdAt: history.createdAt,
     completedAt: history.completedAt,
     status: history.status,
     totalMs: history.totalMs,
-    browserHealth: {
-      issueCount: history.browserIssueCount,
-      errorCount: history.browserErrorCount,
-      warningCount: history.browserWarningCount,
-      networkFailureCount: history.networkFailureCount,
-      httpErrorCount: history.httpErrorCount,
-    },
+    browserHealth,
     totalShards: history.totalShards,
     passedShards: history.passedShards,
     failedShards: history.failedShards,
     failureClasses: [],
     args: null,
-    timing: {
-      avgShardMs: history.avgShardMs,
-      maxShardMs: history.maxShardMs,
-      bootstrapMs: history.bootstrapMs,
-      apiHealthyMs: history.apiHealthyMs,
-      playwrightMs: history.playwrightMs,
-    },
-    failingTargets: [],
-  };
+    shards: [],
+  } as unknown as QaRunManifest));
 };
 
 export const findComparableQaBenchmarkRun = (run: QaRunManifest): QaRunManifest | null => {
@@ -1646,7 +1936,8 @@ const collectLegacyShard = async (
   const logTail = logText ? redactQaSecretText(shortTail(logText)) : null;
   const error = status === 'failed' ? redactQaSecretText(shortTail(logText, 40)) : null;
 
-  return {
+  const browserHealth = summarizeQaBrowserIssues(browserIssues);
+  return normalizeQaShardSeverity({
     shard,
     status,
     durationMs: sumPhaseTimings(phaseMs),
@@ -1659,7 +1950,7 @@ const collectLegacyShard = async (
     failureClass: classifyQaShardFailure({ status, error, logTail, browserIssues }),
     phaseMs,
     browserIssues,
-    browserHealth: summarizeQaBrowserIssues(browserIssues),
+    browserHealth,
     timelineSteps,
     slowSteps,
     artifacts,
@@ -1667,7 +1958,7 @@ const collectLegacyShard = async (
     hasTrace: artifacts.some(artifact => artifact.kind === 'trace'),
     handle: metadata?.handle ?? deriveQaTestHandle(metadata?.target ?? null, title),
     description: metadata?.description ?? deriveQaTestDescription(metadata?.target ?? null, title),
-  };
+  } as QaShardManifest, parseRunIdTimestamp(_runId) ?? 0);
 };
 
 const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRunManifest> => {
@@ -1694,7 +1985,7 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
   const browserHealth = summarizeQaRunBrowserHealth({ shards });
   const failureClasses = summarizeQaFailureClasses(shards);
 
-  return {
+  return applyQaRunSeverity({
     manifestVersion: 1,
     runId,
     createdAt: parseRunIdTimestamp(runId) ?? runStat.mtimeMs,
@@ -1708,7 +1999,7 @@ const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRun
     args: null,
     browserHealth,
     shards,
-  };
+  } as QaRunManifest);
 };
 
 const listQaRunIds = async (limit: number): Promise<string[]> => {
@@ -1760,7 +2051,8 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
         const browserIssues = normalizeQaBrowserIssues(shard.browserIssues);
         const logTail = shard.logTail ? redactQaSecretText(shard.logTail) : logText ? redactQaSecretText(shortTail(logText)) : null;
         const error = shard.error ? redactQaSecretText(shard.error) : null;
-        return {
+        const browserHealth = summarizeQaBrowserIssues(browserIssues, parsed.createdAt);
+        return normalizeQaShardSeverity({
           ...shard,
           target,
           title,
@@ -1771,7 +2063,7 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
             sensitivity: artifact.sensitivity ?? classifyQaArtifactSensitivity(artifact),
           })),
           browserIssues,
-          browserHealth: summarizeQaBrowserIssues(browserIssues),
+          browserHealth,
           error,
           failureClass: shard.failureClass ?? classifyQaShardFailure({
             status: shard.status,
@@ -1784,15 +2076,15 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
             ? shard.slowSteps
             : timelineSteps.slice().sort((a, b) => b.ms - a.ms).slice(0, 12),
           logTail,
-        };
+        } as QaShardManifest, parsed.createdAt);
       }),
     );
-    return {
+    return applyQaRunSeverity({
       ...parsed,
       browserHealth: parsed.browserHealth ?? summarizeQaRunBrowserHealth({ shards }),
       failureClasses: parsed.failureClasses ?? summarizeQaFailureClasses(shards),
       shards,
-    };
+    } as QaRunManifest);
   }
   return await buildLegacyManifest(runId, runDir);
 };
@@ -1952,6 +2244,11 @@ export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'perf' |
   failingTargets: string[];
 } => ({
   manifestVersion: run.manifestVersion,
+  severity: run.severity,
+  reason: run.reason,
+  since: run.since,
+  owner: run.owner,
+  evidence: run.evidence,
   runId: run.runId,
   createdAt: run.createdAt,
   completedAt: run.completedAt,

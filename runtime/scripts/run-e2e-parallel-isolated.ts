@@ -31,6 +31,8 @@ import { basename, join, relative, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
+  applyQaRunSeverity,
+  assertQaReleaseRunSeverity,
   compareQaRunWithHistory,
   classifyQaArtifactSensitivity,
   classifyQaShardFailure,
@@ -756,7 +758,7 @@ const writeRunManifest = (
         phaseMs: result.phaseMs,
         perf: result.perf,
         browserIssues,
-        browserHealth: summarizeQaBrowserIssues(browserIssues),
+        browserHealth: summarizeQaBrowserIssues(browserIssues, createdAt),
         timelineSteps,
         logRelativePath: result.logPath.slice(logsDir.length + 1),
         logTail,
@@ -765,19 +767,19 @@ const writeRunManifest = (
         hasVideo: artifacts.some(artifact => artifact.kind === 'video'),
         hasTrace: artifacts.some(artifact => artifact.kind === 'trace'),
       };
-    });
+    }) as unknown as QaRunManifest['shards'];
   const passedShards = shards.filter(shard => shard.status === 'passed').length;
   const failedShards = shards.filter(shard => shard.status === 'failed').length;
   const status: QaRunManifest['status'] = failedShards > 0 ? 'failed' : 'passed';
-  const manifest: QaRunManifest = {
-    manifestVersion: 1,
+  let manifest: QaRunManifest = applyQaRunSeverity({
+    manifestVersion: 3,
     runId: logsDir.split('/').at(-1) || logsDir,
     createdAt,
     completedAt: Date.now(),
     status,
     totalMs,
     code: codeFingerprint,
-    perf: summarizePerfSamples(shards.flatMap(shard => shard.perf.samples ?? [])),
+    perf: summarizePerfSamples(shards.flatMap(shard => shard.perf?.samples ?? [])),
     browserHealth: summarizeQaRunBrowserHealth({ shards }),
     totalShards: shards.length,
     passedShards,
@@ -797,8 +799,10 @@ const writeRunManifest = (
       pwProject: args.pwProject ?? null,
     },
     shards,
-  };
+  } as unknown as QaRunManifest);
   manifest.benchmark = compareQaRunWithHistory(manifest);
+  manifest = applyQaRunSeverity(manifest);
+  assertQaReleaseRunSeverity(manifest);
   writeFileSync(join(logsDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
   recordQaRunHistory(manifest, logsDir);
   return manifest;
