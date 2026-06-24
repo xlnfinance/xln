@@ -1151,6 +1151,8 @@ test.describe('QA cockpit scenario player', () => {
       });
     });
     await page.route('**/api/qa/history/backfill', async (route) => {
+      const body = route.request().postDataJSON() as { confirm?: string };
+      expect(body.confirm).toBe('BACKFILL_QA_HISTORY');
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -1329,6 +1331,8 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-history')).toContainText('regulator-auditor');
     await expect(page.getByTestId('qa-history')).toContainText('verify evidence playback');
     await expect(page.getByTestId('qa-history-backfill-card')).toContainText('Backfill History Index');
+    await expect(page.getByTestId('qa-history-backfill')).toBeDisabled();
+    await page.getByPlaceholder('BACKFILL_QA_HISTORY').fill('BACKFILL_QA_HISTORY');
     await expect(page.getByTestId('qa-history-backfill')).toBeEnabled();
     await page.getByTestId('qa-history-backfill').click();
     await expect(page.getByTestId('qa-history-backfill-result')).toContainText('scanned 12 / recorded 12 / failed 0');
@@ -1690,5 +1694,137 @@ test.describe('QA cockpit scenario player', () => {
     await page.getByRole('textbox', { name: 'confirm' }).fill('RUN');
     await expect(restartRunButton).toBeEnabled();
     expect(runRestartCalled).toBe(false);
+  });
+
+  test('requires typed confirmation before aborting active restart', async ({ page }) => {
+    test.setTimeout(60_000);
+    let activeRestart = true;
+    let abortConfirm = '';
+    const restartStatus = () => activeRestart
+      ? {
+          active: true,
+          auditId: 'fixture-restart-audit-active',
+          pid: 4242,
+          target: 'tests/e2e-qa-cockpit-fixture.spec.ts',
+          title: 'QA cockpit fixture records playback transcript',
+          startedAt: QA_FIXTURE_RUN.createdAt,
+          timeoutMs: 300_000,
+          killGraceMs: 5_000,
+          terminating: false,
+        }
+      : { active: false };
+
+    await page.route('**/api/qa/runs?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          runs: [QA_FIXTURE_SUMMARY],
+          ledger: [QA_FAIL_LEDGER],
+          regression: QA_REGRESSION_REPORT,
+          verdict: QA_FAIL_VERDICT,
+        }),
+      });
+    });
+    await page.route('**/api/qa/run?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, run: QA_FIXTURE_RUN }),
+      });
+    });
+    await page.route('**/api/qa/catalog', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          catalog: QA_CATALOG,
+          restart: restartStatus(),
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/history?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          history: QA_HISTORY,
+          restart: restartStatus(),
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/restart-audit?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, qaAuth: QA_AUTH, audit: QA_RESTART_AUDIT }),
+      });
+    });
+    await page.route('**/api/qa/stories?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          total: QA_STORIES.length,
+          releasePack: QA_RELEASE_PACK,
+          stories: QA_STORIES,
+        }),
+      });
+    });
+    await page.route('**/api/qa/restart/abort', async (route) => {
+      let body: { confirm?: string } = {};
+      try {
+        body = route.request().postDataJSON() as { confirm?: string };
+      } catch {
+        body = {};
+      }
+      abortConfirm = String(body.confirm || '');
+      activeRestart = false;
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          restart: restartStatus(),
+          restartAllowed: true,
+        }),
+      });
+    });
+    await page.route('**/api/qa/artifact?**', async (route) => {
+      const requestUrl = new URL(route.request().url());
+      const artifactPath = requestUrl.searchParams.get('path') || '';
+      const isPng = artifactPath.endsWith('.png');
+      const isVtt = artifactPath.endsWith('.vtt');
+      await route.fulfill({
+        status: 200,
+        contentType: isPng ? 'image/png' : isVtt ? 'text/vtt; charset=utf-8' : 'video/webm',
+        body: isPng ? QA_FIXTURE_PNG : isVtt ? QA_FIXTURE_VTT : QA_FIXTURE_WEBM,
+      });
+    });
+
+    await page.goto('/qa');
+    await expect(page.getByTestId('qa-auth-panel')).toContainText('open', { timeout: 30_000 });
+    await page.getByRole('button', { name: 'Suites' }).click();
+    await expect(page.getByTestId('qa-restart-abort-card')).toContainText('Active restart');
+    const abortButton = page.getByTestId('qa-restart-abort');
+    await expect(abortButton).toBeDisabled();
+    await page.getByPlaceholder('ABORT_RESTART').fill('NOPE');
+    await expect(abortButton).toBeDisabled();
+    await page.getByPlaceholder('ABORT_RESTART').fill('ABORT_RESTART');
+    await expect(abortButton).toBeEnabled();
+    await abortButton.click();
+    await expect.poll(() => abortConfirm).toBe('ABORT_RESTART');
+    await expect(page.getByTestId('qa-restart-abort-card')).toHaveCount(0);
   });
 });

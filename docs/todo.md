@@ -408,8 +408,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `readQaRestartStatus()` is a side-effect-free status reader; `reapQaRestartState()` performs explicit lifecycle transitions before API responses.
   - Evidence: restart unit coverage exercises active, terminating, inactive, watchdog, and cooldown transitions through the API.
 
-- [ ] Confirm destructive/admin actions.
-  - Typed confirm for restart-run, db reset, deleting history, switching admin token, disconnecting during active restart.
+- [x] Confirm destructive/admin actions.
+  - Status: done. Restart run requires operator, reason, expected HEAD, and typed `RUN`; retention purge requires typed `DELETE_OLDER_THAN_30_DAYS`; history backfill now requires typed `BACKFILL_QA_HISTORY`; active restart abort is exposed in the Suites view and requires typed `ABORT_RESTART`. Read mode keeps privileged actions visible but disabled.
+  - Evidence: focused QA cockpit e2e PASS `2/2`, run `20260624-140459-671`, verifies backfill disabled until typed confirm and verifies active restart abort disabled until `ABORT_RESTART`, then confirms the abort endpoint receives that exact phrase. `bun run check:frontend` PASS with `svelte-check 0/0`.
 
 ## missing tests
 
