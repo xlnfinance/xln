@@ -15,9 +15,9 @@
   import { compareStableText } from '$lib/utils/stableSort';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import {
-    formatGraphDualConnectionAccountInfo,
-    formatGraphEntityReserveBalances,
-    formatGraphEntityShortName,
+    formatGraphDualConnectionAccountInfoFromReplicas,
+    formatGraphEntityBalanceInfo,
+    formatGraphEntityShortNameFromReplicas,
     formatGraphMempoolTxLabel,
     formatGraphReserveBadge,
     getGraphEntityFlag,
@@ -3855,48 +3855,25 @@
     }
   }
   function getEntityBalanceInfo(entityId: string): string {
-    const currentReplicas = getTimeAwareReplicas();
-    const replica = [...currentReplicas.entries()]
-      .find(([key]) => key.startsWith(entityId + ':'));
-    return formatGraphEntityReserveBalances({
-      reserves: replica?.[1]?.state?.reserves,
+    return formatGraphEntityBalanceInfo({
+      entityId,
+      replicas: getTimeAwareReplicas(),
       selectedTokenId,
       getTokenSymbol,
     });
   }
   function getEntityShortName(entityId: string): string {
-    const shortId = XLN?.getEntityShortId?.(entityId);
-    const currentReplicas = getTimeAwareReplicas();
-    const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
-    const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
-    return formatGraphEntityShortName({
+    return formatGraphEntityShortNameFromReplicas({
       entityId,
-      runtimeShortId: shortId,
-      signerId: replica?.signerId,
+      replicas: getTimeAwareReplicas(),
+      getEntityShortId: (value) => XLN?.getEntityShortId?.(value),
     });
   }
   function getDualConnectionAccountInfo(entityA: string, entityB: string): { left: string, right: string, leftEntity: string, rightEntity: string } {
-    const currentReplicas = getTimeAwareReplicas();
-    const isALeft = entityA < entityB;
-    const leftId = isALeft ? entityA : entityB;
-    const rightId = isALeft ? entityB : entityA;
-    let accountData: any = null;
-    const leftReplica = [...currentReplicas.entries()]
-      .find(([key]) => key.startsWith(leftId + ':'));
-    if (leftReplica?.[1]?.state?.accounts) {
-      accountData = leftReplica[1].state.accounts.get(rightId);
-    }
-    if (!accountData) {
-      const rightReplica = [...currentReplicas.entries()]
-        .find(([key]) => key.startsWith(rightId + ':'));
-      if (rightReplica?.[1]?.state?.accounts) {
-        accountData = rightReplica[1].state.accounts.get(leftId);
-      }
-    }
-    return formatGraphDualConnectionAccountInfo({
-      leftId,
-      rightId,
-      accountData,
+    return formatGraphDualConnectionAccountInfoFromReplicas({
+      entityA,
+      entityB,
+      replicas: getTimeAwareReplicas(),
       selectedTokenId,
       getAccountTokenDelta,
       deriveEntry,

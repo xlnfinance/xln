@@ -13,6 +13,14 @@ export type GraphDualConnectionAccountInfo = {
   rightEntity: string;
 };
 
+export type GraphReplicaLike = {
+  signerId?: string | null;
+  state?: {
+    reserves?: ReserveMapLike;
+    accounts?: Map<string, { deltas?: Map<number, unknown> }> | null;
+  } | null;
+};
+
 export type GraphScenarioStep = {
   timestamp: number;
   title: string;
@@ -205,6 +213,43 @@ export function formatGraphEntityShortName(input: {
   return input.entityId;
 }
 
+export function findGraphReplicaByEntityId(
+  replicas: Map<string, GraphReplicaLike>,
+  entityId: string,
+): GraphReplicaLike | null {
+  for (const [key, replica] of replicas.entries()) {
+    if (key.startsWith(`${entityId}:`)) return replica;
+  }
+  return null;
+}
+
+export function formatGraphEntityBalanceInfo(input: {
+  entityId: string;
+  replicas: Map<string, GraphReplicaLike>;
+  selectedTokenId: number;
+  getTokenSymbol: (tokenId: number) => string;
+}): string {
+  const replica = findGraphReplicaByEntityId(input.replicas, input.entityId);
+  return formatGraphEntityReserveBalances({
+    reserves: replica?.state?.reserves,
+    selectedTokenId: input.selectedTokenId,
+    getTokenSymbol: input.getTokenSymbol,
+  });
+}
+
+export function formatGraphEntityShortNameFromReplicas(input: {
+  entityId: string;
+  replicas: Map<string, GraphReplicaLike>;
+  getEntityShortId: (entityId: string) => string | null | undefined;
+}): string {
+  const replica = findGraphReplicaByEntityId(input.replicas, input.entityId);
+  return formatGraphEntityShortName({
+    entityId: input.entityId,
+    runtimeShortId: input.getEntityShortId(input.entityId),
+    signerId: replica?.signerId,
+  });
+}
+
 export function formatGraphDualConnectionAccountInfo(input: {
   leftId: string;
   rightId: string;
@@ -251,6 +296,40 @@ export function formatGraphDualConnectionAccountInfo(input: {
     leftEntity,
     rightEntity,
   };
+}
+
+export function formatGraphDualConnectionAccountInfoFromReplicas(input: {
+  entityA: string;
+  entityB: string;
+  replicas: Map<string, GraphReplicaLike>;
+  selectedTokenId: number;
+  getAccountTokenDelta: (accountData: unknown, tokenId: number) => unknown | null;
+  deriveEntry: (tokenDelta: unknown, isLeft: boolean) => GraphDerivedAccountData;
+  getEntityShortName: (entityId: string) => string;
+}): GraphDualConnectionAccountInfo {
+  const isALeft = input.entityA < input.entityB;
+  const leftId = isALeft ? input.entityA : input.entityB;
+  const rightId = isALeft ? input.entityB : input.entityA;
+  let accountData: { deltas?: Map<number, unknown> } | null = null;
+  const leftReplica = findGraphReplicaByEntityId(input.replicas, leftId);
+  if (leftReplica?.state?.accounts) {
+    accountData = leftReplica.state.accounts.get(rightId) || null;
+  }
+  if (!accountData) {
+    const rightReplica = findGraphReplicaByEntityId(input.replicas, rightId);
+    if (rightReplica?.state?.accounts) {
+      accountData = rightReplica.state.accounts.get(leftId) || null;
+    }
+  }
+  return formatGraphDualConnectionAccountInfo({
+    leftId,
+    rightId,
+    accountData,
+    selectedTokenId: input.selectedTokenId,
+    getAccountTokenDelta: input.getAccountTokenDelta,
+    deriveEntry: input.deriveEntry,
+    getEntityShortName: input.getEntityShortName,
+  });
 }
 
 export function parseGraphScenarioSteps(text: string): GraphScenarioStep[] {

@@ -1,9 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  findGraphReplicaByEntityId,
   formatGraphDualConnectionAccountInfo,
+  formatGraphDualConnectionAccountInfoFromReplicas,
+  formatGraphEntityBalanceInfo,
   formatGraphEntityReserveBalances,
   formatGraphEntityShortName,
+  formatGraphEntityShortNameFromReplicas,
   formatGraphFinancialAmount,
   formatGraphMempoolTxLabel,
   formatGraphReserveBadge,
@@ -116,6 +120,59 @@ describe('graph3d helpers', () => {
     expect(info).toEqual({
       left: 'Their Credit: 7\nCollateral: 3\nOur Credit: 5\nNet: 2',
       right: 'Our Credit: 6\nCollateral: 4\nTheir Credit: 8\nNet: -2',
+      leftEntity: 'ALICE',
+      rightEntity: 'BOB',
+    });
+  });
+
+  test('formats graph entity labels and account tooltips from replica maps', () => {
+    const tokenDelta = { tokenId: 1 };
+    const replicas = new Map([
+      ['bob:signer', {
+        signerId: 'prod-JPM-signer',
+        state: {
+          reserves: new Map<string, bigint>([['1', 2500n]]),
+          accounts: new Map(),
+        },
+      }],
+      ['alice:signer', {
+        signerId: 'alice',
+        state: {
+          accounts: new Map([
+            ['bob', { deltas: new Map<number, unknown>([[1, tokenDelta]]) }],
+          ]),
+        },
+      }],
+    ]);
+
+    expect(findGraphReplicaByEntityId(replicas, 'bob')?.signerId).toBe('prod-JPM-signer');
+    expect(formatGraphEntityBalanceInfo({
+      entityId: 'bob',
+      replicas,
+      selectedTokenId: 1,
+      getTokenSymbol: (tokenId) => tokenId === 1 ? 'USDC' : `TKN${tokenId}`,
+    })).toBe('▸ USDC: 2.50k');
+    expect(formatGraphEntityShortNameFromReplicas({
+      entityId: 'bob',
+      replicas,
+      getEntityShortId: () => null,
+    })).toBe('JPM (bob)');
+    expect(formatGraphDualConnectionAccountInfoFromReplicas({
+      entityA: 'bob',
+      entityB: 'alice',
+      replicas,
+      selectedTokenId: 1,
+      getAccountTokenDelta: (account, tokenId) => (account as { deltas: Map<number, unknown> }).deltas.get(tokenId) ?? null,
+      deriveEntry: (_delta, isLeft) => ({
+        delta: isLeft ? 10_000000000000000000 : -10_000000000000000000,
+        ownCreditLimit: isLeft ? 20_000000000000000000 : 30_000000000000000000,
+        peerCreditLimit: isLeft ? 40_000000000000000000 : 50_000000000000000000,
+        collateral: isLeft ? 60_000000000000000000 : 70_000000000000000000,
+      }),
+      getEntityShortName: (entityId) => entityId.toUpperCase(),
+    })).toEqual({
+      left: 'Their Credit: 40\nCollateral: 60\nOur Credit: 20\nNet: 10',
+      right: 'Our Credit: 30\nCollateral: 70\nTheir Credit: 50\nNet: -10',
       leftEntity: 'ALICE',
       rightEntity: 'BOB',
     });
