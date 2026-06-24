@@ -39,12 +39,27 @@
   } from './swap-panel-helpers';
   import {
     compareStableText,
-    decimalPlacesFromScale,
     normalizeDecimalInput,
     normalizeDisplayPriceForInput,
     parseDecimalAmountToBigInt,
     toBigIntSafe,
   } from './swap-formatting';
+  import {
+    AGGREGATED_ORDERBOOK_DEPTH,
+    FILLED_DISPLAY_PPM_THRESHOLD,
+    MAX_PRICE_DEVIATION_BPS,
+    MIN_ORDER_NOTIONAL_USD,
+    ORDERBOOK_LOT_SCALE,
+    ORDERBOOK_PRICE_DECIMALS,
+    ORDERBOOK_PRICE_SCALE,
+    ORDERBOOK_SNAPSHOT_FRESH_MS,
+    SELECTED_ORDERBOOK_DEPTH,
+    formatSwapTokenAmount,
+    formatSwapTokenAmountForInput,
+    parseSwapDisplayPriceTicks,
+    requantizeSwapOrderAtLimitPrice,
+    type PreparedSwapOrderLike,
+  } from './swap-order-math';
   import {
     buildDeterministicSwapOfferId as buildSwapOfferId,
     buildRoutedRouteCandidates as buildRoutedRouteCandidatesPure,
@@ -101,20 +116,6 @@
   let selectedRouteEntityId = '';
   let selectedRouteEntityName = '';
   let selectedRouteJurisdictionLabel = '';
-  const AGGREGATED_ORDERBOOK_DEPTH = 10;
-  const SELECTED_ORDERBOOK_DEPTH = 10;
-  const ORDERBOOK_PRICE_SCALE = 10_000n;
-  const ORDERBOOK_LOT_SCALE = 10n ** 12n;
-  const ORDERBOOK_SNAPSHOT_FRESH_MS = 10_000;
-  type PreparedSwapOrderLike = {
-    side: 0 | 1;
-    priceTicks: bigint;
-    effectiveGive: bigint;
-    effectiveWant: bigint;
-    unspentGiveAmount: bigint;
-  };
-  const ORDERBOOK_PRICE_DECIMALS = decimalPlacesFromScale(ORDERBOOK_PRICE_SCALE);
-  const MAX_PRICE_DEVIATION_BPS = 3000n; // 30%
   type BookSide = 'bid' | 'ask';
   type SwapOfferLike = SwapBookEntry;
   type ClickedOrderLevel = {
@@ -246,8 +247,6 @@
   let crossCurrentPeerCreditLimit = 0n;
   let canAutoPrepareCrossInboundCapacity = false;
   let placingSwapOffer = false;
-  const MIN_ORDER_NOTIONAL_USD = 10;
-  const FILLED_DISPLAY_PPM_THRESHOLD = 999_950n;
 
     $: activeXlnFunctions = $xlnFunctions;
     $: activeFrame = env;
@@ -3327,60 +3326,24 @@
 
   // Format BigInt for display
   function formatAmount(amount: bigint, tokenIdValue: number): string {
-    const decimals = BigInt(getTokenDecimals(tokenIdValue));
-    const ONE = 10n ** decimals;
-    const whole = amount / ONE;
-    const frac = amount % ONE;
-    if (frac === 0n) return whole.toString();
-    return `${whole}.${frac.toString().padStart(Number(decimals), '0').replace(/0+$/, '')}`;
+    return formatSwapTokenAmount(amount, getTokenDecimals(tokenIdValue));
   }
 
   function formatAmountForInput(amount: bigint, tokenIdValue: number): string {
-    const full = formatAmount(amount, tokenIdValue);
-    const dotIndex = full.indexOf('.');
-    if (dotIndex < 0) return full;
-    const maxDecimals = Math.min(6, Math.max(0, getTokenDecimals(tokenIdValue)));
-    if (maxDecimals <= 0) return full.slice(0, dotIndex);
-    const whole = full.slice(0, dotIndex);
-    const frac = full.slice(dotIndex + 1, dotIndex + 1 + maxDecimals).replace(/0+$/, '');
-    return frac.length > 0 ? `${whole}.${frac}` : whole;
+    return formatSwapTokenAmountForInput(amount, getTokenDecimals(tokenIdValue));
   }
 
   function requantizeAtLimitPrice(remainingGiveAmount: bigint, priceTicks: bigint): PreparedSwapOrderLike | null {
-    if (remainingGiveAmount <= 0n || priceTicks <= 0n) return null;
-    const activeMode = orderMode !== 'none' ? orderMode : tradeSide;
-    const side = activeMode === 'sell-base' ? 1 : 0;
-    if (side === 1) {
-      const quantizedBaseAmount = (remainingGiveAmount / ORDERBOOK_LOT_SCALE) * ORDERBOOK_LOT_SCALE;
-      if (quantizedBaseAmount <= 0n) return null;
-      const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
-      if (quantizedQuoteAmount <= 0n) return null;
-      return {
-        side,
-        priceTicks,
-        effectiveGive: quantizedBaseAmount,
-        effectiveWant: quantizedQuoteAmount,
-        unspentGiveAmount: remainingGiveAmount - quantizedBaseAmount,
-      };
-    }
-    const quantizedBaseAmount = ((remainingGiveAmount * ORDERBOOK_PRICE_SCALE) / priceTicks / ORDERBOOK_LOT_SCALE) * ORDERBOOK_LOT_SCALE;
-    if (quantizedBaseAmount <= 0n) return null;
-    const quantizedQuoteAmount = (quantizedBaseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
-    if (quantizedQuoteAmount <= 0n) return null;
-    return {
-      side,
+    return requantizeSwapOrderAtLimitPrice({
+      remainingGiveAmount,
       priceTicks,
-      effectiveGive: quantizedQuoteAmount,
-      effectiveWant: quantizedBaseAmount,
-      unspentGiveAmount: remainingGiveAmount > quantizedQuoteAmount ? remainingGiveAmount - quantizedQuoteAmount : 0n,
-    };
+      orderMode,
+      tradeSide,
+    });
   }
 
   function parseDisplayPriceTicks(displayPrice: string, fallbackPriceTicks: bigint): bigint {
-    const normalized = normalizeDisplayPriceForInput(displayPrice);
-    const ticks = parseDecimalAmountToBigInt(normalized, ORDERBOOK_PRICE_DECIMALS);
-    if (ticks <= 0n) return fallbackPriceTicks;
-    return ticks > 0n ? ticks : fallbackPriceTicks;
+    return parseSwapDisplayPriceTicks(displayPrice, fallbackPriceTicks);
   }
 
   function stepPrice(direction: 1 | -1): void {
