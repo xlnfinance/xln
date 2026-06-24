@@ -332,7 +332,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `SwapPanel.svelte` 4,119 lines, `Graph3DPanel.svelte` 4,111 lines, `EntityPanelTabs.svelte` 4,104 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `Graph3DPanel.svelte` 4,111 lines, `EntityPanelTabs.svelte` 4,104 lines, `SwapPanel.svelte` 4,082 lines, and `/qa/+page.svelte` 3,576 lines.
 
 - [x] Move Graph3D pure helpers out of the Svelte panel.
   - Impact: medium.
@@ -353,6 +353,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Current issue: `SwapPanel.svelte` mixed hub candidate selection, jurisdiction display normalization, pair labels, initials, badge text, token-map lookup, and numeric clamp helpers into the swap UI component.
   - Status: done. Added `swap-panel-helpers.ts` for the pure helper layer and kept `SwapPanel.svelte` focused on Svelte state, runtime reads, and event handlers. `SwapPanel.svelte` is down to 4,119 lines.
   - Evidence: L1 `bun test tests/frontend/swap-panel-helpers.test.ts` PASS `4/4`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused swap orderbook dropdown e2e `20260624-171030-362` PASS `1/1`, wall `20.9s`, code hash `41377d1db2b7f14d`, browser errors `0`, benchmark `INSUFFICIENT` because no previous comparable run exists.
+  - Progress: second extraction done. Orderbook depth/price/lot/freshness/notional constants, token amount formatting, input amount trimming, price tick parsing, and buy/sell lot requantization moved into `swap-order-math.ts`; `SwapPanel.svelte` is down to 4,082 lines.
+  - Evidence: L1 `bun test tests/frontend/swap-order-math.test.ts tests/frontend/swap-panel-helpers.test.ts` PASS `8/8`; `bun run check:frontend-file-size` PASS; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused swap manual price override e2e `20260624-183724-976` PASS `1/1`, wall `26.4s`, code hash `1d151d54346f27a2`, benchmark `INSUFFICIENT` because no previous comparable run exists.
 
 - [x] Move QA cockpit API/UI types out of the Svelte route.
   - Impact: medium-high.
