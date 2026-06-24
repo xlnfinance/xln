@@ -14,12 +14,28 @@ export type QaScenarioStep = {
   endMs?: number;
 };
 
+export type QaAuthoredScenarioStep = {
+  title: string;
+  text: string;
+  ms?: number;
+  startMs?: number;
+  endMs?: number;
+};
+
+export type QaScenarioMetadata = {
+  summary10w: string | null;
+  steps: QaAuthoredScenarioStep[];
+  owner: string | null;
+  severityPolicy: string | null;
+};
+
 export type QaScenarioShardLike = {
   shard: number;
   status: 'passed' | 'failed' | 'unknown';
   durationMs: number | null;
   handle: string | null;
   description: string | null;
+  scenario?: QaScenarioMetadata | null;
   target: string | null;
   title: string | null;
   error?: string | null;
@@ -75,6 +91,9 @@ const cleanText = (value: string | null | undefined): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const cleanScenarioText = (value: string | null | undefined): string =>
+  String(value || '').replace(/\s+/g, ' ').trim();
+
 const capitalize = (value: string): string =>
   value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
 
@@ -115,10 +134,12 @@ const pushCue = (
   return cursorMs + safeDuration;
 };
 
-const hasVideoTiming = (step: QaScenarioStep): boolean =>
-  Number.isFinite(Number(step.startMs)) &&
-  Number.isFinite(Number(step.endMs)) &&
-  Number(step.endMs) >= Number(step.startMs);
+const hasVideoTiming = (step: QaScenarioStep | null | undefined): step is QaScenarioStep => {
+  if (!step) return false;
+  return Number.isFinite(Number(step.startMs)) &&
+    Number.isFinite(Number(step.endMs)) &&
+    Number(step.endMs) >= Number(step.startMs);
+};
 
 const pushVideoCue = (
   cues: QaScenarioCue[],
@@ -140,6 +161,31 @@ const pushVideoCue = (
     meta: `${formatTimeRange(startMs, endMs)} / ${formatMs(durationMs)}`,
     timebase: 'video',
   });
+};
+
+const pushAuthoredVideoCue = (
+  cues: QaScenarioCue[],
+  step: QaAuthoredScenarioStep,
+  fallback?: QaScenarioStep,
+): boolean => {
+  const fallbackStartMs = hasVideoTiming(fallback) ? Number(fallback.startMs) : null;
+  const fallbackEndMs = hasVideoTiming(fallback) ? Number(fallback.endMs) : null;
+  const startMs = Number.isFinite(Number(step.startMs)) ? Number(step.startMs) : fallbackStartMs;
+  const endMs = Number.isFinite(Number(step.endMs)) ? Number(step.endMs) : fallbackEndMs;
+  if (startMs === null || endMs === null || endMs < startMs) return false;
+  const durationMs = Number.isFinite(Number(step.ms)) ? Number(step.ms) : endMs - startMs;
+  const title = cleanScenarioText(step.title) || 'Browser Step';
+  const id = `${cues.length}-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'cue'}`;
+  cues.push({
+    id,
+    startMs: Math.max(0, Math.floor(startMs)),
+    endMs: Math.max(0, Math.floor(endMs)),
+    title,
+    text: cleanScenarioText(step.text),
+    meta: `${formatTimeRange(startMs, endMs)} / ${formatMs(durationMs)}`,
+    timebase: 'video',
+  });
+  return true;
 };
 
 const pushFailureCue = (
@@ -178,6 +224,10 @@ export function qaScenarioDescription(shard: QaScenarioShardLike): string {
   return capitalize(cleanText(shard.description) || cleanText(shard.title) || cleanText(shard.target) || 'No test description recorded.');
 }
 
+export function qaScenarioSummary(shard: QaScenarioShardLike): string {
+  return cleanScenarioText(shard.scenario?.summary10w) || tenWordScenarioSummary(qaScenarioDescription(shard));
+}
+
 export function cleanTimingLabel(label: string): string {
   const withoutPrefix = label.replace(/^(E2E-TIMING|MESH-TIMING):/i, '');
   return cleanText(withoutPrefix);
@@ -191,46 +241,69 @@ export function buildQaScenarioCues(shard: QaScenarioShardLike): QaScenarioCue[]
     .filter(step => Number.isFinite(step.ms) && step.ms > 0)
     .slice(0, 48);
   const videoSteps = steps.filter(hasVideoTiming);
+  const authoredSteps = (shard.scenario?.steps ?? [])
+    .filter(step => cleanScenarioText(step.title) && cleanScenarioText(step.text))
+    .slice(0, 48);
 
   if (videoSteps.length > 0) {
-    for (const step of videoSteps) pushVideoCue(cues, step);
+    for (const [index, step] of videoSteps.entries()) {
+      const authored = authoredSteps[index] ?? null;
+      if (!authored || !pushAuthoredVideoCue(cues, authored, step)) pushVideoCue(cues, step);
+    }
+    for (const authored of authoredSteps.slice(videoSteps.length)) {
+      pushAuthoredVideoCue(cues, authored);
+    }
     if (shard.status === 'failed') pushFailureCue(cues, shard);
     return cues;
   }
 
   cursorMs = pushCue(cues, cursorMs, 1200, 'Scenario', description, shard.handle || `shard-${shard.shard}`);
 
-  const phaseMs = shard.phaseMs;
-  if (phaseMs) {
-    for (const phase of SETUP_PHASES) {
-      const durationMs = Number(phaseMs[phase.key] || 0);
-      if (durationMs <= 0) continue;
-      cursorMs = pushCue(cues, cursorMs, durationMs, phase.title, phase.text, formatMs(durationMs));
-    }
-  }
-
-  if (steps.length > 0) {
-    for (const step of steps) {
-      const label = cleanTimingLabel(step.label);
-      const title = capitalize(tenWordScenarioSummary(label).split(' ').slice(0, 4).join(' ')) || 'Browser Step';
+  if (authoredSteps.length > 0) {
+    for (const step of authoredSteps) {
+      const durationMs = Number.isFinite(Number(step.ms)) && Number(step.ms) > 0 ? Number(step.ms) : 1200;
       cursorMs = pushCue(
         cues,
         cursorMs,
-        step.ms,
-        title,
-        `${capitalize(label)} completed in ${formatMs(step.ms)}.`,
-        formatMs(step.ms),
+        durationMs,
+        cleanScenarioText(step.title),
+        cleanScenarioText(step.text),
+        formatMs(durationMs),
       );
     }
-  } else if (phaseMs && phaseMs.playwright > 0) {
-    cursorMs = pushCue(
-      cues,
-      cursorMs,
-      phaseMs.playwright,
-      'Browser Run',
-      'Playwright drives the wallet and verifies the scenario outcome.',
-      formatMs(phaseMs.playwright),
-    );
+  } else {
+    const phaseMs = shard.phaseMs;
+    if (phaseMs) {
+      for (const phase of SETUP_PHASES) {
+        const durationMs = Number(phaseMs[phase.key] || 0);
+        if (durationMs <= 0) continue;
+        cursorMs = pushCue(cues, cursorMs, durationMs, phase.title, phase.text, formatMs(durationMs));
+      }
+    }
+
+    if (steps.length > 0) {
+      for (const step of steps) {
+        const label = cleanTimingLabel(step.label);
+        const title = capitalize(tenWordScenarioSummary(label).split(' ').slice(0, 4).join(' ')) || 'Browser Step';
+        cursorMs = pushCue(
+          cues,
+          cursorMs,
+          step.ms,
+          title,
+          `${capitalize(label)} completed in ${formatMs(step.ms)}.`,
+          formatMs(step.ms),
+        );
+      }
+    } else if (phaseMs && phaseMs.playwright > 0) {
+      cursorMs = pushCue(
+        cues,
+        cursorMs,
+        phaseMs.playwright,
+        'Browser Run',
+        'Playwright drives the wallet and verifies the scenario outcome.',
+        formatMs(phaseMs.playwright),
+      );
+    }
   }
 
   if (shard.status === 'failed') {
