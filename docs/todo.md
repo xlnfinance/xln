@@ -292,6 +292,8 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Evidence: L1 first exposed an implicit `string | null` mode type and then passed after source typing; L2 focused move routed-path browser flow PASS `1/1`, run `20260624-155300-762`, wall `32.7s`, code hash `129dd604efcaa79c`, benchmark OK with host-load-only delta. Updated three move batch UX gallery PNGs from the e2e run.
   - Progress: fifth extraction done. Repeated account workspace empty-state markup moved into `LiveRequiredState.svelte`; parent keeps only the mode conditions.
   - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused move routed-path browser flow PASS `1/1`, run `20260624-155713-677`, wall `31.7s`, code hash `47745f57390a040e`, benchmark OK vs `20260624-155300-762`.
+  - Progress: sixth extraction done. Account manage tab navigation moved into `ConfigureWorkspaceTabs.svelte`; parent keeps form rendering and selected-tab state only.
+  - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; L2 focused UI screenshot browser flow PASS `1/1`, run `20260624-160118-721`, wall `31.4s`, code hash `241c8b94ecb691be`, benchmark insufficient because no previous comparable run. Regenerated gallery PNGs were restored because the nav extraction is visually identical and the PNG deltas were rerun churn.
 
 ## p2 performance and scale
 

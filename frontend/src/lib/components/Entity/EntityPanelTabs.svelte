@@ -61,6 +61,7 @@
   import AssetWalletMeta from './AssetWalletMeta.svelte';
   import PendingBatchNotice from './PendingBatchNotice.svelte';
   import LiveRequiredState from './LiveRequiredState.svelte';
+  import ConfigureWorkspaceTabs from './ConfigureWorkspaceTabs.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
@@ -5735,48 +5736,10 @@
                     on:change={handleWorkspaceAccountChange}
                   />
                 </div>
-                <nav class="configure-tabs" aria-label="Account manage workspace">
-                  <button
-                    class="configure-tab"
-                    data-testid="configure-tab-extend-credit"
-                    class:active={configureWorkspaceTab === 'extend-credit'}
-                    on:click={() => configureWorkspaceTab = 'extend-credit'}
-                  >
-                    Extend Credit
-                  </button>
-                  <button
-                    class="configure-tab"
-                    data-testid="configure-tab-request-credit"
-                    class:active={configureWorkspaceTab === 'request-credit'}
-                    on:click={() => configureWorkspaceTab = 'request-credit'}
-                  >
-                    Request Credit
-                  </button>
-                  <button
-                    class="configure-tab"
-                    data-testid="configure-tab-collateral"
-                    class:active={configureWorkspaceTab === 'collateral'}
-                    on:click={() => configureWorkspaceTab = 'collateral'}
-                  >
-                    Request Collateral
-                  </button>
-                  <button
-                    class="configure-tab"
-                    data-testid="configure-tab-token"
-                    class:active={configureWorkspaceTab === 'token'}
-                    on:click={() => configureWorkspaceTab = 'token'}
-                  >
-                    Add Token
-                  </button>
-                  <button
-                    class="configure-tab danger"
-                    data-testid="configure-tab-dispute"
-                    class:active={configureWorkspaceTab === 'dispute'}
-                    on:click={() => configureWorkspaceTab = 'dispute'}
-                  >
-                    Dispute
-                  </button>
-                </nav>
+                <ConfigureWorkspaceTabs
+                  activeTab={configureWorkspaceTab}
+                  selectTab={(tab) => configureWorkspaceTab = tab}
+                />
 
                 {#if !workspaceAccountId}
                   <LiveRequiredState message="Select workspace account above first." />
@@ -6612,48 +6575,6 @@
     background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #18181b)) 98%, transparent);
     padding: 10px;
     box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 6%, transparent);
-  }
-
-  .configure-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
-  }
-
-  .configure-tab {
-    padding: 8px 12px;
-    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 75%, transparent);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--theme-input-bg, #09090b) 88%, transparent);
-    color: var(--theme-text-secondary, #a1a1aa);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .configure-tab:hover {
-    color: var(--theme-text-primary, #e4e4e7);
-    border-color: color-mix(in srgb, var(--theme-border, #27272a) 85%, white 15%);
-  }
-
-  .configure-tab.active {
-    color: var(--theme-accent, #fbbf24);
-    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 65%, transparent);
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 10%, transparent);
-  }
-
-  .configure-tab.danger {
-    color: #fca5a5;
-    border-color: rgba(239, 68, 68, 0.4);
-  }
-
-  .configure-tab.danger:hover,
-  .configure-tab.danger.active {
-    color: #fecaca;
-    border-color: rgba(239, 68, 68, 0.8);
-    background: rgba(127, 29, 29, 0.25);
   }
 
   .configure-token-card {
