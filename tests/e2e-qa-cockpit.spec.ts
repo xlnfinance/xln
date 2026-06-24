@@ -1036,6 +1036,40 @@ const QA_RESTART_AUDIT = [
 ];
 
 test.describe('QA cockpit scenario player', () => {
+  test('shows the standalone runs ledger across test surfaces', async ({ page }) => {
+    await page.route('**/api/qa/runs?**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          ok: true,
+          qaAuth: QA_AUTH,
+          runs: [QA_FIXTURE_SUMMARY, QA_FAST_SUMMARY],
+          ledger: [QA_FAIL_LEDGER, QA_FAST_LEDGER],
+          regression: QA_REGRESSION_REPORT,
+          verdict: QA_FAIL_VERDICT,
+        }),
+      });
+    });
+
+    await page.goto('/runs');
+    await expect(page.getByRole('heading', { name: 'Runs Ledger' })).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId('runs-summary')).toContainText('Total');
+    await expect(page.getByTestId('runs-summary')).toContainText('2');
+    await expect(page.getByTestId('runs-ledger')).toContainText('qa.cockpit-fixture');
+    await expect(page.getByTestId('runs-ledger')).toContainText('regulator-auditor');
+    await expect(page.getByTestId('runs-ledger')).toContainText('release-gate');
+    await expect(page.getByTestId('runs-ledger')).toContainText('browser 1 err / 2 warn / network 1');
+    await expect(page.getByTestId('runs-ledger-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
+
+    await page.getByTestId('runs-sort').selectOption('stack-fast');
+    await expect(page.getByTestId('runs-ledger-row').first()).toHaveAttribute('data-run-id', QA_FAST_RUN_ID);
+
+    await page.getByTestId('runs-search').fill('release-gate');
+    await expect(page.getByTestId('runs-ledger-row')).toHaveCount(1);
+    await expect(page.getByTestId('runs-open-qa')).toHaveAttribute('href', `/qa?runId=${QA_FIXTURE_RUN_ID}`);
+  });
+
   test('plays recorded scenario videos with short copy and synced transcript', async ({ page }) => {
     test.setTimeout(90_000);
     let runsPayload = {
