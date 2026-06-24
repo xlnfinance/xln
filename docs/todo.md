@@ -306,7 +306,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Impact: high.
   - Requirement: no frontend source file can exceed 5,000 lines; this is now a check-time invariant, not a convention.
   - Status: done. `bun run check` now runs `runtime/scripts/check-frontend-file-size.ts` before the frontend build. The gate scans `frontend/src` `.svelte`, `.ts`, and `.js` files and fails loudly on violations.
-  - Evidence: `bun run check` PASS. Largest frontend files after the split are `EntityPanelTabs.svelte` 4,649 lines, `Graph3DPanel.svelte` 4,344 lines, `SwapPanel.svelte` 4,210 lines, and `/qa/+page.svelte` 3,576 lines.
+  - Evidence: `bun run check` PASS. Largest frontend files after the split are `EntityPanelTabs.svelte` 4,649 lines, `Graph3DPanel.svelte` 4,280 lines, `SwapPanel.svelte` 4,210 lines, and `/qa/+page.svelte` 3,576 lines.
+
+- [x] Move Graph3D pure helpers out of the Svelte panel.
+  - Impact: medium.
+  - Current issue: `Graph3DPanel.svelte` mixed reserve snapshot parsing and J-machine tx label formatting into the Three.js scene component, making visual debugger changes harder to audit.
+  - Status: done. Added `graph3d-helpers.ts` for reserve map/object normalization, total reserve calculation, single-token reserve lookup, and mempool tx label formatting. The BrowserVM/Graph3D visual path remains intact; renderer, scene lifecycle, and BrowserVM behavior were not removed or replaced.
+  - Evidence: L1 `bun test tests/frontend/graph3d-helpers.test.ts` PASS `3/3`; `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused BrowserVM/Graph3D e2e `20260624-170344-945` PASS `1/1`, wall `12.8s`, code hash `b62ef19304a2c9f6`, browser errors `0`.
 
 - [x] Move QA cockpit API/UI types out of the Svelte route.
   - Impact: medium-high.

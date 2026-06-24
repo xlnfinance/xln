@@ -14,6 +14,12 @@
   import EntityMiniPanel from '../components/EntityMiniPanel.svelte';
   import { compareStableText } from '$lib/utils/stableSort';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+  import {
+    formatGraphMempoolTxLabel,
+    graphReserveValue,
+    graphReserveValues,
+    graphTotalReserves,
+  } from './graph3d-helpers';
   let showMiniPanel = false;
   let miniPanelEntityId = '';
   let miniPanelEntityName = '';
@@ -69,45 +75,6 @@
       throw new Error(`${action} requires live runtime environment`);
     }
     return liveEnv;
-  }
-  function getReserveValues(reserves: Map<string, bigint> | Record<string, unknown> | undefined): bigint[] {
-    if (!reserves) return [];
-    if (reserves instanceof Map) {
-      return Array.from(reserves.values());
-    }
-    if (typeof reserves === 'object') {
-      return Object.values(reserves).map((v: unknown) => {
-        if (typeof v === 'string') {
-          const numStr = v.replace(/n$/, '');
-          return BigInt(numStr);
-        }
-        return BigInt(v as bigint);
-      });
-    }
-    return [];
-  }
-  function getTotalReserves(replica: any): bigint {
-    const values = getReserveValues(replica?.state?.reserves);
-    let total = 0n;
-    for (const amount of values) {
-      total += amount;
-    }
-    return total;
-  }
-  function getReserveValue(reserves: Map<string, bigint> | Record<string, unknown> | undefined, key: string): bigint {
-    if (!reserves) return 0n;
-    if (reserves instanceof Map) {
-      return reserves.get(key) || (reserves as Map<any, bigint>).get(Number(key)) || 0n;
-    }
-    if (typeof reserves === 'object') {
-      const v = (reserves as Record<string, unknown>)[key];
-      if (v === undefined || v === null) return 0n;
-      if (typeof v === 'string') {
-        return BigInt(v.replace(/n$/, ''));
-      }
-      return BigInt(v as bigint);
-    }
-    return 0n;
   }
   interface JBlockHistoryEntry {
     blockNumber: bigint;
@@ -626,43 +593,12 @@
       -halfGrid + zIndex * spacing
     );
     if (tx) {
-      const label = formatMempoolTxLabel(tx, blockHeight);
+      const label = formatGraphMempoolTxLabel(tx, blockHeight);
       const labelSprite = createTxLabelSprite(label);
       labelSprite.position.set(0, -(cubeSize + 0.3), 0); // Below the cube
       group.add(labelSprite);
     }
     return group;
-  }
-  function formatMempoolTxLabel(tx: any, blockHeight?: number): string {
-    if (!tx) return 'batch';
-    if (tx.type === 'batch' && tx.data?.batch) {
-      const batch = tx.data.batch;
-      const parts: string[] = [];
-      const r2rCount = batch.reserveToReserve?.length || 0;
-      if (r2rCount > 0) parts.push(`${r2rCount}R2R`);
-      const r2cCount = batch.reserveToCollateral?.length || 0;
-      if (r2cCount > 0) parts.push(`+${r2cCount}R2C`);
-      const settlements = batch.settlements || [];
-      let withdrawals = 0; // Red (collateral out)
-      let deposits = 0; // Green (collateral in)
-      for (const settle of settlements) {
-        for (const diff of settle.diffs || []) {
-          if (diff.collateralDiff < 0) withdrawals++;
-          if (diff.collateralDiff > 0) deposits++;
-        }
-      }
-      if (withdrawals > 0) parts.push(`-${withdrawals}W`); // W=withdrawal (red)
-      if (deposits > 0) parts.push(`+${deposits}D`); // D=deposit (green)
-      const summary = parts.join(' ') || 'empty';
-      const fromEntity = tx.entityId?.slice(-1) || '?';
-      return `E${fromEntity}: ${summary}`;
-    }
-    const blockPrefix = blockHeight !== undefined ? `#${blockHeight} ` : '';
-    const type = (tx.type || 'tx').toUpperCase();
-    const from = tx.from?.slice(-1) || '?';
-    const to = tx.to?.slice(-1) || '?';
-    const amount = tx.amount ? `$${Number(tx.amount / (10n ** 18n) / 1_000_000n)}M` : '';
-    return `${blockPrefix}${type}: ${from}→${to} ${amount}`.trim();
   }
   function createTxLabelSprite(text: string): THREE.Sprite {
     const canvas = document.createElement('canvas');
@@ -2610,7 +2546,7 @@
     }
     let balanceStr = '';
     if (replica?.state?.reserves) {
-      const totalReserves = getTotalReserves(replica);
+      const totalReserves = graphTotalReserves(replica);
       const reserveValue = Number(totalReserves) / 1e18;
       if (reserveValue >= 1000000) {
         const millions = reserveValue / 1000000;
@@ -2773,7 +2709,7 @@
         (k: any) => k.startsWith(entity.id + ':')
       );
       const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
-      const reserveAmount = getReserveValue(replica?.state?.reserves, String(selectedTokenId));
+      const reserveAmount = graphReserveValue(replica?.state?.reserves, String(selectedTokenId));
       if (forceRecreateLabels) {
         const material = entity.mesh.material as THREE.MeshLambertMaterial;
         if (material && !entity.mesh.userData['isFed']) { // Don't change Fed color
@@ -3696,7 +3632,7 @@
       if (!replica?.state?.reserves) {
         return EMPTY_SIZE;
       }
-      const totalReserves = getTotalReserves(replica);
+      const totalReserves = graphTotalReserves(replica);
       const reserveValueUSD = Number(totalReserves) / 1e18;
       if (reserveValueUSD <= 0) {
         return EMPTY_SIZE;
@@ -3711,7 +3647,7 @@
     for (const [key, value] of currentReplicas) {
       if (key.startsWith(entityId + ':')) {
         const replica = value as any;
-        const reserveValues = getReserveValues(replica?.state?.reserves);
+        const reserveValues = graphReserveValues(replica?.state?.reserves);
         for (const amount of reserveValues) {
           if (amount > 0n) return true;
         }
