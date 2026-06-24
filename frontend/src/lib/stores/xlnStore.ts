@@ -38,8 +38,9 @@ let remoteAdapterRefreshPromise: Promise<Env | null> | null = null;
 let activeRuntimeAdapterConfig: RuntimeAdapterConfig | null = null;
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
 const DEFAULT_REMOTE_ADAPTER_PATH = '/rpc';
-const REMOTE_VIEW_PAGE_SIZE = 10;
-const REMOTE_HISTORY_FRAME_LIMIT = 12;
+export const REMOTE_VIEW_PAGE_SIZE = 10;
+export const REMOTE_HISTORY_FRAME_LIMIT = 12;
+export const REMOTE_HISTORY_SCAN_CACHE_LIMIT = 24;
 
 type FrontendEntitySummary = {
   id: string;
@@ -174,6 +175,34 @@ export const appRuntimeAdapterEndpoint = writable<string>('');
 export const appRuntimeAdapterActiveEntityId = writable<string>('');
 export const appRuntimeAdapterAccountsPage = writable<number>(0);
 export const appRuntimeAdapterBooksPage = writable<number>(0);
+export type RuntimeAdapterHistoryScanState = {
+  loading: boolean;
+  error: string | null;
+  requestedHeight: number | null;
+  scannedHeight: number | null;
+  latestHeight: number | null;
+  framesCached: number;
+  durationMs: number | null;
+  accountsShown: number | null;
+  accountsTotal: number | null;
+  booksShown: number | null;
+  booksTotal: number | null;
+  endpoint: string;
+};
+export const appRuntimeAdapterHistoryScan = writable<RuntimeAdapterHistoryScanState>({
+  loading: false,
+  error: null,
+  requestedHeight: null,
+  scannedHeight: null,
+  latestHeight: null,
+  framesCached: 0,
+  durationMs: null,
+  accountsShown: null,
+  accountsTotal: null,
+  booksShown: null,
+  booksTotal: null,
+  endpoint: '',
+});
 export const appRuntimeAdapterPageInfo = writable<{
   entityId: string;
   accountsShown: number;
@@ -400,6 +429,25 @@ const trimRemoteHistoryCache = (): void => {
     if (!firstKey) return;
     remoteHistoryCache.delete(firstKey);
   }
+};
+
+const mergeRemoteHistoryFrame = (frames: EnvSnapshot[], frame: EnvSnapshot): EnvSnapshot[] => {
+  const targetHeight = Math.max(0, Math.floor(Number(frame.height || 0)));
+  const byHeight = new Map<number, EnvSnapshot>();
+  for (const item of frames) {
+    const height = Math.max(0, Math.floor(Number(item.height || 0)));
+    if (height > 0) byHeight.set(height, item);
+  }
+  if (targetHeight > 0) byHeight.set(targetHeight, frame);
+  const sorted = Array.from(byHeight.values()).sort((left, right) =>
+    Math.max(0, Number(left.height || 0)) - Math.max(0, Number(right.height || 0)),
+  );
+  if (sorted.length <= REMOTE_HISTORY_SCAN_CACHE_LIMIT) return sorted;
+  const tail = sorted.slice(-REMOTE_HISTORY_SCAN_CACHE_LIMIT);
+  if (tail.some((item) => Math.max(0, Number(item.height || 0)) === targetHeight)) return tail;
+  return [frame, ...tail.slice(-(REMOTE_HISTORY_SCAN_CACHE_LIMIT - 1))].sort((left, right) =>
+    Math.max(0, Number(left.height || 0)) - Math.max(0, Number(right.height || 0)),
+  );
 };
 
 const isRemoteHistoryBoundaryError = (error: unknown): boolean => {
@@ -899,6 +947,99 @@ export const refreshRuntimeAdapterEnvironment = async (): Promise<Env | null> =>
     return await remoteAdapterRefreshPromise;
   } finally {
     remoteAdapterRefreshPromise = null;
+  }
+};
+
+export const scanRuntimeAdapterHistoryAtHeight = async (
+  height: number,
+): Promise<{ frameIndex: number; snapshot: EnvSnapshot; framesCached: number }> => {
+  if (!activeRuntimeAdapterConfig || activeRuntimeAdapterConfig.mode !== 'remote') {
+    throw new Error('Remote Time Machine scan requires a remote runtime adapter');
+  }
+  const requestedHeight = Math.max(1, Math.floor(Number(height || 0)));
+  if (!Number.isFinite(requestedHeight) || requestedHeight < 1) {
+    throw new Error('Remote Time Machine height must be a positive integer');
+  }
+
+  const startedAt = Date.now();
+  appRuntimeAdapterHistoryScan.set({
+    loading: true,
+    error: null,
+    requestedHeight,
+    scannedHeight: null,
+    latestHeight: null,
+    framesCached: get(history).length,
+    durationMs: null,
+    accountsShown: null,
+    accountsTotal: null,
+    booksShown: null,
+    booksTotal: null,
+    endpoint: activeRuntimeAdapterConfig.wsUrl || '',
+  });
+
+  try {
+    const xln = await getXLN();
+    const { runtimeAdapter } = await import('./runtimeAdapterStore');
+    const adapter = get(runtimeAdapter);
+    if (!adapter || adapter.mode !== 'remote') {
+      throw new Error('Runtime adapter is not connected');
+    }
+    const snapshotEnv = await buildRemoteAdapterEnvSnapshot(xln, adapter, activeRuntimeAdapterConfig, {
+      atHeight: requestedHeight,
+      includeHistory: false,
+      updateUiState: false,
+      requestedEntityId: get(appRuntimeAdapterActiveEntityId),
+      accountsPage: get(appRuntimeAdapterAccountsPage),
+      booksPage: get(appRuntimeAdapterBooksPage),
+    });
+    const snapshot = remoteEnvToSnapshot(snapshotEnv);
+    const currentEnv = get(xlnEnvironment);
+    if (!currentEnv) throw new Error('Remote runtime environment is not loaded');
+    const runtimeEnv = unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv;
+    const mergedHistory = mergeRemoteHistoryFrame(runtimeEnv.history || [], snapshot);
+    runtimeEnv.history = mergedHistory;
+    setXlnEnvironment(runtimeEnv);
+    history.set(mergedHistory);
+    currentHeight.set(Math.max(0, Math.floor(Number(runtimeEnv.height || 0))));
+
+    const activeEntityId = get(appRuntimeAdapterActiveEntityId);
+    const activeEntity = Array.from(snapshotEnv.eReplicas.values())
+      .find((replica) => normalizeEntityIdForView(replica.entityId) === activeEntityId)?.state ?? null;
+    const scannedHeight = Math.max(0, Math.floor(Number(snapshot.height || requestedHeight)));
+    const frameIndex = mergedHistory.findIndex((item) => Math.max(0, Number(item.height || 0)) === scannedHeight);
+    if (frameIndex < 0) throw new Error(`Remote Time Machine scan did not cache height ${scannedHeight}`);
+    appRuntimeAdapterHistoryScan.set({
+      loading: false,
+      error: null,
+      requestedHeight,
+      scannedHeight,
+      latestHeight: Math.max(0, Math.floor(Number(adapter.currentHeight || runtimeEnv.height || 0))),
+      framesCached: mergedHistory.length,
+      durationMs: Date.now() - startedAt,
+      accountsShown: activeEntity?.accounts?.size ?? null,
+      accountsTotal: get(appRuntimeAdapterPageInfo)?.accountsTotal ?? null,
+      booksShown: activeEntity?.orderbookExt?.books?.size ?? null,
+      booksTotal: get(appRuntimeAdapterPageInfo)?.booksTotal ?? null,
+      endpoint: activeRuntimeAdapterConfig.wsUrl || '',
+    });
+    return { frameIndex, snapshot, framesCached: mergedHistory.length };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || 'Remote Time Machine scan failed');
+    appRuntimeAdapterHistoryScan.set({
+      loading: false,
+      error: message,
+      requestedHeight,
+      scannedHeight: null,
+      latestHeight: null,
+      framesCached: get(history).length,
+      durationMs: Date.now() - startedAt,
+      accountsShown: null,
+      accountsTotal: null,
+      booksShown: null,
+      booksTotal: null,
+      endpoint: activeRuntimeAdapterConfig.wsUrl || '',
+    });
+    throw error;
   }
 };
 

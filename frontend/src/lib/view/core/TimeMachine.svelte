@@ -6,7 +6,15 @@
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
-  import { getXLN } from '$lib/stores/xlnStore';
+  import {
+    appRuntimeAdapterEndpoint,
+    appRuntimeAdapterHistoryScan,
+    appRuntimeAdapterMode,
+    getXLN,
+    REMOTE_HISTORY_SCAN_CACHE_LIMIT,
+    scanRuntimeAdapterHistoryAtHeight,
+    type RuntimeAdapterHistoryScanState,
+  } from '$lib/stores/xlnStore';
   // BrowserVM resolved via JAdapter
 
   // Props: Accept both Writable and Readable stores (for global vs isolated usage)
@@ -179,6 +187,8 @@
   let showSpeedMenu = false;
   let showLoopMenu = false;
   let showExportMenu = false;
+  let remoteScanHeightDraft = '';
+  let remoteScanError = '';
 
   const speedOptions = [
     { value: 0.1, label: '0.1x' },
@@ -316,6 +326,50 @@
     showExportMenu = false;
   }
 
+  function formatShortEndpoint(value: string): string {
+    const text = String(value || '').trim().replace(/^wss?:\/\//, '');
+    if (!text) return 'remote';
+    return text.length > 28 ? `${text.slice(0, 24)}...` : text;
+  }
+
+  function formatCount(value: number | null | undefined): string {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '-';
+    return Math.max(0, Math.floor(value)).toLocaleString('en-US');
+  }
+
+  function buildRemoteScanStatusLabel(
+    state: RuntimeAdapterHistoryScanState,
+    historyLength: number,
+    localError: string,
+  ): string {
+    if (state.loading) return 'scanning';
+    if (localError || state.error) return localError || state.error || 'scan failed';
+    if (state.scannedHeight) {
+      const duration = typeof state.durationMs === 'number' ? `${Math.max(0, Math.round(state.durationMs))}ms` : 'done';
+      return `h${state.scannedHeight} · ${duration} · ${state.framesCached}/${REMOTE_HISTORY_SCAN_CACHE_LIMIT}`;
+    }
+    return `${historyLength}/${REMOTE_HISTORY_SCAN_CACHE_LIMIT} cached`;
+  }
+
+  async function scanRemoteHeight() {
+    const fallbackHeight = Number($history[selectedFrameIndex]?.height || $env?.height || 0);
+    const raw = remoteScanHeightDraft.trim() || String(Math.max(1, Math.floor(fallbackHeight || 1)));
+    const requestedHeight = Math.max(1, Math.floor(Number(raw)));
+    if (!Number.isFinite(requestedHeight) || requestedHeight < 1) {
+      remoteScanError = 'height must be positive';
+      return;
+    }
+    remoteScanError = '';
+    try {
+      const result = await scanRuntimeAdapterHistoryAtHeight(requestedHeight);
+      remoteScanHeightDraft = String(result.snapshot.height || requestedHeight);
+      safeSet(timeIndex, result.frameIndex);
+      safeSet(isLive, false);
+    } catch (error) {
+      remoteScanError = error instanceof Error ? error.message : String(error || 'scan failed');
+    }
+  }
+
   // Handle slider drag/input
   function handleSliderInput(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -371,6 +425,8 @@
   $: currentTime = formatTime(selectedFrameIndex);
   $: totalTime = formatTime(maxTimeIndex);
   $: progressPercent = maxTimeIndex > 0 ? (selectedFrameIndex / maxTimeIndex) * 100 : 0;
+  $: remoteScanPlaceholder = String(Math.max(1, Math.floor(Number($history[selectedFrameIndex]?.height || $env?.height || 1))));
+  $: remoteScanStatusText = buildRemoteScanStatusLabel($appRuntimeAdapterHistoryScan, $history.length, remoteScanError);
 </script>
 
 <div class="time-machine">
@@ -412,6 +468,7 @@
         <button
           class="frame-badge"
           class:live={$isLive}
+          data-testid="time-machine-frame-badge"
           on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; showExportMenu = false; }}
           title="Click for playback settings"
         >
@@ -459,6 +516,37 @@
       </div>
       <span class="time-label">{currentTime}</span>
     </div>
+    {#if $appRuntimeAdapterMode === 'remote'}
+      <div class="remote-scan" data-testid="time-machine-remote-scan">
+        <span class="remote-endpoint" title={$appRuntimeAdapterEndpoint}>
+          {formatShortEndpoint($appRuntimeAdapterEndpoint)}
+        </span>
+        <input
+          data-testid="time-machine-remote-height"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          placeholder={`h${remoteScanPlaceholder}`}
+          bind:value={remoteScanHeightDraft}
+          aria-label="Remote history height"
+        />
+        <button
+          type="button"
+          data-testid="time-machine-remote-scan-button"
+          disabled={$appRuntimeAdapterHistoryScan.loading}
+          on:click={() => void scanRemoteHeight()}
+        >
+          {$appRuntimeAdapterHistoryScan.loading ? 'Scan...' : 'Scan'}
+        </button>
+        <span class="remote-scan-status" data-testid="time-machine-remote-scan-status">
+          {remoteScanStatusText}
+        </span>
+        {#if $appRuntimeAdapterHistoryScan.accountsTotal !== null}
+          <span class="remote-scan-meta" data-testid="time-machine-remote-scan-meta">
+            {formatCount($appRuntimeAdapterHistoryScan.accountsShown)}/{formatCount($appRuntimeAdapterHistoryScan.accountsTotal)} accounts
+          </span>
+        {/if}
+      </div>
+    {/if}
     <input
       type="range"
       class="scrubber"
@@ -577,6 +665,72 @@
 
   .time-label.end {
     flex-shrink: 0;
+  }
+
+  .remote-scan {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    max-width: min(460px, 44vw);
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(255, 255, 255, 0.68);
+    font-family: 'SF Mono', monospace;
+    font-size: 10px;
+  }
+
+  .remote-endpoint {
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(132, 204, 255, 0.92);
+  }
+
+  .remote-scan input {
+    width: 62px;
+    height: 24px;
+    box-sizing: border-box;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.9);
+    padding: 0 6px;
+    font: inherit;
+  }
+
+  .remote-scan button {
+    height: 24px;
+    border: 1px solid rgba(0, 122, 255, 0.28);
+    border-radius: 4px;
+    background: rgba(0, 122, 255, 0.13);
+    color: rgba(180, 220, 255, 0.96);
+    padding: 0 8px;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .remote-scan button:disabled {
+    cursor: wait;
+    opacity: 0.62;
+  }
+
+  .remote-scan-status,
+  .remote-scan-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .remote-scan-status {
+    color: rgba(255, 255, 255, 0.78);
+  }
+
+  .remote-scan-meta {
+    color: rgba(0, 255, 136, 0.78);
   }
 
   .dock-toggle-btn {
@@ -740,6 +894,17 @@
     .scrubber-container {
       order: -1;
       width: 100%;
+      flex-wrap: wrap;
+    }
+
+    .remote-scan {
+      order: 2;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .remote-endpoint {
+      max-width: 32vw;
     }
 
     .time-label {

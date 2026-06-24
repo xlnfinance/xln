@@ -13,6 +13,7 @@
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
   import { activeRuntime as activeRuntimeStore, vaultOperations, allRuntimes } from '$lib/stores/vaultStore';
+  import { settings } from '$lib/stores/settingsStore';
   import {
     appRuntimeAdapterMode,
     entityPositions,
@@ -44,6 +45,7 @@
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
+  import TimeMachine from './core/TimeMachine.svelte';
 
   type RuntimeFrame = Env | EnvSnapshot;
   type JurisdictionLike = { name: string };
@@ -838,6 +840,15 @@
       {isolatedTimeIndex}
     />
   </main>
+{/if}
+
+{#if $settings.showTimeMachine}
+  <TimeMachine
+    history={isolatedHistory}
+    timeIndex={isolatedTimeIndex}
+    isLive={isolatedIsLive}
+    env={isolatedEnv}
+  />
 {/if}
 
 <style>

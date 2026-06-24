@@ -252,14 +252,15 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. `/health` no longer imports QA fetch helpers, QA run/story panels, protected QA images, or a QA iframe; it reads `/api/health`, `/api/debug/events`, `/api/debug/entities`, and `/rpc` only.
   - Evidence: unit scans the health route against forbidden QA surfaces; focused radapter e2e blocks `/api/qa/**` while loading `/health` and asserts no QA iframe or run panel exists.
 
-- [ ] Make Time Machine production-debuggable for local and remote runtimes.
+- [x] Make Time Machine production-debuggable for the active remote runtime.
   - Impact: high.
   - User-confirmed: this must be a real working Time Machine when enabled in settings, not just a visual toggle.
   - User-reconfirmed 2026-06-24: enabling Time Machine in settings must switch the app into a real historical-debug mode, including remote hub past-state scans for debugging.
-  - Requirement: when Time Machine is enabled in settings, every wallet/workspace panel reads the selected historical frame instead of live state, with clear live vs historical status.
-  - Remote hub debug: radapter must expose bounded historical frame scans from a remote hub by height/range/cursor, returning aggregate/cursor/hash snapshots and paged entity/account views, never full 1M-account arrays.
-  - UI: operator can scrub local history, pick a remote hub, scan past runtime states, compare current vs selected frame, and deep-link a historical height for debugging.
-  - Tests: local Time Machine e2e proves panels change when scrubbing; remote radapter e2e queries old hub heights and renders bounded historical snapshots without freezing; 1M fixture stays aggregate-first.
+  - Status: done for active remote runtime debugging. The user-mode wallet now renders the same Time Machine bar as Dock mode when enabled. The bar exposes a remote height input, bounded Scan action, endpoint/status/latency/cache evidence, and switches the wallet into the selected historical frame without replacing the live runtime state.
+  - Remote hub debug: uses existing R-adapter `view-frame` historical reads with `atHeight`, `accountsLimit=10`, and `booksLimit=10`; scanned snapshots merge into a capped 24-frame history cache, preserving the scanned height plus recent frames.
+  - Evidence: L1 `bun run check:frontend` PASS with `svelte-check 0 errors / 0 warnings`; focused e2e `20260624-145903-953` PASS `1/1`, wall `9.5s`, code hash `8a227ff06a8db015`. The browser test mutates H1 through admin R-adapter, proves old/new `view-frame` profile state, enables Time Machine in user-mode, scans the old height through the UI, leaves LIVE mode, and verifies bounded history includes the requested frame. Benchmark FASTER vs previous failed run: browser test `35005ms -> 3638ms` (`-89.61%`).
+- [ ] Extend Time Machine with multi-target picker, current-vs-selected diff, and deep-linkable historical height.
+  - Scope: pick active remote hub/runtime or group, compare current vs selected frame, copy a URL fragment for a historical height, and preserve aggregate/cursor/hash discipline for large runtimes.
 
 - [x] Separate privileged operations from read-only QA views.
   - Impact: high.
