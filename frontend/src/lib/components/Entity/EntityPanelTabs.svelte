@@ -57,6 +57,7 @@
   import MoveWorkspace from './MoveWorkspace.svelte';
   import DebtPanel from './DebtPanel.svelte';
   import AssetLedgerTable from './AssetLedgerTable.svelte';
+  import AssetFaucetCard from './AssetFaucetCard.svelte';
   import CreditForm from './CreditForm.svelte';
   import CollateralForm from './CollateralForm.svelte';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
@@ -5431,41 +5432,14 @@
               </button>
             </div>
           </div>
-          <section class="faucet-inline-card">
-            <div class="faucet-inline-row">
-              <span class="faucet-inline-label">Faucet</span>
-              <select class="faucet-inline-token" bind:value={faucetAssetSymbol} data-testid="asset-faucet-symbol">
-                {#each assetLedgerRows as row}
-                  <option value={row.symbol}>{row.symbol}</option>
-                {/each}
-              </select>
-              <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')} disabled={assetFaucetSubmitting}>
-                External
-              </button>
-              {#if faucetSupportsReserve}
-                <button
-                  class="btn-table-action deposit"
-                  data-testid={`reserve-faucet-${faucetAssetSymbol}`}
-                  on:click={() => submitAssetFaucet('reserve')}
-                  disabled={assetFaucetSubmitting}
-                  title="Faucet reserve"
-                >
-                  Reserve
-                </button>
-              {/if}
-              {#if canShowAccountFaucet}
-                <button
-                  class="btn-table-action faucet"
-                  data-testid={`account-faucet-${faucetAssetSymbol}`}
-                  on:click={() => submitAssetFaucet('account')}
-                  disabled={assetFaucetSubmitting}
-                  title="Faucet first account"
-                >
-                  Account
-                </button>
-              {/if}
-            </div>
-          </section>
+          <AssetFaucetCard
+            rows={assetLedgerRows}
+            bind:selectedSymbol={faucetAssetSymbol}
+            supportsReserve={faucetSupportsReserve}
+            canShowAccountFaucet={canShowAccountFaucet}
+            submitting={assetFaucetSubmitting}
+            submitFaucet={submitAssetFaucet}
+          />
           <div class="asset-ledger-meta">
             <div class="wallet-meta-block">
               <p class="muted wallet-label">External EOA</p>
@@ -6416,46 +6390,6 @@
 
   .history-warning:hover {
     background: color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent);
-  }
-
-  .faucet-inline-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-    padding: 10px 14px;
-    border: 1px solid rgba(120, 113, 108, 0.22);
-    border-radius: 14px;
-    background: rgba(23, 20, 18, 0.58);
-  }
-
-  .faucet-inline-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-  }
-
-  .faucet-inline-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #fbbf24;
-    white-space: nowrap;
-  }
-
-  .faucet-inline-token {
-    min-width: 112px;
-    max-width: 144px;
-    min-height: 34px;
-    padding: 6px 28px 6px 10px;
-    border-radius: 10px;
-    background: rgba(17, 13, 11, 0.92);
-    border: 1px solid rgba(120, 113, 108, 0.32);
-    color: #f5f5f4;
   }
 
   .workspace-pending-banner {
@@ -8001,8 +7935,7 @@
 
     .tab-header-row,
     .workspace-pending-banner,
-    .workspace-debt-warning,
-    .faucet-inline-card {
+    .workspace-debt-warning {
       flex-direction: column;
       align-items: stretch;
     }
@@ -8022,16 +7955,6 @@
     .btn-refresh-small {
       width: 100%;
       min-height: 38px;
-    }
-
-    .faucet-inline-row {
-      gap: 8px;
-    }
-
-    .faucet-inline-token {
-      min-width: 0;
-      max-width: none;
-      flex: 1 1 120px;
     }
 
     .wallet-meta-copy {
