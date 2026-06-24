@@ -37,6 +37,46 @@
       completedAt?: number | null;
       error?: string | null;
     };
+    bootstrapTimeline?: {
+      readyHash?: string | null;
+      runtimeStateHash?: string | null;
+      entityStateHash?: string | null;
+      readyAt?: number | null;
+      healthPoll?: {
+        actualMs?: number | null;
+        budgetMs?: number | null;
+      };
+      backlog?: {
+        processing?: boolean;
+        runtimeTxs?: number;
+        entityInputs?: number;
+        jInputs?: number;
+        queuedEntityInputCount?: number;
+        queuedEntityTxCount?: number;
+        total?: number;
+      } | null;
+      lastEvent?: {
+        event?: string;
+        stage?: string | null;
+        at?: string | null;
+        height?: number | null;
+      } | null;
+      stages?: Array<{
+        key: string;
+        label: string;
+        status: 'done' | 'active' | 'blocked' | 'pending' | 'disabled';
+        reason: string;
+        budgetMs?: number | null;
+        actualMs?: number | null;
+        startedAt?: number | null;
+        completedAt?: number | null;
+        evidence?: Array<{
+          label: string;
+          value: string | number | boolean | null;
+          unit?: string;
+        }>;
+      }>;
+    };
     jMachines?: Array<{
       name: string;
       chainId: number;
@@ -332,6 +372,9 @@
     const custody = (input['custody'] && typeof input['custody'] === 'object') ? input['custody'] as HealthData['custody'] : undefined;
     const reset = (input['reset'] && typeof input['reset'] === 'object') ? input['reset'] as HealthData['reset'] : undefined;
     const source = (input['source'] && typeof input['source'] === 'object') ? input['source'] as HealthData['source'] : undefined;
+    const bootstrapTimeline = (input['bootstrapTimeline'] && typeof input['bootstrapTimeline'] === 'object')
+      ? input['bootstrapTimeline'] as HealthData['bootstrapTimeline']
+      : undefined;
 
     const normalizedRelay: NonNullable<HealthData['relay']> = {
       activeClients: relay?.activeClients ?? activeClientIds,
@@ -372,6 +415,7 @@
     if (custody) normalized.custody = custody;
     if (bootstrapReserves) normalized.bootstrapReserves = bootstrapReserves;
     if (source) normalized.source = source;
+    if (bootstrapTimeline) normalized.bootstrapTimeline = bootstrapTimeline;
     return normalized;
   }
 
@@ -525,7 +569,7 @@
     if (!text) return 'n/a';
     const clean = text.replace(/-dirty$/, '');
     const suffix = text.endsWith('-dirty') ? '-dirty' : '';
-    return `${clean.slice(0, 12)}${suffix}`;
+    return `${clean.slice(0, 8)}${suffix}`;
   }
 
   function healthVerdictLabel(severity: QaSeverity): 'READY' | 'DEGRADED' | 'FAIL' {

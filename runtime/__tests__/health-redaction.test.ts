@@ -68,3 +68,46 @@ test('public aggregated health strips child process ids and hub runtime ids', ()
   expect(body).not.toContain('accounts');
   expect(body).toContain('childCount');
 });
+
+test('public aggregated health keeps bootstrap timeline evidence without state hashes', () => {
+  const publicPayload = publicAggregatedHealth({
+    timestamp: 1,
+    bootstrapTimeline: {
+      readyHash: 'ready-hash',
+      runtimeStateHash: 'runtime-state-secret',
+      entityStateHash: 'entity-state-secret',
+      readyAt: 123,
+      healthPoll: { actualMs: 42, budgetMs: 1500 },
+      backlog: {
+        processing: false,
+        runtimeTxs: 1,
+        entityInputs: 2,
+        jInputs: 3,
+        queuedEntityInputCount: 4,
+        queuedEntityTxCount: 5,
+        total: 6,
+        queuedEntityInputs: [{ entityId: 'secret', txTypes: ['secretTx'] }],
+      },
+      lastEvent: { event: 'ready-hash', stage: 'offers-ready', at: '2026-06-24T00:00:00.000Z', height: 9 },
+      stages: [{
+        key: 'health-poll',
+        label: 'Health Poll',
+        status: 'done',
+        reason: 'Latest /api/health child refresh window',
+        budgetMs: 1500,
+        actualMs: 42,
+        evidence: [{ label: 'actual', value: 42, unit: 'ms' }],
+      }],
+    },
+  });
+  const body = JSON.stringify(publicPayload);
+
+  expect(body).toContain('ready-hash');
+  expect(body).toContain('Health Poll');
+  expect(body).toContain('actualMs');
+  expect(body).toContain('queuedEntityTxCount');
+  expect(body).not.toContain('runtime-state-secret');
+  expect(body).not.toContain('entity-state-secret');
+  expect(body).not.toContain('secretTx');
+  expect(body).not.toContain('entityId');
+});

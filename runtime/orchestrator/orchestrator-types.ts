@@ -35,6 +35,53 @@ export type StageTiming = {
 
 export type TimingMap = Record<string, StageTiming>;
 
+export type BootstrapTimelineStageStatus = 'done' | 'active' | 'blocked' | 'pending' | 'disabled';
+
+export type BootstrapTimelineStage = {
+  key: string;
+  label: string;
+  status: BootstrapTimelineStageStatus;
+  reason: string;
+  budgetMs: number | null;
+  actualMs: number | null;
+  startedAt: number | null;
+  completedAt: number | null;
+  evidence: Array<{
+    label: string;
+    value: string | number | boolean | null;
+    unit?: string;
+  }>;
+};
+
+export type BootstrapTimelineBacklog = {
+  processing: boolean;
+  runtimeTxs: number;
+  entityInputs: number;
+  jInputs: number;
+  queuedEntityInputCount: number;
+  queuedEntityTxCount: number;
+  total: number;
+};
+
+export type BootstrapTimeline = {
+  readyHash: string | null;
+  runtimeStateHash: string | null;
+  entityStateHash: string | null;
+  readyAt: number | null;
+  healthPoll: {
+    actualMs: number | null;
+    budgetMs: number;
+  };
+  backlog: BootstrapTimelineBacklog | null;
+  lastEvent: {
+    event: string;
+    stage: string | null;
+    at: string | null;
+    height: number | null;
+  } | null;
+  stages: BootstrapTimelineStage[];
+};
+
 export type ResetState = {
   inProgress: boolean;
   lastError: string | null;
@@ -167,6 +214,13 @@ export type HubInfoPayload = {
   relayUrl?: string;
   directWsUrl?: string;
   startupPhase?: string;
+  runtimeBacklog?: unknown;
+  bootstrap?: {
+    readyHash?: string | null;
+    runtimeStateHash?: string | null;
+    entityStateHash?: string | null;
+    readyAt?: number | null;
+  };
 };
 
 export type MarketMakerCrossRouteHealthPayload = {
@@ -356,6 +410,7 @@ export type AggregatedHealth = {
       }>;
     }>;
   };
+  bootstrapTimeline: BootstrapTimeline;
   custody: {
     enabled: boolean;
     ok: boolean;
