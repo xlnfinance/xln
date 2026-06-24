@@ -19,7 +19,7 @@ import {
 } from '../jadapter/watcher';
 import { findRecentReserveUpdatedEvent } from '../j-event-evidence';
 import { createEmptyEnv } from '../runtime';
-import type { EntityReplica, Env, JReplica } from '../types';
+import type { EntityReplica, Env, JReplica, JurisdictionConfig } from '../types';
 
 const makeJReplica = (name: string, blockNumber: bigint, depositoryAddress: string): JReplica => ({
   name,
@@ -30,6 +30,14 @@ const makeJReplica = (name: string, blockNumber: bigint, depositoryAddress: stri
   blockDelayMs: 0,
   lastBlockTimestamp: 0,
   position: { x: 0, y: 0, z: 0 },
+});
+
+const makeJurisdiction = (name: string, chainId: number, depositoryAddress: string): JurisdictionConfig => ({
+  name,
+  address: `rpc://${name}`,
+  chainId,
+  depositoryAddress,
+  entityProviderAddress: `0x${(chainId % 256).toString(16).padStart(2, '0').repeat(20)}`,
 });
 
 const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): Env => {
@@ -260,6 +268,37 @@ describe('jadapter helper cursors', () => {
 
     updateWatcherJurisdictionCursor(env, 200, '0xaaa');
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(41);
+  });
+
+  test('watcher start block ignores signer j-blocks from unrelated jurisdictions', () => {
+    const arrakis = makeJurisdiction('Arrakis', 31337, `0x${'aa'.repeat(20)}`);
+    const wakanda = makeJurisdiction('Wakanda', 31338, `0x${'bb'.repeat(20)}`);
+    const env = makeCursorEnv('jadapter-cursor-jurisdiction-scope', [
+      makeJReplica(arrakis.name, 120n, arrakis.depositoryAddress),
+      makeJReplica(wakanda.name, 80n, wakanda.depositoryAddress),
+    ], arrakis.name);
+    const arrakisEntity = `0x${'66'.repeat(32)}`;
+    const wakandaEntity = `0x${'67'.repeat(32)}`;
+    const arrakisLeft = makeReplica(arrakisEntity, '1', true);
+    const arrakisRight = makeReplica(arrakisEntity, '2', false);
+    const wakandaLeft = makeReplica(wakandaEntity, '1', true);
+    const wakandaRight = makeReplica(wakandaEntity, '2', false);
+    arrakisLeft.state.config.jurisdiction = arrakis;
+    arrakisRight.state.config.jurisdiction = arrakis;
+    wakandaLeft.state.config.jurisdiction = wakanda;
+    wakandaRight.state.config.jurisdiction = wakanda;
+    arrakisLeft.state.lastFinalizedJHeight = 100;
+    arrakisRight.state.lastFinalizedJHeight = 110;
+    wakandaLeft.state.lastFinalizedJHeight = 5;
+    wakandaRight.state.lastFinalizedJHeight = 7;
+    env.eReplicas.set(`${arrakisEntity}:1`, arrakisLeft);
+    env.eReplicas.set(`${arrakisEntity}:2`, arrakisRight);
+    env.eReplicas.set(`${wakandaEntity}:1`, wakandaLeft);
+    env.eReplicas.set(`${wakandaEntity}:2`, wakandaRight);
+
+    expect(getMinimumCommittedSignerJHeight(env)).toBe(5);
+    expect(getWatcherStartBlock(env, arrakis.depositoryAddress)).toBe(101);
+    expect(getWatcherStartBlock(env, wakanda.depositoryAddress)).toBe(6);
   });
 
   test('watcher cursor waits for relevant signer replicas to finalize their j-block', () => {
