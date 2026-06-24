@@ -35,6 +35,11 @@ export function canAddMoveRouteToDraft(from: MoveEndpoint, to: MoveEndpoint): bo
   return isMoveRouteSupported(from, to) && getMoveRouteKey(from, to) !== 'external->external';
 }
 
+export function routeRequiresExplicitExternalAllowance(from: MoveEndpoint, to: MoveEndpoint): boolean {
+  const routeKey = getMoveRouteKey(from, to);
+  return routeKey === 'external->reserve' || routeKey === 'external->account';
+}
+
 export function isExternalTransferMoveRoute(from: MoveEndpoint, to: MoveEndpoint): boolean {
   return getMoveRouteKey(from, to) === 'external->external';
 }

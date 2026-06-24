@@ -80,10 +80,17 @@
     isMoveRouteSupported,
     moveNeedsExternalRecipient,
     moveNeedsReserveRecipient,
+    routeRequiresExplicitExternalAllowance,
     MOVE_ENDPOINT_LABEL,
     MOVE_ENDPOINTS,
     type MoveEndpoint,
   } from './move-routes';
+  import {
+    buildMoveAllowanceContextSignature,
+    buildMoveAllowanceStatusLabel,
+    getMoveRequiredAllowanceAmount,
+    isMoveAllowanceSatisfied,
+  } from './move-allowance';
   import { getMoveValidationErrorForContext, type MoveValidationMode } from './move-validation';
   import { createMoveVisualController } from './move-visual-controller';
   import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
@@ -530,13 +537,14 @@
   $: moveAllowanceRouteEnabled = assetWorkspaceTab === 'move'
     && activeIsLive
     && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint);
-  $: moveAllowanceContextSignature = [
-    moveAllowanceRouteEnabled ? '1' : '0',
-    getMoveRouteKey(moveFromEndpoint, moveToEndpoint),
-    moveAssetSymbol,
-    String(currentSignerId || '').trim().toLowerCase(),
-    getRuntimeId(activeEnv),
-  ].join('|');
+  $: moveAllowanceContextSignature = buildMoveAllowanceContextSignature({
+    enabled: moveAllowanceRouteEnabled,
+    from: moveFromEndpoint,
+    to: moveToEndpoint,
+    assetSymbol: moveAssetSymbol,
+    signerId: currentSignerId,
+    runtimeId: getRuntimeId(activeEnv),
+  });
   $: if (moveAllowanceContextSignature !== moveAllowanceContextKey) {
     moveAllowanceContextKey = moveAllowanceContextSignature;
     moveAllowanceAmountDirty = false;
@@ -554,34 +562,23 @@
     moveAllowanceLoading = false;
     moveAllowanceSubmittingMode = null;
   }
-  $: moveRequiredAllowanceAmount = (() => {
-    if (!moveAllowanceRouteEnabled) return null;
-    const token = findExternalTokenBySymbol(moveAssetSymbol);
-    if (!token) return null;
-    try {
-      return parsePositiveAssetAmount(moveAmount, token, moveUiState.sourceAvailableBalance ?? undefined);
-    } catch {
-      return null;
-    }
-  })();
-  $: moveAllowanceSatisfied = typeof moveRequiredAllowanceAmount === 'bigint'
-    && typeof moveAllowanceRaw === 'bigint'
-    && moveAllowanceRaw >= moveRequiredAllowanceAmount;
-  $: moveAllowanceStatusLabel = (() => {
-    if (!moveAllowanceRouteEnabled) return '';
-    const token = findExternalTokenBySymbol(moveAssetSymbol);
-    const decimals = Number(token?.decimals ?? 18);
-    const available = typeof moveAllowanceRaw === 'bigint'
-      ? formatAmount(moveAllowanceRaw, decimals)
-      : '—';
-    if (moveAllowanceLoading) return 'Checking allowance...';
-    if (moveAllowanceError) return moveAllowanceError;
-    if (typeof moveRequiredAllowanceAmount !== 'bigint') {
-      return `Current allowance ${available} ${moveAssetSymbol}`;
-    }
-    const required = formatAmount(moveRequiredAllowanceAmount, decimals);
-    return `Current allowance ${available} ${moveAssetSymbol} · required ${required} ${moveAssetSymbol}`;
-  })();
+  $: moveRequiredAllowanceAmount = getMoveRequiredAllowanceAmount({
+    enabled: moveAllowanceRouteEnabled,
+    token: findExternalTokenBySymbol(moveAssetSymbol),
+    amountInput: moveAmount,
+    sourceAvailableBalance: moveUiState.sourceAvailableBalance,
+  });
+  $: moveAllowanceSatisfied = isMoveAllowanceSatisfied(moveRequiredAllowanceAmount, moveAllowanceRaw);
+  $: moveAllowanceStatusLabel = buildMoveAllowanceStatusLabel({
+    enabled: moveAllowanceRouteEnabled,
+    tokenSymbol: moveAssetSymbol,
+    tokenDecimals: Number(findExternalTokenBySymbol(moveAssetSymbol)?.decimals ?? 18),
+    raw: moveAllowanceRaw,
+    loading: moveAllowanceLoading,
+    error: moveAllowanceError,
+    required: moveRequiredAllowanceAmount,
+    formatAmount,
+  });
   $: moveValidationSignature = [
     moveFromEndpoint,
     moveToEndpoint,
@@ -1129,10 +1126,6 @@
   }
   function requireExternalTokenBySymbol(symbol: string): ExternalToken {
     return requireExternalTokenBySymbolInList(externalTokens, symbol);
-  }
-  function routeRequiresExplicitExternalAllowance(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    const routeKey = getMoveRouteKey(from, to);
-    return routeKey === 'external->reserve' || routeKey === 'external->account';
   }
   function getMoveAllowanceToken(): ExternalToken {
     const token = requireExternalTokenBySymbol(moveAssetSymbol);
