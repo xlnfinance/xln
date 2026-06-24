@@ -325,6 +325,24 @@ export async function handleAccountInput(
     });
     return { success: true, events };
   }
+  if (
+    input.prevHanko &&
+    !input.newAccountFrame &&
+    !accountMachine.pendingFrame &&
+    (accountMachine.status ?? 'active') !== 'active'
+  ) {
+    events.push(
+      `ℹ️ Ignored obsolete ACK for frozen account frame ${String(replayInputHeight ?? 'none')} ` +
+      `(current=${String(accountMachine.currentHeight ?? 0)}, status=${String(accountMachine.status)})`,
+    );
+    accountLog.debug('input.frozen_ack_ignored', {
+      currentHeight: replayCurrentHeight,
+      inputHeight: replayInputHeight,
+      status: accountMachine.status,
+      from: shortId(input.fromEntityId),
+    });
+    return { success: true, events };
+  }
 
   let validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
   try {

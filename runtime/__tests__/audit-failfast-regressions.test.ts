@@ -3360,6 +3360,38 @@ describe('audit fail-fast regressions', () => {
     expect(verified.valid).toBe(true);
   });
 
+  test('handleAccountInput ignores obsolete ACK after dispute freeze clears pending frame', async () => {
+    const seed = 'account-frame-frozen-obsolete-ack';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    const accountMachine = makeProposalAccount([], left.entityId, right.entityId);
+    accountMachine.currentHeight = 8;
+    accountMachine.currentFrame = {
+      ...accountMachine.currentFrame,
+      height: 8,
+      stateHash: `0x${'ef'.repeat(32)}`,
+    };
+    accountMachine.status = 'disputed';
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+
+    const result = await handleAccountInput(env, accountMachine, {
+      kind: 'ack',
+      fromEntityId: right.entityId,
+      toEntityId: left.entityId,
+      height: 9,
+      prevHanko: `0x${'12'.repeat(65)}`,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.response).toBeUndefined();
+    expect(accountMachine.currentHeight).toBe(8);
+    expect(result.events.some((event) => event.includes('Ignored obsolete ACK for frozen account frame 9'))).toBe(true);
+  });
+
   test('handleAccountInput rejects frames whose byLeft does not match the signed proposer', async () => {
     const seed = 'account-frame-by-left-binding';
     const env = createEmptyEnv(seed);
