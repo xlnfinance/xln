@@ -104,8 +104,8 @@ const profileCommands: Record<SoakProfile, SoakCommand[]> = {
       timeoutMs: 180_000,
     },
     {
-      name: 'hub consensus swap 100 TPS',
-      command: 'bun runtime/scripts/bench-swap-hub-consensus-tps.ts --swaps 300 --warmup 30 --min-tps 100 --batch-size 100 --processes 2',
+      name: '100-user hub consensus swap 100 TPS',
+      command: 'bun runtime/scripts/bench-swap-hub-consensus-tps.ts --swaps 300 --warmup 30 --min-tps 100 --batch-size 100 --users 100 --processes 2',
       timeoutMs: 240_000,
     },
   ],
