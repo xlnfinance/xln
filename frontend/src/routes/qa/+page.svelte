@@ -1057,13 +1057,27 @@
           {/if}
         {/if}
         <div class="ux-preview-strip">
-          {#each uxGalleryStories.slice(0, 6) as story}
-            <button type="button" class="ux-preview-card" onclick={() => (activeView = 'gallery')} title={story.description ?? story.title}>
-              <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
-              <span>{story.group}</span>
-              <strong>{story.title}</strong>
+          {#if uxGalleryStories[0]}
+            <button
+              type="button"
+              class="ux-preview-card hero"
+              onclick={() => (activeView = 'gallery')}
+              title={uxGalleryStories[0].description ?? uxGalleryStories[0].title}
+            >
+              <QaProtectedImage url={uxGalleryStories[0].url} alt={uxGalleryStories[0].title} loading="lazy" />
+              <span>{uxGalleryStories[0].group}</span>
+              <strong>{uxGalleryStories[0].title}</strong>
             </button>
-          {/each}
+          {/if}
+          <div class="ux-preview-rail">
+            {#each uxGalleryStories.slice(1, 5) as story}
+              <button type="button" class="ux-preview-card compact" onclick={() => (activeView = 'gallery')} title={story.description ?? story.title}>
+                <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
+                <span>{story.group}</span>
+                <strong>{story.title}</strong>
+              </button>
+            {/each}
+          </div>
         </div>
       </section>
     {/if}
@@ -2425,7 +2439,14 @@
 
   .ux-preview-strip {
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+
+  .ux-preview-rail {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.75rem;
   }
 
@@ -2442,6 +2463,22 @@
     text-align: left;
     overflow: hidden;
     cursor: pointer;
+  }
+
+  .ux-preview-card.hero {
+    grid-template-rows: 232px auto auto;
+  }
+
+  .ux-preview-card.hero :global(img) {
+    height: 232px;
+  }
+
+  .ux-preview-card.compact {
+    grid-template-rows: 92px auto auto;
+  }
+
+  .ux-preview-card.compact :global(img) {
+    height: 92px;
   }
 
   .ux-preview-card :global(img) {
@@ -3556,15 +3593,27 @@
     }
 
     .ux-preview-strip,
+    .ux-preview-rail,
     .ux-gallery-grid {
       grid-template-columns: 1fr;
+    }
+
+    .ux-preview-rail {
+      display: contents;
     }
 
     .ux-preview-card {
       grid-template-rows: 150px auto auto;
     }
 
+    .ux-preview-card.hero,
+    .ux-preview-card.compact {
+      grid-template-rows: 150px auto auto;
+    }
+
     .ux-preview-card :global(img),
+    .ux-preview-card.hero :global(img),
+    .ux-preview-card.compact :global(img),
     .ux-shot :global(img) {
       height: 150px;
     }
