@@ -299,7 +299,14 @@ async function importRpc2SiblingEntity(
     view.XLN = runtimeModule;
     view.__xln_instance = runtimeModule;
 
-    if (!env.jReplicas?.has(jurisdictionName)) {
+    const hasConnectedAdapter = (replica: any): boolean => Boolean(
+      replica?.jadapter?.addresses?.depository &&
+        replica?.jadapter?.addresses?.entityProvider &&
+        replica?.jadapter?.depository &&
+        replica?.jadapter?.entityProvider &&
+        typeof replica?.jadapter?.submitTx === 'function',
+    );
+    if (!hasConnectedAdapter(env.jReplicas?.get(jurisdictionName))) {
       runtimeModule.enqueueRuntimeInput(env, {
         runtimeTxs: [{
           type: 'importJ',
@@ -336,12 +343,19 @@ async function importRpc2SiblingEntity(
   await expect.poll(
     async () => page.evaluate((jurisdictionName) => {
       const env = (window as CrossRuntimeWindow).isolatedEnv;
-      return Boolean(env?.jReplicas?.has(jurisdictionName));
+      const replica = env?.jReplicas?.get(jurisdictionName);
+      return Boolean(
+        replica?.jadapter?.addresses?.depository &&
+          replica?.jadapter?.addresses?.entityProvider &&
+          replica?.jadapter?.depository &&
+          replica?.jadapter?.entityProvider &&
+          typeof replica?.jadapter?.submitTx === 'function',
+      );
     }, result.jurisdictionName),
     {
       timeout: 60_000,
       intervals: [250, 500, 1000],
-      message: `${label} runtime must import rpc2 jurisdiction`,
+      message: `${label} runtime must import connected rpc2 jurisdiction adapter`,
     },
   ).toBe(true);
 
@@ -608,6 +622,14 @@ async function waitForDefaultJurisdictionReplicas(page: Page, label: string): Pr
     async () => page.evaluate(() => {
       const env = (window as CrossRuntimeWindow).isolatedEnv;
       const jurisdictions = Array.from(env?.jReplicas?.keys?.() || []).map((name) => String(name));
+      const replicas = Array.from(env?.jReplicas?.values?.() || []);
+      const isConnected = (replica: any): boolean => Boolean(
+        replica?.jadapter?.addresses?.depository &&
+          replica?.jadapter?.addresses?.entityProvider &&
+          replica?.jadapter?.depository &&
+          replica?.jadapter?.entityProvider &&
+          typeof replica?.jadapter?.submitTx === 'function',
+      );
       const entities = Array.from(env?.eReplicas?.values?.() || []).map((replica: any) => ({
         entityId: String(replica?.state?.entityId || replica?.entityId || ''),
         signerId: String(replica?.signerId || ''),
@@ -623,6 +645,8 @@ async function waitForDefaultJurisdictionReplicas(page: Page, label: string): Pr
         entityJurisdictionCount: entityJurisdictions.size,
         hasTestnet: jurisdictions.some((name) => /^testnet$/i.test(name)),
         hasSecondary: jurisdictions.some((name) => /tron|rpc2|second/i.test(name)),
+        hasTestnetAdapter: replicas.some((replica: any) => /^testnet$/i.test(String(replica?.name || '')) && isConnected(replica)),
+        hasSecondaryAdapter: replicas.some((replica: any) => /tron|rpc2|second/i.test(String(replica?.name || '')) && isConnected(replica)),
         entities: entities.length,
       };
     }),
@@ -634,6 +658,8 @@ async function waitForDefaultJurisdictionReplicas(page: Page, label: string): Pr
   ).toMatchObject({
     hasTestnet: true,
     hasSecondary: true,
+    hasTestnetAdapter: true,
+    hasSecondaryAdapter: true,
   });
 
   await expect.poll(

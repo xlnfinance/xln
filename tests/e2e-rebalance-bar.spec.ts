@@ -2347,27 +2347,62 @@ test.describe('Rebalance E2E', () => {
         .catch(() => null);
 
       await recipientPage.waitForTimeout(2_000);
-      const afterP2 = await readPairState(recipientPage, h2, rt2.entityId);
-      expect(afterP2, 'rt2-h2 state after payment#2').toBeTruthy();
-      const p2HashSeen = Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2.hashlock);
-      const p2Received = await hasDebugHtlcEvent(recipientPage, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
-      const rt2P2Events = await readPersistedFrameEventsSinceCursor(recipientPage, {
-        cursor: rt2P2Cursor,
-        eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
-      });
-      const h2SettledEarly = rt2P2Events.events.some((event) =>
-        event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
-      );
-      const h2SettlesAfterP2 = countRebalanceStepEvents(
-        await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
-        'account_settled_finalized_bilateral',
-        (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
-      );
-      const h2SettledDuringP2 = h2SettledEarly || h2SettlesAfterP2 > h2SettlesBeforeP2;
-      if (p2HashSeen || p2Received) {
+      type P2Observation = {
+        afterP2: Awaited<ReturnType<typeof readPairState>>;
+        p2HashSeen: boolean;
+        p2Received: boolean;
+        debtReachedFullPayment: boolean;
+        h2SettledDuringP2: boolean;
+        rt2P2Events: Awaited<ReturnType<typeof readPersistedFrameEventsSinceCursor>>;
+      };
+      const readP2Observation = async (): Promise<P2Observation> => {
+        const afterP2 = await readPairState(recipientPage, h2, rt2.entityId);
+        expect(afterP2, 'rt2-h2 state after payment#2').toBeTruthy();
+        const p2HashSeen = Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2.hashlock);
+        const p2Received = await hasDebugHtlcEvent(recipientPage, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
+        const rt2P2Events = await readPersistedFrameEventsSinceCursor(recipientPage, {
+          cursor: rt2P2Cursor,
+          eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
+        });
+        const h2SettledEarly = rt2P2Events.events.some((event) =>
+          event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
+        );
+        const h2SettlesAfterP2 = countRebalanceStepEvents(
+          await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
+          'account_settled_finalized_bilateral',
+          (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+        );
+        return {
+          afterP2,
+          p2HashSeen,
+          p2Received,
+          debtReachedFullPayment: BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') >= beforeP2Debt + 500n * 10n ** 18n,
+          h2SettledDuringP2: h2SettledEarly || h2SettlesAfterP2 > h2SettlesBeforeP2,
+          rt2P2Events,
+        };
+      };
+      let p2Observation = await readP2Observation();
+      if (
+        (p2Observation.p2HashSeen || p2Observation.p2Received || p2Observation.debtReachedFullPayment) &&
+        !p2Observation.h2SettledDuringP2
+      ) {
+        await expect.poll(async () => {
+          p2Observation = await readP2Observation();
+          return p2Observation.h2SettledDuringP2 ||
+            !(p2Observation.p2HashSeen || p2Observation.p2Received || p2Observation.debtReachedFullPayment);
+        }, {
+          timeout: 10_000,
+          intervals: [250, 500, 1000],
+          message: 'payment#2 outcome must include H2 settle evidence before accepting debt growth',
+        }).toBe(true);
+      }
+      const { afterP2, p2HashSeen, p2Received, h2SettledDuringP2, rt2P2Events } = p2Observation;
+      if (p2HashSeen || p2Received || p2Observation.debtReachedFullPayment) {
         expect(
           h2SettledDuringP2,
-          `payment#2 passed too early without persisted rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
+          `payment#2 passed too early without persisted rebalance finalize evidence: ` +
+            `beforeDebt=${beforeP2Debt} afterDebt=${afterP2?.hubExposure || afterP2?.hubDebt || 'n/a'} ` +
+            `events=${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
         ).toBe(true);
       } else {
         expect(

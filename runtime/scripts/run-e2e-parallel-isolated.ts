@@ -1199,11 +1199,17 @@ const stopShardRuntimePorts = async (
   await freePort(apiPort + 13, log);
 };
 
-const pidsOnPort = (port: number): number[] => {
-  const res = spawnSync('lsof', ['-ti', `tcp:${port}`], {
+const pidsOnPort = (port: number, log?: ReturnType<typeof createWriteStream>): number[] => {
+  const res = spawnSync('lsof', ['-nP', `-tiTCP:${port}`, '-sTCP:LISTEN'], {
     stdio: ['ignore', 'pipe', 'ignore'],
     encoding: 'utf8',
+    timeout: 2_000,
+    killSignal: 'SIGKILL',
   });
+  if (res.error) {
+    log?.write(`[preflight] lsof tcp:${port} failed: ${res.error.message}\n`);
+    return [];
+  }
   const text = String(res.stdout || '').trim();
   if (!text) return [];
   return text
@@ -1213,7 +1219,7 @@ const pidsOnPort = (port: number): number[] => {
 };
 
 const freePort = async (port: number, log?: ReturnType<typeof createWriteStream>): Promise<void> => {
-  const first = pidsOnPort(port).filter(pid => pid !== process.pid);
+  const first = pidsOnPort(port, log).filter(pid => pid !== process.pid);
   if (first.length === 0) return;
 
   log?.write(`[preflight] port ${port} busy by pids=${first.join(',')} -> SIGTERM\n`);
@@ -1224,7 +1230,7 @@ const freePort = async (port: number, log?: ReturnType<typeof createWriteStream>
   }
   await delay(300);
 
-  const second = pidsOnPort(port).filter(pid => pid !== process.pid);
+  const second = pidsOnPort(port, log).filter(pid => pid !== process.pid);
   if (second.length > 0) {
     log?.write(`[preflight] port ${port} still busy by pids=${second.join(',')} -> SIGKILL\n`);
     for (const pid of second) {
@@ -1235,7 +1241,7 @@ const freePort = async (port: number, log?: ReturnType<typeof createWriteStream>
     await delay(150);
   }
 
-  const remain = pidsOnPort(port).filter(pid => pid !== process.pid);
+  const remain = pidsOnPort(port, log).filter(pid => pid !== process.pid);
   if (remain.length > 0) {
     throw new Error(`Port ${port} still in use after cleanup: ${remain.join(',')}`);
   }
