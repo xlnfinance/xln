@@ -919,7 +919,7 @@
 
         <div class="wallet-create-title">
           <div>
-            <h2>{inputMode === 'mnemonic' ? 'Import XLN wallet' : 'Create XLN wallet'}</h2>
+            <h2>{inputMode === 'mnemonic' ? 'Import xln wallet' : 'Create xln wallet'}</h2>
             <p>{inputMode === 'mnemonic'
               ? 'Recover from an existing mnemonic. New wallets start from the main creation form.'
               : 'Enter a display name and secret. The wallet opens automatically when derivation finishes.'}</p>
