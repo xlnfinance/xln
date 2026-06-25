@@ -1,13 +1,13 @@
 {
-  "title": "desktop finalized dispute history",
+  "title": "desktop finalized dispute",
   "group": "Disputes",
-  "description": "History after the dispute finalizes and debt evidence is mirrored.",
+  "description": "Reloaded wallet shows the finalized disputed account and recovery action.",
   "platform": "desktop",
   "tags": [
     "dispute",
     "history",
-    "debt"
+    "reload"
   ],
-  "sourceTest": "creates one mirrored debt on both sides after dispute finalize",
+  "sourceTest": "entity workspace dispute lifecycle returns reserve",
   "project": "chromium"
 }
