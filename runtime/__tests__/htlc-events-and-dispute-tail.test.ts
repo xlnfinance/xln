@@ -6,6 +6,7 @@ import {
   buildHtlcReceivedEventPayload,
 } from '../htlc-events';
 import { applyCommittedAccountFrameFollowups } from '../entity-tx/handlers/account';
+import { pruneSettledOriginatedHtlcRoutes } from '../entity-tx/htlc-route-lifecycle';
 import { createEmptyEnv } from '../runtime';
 import type { AccountMachine, EntityReplica } from '../types';
 
@@ -264,5 +265,99 @@ describe('htlc event contract and dispute tail', () => {
 
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
     expect(replica.state.crontabState?.hooks.has(`htlc-secret-ack:${hashlock}`)).toBe(false);
+  });
+
+  test('emits HtlcFinalized before pruning originated outbound route on committed resolve', () => {
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterpartyId = `0x${'22'.repeat(32)}`;
+    const outboundLockId = 'lock-outbound';
+    const hashlock = `0x${'77'.repeat(32)}`;
+    const secret = `0x${'55'.repeat(32)}`;
+    const env = createEmptyEnv('htlc-finalized-commit-seed');
+    env.quietRuntimeLogs = true;
+    env.activeJurisdiction = 'Testnet';
+    const replica = makeReplica(entityId, counterpartyId);
+    replica.state.htlcNotes.set(`lock:${outboundLockId}`, 'invoice-42');
+    replica.state.htlcRoutes.set(hashlock, {
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      startedAtMs: replica.state.timestamp - 750,
+      outboundEntity: counterpartyId,
+      outboundLockId,
+      createdTimestamp: replica.state.timestamp - 1000,
+    });
+
+    applyCommittedAccountFrameFollowups(replica.state, counterpartyId, {
+      height: 1,
+      timestamp: replica.state.timestamp,
+      jHeight: 0,
+      accountTxs: [{
+        type: 'htlc_resolve',
+        data: {
+          lockId: outboundLockId,
+          outcome: 'secret',
+          secret,
+        },
+      }],
+      prevFrameHash: '',
+      deltas: [],
+      stateHash: '',
+      byLeft: true,
+    }, [], env);
+
+    const finalizedEvents = env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized');
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+    expect(finalizedEvents).toHaveLength(1);
+    expect(finalizedEvents[0]?.data).toMatchObject({
+      entityId,
+      fromEntity: entityId,
+      toEntity: counterpartyId,
+      hashlock,
+      secret,
+      lockId: outboundLockId,
+      amount: '10',
+      tokenId: 1,
+      jurisdictionId: 'Testnet',
+      description: 'invoice-42',
+      finalizedAtMs: replica.state.timestamp,
+      elapsedMs: 750,
+      finalizedInMs: 750,
+    });
+  });
+
+  test('keeps originated outbound route while lock is still queued for account consensus', () => {
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterpartyId = `0x${'22'.repeat(32)}`;
+    const outboundLockId = 'lock-pending';
+    const hashlock = `0x${'88'.repeat(32)}`;
+    const replica = makeReplica(entityId, counterpartyId);
+    const account = replica.state.accounts.get(counterpartyId)!;
+    account.mempool.push({
+      type: 'htlc_lock',
+      data: {
+        lockId: outboundLockId,
+        hashlock,
+        tokenId: 1,
+        amount: 10n,
+        timelock: 100000n,
+        revealBeforeHeight: 10,
+      },
+    });
+    replica.state.htlcRoutes.set(hashlock, {
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      outboundEntity: counterpartyId,
+      outboundLockId,
+      createdTimestamp: replica.state.timestamp - 1000,
+    });
+
+    expect(pruneSettledOriginatedHtlcRoutes(replica.state, replica.state.timestamp)).toBe(0);
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(true);
+
+    account.mempool = [];
+    expect(pruneSettledOriginatedHtlcRoutes(replica.state, replica.state.timestamp)).toBe(1);
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
   });
 });

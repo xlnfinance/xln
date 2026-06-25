@@ -1,8 +1,9 @@
-import type { AccountFrame, AccountTx, EntityState } from '../../../types';
+import type { AccountFrame, AccountTx, EntityState, Env, HtlcNoteKey, HtlcRoute } from '../../../types';
 import { HEAVY_LOGS } from '../../../utils';
 import { swapKey } from '../../../swap-execution';
 import { cancelHook as cancelScheduledHook } from '../../../entity-crontab';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
+import { buildHtlcFinalizedEventPayload } from '../../../htlc-events';
 import {
   ensureLendingState,
   getCreditGrantedByAccountOwner,
@@ -11,6 +12,39 @@ import {
 import type { MempoolOp } from './orderbook-queue';
 
 const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
+
+const jurisdictionIdFor = (state: EntityState, env?: Env): string =>
+  String(state.config?.jurisdiction?.name || env?.activeJurisdiction || '').trim();
+
+function emitOriginatedHtlcFinalized(
+  env: Env | undefined,
+  state: EntityState,
+  route: HtlcRoute,
+  accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
+): void {
+  if (!env?.emit || accountTx.data.outcome !== 'secret') return;
+  if (route.inboundEntity || route.outboundLockId !== accountTx.data.lockId) return;
+  const description =
+    state.htlcNotes?.get(`lock:${accountTx.data.lockId}` as HtlcNoteKey)
+    ?? state.htlcNotes?.get(`hashlock:${route.hashlock}` as HtlcNoteKey)
+    ?? undefined;
+  env.emit('HtlcFinalized', {
+    ...buildHtlcFinalizedEventPayload({
+      entityId: state.entityId,
+      fromEntity: state.entityId,
+      ...(route.outboundEntity ? { toEntity: route.outboundEntity } : {}),
+      hashlock: route.hashlock,
+      ...(accountTx.data.secret ? { secret: accountTx.data.secret } : {}),
+      lockId: accountTx.data.lockId,
+      ...(route.amount !== undefined ? { amount: route.amount } : {}),
+      ...(route.tokenId !== undefined ? { tokenId: route.tokenId } : {}),
+      ...(description ? { description } : {}),
+      ...(route.startedAtMs !== undefined ? { startedAtMs: route.startedAtMs } : {}),
+      ...(jurisdictionIdFor(state, env) ? { jurisdictionId: jurisdictionIdFor(state, env) } : {}),
+      finalizedAtMs: state.timestamp,
+    }),
+  });
+}
 
 const setCreditLimitOp = (
   accountId: string,
@@ -123,6 +157,7 @@ export function applyCommittedAccountFrameFollowups(
   counterpartyId: string,
   committedFrame: AccountFrame,
   mempoolOps: MempoolOp[] = [],
+  env?: Env,
 ): void {
   if (HEAVY_LOGS) {
     console.log(
@@ -147,6 +182,7 @@ export function applyCommittedAccountFrameFollowups(
           const resolvesOriginatedOutbound =
             route.outboundLockId === accountTx.data.lockId && !route.inboundEntity;
           if (!resolvesInbound && !resolvesOriginatedOutbound) continue;
+          emitOriginatedHtlcFinalized(env, newState, route, accountTx);
           terminateHtlcRoute(newState, hashlock, newState.timestamp);
         }
       }
