@@ -342,7 +342,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
       for (const { frame: committedFrame, committedViaNewFrame } of committedFrameEntries) {
         if (!committedFrame?.accountTxs) continue;
-        applyCommittedAccountFrameFollowups(newState, counterpartyId, committedFrame, mempoolOps);
+        applyCommittedAccountFrameFollowups(newState, counterpartyId, committedFrame, mempoolOps, env);
 
         for (const accountTx of committedFrame.accountTxs) {
           const crossJurisdictionFollowupHandled = applyCommittedCrossJurisdictionAccountTxFollowup(
