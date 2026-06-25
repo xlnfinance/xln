@@ -151,13 +151,14 @@ const profileCommands: Record<SoakProfile, SoakCommand[]> = {
     {
       name: '100-user HTLC storage recovery',
       command:
-        'XLN_DB_PATH=db-tmp/soak-mainnet-hub ' +
+        'SOAK_DB_ROOT="${SOAK_MAINNET_DB_ROOT:-.logs/soak/db/mainnet-hub}"; ' +
+        'XLN_DB_PATH="$SOAK_DB_ROOT" ' +
         'bun runtime/scripts/bench-storage-hub.ts ' +
         '--accounts 100 --payments 100 --payment-kind htlc --min-payment-tps 100 ' +
         '--persist --storage --storage-snapshot 2 --storage-epoch-mb 2 ' +
         '--import-batch 64 --open-batch 50 --payment-batch 100 --recovery-scan-step 5 ' +
         '--recovery-budget-ms 10000 --crash-recover --crash-recovery-budget-ms 10000 ' +
-        '--db-root db-tmp/soak-mainnet-hub',
+        '--db-root "$SOAK_DB_ROOT"',
       timeoutMs: 600_000,
     },
     {
