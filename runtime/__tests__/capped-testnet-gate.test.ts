@@ -6,16 +6,17 @@ import {
   validateCappedTestnetPolicy,
   type CappedTestnetPolicy,
 } from '../scripts/run-capped-testnet-gate';
+import { MAINNET_GATE, MAINNET_GATE_LABELS } from '../scripts/mainnet-gate-constants';
 
 const validPolicy = (): CappedTestnetPolicy => ({
-  $schema: 'xln:capped-testnet-policy:v1',
-  name: 'capped-public-testnet',
+  $schema: MAINNET_GATE_LABELS.cappedPolicySchema,
+  name: MAINNET_GATE_LABELS.cappedPolicyName,
   scope: ['landing', 'all-current-user-facing-flows'],
-  riskCapUsd: 10_000,
+  riskCapUsd: MAINNET_GATE.cappedRiskUsd,
   riskCapEnforcement: 'operator_config',
-  expectedTowers: 1,
-  expectedHubs: 3,
-  recoverySlaSeconds: 60,
+  expectedTowers: MAINNET_GATE.expectedTowers,
+  expectedHubs: MAINNET_GATE.expectedHubs,
+  recoverySlaSeconds: MAINNET_GATE.recoverySlaSeconds,
   exceptionPolicy: {
     p0: 'forbidden',
     p1: 'forbidden',
@@ -23,7 +24,7 @@ const validPolicy = (): CappedTestnetPolicy => ({
     p3: 'issue_required',
   },
   externalAuditRequired: false,
-  soakMinutes: 1440,
+  soakMinutes: MAINNET_GATE.soakMinutes,
 });
 
 test('capped testnet policy accepts the agreed launch envelope', () => {
@@ -46,12 +47,12 @@ test('capped testnet policy rejects uncapped risk and weak exceptions', () => {
   expect(validateCappedTestnetPolicy(policy)).toContain('POLICY_P0_EXCEPTION_INVALID');
 });
 
-test('capped testnet gate includes 24h soak unless explicitly skipped', () => {
+test('capped testnet gate includes agreed one-hour soak unless explicitly skipped', () => {
   const full = buildCappedTestnetGateSteps(validPolicy(), { skipSoak: false });
-  expect(full.map(step => step.command)).toContain('bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=1440');
+  expect(full.map(step => step.command)).toContain('bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=60');
 
   const preflight = buildCappedTestnetGateSteps(validPolicy(), { skipSoak: true });
-  expect(preflight.some(step => step.command.includes('--minutes=1440'))).toBe(false);
+  expect(preflight.some(step => step.command.includes('--minutes=60'))).toBe(false);
 });
 
 test('capped testnet gate arg parser supports preflight and dry run', () => {

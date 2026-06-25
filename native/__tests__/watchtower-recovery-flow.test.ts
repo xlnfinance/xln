@@ -182,7 +182,7 @@ describe('watchtower recovery full flow', () => {
       port: 0,
       towerId: 'tower-restore-flow',
       dbPath: join(towerRoot, 'tower.level'),
-      maxStoredBytesPerLookupKey: 64 * 1024,
+      maxStoredBytesPerLookupKey: 256 * 1024,
     });
     servers.push(towerServer);
 
@@ -193,8 +193,38 @@ describe('watchtower recovery full flow', () => {
     env.runtimeId = runtimeId;
     env.dbNamespace = `${runtimeId}-${Date.now()}-restore-flow`;
     env.quietRuntimeLogs = true;
-    const jurisdiction = installJurisdiction(env, 'RestoreFlow');
+    const jurisdictionName = 'RestoreFlow';
     const entityId = `0x${'ab'.repeat(32)}`;
+
+    xln.enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importJ',
+        data: {
+          name: jurisdictionName,
+          chainId: 31337,
+          ticker: 'SIM',
+          rpcs: [],
+          blockTimeMs: 1_000,
+        },
+      }],
+      entityInputs: [],
+    });
+    await xln.process(env);
+    const restoredJReplica = env.jReplicas.get(jurisdictionName);
+    if (!restoredJReplica?.depositoryAddress || !restoredJReplica.entityProviderAddress) {
+      throw new Error('RESTORE_FLOW_JURISDICTION_IMPORT_FAILED');
+    }
+    const jurisdiction: JurisdictionConfig = {
+      name: jurisdictionName,
+      address: 'browservm://',
+      chainId: Number(restoredJReplica.chainId || 31337),
+      depositoryAddress: restoredJReplica.depositoryAddress,
+      entityProviderAddress: restoredJReplica.entityProviderAddress,
+    };
+
+    const browserVMState = await restoredJReplica.jadapter?.dumpState?.();
+    if (!browserVMState) throw new Error('RESTORE_FLOW_BROWSERVM_STATE_MISSING');
+    env.browserVMState = browserVMState;
 
     xln.enqueueRuntimeInput(env, {
       runtimeTxs: [{

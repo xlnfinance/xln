@@ -5,8 +5,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 
+import { MAINNET_GATE, MAINNET_GATE_LABELS } from './mainnet-gate-constants';
+
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
-const MAX_CAPPED_TESTNET_RISK_USD = 10_000;
 
 type ExceptionPolicy = {
   p0?: string;
@@ -110,24 +111,24 @@ const asFiniteNumber = (value: unknown): number | null => {
 
 export const validateCappedTestnetPolicy = (policy: CappedTestnetPolicy): string[] => {
   const errors: string[] = [];
-  if (policy.$schema !== 'xln:capped-testnet-policy:v1') {
+  if (policy.$schema !== MAINNET_GATE_LABELS.cappedPolicySchema) {
     errors.push('POLICY_SCHEMA_INVALID');
   }
   const riskCapUsd = asFiniteNumber(policy.riskCapUsd);
-  if (riskCapUsd === null || riskCapUsd <= 0 || riskCapUsd > MAX_CAPPED_TESTNET_RISK_USD) {
+  if (riskCapUsd === null || riskCapUsd <= 0 || riskCapUsd > MAINNET_GATE.cappedRiskUsd) {
     errors.push(`POLICY_RISK_CAP_INVALID:${String(policy.riskCapUsd)}`);
   }
   if (!['operator_config', 'code', 'contract'].includes(String(policy.riskCapEnforcement || ''))) {
     errors.push(`POLICY_RISK_CAP_ENFORCEMENT_INVALID:${String(policy.riskCapEnforcement)}`);
   }
-  if (asFiniteNumber(policy.expectedTowers) !== 1) {
+  if (asFiniteNumber(policy.expectedTowers) !== MAINNET_GATE.expectedTowers) {
     errors.push(`POLICY_EXPECTED_TOWERS_INVALID:${String(policy.expectedTowers)}`);
   }
-  if (asFiniteNumber(policy.expectedHubs) !== 3) {
+  if (asFiniteNumber(policy.expectedHubs) !== MAINNET_GATE.expectedHubs) {
     errors.push(`POLICY_EXPECTED_HUBS_INVALID:${String(policy.expectedHubs)}`);
   }
   const recoverySlaSeconds = asFiniteNumber(policy.recoverySlaSeconds);
-  if (recoverySlaSeconds === null || recoverySlaSeconds <= 0 || recoverySlaSeconds > 60) {
+  if (recoverySlaSeconds === null || recoverySlaSeconds <= 0 || recoverySlaSeconds > MAINNET_GATE.recoverySlaSeconds) {
     errors.push(`POLICY_RECOVERY_SLA_INVALID:${String(policy.recoverySlaSeconds)}`);
   }
   if (policy.exceptionPolicy?.p0 !== 'forbidden') errors.push('POLICY_P0_EXCEPTION_INVALID');
@@ -137,7 +138,7 @@ export const validateCappedTestnetPolicy = (policy: CappedTestnetPolicy): string
   if (policy.externalAuditRequired !== false) {
     errors.push('POLICY_EXTERNAL_AUDIT_SHOULD_BE_FALSE_FOR_CAPPED_TESTNET');
   }
-  if (asFiniteNumber(policy.soakMinutes) !== 1440) {
+  if (asFiniteNumber(policy.soakMinutes) !== MAINNET_GATE.soakMinutes) {
     errors.push(`POLICY_SOAK_MINUTES_INVALID:${String(policy.soakMinutes)}`);
   }
   if (!Array.isArray(policy.scope) || policy.scope.length === 0) {
@@ -155,7 +156,7 @@ export const buildCappedTestnetGateSteps = (
   policy: CappedTestnetPolicy,
   options: { skipSoak: boolean },
 ): GateStep[] => {
-  const soakMinutes = Math.floor(asFiniteNumber(policy.soakMinutes) ?? 1440);
+  const soakMinutes = Math.floor(asFiniteNumber(policy.soakMinutes) ?? MAINNET_GATE.soakMinutes);
   const steps: GateStep[] = [
     { name: 'source check', command: 'bun run check', timeoutMs: 1_200_000 },
     { name: 'security audit pack', command: 'bun run security:audit-pack', timeoutMs: 120_000 },
@@ -166,7 +167,7 @@ export const buildCappedTestnetGateSteps = (
   ];
   if (!options.skipSoak) {
     steps.push({
-      name: '24h release soak',
+      name: 'one-hour release soak',
       command: `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=${soakMinutes}`,
       timeoutMs: (soakMinutes + 30) * 60_000,
     });

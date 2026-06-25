@@ -17,5 +17,5 @@
     "p3": "issue_required"
   },
   "externalAuditRequired": false,
-  "soakMinutes": 1440
+  "soakMinutes": 60
 }

@@ -20,7 +20,7 @@ Date: 2026-06-16
 |------|----------|
 | Launch scope | Everything currently user-facing, plus landing |
 | Value cap | Public testnet / capped beta, max USD 10,000 equivalent at risk |
-| Soak duration | 24 hours uninterrupted |
+| Soak duration | 1 hour uninterrupted for capped testnet |
 | External audit | Not required for this capped testnet; required before uncapped mainnet |
 | Topology | One official tower and three hubs |
 | Default exception rule | P0/P1 exceptions forbidden; P2 only with explicit owner sign-off |
@@ -32,7 +32,7 @@ Soak means a long-running release candidate run under realistic load and
 restarts. It is meant to catch memory leaks, timing drift, flaky persistence,
 RPC instability, reconnect bugs, tower upload gaps, and health-monitoring lies.
 Any crash, manual repair, data loss, unexplained console error, or failed gate
-restarts the 24-hour clock.
+restarts the 1-hour clock.
 
 ## Mechanism
 
@@ -43,7 +43,7 @@ The mechanism is a loop, not a one-time checklist:
    check fails or evidence is missing, the release cannot move forward.
 3. Fix the first real blocker with L1/L2/L3 verification.
 4. Commit the fix, freeze a new release candidate, and restart the gates.
-5. After all gates pass, run the 24-hour soak on the same candidate.
+5. After all gates pass, run the 1-hour soak on the same candidate.
 6. If soak fails, treat it as a real blocker and restart the loop after the fix.
 7. Only after green gates plus green soak, run the one-tower / three-hub canary.
 
@@ -58,14 +58,17 @@ Concrete examples:
 - `bun run gate:release` is an integrated release gate: runtime tests,
   contracts, RPC settlement, persistence, watchtower smoke, fast e2e, system
   tests, storage benchmark, and prod health.
+- `bun run gate:mainnet-preflight` is the operator-facing preflight: it runs
+  source checks, deterministic money invariants, security audit pack, release
+  gate, full browser e2e, watchtower smoke, and capped topology health.
 - `bun run gate:capped-testnet:preflight` is the capped launch preflight: it
   validates policy, dirty-worktree status, release evidence, full e2e,
-  watchtower smoke, and one-tower / three-hub health without the 24-hour soak.
+  watchtower smoke, and one-tower / three-hub health without the 1-hour soak.
 - `bun run gate:capped-testnet` is the full capped launch gate, including soak.
 - Browser/F12 drill is a product gate: the actual app must work without uncaught
   console errors in the flows users touch.
-- `bun run soak:capped-testnet` is the 24-hour soak: repeated release-profile
-  checks for a full day without manual repair.
+- `bun run soak:capped-testnet` is the 1-hour capped soak: repeated
+  release-profile checks without manual repair.
 
 ## xln Mental Model For The Gatekeeper
 
@@ -136,8 +139,8 @@ Required evidence:
 4. `bun run gate:release` output.
 5. `bun run test:e2e:full` output.
 6. `bun run test:watchtower:smoke` output.
-7. 24-hour soak output from
-   `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=1440`.
+7. 1-hour soak output from
+   `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=60`.
 8. Production-health output proving one tower and three hubs are healthy.
 9. Browser/F12 console evidence for landing, bootstrap, recovery, payment,
    swap, dispute, and reload flows with zero uncaught errors.
@@ -206,16 +209,16 @@ Report format:
    - Browser/F12 console drill on landing, bootstrap, recovery, payment, swap,
      dispute, reload, and local backup import.
 
-4. Run the 24-hour soak.
+4. Run the 1-hour soak.
    - Current `bun run soak:release` is a 240-minute script.
-   - The 24-hour gate command is:
+   - The capped-testnet gate command is:
 
      ```bash
      bun run soak:capped-testnet
      ```
 
    - No manual repair is allowed during soak.
-   - Any failure restarts the 24-hour clock after the root-cause fix.
+   - Any failure restarts the 1-hour clock after the root-cause fix.
 
 5. Run the capped topology canary.
    - Deploy one official tower and three hubs.
@@ -239,7 +242,7 @@ Report format:
 
 8. Decide.
    - PASS requires zero P0/P1, signed-off P2 list, green evidence, and complete
-     24-hour soak.
+     1-hour soak.
    - FAIL produces the next loop's first blocker and exact repro command.
 
 ## Launch Sign-Off
@@ -253,7 +256,7 @@ Dirty worktree:
 Scope: all current user-facing features + landing
 Risk cap: USD 10,000 equivalent aggregate
 Topology: one tower, three hubs
-24h soak artifact:
+1h soak artifact:
 Gate artifacts:
 Browser/F12 artifact:
 Rollback artifact:
@@ -271,4 +274,4 @@ Next rollback command:
 3. Confirm recovery SLA: less than 60 seconds from seed entry or backup upload
    to restored wallet choice.
 4. Is the landing allowed to onboard public users immediately, or must it be
-   waitlist/invite-only until the 24-hour soak is complete?
+   waitlist/invite-only until the 1-hour capped soak is complete?

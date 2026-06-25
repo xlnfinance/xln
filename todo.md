@@ -1,6 +1,6 @@
 # XLN TODO
 
-Last updated: 2026-06-15
+Last updated: 2026-06-25
 
 This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
@@ -47,6 +47,9 @@ file and older docs disagree, prefer code and tests first, then this file.
 - Confirmed on current `main` (`d328c43a`): `bun run gate:release` passed,
   production health smoke returned healthy, and a release soak was manually
   stopped after 13 complete `gate:ci + hub10k` iterations with exit code `0`.
+- Added mainnet-preflight gate plan and reduced the capped-testnet executable
+  soak policy from 24 hours to 1 hour for faster local release loops. The
+  uncapped real-funds bar can still require a longer soak before launch.
 
 ## P0 - Release And Mainnet Readiness
 
@@ -63,7 +66,8 @@ file and older docs disagree, prefer code and tests first, then this file.
      iterations (`gate:ci` plus `hub10k`) passed before the run was stopped
      manually for time.
    - Still needed for a mainnet candidate: a complete uninterrupted
-     multi-hour `bun run soak:release`.
+     one-hour `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak`
+     from a clean tree.
 
 3. **Make real mainnet ops explicit.**
    - Chain/RPC endpoints selected and documented.
