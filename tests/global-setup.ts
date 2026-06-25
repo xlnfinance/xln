@@ -27,6 +27,15 @@ type BrowserIssue = {
   timestamp: number;
 };
 
+type BrowserIssueExpectation = {
+  type?: BrowserIssueType;
+  severity?: BrowserIssueSeverity;
+  message?: string | RegExp;
+  url?: string | RegExp;
+  method?: string;
+  status?: number;
+};
+
 type BrowserWithPatch = Browser & {
   __xlnQaNewContext?: Browser['newContext'];
 };
@@ -34,6 +43,7 @@ type BrowserWithPatch = Browser & {
 const observedPages = new Set<Page>();
 const observedContexts = new Set<BrowserContext>();
 const patchedBrowsers = new Set<Browser>();
+const expectedBrowserIssuesByTestId = new Map<string, BrowserIssueExpectation[]>();
 let activeTestInfo: TestInfo | null = null;
 
 const eventPath = (): string => process.env['E2E_BROWSER_EVENTS_PATH']?.trim() ?? '';
@@ -50,6 +60,32 @@ const writeIssue = (issue: BrowserIssue): void => {
   appendFileSync(path, `${JSON.stringify(issue)}\n`);
 };
 
+const matchesText = (pattern: string | RegExp | undefined, value: string | null): boolean => {
+  if (pattern === undefined) return true;
+  const text = value ?? '';
+  return typeof pattern === 'string' ? text.includes(pattern) : pattern.test(text);
+};
+
+const isExpectedBrowserIssue = (
+  testInfo: TestInfo | null,
+  type: BrowserIssueType,
+  severity: BrowserIssueSeverity,
+  message: string,
+  details: Pick<BrowserIssue, 'url' | 'method' | 'status'>,
+): boolean => {
+  const id = testId(testInfo);
+  if (!id) return false;
+  const rules = expectedBrowserIssuesByTestId.get(id) ?? [];
+  return rules.some((rule) =>
+    (rule.type === undefined || rule.type === type) &&
+    (rule.severity === undefined || rule.severity === severity) &&
+    (rule.method === undefined || rule.method === details.method) &&
+    (rule.status === undefined || rule.status === details.status) &&
+    matchesText(rule.message, message) &&
+    matchesText(rule.url, details.url),
+  );
+};
+
 const emitIssue = (
   testInfo: TestInfo | null,
   type: BrowserIssueType,
@@ -59,10 +95,11 @@ const emitIssue = (
 ): void => {
   const text = message.trim();
   if (!text) return;
+  const expected = isExpectedBrowserIssue(testInfo, type, severity, text, details);
   writeIssue({
     type,
-    severity,
-    message: text.slice(0, 2_000),
+    severity: expected ? 'warning' : severity,
+    message: `${expected ? '[expected] ' : ''}${text}`.slice(0, 2_000),
     url: details.url,
     method: details.method,
     status: details.status,
@@ -74,10 +111,22 @@ const emitIssue = (
 const isBenignConsoleMessage = (message: string): boolean =>
   message === 'Ignoring Event: localhost';
 
+const getConsoleResourceStatus = (message: string): number | null => {
+  const match = message.match(/Failed to load resource: the server responded with a status of (\d{3})/);
+  if (!match) return null;
+  const status = Number(match[1]);
+  return Number.isInteger(status) ? status : null;
+};
+
 const isBenignRequestFailure = (request: Request, message: string): boolean => {
   if (message !== 'net::ERR_ABORTED') return false;
   return true;
 };
+
+const isBenignPageError = (url: string | null, message: string): boolean =>
+  url === 'about:blank' &&
+  message.includes("Failed to read the 'localStorage' property") &&
+  message.includes('Access is denied');
 
 const observePage = (page: Page, testInfo: TestInfo | null): void => {
   if (observedPages.has(page)) return;
@@ -87,13 +136,19 @@ const observePage = (page: Page, testInfo: TestInfo | null): void => {
     const type = message.type();
     if (type !== 'error' && type !== 'warning') return;
     if (type === 'warning' && isBenignConsoleMessage(message.text())) return;
-    emitIssue(testInfo, 'console', type === 'error' ? 'error' : 'warning', message.text(), {
+    const resourceStatus = getConsoleResourceStatus(message.text());
+    const severity: BrowserIssueSeverity =
+      resourceStatus !== null
+        ? resourceStatus >= 500 ? 'error' : 'warning'
+        : type === 'error' ? 'error' : 'warning';
+    emitIssue(testInfo, 'console', severity, message.text(), {
       url: page.url() || null,
       method: null,
       status: null,
     });
   });
   page.on('pageerror', (error) => {
+    if (isBenignPageError(page.url() || null, error.message)) return;
     emitIssue(testInfo, 'pageerror', 'error', error.message, {
       url: page.url() || null,
       method: null,
@@ -153,8 +208,19 @@ test.beforeEach(async ({ browser, context, page }, testInfo) => {
 });
 
 test.afterEach(async () => {
+  const id = testId(activeTestInfo);
+  if (id) expectedBrowserIssuesByTestId.delete(id);
   activeTestInfo = null;
 });
+
+export const allowBrowserIssue = (rule: BrowserIssueExpectation): void => {
+  const id = testId(activeTestInfo);
+  if (!id) throw new Error('allowBrowserIssue must be called inside a running test');
+  expectedBrowserIssuesByTestId.set(id, [
+    ...(expectedBrowserIssuesByTestId.get(id) ?? []),
+    rule,
+  ]);
+};
 
 export { devices, expect, request };
 export type {

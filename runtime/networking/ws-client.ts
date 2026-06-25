@@ -5,6 +5,8 @@ import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 
+const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
+
 // Separate interfaces for browser and Node.js WebSocket implementations
 interface BrowserWebSocket {
   binaryType: string;
@@ -202,8 +204,9 @@ export class RuntimeWsClient {
           `code=${Number(code || 0)} reason="${reason || 'n/a'}"`;
         const shouldReconnect = this.shouldReconnectAfterClose(Number(code || 0), reason);
         if (shouldReconnect) {
-          console.error(`[WS] ${summary} — scheduling reconnect`);
-          this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
+          const normalClose = NORMAL_CLOSE_CODES.has(Number(code || 0));
+          (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
+          if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
           this.scheduleReconnect();
         } else {
           console.warn(`[WS] ${summary} — reconnect disabled`);
@@ -242,8 +245,9 @@ export class RuntimeWsClient {
           `code=${code} reason="${reason || 'n/a'}" clean=${event.wasClean ? 1 : 0}`;
         const shouldReconnect = this.shouldReconnectAfterClose(code, reason);
         if (shouldReconnect) {
-          console.error(`[WS] ${summary} — scheduling reconnect`);
-          this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
+          const normalClose = event.wasClean || NORMAL_CLOSE_CODES.has(code);
+          (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
+          if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
           this.scheduleReconnect();
         } else {
           console.warn(`[WS] ${summary} — reconnect disabled`);
