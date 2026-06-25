@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import QaAdminEvidenceBoard from '$lib/components/QA/QaAdminEvidenceBoard.svelte';
   import QaProtectedImage from '$lib/components/QA/QaProtectedImage.svelte';
   import QaScenarioPlayer from '$lib/components/QA/QaScenarioPlayer.svelte';
   import {
@@ -38,6 +39,11 @@
     statusLabel,
     topRegressionMetric,
   } from '$lib/qa/cockpit-helpers';
+  import {
+    buildAdminStoryCards,
+    normalizeQaAdminHealth,
+    type QaAdminHealthSnapshot,
+  } from '$lib/qa/adminEvidence';
   import type { QaSeverity } from '@xln/runtime/qa/severity';
   import { DISPLAY, QA } from '@xln/runtime/constants';
   import type {
@@ -134,6 +140,10 @@
   let artifactWindowSize = $state(QA.ARTIFACT_WINDOW_STEP);
   let systemVerdict = $state<QaSystemVerdict | null>(null);
   let showRawLogTail = $state(false);
+  let adminHealth = $state<QaAdminHealthSnapshot | null>(null);
+  let adminHealthError = $state<string | null>(null);
+  let loadingAdminHealth = $state(false);
+  let uxSlideshowIndex = $state<number | null>(null);
 
   const RUN_WINDOW_STEP = QA.RUN_WINDOW_STEP;
   const SHARD_WINDOW_STEP = QA.SHARD_WINDOW_STEP;
@@ -250,6 +260,10 @@
   const uxGalleryCuratedCount = $derived(uxGalleryStories.filter(story => story.curated).length);
   const uxGalleryDesktopCount = $derived(uxGalleryStories.filter(story => story.platform === 'desktop').length);
   const uxGalleryMobileCount = $derived(uxGalleryStories.filter(story => story.platform === 'mobile').length);
+  const adminStoryCards = $derived(buildAdminStoryCards(selectedRun, uxGalleryStories));
+  const uxSlideshowStory = $derived(
+    uxSlideshowIndex === null ? null : uxGalleryStories[uxSlideshowIndex] ?? null,
+  );
 
   function trendPillLabel(run: QaSummary): string {
     const total = Math.max(0, Number(run.totalShards || 0));
@@ -265,6 +279,35 @@
       `browser ${formatBrowserHealth(browser)}`,
       formatDate(run.createdAt),
     ].join(' · ');
+  }
+
+  function openUxStoryByIndex(index: number | null): void {
+    if (typeof index !== 'number') return;
+    if (index < 0 || index >= uxGalleryStories.length) return;
+    uxSlideshowIndex = index;
+  }
+
+  function openUxStory(story: QaStoryScreenshot): void {
+    const index = uxGalleryStories.findIndex(candidate => candidate.id === story.id);
+    openUxStoryByIndex(index);
+  }
+
+  function closeUxSlideshow(): void {
+    uxSlideshowIndex = null;
+  }
+
+  function stepUxSlideshow(delta: number): void {
+    if (uxGalleryStories.length === 0) return;
+    const current = uxSlideshowIndex ?? 0;
+    uxSlideshowIndex = (current + delta + uxGalleryStories.length) % uxGalleryStories.length;
+  }
+
+  function selectStoryShard(index: number): void {
+    if (!selectedRun || !selectedRun.shards[index]) return;
+    activeView = 'e2e';
+    selectedShardIndex = index;
+    showRawLogTail = false;
+    rememberRunInUrl(selectedRun.runId, selectedRun.shards[index].shard);
   }
 
   function applyQaAuth(payload: { qaAuth?: QaAuthInfo } | null | undefined): void {
@@ -654,6 +697,29 @@
     }
   }
 
+  async function loadAdminHealth(): Promise<void> {
+    loadingAdminHealth = true;
+    adminHealthError = null;
+    try {
+      const response = await qaFetch('/api/health', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok) {
+        const message = payload && typeof payload === 'object' && 'error' in payload
+          ? String((payload as { error?: unknown }).error || '')
+          : '';
+        throw new Error(message || `Health HTTP ${response.status}`);
+      }
+      const snapshot = normalizeQaAdminHealth(payload);
+      if (!snapshot) throw new Error('Health payload is not an orchestrator snapshot');
+      adminHealth = snapshot;
+    } catch (err) {
+      adminHealth = null;
+      adminHealthError = err instanceof Error ? err.message : String(err);
+    } finally {
+      loadingAdminHealth = false;
+    }
+  }
+
   async function selectRun(runId: string): Promise<void> {
     if (!runId || runId === selectedRunId) return;
     selectedRunId = runId;
@@ -819,7 +885,7 @@
     writeQaToken(qaTokenInput);
     error = null;
     actionError = null;
-    await Promise.all([loadRuns(false), loadMeta()]);
+    await Promise.all([loadRuns(false), loadMeta(), loadAdminHealth()]);
     if (selectedRunId) await loadRun(selectedRunId);
   }
 
@@ -827,18 +893,20 @@
     clearQaToken();
     qaTokenInput = '';
     qaAuthLabel = 'locked';
-    await Promise.all([loadRuns(false), loadMeta()]);
+    await Promise.all([loadRuns(false), loadMeta(), loadAdminHealth()]);
   }
 
   onMount(() => {
     qaTokenInput = consumeQaTokenFromUrl();
     void loadRuns(false);
     void loadMeta();
+    void loadAdminHealth();
     const timer = setInterval(() => {
       if (!autoRefresh) return;
       void loadRuns(true);
       if (selectedRunId) void loadRun(selectedRunId);
       void loadMeta();
+      void loadAdminHealth();
     }, 15000);
     return () => clearInterval(timer);
   });
@@ -1056,6 +1124,15 @@
       </div>
     </section>
 
+    <QaAdminEvidenceBoard
+      stories={adminStoryCards}
+      health={adminHealth}
+      healthError={adminHealthError}
+      loadingHealth={loadingAdminHealth}
+      onOpenScreenshot={openUxStoryByIndex}
+      onSelectShard={selectStoryShard}
+    />
+
     {#if uxGalleryStories.length > 0}
       <section class="ux-gallery-preview" data-testid="qa-ux-gallery-preview">
         <div class="suite-list-head">
@@ -1086,7 +1163,7 @@
             <button
               type="button"
               class="ux-preview-card hero"
-              onclick={() => (activeView = 'gallery')}
+              onclick={() => openUxStoryByIndex(0)}
               title={uxGalleryStories[0].description ?? uxGalleryStories[0].title}
             >
               <QaProtectedImage url={uxGalleryStories[0].url} alt={uxGalleryStories[0].title} loading="lazy" />
@@ -1096,7 +1173,7 @@
           {/if}
           <div class="ux-preview-rail">
             {#each uxGalleryStories.slice(1, 5) as story}
-              <button type="button" class="ux-preview-card compact" onclick={() => (activeView = 'gallery')} title={story.description ?? story.title}>
+              <button type="button" class="ux-preview-card compact" onclick={() => openUxStory(story)} title={story.description ?? story.title}>
                 <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
                 <span>{story.group}</span>
                 <strong>{story.title}</strong>
@@ -1231,7 +1308,13 @@
               <h3>{group}</h3>
               <div class="ux-gallery-grid">
                 {#each uxGalleryStories.filter(story => story.group === group) as story}
-                  <article class="ux-gallery-card" data-testid="qa-ux-gallery-card" data-platform={story.platform ?? 'unknown'}>
+                  <button
+                    type="button"
+                    class="ux-gallery-card"
+                    data-testid="qa-ux-gallery-card"
+                    data-platform={story.platform ?? 'unknown'}
+                    onclick={() => openUxStory(story)}
+                  >
                     <div class="ux-shot">
                       <QaProtectedImage url={story.url} alt={story.title} loading="lazy" />
                     </div>
@@ -1246,7 +1329,7 @@
                         {#if story.runId}<span>run {story.runId}</span>{/if}
                       </div>
                     </div>
-                  </article>
+                  </button>
                 {/each}
               </div>
             </div>
@@ -2063,6 +2146,34 @@
     {:else}
       <div class="empty-state">No runs found yet.</div>
     {/if}
+
+    {#if uxSlideshowStory}
+      <div class="ux-slideshow-backdrop" data-testid="qa-ux-slideshow" role="dialog" aria-modal="true" aria-label="UX screenshot slideshow">
+        <section class="ux-slideshow">
+          <div class="ux-slideshow-head">
+            <div>
+              <div class="eyebrow">{uxSlideshowStory.group}</div>
+              <h2>{uxSlideshowStory.title}</h2>
+              <p>{uxSlideshowStory.description ?? uxSlideshowStory.name}</p>
+            </div>
+            <button type="button" class="mini-action ghost" data-testid="qa-ux-slideshow-close" onclick={closeUxSlideshow}>Close</button>
+          </div>
+          <div class="ux-slideshow-image">
+            <QaProtectedImage url={uxSlideshowStory.url} alt={uxSlideshowStory.title} loading="eager" />
+          </div>
+          <div class="ux-slideshow-controls">
+            <button type="button" class="mini-action" data-testid="qa-ux-slideshow-prev" onclick={() => stepUxSlideshow(-1)}>Prev</button>
+            <div class="artifact-chips">
+              <span>{(uxSlideshowIndex ?? 0) + 1}/{uxGalleryStories.length}</span>
+              <span>{uxSlideshowStory.platform ?? 'screen'}</span>
+              <span>{uxSlideshowStory.curated ? 'curated' : uxSlideshowStory.source}</span>
+              {#if uxSlideshowStory.runId}<span>run {uxSlideshowStory.runId}</span>{/if}
+            </div>
+            <button type="button" class="mini-action" data-testid="qa-ux-slideshow-next" onclick={() => stepUxSlideshow(1)}>Next</button>
+          </div>
+        </section>
+      </div>
+    {/if}
   </main>
 </div>
 
@@ -2605,10 +2716,21 @@
     display: grid;
     grid-template-rows: 180px auto;
     min-width: 0;
+    width: 100%;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
+    padding: 0;
+    color: inherit;
     background: rgba(255, 255, 255, 0.035);
+    font: inherit;
+    text-align: left;
     overflow: hidden;
+    cursor: pointer;
+  }
+
+  .ux-gallery-card:hover {
+    border-color: rgba(216, 175, 79, 0.46);
+    background: rgba(216, 175, 79, 0.07);
   }
 
   .ux-shot {
@@ -2639,6 +2761,66 @@
     min-height: 2.2em;
     font-size: 0.78rem;
     line-height: 1.35;
+  }
+
+  .ux-slideshow-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+    background: rgba(2, 3, 5, 0.82);
+    backdrop-filter: blur(18px);
+  }
+
+  .ux-slideshow {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 0.85rem;
+    width: min(1280px, 96vw);
+    max-height: 94vh;
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    background: #08090b;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.52);
+  }
+
+  .ux-slideshow-head,
+  .ux-slideshow-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .ux-slideshow-head h2,
+  .ux-slideshow-head p {
+    margin: 0;
+  }
+
+  .ux-slideshow-head p {
+    color: #b7b2a4;
+  }
+
+  .ux-slideshow-image {
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: #050506;
+  }
+
+  .ux-slideshow-image :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: calc(94vh - 190px);
+    object-fit: contain;
+    object-position: top center;
+    background: #050506;
   }
 
   .run-summary,
@@ -3650,6 +3832,16 @@
     .ux-preview-rail,
     .ux-gallery-grid {
       grid-template-columns: 1fr;
+    }
+
+    .ux-slideshow-backdrop {
+      padding: 0.7rem;
+    }
+
+    .ux-slideshow-head,
+    .ux-slideshow-controls {
+      align-items: stretch;
+      flex-direction: column;
     }
 
     .ux-preview-rail {

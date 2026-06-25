@@ -1,7 +1,8 @@
-import { normalizeWsUrl } from './wsUrl';
+import { normalizeWsConnectUrl } from './wsUrl';
 import { REMOTE_RUNTIME } from '@xln/runtime/constants';
 
 export const REMOTE_RUNTIME_IMPORT_HASH_PARAM = REMOTE_RUNTIME.IMPORT_HASH_PARAM;
+export const REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM = REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM;
 export const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_STORAGE_KEY;
 export const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = REMOTE_RUNTIME.IMPORT_RESULT_STORAGE_KEY;
 export const MAX_REMOTE_RUNTIME_IMPORTS = REMOTE_RUNTIME.MAX_IMPORTS;
@@ -44,7 +45,7 @@ export const remoteRuntimeIdForWsUrl = (wsUrl: string): string =>
   `radapter:${normalizeRemoteRuntimeWsUrl(wsUrl)}`.toLowerCase();
 
 export const normalizeRemoteRuntimeWsUrl = (value: string): string => {
-  const parsed = new URL(normalizeWsUrl(String(value || '').trim()));
+  const parsed = new URL(normalizeWsConnectUrl(String(value || '').trim()));
   if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
     throw new Error('REMOTE_RUNTIME_WS_REQUIRED');
   }
@@ -59,6 +60,20 @@ const decodeBase64UrlUtf8 = (value: string): string => {
   return new TextDecoder().decode(bytes);
 };
 
+export const readRemoteRuntimeTokenExpiry = (token: string): number | null => {
+  const parts = String(token || '').trim().split('.');
+  if (parts.length !== 7 || parts[0] !== 'xlnra1') return null;
+  const expiresAt = Math.floor(Number(parts[2]));
+  return Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : null;
+};
+
+export const assertRemoteRuntimeTokenFresh = (entry: Pick<RemoteRuntimeImportEntry, 'label' | 'token'>, now = Date.now()): void => {
+  const expiresAt = readRemoteRuntimeTokenExpiry(entry.token);
+  if (expiresAt !== null && expiresAt <= now) {
+    throw new Error(`REMOTE_RUNTIME_TOKEN_EXPIRED:${entry.label || 'runtime'}:${expiresAt}`);
+  }
+};
+
 const entryFromUnknown = (value: unknown, index: number): RemoteRuntimeImportEntry => {
   if (!isRecord(value)) throw new Error(`REMOTE_RUNTIME_IMPORT_ENTRY_INVALID:${index + 1}`);
   const wsUrl = normalizeRemoteRuntimeWsUrl(String(value['wsUrl'] || value['ws'] || value['url'] || '').trim());
@@ -66,7 +81,9 @@ const entryFromUnknown = (value: unknown, index: number): RemoteRuntimeImportEnt
   if (!token.startsWith('xlnra1.')) throw new Error(`REMOTE_RUNTIME_IMPORT_TOKEN_INVALID:${index + 1}`);
   const access = normalizeAccess(value['access'] || value['role'] || value['mode']);
   const label = String(value['label'] || value['name'] || new URL(wsUrl).host || `runtime ${index + 1}`).trim();
-  return { label, access, wsUrl, token };
+  const entry = { label, access, wsUrl, token };
+  assertRemoteRuntimeTokenFresh(entry);
+  return entry;
 };
 
 const entriesFromJson = (value: unknown): RemoteRuntimeImportEntry[] => {
@@ -77,6 +94,11 @@ const entriesFromJson = (value: unknown): RemoteRuntimeImportEntry[] => {
       : [];
   if (entries.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_ENTRIES_MISSING');
   return limitRemoteRuntimeImportEntries(entries.map(entryFromUnknown));
+};
+
+export const parseRemoteRuntimeImportSourcePayload = (value: unknown): RemoteRuntimeImportEntry[] => {
+  const source = isRecord(value) && isRecord(value['manifest']) ? value['manifest'] : value;
+  return entriesFromJson(source);
 };
 
 const tokenizeImportLine = (line: string): string[] => {
@@ -101,7 +123,9 @@ const entryFromLine = (line: string, index: number): RemoteRuntimeImportEntry =>
   const access = normalizeAccess(parts[accessIndex]);
   const labelParts = parts.filter((_, partIndex) => partIndex !== wsIndex && partIndex !== tokenIndex && partIndex !== accessIndex);
   const label = labelParts.join(' ').trim() || new URL(wsUrl).host;
-  return { label, access, wsUrl, token };
+  const entry = { label, access, wsUrl, token };
+  assertRemoteRuntimeTokenFresh(entry);
+  return entry;
 };
 
 export const parseRemoteRuntimeImportText = (text: string): RemoteRuntimeImportEntry[] => {

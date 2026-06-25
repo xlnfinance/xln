@@ -318,7 +318,7 @@ const hubRpcUrl = (hubOffset: number): string => {
   const api = new URL(API_BASE_URL);
   const port = Number(api.port);
   if (!Number.isFinite(port) || port <= 0) throw new Error(`E2E_API_BASE_URL must include a port: ${API_BASE_URL}`);
-  return `ws://localhost:${port + hubOffset}/rpc`;
+  return `ws://127.0.0.1:${port + hubOffset}/rpc`;
 };
 
 const runtimeImportManifestPath = (): string =>
@@ -943,13 +943,14 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     expect(baseline.custody?.ok, `custody must be ready: ${JSON.stringify(baseline.custody ?? {})}`).toBe(true);
     expectMarketMakerBooksHealthy(baseline);
 
-    const importUrl = await readRuntimeImportUrl(page);
+    const importUrl = `${APP_BASE_URL}/radapter/manage#runtime-import-src=${encodeURIComponent('/api/runtime-import?access=read')}`;
     const parsedImportUrl = new URL(importUrl);
     expect(parsedImportUrl.pathname).toBe('/radapter/manage');
     expect(parsedImportUrl.search).toBe('');
-    expect(parsedImportUrl.hash).toContain('runtime-import=');
+    expect(parsedImportUrl.hash).toContain('runtime-import-src=');
     expect(importUrl).not.toContain('?runtimeList=');
     expect(importUrl).not.toContain('&token=');
+    expect(importUrl).not.toContain('xlnra1.');
     await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('remote-runtime-manager')).toBeVisible();
     await expect(page.getByTestId('remote-runtime-bulk-textarea')).toBeVisible();

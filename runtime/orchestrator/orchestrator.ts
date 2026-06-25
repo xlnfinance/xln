@@ -7,6 +7,7 @@ import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { compareStableText, safeStringify } from '../serialization-utils';
+import { REMOTE_RUNTIME } from '../constants';
 import { createStructuredLogger } from '../logger';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
@@ -279,10 +280,12 @@ let custodySupport: CustodySupportState | null = null;
 
 type RuntimeImportManifestEntry = {
   label: string;
-  access: 'read' | 'admin';
+  access: RuntimeImportAccess;
   wsUrl: string;
   token: string;
 };
+
+type RuntimeImportAccess = 'read' | 'admin';
 
 type RuntimeImportManifest = {
   v: 1;
@@ -291,12 +294,20 @@ type RuntimeImportManifest = {
   entries: RuntimeImportManifestEntry[];
 };
 
-const runtimeImportAccess = String(process.env['XLN_RUNTIME_IMPORT_ACCESS'] || 'read').trim().toLowerCase() === 'admin'
-  ? 'admin'
-  : 'read';
+const normalizeRuntimeImportAccess = (value: unknown): RuntimeImportAccess =>
+  String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'read';
+
+const runtimeImportAccess = normalizeRuntimeImportAccess(process.env['XLN_RUNTIME_IMPORT_ACCESS']);
 const runtimeImportTokenTtlMs = Math.max(
   60_000,
-  Math.floor(Number(process.env['XLN_RUNTIME_IMPORT_TOKEN_TTL_MS'] || String(60 * 60 * 1_000))),
+  Math.floor(Number(process.env['XLN_RUNTIME_IMPORT_TOKEN_TTL_MS'] || String(REMOTE_RUNTIME.IMPORT_TOKEN_TTL_MS))),
+);
+const runtimeImportRefreshMarginMs = Math.max(
+  10_000,
+  Math.min(
+    runtimeImportTokenTtlMs - 1_000,
+    Math.floor(Number(process.env['XLN_RUNTIME_IMPORT_REFRESH_MARGIN_MS'] || String(REMOTE_RUNTIME.IMPORT_TOKEN_REFRESH_MARGIN_MS))),
+  ),
 );
 const runtimeImportManifestPath = process.env['XLN_RUNTIME_IMPORT_MANIFEST_PATH']?.trim()
   || join(args.dbRoot, 'runtime-import-manifest.json');
@@ -344,7 +355,7 @@ const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string => {
 const runtimeIdFromChild = (child: HubChild | MarketMakerChild): string =>
   String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim().toLowerCase();
 
-const buildRuntimeImportManifest = (): RuntimeImportManifest | null => {
+const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportAccess): RuntimeImportManifest | null => {
   const issuedAt = Date.now();
   const expiresAt = issuedAt + runtimeImportTokenTtlMs;
   const entries: RuntimeImportManifestEntry[] = [];
@@ -353,28 +364,28 @@ const buildRuntimeImportManifest = (): RuntimeImportManifest | null => {
     if (!runtimeId) continue;
     entries.push({
       label: child.name,
-      access: runtimeImportAccess,
+      access,
       wsUrl: buildPublicRuntimeRpcUrl(child.apiPort),
-      token: deriveRuntimeImportToken(child.authSeed, runtimeImportAccess, runtimeId, child.name.toLowerCase(), expiresAt),
+      token: deriveRuntimeImportToken(child.authSeed, access, runtimeId, child.name.toLowerCase(), expiresAt),
     });
   }
   const marketMakerRuntimeId = runtimeIdFromChild(marketMakerChild);
   if (args.mmEnabled && marketMakerRuntimeId) {
     entries.push({
       label: marketMakerChild.name,
-      access: runtimeImportAccess,
+      access,
       wsUrl: buildPublicRuntimeRpcUrl(marketMakerChild.apiPort),
-      token: deriveRuntimeImportToken(marketMakerChild.authSeed, runtimeImportAccess, marketMakerRuntimeId, 'mm', expiresAt),
+      token: deriveRuntimeImportToken(marketMakerChild.authSeed, access, marketMakerRuntimeId, 'mm', expiresAt),
     });
   }
   if (args.custodyEnabled && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
     entries.push({
       label: 'Custody',
-      access: runtimeImportAccess,
+      access,
       wsUrl: buildPublicRuntimeRpcUrl(args.custodyDaemonPort),
       token: deriveRuntimeImportToken(
         custodySupport.daemonAuthSeed,
-        runtimeImportAccess,
+        access,
         custodySupport.daemonAuthAudience,
         'custody',
         expiresAt,
@@ -401,6 +412,18 @@ const publishRuntimeImportManifest = (): void => {
     manifestPath: runtimeImportManifestPath,
     exposeUrl: runtimeImportLogUrlEnabled,
   }));
+  scheduleRuntimeImportManifestRefresh(manifest);
+};
+
+let runtimeImportRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+const scheduleRuntimeImportManifestRefresh = (manifest: RuntimeImportManifest): void => {
+  if (runtimeImportRefreshTimer) clearTimeout(runtimeImportRefreshTimer);
+  const delayMs = Math.max(10_000, manifest.expiresAt - Date.now() - runtimeImportRefreshMarginMs);
+  runtimeImportRefreshTimer = setTimeout(() => {
+    runtimeImportRefreshTimer = null;
+    publishRuntimeImportManifest();
+  }, delayMs);
 };
 
 let resetPromise: Promise<void> | null = null;
@@ -2405,6 +2428,17 @@ const server = Bun.serve({
       await refreshChildHealthForResponse();
       const health = await buildAggregatedHealthResponse();
       return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicAggregatedHealth(health)), { headers });
+    }
+
+    if (pathname === '/api/runtime-import' && request.method === 'GET') {
+      await pollAllHubHealth();
+      if (args.mmEnabled) await pollMarketMakerHealth();
+      const access = normalizeRuntimeImportAccess(url.searchParams.get('access') || runtimeImportAccess);
+      const manifest = buildRuntimeImportManifest(access);
+      if (!manifest) {
+        return new Response(safeStringify({ error: 'RUNTIME_IMPORT_NOT_READY' }), { status: 503, headers });
+      }
+      return new Response(safeStringify({ importUrl: buildRuntimeImportUrl(manifest), manifest }), { headers });
     }
 
     if (pathname === '/api/metrics') {

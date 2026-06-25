@@ -2,6 +2,7 @@ import { RemoteRuntimeAdapter } from '@xln/runtime/radapter/remote';
 import type { RuntimeAdapterEntitySummary } from '@xln/runtime/radapter/types';
 import type { StorageHead } from '@xln/runtime/storage/types';
 import {
+  assertRemoteRuntimeTokenFresh,
   remoteRuntimeIdForWsUrl,
   type RemoteRuntimeImportEntry,
   type StoredRemoteRuntimeImportEntry,
@@ -26,6 +27,7 @@ export const validateRemoteRuntimeEntry = async (
   const importedAt = options.importedAt ?? Date.now();
   options.onProgress?.({ index, status: 'checking', detail: 'connecting' });
   try {
+    assertRemoteRuntimeTokenFresh(entry, importedAt);
     await adapter.connect({
       mode: 'remote',
       wsUrl: entry.wsUrl,

@@ -12,6 +12,19 @@ const normalizeLoopbackHost = (host: string): string => {
   return normalized;
 };
 
+const normalizeLoopbackConnectHost = (host: string): string => {
+  const normalized = String(host || '').trim().toLowerCase();
+  if (
+    normalized === 'localhost' ||
+    normalized === '0.0.0.0' ||
+    normalized === '[::1]' ||
+    normalized === '::1'
+  ) {
+    return '127.0.0.1';
+  }
+  return normalized;
+};
+
 const parseWsUrl = (value: string): URL | null => {
   try {
     const parsed = new URL(String(value || '').trim());
@@ -26,6 +39,16 @@ export const normalizeWsUrl = (value: string): string => {
   const parsed = parseWsUrl(value);
   if (!parsed) return String(value || '').trim();
   parsed.hostname = normalizeLoopbackHost(parsed.hostname);
+  parsed.hash = '';
+  parsed.search = '';
+  parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+  return parsed.toString();
+};
+
+export const normalizeWsConnectUrl = (value: string): string => {
+  const parsed = parseWsUrl(value);
+  if (!parsed) return String(value || '').trim();
+  parsed.hostname = normalizeLoopbackConnectHost(parsed.hostname);
   parsed.hash = '';
   parsed.search = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';

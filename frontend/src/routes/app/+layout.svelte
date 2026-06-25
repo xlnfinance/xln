@@ -25,7 +25,7 @@
     initializeActiveTabLock,
     isInactiveTabStandby
   } from '$lib/utils/activeTabLock';
-  import { normalizeWsUrl } from '$lib/utils/wsUrl';
+  import { normalizeWsConnectUrl } from '$lib/utils/wsUrl';
   import {
     REMOTE_RUNTIME_IMPORT_HASH_PARAM,
   } from '$lib/utils/remoteRuntimeImport';
@@ -120,7 +120,7 @@
   }
 
   function normalizeRuntimeWsUrl(value: string): string {
-    const parsed = new URL(normalizeWsUrl(String(value || '').trim()));
+    const parsed = new URL(normalizeWsConnectUrl(String(value || '').trim()));
     if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
       throw new Error('REMOTE_RUNTIME_WS_REQUIRED');
     }

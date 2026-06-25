@@ -7,16 +7,10 @@ import { join } from 'node:path';
 type DevRadapterKeysPayload = {
   importUrl: string;
   adminImportUrl: string;
-  importManifest: {
-    entries: Array<{ label: string; access: string; wsUrl: string; token: string }>;
-  };
-  adminImportManifest: {
-    entries: Array<{ label: string; access: string; wsUrl: string; token: string }>;
-  };
-  entries: Array<{ name: string; appUrl: string; adminAppUrl: string; inspectToken: string; adminToken: string }>;
+  entries: Array<{ name: string; wsUrl: string; authSeed: string }>;
 };
 
-test('dev radapter keys prints one manager fragment import URL with ready tokens', () => {
+test('dev radapter keys prints one manager source URL without pre-runtime tokens', () => {
   const dir = mkdtempSync(join(tmpdir(), 'xln-dev-radapter-'));
   const outPath = join(dir, 'radapter-keys.json');
   const envOutPath = join(dir, 'radapter-keys.env');
@@ -38,29 +32,24 @@ test('dev radapter keys prints one manager fragment import URL with ready tokens
     });
 
     expect(result.status, result.stderr).toBe(0);
-    const managerLinks = result.stdout.match(/https:\/\/localhost:8084\/radapter\/manage#runtime-import=[^\s]+/g) ?? [];
+    const managerLinks = result.stdout.match(/https:\/\/localhost:8084\/radapter\/manage#runtime-import-src=[^\s]+/g) ?? [];
     expect(managerLinks.length).toBe(1);
     expect(result.stdout).not.toContain('key=paste');
     expect(result.stdout).not.toContain('Open these URLs');
     expect(result.stdout).not.toContain('?runtimeList=');
+    expect(result.stdout).not.toContain('xlnra1.');
 
     const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
     expect(payload.importUrl).toBe(managerLinks[0]);
-    expect(payload.importUrl).toContain('/radapter/manage#runtime-import=');
+    expect(payload.importUrl).toContain('/radapter/manage#runtime-import-src=');
     expect(payload.importUrl).not.toContain('?runtimeList=');
-    expect(payload.adminImportUrl).toContain('/radapter/manage#runtime-import=');
-
-    const runtimeList = new URLSearchParams(new URL(payload.importUrl).hash.slice(1)).get('runtime-import') || '';
-    for (const label of ['H1', 'H2', 'H3', 'MM']) {
-      expect(runtimeList).toContain(label);
-    }
-    expect(runtimeList).toContain('xlnra1.read.');
-    expect(runtimeList).not.toContain('xlnra1.full.');
-    expect(payload.importManifest.entries.every(entry => entry.access === 'read')).toBe(true);
-    expect(payload.adminImportManifest.entries.every(entry => entry.access === 'admin')).toBe(true);
-    expect(payload.adminImportUrl).toContain('xlnra1.full.');
-    expect(payload.entries.every(entry => entry.appUrl.includes('&token='))).toBe(true);
-    expect(payload.entries.every(entry => !entry.appUrl.includes('key=paste'))).toBe(true);
+    expect(payload.adminImportUrl).toContain('/radapter/manage#runtime-import-src=');
+    expect(payload.adminImportUrl).toContain('access%3Dadmin');
+    expect(payload.importUrl).not.toContain('xlnra1.');
+    expect(payload.adminImportUrl).not.toContain('xlnra1.');
+    expect(payload.entries.map(entry => entry.name)).toEqual(['H1', 'H2', 'H3', 'MM']);
+    expect(payload.entries[0]?.wsUrl).toBe('ws://127.0.0.1:8092/rpc');
+    expect(payload.entries.every(entry => entry.authSeed.length >= 32)).toBe(true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -89,9 +78,9 @@ test('dev radapter keys can suppress early URL logging for bun run dev', () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).not.toContain('/radapter/manage#runtime-import=');
+    expect(result.stdout).not.toContain('/radapter/manage#runtime-import-src=');
     const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
-    expect(payload.importUrl).toContain('/radapter/manage#runtime-import=');
+    expect(payload.importUrl).toContain('/radapter/manage#runtime-import-src=');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -123,7 +112,7 @@ test('dev radapter keys can run quietly when bun run dev waits for the real mani
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
     const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
-    expect(payload.importUrl).toContain('/radapter/manage#runtime-import=');
+    expect(payload.importUrl).toContain('/radapter/manage#runtime-import-src=');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

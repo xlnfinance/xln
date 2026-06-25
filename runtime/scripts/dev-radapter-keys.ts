@@ -3,25 +3,11 @@
 import { chmodSync, mkdirSync, writeFileSync } from 'fs';
 import { dirname, resolve } from 'path';
 import { randomBytes } from 'crypto';
-import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
+import { REMOTE_RUNTIME } from '../constants';
 
 type DevRuntime = {
   name: 'H1' | 'H2' | 'H3' | 'MM';
   portOffset: number;
-};
-
-type RuntimeImportManifestEntry = {
-  label: string;
-  access: 'read' | 'admin';
-  wsUrl: string;
-  token: string;
-};
-
-type RuntimeImportManifest = {
-  v: 1;
-  issuedAt: number;
-  expiresAt: number;
-  entries: RuntimeImportManifestEntry[];
 };
 
 const RUNTIMES: DevRuntime[] = [
@@ -57,75 +43,29 @@ const outPath = resolve(readArg('--out', './db/dev/radapter-keys.json')!);
 const envOutPath = resolve(readArg('--env-out', './db/dev/radapter-keys.env')!);
 const suppressUrlLog = hasFlag('--suppress-url-log');
 const quiet = hasFlag('--quiet');
-const issuedAt = Date.now();
-const expiresAt = issuedAt + 24 * 60 * 60 * 1000;
-
-const buildAppUrl = (wsUrl: string, token: string): string =>
-  `https://localhost:${webPort}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(token)}`;
-
-const formatRuntimeImportLines = (manifest: RuntimeImportManifest): string =>
-  manifest.entries.map(entry => `${entry.label} | ${entry.access} | ${entry.wsUrl} | ${entry.token}`).join('\n');
-
-const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string =>
-  `https://localhost:${webPort}/radapter/manage#runtime-import=${encodeURIComponent(formatRuntimeImportLines(manifest))}`;
+const buildRuntimeImportSourceUrl = (access: 'read' | 'admin'): string =>
+  `https://localhost:${webPort}/radapter/manage#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent(`/api/runtime-import?access=${access}`)}`;
 
 const seeds: Record<string, string> = {};
 const entries = RUNTIMES.map(runtime => {
   const seed = randomBytes(32).toString('hex');
   seeds[runtime.name] = seed;
-  const wsUrl = `ws://localhost:${apiPort + runtime.portOffset}/rpc`;
-  const inspectToken = deriveRuntimeAdapterCapabilityToken(seed, 'read', expiresAt, {
-    keyId: `dev-${runtime.name.toLowerCase()}-read`,
-  });
-  const adminToken = deriveRuntimeAdapterCapabilityToken(seed, 'full', expiresAt, {
-    keyId: `dev-${runtime.name.toLowerCase()}-admin`,
-  });
+  const wsUrl = `ws://127.0.0.1:${apiPort + runtime.portOffset}/rpc`;
   return {
     name: runtime.name,
     wsUrl,
-    appUrl: buildAppUrl(wsUrl, inspectToken),
-    adminAppUrl: buildAppUrl(wsUrl, adminToken),
     authSeed: seed,
-    inspectToken,
-    adminToken,
   };
 });
 
-const readImportManifest: RuntimeImportManifest = {
-  v: 1,
-  issuedAt,
-  expiresAt,
-  entries: entries.map(entry => ({
-    label: entry.name,
-    access: 'read',
-    wsUrl: entry.wsUrl,
-    token: entry.inspectToken,
-  })),
-};
-
-const adminImportManifest: RuntimeImportManifest = {
-  v: 1,
-  issuedAt,
-  expiresAt,
-  entries: entries.map(entry => ({
-    label: entry.name,
-    access: 'admin',
-    wsUrl: entry.wsUrl,
-    token: entry.adminToken,
-  })),
-};
-
-const importUrl = buildRuntimeImportUrl(readImportManifest);
-const adminImportUrl = buildRuntimeImportUrl(adminImportManifest);
+const importUrl = buildRuntimeImportSourceUrl('read');
+const adminImportUrl = buildRuntimeImportSourceUrl('admin');
 
 const payload = {
   generatedAt: new Date().toISOString(),
-  expiresAt,
-  note: 'Local dev secrets. This file is under db/ and must not be committed.',
+  note: 'Local dev auth seeds. This file is under db/ and must not be committed. Runtime-bound capability tokens are issued by /api/runtime-import after the mesh boots.',
   importUrl,
   adminImportUrl,
-  importManifest: readImportManifest,
-  adminImportManifest,
   entries,
 };
 

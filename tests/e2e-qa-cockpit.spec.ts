@@ -66,6 +66,79 @@ const QA_FIXTURE_VTT = [
   '',
 ].join('\n');
 
+function qaStoryVideoShard(
+  shard: number,
+  slug: string,
+  title: string,
+  description: string,
+  summary10w: string,
+) {
+  const relativeRoot = `test-results-shard-${shard}/qa-story-${slug}`;
+  return {
+    ...qaSignal('OK', `${slug} story video passed`, 'qa-shard'),
+    shard,
+    status: 'passed',
+    durationMs: 1_600,
+    handle: `qa.story.${slug}`,
+    description,
+    scenario: {
+      summary10w,
+      owner: 'qa',
+      severityPolicy: 'release-evidence',
+      steps: [
+        { title: title, text: description, startMs: 0, endMs: 40, ms: 40 },
+        { title: 'Verify evidence', text: 'Operator confirms the visible wallet state and the recorded video.', startMs: 40, endMs: 80, ms: 40 },
+      ],
+    },
+    target: `tests/e2e-user-story-${slug}.spec.ts`,
+    title,
+    requireMarketMaker: slug.includes('swap'),
+    logRelativePath: `e2e-shard-${String(shard).padStart(2, '0')}.log`,
+    logTail: `${title} passed with recorded video evidence`,
+    error: null,
+    failureClass: null,
+    phaseMs: {
+      preflight: 45,
+      anvilBoot: 90,
+      apiBoot: 120,
+      apiHealthy: 180,
+      viteBoot: 220,
+      playwright: 945,
+    },
+    browserIssues: [],
+    browserHealth: QA_CLEAN_BROWSER_HEALTH,
+    timelineSteps: [
+      { label: `E2E-TIMING:${title}`, ms: 40, startMs: 0, endMs: 40 },
+      { label: 'E2E-TIMING:verify evidence', ms: 40, startMs: 40, endMs: 80 },
+    ],
+    slowSteps: [
+      { label: 'E2E-TIMING:verify evidence', ms: 40, startMs: 40, endMs: 80 },
+    ],
+    artifacts: [
+      {
+        name: `${slug}.webm`,
+        relativePath: `${relativeRoot}/video.webm`,
+        sizeBytes: 1024,
+        kind: 'video',
+        sensitivity: 'internal',
+        contentType: 'video/webm',
+        url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent(`${relativeRoot}/video.webm`)}`,
+      },
+      {
+        name: 'cues.vtt',
+        relativePath: `${relativeRoot}/qa-cues/cues.vtt`,
+        sizeBytes: QA_FIXTURE_VTT.length,
+        kind: 'text',
+        sensitivity: 'public',
+        contentType: 'text/vtt; charset=utf-8',
+        url: `/api/qa/artifact?runId=${encodeURIComponent(QA_FIXTURE_RUN_ID)}&path=${encodeURIComponent(`${relativeRoot}/qa-cues/cues.vtt`)}`,
+      },
+    ],
+    hasVideo: true,
+    hasTrace: false,
+  };
+}
+
 const QA_FIXTURE_RUN = {
   ...qaSignal('FAIL', '1/3 shard(s) failed', 'qa', Date.UTC(2026, 5, 23, 23, 59, 59, 999), [
     { label: 'failed shards', value: 1 },
@@ -124,8 +197,8 @@ const QA_FIXTURE_RUN = {
     ],
     likelyCauses: ['code hash changed', 'git HEAD changed', 'largest delta: wall time +25%'],
   },
-  totalShards: 3,
-  passedShards: 2,
+  totalShards: 7,
+  passedShards: 6,
   failedShards: 1,
   failureClasses: ['assertion'],
   fatalMarkers: [{
@@ -263,6 +336,34 @@ const QA_FIXTURE_RUN = {
       hasVideo: true,
       hasTrace: false,
     },
+    qaStoryVideoShard(
+      2,
+      'payment',
+      'Payment flow prepares hub transfer',
+      'Payment user story records a prepared hub payment with visible counterparty capacity.',
+      'Payment evidence shows transfer capacity before signing',
+    ),
+    qaStoryVideoShard(
+      3,
+      'swap',
+      'Swap flow quotes market-maker orderbook',
+      'Swap user story records source token selection, quote side, and visible orderbook depth.',
+      'Swap evidence shows quote and resting orderbook depth',
+    ),
+    qaStoryVideoShard(
+      4,
+      'cross-chain-swap',
+      'Cross-chain swap route selects target hub',
+      'Cross-chain swap user story records jurisdiction routing and target hub liquidity path.',
+      'Cross-chain route evidence shows target hub selection',
+    ),
+    qaStoryVideoShard(
+      5,
+      'dispute',
+      'Dispute flow opens challenge controls',
+      'Dispute user story records account challenge controls and lifecycle evidence.',
+      'Dispute evidence shows challenge controls and history',
+    ),
     {
       ...qaSignal('OK', 'qa.deep-link-video passed', 'qa-shard'),
       shard: 7,
@@ -432,7 +533,7 @@ const QA_PASS_VERDICT = {
 };
 
 const QA_FAIL_LEDGER = {
-  ...qaSignal('FAIL', '1/3 shard(s) failed', 'qa', QA_FIXTURE_RUN.createdAt),
+  ...qaSignal('FAIL', '1/7 shard(s) failed', 'qa', QA_FIXTURE_RUN.createdAt),
   runId: QA_FIXTURE_RUN_ID,
   createdAt: QA_FIXTURE_RUN.createdAt,
   completedAt: QA_FIXTURE_RUN.completedAt,
@@ -1035,7 +1136,169 @@ const QA_RESTART_AUDIT = [
   },
 ];
 
+const QA_ADMIN_HEALTH = {
+  timestamp: Date.UTC(2026, 5, 24, 0, 1, 0),
+  coreOk: true,
+  systemOk: true,
+  degraded: [],
+  disk: {
+    ok: true,
+    minFreeBytes: 5 * 1024 ** 3,
+    freeBytes: 24 * 1024 ** 3,
+    usedBytes: 76 * 1024 ** 3,
+    totalBytes: 100 * 1024 ** 3,
+    freeGiB: 24,
+    usedGiB: 76,
+    totalGiB: 100,
+    usedPct: 76,
+  },
+  storage: {
+    ok: true,
+    minFreeBytes: 5 * 1024 ** 3,
+    disk: {
+      totalBytes: 100 * 1024 ** 3,
+      usedBytes: 76 * 1024 ** 3,
+      freeBytes: 24 * 1024 ** 3,
+    },
+    sampledAt: Date.UTC(2026, 5, 24, 0, 1, 0),
+    historyPath: 'data/storage-health-history.json',
+    tracked: [
+      {
+        name: 'runtimeDb',
+        kind: 'db',
+        path: '/Users/zigota/xln/db/runtime',
+        currentBytes: 87_000_000,
+        deltaBytes1h: 1_500_000,
+        bytesPerHour: 1_500_000,
+        sampleWindowMs: 3_600_000,
+        scanEntries: 12,
+        scanMs: 8,
+        scanTruncated: false,
+        scanMode: 'shallow',
+      },
+      {
+        name: 'runtimeArtifacts',
+        kind: 'log',
+        path: '/Users/zigota/xln/.logs',
+        currentBytes: 23_000_000,
+        deltaBytes1h: 3_000_000,
+        bytesPerHour: 3_000_000,
+        sampleWindowMs: 3_600_000,
+        scanEntries: 28,
+        scanMs: 11,
+        scanTruncated: false,
+        scanMode: 'shallow',
+      },
+    ],
+  },
+  process: {
+    pid: 4242,
+    ownerId: 'orchestrator',
+    uptimeSec: 120,
+    rssBytes: 180_000_000,
+    heapUsedBytes: 90_000_000,
+    loadavg: [1.1, 1.4, 1.6],
+    cpuCount: 10,
+    memory: { freeBytes: 1_000_000_000, totalBytes: 8_000_000_000, freePct: 12.5 },
+    children: [
+      {
+        role: 'hub',
+        name: 'H1',
+        pid: 4301,
+        leasePid: 4301,
+        leaseOwnerId: 'runtime-h1-abcdef',
+        online: true,
+        exitCode: null,
+        startedAt: Date.UTC(2026, 5, 24, 0, 0, 0),
+        exitedAt: null,
+        restartCount: 0,
+        apiPort: 8092,
+        dbPath: '/Users/zigota/xln/db/dev/h1',
+        lastErrorLine: null,
+        recentStdout: [],
+        recentStderr: [],
+      },
+      {
+        role: 'hub',
+        name: 'H2',
+        pid: 4302,
+        leasePid: 4302,
+        leaseOwnerId: 'runtime-h2-fedcba',
+        online: true,
+        exitCode: null,
+        startedAt: Date.UTC(2026, 5, 24, 0, 0, 0),
+        exitedAt: null,
+        restartCount: 0,
+        apiPort: 8093,
+        dbPath: '/Users/zigota/xln/db/dev/h2',
+        lastErrorLine: null,
+        recentStdout: [],
+        recentStderr: [],
+      },
+    ],
+  },
+  hubs: [
+    {
+      entityId: 'hub-entity-h1',
+      name: 'H1',
+      online: true,
+      runtimeId: 'runtime-h1-abcdef',
+      selfRelayPresence: true,
+      pid: 4301,
+      apiPort: 8092,
+      apiUrl: 'http://127.0.0.1:8092',
+      dbPath: '/Users/zigota/xln/db/dev/h1',
+      startedAt: Date.UTC(2026, 5, 24, 0, 0, 0),
+      exitedAt: null,
+      exitCode: null,
+      restartCount: 0,
+      lastErrorLine: null,
+    },
+  ],
+  hubMesh: {
+    ok: true,
+    hubIds: ['hub-entity-h1', 'hub-entity-h2'],
+    pairs: [
+      { left: 'hub-entity-h1', right: 'hub-entity-h2', ok: true, expectedCreditAmount: '1000000' },
+      { left: 'hub-entity-h2', right: 'hub-entity-h3', ok: true, expectedCreditAmount: '1000000' },
+    ],
+    direct: {
+      openLinkCount: 2,
+      links: [
+        { fromRuntimeId: 'runtime-h1-abcdef', toRuntimeId: 'runtime-h2-fedcba', endpoint: 'ws://127.0.0.1:8093/rpc' },
+      ],
+    },
+  },
+  marketMaker: {
+    enabled: true,
+    ok: true,
+    entityId: 'market-maker-entity',
+    startupPhase: 'ready',
+    expectedOffersPerHub: 4,
+    expectedOffersPerPair: 2,
+    cross: { applicable: true, ok: true, expectedRoutes: 2, routes: [] },
+    hubs: [],
+  },
+  custody: {
+    enabled: true,
+    ok: true,
+    entityId: 'custody-entity',
+    daemonPort: 8720,
+    servicePort: 8721,
+  },
+};
+
 test.describe('QA cockpit scenario player', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/health', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(QA_ADMIN_HEALTH),
+      });
+    });
+  });
+
   test('shows the standalone runs ledger across test surfaces', async ({ page }) => {
     await page.route('**/api/qa/runs?**', async (route) => {
       await route.fulfill({
@@ -1229,9 +1492,27 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('2026-06-23 23:59:59 UTC');
     await expect(page.getByText('green = passed/total')).toBeVisible();
-    await expect(page.getByTestId('qa-trend-pill').first()).toHaveText('1F/3');
+    await expect(page.getByTestId('qa-trend-pill').first()).toHaveText('1F/7');
     await expect(page.getByTestId('qa-trend-pill').nth(1)).toHaveText('1/1');
-    await expect(page.getByTestId('qa-trend-pill').first()).toHaveAttribute('title', /FAIL 2\/3 stacks/);
+    await expect(page.getByTestId('qa-trend-pill').first()).toHaveAttribute('title', /FAIL 6\/7 stacks/);
+    await expect(page.getByTestId('qa-admin-evidence-board')).toContainText('4 flows to inspect first');
+    await expect(page.getByTestId('qa-admin-story-card')).toHaveCount(4);
+    await expect(page.locator('[data-testid="qa-admin-story-card"][data-story-key="payment"]')).toContainText('qa.story.payment');
+    await expect(page.locator('[data-testid="qa-admin-story-card"][data-story-key="swap"]')).toContainText('qa.story.swap');
+    await expect(page.locator('[data-testid="qa-admin-story-card"][data-story-key="cross-chain-swap"]')).toContainText('qa.story.cross-chain-swap');
+    await expect(page.locator('[data-testid="qa-admin-story-card"][data-story-key="dispute"]')).toContainText('qa.story.dispute');
+    await expect
+      .poll(async () => page.getByTestId('qa-story-video').count(), {
+        timeout: 10_000,
+        message: 'pre-mainnet user stories should expose four video cards',
+      })
+      .toBe(4);
+    await expect(page.getByTestId('qa-story-video').first()).toHaveAttribute('src', /^blob:/);
+    await expect(page.getByTestId('qa-storage-watchers')).toContainText('Who stores what');
+    await expect(page.getByTestId('qa-storage-watchers')).toContainText('runtimeDb');
+    await expect(page.getByTestId('qa-storage-watchers')).toContainText('/Users/zigota/xln/db/dev/h1');
+    await expect(page.getByTestId('qa-storage-watchers')).toContainText('market-maker');
+    await expect(page.getByTestId('qa-credit-line-evidence')).toContainText('1000000');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('browser');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('assertion');
@@ -1262,6 +1543,17 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('On-chain Batch');
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('Disputes');
     await expect(page.getByTestId('qa-ux-gallery')).toContainText('History');
+    await page.getByTestId('qa-ux-gallery-card').filter({ hasText: 'desktop payment composer' }).click();
+    await expect(page.getByTestId('qa-ux-slideshow')).toBeVisible();
+    await expect(page.getByTestId('qa-ux-slideshow')).toContainText('desktop payment composer');
+    await page.getByTestId('qa-ux-slideshow-next').click();
+    await expect(page.getByTestId('qa-ux-slideshow')).toContainText('mobile swap ticket');
+    await page.getByTestId('qa-ux-slideshow-prev').click();
+    await expect(page.getByTestId('qa-ux-slideshow')).toContainText('desktop payment composer');
+    await page.getByTestId('qa-ux-slideshow-close').click();
+    await expect(page.getByTestId('qa-ux-slideshow')).toHaveCount(0);
+    await page.locator('[data-testid="qa-admin-story-card"][data-story-key="payment"]').getByRole('button', { name: 'Open shard' }).click();
+    await expect(page.locator('[data-testid="qa-suite-row"][data-shard="2"]')).toHaveClass(/selected/);
     await expect(page.getByTestId('qa-run-row').first()).toHaveAttribute('data-run-id', QA_FIXTURE_RUN_ID);
     await expect(page.getByTestId('qa-run-row').first()).toContainText('assertion');
     await page.getByTestId('qa-run-sort').selectOption('stack-fast');

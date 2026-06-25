@@ -3,7 +3,7 @@ import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
 import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
 import { toasts } from './toastStore';
-import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
+import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
@@ -505,7 +505,7 @@ const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
     readStoredAdapterValue('xln-runtime-adapter-ws') ||
     defaultRemoteAdapterWsUrl()
   ).trim();
-  const normalizedWsUrl = normalizeWsUrl(wsUrl);
+  const normalizedWsUrl = normalizeWsConnectUrl(wsUrl);
   const authKey = (
     readStoredAdapterValue('xln-runtime-adapter-key') ||
     ''

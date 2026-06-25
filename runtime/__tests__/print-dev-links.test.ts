@@ -63,9 +63,10 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('https://localhost:8084/qa');
     expect(banner.stdout).toContain('remote import read');
     expect(banner.stdout).toContain('remote import admin');
-    expect(banner.stdout).toContain('/radapter/manage#runtime-import=');
-    expect(banner.stdout).toContain('xlnra1.read.');
-    expect(banner.stdout).toContain('xlnra1.full.');
+    expect(banner.stdout).toContain('/radapter/manage#runtime-import-src=');
+    expect(banner.stdout).toContain('access%3Dread');
+    expect(banner.stdout).toContain('access%3Dadmin');
+    expect(banner.stdout).not.toContain('xlnra1.');
     expect(banner.stdout).toContain('http://127.0.0.1:8082/api/health');
     expect(banner.stdout).toContain('https://localhost:8087');
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');

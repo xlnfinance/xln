@@ -252,9 +252,16 @@ export const REMOTE_RUNTIME = {
   HISTORY_SCAN_CACHE_LIMIT: 24,
 
   IMPORT_HASH_PARAM: 'runtime-import',
+  IMPORT_SOURCE_HASH_PARAM: 'runtime-import-src',
   IMPORT_STORAGE_KEY: 'xln-remote-runtime-imports',
   IMPORT_RESULT_STORAGE_KEY: 'xln-remote-runtime-import-last-result',
   MAX_IMPORTS: 100,
+
+  /** Default lifetime for one-click dev import capability tokens. */
+  IMPORT_TOKEN_TTL_MS: 60 * 60 * 1000,
+
+  /** Re-issue the dev import manifest before one-click tokens expire. */
+  IMPORT_TOKEN_REFRESH_MARGIN_MS: 5 * 60 * 1000,
 } as const;
 
 export const TIME_MACHINE = {

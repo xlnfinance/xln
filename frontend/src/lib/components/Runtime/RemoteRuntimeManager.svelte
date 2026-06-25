@@ -7,9 +7,11 @@
     MAX_REMOTE_RUNTIME_IMPORTS,
     REMOTE_RUNTIME_IMPORT_HASH_PARAM,
     REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
+    REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
     formatRemoteRuntimeImportLines,
     normalizeRemoteRuntimeWsUrl,
     parseRemoteRuntimeImportPayload,
+    parseRemoteRuntimeImportSourcePayload,
     parseRemoteRuntimeImportText,
     type RemoteRuntimeImportAccess,
     type RemoteRuntimeImportEntry,
@@ -87,6 +89,24 @@
     ).trim();
   };
 
+  const readImportSourceFromHash = (): string => {
+    if (typeof window === 'undefined') return '';
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+    if (!hash.trim()) return '';
+    const params = new URLSearchParams(hash);
+    return String(params.get(REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM) || '').trim();
+  };
+
+  const fetchImportSource = async (source: string): Promise<RemoteRuntimeImportEntry[]> => {
+    const url = new URL(source, window.location.href);
+    if (url.origin !== window.location.origin) {
+      throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_ORIGIN_INVALID:${url.origin}`);
+    }
+    const response = await fetch(url, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_FAILED:${response.status}`);
+    return parseRemoteRuntimeImportSourcePayload(await response.json());
+  };
+
   const scrubImportHash = (): void => {
     if (typeof window === 'undefined' || !window.location.hash) return;
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
@@ -114,12 +134,16 @@
     }));
   };
 
-  const prefillFromHash = (): void => {
+  const prefillFromHash = async (): Promise<void> => {
     const payload = readImportPayloadFromHash();
-    if (!payload) return;
+    const source = readImportSourceFromHash();
+    if (!payload && !source) return;
     mode = 'bulk';
     try {
-      const entries = parseRemoteRuntimeImportPayload(payload);
+      status = source ? 'Loading import list' : status;
+      const entries = source
+        ? await fetchImportSource(source)
+        : parseRemoteRuntimeImportPayload(payload);
       bulkText = formatRemoteRuntimeImportLines(entries);
       resetRows(entries);
       status = `Ready to import ${entries.length} remote runtime${entries.length === 1 ? '' : 's'}`;
@@ -178,7 +202,7 @@
   }
 
   onMount(() => {
-    prefillFromHash();
+    void prefillFromHash();
   });
 </script>
 
