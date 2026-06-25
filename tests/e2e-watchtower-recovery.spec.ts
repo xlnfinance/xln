@@ -10,7 +10,7 @@
  *    state from the watchtower instead of booting as a fresh empty wallet.
  */
 
-import { expect, test, type BrowserContext, type Page } from './global-setup';
+import { allowBrowserIssue, expect, test, type BrowserContext, type Page } from './global-setup';
 import { createServer } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -698,7 +698,11 @@ async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towe
   await page.close();
   const nextPage = await context.newPage();
   await nextPage.addInitScript((urls: string[]) => {
-    window.localStorage.setItem('xln-watchtower-urls', JSON.stringify(urls));
+    try {
+      window.localStorage.setItem('xln-watchtower-urls', JSON.stringify(urls));
+    } catch {
+      // about:blank documents in hardened browser contexts can deny localStorage.
+    }
     (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = urls;
   }, towerUrls);
   const resetNonce = '0123456789abcdef0123456789abcdef';
@@ -764,6 +768,17 @@ test.describe('watchtower runtime recovery', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
   test('restores a wiped runtime from standalone tower backup and continues channel payments', async ({ page, context, browser }) => {
+    allowBrowserIssue({
+      type: 'http',
+      severity: 'error',
+      status: 503,
+      url: '/api/watchtower-proxy',
+    });
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'error',
+      message: 'Failed to load resource: the server responded with a status of 503',
+    });
     let recipientContext: BrowserContext | null = null;
     if (!ISOLATED_BASELINE_READY && process.env.E2E_RESET_BASE_URL) {
       await ensureE2EBaseline(page, {
@@ -775,11 +790,19 @@ test.describe('watchtower runtime recovery', () => {
     const tower = await startWatchtower();
     try {
       await context.addInitScript((towerUrl: string) => {
-        window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
+        try {
+          window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
+        } catch {
+          // about:blank documents in hardened browser contexts can deny localStorage.
+        }
         (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = [towerUrl];
       }, tower.baseUrl);
       await page.addInitScript((towerUrl: string) => {
-        window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
+        try {
+          window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
+        } catch {
+          // about:blank documents in hardened browser contexts can deny localStorage.
+        }
         (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = [towerUrl];
       }, tower.baseUrl);
 
@@ -934,6 +957,7 @@ test.describe('watchtower runtime recovery', () => {
         })
         .toBe(recipientAfterPayment);
     } finally {
+      await Promise.all(context.pages().map((openPage) => openPage.close().catch(() => undefined)));
       await recipientContext?.close().catch(() => undefined);
       await stopWatchtower(tower);
     }

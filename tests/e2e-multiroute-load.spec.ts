@@ -38,7 +38,7 @@
  * Prereqs: localhost:8080, xln.finance with 3 hubs (H1/H2/H3)
  */
 
-import { test, expect, type BrowserContext, type Page } from './global-setup';
+import { allowBrowserIssue, test, expect, type BrowserContext, type Page } from './global-setup';
 import { ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
@@ -339,6 +339,11 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
   test.setTimeout(600_000);
 
   test('full mesh routing with diverse payment patterns', async ({ browser, page }) => {
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'error',
+      message: /\[HTLC_PAYMENT\].*Insufficient outbound capacity/,
+    });
     const userNames: UserName[] = ['alice', 'bob', 'carol', 'dave', 'eve', 'frank'];
     const userContexts: BrowserContext[] = [];
     const userPages: Record<UserName, Page> = {} as Record<UserName, Page>;

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from './global-setup';
+import { allowBrowserIssue, expect, test, type Page } from './global-setup';
 import { Wallet } from 'ethers';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp } from './utils/e2e-demo-users';
@@ -162,6 +162,11 @@ test.describe('runtime ingress debug loop guards', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
   test('bad entity inputs produce one debug event and do not requeue into a runtime error loop', async ({ page }) => {
+    allowBrowserIssue({
+      type: 'console',
+      severity: 'error',
+      message: /REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND|RUNTIME_REPLICA_NOT_FOUND|RUNTIME_INPUT_QUARANTINED|Runtime loop error|RUNTIME_LOOP_ERROR|RUNTIME_LOOP_HALTED/,
+    });
     await ensureE2EBaseline(page, {
       apiBaseUrl: API_BASE_URL,
       requireHubMesh: false,

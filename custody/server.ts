@@ -435,6 +435,13 @@ const server = Bun.serve({
       return asset('./styles.css');
     }
 
+    if (pathname === '/favicon.ico') {
+      return new Response(null, {
+        status: 204,
+        headers: { 'Cache-Control': 'public, max-age=86400' },
+      });
+    }
+
     if (pathname === '/api/qr') {
       const data = String(url.searchParams.get('data') || '').trim();
       if (!data) {
