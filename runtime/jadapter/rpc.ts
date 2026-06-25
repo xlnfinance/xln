@@ -74,6 +74,7 @@ import {
   type RpcBatchRequest,
   type RpcBatchResponse,
 } from './rpc-utils';
+import { nodeProcess, runtimeIsBrowser } from '../runtime-platform';
 
 const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const TRON_FINALITY_DEPTH = 19;
@@ -150,7 +151,7 @@ const rpcErrorText = (error: unknown): string => {
 };
 
 export const isTransientRpcUnavailableError = (error: unknown): boolean =>
-  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|PROXY_UPSTREAM_TIMEOUT|502 Bad Gateway/i
+  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|Failed to fetch|NetworkError|Load failed|PROXY_UPSTREAM_TIMEOUT|50[0234] (Bad Gateway|Gateway Timeout|Service Unavailable|Internal Server Error)|server response 50[0234]|responseStatus["': ]+50[0234]/i
     .test(rpcErrorText(error));
 
 export const shouldEmitExternalWalletBalanceDelta = (
@@ -261,6 +262,20 @@ export async function createRpcAdapter(
     } catch {
       return String(value);
     }
+  };
+  const haltProcessForFatalWatcherError = (fatalPayload: Record<string, unknown>): void => {
+    const error = new Error(`JADAPTER_WATCHER_FATAL:${safeJsonish(fatalPayload)}`);
+    if (runtimeIsBrowser) {
+      setTimeout(() => {
+        throw error;
+      }, 0);
+      return;
+    }
+    if (nodeProcess?.exit) {
+      nodeProcess.exit(1);
+      return;
+    }
+    throw error;
   };
   const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
     runner as Parameters<typeof Account__factory.connect>[1];
@@ -2362,7 +2377,7 @@ export async function createRpcAdapter(
             lastSyncedBlock,
           });
           console.error(`🔭⛔ [JAdapter:rpc] Fatal watcher error; exiting:`, fatalPayload);
-          process.exit(1);
+          haltProcessForFatalWatcherError(fatalPayload);
         }).finally(() => {
           pollInFlight = null;
         });

@@ -141,7 +141,19 @@ describe('jadapter helper cursors', () => {
     };
 
     expect(isTransientRpcUnavailableError(error)).toBe(true);
+    expect(isTransientRpcUnavailableError(Object.assign(
+      new Error('server response 500 Internal Server Error (code=SERVER_ERROR)'),
+      {
+        code: 'SERVER_ERROR',
+        info: {
+          requestUrl: 'https://localhost:20364/rpc2',
+          responseStatus: '500 Internal Server Error',
+          responseBody: 'Internal Server Error',
+        },
+      },
+    ))).toBe(true);
     expect(isTransientRpcUnavailableError(new Error('EXTERNAL_WALLET_BASELINE_MISSING'))).toBe(false);
+    expect(isTransientRpcUnavailableError(new Error('execution reverted: INSUFFICIENT_RESERVE'))).toBe(false);
   });
 
   test('j-event ingress rejects during persistence quiesce before cursor or dedup mutation', () => {
