@@ -635,9 +635,27 @@ const hasRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
   if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
+  if (collectAccountMempoolWakeInputs(env).length > 0) return true;
   // Check for due scheduled hooks (setTimeout-like entity pings)
   if (hasDueEntityHooks(env)) return true;
   return false;
+};
+
+const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
+  const wakeInputs: EntityInput[] = [];
+  for (const replica of env.eReplicas?.values?.() ?? []) {
+    const entityId = String(replica?.entityId || replica?.state?.entityId || '').trim().toLowerCase();
+    const signerId = String(replica?.signerId || '').trim().toLowerCase();
+    if (!entityId || !signerId) continue;
+    const accounts = replica?.state?.accounts;
+    if (!(accounts instanceof Map)) continue;
+    const hasAccountMempool = Array.from(accounts.values()).some((account) =>
+      account.mempool.length > 0 && !account.pendingFrame
+    );
+    if (!hasAccountMempool) continue;
+    wakeInputs.push({ entityId, signerId, entityTxs: [] });
+  }
+  return wakeInputs;
 };
 
 const prioritizeJEventFrame = (
@@ -2593,9 +2611,18 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     generateHookPings(env);
 
     const mempool = ensureRuntimeMempool(env);
+    const accountWakeInputs = collectAccountMempoolWakeInputs(env);
+    const explicitEntityInputKeys = new Set(
+      mempool.entityInputs.map((input) =>
+        `${String(input.entityId || '').toLowerCase()}:${String(input.signerId || '').toLowerCase()}`
+      ),
+    );
+    const dedupedAccountWakeInputs = accountWakeInputs.filter((input) =>
+      !explicitEntityInputKeys.has(`${input.entityId.toLowerCase()}:${input.signerId.toLowerCase()}`)
+    );
     const runtimeInput: RuntimeInput = {
       runtimeTxs: [...mempool.runtimeTxs],
-      entityInputs: [...mempool.entityInputs],
+      entityInputs: [...mempool.entityInputs, ...dedupedAccountWakeInputs],
       ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
     };
     processProfileMetrics.runtimeTxs = runtimeInput.runtimeTxs.length;

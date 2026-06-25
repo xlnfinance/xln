@@ -27,8 +27,7 @@ function accountHasLiveLockReference(state: EntityState, counterpartyId: string 
   return Boolean(
     account.locks?.has(lockId) ||
     accountFrameHasLock(account.mempool, lockId) ||
-    accountFrameHasLock(account.pendingFrame?.accountTxs, lockId) ||
-    accountFrameHasLock(account.currentFrame?.accountTxs, lockId)
+    accountFrameHasLock(account.pendingFrame?.accountTxs, lockId)
   );
 }
 

@@ -277,6 +277,18 @@ describe('htlc event contract and dispute tail', () => {
     env.quietRuntimeLogs = true;
     env.activeJurisdiction = 'Testnet';
     const replica = makeReplica(entityId, counterpartyId);
+    const account = replica.state.accounts.get(counterpartyId)!;
+    account.mempool.push({
+      type: 'htlc_lock',
+      data: {
+        lockId: outboundLockId,
+        hashlock,
+        tokenId: 1,
+        amount: 10n,
+        timelock: 100000n,
+        revealBeforeHeight: 10,
+      },
+    });
     replica.state.htlcNotes.set(`lock:${outboundLockId}`, 'invoice-42');
     replica.state.htlcRoutes.set(hashlock, {
       hashlock,
@@ -308,6 +320,7 @@ describe('htlc event contract and dispute tail', () => {
 
     const finalizedEvents = env.frameLogs.filter((entry) => entry.message === 'HtlcFinalized');
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+    expect(account.mempool).toEqual([]);
     expect(finalizedEvents).toHaveLength(1);
     expect(finalizedEvents[0]?.data).toMatchObject({
       entityId,
@@ -358,6 +371,50 @@ describe('htlc event contract and dispute tail', () => {
 
     account.mempool = [];
     expect(pruneSettledOriginatedHtlcRoutes(replica.state, replica.state.timestamp)).toBe(1);
+    expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
+  });
+
+  test('prunes originated outbound route when only stale committed frame still names the lock', () => {
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterpartyId = `0x${'22'.repeat(32)}`;
+    const outboundLockId = 'lock-stale-current-frame';
+    const hashlock = `0x${'89'.repeat(32)}`;
+    const replica = makeReplica(entityId, counterpartyId);
+    const account = replica.state.accounts.get(counterpartyId)!;
+    account.currentFrame = {
+      ...account.currentFrame,
+      accountTxs: [{
+        type: 'htlc_lock',
+        data: {
+          lockId: outboundLockId,
+          hashlock,
+          tokenId: 1,
+          amount: 10n,
+          timelock: 100000n,
+          revealBeforeHeight: 10,
+        },
+      }],
+    };
+    replica.state.lockBook.set(outboundLockId, {
+      lockId: outboundLockId,
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      direction: 'outgoing',
+      counterpartyEntityId: counterpartyId,
+      createdTimestamp: replica.state.timestamp - 1000,
+    });
+    replica.state.htlcRoutes.set(hashlock, {
+      hashlock,
+      tokenId: 1,
+      amount: 10n,
+      outboundEntity: counterpartyId,
+      outboundLockId,
+      createdTimestamp: replica.state.timestamp - 1000,
+    });
+
+    expect(pruneSettledOriginatedHtlcRoutes(replica.state, replica.state.timestamp)).toBe(1);
+    expect(replica.state.lockBook.has(outboundLockId)).toBe(false);
     expect(replica.state.htlcRoutes.has(hashlock)).toBe(false);
   });
 });

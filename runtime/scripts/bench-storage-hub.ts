@@ -354,6 +354,40 @@ type OpenHtlcLockStats = {
   samples: string[];
 };
 
+const accountFrameHasHtlcLock = (txs: readonly unknown[] | undefined, lockId: string): boolean =>
+  Boolean(txs?.some((tx) =>
+    typeof tx === 'object' &&
+    tx !== null &&
+    (tx as { type?: unknown }).type === 'htlc_lock' &&
+    (tx as { data?: { lockId?: unknown } }).data?.lockId === lockId
+  ));
+
+const accountFrameHasHtlcResolve = (txs: readonly unknown[] | undefined, lockId: string): boolean =>
+  Boolean(txs?.some((tx) =>
+    typeof tx === 'object' &&
+    tx !== null &&
+    (tx as { type?: unknown }).type === 'htlc_resolve' &&
+    (tx as { data?: { lockId?: unknown } }).data?.lockId === lockId
+  ));
+
+const describeRouteLockRefs = (
+  state: EntityState,
+  counterpartyId: string | undefined,
+  lockId: string | undefined,
+): string => {
+  if (!counterpartyId || !lockId) return 'refs=none';
+  const account = state.accounts.get(counterpartyId);
+  if (!account) return 'refs=no-account';
+  const refs = [
+    account.locks?.has(lockId) ? 'locks' : '',
+    accountFrameHasHtlcLock(account.mempool, lockId) ? 'mempool' : '',
+    accountFrameHasHtlcLock(account.pendingFrame?.accountTxs, lockId) ? `pending:${account.pendingFrame?.height ?? '?'}` : '',
+    accountFrameHasHtlcLock(account.currentFrame?.accountTxs, lockId) ? `current:${account.currentFrame?.height ?? '?'}` : '',
+    accountFrameHasHtlcResolve(account.currentFrame?.accountTxs, lockId) ? `currentResolve:${account.currentFrame?.height ?? '?'}` : '',
+  ].filter(Boolean);
+  return `refs=${refs.join(',') || 'none'}`;
+};
+
 const summarizeOpenHtlcLocks = (env: Env): OpenHtlcLockStats => {
   const stats: OpenHtlcLockStats = { total: 0, entityLockBook: 0, accountLocks: 0, htlcRoutes: 0, samples: [] };
   for (const replica of env.eReplicas.values()) {
@@ -365,10 +399,11 @@ const summarizeOpenHtlcLocks = (env: Env): OpenHtlcLockStats => {
     for (const [hashlock, route] of replica.state.htlcRoutes?.entries?.() ?? []) {
       stats.htlcRoutes += 1;
       if (stats.samples.length < 8) {
+        const refs = describeRouteLockRefs(replica.state, route.outboundEntity, route.outboundLockId);
         stats.samples.push(
           `route:${entityId}:${String(hashlock).slice(0, 12)}:` +
             `in=${String(route.inboundLockId || '').slice(0, 12) || '-'}:` +
-            `out=${String(route.outboundLockId || '').slice(0, 12) || '-'}`,
+            `out=${String(route.outboundLockId || '').slice(0, 12) || '-'}:${refs}`,
         );
       }
     }
@@ -663,8 +698,8 @@ async function main() {
 
   let sampleDiffBytes = 0;
   let paymentMs = 0;
+  let settlementMs = 0;
   let processedPayments = 0;
-  const paymentStartedAt = users.length > 0 ? getPerfMs() : null;
 
   if (users.length > 0) {
     const sampleUser = users[0]!;
@@ -684,8 +719,12 @@ async function main() {
         ],
       },
     ];
+    const samplePaymentStartedAt = getPerfMs();
     await runQuiet(!verbose, () => processRuntime(env, samplePaymentInput));
+    paymentMs += getPerfMs() - samplePaymentStartedAt;
+    const sampleSettlementStartedAt = getPerfMs();
     await runQuiet(!verbose, () => converge(env, maxConverge));
+    settlementMs += getPerfMs() - sampleSettlementStartedAt;
     processedPayments += 1;
 
     const sampleUserReplicaAfter = findReplica(env, sampleUser);
@@ -723,15 +762,18 @@ async function main() {
           ),
         ],
       }));
+      const paymentBatchStartedAt = getPerfMs();
       await runQuiet(!verbose, () => processRuntime(env, paymentInputs));
+      paymentMs += getPerfMs() - paymentBatchStartedAt;
+      const settlementBatchStartedAt = getPerfMs();
       await runQuiet(!verbose, () => converge(env, maxConverge));
+      settlementMs += getPerfMs() - settlementBatchStartedAt;
       processedPayments += slice.length;
       if ((offset / paymentBatch) % 8 === 0) {
         console.log(`Payment progress: ${processedPayments}/${payments}`);
       }
     }
   }
-  paymentMs = paymentStartedAt === null ? 0 : getPerfMs() - paymentStartedAt;
   const paymentTps = processedPayments > 0
     ? processedPayments / Math.max(paymentMs / 1000, 0.001)
     : 0;
@@ -846,10 +888,11 @@ async function main() {
   console.log('');
   console.log(`Open account phase: ${openMs.toFixed(2)}ms total, ${(openMs / Math.max(1, users.length)).toFixed(3)}ms/account`);
   if (processedPayments > 0) {
-    const effectivePaymentMs = Math.max(1, paymentMs);
+    const effectiveAdmissionMs = Math.max(1, paymentMs);
     console.log(
-      `Payment burst: kind=${paymentKind} count=${processedPayments} elapsed=${effectivePaymentMs.toFixed(2)}ms ` +
-        `throughput=${paymentTps.toFixed(2)} pay/s target=${minPaymentTps || 'none'}`,
+      `Payment burst: kind=${paymentKind} count=${processedPayments} admission=${effectiveAdmissionMs.toFixed(2)}ms ` +
+        `admissionTps=${paymentTps.toFixed(2)} pay/s settlement=${settlementMs.toFixed(2)}ms ` +
+        `target=${minPaymentTps || 'none'}`,
     );
   }
   console.log(`Current full runtime snapshot: ${formatBytes(currentSnapshotBytes)}`);
@@ -1013,6 +1056,7 @@ async function main() {
         crashRecoveredHubAccountCount,
         openMs,
         paymentMs,
+        settlementMs,
       },
       null,
       2,

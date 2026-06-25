@@ -1122,10 +1122,18 @@ export const applyEntityInput = async (
       return false;
     }
   })();
+  const hasProposableAccountMempool = Array.from(workingReplica.state.accounts.values()).some((account) =>
+    account.mempool.length > 0 && !account.pendingFrame
+  );
 
   // Single-signer entities still produce a hash-linked frame; they only skip
   // the multi-validator precommit/commit round trip.
-  if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal && isSingleSigner) {
+  if (
+    workingReplica.isProposer &&
+    (workingReplica.mempool.length > 0 || hasProposableAccountMempool) &&
+    !workingReplica.proposal &&
+    isSingleSigner
+  ) {
     entityLog.debug('single_signer.execute', { txs: workingReplica.mempool.map(tx => tx.type) });
     const {
       newState: newEntityState,
@@ -1202,7 +1210,12 @@ export const applyEntityInput = async (
     return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
   }
 
-  if (!isSingleSigner && workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal) {
+  if (
+    !isSingleSigner &&
+    workingReplica.isProposer &&
+    (workingReplica.mempool.length > 0 || hasProposableAccountMempool) &&
+    !workingReplica.proposal
+  ) {
     entityLog.debug('proposal.auto_start', {
       mempool: workingReplica.mempool.length,
       txs: workingReplica.mempool.map(tx => tx.type),
@@ -1355,6 +1368,11 @@ export const applyEntityFrame = async (
 
   const proposableAccounts = new Set<string>();
   drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
+  for (const [accountId, accountMachine] of currentEntityState.accounts) {
+    if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+      proposableAccounts.add(accountId);
+    }
+  }
 
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapCancelRequests: SwapCancelRequestEvent[] = [];

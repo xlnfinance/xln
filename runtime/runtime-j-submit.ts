@@ -3,6 +3,7 @@ import { getCachedSignerPrivateKey } from './account-crypto';
 import { isBatchEmpty } from './j-batch';
 import { rememberRecentJEvents } from './j-event-evidence';
 import { getEntityReplicaById } from './orchestrator/mesh-common';
+import { ensureLiveJAdapterForReplica } from './runtime-infra';
 
 export type RuntimeJOutboxQueue = (
   env: Env,
@@ -193,7 +194,12 @@ export async function submitRuntimeJOutbox(
       throw new Error(`J_SUBMIT_FATAL: missing_jReplica:${jInput.jurisdictionName}`);
     }
 
-    const jAdapter = jReplica.jadapter;
+    const jAdapter = typeof jReplica.jadapter?.submitTx === 'function'
+      ? jReplica.jadapter
+      : await ensureLiveJAdapterForReplica(env, jInput.jurisdictionName, {
+          allowBrowserVm: typeof window !== 'undefined',
+          context: `j-submit:${jInput.jurisdictionName}`,
+        });
     if (!jAdapter) {
       throw new Error(`J_SUBMIT_FATAL: missing_jAdapter:${jInput.jurisdictionName}`);
     }

@@ -172,6 +172,12 @@ export function applyCommittedAccountFrameFollowups(
     // Account frames are canonical once committed; keep entity-local indexes in
     // sync here instead of mutating them while the account proposal is still tentative.
     if (accountTx.type === 'htlc_resolve') {
+      const account = newState.accounts.get(counterpartyId);
+      if (account?.mempool?.length) {
+        account.mempool = account.mempool.filter((mempoolTx) =>
+          !(mempoolTx.type === 'htlc_lock' && mempoolTx.data.lockId === accountTx.data.lockId)
+        );
+      }
       newState.lockBook.delete(accountTx.data.lockId);
       if (newState.crontabState) {
         cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
