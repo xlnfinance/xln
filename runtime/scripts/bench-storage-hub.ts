@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { join } from 'path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { deriveAccountWatchSeed } from '../account-watch-seed';
 import { generateLazyEntityId } from '../entity-factory';
+import { hashHtlcSecret } from '../htlc-utils';
 import { converge } from '../scenarios/helpers';
 import { serializeTaggedJson } from '../serialization-utils';
 import { buildAccountMerkleFromState } from '../storage';
@@ -12,10 +14,11 @@ import {
   applyRuntimeInput,
   closeRuntimeDb,
   createEmptyEnv,
+  loadEnvFromDB,
   process as processRuntime,
   saveEnvToDB,
 } from '../runtime';
-import type { AccountMachine, EntityReplica, EntityState, Env, JReplica, RoutedEntityInput } from '../types';
+import type { AccountMachine, EntityReplica, EntityState, EntityTx, Env, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 
@@ -34,6 +37,8 @@ type DocStats = {
   p99: number;
   total: number;
 };
+
+type PaymentKind = 'direct' | 'htlc';
 
 const args = globalThis.process.argv.slice(2);
 
@@ -62,6 +67,12 @@ const parseBigIntArg = (value: string | undefined, fallback: bigint): bigint => 
   } catch {
     return fallback;
   }
+};
+
+const parsePaymentKind = (value: string | undefined): PaymentKind => {
+  const kind = String(value || 'direct');
+  if (kind === 'direct' || kind === 'htlc') return kind;
+  throw new Error(`INVALID_PAYMENT_KIND:${kind}`);
 };
 
 const formatBytes = (value: number): string => {
@@ -273,6 +284,57 @@ const makeParticipant = (seed: string, slotNumber: number, name: string): Partic
   };
 };
 
+const htlcSecretFor = (seed: string, index: number): string =>
+  `0x${createHash('sha256').update(`${seed}:soak-htlc:${index}`).digest('hex')}`;
+
+const paymentTxFor = (
+  paymentKind: PaymentKind,
+  seed: string,
+  index: number,
+  user: Participant,
+  hub: Participant,
+  tokenId: number,
+  amount: bigint,
+  description: string,
+): EntityTx => {
+  if (paymentKind === 'direct') {
+    return {
+      type: 'directPayment',
+      data: {
+        targetEntityId: hub.entityId,
+        tokenId,
+        amount,
+        route: [],
+        description,
+      },
+    };
+  }
+  const secret = htlcSecretFor(seed, index);
+  return {
+    type: 'htlcPayment',
+    data: {
+      targetEntityId: hub.entityId,
+      tokenId,
+      amount,
+      route: [user.entityId, hub.entityId],
+      description,
+      secret,
+      hashlock: hashHtlcSecret(secret),
+    },
+  };
+};
+
+const countOpenHtlcLocks = (env: Env): number => {
+  let total = 0;
+  for (const replica of env.eReplicas.values()) {
+    total += replica.state.lockBook?.size ?? 0;
+    for (const account of replica.state.accounts.values()) {
+      total += account.locks?.size ?? 0;
+    }
+  }
+  return total;
+};
+
 const importParticipants = async (
   env: Env,
   participants: Participant[],
@@ -326,6 +388,8 @@ async function main() {
   const openBatch = parsePositiveInt(getArg('--open-batch', '64'), 64);
   const paymentBatch = parsePositiveInt(getArg('--payment-batch', '64'), 64);
   const payments = parseNonNegativeInt(getArg('--payments', '0'), 0);
+  const paymentKind = parsePaymentKind(getArg('--payment-kind', 'direct'));
+  const minPaymentTps = parseNonNegativeInt(getArg('--min-payment-tps', '0'), 0);
   const tokenId = parsePositiveInt(getArg('--token-id', '1'), 1);
   const persist = hasFlag('--persist');
   const storageEnabled = hasFlag('--storage');
@@ -333,6 +397,8 @@ async function main() {
   const storageEpochMb = parsePositiveInt(getArg('--storage-epoch-mb', '256'), 256);
   const accountMerkleRadix = getArg('--account-merkle-radix', '16') === '256' ? 256 : 16;
   const recoveryBudgetMs = parsePositiveInt(getArg('--recovery-budget-ms', '10000'), 10000);
+  const crashRecoveryBudgetMs = parsePositiveInt(getArg('--crash-recovery-budget-ms', '10000'), 10000);
+  const crashRecover = hasFlag('--crash-recover');
   const recoveryScanStep = parsePositiveInt(getArg('--recovery-scan-step', '1'), 1);
   const snapshotInterval = parsePositiveInt(
     getArg('--snapshot-interval', persist ? '100000' : String(Number.MAX_SAFE_INTEGER)),
@@ -412,7 +478,7 @@ async function main() {
     users.push(makeParticipant(seed, index + 2, `user-${index + 1}`));
   }
 
-  console.log(`Benchmark config: accounts=${accounts} payments=${payments} persist=${persist ? 1 : 0}`);
+  console.log(`Benchmark config: accounts=${accounts} payments=${payments} paymentKind=${paymentKind} persist=${persist ? 1 : 0}`);
   console.log(`Batches: import=${importBatch} open=${openBatch} payment=${paymentBatch} converge=${maxConverge}`);
 
   const importStartedAt = getPerfMs();
@@ -512,6 +578,7 @@ async function main() {
   let sampleDiffBytes = 0;
   let paymentMs = 0;
   let processedPayments = 0;
+  const paymentStartedAt = users.length > 0 ? getPerfMs() : null;
 
   if (users.length > 0) {
     const sampleUser = users[0]!;
@@ -527,16 +594,7 @@ async function main() {
         entityId: sampleUser.entityId,
         signerId: sampleUser.signerId,
         entityTxs: [
-          {
-            type: 'directPayment',
-            data: {
-              targetEntityId: hub.entityId,
-              tokenId,
-              amount: paymentAmount,
-              route: [],
-              description: 'sample-payment',
-            },
-          },
+          paymentTxFor(paymentKind, seed, 0, sampleUser, hub, tokenId, paymentAmount, `sample-${paymentKind}`),
         ],
       },
     ];
@@ -561,23 +619,22 @@ async function main() {
 
   if (payments > processedPayments) {
     const paymentUsers = users.slice(0, Math.min(users.length, payments - processedPayments));
-    const paymentStartedAt = getPerfMs();
     for (let offset = 0; offset < paymentUsers.length; offset += paymentBatch) {
       const slice = paymentUsers.slice(offset, offset + paymentBatch);
       const paymentInputs: RoutedEntityInput[] = slice.map((user, index) => ({
         entityId: user.entityId,
         signerId: user.signerId,
         entityTxs: [
-          {
-            type: 'directPayment' as const,
-            data: {
-              targetEntityId: hub.entityId,
-              tokenId,
-              amount: paymentAmount,
-              route: [],
-              description: `burst-${offset + index + 1}`,
-            },
-          },
+          paymentTxFor(
+            paymentKind,
+            seed,
+            processedPayments + offset + index,
+            user,
+            hub,
+            tokenId,
+            paymentAmount,
+            `${paymentKind}-burst-${offset + index + 1}`,
+          ),
         ],
       }));
       await runQuiet(!verbose, () => processRuntime(env, paymentInputs));
@@ -587,7 +644,17 @@ async function main() {
         console.log(`Payment progress: ${processedPayments}/${payments}`);
       }
     }
-    paymentMs = getPerfMs() - paymentStartedAt;
+  }
+  paymentMs = paymentStartedAt === null ? 0 : getPerfMs() - paymentStartedAt;
+  const paymentTps = processedPayments > 0
+    ? processedPayments / Math.max(paymentMs / 1000, 0.001)
+    : 0;
+  if (minPaymentTps > 0 && paymentTps < minPaymentTps) {
+    throw new Error(`PAYMENT_TPS_BELOW_TARGET:${paymentTps.toFixed(2)}<${minPaymentTps}`);
+  }
+  const openHtlcLocks = paymentKind === 'htlc' ? countOpenHtlcLocks(env) : 0;
+  if (paymentKind === 'htlc' && openHtlcLocks !== 0) {
+    throw new Error(`HTLC_LOCKS_LEFT:${openHtlcLocks}`);
   }
 
   const dbBytes = persist || storageEnabled ? getDirSize(dbPath) : 0;
@@ -610,6 +677,9 @@ async function main() {
   let storageLatestFirstMismatchLiveJson: string | null = null;
   let storageLatestFirstMismatchLoadedJson: string | null = null;
   let storageStats: Awaited<ReturnType<typeof inspectStorageDb>> | null = null;
+  let crashRecoveryMs: number | null = null;
+  let crashRecoveredHubAccountCount: number | null = null;
+  let crashRecoveredHeight: number | null = null;
   if (storageEnabled) {
     const liveHubReplica = findReplica(env, hub);
     const liveMerkleStartedAt = getPerfMs();
@@ -658,14 +728,30 @@ async function main() {
     storageStats = await inspectStorageDb(env);
   }
   await closeRuntimeDb(env);
+  if (storageEnabled && crashRecover) {
+    const crashStartedAt = getPerfMs();
+    const recoveredEnv = await loadEnvFromDB(runtimeId, seed);
+    crashRecoveryMs = getPerfMs() - crashStartedAt;
+    if (!recoveredEnv) throw new Error('CRASH_RECOVERY_LOAD_NULL');
+    const recoveredHub = findReplica(recoveredEnv, hub);
+    crashRecoveredHeight = recoveredEnv.height;
+    crashRecoveredHubAccountCount = recoveredHub.state.accounts.size;
+    await closeRuntimeDb(recoveredEnv);
+    if (crashRecoveredHubAccountCount !== users.length) {
+      throw new Error(`CRASH_RECOVERY_ACCOUNT_COUNT_MISMATCH:${crashRecoveredHubAccountCount}/${users.length}`);
+    }
+    if (crashRecoveryMs > crashRecoveryBudgetMs) {
+      throw new Error(`CRASH_RECOVERY_BUDGET_EXCEEDED:${crashRecoveryMs.toFixed(2)}>${crashRecoveryBudgetMs}`);
+    }
+  }
 
   console.log('');
   console.log(`Open account phase: ${openMs.toFixed(2)}ms total, ${(openMs / Math.max(1, users.length)).toFixed(3)}ms/account`);
   if (processedPayments > 0) {
     const effectivePaymentMs = Math.max(1, paymentMs);
     console.log(
-      `Payment burst: count=${processedPayments} elapsed=${effectivePaymentMs.toFixed(2)}ms ` +
-        `throughput=${(processedPayments / (effectivePaymentMs / 1000)).toFixed(2)} pay/s`,
+      `Payment burst: kind=${paymentKind} count=${processedPayments} elapsed=${effectivePaymentMs.toFixed(2)}ms ` +
+        `throughput=${paymentTps.toFixed(2)} pay/s target=${minPaymentTps || 'none'}`,
     );
   }
   console.log(`Current full runtime snapshot: ${formatBytes(currentSnapshotBytes)}`);
@@ -766,6 +852,13 @@ async function main() {
         console.log('+----------+--------+------+------+------+----------+');
       }
     }
+    if (crashRecover) {
+      console.log(
+        `Crash recovery: load=${crashRecoveryMs?.toFixed(2) ?? 'null'}ms ` +
+          `height=${crashRecoveredHeight ?? 'null'} hubAccounts=${crashRecoveredHubAccountCount ?? 'null'} ` +
+          `budget=${crashRecoveryBudgetMs}ms`,
+      );
+    }
   }
 
   console.log('');
@@ -776,6 +869,10 @@ async function main() {
         accounts,
         paymentsRequested: payments,
         paymentsProcessed: processedPayments,
+        paymentKind,
+        paymentTps: Number(paymentTps.toFixed(2)),
+        minPaymentTps,
+        openHtlcLocks,
         persist,
         storageEnabled,
         storageSnapshotPeriod,
@@ -811,6 +908,11 @@ async function main() {
         storageLatestFirstMismatchLiveJson,
         storageLatestFirstMismatchLoadedJson,
         storageStats,
+        crashRecover,
+        crashRecoveryMs,
+        crashRecoveryBudgetMs,
+        crashRecoveredHeight,
+        crashRecoveredHubAccountCount,
         openMs,
         paymentMs,
       },
