@@ -35,6 +35,7 @@ type Cli = {
   concurrency: number;
   batchSize: number;
   processes: number;
+  users: number;
 };
 
 type BenchAccountCase = {
@@ -59,6 +60,10 @@ type HubConsensusBenchmarkResult = {
   crossTps: number;
   committedFrames: number;
   batchSize: number;
+  users: number;
+  sameUsers: number;
+  crossUsers: number;
+  uniqueUserAccounts: number;
   committedSwaps: number;
   concurrency: number;
   processes: number;
@@ -107,14 +112,24 @@ const nonNegativeInt = (args: string[], name: string, fallback: number): number 
   return value;
 };
 
-const parseCli = (args: string[]): Cli => ({
-  swaps: positiveInt(args, '--swaps', 1_000),
-  warmup: nonNegativeInt(args, '--warmup', 100),
-  minTps: positiveInt(args, '--min-tps', 10_000),
-  concurrency: positiveInt(args, '--concurrency', 128),
-  batchSize: Math.min(positiveInt(args, '--batch-size', MAX_ACCOUNT_FRAME_TXS), MAX_ACCOUNT_FRAME_TXS),
-  processes: positiveInt(args, '--processes', 1),
-});
+const benchmarkSeed = (label: string): string => {
+  const worker = globalThis.process.env['XLN_SWAP_CONSENSUS_WORKER'];
+  return worker === undefined ? label : `${label}-worker-${worker}`;
+};
+
+const parseCli = (args: string[]): Cli => {
+  const swaps = positiveInt(args, '--swaps', 1_000);
+  const batchSize = Math.min(positiveInt(args, '--batch-size', MAX_ACCOUNT_FRAME_TXS), MAX_ACCOUNT_FRAME_TXS);
+  return {
+    swaps,
+    warmup: nonNegativeInt(args, '--warmup', 100),
+    minTps: positiveInt(args, '--min-tps', 10_000),
+    concurrency: positiveInt(args, '--concurrency', 128),
+    batchSize,
+    processes: positiveInt(args, '--processes', 1),
+    users: positiveInt(args, '--users', Math.max(1, Math.ceil(swaps / batchSize))),
+  };
+};
 
 const makeJurisdiction = (): JurisdictionConfig => ({
   name: 'BenchJ',
@@ -540,14 +555,23 @@ const buildCases = (
   hubId: string,
   swaps: number,
   batchSize: number,
+  users: number,
 ): { same: BenchAccountCase[]; cross: BenchAccountCase[] } => {
   const same: BenchAccountCase[] = [];
   const cross: BenchAccountCase[] = [];
-  const width = Math.max(1, Math.min(batchSize, MAX_ACCOUNT_FRAME_TXS));
-  for (let index = 0; index < swaps; index += width) {
-    const count = Math.min(width, swaps - index);
-    same.push(makeSameCase(env, jurisdiction, hubId, index, count));
-    cross.push(makeCrossCase(env, jurisdiction, hubId, index, count));
+  const activeUsers = Math.max(1, Math.min(users, swaps));
+  const baseSwapsPerUser = Math.floor(swaps / activeUsers);
+  const remainder = swaps % activeUsers;
+  let startIndex = 0;
+  for (let userIndex = 0; userIndex < activeUsers; userIndex += 1) {
+    const count = baseSwapsPerUser + (userIndex < remainder ? 1 : 0);
+    if (count <= 0) continue;
+    if (count > batchSize) {
+      throw new Error(`USER_BATCH_OVERFLOW:user=${userIndex}:count=${count}:batchSize=${batchSize}`);
+    }
+    same.push(makeSameCase(env, jurisdiction, hubId, startIndex, count));
+    cross.push(makeCrossCase(env, jurisdiction, hubId, startIndex, count));
+    startIndex += count;
   }
   return { same, cross };
 };
@@ -573,6 +597,7 @@ const runPass = async (
   seed: string,
   concurrency: number,
   batchSize: number,
+  users: number,
 ): Promise<{
   sameElapsedMs: number;
   crossElapsedMs: number;
@@ -581,9 +606,11 @@ const runPass = async (
   elapsedMs: number;
   stages: StageTotals;
   frames: number;
+  sameUsers: number;
+  crossUsers: number;
 }> => {
   const { env, jurisdiction, hubId } = makeEnv(seed);
-  const { same, cross } = buildCases(env, jurisdiction, hubId, swaps, batchSize);
+  const { same, cross } = buildCases(env, jurisdiction, hubId, swaps, batchSize, users);
   const stages = concurrency === 1 ? createStageTotals() : undefined;
   const startedAt = getPerfMs();
   const sameResult = await runMeasuredCases(same, concurrency, stages);
@@ -596,6 +623,8 @@ const runPass = async (
     elapsedMs: getPerfMs() - startedAt,
     stages: stages ?? createStageTotals(),
     frames: same.length + cross.length,
+    sameUsers: same.length,
+    crossUsers: cross.length,
   };
 };
 
@@ -612,6 +641,7 @@ const runWorkerProcess = (
     '--min-tps', '1',
     '--concurrency', String(cli.concurrency),
     '--batch-size', String(cli.batchSize),
+    '--users', String(cli.users),
     '--processes', '1',
   ], {
     cwd: process.cwd(),
@@ -648,6 +678,9 @@ const runDistributedWorkers = async (cli: Cli): Promise<HubConsensusBenchmarkRes
   const crossSwaps = workers.reduce((sum, worker) => sum + worker.crossSwaps, 0);
   const committedSwaps = workers.reduce((sum, worker) => sum + worker.committedSwaps, 0);
   const committedFrames = workers.reduce((sum, worker) => sum + worker.committedFrames, 0);
+  const sameUsers = workers.reduce((sum, worker) => sum + worker.sameUsers, 0);
+  const crossUsers = workers.reduce((sum, worker) => sum + worker.crossUsers, 0);
+  const uniqueUserAccounts = workers.reduce((sum, worker) => sum + worker.uniqueUserAccounts, 0);
   const elapsedMs = Math.max(...workers.map((worker) => worker.elapsedMs), 0.001);
   const sameElapsedMs = Math.max(...workers.map((worker) =>
     worker.sameTps > 0 ? (worker.sameSwaps / worker.sameTps) * 1000 : worker.elapsedMs,
@@ -669,22 +702,45 @@ const runDistributedWorkers = async (cli: Cli): Promise<HubConsensusBenchmarkRes
     crossTps: Number((crossSwaps / Math.max(crossElapsedMs / 1000, 0.001)).toFixed(2)),
     committedFrames,
     batchSize: cli.batchSize,
+    users: cli.users,
+    sameUsers,
+    crossUsers,
+    uniqueUserAccounts,
     committedSwaps,
     concurrency: cli.concurrency,
     processes: cli.processes,
-    scope: 'batched distributed account consensus throughput aggregated across worker processes; each worker runs hub propose/commit + user ACK with hanko sign/verify and dispute proof',
+    scope: `batched distributed account consensus throughput across ${uniqueUserAccounts} user accounts aggregated across worker processes; each worker runs hub propose/commit + user ACK with hanko sign/verify and dispute proof`,
   };
   return output;
 };
 
 export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsensusBenchmarkResult> => {
   if (cli.processes > 1) return runDistributedWorkers(cli);
-  if (cli.warmup > 0) await runPass(cli.warmup, 'swap-hub-consensus-warmup', cli.concurrency, cli.batchSize);
-  const { sameElapsedMs, crossElapsedMs, sameSwaps, crossSwaps, elapsedMs, stages, frames } = await runPass(
+  if (cli.warmup > 0) {
+    await runPass(
+      cli.warmup,
+      benchmarkSeed('swap-hub-consensus-warmup'),
+      cli.concurrency,
+      cli.batchSize,
+      Math.min(cli.users, cli.warmup),
+    );
+  }
+  const {
+    sameElapsedMs,
+    crossElapsedMs,
+    sameSwaps,
+    crossSwaps,
+    elapsedMs,
+    stages,
+    frames,
+    sameUsers,
+    crossUsers,
+  } = await runPass(
     cli.swaps,
-    'swap-hub-consensus-measured',
+    benchmarkSeed('swap-hub-consensus-measured'),
     cli.concurrency,
     cli.batchSize,
+    cli.users,
   );
   const totalSwaps = sameSwaps + crossSwaps;
   const elapsedSeconds = Math.max(elapsedMs / 1000, 0.001);
@@ -704,10 +760,14 @@ export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsens
     crossTps: Number(crossTps.toFixed(2)),
     committedFrames: frames,
     batchSize: cli.batchSize,
+    users: cli.users,
+    sameUsers,
+    crossUsers,
+    uniqueUserAccounts: sameUsers + crossUsers,
     committedSwaps: totalSwaps,
     concurrency: cli.concurrency,
     processes: cli.processes,
-    scope: 'batched distributed account consensus throughput: hub propose/commit + user ACK on independent accounts; up to 100 swap txs per account frame; includes hanko sign/verify and dispute proof, excludes entity frame and storage flush',
+    scope: `batched distributed account consensus throughput across ${sameUsers + crossUsers} user accounts: hub propose/commit + user ACK on independent accounts; up to ${cli.batchSize} swap txs per account frame; includes hanko sign/verify and dispute proof, excludes entity frame and storage flush`,
     ...(stageMs ? { stageMs } : {}),
   };
   return output;
