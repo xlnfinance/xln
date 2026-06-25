@@ -1881,6 +1881,7 @@ const runShard = async (
           USE_ANVIL: 'true',
           ANVIL_RPC: rpcUrl,
           ANVIL_RPC2: rpc2Url,
+          XLN_JURISDICTIONS_PATH: join(dbPath, 'jurisdictions.json'),
           XLN_SKIP_STALE_REAP: '1',
           XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
