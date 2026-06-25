@@ -2,10 +2,11 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
+import { freemem, loadavg, totalmem } from 'node:os';
 import type { Readable } from 'node:stream';
 
-type SoakProfile = 'quick' | 'release' | 'swap';
+type SoakProfile = 'quick' | 'release' | 'swap' | 'mainnet';
 
 type SoakCommand = {
   name: string;
@@ -23,6 +24,27 @@ type SoakArgs = {
   keepE2eRuns: number;
   minKeepE2eRuns: number;
   minFreeBytes: number;
+  sampleMs: number;
+};
+
+type SoakPerfSample = {
+  ts: number;
+  load1: number;
+  freeMemBytes: number;
+  totalMemBytes: number;
+  diskFreeBytes: number;
+  processCpuPct: number;
+  processRssKb: number;
+};
+
+type SoakPerfSummary = {
+  sampleCount: number;
+  peakLoad1: number;
+  minFreeMemBytes: number;
+  minDiskFreeBytes: number;
+  maxProcessCpuPct: number;
+  maxProcessRssKb: number;
+  samples: SoakPerfSample[];
 };
 
 type SoakResult = {
@@ -33,6 +55,7 @@ type SoakResult = {
   durationMs: number;
   startedAt: string;
   finishedAt: string;
+  perf: SoakPerfSummary;
   stdoutTail?: string;
   stderrTail?: string;
 };
@@ -56,6 +79,35 @@ const profileCommands: Record<SoakProfile, SoakCommand[]> = {
     { name: 'orderbook core TPS', command: 'bun run bench:swap:orderbook', timeoutMs: 120_000 },
     { name: 'same/cross account TPS', command: 'bun run bench:swap:runtime', timeoutMs: 120_000 },
     { name: 'swap scenario TPS', command: 'bun run bench:swap:scenarios', timeoutMs: 180_000 },
+  ],
+  mainnet: [
+    {
+      name: '100-user HTLC storage recovery',
+      command:
+        'XLN_DB_PATH=db-tmp/soak-mainnet-hub ' +
+        'bun runtime/scripts/bench-storage-hub.ts ' +
+        '--accounts 100 --payments 100 --payment-kind htlc --min-payment-tps 100 ' +
+        '--persist --storage --storage-snapshot 20 --storage-epoch-mb 8 ' +
+        '--import-batch 64 --open-batch 50 --payment-batch 100 --recovery-scan-step 5 ' +
+        '--recovery-budget-ms 10000 --crash-recover --crash-recovery-budget-ms 10000 ' +
+        '--db-root db-tmp/soak-mainnet-hub',
+      timeoutMs: 600_000,
+    },
+    {
+      name: 'same/cross account swap 100 TPS',
+      command: 'bun runtime/scripts/bench-swap-runtime-tps.ts --swaps 1000 --warmup 100 --min-tps 100',
+      timeoutMs: 120_000,
+    },
+    {
+      name: 'swap scenarios 100 TPS',
+      command: 'bun runtime/scripts/bench-swap-scenarios-tps.ts --swaps 1000 --warmup 100 --min-tps 100',
+      timeoutMs: 180_000,
+    },
+    {
+      name: 'hub consensus swap 100 TPS',
+      command: 'bun runtime/scripts/bench-swap-hub-consensus-tps.ts --swaps 300 --warmup 30 --min-tps 100 --batch-size 100 --processes 2',
+      timeoutMs: 240_000,
+    },
   ],
 };
 
@@ -81,14 +133,16 @@ const parseArgs = (): SoakArgs => {
   }
 
   const rawProfile = String(flags.get('--profile') || 'quick');
-  if (rawProfile !== 'quick' && rawProfile !== 'release' && rawProfile !== 'swap') {
-    throw new Error(`Invalid --profile=${rawProfile}; expected quick, release, or swap`);
+  if (rawProfile !== 'quick' && rawProfile !== 'release' && rawProfile !== 'swap' && rawProfile !== 'mainnet') {
+    throw new Error(`Invalid --profile=${rawProfile}; expected quick, release, swap, or mainnet`);
   }
 
   const iterationsRaw = flags.get('--iterations');
   const minutesRaw = flags.get('--minutes');
   const iterations = iterationsRaw === undefined ? (rawProfile === 'quick' ? 2 : null) : Number(iterationsRaw);
-  const minutes = minutesRaw === undefined ? (rawProfile === 'release' ? 240 : rawProfile === 'swap' ? 10 : null) : Number(minutesRaw);
+  const minutes = minutesRaw === undefined
+    ? (rawProfile === 'release' ? 240 : rawProfile === 'swap' ? 10 : rawProfile === 'mainnet' ? 1440 : null)
+    : Number(minutesRaw);
   if (iterations !== null && (!Number.isFinite(iterations) || iterations <= 0)) {
     throw new Error(`Invalid --iterations=${String(iterationsRaw)}`);
   }
@@ -107,6 +161,7 @@ const parseArgs = (): SoakArgs => {
       || process.env['XLN_MIN_DISK_FREE_BYTES']
       || DEFAULT_MIN_FREE_BYTES,
   );
+  const sampleMsRaw = Number(flags.get('--sample-ms') || process.env['SOAK_SAMPLE_MS'] || 5_000);
   return {
     profile: rawProfile,
     iterations: iterations === null ? null : Math.floor(iterations),
@@ -123,6 +178,9 @@ const parseArgs = (): SoakArgs => {
     minFreeBytes: Number.isFinite(minFreeBytesRaw) && minFreeBytesRaw > 0
       ? Math.max(Math.floor(minFreeBytesRaw), DEFAULT_MIN_FREE_BYTES)
       : DEFAULT_MIN_FREE_BYTES,
+    sampleMs: Number.isFinite(sampleMsRaw) && sampleMsRaw >= 1_000
+      ? Math.floor(sampleMsRaw)
+      : 5_000,
   };
 };
 
@@ -135,7 +193,78 @@ const appendTail = (tail: string, chunk: string): string =>
 const prefixedOutput = (iteration: number, command: SoakCommand, chunk: string): string =>
   `[soak:${iteration}:${command.name}] ${chunk}`;
 
-const runCommand = async (command: SoakCommand, iteration: number, streamOutput: boolean): Promise<SoakResult> => {
+type ProcessRow = { pid: number; ppid: number; cpuPct: number; rssKb: number };
+
+const readProcessRows = (): ProcessRow[] => {
+  try {
+    const text = execFileSync('ps', ['-axo', 'pid=,ppid=,pcpu=,rss='], { encoding: 'utf8' });
+    return text
+      .trim()
+      .split('\n')
+      .map((line): ProcessRow | null => {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 4) return null;
+        const pid = Number(parts[0]);
+        const ppid = Number(parts[1]);
+        const cpuPct = Number(parts[2]);
+        const rssKb = Number(parts[3]);
+        if (![pid, ppid, cpuPct, rssKb].every(Number.isFinite)) return null;
+        return { pid, ppid, cpuPct, rssKb };
+      })
+      .filter((row): row is ProcessRow => row !== null);
+  } catch {
+    return [];
+  }
+};
+
+const summarizeProcessTree = (rootPid: number): { cpuPct: number; rssKb: number } => {
+  const rows = readProcessRows();
+  const childrenByParent = new Map<number, ProcessRow[]>();
+  for (const row of rows) {
+    childrenByParent.set(row.ppid, [...(childrenByParent.get(row.ppid) ?? []), row]);
+  }
+  const stack = [rootPid];
+  const pids = new Set<number>();
+  while (stack.length > 0) {
+    const pid = stack.pop();
+    if (pid === undefined || pids.has(pid)) continue;
+    pids.add(pid);
+    for (const child of childrenByParent.get(pid) ?? []) stack.push(child.pid);
+  }
+  let cpuPct = 0;
+  let rssKb = 0;
+  for (const row of rows) {
+    if (!pids.has(row.pid)) continue;
+    cpuPct += row.cpuPct;
+    rssKb += row.rssKb;
+  }
+  return { cpuPct: Number(cpuPct.toFixed(2)), rssKb };
+};
+
+const readSoakPerfSample = (pid: number): SoakPerfSample => {
+  const tree = summarizeProcessTree(pid);
+  return {
+    ts: Date.now(),
+    load1: loadavg()[0] ?? 0,
+    freeMemBytes: freemem(),
+    totalMemBytes: totalmem(),
+    diskFreeBytes: readDiskFreeBytes(),
+    processCpuPct: tree.cpuPct,
+    processRssKb: tree.rssKb,
+  };
+};
+
+const summarizePerf = (samples: SoakPerfSample[]): SoakPerfSummary => ({
+  sampleCount: samples.length,
+  peakLoad1: samples.reduce((max, sample) => Math.max(max, sample.load1), 0),
+  minFreeMemBytes: samples.reduce((min, sample) => Math.min(min, sample.freeMemBytes), Number.POSITIVE_INFINITY),
+  minDiskFreeBytes: samples.reduce((min, sample) => Math.min(min, sample.diskFreeBytes), Number.POSITIVE_INFINITY),
+  maxProcessCpuPct: samples.reduce((max, sample) => Math.max(max, sample.processCpuPct), 0),
+  maxProcessRssKb: samples.reduce((max, sample) => Math.max(max, sample.processRssKb), 0),
+  samples,
+});
+
+const runCommand = async (command: SoakCommand, iteration: number, streamOutput: boolean, sampleMs: number): Promise<SoakResult> => {
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   console.log(`[soak:${iteration}] ${command.name}`);
@@ -148,6 +277,15 @@ const runCommand = async (command: SoakCommand, iteration: number, streamOutput:
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const perfSamples: SoakPerfSample[] = [];
+  if (proc.pid) {
+    perfSamples.push(readSoakPerfSample(proc.pid));
+  }
+  const sampleTimer = setInterval(() => {
+    if (!proc.pid || proc.exitCode !== null) return;
+    perfSamples.push(readSoakPerfSample(proc.pid));
+  }, sampleMs);
+  sampleTimer.unref();
   proc.stdout.on('data', chunk => {
     const text = chunk.toString();
     stdoutTail = appendTail(stdoutTail, text);
@@ -172,12 +310,21 @@ const runCommand = async (command: SoakCommand, iteration: number, streamOutput:
     proc.once('exit', resolve);
   });
   clearTimeout(timer);
+  clearInterval(sampleTimer);
+  if (proc.pid) {
+    perfSamples.push(readSoakPerfSample(proc.pid));
+  }
   const durationMs = Date.now() - startedAtMs;
   if (code !== 0) {
     if (stdoutTail) process.stdout.write(prefixedOutput(iteration, command, `stdout tail:\n${stdoutTail}`));
     if (stderrTail) process.stderr.write(prefixedOutput(iteration, command, `stderr tail:\n${stderrTail}`));
   }
   console.log(`[soak:${iteration}] ${command.name} code=${code ?? 'signal'} durationMs=${durationMs}`);
+  const perf = summarizePerf(perfSamples);
+  console.log(
+    `[soak:${iteration}] perf samples=${perf.sampleCount} peakLoad1=${perf.peakLoad1.toFixed(2)} ` +
+      `maxCpu=${perf.maxProcessCpuPct.toFixed(1)} maxRssKb=${perf.maxProcessRssKb} minDiskFree=${perf.minDiskFreeBytes}`,
+  );
 
   return {
     iteration,
@@ -187,6 +334,7 @@ const runCommand = async (command: SoakCommand, iteration: number, streamOutput:
     durationMs,
     startedAt,
     finishedAt: new Date().toISOString(),
+    perf,
     ...(stdoutTail ? { stdoutTail } : {}),
     ...(stderrTail ? { stderrTail } : {}),
   };
@@ -287,6 +435,7 @@ const main = async (): Promise<void> => {
   console.log(`keepE2eRuns=${args.keepE2eRuns}`);
   console.log(`minKeepE2eRuns=${args.minKeepE2eRuns}`);
   console.log(`minFreeBytes=${args.minFreeBytes}`);
+  console.log(`sampleMs=${args.sampleMs}`);
   console.log('='.repeat(76));
 
   pruneSuccessfulE2eRuns(args.keepE2eRuns, args.minFreeBytes, args.minKeepE2eRuns);
@@ -298,7 +447,7 @@ const main = async (): Promise<void> => {
 
     for (const command of commands) {
       pruneSuccessfulE2eRuns(args.keepE2eRuns, args.minFreeBytes, args.minKeepE2eRuns);
-      const result = await runCommand(command, iteration, args.streamOutput);
+      const result = await runCommand(command, iteration, args.streamOutput, args.sampleMs);
       results.push(result);
       writeSummary(args.outputPath, {
         profile: args.profile,
