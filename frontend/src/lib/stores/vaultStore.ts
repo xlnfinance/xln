@@ -2471,8 +2471,8 @@ export const vaultOperations = {
       return latest;
     };
 
-    if (getLatestEnv().jReplicas?.has(config.name)) {
-      const existing = getLatestEnv().jReplicas.get(config.name);
+    const existing = findJReplicaByName(getLatestEnv(), config.name);
+    if (existing && hasConnectedJurisdictionAdapter(existing)) {
       return {
         ...config,
         contracts: {
@@ -2482,6 +2482,9 @@ export const vaultOperations = {
           deltaTransformer: String(existing?.contracts?.deltaTransformer || config.contracts?.deltaTransformer || ''),
         },
       };
+    }
+    if (existing) {
+      console.warn(`[VaultStore] J-machine "${config.name}" exists without a live adapter; re-importing`);
     }
 
     ensureRuntimeLoopRunning(runtimeEnv, xln, `import-jmachine:${config.name}`);
