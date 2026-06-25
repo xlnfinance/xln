@@ -251,6 +251,22 @@
   const uxGalleryDesktopCount = $derived(uxGalleryStories.filter(story => story.platform === 'desktop').length);
   const uxGalleryMobileCount = $derived(uxGalleryStories.filter(story => story.platform === 'mobile').length);
 
+  function trendPillLabel(run: QaSummary): string {
+    const total = Math.max(0, Number(run.totalShards || 0));
+    if (run.failedShards > 0) return `${run.failedShards}F/${total}`;
+    return formatCount(run);
+  }
+
+  function trendPillTitle(run: QaSummary): string {
+    const browser = browserHealth(run);
+    return [
+      `${statusLabel(run)} ${formatCount(run)} stacks`,
+      `${formatMs(run.totalMs)} wall`,
+      `browser ${formatBrowserHealth(browser)}`,
+      formatDate(run.createdAt),
+    ].join(' · ');
+  }
+
   function applyQaAuth(payload: { qaAuth?: QaAuthInfo } | null | undefined): void {
     const auth = payload?.qaAuth;
     if (!auth) return;
@@ -867,16 +883,25 @@
       </article>
     </div>
 
-    <div class="trend-strip">
+    <div class="trend-head">
+      <span>Recent runs</span>
+      <small>green = passed/total · red = failed/total</small>
+    </div>
+
+    <div class="trend-strip" data-testid="qa-trend-strip">
       {#each latestTrend as run}
         <button
+          type="button"
           class="trend-pill"
           class:pass={run.status === 'passed'}
           class:fail={run.status === 'failed'}
           class:selected={run.runId === selectedRunId}
+          title={trendPillTitle(run)}
+          aria-label={trendPillTitle(run)}
+          data-testid="qa-trend-pill"
           onclick={() => selectRun(run.runId)}
         >
-          {run.failedShards > 0 ? run.failedShards : run.passedShards}
+          {trendPillLabel(run)}
         </button>
       {/each}
     </div>
@@ -1020,14 +1045,14 @@
         <p>{verdict.reason}</p>
       </div>
       <div class="verdict-meta">
-        <span>{verdict.activeCount} active reasons</span>
-        <span>{verdict.failingSurfaceCount} failing surfaces</span>
-        <span>benchmark {benchmarkLabel(verdict.regressionStatus)}</span>
-        <span>browser {verdict.browserErrorCount} err / {verdict.browserWarningCount} warn</span>
+        <span title="Independent active signals currently keeping the verdict non-green">{verdict.activeCount} active reasons</span>
+        <span title="Distinct failing areas: run status, browser health, benchmarks, restart audit, or runtime markers">{verdict.failingSurfaceCount} failing surfaces</span>
+        <span title="Runtime benchmark verdict compared with comparable historical runs">benchmark {benchmarkLabel(verdict.regressionStatus)}</span>
+        <span title="Browser console, pageerror, network, and HTTP findings captured during Playwright">browser {verdict.browserErrorCount} err / {verdict.browserWarningCount} warn</span>
         <code title={verdict.gitHead ?? ''}>head {shortHash(verdict.gitHead)}</code>
         <code title={verdict.codeHash ?? ''}>code {shortHash(verdict.codeHash)}</code>
-        {#if verdict.dirty}<span>dirty</span>{/if}
-        <span>{formatDate(verdict.latestAt)}</span>
+        {#if verdict.dirty}<span title="Git working tree was dirty when this run was captured">dirty</span>{/if}
+        <span title="Latest evidence timestamp">{formatDate(verdict.latestAt)}</span>
       </div>
     </section>
 
@@ -2151,6 +2176,29 @@
     flex-wrap: wrap;
   }
 
+  .trend-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+
+  .trend-head span {
+    color: #9b978a;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .trend-head small {
+    min-width: 0;
+    color: #817b70;
+    font-size: 0.68rem;
+    text-align: right;
+  }
+
   .sort-control {
     display: grid;
     gap: 0.3rem;
@@ -2228,13 +2276,19 @@
   }
 
   .trend-pill {
-    min-width: 2.1rem;
+    min-width: 3.1rem;
     height: 2rem;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.04);
     color: inherit;
     cursor: pointer;
+    padding: 0 0.45rem;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
   }
 
   .trend-pill.pass,

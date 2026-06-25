@@ -1228,6 +1228,10 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('benchmark SLOWER');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('2026-06-23 23:59:59 UTC');
+    await expect(page.getByText('green = passed/total')).toBeVisible();
+    await expect(page.getByTestId('qa-trend-pill').first()).toHaveText('1F/3');
+    await expect(page.getByTestId('qa-trend-pill').nth(1)).toHaveText('1/1');
+    await expect(page.getByTestId('qa-trend-pill').first()).toHaveAttribute('title', /FAIL 2\/3 stacks/);
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('browser');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('Browser health failed');
     await expect(page.getByTestId('qa-failure-inbox')).toContainText('assertion');
