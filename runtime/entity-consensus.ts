@@ -78,6 +78,7 @@ import {
 } from './entity-consensus/hanko-witness';
 import { cloneCrossJurisdictionAccountTxRoute } from './cross-jurisdiction';
 import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
+import { pruneSettledOriginatedHtlcRoutes } from './entity-tx/htlc-route-lifecycle';
 export { mergeEntityInputs } from './entity-input-merge';
 
 const ENTITY_FRAME_PROFILE =
@@ -1944,6 +1945,11 @@ export const applyEntityFrame = async (
   }
   markFrameProfile('accountProposals');
 
+  const prunedOriginatedHtlcRoutes = pruneSettledOriginatedHtlcRoutes(currentEntityState, currentEntityState.timestamp);
+  if (prunedOriginatedHtlcRoutes > 0) {
+    markStorageEntityDirty(env, currentEntityState.entityId);
+  }
+
   const frameElapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
   if (ENTITY_FRAME_PROFILE || frameElapsedMs >= ENTITY_FRAME_SLOW_MS) {
     console.warn('[ENTITY-FRAME-PROFILE]', safeStringify({
@@ -1963,6 +1969,7 @@ export const applyEntityFrame = async (
       orderbookMempoolOps,
       orderbookBookUpdates,
       orderbookCrossFills,
+      prunedOriginatedHtlcRoutes,
       marks: frameProfileMarks,
       txTypeTotals: Array.from(frameProfileTxTotals.entries())
         .map(([type, value]) => ({ type, ...value }))

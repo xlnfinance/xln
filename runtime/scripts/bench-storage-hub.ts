@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
-import { join } from 'path';
+import { basename, dirname, join } from 'path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { deriveAccountWatchSeed } from '../account-watch-seed';
@@ -18,6 +18,7 @@ import {
   process as processRuntime,
   saveEnvToDB,
 } from '../runtime';
+import { dbRootPath } from '../runtime-platform';
 import type { AccountMachine, EntityReplica, EntityState, EntityTx, Env, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
@@ -271,6 +272,27 @@ const getDirSize = (path: string): number => {
   }
 };
 
+const runtimeDbSiblingPaths = (basePath: string): string[] => {
+  const parent = dirname(basePath);
+  const prefix = basename(basePath);
+  try {
+    return readdirSync(parent)
+      .filter(entry => entry === prefix || entry.startsWith(`${prefix}-`))
+      .map(entry => join(parent, entry));
+  } catch {
+    return [];
+  }
+};
+
+const removeRuntimeDbPaths = (basePath: string): void => {
+  for (const path of runtimeDbSiblingPaths(basePath)) {
+    rmSync(path, { recursive: true, force: true });
+  }
+};
+
+const getRuntimeDbBytes = (basePath: string): number =>
+  runtimeDbSiblingPaths(basePath).reduce((sum, path) => sum + getDirSize(path), 0);
+
 const makeParticipant = (seed: string, slotNumber: number, name: string): Participant => {
   const slot = String(slotNumber);
   const signerId = deriveSignerAddressSync(seed, slot).toLowerCase();
@@ -324,15 +346,62 @@ const paymentTxFor = (
   };
 };
 
-const countOpenHtlcLocks = (env: Env): number => {
-  let total = 0;
+type OpenHtlcLockStats = {
+  total: number;
+  entityLockBook: number;
+  accountLocks: number;
+  htlcRoutes: number;
+  samples: string[];
+};
+
+const summarizeOpenHtlcLocks = (env: Env): OpenHtlcLockStats => {
+  const stats: OpenHtlcLockStats = { total: 0, entityLockBook: 0, accountLocks: 0, htlcRoutes: 0, samples: [] };
   for (const replica of env.eReplicas.values()) {
-    total += replica.state.lockBook?.size ?? 0;
+    const entityId = String(replica.state.entityId || '').slice(0, 10);
+    for (const lock of replica.state.lockBook?.values?.() ?? []) {
+      stats.entityLockBook += 1;
+      if (stats.samples.length < 8) stats.samples.push(`lockBook:${entityId}:${String(lock.lockId).slice(0, 12)}`);
+    }
+    for (const [hashlock, route] of replica.state.htlcRoutes?.entries?.() ?? []) {
+      stats.htlcRoutes += 1;
+      if (stats.samples.length < 8) {
+        stats.samples.push(
+          `route:${entityId}:${String(hashlock).slice(0, 12)}:` +
+            `in=${String(route.inboundLockId || '').slice(0, 12) || '-'}:` +
+            `out=${String(route.outboundLockId || '').slice(0, 12) || '-'}`,
+        );
+      }
+    }
     for (const account of replica.state.accounts.values()) {
-      total += account.locks?.size ?? 0;
+      for (const lock of account.locks?.values?.() ?? []) {
+        stats.accountLocks += 1;
+        if (stats.samples.length < 8) stats.samples.push(`account:${entityId}:${String(lock.lockId).slice(0, 12)}`);
+      }
     }
   }
-  return total;
+  stats.total = stats.entityLockBook + stats.accountLocks + stats.htlcRoutes;
+  return stats;
+};
+
+const drainHtlcSettlements = async (
+  env: Env,
+  maxRounds: number,
+  maxConverge: number,
+  verbose: boolean,
+): Promise<OpenHtlcLockStats> => {
+  let stats = summarizeOpenHtlcLocks(env);
+  for (let round = 0; round < maxRounds && stats.total > 0; round += 1) {
+    await runQuiet(!verbose, () => converge(env, maxConverge));
+    stats = summarizeOpenHtlcLocks(env);
+    if (verbose || round === 0 || round === maxRounds - 1 || stats.total === 0) {
+      console.log(
+        `HTLC drain round ${round + 1}/${maxRounds}: total=${stats.total} ` +
+          `lockBook=${stats.entityLockBook} accounts=${stats.accountLocks} routes=${stats.htlcRoutes} ` +
+          `samples=${stats.samples.join(' | ') || 'none'}`,
+      );
+    }
+  }
+  return stats;
 };
 
 const importParticipants = async (
@@ -376,6 +445,22 @@ const logStats = (label: string, stats: DocStats): void => {
   );
 };
 
+const isStorageAbsentAtHeightError = (error: unknown): boolean =>
+  error instanceof Error && error.message.startsWith('STORAGE_DIFF_MISSING:');
+
+const loadOptionalEntityStateFromStorageDb = async (
+  env: Env,
+  entityId: string,
+  height: number,
+): Promise<EntityState | null> => {
+  try {
+    return await loadEntityStateFromStorageDb(env, entityId, height);
+  } catch (error) {
+    if (isStorageAbsentAtHeightError(error)) return null;
+    throw error;
+  }
+};
+
 const requireWatchSeed = (watchSeeds: ReadonlyMap<string, string>, entityId: string): string => {
   const watchSeed = watchSeeds.get(entityId);
   if (!watchSeed) throw new Error(`BENCH_WATCH_SEED_MISSING:${entityId}`);
@@ -409,13 +494,14 @@ async function main() {
   const maxConverge = parsePositiveInt(getArg('--max-converge', '200'), 200);
   const verbose = hasFlag('--verbose');
   const seed = getArg('--seed', 'bench-storage-hub alpha beta gamma delta epsilon')!;
-  const dbRoot = getArg('--db-root', 'db-tmp/runtime-bench')!;
+  const requestedDbRoot = getArg('--db-root', dbRootPath)!;
+  const dbRoot = process.env['XLN_DB_PATH'] || requestedDbRoot;
 
   const runtimeId = deriveSignerAddressSync(seed, '900000').toLowerCase();
   const dbPath = join(dbRoot, runtimeId);
 
   if (persist) {
-    rmSync(dbPath, { recursive: true, force: true });
+    removeRuntimeDbPaths(dbPath);
     mkdirSync(dbRoot, { recursive: true });
   }
 
@@ -652,12 +738,18 @@ async function main() {
   if (minPaymentTps > 0 && paymentTps < minPaymentTps) {
     throw new Error(`PAYMENT_TPS_BELOW_TARGET:${paymentTps.toFixed(2)}<${minPaymentTps}`);
   }
-  const openHtlcLocks = paymentKind === 'htlc' ? countOpenHtlcLocks(env) : 0;
+  const openHtlcStats = paymentKind === 'htlc'
+    ? await drainHtlcSettlements(env, 8, maxConverge, verbose)
+    : summarizeOpenHtlcLocks(env);
+  const openHtlcLocks = paymentKind === 'htlc' ? openHtlcStats.total : 0;
   if (paymentKind === 'htlc' && openHtlcLocks !== 0) {
-    throw new Error(`HTLC_LOCKS_LEFT:${openHtlcLocks}`);
+    throw new Error(
+      `HTLC_LOCKS_LEFT:${openHtlcLocks}:` +
+        `lockBook=${openHtlcStats.entityLockBook}:accounts=${openHtlcStats.accountLocks}:routes=${openHtlcStats.htlcRoutes}`,
+    );
   }
 
-  const dbBytes = persist || storageEnabled ? getDirSize(dbPath) : 0;
+  const dbBytes = persist || storageEnabled ? getRuntimeDbBytes(dbPath) : 0;
   let storageLoadedAccountCount: number | null = null;
   let storageHistoricalHeight: number | null = null;
   let storageHistoricalAccountCount: number | null = null;
@@ -697,16 +789,10 @@ async function main() {
       storageLatestFirstMismatchLiveJson = comparison.firstMismatchLiveJson;
       storageLatestFirstMismatchLoadedJson = comparison.firstMismatchLoadedJson;
     }
-    storageHistoricalHeight = Math.max(1, Math.min(env.height - 1, storageSnapshotPeriod));
-    const historicalLoadStartedAt = getPerfMs();
-    const historical = await loadEntityStateFromStorageDb(env, hub.entityId, storageHistoricalHeight);
-    storageHistoricalLoadMs = getPerfMs() - historicalLoadStartedAt;
-    storageHistoricalAccountCount = historical?.accounts.size ?? null;
-    storageHistoricalMerkleRoot = historical ? buildAccountMerkleFromState(historical.accounts, accountMerkleRadix).root : null;
     storageMerkleBuildMs = getPerfMs() - liveMerkleStartedAt;
     for (let height = 1; height <= env.height; height += recoveryScanStep) {
       const recoveryStartedAt = getPerfMs();
-      const recovered = await loadEntityStateFromStorageDb(env, hub.entityId, height);
+      const recovered = await loadOptionalEntityStateFromStorageDb(env, hub.entityId, height);
       const recoveryMs = getPerfMs() - recoveryStartedAt;
       if (!recovered) {
         if (storageFirstPresentHeight === null) continue;
@@ -719,6 +805,18 @@ async function main() {
         storageWorstLoadHeight = height;
       }
     }
+    storageHistoricalHeight = Math.max(
+      storageFirstPresentHeight ?? 1,
+      Math.min(env.height - 1, storageSnapshotPeriod),
+    );
+    const historicalLoadStartedAt = getPerfMs();
+    const historical = await loadOptionalEntityStateFromStorageDb(env, hub.entityId, storageHistoricalHeight);
+    storageHistoricalLoadMs = getPerfMs() - historicalLoadStartedAt;
+    if (!historical && storageFirstPresentHeight !== null) {
+      throw new Error(`HISTORICAL_LOAD_FAILED: height=${storageHistoricalHeight}`);
+    }
+    storageHistoricalAccountCount = historical?.accounts.size ?? null;
+    storageHistoricalMerkleRoot = historical ? buildAccountMerkleFromState(historical.accounts, accountMerkleRadix).root : null;
     if ((storageWorstLoadMs ?? 0) > recoveryBudgetMs) {
       throw new Error(
         `RECOVERY_BUDGET_EXCEEDED: worst=${storageWorstLoadMs?.toFixed(2)}ms ` +
