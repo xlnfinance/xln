@@ -30,6 +30,16 @@ bun runtime/scripts/dev-radapter-keys.ts \
   --quiet
 source "$DEV_RADAPTER_KEYS_ENV"
 
+bun runtime/scripts/print-dev-links.ts \
+  --web-port "${WEB_PORT}" \
+  --api-port "${API_PORT}" \
+  --rpc-port "${RPC_PORT}" \
+  --rpc2-port "${RPC2_PORT}" \
+  --custody-port "${CUSTODY_PORT}" \
+  --custody-daemon-port "${CUSTODY_DAEMON_PORT}" \
+  --watchtower-port "${WATCHTOWER_PORT}" \
+  --keys "$DEV_RADAPTER_KEYS_JSON"
+
 exec concurrently \
   --kill-others-on-fail \
   --names 'ANVIL,ANVIL2,MESH,WATCH,RUNTIME,VITE' \
