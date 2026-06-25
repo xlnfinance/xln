@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { execFileSync, spawn, type ChildProcessByStdio } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import { freemem, loadavg, totalmem } from 'node:os';
 import type { Readable } from 'node:stream';
 
@@ -47,6 +48,41 @@ type SoakPerfSummary = {
   samples: SoakPerfSample[];
 };
 
+type SoakCodeFingerprint = {
+  gitHead: string | null;
+  gitBranch: string | null;
+  gitStatus: string;
+  dirty: boolean;
+  codeHash: string;
+  computedAt: number;
+  trackedFileCount: number;
+  trackedBytes: number;
+};
+
+type SoakResultEvidence = {
+  passed?: boolean;
+  tps?: number;
+  sameTps?: number;
+  crossTps?: number;
+  aggregateTps?: number;
+  paymentTps?: number;
+  openHtlcLocks?: number;
+  currentSnapshotBytes?: number;
+  dbBytes?: number;
+  storageTotalBytes?: number;
+  storageHistoryBytes?: number;
+  storageSnapshotBytes?: number;
+  storageSnapshotCount?: number;
+  storageLatestSnapshotHeight?: number;
+  storageEpochCount?: number;
+  storageLatestAccountMismatches?: number;
+  storageWorstLoadMs?: number;
+  storageRecoverySamples?: number;
+  crashRecoveryMs?: number;
+  crashRecoveredHeight?: number;
+  crashRecoveredHubAccountCount?: number;
+};
+
 type SoakResult = {
   iteration: number;
   name: string;
@@ -56,8 +92,39 @@ type SoakResult = {
   startedAt: string;
   finishedAt: string;
   perf: SoakPerfSummary;
+  evidence?: SoakResultEvidence;
   stdoutTail?: string;
   stderrTail?: string;
+};
+
+type SoakRunSummary = {
+  generatedAt: string;
+  complete: boolean;
+  completedCases: number;
+  failedCases: number;
+  completedFullIterations: number;
+  durationMs: number;
+  disk: {
+    firstFreeBytes: number | null;
+    lastFreeBytes: number | null;
+    minFreeBytes: number | null;
+    deltaBytes: number | null;
+  };
+  resources: {
+    peakLoad1: number;
+    maxProcessCpuPct: number;
+    maxProcessRssKb: number;
+  };
+  cases: Array<{
+    name: string;
+    runs: number;
+    failures: number;
+    minDurationMs: number;
+    maxDurationMs: number;
+    avgDurationMs: number;
+    lastDurationMs: number;
+    lastEvidence?: SoakResultEvidence;
+  }>;
 };
 
 const DEFAULT_OUTPUT = join('.logs', 'soak', `soak-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
@@ -87,7 +154,7 @@ const profileCommands: Record<SoakProfile, SoakCommand[]> = {
         'XLN_DB_PATH=db-tmp/soak-mainnet-hub ' +
         'bun runtime/scripts/bench-storage-hub.ts ' +
         '--accounts 100 --payments 100 --payment-kind htlc --min-payment-tps 100 ' +
-        '--persist --storage --storage-snapshot 20 --storage-epoch-mb 8 ' +
+        '--persist --storage --storage-snapshot 2 --storage-epoch-mb 2 ' +
         '--import-batch 64 --open-batch 50 --payment-batch 100 --recovery-scan-step 5 ' +
         '--recovery-budget-ms 10000 --crash-recover --crash-recovery-budget-ms 10000 ' +
         '--db-root db-tmp/soak-mainnet-hub',
@@ -193,6 +260,133 @@ const appendTail = (tail: string, chunk: string): string =>
 const prefixedOutput = (iteration: number, command: SoakCommand, chunk: string): string =>
   `[soak:${iteration}:${command.name}] ${chunk}`;
 
+const compareStableText = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0;
+
+const spawnText = (cmd: string, args: string[]): string => {
+  const result = spawnSync(cmd, args, {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) return '';
+  return String(result.stdout || '').trim();
+};
+
+const computeCodeFingerprint = (): SoakCodeFingerprint => {
+  const gitHead = spawnText('git', ['rev-parse', 'HEAD']) || null;
+  const gitBranch = spawnText('git', ['rev-parse', '--abbrev-ref', 'HEAD']) || null;
+  const gitStatus = spawnText('git', ['status', '--short', '--untracked-files=all']);
+  const sourceRaw = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: 'pipe',
+    encoding: 'buffer',
+  });
+  if (sourceRaw.status !== 0) {
+    throw new Error(`SOAK_GIT_LS_FILES_FAILED:${String(sourceRaw.stderr || '').trim()}`);
+  }
+  const files = Buffer.from(sourceRaw.stdout)
+    .toString('utf8')
+    .split('\0')
+    .filter(Boolean)
+    .sort(compareStableText);
+  const hash = createHash('sha256');
+  let trackedBytes = 0;
+  for (const file of files) {
+    const absolutePath = resolve(process.cwd(), file);
+    if (!existsSync(absolutePath)) continue;
+    const data = readFileSync(absolutePath);
+    trackedBytes += data.length;
+    hash.update(file);
+    hash.update('\0');
+    hash.update(data);
+    hash.update('\0');
+  }
+  return {
+    gitHead,
+    gitBranch,
+    gitStatus,
+    dirty: gitStatus.length > 0,
+    codeHash: hash.digest('hex'),
+    computedAt: Date.now(),
+    trackedFileCount: files.length,
+    trackedBytes,
+  };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const numberOf = (record: Record<string, unknown>, key: string): number | undefined => {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+};
+
+const booleanOf = (record: Record<string, unknown>, key: string): boolean | undefined =>
+  typeof record[key] === 'boolean' ? record[key] : undefined;
+
+const parseLastJsonObject = (text: string): Record<string, unknown> | null => {
+  const trimmed = text.trim();
+  const starts: number[] = [];
+  for (let index = trimmed.lastIndexOf('\n{'); index >= 0; index = trimmed.lastIndexOf('\n{', index - 1)) {
+    starts.push(index + 1);
+  }
+  if (trimmed.startsWith('{')) starts.push(0);
+  for (const start of starts) {
+    try {
+      const parsed = JSON.parse(trimmed.slice(start));
+      if (isRecord(parsed)) return parsed;
+    } catch {
+      // Try the next candidate; stdout tails can contain earlier pretty JSON.
+    }
+  }
+  return null;
+};
+
+const extractResultEvidence = (stdoutTail: string): SoakResultEvidence | undefined => {
+  const parsed = parseLastJsonObject(stdoutTail);
+  if (!parsed) return undefined;
+  const storageStats = isRecord(parsed['storageStats']) ? parsed['storageStats'] : null;
+  const storageHead = storageStats && isRecord(storageStats['head']) ? storageStats['head'] : null;
+  const snapshotHeights = storageStats && Array.isArray(storageStats['snapshotHeights'])
+    ? storageStats['snapshotHeights'].filter((height): height is number => typeof height === 'number' && Number.isFinite(height))
+    : [];
+  const epochDbs = storageStats && Array.isArray(storageStats['epochDbs']) ? storageStats['epochDbs'] : [];
+  const evidence: SoakResultEvidence = {};
+  const setNumber = (key: keyof SoakResultEvidence, value: number | undefined): void => {
+    if (value !== undefined) {
+      (evidence as Record<string, unknown>)[key] = value;
+    }
+  };
+  const passed = booleanOf(parsed, 'passed');
+  if (passed !== undefined) evidence.passed = passed;
+  setNumber('tps', numberOf(parsed, 'tps'));
+  setNumber('sameTps', numberOf(parsed, 'sameTps'));
+  setNumber('crossTps', numberOf(parsed, 'crossTps'));
+  setNumber('aggregateTps', numberOf(parsed, 'aggregateTps'));
+  setNumber('paymentTps', numberOf(parsed, 'paymentTps'));
+  setNumber('openHtlcLocks', numberOf(parsed, 'openHtlcLocks'));
+  setNumber('currentSnapshotBytes', numberOf(parsed, 'currentSnapshotBytes'));
+  setNumber('dbBytes', numberOf(parsed, 'dbBytes'));
+  if (storageStats) {
+    setNumber('storageTotalBytes', numberOf(storageStats, 'totalBytes'));
+    setNumber('storageHistoryBytes', numberOf(storageStats, 'historyBytes'));
+    setNumber('storageSnapshotBytes', numberOf(storageStats, 'snapshotBytes'));
+    evidence.storageSnapshotCount = snapshotHeights.length;
+    evidence.storageEpochCount = epochDbs.length;
+  }
+  if (storageHead) setNumber('storageLatestSnapshotHeight', numberOf(storageHead, 'latestSnapshotHeight'));
+  setNumber('storageLatestAccountMismatches', numberOf(parsed, 'storageLatestAccountMismatches'));
+  setNumber('storageWorstLoadMs', numberOf(parsed, 'storageWorstLoadMs'));
+  setNumber('storageRecoverySamples', numberOf(parsed, 'storageRecoverySamples'));
+  setNumber('crashRecoveryMs', numberOf(parsed, 'crashRecoveryMs'));
+  setNumber('crashRecoveredHeight', numberOf(parsed, 'crashRecoveredHeight'));
+  setNumber('crashRecoveredHubAccountCount', numberOf(parsed, 'crashRecoveredHubAccountCount'));
+  return Object.keys(evidence).length > 0 ? evidence : undefined;
+};
+
 type ProcessRow = { pid: number; ppid: number; cpuPct: number; rssKb: number };
 
 const readProcessRows = (): ProcessRow[] => {
@@ -264,6 +458,61 @@ const summarizePerf = (samples: SoakPerfSample[]): SoakPerfSummary => ({
   samples,
 });
 
+const buildSoakRunSummary = (options: {
+  commands: SoakCommand[];
+  complete: boolean;
+  results: SoakResult[];
+  startedAtMs: number;
+}): SoakRunSummary => {
+  const samples = options.results.flatMap(result => result.perf.samples);
+  const diskValues = samples.map(sample => sample.diskFreeBytes).filter(Number.isFinite);
+  const byIteration = new Map<number, SoakResult[]>();
+  const byCase = new Map<string, SoakResult[]>();
+  for (const result of options.results) {
+    byIteration.set(result.iteration, [...(byIteration.get(result.iteration) ?? []), result]);
+    byCase.set(result.name, [...(byCase.get(result.name) ?? []), result]);
+  }
+  const completedFullIterations = [...byIteration.values()].filter((results) => {
+    if (results.length < options.commands.length) return false;
+    return options.commands.every(command =>
+      results.some(result => result.name === command.name && result.code === 0),
+    );
+  }).length;
+  return {
+    generatedAt: new Date().toISOString(),
+    complete: options.complete,
+    completedCases: options.results.length,
+    failedCases: options.results.filter(result => result.code !== 0).length,
+    completedFullIterations,
+    durationMs: Date.now() - options.startedAtMs,
+    disk: {
+      firstFreeBytes: diskValues[0] ?? null,
+      lastFreeBytes: diskValues.at(-1) ?? null,
+      minFreeBytes: diskValues.length > 0 ? Math.min(...diskValues) : null,
+      deltaBytes: diskValues.length > 0 ? (diskValues.at(-1) ?? 0) - diskValues[0]! : null,
+    },
+    resources: {
+      peakLoad1: options.results.reduce((max, result) => Math.max(max, result.perf.peakLoad1), 0),
+      maxProcessCpuPct: options.results.reduce((max, result) => Math.max(max, result.perf.maxProcessCpuPct), 0),
+      maxProcessRssKb: options.results.reduce((max, result) => Math.max(max, result.perf.maxProcessRssKb), 0),
+    },
+    cases: [...byCase.entries()].map(([name, results]) => {
+      const durations = results.map(result => result.durationMs);
+      const latest = results.at(-1);
+      return {
+        name,
+        runs: results.length,
+        failures: results.filter(result => result.code !== 0).length,
+        minDurationMs: Math.min(...durations),
+        maxDurationMs: Math.max(...durations),
+        avgDurationMs: Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length),
+        lastDurationMs: latest?.durationMs ?? 0,
+        ...(latest?.evidence ? { lastEvidence: latest.evidence } : {}),
+      };
+    }),
+  };
+};
+
 const runCommand = async (command: SoakCommand, iteration: number, streamOutput: boolean, sampleMs: number): Promise<SoakResult> => {
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
@@ -325,6 +574,7 @@ const runCommand = async (command: SoakCommand, iteration: number, streamOutput:
     `[soak:${iteration}] perf samples=${perf.sampleCount} peakLoad1=${perf.peakLoad1.toFixed(2)} ` +
       `maxCpu=${perf.maxProcessCpuPct.toFixed(1)} maxRssKb=${perf.maxProcessRssKb} minDiskFree=${perf.minDiskFreeBytes}`,
   );
+  const evidence = stdoutTail ? extractResultEvidence(stdoutTail) : undefined;
 
   return {
     iteration,
@@ -335,6 +585,7 @@ const runCommand = async (command: SoakCommand, iteration: number, streamOutput:
     startedAt,
     finishedAt: new Date().toISOString(),
     perf,
+    ...(evidence ? { evidence } : {}),
     ...(stdoutTail ? { stdoutTail } : {}),
     ...(stderrTail ? { stderrTail } : {}),
   };
@@ -425,10 +676,13 @@ const main = async (): Promise<void> => {
   const startedAt = Date.now();
   const deadline = args.minutes === null ? null : startedAt + args.minutes * 60_000;
   const results: SoakResult[] = [];
+  const code = computeCodeFingerprint();
 
   console.log('');
   console.log('='.repeat(76));
   console.log(`XLN soak gate: ${args.profile}`);
+  console.log(`gitHead=${code.gitHead?.slice(0, 12) ?? 'unknown'}${code.dirty ? ' dirty' : ''}`);
+  console.log(`codeHash=${code.codeHash.slice(0, 16)} trackedFiles=${code.trackedFileCount} trackedBytes=${code.trackedBytes}`);
   console.log(`mode=${args.iterations !== null ? `${args.iterations} iteration(s)` : `${args.minutes} minute(s)`}`);
   console.log(`summary=${args.outputPath}`);
   console.log(`streamOutput=${args.streamOutput}`);
@@ -451,9 +705,11 @@ const main = async (): Promise<void> => {
       results.push(result);
       writeSummary(args.outputPath, {
         profile: args.profile,
+        code,
         startedAt: new Date(startedAt).toISOString(),
         updatedAt: new Date().toISOString(),
         complete: false,
+        summary: buildSoakRunSummary({ commands, complete: false, results, startedAtMs: startedAt }),
         results,
       });
       if (result.code !== 0) {
@@ -472,11 +728,13 @@ const main = async (): Promise<void> => {
 
   const payload = {
     profile: args.profile,
+    code,
     startedAt: new Date(startedAt).toISOString(),
     finishedAt: new Date().toISOString(),
     complete: true,
     iterationsCompleted: Math.max(0, iteration - 1),
     durationMs: Date.now() - startedAt,
+    summary: buildSoakRunSummary({ commands, complete: true, results, startedAtMs: startedAt }),
     results,
   };
   writeSummary(args.outputPath, payload);
