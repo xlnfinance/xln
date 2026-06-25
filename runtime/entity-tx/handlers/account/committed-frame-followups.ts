@@ -2,7 +2,7 @@ import type { AccountFrame, AccountTx, EntityState } from '../../../types';
 import { HEAVY_LOGS } from '../../../utils';
 import { swapKey } from '../../../swap-execution';
 import { cancelHook as cancelScheduledHook } from '../../../entity-crontab';
-import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
+import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import {
   ensureLendingState,
   getCreditGrantedByAccountOwner,
@@ -143,7 +143,10 @@ export function applyCommittedAccountFrameFollowups(
       }
       if (accountTx.data.outcome === 'secret') {
         for (const [hashlock, route] of newState.htlcRoutes.entries()) {
-          if (route.inboundLockId !== accountTx.data.lockId) continue;
+          const resolvesInbound = route.inboundLockId === accountTx.data.lockId;
+          const resolvesOriginatedOutbound =
+            route.outboundLockId === accountTx.data.lockId && !route.inboundEntity;
+          if (!resolvesInbound && !resolvesOriginatedOutbound) continue;
           terminateHtlcRoute(newState, hashlock, newState.timestamp);
         }
       }
@@ -156,4 +159,5 @@ export function applyCommittedAccountFrameFollowups(
       newState.pendingSwapFillRatios?.delete(key);
     }
   }
+  pruneSettledOriginatedHtlcRoutes(newState, newState.timestamp);
 }
