@@ -1491,7 +1491,12 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('benchmark SLOWER');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('browser 1 err / 2 warn');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('2026-06-23 23:59:59 UTC');
-    await expect(page.getByText('green = passed/total')).toBeVisible();
+    await expect(page.getByText('circle = passed/total stacks')).toBeVisible();
+    await expect(page.getByTestId('qa-verdict-explain')).toContainText('Root cause');
+    await expect(page.getByTestId('qa-verdict-explain')).toContainText('Active reasons');
+    await expect(page.getByTestId('qa-verdict-explain')).toContainText('Failing surfaces');
+    await expect(page.getByTestId('qa-verdict-explain')).toContainText('Browser capture');
+    await expect(page.getByTestId('qa-verdict-explain')).toContainText('1 err / 2 warn');
     await expect(page.getByTestId('qa-trend-pill').first()).toHaveText('1F/7');
     await expect(page.getByTestId('qa-trend-pill').nth(1)).toHaveText('1/1');
     await expect(page.getByTestId('qa-trend-pill').first()).toHaveAttribute('title', /FAIL 6\/7 stacks/);
@@ -1777,6 +1782,7 @@ test.describe('QA cockpit scenario player', () => {
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('0 failing surfaces');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('benchmark OK');
     await expect(page.getByTestId('qa-verdict-banner')).toContainText('browser 0 err / 0 warn');
+    await expect(page.getByTestId('qa-verdict-explain')).toContainText('No blocking QA signal is active.');
 
     expect(runtimeErrors).toEqual([]);
   });

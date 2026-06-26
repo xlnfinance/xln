@@ -74,6 +74,47 @@ export const assertRemoteRuntimeTokenFresh = (entry: Pick<RemoteRuntimeImportEnt
   }
 };
 
+export const describeRemoteRuntimeImportError = (
+  value: unknown,
+  entry?: Pick<RemoteRuntimeImportEntry, 'label' | 'wsUrl' | 'access'>,
+): string => {
+  const raw = value instanceof Error ? value.message : String(value || 'Remote runtime import failed');
+  const label = entry?.label || 'runtime';
+  const wsUrl = entry?.wsUrl || '';
+  if (raw.startsWith('REMOTE_RUNTIME_CONNECT_FAILED:') || raw.includes('WebSocket') || raw.includes('network error')) {
+    return `${label}: connection failed. Check that the mesh is running and ${wsUrl || 'the WebSocket URL'} is reachable from the browser.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_ACCESS_MISMATCH:')) {
+    return `${label}: token role mismatch. Expected ${entry?.access ?? 'requested'} access, but the server returned a different capability.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_TOKEN_EXPIRED:')) {
+    return `${label}: token expired. Reopen the fresh import link from bun run dev.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_EMPTY:')) {
+    return `${label}: runtime answered, but its snapshot has no entities yet. Wait for bootstrap and retry.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_IMPORT_SOURCE_FAILED:')) {
+    return `Import source failed with HTTP ${raw.split(':')[1] || 'error'}. Check /api/runtime-import and retry.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_IMPORT_SOURCE_ORIGIN_INVALID:')) {
+    return 'Import source must be same-origin so tokens do not leak to another host.';
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_IMPORT_LIMIT_EXCEEDED:')) {
+    const [, actual, limit] = raw.split(':');
+    return `Too many runtimes: ${actual} lines, limit is ${limit}.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_IMPORT_TOKEN_INVALID:') || raw.startsWith('REMOTE_RUNTIME_IMPORT_TOKEN_MISSING:')) {
+    return `Line ${raw.split(':')[1] || '?'} has no valid xlnra1 token.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_IMPORT_WS_MISSING:') || raw === 'REMOTE_RUNTIME_WS_REQUIRED') {
+    return `Line ${raw.split(':')[1] || '?'} has no valid ws:// or wss:// runtime URL.`;
+  }
+  if (raw.startsWith('REMOTE_RUNTIME_IMPORT_ACCESS_MISSING:') || raw.startsWith('REMOTE_RUNTIME_IMPORT_ACCESS_INVALID:')) {
+    return `Line ${raw.split(':')[1] || '?'} must include read or admin access.`;
+  }
+  return raw;
+};
+
 const entryFromUnknown = (value: unknown, index: number): RemoteRuntimeImportEntry => {
   if (!isRecord(value)) throw new Error(`REMOTE_RUNTIME_IMPORT_ENTRY_INVALID:${index + 1}`);
   const wsUrl = normalizeRemoteRuntimeWsUrl(String(value['wsUrl'] || value['ws'] || value['url'] || '').trim());

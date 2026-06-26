@@ -145,6 +145,13 @@
   let loadingAdminHealth = $state(false);
   let uxSlideshowIndex = $state<number | null>(null);
 
+  type VerdictExplanation = {
+    label: string;
+    value: string;
+    detail: string;
+    tone?: 'bad' | 'warn' | 'ok';
+  };
+
   const RUN_WINDOW_STEP = QA.RUN_WINDOW_STEP;
   const SHARD_WINDOW_STEP = QA.SHARD_WINDOW_STEP;
   const HISTORY_WINDOW_STEP = QA.HISTORY_WINDOW_STEP;
@@ -247,6 +254,7 @@
   );
   const failureClassOptions = $derived(buildFailureClassOptions(runs, failureInbox));
   const verdict = $derived(buildVerdictSummary(systemVerdict, latestRun, failureInbox));
+  const verdictExplanations = $derived(buildVerdictExplanations(verdict, latestRun, failureInbox));
   const uxGalleryStories = $derived([
     ...stories.filter(story => story.curated),
     ...stories.filter(story => !story.curated),
@@ -279,6 +287,49 @@
       `browser ${formatBrowserHealth(browser)}`,
       formatDate(run.createdAt),
     ].join(' · ');
+  }
+
+  function buildVerdictExplanations(
+    summary: QaVerdictSummary,
+    run: QaSummary | null,
+    inbox: QaFailureInboxItem[],
+  ): VerdictExplanation[] {
+    const activeDetails = inbox
+      .filter(item => !summary.latestRunId || item.runId === summary.latestRunId || item.failureClass === 'operations')
+      .slice(0, 3)
+      .map(item => `${item.failureClass}: ${item.title}`);
+    return [
+      {
+        label: 'Root cause',
+        value: summary.status,
+        detail: activeDetails[0] || summary.reason || 'No blocking QA signal is active.',
+        tone: summary.status === 'FAIL' ? 'bad' : summary.status === 'PASS' ? 'ok' : 'warn',
+      },
+      {
+        label: 'Active reasons',
+        value: String(summary.activeCount),
+        detail: activeDetails.length > 0 ? activeDetails.join(' | ') : 'No blocking QA signal is active.',
+        tone: summary.activeCount > 0 ? 'bad' : 'ok',
+      },
+      {
+        label: 'Failing surfaces',
+        value: String(summary.failingSurfaceCount),
+        detail: 'Distinct areas: run status, browser health, benchmark regression, restart audit, or runtime marker.',
+        tone: summary.failingSurfaceCount > 0 ? 'bad' : 'ok',
+      },
+      {
+        label: 'Browser capture',
+        value: `${summary.browserErrorCount} err / ${summary.browserWarningCount} warn`,
+        detail: 'Console errors, page errors, failed requests, and HTTP failures captured during e2e.',
+        tone: summary.browserErrorCount > 0 ? 'bad' : summary.browserWarningCount > 0 ? 'warn' : 'ok',
+      },
+      {
+        label: 'Benchmark',
+        value: benchmarkLabel(summary.regressionStatus),
+        detail: run?.benchmark?.reason || 'Compared with historical runs for the same test stack.',
+        tone: summary.regressionStatus === 'slower' || summary.regressionStatus === 'mixed' ? 'warn' : 'ok',
+      },
+    ];
   }
 
   function openUxStoryByIndex(index: number | null): void {
@@ -953,7 +1004,7 @@
 
     <div class="trend-head">
       <span>Recent runs</span>
-      <small>green = passed/total · red = failed/total</small>
+      <small>circle = passed/total stacks · F = failed stacks</small>
     </div>
 
     <div class="trend-strip" data-testid="qa-trend-strip">
@@ -1040,7 +1091,7 @@
             <div class="run-row-timing">
               <span>stack {formatMs(run.totalMs)}</span>
               <span>boot {formatMs(run.timing?.bootstrapMs)}</span>
-              <span>pw {formatMs(run.timing?.playwrightMs)}</span>
+              <span>browser {formatMs(run.timing?.playwrightMs)}</span>
               <span>test {formatMs(run.timing?.avgShardMs)}</span>
               <span class:warn={browserHealth(run).errorCount > 0}>browser {formatBrowserHealth(browserHealth(run))}</span>
             </div>
@@ -1122,6 +1173,16 @@
         {#if verdict.dirty}<span title="Git working tree was dirty when this run was captured">dirty</span>{/if}
         <span title="Latest evidence timestamp">{formatDate(verdict.latestAt)}</span>
       </div>
+    </section>
+
+    <section class="verdict-explain" data-testid="qa-verdict-explain">
+      {#each verdictExplanations as item}
+        <article class:bad={item.tone === 'bad'} class:warn={item.tone === 'warn'} class:ok={item.tone === 'ok'}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+          <small>{item.detail}</small>
+        </article>
+      {/each}
     </section>
 
     <QaAdminEvidenceBoard
@@ -2835,6 +2896,7 @@
 
   .admin-card,
   .verdict-banner,
+  .verdict-explain,
   .failure-inbox,
   .restart-plan {
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -2887,6 +2949,53 @@
     border-radius: 999px;
     padding: 0.28rem 0.5rem;
     background: rgba(0, 0, 0, 0.18);
+  }
+
+  .verdict-explain {
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 0.7rem;
+    padding: 0.75rem;
+  }
+
+  .verdict-explain article {
+    display: grid;
+    gap: 0.25rem;
+    min-width: 0;
+    padding: 0.65rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(0, 0, 0, 0.15);
+  }
+
+  .verdict-explain article.bad {
+    border-color: rgba(255, 123, 114, 0.32);
+  }
+
+  .verdict-explain article.warn {
+    border-color: rgba(216, 175, 79, 0.34);
+  }
+
+  .verdict-explain article.ok {
+    border-color: rgba(63, 185, 80, 0.26);
+  }
+
+  .verdict-explain span {
+    color: #9b978a;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .verdict-explain strong {
+    color: #f1efe7;
+    font-size: 0.95rem;
+  }
+
+  .verdict-explain small {
+    min-width: 0;
+    color: #b7b1a4;
+    line-height: 1.35;
   }
 
   .failure-list {

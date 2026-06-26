@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   MAX_REMOTE_RUNTIME_IMPORTS,
   assertRemoteRuntimeTokenFresh,
+  describeRemoteRuntimeImportError,
   parseRemoteRuntimeImportText,
   persistRemoteRuntimeImports,
   readStoredRemoteRuntimeImports,
@@ -93,6 +94,17 @@ describe('remote runtime import manager utilities', () => {
   test('rejects more than 100 remote runtime capability lines', () => {
     const lines = Array.from({ length: MAX_REMOTE_RUNTIME_IMPORTS + 1 }, (_, index) => makeEntry(index + 1));
     expect(() => parseRemoteRuntimeImportText(lines.join('\n'))).toThrow('REMOTE_RUNTIME_IMPORT_LIMIT_EXCEEDED:101:100');
+  });
+
+  test('explains browser-side remote connection failures in operator language', () => {
+    const [entry] = parseRemoteRuntimeImportText(`H1 | admin | ws://localhost:8092/rpc | ${token}`);
+    const message = describeRemoteRuntimeImportError(
+      new Error(`REMOTE_RUNTIME_CONNECT_FAILED:${entry!.wsUrl}:error`),
+      entry,
+    );
+    expect(message).toContain('H1: connection failed');
+    expect(message).toContain('mesh is running');
+    expect(message).toContain('ws://127.0.0.1:8092/rpc');
   });
 
   test('merge import upserts by normalized runtime endpoint', () => {

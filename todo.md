@@ -1,6 +1,6 @@
 # XLN TODO
 
-Last updated: 2026-06-25
+Last updated: 2026-06-26
 
 This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
@@ -50,6 +50,8 @@ file and older docs disagree, prefer code and tests first, then this file.
 - Added mainnet-preflight gate plan and reduced the capped-testnet executable
   soak policy from 24 hours to 1 hour for faster local release loops. The
   uncapped real-funds bar can still require a longer soak before launch.
+- Added the dev control-panel banner, QA verdict explanation panel, browser-side
+  remote-runtime import diagnostics, and admin cockpit selftest assertions.
 
 ## P0 - Release And Mainnet Readiness
 
@@ -76,7 +78,14 @@ file and older docs disagree, prefer code and tests first, then this file.
    - Monitoring and alert thresholds cover runtime, relay, storage, market
      maker, and watchtower.
 
-4. **External audit handoff.**
+4. **Keep admin cockpit green before handoff.**
+   - Exit: focused QA cockpit e2e covers verdict explanations, four user-story
+     videos, screenshot gallery/slideshow, run ledger, history DB controls, and
+     read/admin disabled states.
+   - Exit: remote-runtime bulk import reports every checked row, imports
+     successful rows, and shows retryable diagnostics for failed rows.
+
+5. **External audit handoff.**
    - Refresh `docs/security/external-audit-brief.md`.
    - Produce the current audit pack with `bun run security:audit-pack`.
    - Do not treat internal E2E success as a substitute for audit on real funds.
@@ -188,6 +197,32 @@ file and older docs disagree, prefer code and tests first, then this file.
 5. **Activity/account-card context.**
    - Show routing, HTLC, swap, J-event, dispute, and recovery events clearly
      enough for demo and support/debug use.
+
+6. **Remote runtime time machine.**
+   - Browser UI requests historical subset snapshots through RAdapter; no local
+     browser-only replay of remote state.
+   - Paginate large entity/account/book lists by default with configurable
+     page size.
+   - Exit: operator can inspect a selected remote hub at a past height without
+     freezing the wallet.
+
+7. **UX screenshot release evidence.**
+   - Keep at least 30 curated screenshots across desktop/mobile covering
+     onboarding, assets, accounts, payment, swap, cross-chain swap, disputes,
+     on-chain batch/history, health, QA, RAdapter import, and time machine.
+   - Exit: QA cockpit gallery opens every curated screenshot and slideshow
+     navigation works from keyboard/clicks.
+
+8. **Pre-mainnet admin stories.**
+   - Keep four first-screen videos in QA cockpit: payment, swap, cross-chain
+     swap, dispute.
+   - Each story needs a short operator description and synchronized playback
+     transcript.
+
+9. **AI court app after core health/QA work.**
+   - Finish the existing AI court app with XLN token intake, challenge flow,
+     adjudication, and winner-takes-all settlement.
+   - Not a mainnet readiness blocker until protocol/admin gates are green.
 
 ## Auxiliary AI Work
 

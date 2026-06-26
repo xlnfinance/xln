@@ -3,6 +3,7 @@ import type { RuntimeAdapterEntitySummary } from '@xln/runtime/radapter/types';
 import type { StorageHead } from '@xln/runtime/storage/types';
 import {
   assertRemoteRuntimeTokenFresh,
+  describeRemoteRuntimeImportError,
   remoteRuntimeIdForWsUrl,
   type RemoteRuntimeImportEntry,
   type StoredRemoteRuntimeImportEntry,
@@ -57,8 +58,7 @@ export const validateRemoteRuntimeEntry = async (
       importedAt,
     };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    options.onProgress?.({ index, status: 'error', detail });
+    options.onProgress?.({ index, status: 'error', detail: describeRemoteRuntimeImportError(error, entry) });
     throw error;
   } finally {
     adapter.disconnect();

@@ -55,6 +55,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
 
     expect(banner.status, banner.stderr).toBe(0);
     expect(banner.stdout).toContain('XLN DEV CONTROL PANEL');
+    expect(banner.stdout).toContain('Open any subsystem from here');
     expect(banner.stdout).toContain('wallet');
     expect(banner.stdout).toContain('https://localhost:8084/app');
     expect(banner.stdout).toContain('health admin');
@@ -70,6 +71,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('http://127.0.0.1:8082/api/health');
     expect(banner.stdout).toContain('https://localhost:8087');
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');
+    expect(banner.stdout).toContain('runtime import links fetch fresh tokens');
     expect(banner.stdout).not.toContain('key=paste');
     expect(banner.stdout).not.toContain('Open these URLs');
     expect(banner.stdout).not.toContain('?runtimeList=');

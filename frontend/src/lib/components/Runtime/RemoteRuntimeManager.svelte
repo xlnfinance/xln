@@ -8,6 +8,7 @@
     REMOTE_RUNTIME_IMPORT_HASH_PARAM,
     REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
     REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
+    describeRemoteRuntimeImportError,
     formatRemoteRuntimeImportLines,
     normalizeRemoteRuntimeWsUrl,
     parseRemoteRuntimeImportPayload,
@@ -42,8 +43,9 @@
   let status = '';
   let error = '';
   let working = false;
+  let lastFailedEntries: RemoteRuntimeImportEntry[] = [];
 
-  const errorMessage = (value: unknown): string => value instanceof Error ? value.message : String(value || 'Remote runtime import failed');
+  const errorMessage = (value: unknown, entry?: RemoteRuntimeImportEntry): string => describeRemoteRuntimeImportError(value, entry);
 
   const buildSingleEntry = (): RemoteRuntimeImportEntry => {
     const normalizedWsUrl = normalizeRemoteRuntimeWsUrl(wsUrl);
@@ -162,26 +164,38 @@
     if (working) return;
     working = true;
     error = '';
+    lastFailedEntries = [];
     status = `Checking ${entries.length} remote runtime${entries.length === 1 ? '' : 's'}`;
     resetRows(entries);
     try {
       const importedAt = Date.now();
       const validated: StoredRemoteRuntimeImportEntry[] = [];
+      const failed: Array<{ entry: RemoteRuntimeImportEntry; reason: string }> = [];
       for (const [index, entry] of entries.entries()) {
         status = `Checking ${entry.label || entry.wsUrl}`;
-        validated.push(await validateRemoteRuntimeEntry(entry, {
-          index,
-          importedAt,
-          onProgress: (progress) => setRow(progress.index, {
-            status: progress.status,
-            detail: progress.detail,
-          }),
-        }));
+        try {
+          validated.push(await validateRemoteRuntimeEntry(entry, {
+            index,
+            importedAt,
+            onProgress: (progress) => setRow(progress.index, {
+              status: progress.status,
+              detail: progress.detail,
+            }),
+          }));
+        } catch (err) {
+          failed.push({ entry, reason: errorMessage(err, entry) });
+        }
       }
-      if (validated.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_EMPTY');
+      lastFailedEntries = failed.map(item => item.entry);
+      if (validated.length === 0) {
+        throw new Error(failed[0]?.reason || 'REMOTE_RUNTIME_IMPORT_EMPTY');
+      }
       const persisted = runtimeOperations.upsertRemoteRuntimeImports(validated);
       writeImportSummary(validated, persisted.length, importedAt);
-      status = `Imported ${validated.length} remote runtime${validated.length === 1 ? '' : 's'}`;
+      status = failed.length === 0
+        ? `Imported ${validated.length} remote runtime${validated.length === 1 ? '' : 's'}`
+        : `Imported ${validated.length}/${entries.length}; ${failed.length} failed`;
+      error = failed.length > 0 ? failed.map(item => item.reason).join('\n') : '';
       const first = validated[0]!;
       dispatch('imported', { runtimeId: first.runtimeId, count: validated.length });
       runtimeOperations.activateRemoteRuntime(first.runtimeId, { href: '/app' });
@@ -199,6 +213,11 @@
 
   async function importBulk(): Promise<void> {
     await importEntries(parseRemoteRuntimeImportText(bulkText));
+  }
+
+  async function retryFailed(): Promise<void> {
+    if (lastFailedEntries.length === 0) return;
+    await importEntries(lastFailedEntries);
   }
 
   onMount(() => {
@@ -251,11 +270,16 @@
   {#if error}
     <div class="manager-error" data-testid="remote-runtime-manager-error">{error}</div>
   {/if}
+  {#if lastFailedEntries.length > 0 && !working}
+    <button class="retry-button" data-testid="remote-runtime-bulk-retry-failed" type="button" on:click={() => void retryFailed()}>
+      Retry failed
+    </button>
+  {/if}
 
   {#if rows.length > 0}
     <div class="row-list" data-testid="remote-runtime-manager-rows">
       {#each rows as row (row.index)}
-        <div class="row" class:error={row.status === 'error'} class:connected={row.status === 'connected'}>
+        <div class="row" class:error={row.status === 'error'} class:connected={row.status === 'connected'} title={row.detail}>
           <span class="row-dot {row.status}"></span>
           <span class="row-label" title={row.wsUrl}>{row.label}</span>
           <span class="row-access">{row.access}</span>
@@ -282,7 +306,8 @@
 
   .mode-tabs button,
   .single-grid button,
-  .bulk-button {
+  .bulk-button,
+  .retry-button {
     min-height: 30px;
     display: inline-flex;
     align-items: center;
@@ -350,6 +375,15 @@
 
   .bulk-button {
     width: 100%;
+  }
+
+  .retry-button {
+    width: max-content;
+    min-height: 26px;
+    padding: 0 10px;
+    color: #fecaca;
+    border-color: rgba(248, 113, 113, 0.34);
+    background: rgba(248, 113, 113, 0.08);
   }
 
   button:disabled {

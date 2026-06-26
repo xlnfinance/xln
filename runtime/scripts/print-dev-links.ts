@@ -114,6 +114,7 @@ const line = '='.repeat(88);
 console.log('');
 console.log(line);
 console.log('XLN DEV CONTROL PANEL');
+console.log('Open any subsystem from here; service logs stream below this block.');
 console.log(line);
 for (const row of rows) {
   const value = row.display ? hyperlink(row.display, row.url) : row.url;
@@ -121,7 +122,7 @@ for (const row of rows) {
 }
 console.log('-'.repeat(88));
 console.log(`plain import URLs: ${resolve(args.keysPath)}`);
+console.log('runtime import links fetch fresh tokens into the manager; press Confirm in the browser.');
 console.log('logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE');
-console.log('remote import links fetch fresh tokens into the manager; press Confirm in the browser.');
 console.log(line);
 console.log('');
