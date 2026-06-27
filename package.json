@@ -122,6 +122,8 @@
     "deploy:prod:runtime": "./deploy.sh --runtime-only --remote root@xln.finance --push --production",
     "deploy:prod:full": "./deploy.sh --remote root@xln.finance --push --frontend --production",
     "deploy:prod:fresh": "./deploy.sh --remote root@xln.finance --push --frontend --fresh --production",
+    "deploy:qa": "./scripts/deploy-qa-evidence.sh --remote root@xln.finance",
+    "deploy:qa:dry": "./scripts/deploy-qa-evidence.sh --remote root@xln.finance --dry-run",
     "test:contracts:r2r": "echo 'obsolete: direct unsafe R2R post-deploy script removed; use processBatch paths in e2e/scenarios'",
     "test:governance": "cd jurisdictions && npx hardhat test --grep governance",
     "test:entity": "cd jurisdictions && npx hardhat test --grep entity",

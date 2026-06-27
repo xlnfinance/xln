@@ -53,6 +53,21 @@ export ANVIL_TMPDIR=${ANVIL_TMPDIR:-$REPO_ROOT/data/anvil-tmp}
 export PATH="${HOME}/.bun/bin:$PATH"
 export XLN_MIN_DISK_FREE_BYTES=${XLN_MIN_DISK_FREE_BYTES:-$((5 * 1024 * 1024 * 1024))}
 
+# QA evidence root: persistent on prod (outside the /root/xln checkout that deploy.sh
+# hard-resets + git-cleans on every deploy), and the local .logs dir for dev. Detected
+# by checkout path so the same script works on the Mac and on the server. Run artifacts
+# + the history DB are uploaded here by scripts/deploy-qa-evidence.sh (bun run deploy:qa),
+# decoupled from the code deploy.
+if [ -z "${QA_EVIDENCE_ROOT:-}" ]; then
+  if [ "$REPO_ROOT" = "/root/xln" ]; then
+    QA_EVIDENCE_ROOT="/root/xln-qa-evidence"
+  else
+    QA_EVIDENCE_ROOT="$REPO_ROOT/.logs"
+  fi
+fi
+export QA_EVIDENCE_ROOT
+mkdir -p "$QA_EVIDENCE_ROOT/e2e-parallel"
+
 mkdir -p "$XLN_DB_PATH"
 mkdir -p "$XLN_MESH_DB_ROOT"
 mkdir -p "$ANVIL_TMPDIR"
