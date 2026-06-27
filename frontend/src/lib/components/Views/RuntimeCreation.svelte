@@ -71,6 +71,15 @@
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
 
+  // Visual scheme for the standalone auth screen: 'dark' (default "vault") or 'light' (minimalist fintech skin)
+  type AuthScheme = 'dark' | 'light';
+  const AUTH_SCHEME_STORAGE_KEY = 'xln-auth-scheme';
+  let scheme: AuthScheme = 'dark';
+  function setScheme(next: AuthScheme): void {
+    scheme = next;
+    if (typeof localStorage !== 'undefined') localStorage.setItem(AUTH_SCHEME_STORAGE_KEY, next);
+  }
+
   $: hasAnyPersistedState = typeof localStorage !== 'undefined' && (localStorage.length > 0 || typeof indexedDB !== 'undefined');
 
   async function handleResetEverything() {
@@ -869,6 +878,11 @@
   onMount(() => {
     let unsubscribe: (() => void) | undefined;
 
+    // Restore the saved auth scheme (dark default)
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(AUTH_SCHEME_STORAGE_KEY) === 'light') {
+      scheme = 'light';
+    }
+
     // Run async init
     (async () => {
       // Init i18n
@@ -889,7 +903,7 @@
 
 </script>
 
-<div class="brainvault-wrapper" class:embedded>
+<div class="brainvault-wrapper" class:embedded class:scheme-light={!embedded && scheme === 'light'}>
   <!-- Hierarchical Navigation (only in standalone mode) -->
   {#if !embedded}
     <HierarchicalNav />
@@ -898,6 +912,37 @@
 	    <!-- Main Wallet Content -->
   <div class="brainvault-container" class:deriving={phase === 'deriving'}>
     <!-- Ambient particles disabled for minimalist mode -->
+
+    {#if !embedded}
+      <!-- Scheme toggle (dark "vault" <-> light "minimalist") -->
+      <div class="scheme-toggle" role="group" aria-label="Color scheme">
+        <button
+          type="button"
+          class:active={scheme === 'dark'}
+          aria-pressed={scheme === 'dark'}
+          aria-label="Dark scheme"
+          on:click={() => setScheme('dark')}
+          title="Dark"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+          </svg>
+        </button>
+        <button
+          type="button"
+          class:active={scheme === 'light'}
+          aria-pressed={scheme === 'light'}
+          aria-label="Light scheme"
+          on:click={() => setScheme('light')}
+          title="Light"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4.2"/>
+            <path d="M12 2.4v2.4M12 19.2v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.4 12h2.4M19.2 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/>
+          </svg>
+        </button>
+      </div>
+    {/if}
 
   <!-- Header - minimalist (no logo, clean fintech UI) -->
   <div class="header" class:deriving={phase === 'deriving'}>
@@ -2458,5 +2503,313 @@
     .recovery-actions {
       gap: 8px;
     }
+  }
+
+  /* ============================================================
+     SCHEME TOGGLE (segmented control, top-right of auth screen)
+     ============================================================ */
+  .scheme-toggle {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 5;
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+
+  .scheme-toggle button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.42);
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease;
+  }
+
+  .scheme-toggle button:hover {
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .scheme-toggle button.active {
+    background: rgba(255, 200, 100, 0.16);
+    color: rgba(255, 214, 150, 0.96);
+  }
+
+  /* ============================================================
+     LIGHT SCHEME — minimalist fintech skin (optional, switchable)
+     Tokens scoped to the auth root so the dark default is untouched.
+     ============================================================ */
+  .brainvault-wrapper.scheme-light {
+    --l-bg-1: #f7f9fc;
+    --l-bg-2: #eef1f7;
+    --l-card: #ffffff;
+    --l-border: rgba(15, 23, 42, 0.08);
+    --l-border-strong: rgba(15, 23, 42, 0.14);
+    --l-text: #0f172a;
+    --l-text-2: #475569;
+    --l-text-3: #94a3b8;
+    --l-accent: #4f46e5;
+    --l-accent-hover: #4338ca;
+    --l-accent-soft: rgba(79, 70, 229, 0.08);
+    --l-accent-ring: rgba(79, 70, 229, 0.16);
+    --l-field: #f8fafc;
+    --l-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.07);
+  }
+
+  /* Page + card surfaces */
+  .scheme-light .brainvault-container {
+    background: var(--l-bg-2);
+    background-image:
+      radial-gradient(ellipse at 50% -10%, rgba(79, 70, 229, 0.06) 0%, transparent 55%),
+      linear-gradient(180deg, var(--l-bg-1) 0%, var(--l-bg-2) 100%);
+  }
+
+  .scheme-light .glass-card {
+    background: var(--l-card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border: 1px solid var(--l-border);
+    border-radius: 18px;
+    box-shadow: var(--l-shadow-card);
+  }
+
+  .scheme-light .glass-card::before {
+    background: linear-gradient(90deg, transparent, var(--l-accent-ring), transparent);
+    opacity: 0.7;
+  }
+
+  /* Titles + copy */
+  .scheme-light .wallet-create-title h2 { color: var(--l-text); }
+  .scheme-light .wallet-create-title p { color: var(--l-text-2); }
+  .scheme-light .creation-context-copy { color: var(--l-text-3); }
+
+  /* Segmented mode tabs (iOS-style) */
+  .scheme-light .input-mode-tabs {
+    background: var(--l-bg-2);
+    border-color: var(--l-border);
+  }
+  .scheme-light .input-mode-tabs button { color: var(--l-text-2); }
+  .scheme-light .input-mode-tabs button:hover {
+    color: var(--l-text);
+    background: rgba(15, 23, 42, 0.03);
+  }
+  .scheme-light .input-mode-tabs button.selected {
+    background: var(--l-card);
+    border-color: var(--l-border);
+    color: var(--l-accent);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+
+  /* Quick login */
+  .scheme-light .quick-login-section {
+    background: rgba(15, 23, 42, 0.015);
+    border-color: var(--l-border);
+  }
+  .scheme-light .quick-login-header { color: var(--l-text-3); }
+  .scheme-light .quick-login-btn {
+    background: var(--l-card);
+    border-color: var(--l-border);
+    color: var(--l-text);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .scheme-light .quick-login-btn:hover {
+    background: var(--l-accent-soft);
+    border-color: var(--l-accent-ring);
+    color: var(--l-accent);
+  }
+
+  /* Labels + hints + inputs */
+  .scheme-light .input-group label { color: var(--l-text-2); }
+  .scheme-light .input-hint { color: var(--l-text-3); }
+
+  .scheme-light .input-wrapper input,
+  .scheme-light .input-wrapper textarea,
+  .scheme-light .custom-shard-input input {
+    background: var(--l-field);
+    border: 1px solid var(--l-border-strong);
+    border-radius: 10px;
+    color: var(--l-text);
+  }
+  .scheme-light .input-wrapper input:focus,
+  .scheme-light .input-wrapper textarea:focus,
+  .scheme-light .custom-shard-input input:focus {
+    background: var(--l-card);
+    border-color: var(--l-accent);
+    box-shadow: 0 0 0 3px var(--l-accent-ring);
+  }
+  .scheme-light .input-wrapper input::placeholder,
+  .scheme-light .input-wrapper textarea::placeholder { color: var(--l-text-3); }
+
+  .scheme-light .input-wrapper .toggle-visibility,
+  .scheme-light .input-wrapper .suggest-btn { color: var(--l-text-3); }
+  .scheme-light .input-wrapper .toggle-visibility:hover,
+  .scheme-light .input-wrapper .suggest-btn:hover { color: var(--l-accent); }
+
+  .scheme-light .strength-meter { background: rgba(15, 23, 42, 0.08); }
+
+  /* Factor buttons */
+  .scheme-light .factor-btn {
+    background: var(--l-card);
+    border-color: var(--l-border);
+  }
+  .scheme-light .factor-btn:hover {
+    background: var(--l-accent-soft);
+    border-color: var(--l-accent-ring);
+  }
+  .scheme-light .factor-btn.selected {
+    background: var(--l-accent-soft);
+    border-color: var(--l-accent);
+    box-shadow: 0 0 0 1px var(--l-accent-ring);
+  }
+  .scheme-light .factor-num { color: var(--l-accent); }
+  .scheme-light .factor-tier { color: var(--l-text-3); }
+  .scheme-light .factor-btn.selected .factor-tier { color: var(--l-accent); }
+  .scheme-light .custom-label,
+  .scheme-light .factor-summary { color: var(--l-text-3); }
+  .scheme-light .factor-separator { color: var(--l-border-strong); }
+  .scheme-light .warning-text { color: var(--l-text-3); }
+
+  /* Primary CTA — solid filled indigo (Stripe/Apple pattern) */
+  .scheme-light .derive-btn {
+    background: var(--l-accent);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    color: #ffffff;
+    letter-spacing: 0.08em;
+    box-shadow: 0 6px 16px rgba(79, 70, 229, 0.28);
+  }
+  .scheme-light .derive-btn::before {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.22), transparent);
+  }
+  .scheme-light .derive-btn:hover:not(:disabled) {
+    background: var(--l-accent-hover);
+    border-color: transparent;
+    box-shadow: 0 8px 22px rgba(79, 70, 229, 0.36);
+    color: #ffffff;
+  }
+  .scheme-light .derive-btn:disabled {
+    opacity: 1;
+    background: #e2e6ee;
+    color: var(--l-text-3);
+    box-shadow: none;
+  }
+
+  /* Secondary buttons + links */
+  .scheme-light .back-to-create,
+  .scheme-light .backup-upload-btn,
+  .scheme-light .generate-mnemonic-btn {
+    background: var(--l-card);
+    border-color: var(--l-border-strong);
+    color: var(--l-text);
+  }
+  .scheme-light .back-to-create:hover,
+  .scheme-light .backup-upload-btn:hover,
+  .scheme-light .generate-mnemonic-btn:hover {
+    background: var(--l-accent-soft);
+    border-color: var(--l-accent-ring);
+    color: var(--l-accent);
+  }
+  .scheme-light .reset-link { color: var(--l-text-3); }
+  .scheme-light .reset-link:hover { color: #dc2626; }
+
+  .scheme-light .warning-box {
+    background: rgba(217, 119, 6, 0.07);
+    border: 1px solid rgba(217, 119, 6, 0.22);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: #92400e;
+  }
+
+  /* Recovery cards */
+  .scheme-light .recovery-status-strip > div,
+  .scheme-light .recovery-loading,
+  .scheme-light .recovery-candidate {
+    background: var(--l-card);
+    border-color: var(--l-border);
+    color: var(--l-text-2);
+  }
+  .scheme-light .recovery-label { color: var(--l-text-3); }
+  .scheme-light .recovery-status-strip strong,
+  .scheme-light .candidate-main strong { color: var(--l-text); }
+  .scheme-light .candidate-main span,
+  .scheme-light .candidate-meta span { color: var(--l-text-2); }
+  .scheme-light .recovery-candidate.selected {
+    border-color: var(--l-accent);
+    background: var(--l-accent-soft);
+  }
+  .scheme-light .recovery-spinner {
+    border-color: rgba(15, 23, 42, 0.12);
+    border-top-color: var(--l-accent);
+  }
+
+  /* Deriving phase */
+  .scheme-light .glass-card.deriving h2 { color: var(--l-text); }
+  .scheme-light .pyramid-progress-text {
+    color: var(--l-accent);
+    text-shadow: none;
+  }
+  .scheme-light .stat-label { color: var(--l-text-3); }
+  .scheme-light .stat-value { color: var(--l-text); }
+  .scheme-light .pyramid-progress-bar { background: rgba(15, 23, 42, 0.08); }
+  .scheme-light .pyramid-progress-fill {
+    background: linear-gradient(90deg, var(--l-accent) 0%, #818cf8 100%);
+    box-shadow: none;
+  }
+  .scheme-light .speed-control {
+    background: var(--l-field);
+    border-color: var(--l-border);
+  }
+  .scheme-light .speed-label { color: var(--l-accent); }
+  .scheme-light .speed-eta { color: var(--l-text); text-shadow: none; }
+  .scheme-light .speed-details { color: var(--l-text-3); }
+  .scheme-light .mini-shard-grid {
+    background: rgba(15, 23, 42, 0.03);
+    border-color: var(--l-border);
+  }
+  .scheme-light .mini-shard.pending {
+    background: rgba(15, 23, 42, 0.06);
+    border-color: var(--l-border);
+    box-shadow: none;
+  }
+  .scheme-light .control-btn {
+    border-color: var(--l-border-strong);
+    color: var(--l-text-2);
+  }
+  .scheme-light .control-btn:hover {
+    border-color: var(--l-accent-ring);
+    color: var(--l-accent);
+  }
+  .scheme-light .matrix-status {
+    background: rgba(15, 23, 42, 0.03);
+    color: var(--l-text-2);
+  }
+  .scheme-light .matrix-status.error {
+    color: #b91c1c;
+    border-color: rgba(220, 38, 38, 0.3);
+    background: rgba(220, 38, 38, 0.06);
+  }
+
+  /* Toggle itself under light scheme */
+  .scheme-light .scheme-toggle {
+    background: var(--l-card);
+    border-color: var(--l-border);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  }
+  .scheme-light .scheme-toggle button { color: var(--l-text-3); }
+  .scheme-light .scheme-toggle button:hover { color: var(--l-text-2); }
+  .scheme-light .scheme-toggle button.active {
+    background: var(--l-accent-soft);
+    color: var(--l-accent);
   }
 </style>
