@@ -53,7 +53,7 @@ if [ "$DB_ONLY" = "0" ]; then
   fi
 fi
 
-rsync_opts=(-az --human-readable --info=progress2)
+rsync_opts=(-az --partial --progress)
 [ "$DRY_RUN" = "1" ] && rsync_opts+=(--dry-run)
 
 echo "[qa-evidence] remote=$REMOTE_HOST root=$REMOTE_ROOT"
