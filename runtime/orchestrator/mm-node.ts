@@ -3216,10 +3216,8 @@ const run = async (): Promise<void> => {
     return health;
   };
 
-  const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {
-    const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });
-    return sameHealth;
-  };
+  const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>
+    publishMarketMakerHealthSnapshot({ includeCross: bootstrapCrossStarted });
 
   const buildAccountStatusDebug = (
     entityId: string,
@@ -3849,6 +3847,16 @@ const run = async (): Promise<void> => {
             : quoteableHubsFor(targetContext);
           if (targetHubs.length === 0) continue;
           const targetTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, targetContext);
+          const specs = buildMarketMakerCrossOfferSpecs(
+            env,
+            sourceContext,
+            targetContext,
+            sourceHubs,
+            targetHubs,
+            sourceTokenIds,
+            targetTokenIds,
+          );
+          if (specs.length === 0) continue;
           crossQuoteJobs.push({
             sourceContext,
             targetContext,

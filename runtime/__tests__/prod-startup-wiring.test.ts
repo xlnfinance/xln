@@ -326,6 +326,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
     expect(mmNode).toContain("direction: 'bootstrap-batch'");
     expect(mmNode).toContain('if (mode === \'bootstrap\' && deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
+    expect(mmNode).toContain('const specs = buildMarketMakerCrossOfferSpecs(\n            env,\n            sourceContext,\n            targetContext,\n            sourceHubs,\n            targetHubs,\n            sourceTokenIds,\n            targetTokenIds,\n          );\n          if (specs.length === 0) continue;');
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK");
     expect(mmNode).toContain('let bootstrapCrossStarted = false;');
@@ -470,9 +471,7 @@ describe('production startup wiring', () => {
     expect(healthBuilder).toContain('cachedHealthResponseJson = safeStringify({');
     expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
     expect(mmNode).toContain('ok: expectedRouteCount === 0 || (routes.length >= expectedRouteCount && routes.every(route => route.ready))');
-    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {');
-    expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
-    expect(mmNode).toContain('return sameHealth;');
+    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>\n    publishMarketMakerHealthSnapshot({ includeCross: bootstrapCrossStarted });');
     expect(mmNode).toContain('const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });');
     expect(mmNode).toContain("import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';");
@@ -487,6 +486,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD']");
     expect(mmNode).toContain('BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}');
+    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>\n    publishMarketMakerHealthSnapshot({ includeCross: bootstrapCrossStarted });');
     expect(mmNode).toContain('const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>');
     expect(mmNode).toContain('const canCheckBootstrapCompletion = (): boolean =>');
     expect(mmNode).toContain('return !hasExpectedBootstrapCrossRoutes(visibleHubs) || !hasBootstrapCrossAccountBacklog(visibleHubs);');
