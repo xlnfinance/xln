@@ -315,9 +315,36 @@ const runtimeImportLogUrlEnabled = ['1', 'true', 'yes', 'on'].includes(
   String(process.env['XLN_RUNTIME_IMPORT_LOG_URL'] || '').trim().toLowerCase(),
 );
 
-const buildPublicRuntimeRpcUrl = (apiPort: number): string => {
+const isLoopbackPublicBase = (() => {
+  try {
+    return /^(localhost|127\.|0\.0\.0\.0|::1|\[::1\])/.test(new URL(args.publicWsBaseUrl).hostname);
+  } catch {
+    return true;
+  }
+})();
+
+// Externally-reachable radapter /rpc URL for a hub / market-maker node.
+// Prod is fronted by nginx (publicPort -> apiPort, e.g. 8090 -> 18090); local has no proxy,
+// so the browser must hit the apiPort directly.
+const buildRuntimeNodeRpcUrl = (apiPort: number, publicPort: number): string => {
   const url = new URL(args.publicWsBaseUrl);
-  url.port = String(apiPort);
+  url.port = String(isLoopbackPublicBase ? apiPort : publicPort);
+  url.pathname = '/rpc';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+};
+
+// Custody runs server.ts on a daemon port that is not nginx-fronted. On prod it must be exposed
+// via a dedicated subdomain set in XLN_CUSTODY_PUBLIC_RPC_URL (e.g. wss://custody.xln.finance/rpc).
+// Locally we hit the daemon port directly. Returns null when prod has no public route configured
+// yet, so the manifest omits an unreachable custody entry instead of advertising a broken one.
+const custodyPublicRpcUrlEnv = String(process.env['XLN_CUSTODY_PUBLIC_RPC_URL'] || '').trim();
+const buildCustodyRpcUrl = (daemonPort: number): string | null => {
+  if (custodyPublicRpcUrlEnv) return custodyPublicRpcUrlEnv;
+  if (!isLoopbackPublicBase) return null;
+  const url = new URL(args.publicWsBaseUrl);
+  url.port = String(daemonPort);
   url.pathname = '/rpc';
   url.search = '';
   url.hash = '';
@@ -365,7 +392,7 @@ const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportA
     entries.push({
       label: child.name,
       access,
-      wsUrl: buildPublicRuntimeRpcUrl(child.apiPort),
+      wsUrl: buildRuntimeNodeRpcUrl(child.apiPort, child.publicPort),
       token: deriveRuntimeImportToken(child.authSeed, access, runtimeId, child.name.toLowerCase(), expiresAt),
     });
   }
@@ -374,23 +401,26 @@ const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportA
     entries.push({
       label: marketMakerChild.name,
       access,
-      wsUrl: buildPublicRuntimeRpcUrl(marketMakerChild.apiPort),
+      wsUrl: buildRuntimeNodeRpcUrl(marketMakerChild.apiPort, marketMakerChild.publicPort),
       token: deriveRuntimeImportToken(marketMakerChild.authSeed, access, marketMakerRuntimeId, 'mm', expiresAt),
     });
   }
   if (args.custodyEnabled && custodySupport?.daemonAuthSeed && custodySupport.daemonAuthAudience) {
-    entries.push({
-      label: 'Custody',
-      access,
-      wsUrl: buildPublicRuntimeRpcUrl(args.custodyDaemonPort),
-      token: deriveRuntimeImportToken(
-        custodySupport.daemonAuthSeed,
+    const custodyWsUrl = buildCustodyRpcUrl(args.custodyDaemonPort);
+    if (custodyWsUrl) {
+      entries.push({
+        label: 'Custody',
         access,
-        custodySupport.daemonAuthAudience,
-        'custody',
-        expiresAt,
-      ),
-    });
+        wsUrl: custodyWsUrl,
+        token: deriveRuntimeImportToken(
+          custodySupport.daemonAuthSeed,
+          access,
+          custodySupport.daemonAuthAudience,
+          'custody',
+          expiresAt,
+        ),
+      });
+    }
   }
   return entries.length > 0 ? { v: 1, issuedAt, expiresAt, entries } : null;
 };
