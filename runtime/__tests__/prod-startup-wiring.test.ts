@@ -407,10 +407,23 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('const isMarketMakerBootstrapReady = (health: MarketMakerHealth | null): boolean => {');
     expect(mmNode).toContain('const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean => {');
     expect(mmNode).toContain('const isMarketMakerFullDepthComplete = (health: MarketMakerHealth | null): boolean => {');
+    expect(mmNode).toContain('const isMarketMakerCrossDepthComplete = (health: MarketMakerHealth | null): boolean => {');
+    expect(mmNode).toContain('const publishReadyHealthSnapshot = (): MarketMakerHealth | null => {');
+    expect(mmNode).toContain('const currentHealth = cachedMarketMakerHealth;');
+    expect(mmNode).toContain('if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) {');
+    expect(mmNode).toContain('crossOverride: currentHealth.cross');
     expect(mmNode).toContain("if (startupPhase === 'offers-ready') {");
-    expect(mmNode).toContain("const before = publishMarketMakerHealthSnapshot({ includeCross: true });");
+    expect(mmNode).toContain("const before = publishReadyHealthSnapshot();");
     expect(mmNode).toContain('if (isMarketMakerFullDepthComplete(before)) return;');
     expect(mmNode).toContain("await driveQuotes('steady');");
+    expect(mmNode).toContain('const after = publishReadyHealthSnapshot();');
+    const refreshCachedHealthBlock = extractSourceBlock(
+      mmNode,
+      'const refreshCachedHealth = (): void => {',
+      'const runQuoteMaintenance = async (): Promise<void> => {',
+    );
+    expect(refreshCachedHealthBlock).toContain('publishReadyHealthSnapshot();');
+    expect(refreshCachedHealthBlock).not.toContain('includeCross: true');
     expect(mmNode).not.toContain("bootstrapCrossExpectedRoutes === false");
     expect(mmNode).not.toContain("crossOverride: buildNeutralMarketMakerCrossHealth()");
     expect(mmNode).not.toContain('Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)');

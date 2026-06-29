@@ -2798,6 +2798,16 @@ const isMarketMakerFullDepthComplete = (health: MarketMakerHealth | null): boole
   );
 };
 
+const isMarketMakerCrossDepthComplete = (health: MarketMakerHealth | null): boolean => {
+  if (!health?.enabled) return false;
+  if (!health.cross.applicable) return true;
+  return (
+    health.cross.expectedRoutes > 0 &&
+    health.cross.routes.length >= health.cross.expectedRoutes &&
+    health.cross.routes.every((route) => route.depthReady)
+  );
+};
+
 const isMarketMakerSameDepthComplete = (health: MarketMakerHealth | null): boolean =>
   Boolean(health?.enabled && health.hubs.length > 0 && health.hubs.every((hub) => hub.depthReady));
 
@@ -3424,6 +3434,17 @@ const run = async (): Promise<void> => {
         ? { includeCross: false, crossOverride: buildBootstrapCrossHealthOverride() }
         : { includeCross: false },
     );
+
+  const publishReadyHealthSnapshot = (): MarketMakerHealth | null => {
+    const currentHealth = cachedMarketMakerHealth;
+    if (!currentHealth || !isMarketMakerCrossDepthComplete(currentHealth)) {
+      return publishMarketMakerHealthSnapshot({ includeCross: true });
+    }
+    return publishMarketMakerHealthSnapshot({
+      includeCross: false,
+      crossOverride: currentHealth.cross,
+    });
+  };
 
   const buildAccountStatusDebug = (
     entityId: string,
@@ -4442,7 +4463,7 @@ const run = async (): Promise<void> => {
     healthRefreshInFlight = true;
     try {
       if (startupPhase === 'offers-ready') {
-        publishMarketMakerHealthSnapshot({ includeCross: true });
+        publishReadyHealthSnapshot();
       } else {
         publishBootstrapHealthSnapshot();
       }
@@ -4453,10 +4474,11 @@ const run = async (): Promise<void> => {
   const runQuoteMaintenance = async (): Promise<void> => {
     if (hasMarketMakerRuntimeBacklog(env)) return;
     if (startupPhase === 'offers-ready') {
-      const before = publishMarketMakerHealthSnapshot({ includeCross: true });
+      const before = publishReadyHealthSnapshot();
       if (isMarketMakerFullDepthComplete(before)) return;
       await driveQuotes('steady');
-      publishMarketMakerHealthSnapshot({ includeCross: true });
+      const after = publishReadyHealthSnapshot();
+      if (!isMarketMakerFullDepthComplete(after)) publishMarketMakerHealthSnapshot({ includeCross: true });
       return;
     }
     const enqueued = await driveQuotes();
