@@ -108,7 +108,9 @@
     if (rt) void connectLiveRuntime(rt);
   }
 
-  async function discoverLiveRuntimes(): Promise<void> {
+  // `silent` (used for auto-discovery on mount) swallows errors so a login screen with no
+  // reachable runtime server doesn't surface a scary fetch error before the user asks for it.
+  async function discoverLiveRuntimes(silent = false): Promise<void> {
     if (typeof window === 'undefined' || liveRuntimesLoading) return;
     liveRuntimesLoading = true;
     liveRuntimesError = '';
@@ -132,7 +134,7 @@
       liveRuntimes = next;
       liveRuntimesLoaded = true;
     } catch (err) {
-      liveRuntimesError = err instanceof Error ? err.message : String(err);
+      if (!silent) liveRuntimesError = err instanceof Error ? err.message : String(err);
     } finally {
       liveRuntimesLoading = false;
     }
@@ -147,7 +149,12 @@
         label: rt.label,
         access: rt.access,
       });
-      runtimeOperations.activateRemoteRuntime(stored.runtimeId, { href: '/app' });
+      const activated = runtimeOperations.activateRemoteRuntime(stored.runtimeId, { href: '/app' });
+      // On success the page reloads into the runtime; if activation didn't take, don't leave a stuck spinner.
+      if (!activated) {
+        liveRuntimesError = `${rt.label}: connected but could not activate the runtime`;
+        connectingRuntimeId = '';
+      }
     } catch (err) {
       liveRuntimesError = `${rt.label}: ${err instanceof Error ? err.message : String(err)}`;
       connectingRuntimeId = '';
@@ -957,8 +964,9 @@
       scheme = 'light';
     }
 
-    // Auto-discover live runtimes (hubs) for the connect dropdown — standalone login only
-    if (!embedded) void discoverLiveRuntimes();
+    // Auto-discover live runtimes (hubs) for the connect dropdown.
+    // Silent: a login screen without a reachable runtime server must not show a fetch error.
+    void discoverLiveRuntimes(true);
 
     // Run async init
     (async () => {
@@ -980,7 +988,7 @@
 
 </script>
 
-<div class="brainvault-wrapper" class:embedded class:scheme-light={!embedded && scheme === 'light'}>
+<div class="brainvault-wrapper" class:embedded class:scheme-light={scheme === 'light'}>
   <!-- Hierarchical Navigation (only in standalone mode) -->
   {#if !embedded}
     <HierarchicalNav />
@@ -990,9 +998,8 @@
   <div class="brainvault-container" class:deriving={phase === 'deriving'}>
     <!-- Ambient particles disabled for minimalist mode -->
 
-    {#if !embedded}
-      <!-- Scheme toggle (dark "vault" <-> light "minimalist") -->
-      <div class="scheme-toggle" role="group" aria-label="Color scheme">
+    <!-- Scheme toggle (dark "vault" <-> light "minimalist") -->
+    <div class="scheme-toggle" role="group" aria-label="Color scheme">
         <button
           type="button"
           class:active={scheme === 'dark'}
@@ -1019,7 +1026,6 @@
           </svg>
         </button>
       </div>
-    {/if}
 
   <!-- Header - minimalist (no logo, clean fintech UI) -->
   <div class="header" class:deriving={phase === 'deriving'}>
@@ -1103,7 +1109,6 @@
           </div>
         </div>
 
-        {#if !embedded}
           <!-- Connect to a live remote runtime (radapter, admin) -->
           <div class="live-runtime-section">
             <div class="live-runtime-header">
@@ -1114,7 +1119,7 @@
                 title="Refresh"
                 aria-label="Refresh live runtimes"
                 disabled={liveRuntimesLoading}
-                on:click={discoverLiveRuntimes}
+                on:click={() => discoverLiveRuntimes()}
               >
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:spinning={liveRuntimesLoading}>
                   <path d="M21 2v6h-6M3 22v-6h6M3.51 9a9 9 0 0114.13-3.36L21 8M3 16l3.36 2.36A9 9 0 0020.49 15"/>
@@ -1153,7 +1158,6 @@
               <div class="live-runtime-error">{liveRuntimesError}</div>
             {/if}
           </div>
-        {/if}
 
         {#if inputMode === 'brainvault'}
         <!-- Name Input -->
@@ -2935,6 +2939,28 @@
   .scheme-light .glass-card::before {
     background: linear-gradient(90deg, transparent, var(--l-accent-ring), transparent);
     opacity: 0.7;
+  }
+
+  /* Embedded mode (UserModePanel login) styles container/card dark at higher specificity;
+     re-assert the light surfaces so the light skin works on the primary login too. */
+  .brainvault-wrapper.embedded.scheme-light .brainvault-container {
+    background: var(--l-bg-2);
+    background-image:
+      radial-gradient(ellipse at 50% -10%, rgba(79, 70, 229, 0.06) 0%, transparent 55%),
+      linear-gradient(180deg, var(--l-bg-1) 0%, var(--l-bg-2) 100%);
+  }
+  .brainvault-wrapper.embedded.scheme-light .glass-card {
+    border-color: var(--l-border);
+    box-shadow: var(--l-shadow-card);
+  }
+  .brainvault-wrapper.embedded.scheme-light .input-progress .pyramid-progress-text {
+    color: var(--l-accent);
+  }
+  .brainvault-wrapper.embedded.scheme-light .pyramid-progress-bar {
+    background: rgba(15, 23, 42, 0.08);
+  }
+  .brainvault-wrapper.embedded.scheme-light .pyramid-progress-fill {
+    background: linear-gradient(90deg, var(--l-accent), #818cf8);
   }
 
   /* Titles + copy */

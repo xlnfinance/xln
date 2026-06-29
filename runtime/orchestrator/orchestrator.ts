@@ -2461,8 +2461,14 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/runtime-import' && request.method === 'GET') {
-      await pollAllHubHealth();
-      if (args.mmEnabled) await pollMarketMakerHealth();
+      // Refresh child identities best-effort, but never let an unhealthy child (whose /api/health
+      // hangs) block manifest generation. The manifest only needs each child's cached runtimeId,
+      // so cap the refresh and fall back to the last-known state.
+      const refresh = Promise.all([
+        pollAllHubHealth().catch(() => {}),
+        args.mmEnabled ? pollMarketMakerHealth().catch(() => {}) : Promise.resolve(),
+      ]);
+      await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, 1200))]);
       const access = normalizeRuntimeImportAccess(url.searchParams.get('access') || runtimeImportAccess);
       const manifest = buildRuntimeImportManifest(access);
       if (!manifest) {
