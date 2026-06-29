@@ -904,9 +904,10 @@ run_local_deploy() {
         fail_deploy_with_debug "public production stack did not become healthy"
       fi
     else
-      pm2 describe xln-server >/dev/null 2>&1 \
-        && pm2 restart xln-server \
-        || pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
+      # Recreate from the wrapper on every non-fresh deploy. Restarting the existing PM2
+      # entry can preserve an old direct command/env and silently drop wrapper defaults.
+      pm2 delete xln-server >/dev/null 2>&1 || true
+      run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
     fi
     pm2 save
   else
