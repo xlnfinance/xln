@@ -2003,7 +2003,7 @@ export const buildMarketMakerCrossHealth = (
       sourceHubEntityId: group.sourceHubEntityId,
       targetHubEntityId: group.targetHubEntityId,
       offers,
-      ready: pairs.length > 0 && pairs.every(pair => pair.ready),
+      ready: pairs.length > 0 && blockers.length === 0 && pairs.every(pair => pair.ready),
       depthReady: expectedOffers > 0 && offers >= expectedOffers && pairs.every(pair => pair.depthReady),
       blockers,
       pairs,
@@ -2122,15 +2122,6 @@ const buildMarketMakerCrossDebugSummary = (
 const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth['cross'] => ({
   applicable,
   ok: !applicable,
-  expectedRoutes: 0,
-  expectedOffersPerRoute: 0,
-  expectedOffersPerPair: 0,
-  routes: [],
-});
-
-const buildNeutralMarketMakerCrossHealth = (): MarketMakerHealth['cross'] => ({
-  applicable: false,
-  ok: true,
   expectedRoutes: 0,
   expectedOffersPerRoute: 0,
   expectedOffersPerPair: 0,
@@ -2643,15 +2634,15 @@ export const getMarketMakerHealth = (
   });
 
   const hubsDepthReady = hubs.length > 0 && hubs.every((entry) => entry.depthReady);
-  const crossDepthReady = !cross.applicable || (
+  const crossReady = !cross.applicable || (
     cross.expectedRoutes > 0 &&
     cross.routes.length >= cross.expectedRoutes &&
-    cross.routes.every((route) => route.depthReady)
+    cross.routes.every((route) => route.ready)
   );
 
   return {
     enabled: true,
-    ok: hubsDepthReady && crossDepthReady,
+    ok: hubsDepthReady && crossReady,
     entityId: mmEntityId,
     connectivity,
     expectedOffersPerHub,
@@ -2663,6 +2654,17 @@ export const getMarketMakerHealth = (
 
 const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean => {
   if (!health?.enabled || !health.ok) return false;
+  if (health.hubs.length === 0 || !health.hubs.every((hub) => hub.depthReady)) return false;
+  if (!health.cross.applicable) return true;
+  return (
+    health.cross.expectedRoutes > 0 &&
+    health.cross.routes.length >= health.cross.expectedRoutes &&
+    health.cross.routes.every((route) => route.ready)
+  );
+};
+
+const isMarketMakerFullDepthComplete = (health: MarketMakerHealth | null): boolean => {
+  if (!health?.enabled) return false;
   if (health.hubs.length === 0 || !health.hubs.every((hub) => hub.depthReady)) return false;
   if (!health.cross.applicable) return true;
   return (
@@ -2965,6 +2967,7 @@ const assertMarketMakerBootstrapFinalized = (
           sourceHubEntityId: route.sourceHubEntityId,
           targetHubEntityId: route.targetHubEntityId,
           offers: route.offers,
+          ready: route.ready,
           depthReady: route.depthReady,
           blockers: route.blockers,
         })) ?? [],
@@ -3062,7 +3065,7 @@ const run = async (): Promise<void> => {
   let bootstrapEntityStateHash: string | null = null;
   let bootstrapReadyAt: number | null = null;
   let bootstrapCrossStarted = false;
-  let bootstrapCrossExpectedRoutes: boolean | null = null;
+  let bootstrapCrossPlanJobCount: number | null = null;
   let bootstrapReadySnapshotPersisted = false;
   type DirectEntityInputDebug = {
     at: number;
@@ -3237,8 +3240,8 @@ const run = async (): Promise<void> => {
 
   const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>
     publishMarketMakerHealthSnapshot(
-      bootstrapCrossExpectedRoutes === false
-        ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
+      bootstrapCrossStarted
+        ? { includeCross: true }
         : { includeCross: false },
     );
 
@@ -3670,15 +3673,11 @@ const run = async (): Promise<void> => {
   const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {
     if (bootstrapCompletionHealthHeight === env.height) return bootstrapCompletionHealth;
     bootstrapCompletionHealthHeight = env.height;
-    bootstrapCompletionHealth = buildMarketMakerHealthSnapshot(
-      bootstrapCrossExpectedRoutes === false
-        ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
-        : { includeCross: true },
-    );
+    bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
     return bootstrapCompletionHealth;
   };
   const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>
-    bootstrapCrossExpectedRoutes ?? buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, visibleHubs, mmTokenIdsByContext).size > 0;
+    buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, visibleHubs, mmTokenIdsByContext).size > 0;
   const canCheckBootstrapCompletion = (): boolean => {
     if (!bootstrapCrossStarted || hasMarketMakerRuntimeBacklog(env)) return false;
     const visibleHubs = readVisibleHubProfiles(env, true);
@@ -3895,12 +3894,10 @@ const run = async (): Promise<void> => {
         }
       }
       if (mode === 'bootstrap' && bootstrapCrossStarted) {
-        const hasExpectedRoutes = crossQuoteJobs.length > 0;
-        if (bootstrapCrossExpectedRoutes !== hasExpectedRoutes) {
-          bootstrapCrossExpectedRoutes = hasExpectedRoutes;
+        const expectedRouteJobs = crossQuoteJobs.length;
+        if (bootstrapCrossPlanJobCount !== expectedRouteJobs) {
+          bootstrapCrossPlanJobCount = expectedRouteJobs;
           bootstrapCompletionHealthHeight = -1;
-          let expectedRouteJobs = 0;
-          if (hasExpectedRoutes) expectedRouteJobs = crossQuoteJobs.length;
           emitBootstrapDebugEvent('cross-plan', {
             expectedRoutes: expectedRouteJobs,
           });
@@ -4139,6 +4136,7 @@ const run = async (): Promise<void> => {
       const sameDepthComplete =
         isMarketMakerSameDepthComplete(health) &&
         isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));
+      const previousPhase = startupPhase;
       if (sameDepthComplete || bootstrapCrossStarted) {
         bootstrapCrossStarted = true;
         if (startupPhase !== 'bootstrap-cross') {
@@ -4150,6 +4148,7 @@ const run = async (): Promise<void> => {
         } else {
           startupPhase = 'bootstrap-cross';
         }
+        if (startupPhase !== previousPhase) rebuildCachedHealthResponseJson();
         return;
       }
       if (startupPhase !== 'bootstrap-same-chain') {
@@ -4161,6 +4160,7 @@ const run = async (): Promise<void> => {
       } else {
         startupPhase = 'bootstrap-same-chain';
       }
+      if (startupPhase !== previousPhase) rebuildCachedHealthResponseJson();
     };
     while (!shuttingDown && Date.now() < deadline) {
       if (hasMarketMakerRuntimeBacklog(env)) {
@@ -4172,6 +4172,7 @@ const run = async (): Promise<void> => {
       const beforeDrive = publishBootstrapHealthSnapshot();
       refreshBootstrapPhase(beforeDrive);
       await yieldMarketMakerApi();
+      if (isBootstrapDepthComplete(beforeDrive) && canCheckBootstrapCompletion()) return beforeDrive;
       if (bootstrapCompletionCheckArmed && canCheckBootstrapCompletion()) {
         const completionStartedAt = Date.now();
         const completionHealth = buildBootstrapCompletionHealth();
@@ -4228,11 +4229,7 @@ const run = async (): Promise<void> => {
     healthRefreshInFlight = true;
     try {
       if (startupPhase === 'offers-ready') {
-        publishMarketMakerHealthSnapshot(
-          bootstrapCrossExpectedRoutes === false
-            ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
-            : { includeCross: true },
-        );
+        publishMarketMakerHealthSnapshot({ includeCross: true });
       } else {
         publishBootstrapHealthSnapshot();
       }
@@ -4243,31 +4240,14 @@ const run = async (): Promise<void> => {
   const runQuoteMaintenance = async (): Promise<void> => {
     if (hasMarketMakerRuntimeBacklog(env)) return;
     if (startupPhase === 'offers-ready') {
-      publishMarketMakerHealthSnapshot(
-        bootstrapCrossExpectedRoutes === false
-          ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
-          : { includeCross: true },
-      );
+      const before = publishMarketMakerHealthSnapshot({ includeCross: true });
+      if (isMarketMakerFullDepthComplete(before)) return;
+      await driveQuotes('steady');
+      publishMarketMakerHealthSnapshot({ includeCross: true });
       return;
     }
-    const before = startupPhase === 'offers-ready'
-      ? publishMarketMakerHealthSnapshot(
-          bootstrapCrossExpectedRoutes === false
-            ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
-            : { includeCross: true },
-        )
-      : publishBootstrapHealthSnapshot();
-    if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;
     const enqueued = await driveQuotes();
-    if (startupPhase === 'offers-ready') {
-      publishMarketMakerHealthSnapshot(
-        bootstrapCrossExpectedRoutes === false
-          ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
-          : { includeCross: true },
-      );
-    } else {
-      publishBootstrapHealthSnapshot();
-    }
+    publishBootstrapHealthSnapshot();
     if (startupPhase !== 'offers-ready' && !enqueued && canCheckBootstrapCompletion()) {
       const completionHealth = buildBootstrapCompletionHealth();
       if (isBootstrapDepthComplete(completionHealth)) {
@@ -4318,6 +4298,7 @@ const run = async (): Promise<void> => {
     const bootstrapHealth = await waitForBootstrapOffers();
     if (bootstrapHealth) {
       await markOffersReady(bootstrapHealth);
+      startQuoteLoop();
     } else {
       startupPhase = 'bootstrap-degraded';
       emitBootstrapDebugEvent('phase', { phase: startupPhase });
