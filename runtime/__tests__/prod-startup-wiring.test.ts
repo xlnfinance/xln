@@ -469,6 +469,7 @@ describe('production startup wiring', () => {
     expect(healthBuilder).toContain('expectedRoutes: 0');
     expect(healthBuilder).toContain('cachedHealthResponseJson = safeStringify({');
     expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
+    expect(mmNode).toContain('ok: expectedRouteCount === 0 || (routes.length >= expectedRouteCount && routes.every(route => route.ready))');
     expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('const sameHealth = publishMarketMakerHealthSnapshot({ includeCross: false });');
     expect(mmNode).toContain('return sameHealth;');
@@ -486,8 +487,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD']");
     expect(mmNode).toContain('BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}');
+    expect(mmNode).toContain('const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>');
     expect(mmNode).toContain('const canCheckBootstrapCompletion = (): boolean =>');
-    expect(mmNode).toContain('!hasBootstrapCrossAccountBacklog(readVisibleHubProfiles(env, true));');
+    expect(mmNode).toContain('return !hasExpectedBootstrapCrossRoutes(visibleHubs) || !hasBootstrapCrossAccountBacklog(visibleHubs);');
     expect(mmNode).not.toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
     expect(mmNode).toContain("const enqueued = await driveQuotes('bootstrap');");
     expect(mmNode).toContain('if (!enqueued && canCheckBootstrapCompletion()) {');

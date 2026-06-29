@@ -2029,7 +2029,7 @@ export const buildMarketMakerCrossHealth = (
 
   return {
     applicable: expectedRouteCount > 0,
-    ok: expectedRouteCount > 0 && routes.length >= expectedRouteCount && routes.every(route => route.ready),
+    ok: expectedRouteCount === 0 || (routes.length >= expectedRouteCount && routes.every(route => route.ready)),
     expectedRoutes: expectedRouteCount,
     expectedOffersPerRoute,
     expectedOffersPerPair,
@@ -3652,10 +3652,13 @@ const run = async (): Promise<void> => {
     bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
     return bootstrapCompletionHealth;
   };
-  const canCheckBootstrapCompletion = (): boolean =>
-    bootstrapCrossStarted &&
-    !hasMarketMakerRuntimeBacklog(env) &&
-    !hasBootstrapCrossAccountBacklog(readVisibleHubProfiles(env, true));
+  const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>
+    buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, visibleHubs, mmTokenIdsByContext).size > 0;
+  const canCheckBootstrapCompletion = (): boolean => {
+    if (!bootstrapCrossStarted || hasMarketMakerRuntimeBacklog(env)) return false;
+    const visibleHubs = readVisibleHubProfiles(env, true);
+    return !hasExpectedBootstrapCrossRoutes(visibleHubs) || !hasBootstrapCrossAccountBacklog(visibleHubs);
+  };
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<boolean> => {
     if (shuttingDown) return false;
     if (loopInFlight) return false;
