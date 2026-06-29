@@ -251,6 +251,7 @@ export type MarketMakerHealth = {
     expectedRoutes: number;
     expectedOffersPerRoute: number;
     expectedOffersPerPair: number;
+    routeCount?: number;
     routes: MarketMakerCrossRouteHealth[];
   };
 };
@@ -1797,6 +1798,8 @@ type MarketMakerCrossBootstrapWaveDebug = {
   direction: string;
   sourceHubEntityId?: string;
   candidateCount?: number;
+  coverageGaps?: number;
+  progress?: number;
   selectedCount?: number;
   desiredOffers?: number;
   groupedSourceHubs?: number;
@@ -1835,6 +1838,14 @@ type MarketMakerCrossHealthRouteGroup = {
   targetHubEntityId: string;
   expectedPairs: Map<string, MarketMakerCrossHealthPairExpectation>;
   specs: MarketMakerOfferSpec[];
+};
+
+type MarketMakerCrossPlanSummary = {
+  applicable: boolean;
+  expectedJobs: number;
+  expectedRoutes: number;
+  expectedOffersPerRoute: number;
+  expectedOffersPerPair: number;
 };
 
 const describeMarketMakerAccountBlocker = (
@@ -1972,6 +1983,59 @@ const buildExpectedMarketMakerCrossRouteGroups = (
   return groups;
 };
 
+const buildMarketMakerCrossPlanSummary = (
+  contexts: MarketMakerEntityContext[],
+  visibleHubs: HubProfile[],
+  tokenIdsByContext: MarketMakerTokenIdsByContext,
+): MarketMakerCrossPlanSummary => {
+  let expectedJobs = 0;
+  let expectedRoutes = 0;
+  let maxPairsPerRoute = 0;
+  for (const sourceContext of contexts) {
+    const sourceJurisdictionRef = sourceContext.jurisdictionRef;
+    const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
+    if (!sourceJurisdictionRef || sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+    const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
+    if (sourceHubs.length === 0) continue;
+    for (const targetContext of contexts) {
+      const targetJurisdictionRef = targetContext.jurisdictionRef;
+      if (
+        sourceContext.entityId === targetContext.entityId ||
+        sameJurisdiction(sourceContext, targetContext) ||
+        !targetJurisdictionRef
+      ) {
+        continue;
+      }
+      const targetTokenIds = getMarketMakerTokenIds(tokenIdsByContext, targetContext);
+      if (targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
+      const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
+      if (targetHubs.length === 0) continue;
+      const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
+      let routeGroupsForJob = 0;
+      for (const sourceHub of sourceHubs) {
+        const targetHub = targetByBaseName.get(hubBaseName(sourceHub.name));
+        if (!targetHub || sameJurisdiction(sourceHub, targetHub)) continue;
+        routeGroupsForJob += 1;
+      }
+      if (routeGroupsForJob === 0) continue;
+      expectedJobs += 1;
+      expectedRoutes += routeGroupsForJob;
+      maxPairsPerRoute = Math.max(
+        maxPairsPerRoute,
+        buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds).length,
+      );
+    }
+  }
+  const expectedOffersPerPair = expectedRoutes > 0 ? MARKET_MAKER_CROSS_LEVELS_PER_PAIR : 0;
+  return {
+    applicable: expectedRoutes > 0,
+    expectedJobs,
+    expectedRoutes,
+    expectedOffersPerRoute: maxPairsPerRoute * expectedOffersPerPair,
+    expectedOffersPerPair,
+  };
+};
+
 export const buildMarketMakerCrossHealth = (
   env: Env,
   contexts: MarketMakerEntityContext[],
@@ -2059,6 +2123,7 @@ export const buildMarketMakerCrossHealth = (
     expectedRoutes: expectedRouteCount,
     expectedOffersPerRoute,
     expectedOffersPerPair,
+    routeCount: routes.length,
     routes,
   };
 };
@@ -2151,6 +2216,17 @@ const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHe
   expectedRoutes: 0,
   expectedOffersPerRoute: 0,
   expectedOffersPerPair: 0,
+  routeCount: 0,
+  routes: [],
+});
+
+const buildPlannedMarketMakerCrossHealth = (plan: MarketMakerCrossPlanSummary): MarketMakerHealth['cross'] => ({
+  applicable: plan.applicable,
+  ok: !plan.applicable,
+  expectedRoutes: plan.expectedRoutes,
+  expectedOffersPerRoute: plan.expectedOffersPerRoute,
+  expectedOffersPerPair: plan.expectedOffersPerPair,
+  routeCount: plan.expectedRoutes,
   routes: [],
 });
 
@@ -2243,55 +2319,43 @@ const maintainMarketMakerCrossQuotes = async (
     let remainingSourceHubGroups = Math.max(1, Math.floor(maxSourceHubGroups));
     let desiredOffersSeen = 0;
     const sortedTargetHubs = [...targetHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
-    const sourceHubScans = [...sourceHubs]
-      .map(sourceHub => {
-        const specs = buildMarketMakerCrossOfferSpecs(
-          env,
-          sourceContext,
-          targetContext,
-          [sourceHub],
-          sortedTargetHubs,
-          sourceTokenIds,
-          targetTokenIds,
-        );
-        return {
-          sourceHub,
-          specs,
-          coverageGaps: countCrossPairCoverageGaps(env, specs),
-          progress: countCrossSpecBootstrapProgress(env, specs, getPendingCrossRequestOrderIds),
-        };
-      })
-      .sort((left, right) =>
-        right.coverageGaps - left.coverageGaps ||
-        left.progress - right.progress ||
-        compareStableText(left.sourceHub.entityId, right.sourceHub.entityId),
-      );
+    const orderedSourceHubs = [...sourceHubs].sort((left, right) => compareStableText(left.entityId, right.entityId));
 
     emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start', {
       direction,
-      groupedSourceHubs: sourceHubScans.length,
+      groupedSourceHubs: orderedSourceHubs.length,
       groupedTargetHubs: sortedTargetHubs.length,
       remainingNewOffers,
       remainingSourceHubGroups,
     });
 
-    for (const scan of sourceHubScans) {
+    for (const sourceHub of orderedSourceHubs) {
       await yieldMarketMakerApi();
       if (!shouldContinue()) return false;
       if (remainingNewOffers <= 0 || remainingSourceHubGroups <= 0) break;
-      if (scan.specs.length === 0) continue;
-      const sourceHub = scan.sourceHub;
       const sourceHubEntityId = sourceHub.entityId;
       const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
       if (!account) continue;
       if (String(account.status || 'active') !== 'active') continue;
       if (!isAccountConsensusReady(account)) continue;
+      const sourceHubSpecs = buildMarketMakerCrossOfferSpecs(
+        env,
+        sourceContext,
+        targetContext,
+        [sourceHub],
+        sortedTargetHubs,
+        sourceTokenIds,
+        targetTokenIds,
+      );
+      if (sourceHubSpecs.length === 0) continue;
+      const coverageGaps = countCrossPairCoverageGaps(env, sourceHubSpecs);
+      const progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs, getPendingCrossRequestOrderIds);
 
       const existingOfferIds = collectOfferIdsForAccount(account);
       const perAccountLimit = Math.max(1, Math.floor(maxOffersPerAccount));
       let selectedForSourceHub = 0;
       let candidateCount = 0;
-      const specs = scan.specs.filter(spec => {
+      const specs = sourceHubSpecs.filter(spec => {
         const route = spec.crossJurisdiction;
         if (!route) return false;
         const targetAccount = getAccountMachine(env, targetContext.entityId, route.target.entityId);
@@ -2375,6 +2439,8 @@ const maintainMarketMakerCrossQuotes = async (
         direction,
         sourceHubEntityId,
         candidateCount,
+        coverageGaps,
+        progress,
         remainingNewOffers,
         remainingSourceHubGroups,
         selectedCount: selectedForSourceHub,
@@ -2385,6 +2451,8 @@ const maintainMarketMakerCrossQuotes = async (
           direction,
           sourceHubEntityId,
           candidateCount,
+          coverageGaps,
+          progress,
           selectedCount: selectedForSourceHub,
           remainingNewOffers,
           remainingSourceHubGroups,
@@ -3121,6 +3189,7 @@ const run = async (): Promise<void> => {
   let bootstrapReadyAt: number | null = null;
   let bootstrapCrossStarted = false;
   let bootstrapCrossPlanJobCount: number | null = null;
+  let bootstrapCrossProducerAttempted = false;
   let bootstrapReadySnapshotPersisted = false;
   type DirectEntityInputDebug = {
     at: number;
@@ -3341,10 +3410,16 @@ const run = async (): Promise<void> => {
     return health;
   };
 
+  const buildBootstrapCrossHealthOverride = (): MarketMakerHealth['cross'] => {
+    const visibleHubs = readVisibleHubProfiles(env, true);
+    const plan = buildMarketMakerCrossPlanSummary(mmContexts, visibleHubs, mmTokenIdsByContext);
+    return buildPlannedMarketMakerCrossHealth(plan);
+  };
+
   const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>
     publishMarketMakerHealthSnapshot(
       bootstrapCrossStarted
-        ? { includeCross: true }
+        ? { includeCross: false, crossOverride: buildBootstrapCrossHealthOverride() }
         : { includeCross: false },
     );
 
@@ -3749,11 +3824,13 @@ const run = async (): Promise<void> => {
     return bootstrapCompletionHealth;
   };
   const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>
-    buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, visibleHubs, mmTokenIdsByContext).size > 0;
+    buildMarketMakerCrossPlanSummary(mmContexts, visibleHubs, mmTokenIdsByContext).expectedRoutes > 0;
   const canCheckBootstrapCompletion = (): boolean => {
     if (!bootstrapCrossStarted || hasMarketMakerRuntimeBacklog(env)) return false;
     const visibleHubs = readVisibleHubProfiles(env, true);
-    return !hasExpectedBootstrapCrossRoutes(visibleHubs) || !hasBootstrapCrossAccountBacklog(visibleHubs);
+    const hasCrossPlan = hasExpectedBootstrapCrossRoutes(visibleHubs);
+    if (hasCrossPlan && !bootstrapCrossProducerAttempted) return false;
+    return !hasCrossPlan || !hasBootstrapCrossAccountBacklog(visibleHubs);
   };
   const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<boolean> => {
     if (shuttingDown) return false;
@@ -3959,14 +4036,16 @@ const run = async (): Promise<void> => {
         }
       }
       if (mode === 'bootstrap' && bootstrapCrossStarted) {
-        const expectedRouteJobs = crossQuoteJobs.length;
-        if (bootstrapCrossPlanJobCount !== expectedRouteJobs) {
-          bootstrapCrossPlanJobCount = expectedRouteJobs;
+        const crossPlan = buildMarketMakerCrossPlanSummary(mmContexts, visibleHubs, mmTokenIdsByContext);
+        if (bootstrapCrossPlanJobCount !== crossPlan.expectedJobs) {
+          bootstrapCrossPlanJobCount = crossPlan.expectedJobs;
           bootstrapCompletionHealthHeight = -1;
           emitBootstrapDebugEvent('cross-plan', {
-            expectedRoutes: expectedRouteJobs,
+            expectedJobs: crossPlan.expectedJobs,
+            expectedRoutes: crossPlan.expectedRoutes,
           });
         }
+        if (crossQuoteJobs.length > 0) bootstrapCrossProducerAttempted = true;
       }
       const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }> = [];
       if (crossQuoteJobs.length > 0) {

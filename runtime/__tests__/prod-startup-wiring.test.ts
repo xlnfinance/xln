@@ -515,7 +515,9 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('const buildNeutralMarketMakerCrossHealth = (): MarketMakerHealth[\'cross\'] => ({');
     expect(mmNode).toContain('ok: expectedRouteCount === 0 || (routes.length >= expectedRouteCount && routes.every(route => route.depthReady))');
     expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>');
-    expect(mmNode).toContain('? { includeCross: true }');
+    expect(mmNode).toContain('const buildBootstrapCrossHealthOverride = (): MarketMakerHealth[\'cross\'] => {');
+    expect(mmNode).toContain('return buildPlannedMarketMakerCrossHealth(plan);');
+    expect(mmNode).toContain('? { includeCross: false, crossOverride: buildBootstrapCrossHealthOverride() }');
     expect(mmNode).toContain(': { includeCross: false },');
     expect(mmNode).toContain('const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });');
@@ -538,7 +540,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("emitBootstrapDebugEvent('cross-plan'");
     expect(mmNode).toContain('const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>');
     expect(mmNode).toContain('const canCheckBootstrapCompletion = (): boolean =>');
-    expect(mmNode).toContain('return !hasExpectedBootstrapCrossRoutes(visibleHubs) || !hasBootstrapCrossAccountBacklog(visibleHubs);');
+    expect(mmNode).toContain('if (hasCrossPlan && !bootstrapCrossProducerAttempted) return false;');
+    expect(mmNode).toContain('return !hasCrossPlan || !hasBootstrapCrossAccountBacklog(visibleHubs);');
     expect(mmNode).not.toContain('const completionBeforeDrive = buildBootstrapCompletionHealth();');
     expect(mmNode).toContain("const enqueued = await driveQuotes('bootstrap');");
     expect(mmNode).toContain('if (!enqueued && canCheckBootstrapCompletion()) {');
@@ -655,12 +658,17 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
     expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
-    expect(mmNode).toContain('const sourceHubScans = [...sourceHubs]');
-    expect(mmNode).toContain('coverageGaps: countCrossPairCoverageGaps(env, specs)');
-    expect(mmNode).toContain('right.coverageGaps - left.coverageGaps');
-    expect(mmNode.indexOf('const sourceHubScans = [...sourceHubs]')).toBeLessThan(
-      mmNode.indexOf("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start'"),
+    expect(mmNode).toContain('const orderedSourceHubs = [...sourceHubs].sort');
+    expect(mmNode).not.toContain('const sourceHubScans = [...sourceHubs]');
+    const bootstrapCrossBranch = mmNode.slice(
+      mmNode.indexOf('if (emitBootstrapWaveEvents) {'),
+      mmNode.indexOf('const desiredOffers = buildMarketMakerCrossOfferSpecs('),
     );
+    expect(bootstrapCrossBranch.indexOf("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start'")).toBeLessThan(
+      bootstrapCrossBranch.indexOf('const sourceHubSpecs = buildMarketMakerCrossOfferSpecs('),
+    );
+    expect(bootstrapCrossBranch).toContain('coverageGaps = countCrossPairCoverageGaps(env, sourceHubSpecs)');
+    expect(bootstrapCrossBranch).toContain('progress = countCrossSpecBootstrapProgress(env, sourceHubSpecs, getPendingCrossRequestOrderIds)');
     expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
     expect(mmNode).toContain("direction: 'bootstrap-batch'");
     expect(mmNode).toContain('deferredBootstrapCrossLastIndex = entry.index;\n            break;');

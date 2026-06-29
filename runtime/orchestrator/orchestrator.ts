@@ -1766,6 +1766,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     expectedRoutes: Number(rawMmCross?.expectedRoutes || 0),
     expectedOffersPerRoute: Number(rawMmCross?.expectedOffersPerRoute || 0),
     expectedOffersPerPair: Number(rawMmCross?.expectedOffersPerPair || 0),
+    routeCount: Number(rawMmCross?.routeCount || (Array.isArray(rawMmCross?.routes) ? rawMmCross.routes.length : 0)),
     routes: Array.isArray(rawMmCross?.routes)
       ? rawMmCross.routes.map((route) => ({
           sourceJurisdiction: String(route.sourceJurisdiction || ''),
@@ -1877,7 +1878,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     mmStartupPhase,
     mmOfferTotal,
     mmExpectedTotal,
-    crossRouteCount: mmCross.routes.length,
+    crossRouteCount: mmCross.routeCount,
     expectedCrossRoutes: mmCross.expectedRoutes,
     custodyEnabled: args.custodyEnabled,
     custodyOk,

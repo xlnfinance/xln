@@ -251,6 +251,7 @@ export type MarketMakerCrossHealthPayload = {
   expectedRoutes: number;
   expectedOffersPerRoute: number;
   expectedOffersPerPair: number;
+  routeCount?: number;
   routes: MarketMakerCrossRouteHealthPayload[];
 };
 

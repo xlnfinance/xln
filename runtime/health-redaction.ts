@@ -247,7 +247,7 @@ const publicMarketMakerHealth = (marketMaker: PublicHealthRecord): Record<string
       applicable: valueOf(cross as PublicHealthRecord, 'applicable') === true,
       ok: valueOf(cross as PublicHealthRecord, 'ok') === true,
       expectedRoutes: valueOf(cross as PublicHealthRecord, 'expectedRoutes'),
-      routeCount: arrayOf(cross as PublicHealthRecord, 'routes')?.length,
+      routeCount: valueOf(cross as PublicHealthRecord, 'routeCount') ?? arrayOf(cross as PublicHealthRecord, 'routes')?.length,
     };
   })(),
 });
