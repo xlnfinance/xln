@@ -57,7 +57,15 @@ const deriveRuntimeIdFromMnemonic = (mnemonic: string): string =>
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function selectBrainvaultWorkFactor(page: Page, factor = 1): Promise<void> {
-  const factorButton = page.getByRole('button', { name: new RegExp(`^${factor}\\s+`, 'i') }).first();
+  let factorButton = page.getByRole('button', { name: new RegExp(`^${factor}\\s+`, 'i') }).first();
+  if (!await factorButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    // Factor presets are collapsed under the "Advanced" (Security work factor) toggle now.
+    const advancedToggle = page.getByRole('button', { name: /Security work factor/i }).first();
+    if (await advancedToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await advancedToggle.click();
+      factorButton = page.getByRole('button', { name: new RegExp(`^${factor}\\s+`, 'i') }).first();
+    }
+  }
   if (!await factorButton.isVisible({ timeout: 1_000 }).catch(() => false)) return;
   await factorButton.click();
 }

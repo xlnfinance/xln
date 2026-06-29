@@ -487,7 +487,15 @@ async function createRuntimeViaUi(
     await mnemonicInput.fill(secret);
   }
 
-  const factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
+  let factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
+  if (!await factorOneButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    // Factor presets are collapsed under the "Advanced" (Security work factor) toggle now.
+    const advancedToggle = page.getByRole('button', { name: /Security work factor/i }).first();
+    if (await advancedToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await advancedToggle.click();
+      factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
+    }
+  }
   if (await factorOneButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
     await factorOneButton.click({ force: true });
   }

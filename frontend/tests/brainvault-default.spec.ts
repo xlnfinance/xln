@@ -2,8 +2,8 @@ import { expect, test } from '../../tests/global-setup';
 
 async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.getByLabel('Display name')).toBeVisible({ timeout: 240_000 });
-  await expect(page.getByRole('heading', { name: /Recovery services/i })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Local only/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Configure account/i })).toBeVisible();
+  await expect(page.getByText('Local only')).toBeVisible();
   const startButton = page.getByRole('button', { name: /^start$/i });
   await expect(startButton).toBeVisible();
   await startButton.click();
@@ -23,10 +23,11 @@ test.describe('BrainVault default flow', () => {
     await page.getByLabel('Name').fill('vault-test@example.com');
     await page.getByLabel('Password').fill('A_VeryHARDpassword123!');
 
-    // UI now uses factor preset buttons (no slider input)
+    // Security work factor presets are collapsed under the "Advanced" toggle now
+    await page.getByRole('button', { name: /Security work factor/i }).click();
     await page.getByRole('button', { name: /^1\b/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: /Create XLN wallet/i });
+    const deriveButton = page.getByRole('button', { name: /Open \/ restore wallet/i });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 
@@ -44,9 +45,11 @@ test.describe('BrainVault default flow', () => {
     await page.getByLabel('Name').fill('vault-tes2t@example.com');
     await page.getByLabel('Password').fill('NotHardEnough!11');
 
+    // Security work factor presets are collapsed under the "Advanced" toggle now
+    await page.getByRole('button', { name: /Security work factor/i }).click();
     await page.getByRole('button', { name: /^2\b/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: /Create XLN wallet/i });
+    const deriveButton = page.getByRole('button', { name: /Open \/ restore wallet/i });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 

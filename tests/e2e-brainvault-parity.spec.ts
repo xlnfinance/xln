@@ -207,6 +207,8 @@ test.describe('brainvault parity', () => {
     await waitForBrainvaultCreateForm(page);
     await page.locator('#name').fill('standalone vault');
     await page.locator('#passphrase').fill('ced-export-42');
+    // Security work factor presets are collapsed under the "Advanced" toggle now.
+    await page.getByRole('button', { name: /Security work factor/i }).click();
     await page.getByRole('button', { name: /^1\s+Test$/ }).click();
 
     const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open \/ restore wallet|Open (Wallet|Vault))/, exact: false });
