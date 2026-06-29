@@ -296,8 +296,10 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
 );
 // Bootstrap is full readiness: every configured same-chain and cross route level
 // must be committed before offers-ready, so tests do not race background fills.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK = 6;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK = 6;
+// Keep same-chain bootstrap throughput high; correctness is enforced by
+// committed-depth health, not by slowly dripping orders into the producer.
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_OFFERS_PER_ACCOUNT_PER_TICK = 1000;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_OFFERS_PER_TICK = 1000;
 const MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE = Math.max(
   1,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_SAME_QUOTE_HUB_GROUPS_PER_WAVE'] || '1'),
@@ -319,8 +321,8 @@ const MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK = Math.max(
 // Cross bootstrap builds full route depth across waves. Keep each
 // producer wave to a single source-hub batch so prod's one-CPU runtime does not
 // monopolize HTTP while admitting and committing cross orders.
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 15;
-const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 15;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = 45;
+const MARKET_MAKER_BOOTSTRAP_DEFAULT_MAX_NEW_CROSS_OFFERS_PER_TICK = 45;
 const MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   1,
   Number(
