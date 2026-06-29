@@ -33,6 +33,9 @@ export XLN_MESH_API_PORT_BASE=${XLN_MESH_API_PORT_BASE:-18090}
 export XLN_MESH_PUBLIC_PORT_BASE=${XLN_MESH_PUBLIC_PORT_BASE:-8090}
 export XLN_MESH_CUSTODY_PORT=${XLN_MESH_CUSTODY_PORT:-$(xln_custody_port)}
 export XLN_MESH_CUSTODY_DAEMON_PORT=${XLN_MESH_CUSTODY_DAEMON_PORT:-$(xln_custody_daemon_port)}
+# Public radapter URL for the custody daemon (nginx custody.xln.finance/rpc -> 127.0.0.1:8088),
+# so custody shows up + connects in the wallet's "Connect to live runtime" dropdown.
+export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}
 export XLN_RUNTIME_EXIT_ON_FATAL=${XLN_RUNTIME_EXIT_ON_FATAL:-1}
 export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}
 export XLN_RUNTIME_TICK_DELAY_MS=${XLN_RUNTIME_TICK_DELAY_MS:-1}

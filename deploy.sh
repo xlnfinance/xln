@@ -424,8 +424,46 @@ text = re.sub(r"\n    location /api/watchtower/ \{\n(?:        .*\n)*?    \}\n",
 path.write_text(text)
 PY
 
+  # Route custody.xln.finance/rpc to the custody radapter daemon (:8088) so the wallet can connect
+  # to the custody runtime. Idempotent: only injects when the /rpc upstream is missing.
+  if ! grep -q 'proxy_pass http://127.0.0.1:8088;' "$available"; then
+    python3 - "$available" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+anchor = "    server_name custody.xln.finance;"
+idx = text.find(anchor)
+if idx != -1:
+    loc = text.find("    location / {", idx)
+    if loc != -1:
+        block = (
+            "    location /rpc {\n"
+            "        proxy_pass http://127.0.0.1:8088;\n"
+            "        proxy_http_version 1.1;\n"
+            "        proxy_set_header Upgrade $http_upgrade;\n"
+            "        proxy_set_header Connection upgrade;\n"
+            "        proxy_set_header Host $host;\n"
+            "        proxy_set_header X-Real-IP $remote_addr;\n"
+            "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+            "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+            "        proxy_read_timeout 300s;\n"
+            "        proxy_connect_timeout 75s;\n"
+            "    }\n\n"
+        )
+        text = text[:loc] + block + text[loc:]
+        path.write_text(text)
+PY
+  fi
+
   if grep -q 'proxy_pass https://127.0.0.1:8087;' "$available"; then
     echo "[deploy] invalid custody upstream scheme in nginx config: expected http://127.0.0.1:8087" >&2
+    return 1
+  fi
+
+  if ! grep -q 'proxy_pass http://127.0.0.1:8088;' "$available"; then
+    echo "[deploy] custody /rpc daemon upstream missing from nginx config" >&2
     return 1
   fi
 

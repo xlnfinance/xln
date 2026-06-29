@@ -56,8 +56,12 @@ export const handleRuntimeHealth = async (
     );
   }
 
-  if (!deps.cachedHealthInFlight) {
-    const work = (async () => {
+  // Capture the in-flight promise into a local so a concurrent request can't observe it being
+  // cleared by another request's `.finally` between this check and the await (that race threw
+  // RUNTIME_HEALTH_INFLIGHT_MISSING and 500'd /api/health under concurrent polling).
+  let inFlight = deps.cachedHealthInFlight;
+  if (!inFlight) {
+    inFlight = (async () => {
       const { getHealthStatus } = await import('../health');
       const env = deps.env;
       const health = await getHealthStatus(env);
@@ -154,13 +158,9 @@ export const handleRuntimeHealth = async (
     })().finally(() => {
       deps.setCachedHealthInFlight(null);
     });
-    deps.setCachedHealthInFlight(work);
+    deps.setCachedHealthInFlight(inFlight);
   }
 
-  const inFlight = deps.cachedHealthInFlight;
-  if (!inFlight) {
-    throw new Error('RUNTIME_HEALTH_INFLIGHT_MISSING');
-  }
   const body = await inFlight;
   return new Response(includeOperatorHealth ? body.fullBody : body.publicBody, {
     headers: {
