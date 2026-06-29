@@ -2128,6 +2128,15 @@ const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHe
   routes: [],
 });
 
+const buildNeutralMarketMakerCrossHealth = (): MarketMakerHealth['cross'] => ({
+  applicable: false,
+  ok: true,
+  expectedRoutes: 0,
+  expectedOffersPerRoute: 0,
+  expectedOffersPerPair: 0,
+  routes: [],
+});
+
 const maintainMarketMakerCrossQuotes = async (
   env: Env,
   sourceContext: MarketMakerEntityContext,
@@ -2904,14 +2913,16 @@ export const buildMarketMakerBootstrapFingerprint = (
           compareStableText(left.sourceHub, right.sourceHub) ||
           compareStableText(left.targetHub, right.targetHub),
         ),
-      offersCommitted: collectCommittedMarketMakerCrossOfferFingerprints(
-        env,
-        contexts,
-        visibleHubs,
-        tokenIdsByContext,
-        contextRoles,
-        hubRoles,
-      ),
+      offersCommitted: health.cross.expectedRoutes > 0
+        ? collectCommittedMarketMakerCrossOfferFingerprints(
+            env,
+            contexts,
+            visibleHubs,
+            tokenIdsByContext,
+            contextRoles,
+            hubRoles,
+          )
+        : [],
     },
   };
   const encoded = safeStringify(payload);
@@ -3051,6 +3062,7 @@ const run = async (): Promise<void> => {
   let bootstrapEntityStateHash: string | null = null;
   let bootstrapReadyAt: number | null = null;
   let bootstrapCrossStarted = false;
+  let bootstrapCrossExpectedRoutes: boolean | null = null;
   let bootstrapReadySnapshotPersisted = false;
   type DirectEntityInputDebug = {
     at: number;
@@ -3099,7 +3111,10 @@ const run = async (): Promise<void> => {
     });
   };
 
-  const buildMarketMakerHealthSnapshot = (options: { includeCross?: boolean } = {}): MarketMakerHealth | null => {
+  const buildMarketMakerHealthSnapshot = (options: {
+    includeCross?: boolean;
+    crossOverride?: MarketMakerHealth['cross'];
+  } = {}): MarketMakerHealth | null => {
     const primaryContext = mmContexts[0] ?? null;
     const activeEntityId = activeMmEntityId;
     if (!activeEntityId || !primaryContext) return null;
@@ -3107,7 +3122,8 @@ const run = async (): Promise<void> => {
     const allVisibleHubs = readVisibleHubProfiles(env, true);
     cachedVisibleHubProfiles = visibleHubs;
     cachedAllVisibleHubProfiles = allVisibleHubs;
-    const includeCross = options.includeCross !== false;
+    const crossOverride = options.crossOverride;
+    const includeCross = !crossOverride && options.includeCross !== false;
     const crossApplicable = mmContexts.length > 1 && allVisibleHubs.some(profile =>
       mmContexts.some(context => sameJurisdiction(context, profile)) &&
       !sameJurisdiction(primaryContext, profile),
@@ -3124,7 +3140,7 @@ const run = async (): Promise<void> => {
             tokenIdsByContext: mmTokenIdsByContext,
           }
         : undefined,
-      includeCross ? undefined : buildDeferredMarketMakerCrossHealth(crossApplicable),
+      crossOverride ?? (includeCross ? undefined : buildDeferredMarketMakerCrossHealth(crossApplicable)),
     );
   };
 
@@ -3209,7 +3225,10 @@ const run = async (): Promise<void> => {
     });
   };
 
-  const publishMarketMakerHealthSnapshot = (options: { includeCross?: boolean } = {}): MarketMakerHealth | null => {
+  const publishMarketMakerHealthSnapshot = (options: {
+    includeCross?: boolean;
+    crossOverride?: MarketMakerHealth['cross'];
+  } = {}): MarketMakerHealth | null => {
     const health = buildMarketMakerHealthSnapshot(options);
     if (health) cachedMarketMakerHealth = health;
     rebuildCachedHealthResponseJson();
@@ -3217,7 +3236,11 @@ const run = async (): Promise<void> => {
   };
 
   const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>
-    publishMarketMakerHealthSnapshot({ includeCross: bootstrapCrossStarted });
+    publishMarketMakerHealthSnapshot(
+      bootstrapCrossExpectedRoutes === false
+        ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
+        : { includeCross: false },
+    );
 
   const buildAccountStatusDebug = (
     entityId: string,
@@ -3647,11 +3670,15 @@ const run = async (): Promise<void> => {
   const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {
     if (bootstrapCompletionHealthHeight === env.height) return bootstrapCompletionHealth;
     bootstrapCompletionHealthHeight = env.height;
-    bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
+    bootstrapCompletionHealth = buildMarketMakerHealthSnapshot(
+      bootstrapCrossExpectedRoutes === false
+        ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
+        : { includeCross: true },
+    );
     return bootstrapCompletionHealth;
   };
   const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>
-    buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, visibleHubs, mmTokenIdsByContext).size > 0;
+    bootstrapCrossExpectedRoutes ?? buildExpectedMarketMakerCrossRouteGroups(env, mmContexts, visibleHubs, mmTokenIdsByContext).size > 0;
   const canCheckBootstrapCompletion = (): boolean => {
     if (!bootstrapCrossStarted || hasMarketMakerRuntimeBacklog(env)) return false;
     const visibleHubs = readVisibleHubProfiles(env, true);
@@ -3864,6 +3891,18 @@ const run = async (): Promise<void> => {
             targetHubs,
             sourceTokenIds,
             targetTokenIds,
+          });
+        }
+      }
+      if (mode === 'bootstrap' && bootstrapCrossStarted) {
+        const hasExpectedRoutes = crossQuoteJobs.length > 0;
+        if (bootstrapCrossExpectedRoutes !== hasExpectedRoutes) {
+          bootstrapCrossExpectedRoutes = hasExpectedRoutes;
+          bootstrapCompletionHealthHeight = -1;
+          let expectedRouteJobs = 0;
+          if (hasExpectedRoutes) expectedRouteJobs = crossQuoteJobs.length;
+          emitBootstrapDebugEvent('cross-plan', {
+            expectedRoutes: expectedRouteJobs,
           });
         }
       }
@@ -4189,7 +4228,11 @@ const run = async (): Promise<void> => {
     healthRefreshInFlight = true;
     try {
       if (startupPhase === 'offers-ready') {
-        publishMarketMakerHealthSnapshot({ includeCross: true });
+        publishMarketMakerHealthSnapshot(
+          bootstrapCrossExpectedRoutes === false
+            ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
+            : { includeCross: true },
+        );
       } else {
         publishBootstrapHealthSnapshot();
       }
@@ -4200,16 +4243,28 @@ const run = async (): Promise<void> => {
   const runQuoteMaintenance = async (): Promise<void> => {
     if (hasMarketMakerRuntimeBacklog(env)) return;
     if (startupPhase === 'offers-ready') {
-      publishMarketMakerHealthSnapshot({ includeCross: true });
+      publishMarketMakerHealthSnapshot(
+        bootstrapCrossExpectedRoutes === false
+          ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
+          : { includeCross: true },
+      );
       return;
     }
     const before = startupPhase === 'offers-ready'
-      ? publishMarketMakerHealthSnapshot({ includeCross: true })
+      ? publishMarketMakerHealthSnapshot(
+          bootstrapCrossExpectedRoutes === false
+            ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
+            : { includeCross: true },
+        )
       : publishBootstrapHealthSnapshot();
     if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;
     const enqueued = await driveQuotes();
     if (startupPhase === 'offers-ready') {
-      publishMarketMakerHealthSnapshot({ includeCross: true });
+      publishMarketMakerHealthSnapshot(
+        bootstrapCrossExpectedRoutes === false
+          ? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }
+          : { includeCross: true },
+      );
     } else {
       publishBootstrapHealthSnapshot();
     }

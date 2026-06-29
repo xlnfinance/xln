@@ -228,7 +228,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("role: 'source-mm-hub' | 'target-mm-hub';");
     expect(mmNode).toContain('const describeMarketMakerAccountBlocker = (');
     expect(mmNode).toContain("reason: 'missing-account' | 'inactive-account' | 'height-zero' | 'pending-frame' | 'mempool';");
-    expect(mmNode).toContain('const publishMarketMakerHealthSnapshot = (options: { includeCross?: boolean } = {}): MarketMakerHealth | null => {');
+    expect(mmNode).toContain('crossOverride?: MarketMakerHealth[\'cross\'];');
+    expect(mmNode).toContain('const publishMarketMakerHealthSnapshot = (options: {');
     expect(mmNode).toContain('if (health) cachedMarketMakerHealth = health;');
     expect(mmNode).toContain('const shouldStartJWatcherAtCurrentBlock = (): boolean =>');
     expect(mmNode).toContain("!envFlagEnabled(process.env['XLN_MARKET_MAKER_REPLAY_HISTORICAL_J_EVENTS'])");
@@ -369,7 +370,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (hasSourceAccountCrossOffer(env, route)) return true;');
     expect(mmNode).not.toContain('const isMarketMakerBootstrapReady = (health: MarketMakerHealth | null): boolean => {');
     expect(mmNode).toContain('const isMarketMakerDepthComplete = (health: MarketMakerHealth | null): boolean => {');
-    expect(mmNode).toContain("if (startupPhase === 'offers-ready') {\n      publishMarketMakerHealthSnapshot({ includeCross: true });\n      return;\n    }");
+    expect(mmNode).toContain("if (startupPhase === 'offers-ready') {");
+    expect(mmNode).toContain("bootstrapCrossExpectedRoutes === false");
+    expect(mmNode).toContain("crossOverride: buildNeutralMarketMakerCrossHealth()");
     expect(mmNode).not.toContain('Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)');
     expect(mmNode).toContain('const quoteReadyHubEntityIds = hubEntityIds.filter((hubEntityId) =>');
     expect(mmNode).toContain('const desiredOffers = buildMarketMakerOfferSpecs(quoteReadyHubEntityIds, tokenIds);');
@@ -470,10 +473,15 @@ describe('production startup wiring', () => {
     expect(healthBuilder).toContain('expectedRoutes: 0');
     expect(healthBuilder).toContain('cachedHealthResponseJson = safeStringify({');
     expect(mmNode).toContain('const buildDeferredMarketMakerCrossHealth = (applicable: boolean): MarketMakerHealth[\'cross\'] => ({');
+    expect(mmNode).toContain('const buildNeutralMarketMakerCrossHealth = (): MarketMakerHealth[\'cross\'] => ({');
     expect(mmNode).toContain('ok: expectedRouteCount === 0 || (routes.length >= expectedRouteCount && routes.every(route => route.ready))');
-    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>\n    publishMarketMakerHealthSnapshot({ includeCross: bootstrapCrossStarted });');
+    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>');
+    expect(mmNode).toContain("? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }");
+    expect(mmNode).toContain(": { includeCross: false },");
     expect(mmNode).toContain('const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {');
-    expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });');
+    expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot(');
+    expect(mmNode).toContain("? { includeCross: false, crossOverride: buildNeutralMarketMakerCrossHealth() }");
+    expect(mmNode).toContain(": { includeCross: true },");
     expect(mmNode).toContain("import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';");
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string => {');
     expect(mmNode).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
@@ -486,7 +494,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD']");
     expect(mmNode).toContain('BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}');
-    expect(mmNode).toContain('const publishBootstrapHealthSnapshot = (): MarketMakerHealth | null =>\n    publishMarketMakerHealthSnapshot({ includeCross: bootstrapCrossStarted });');
+    expect(mmNode).toContain('let bootstrapCrossExpectedRoutes: boolean | null = null;');
+    expect(mmNode).toContain("emitBootstrapDebugEvent('cross-plan'");
     expect(mmNode).toContain('const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>');
     expect(mmNode).toContain('const canCheckBootstrapCompletion = (): boolean =>');
     expect(mmNode).toContain('return !hasExpectedBootstrapCrossRoutes(visibleHubs) || !hasBootstrapCrossAccountBacklog(visibleHubs);');
@@ -499,7 +508,8 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain("await markOffersReady();\n      publishMarketMakerHealthSnapshot({ includeCross: true });");
     expect(mmNode).toContain("startupPhase = 'bootstrap-same-chain';\n    publishBootstrapHealthSnapshot();");
     expect(mmNode).toContain('const sameDepthComplete =\n        isMarketMakerSameDepthComplete(health) &&\n        isAllSameQuoteDepthComplete(readVisibleHubProfiles(env, true));');
-    expect(mmNode).toContain("const before = startupPhase === 'offers-ready'\n      ? publishMarketMakerHealthSnapshot({ includeCross: true })\n      : publishBootstrapHealthSnapshot();");
+    expect(mmNode).toContain("const before = startupPhase === 'offers-ready'");
+    expect(mmNode).toContain(': publishBootstrapHealthSnapshot();');
     expect(mmNode).toContain("if (startupPhase === 'offers-ready' && isMarketMakerDepthComplete(before)) return;");
     expect(mmNode).not.toContain("if (startupPhase !== 'offers-ready' && bootstrapCrossStarted) {");
     expect(mmNode).not.toContain('const completionHealth = bootstrapCrossStarted ? buildBootstrapCompletionHealth() : health;');
