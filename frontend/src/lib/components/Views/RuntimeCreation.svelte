@@ -25,7 +25,9 @@
     getShardCount,
     hexToBytes,
   } from '@xln/brainvault/core';
-  import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
+  import { DEMO_ACCOUNTS, type DemoAccount } from '$lib/config/demo-accounts';
+  import { resolveConfiguredApiBase } from '$lib/stores/xlnStore';
+  import { runtimeOperations } from '$lib/stores/runtimeStore';
   import { generateLazyEntityIdPreview } from '$lib/utils/lazyEntityId';
   import {
     BRAINVAULT_WORKER_CAP_STORAGE_KEY,
@@ -78,6 +80,78 @@
   function setScheme(next: AuthScheme): void {
     scheme = next;
     if (typeof localStorage !== 'undefined') localStorage.setItem(AUTH_SCHEME_STORAGE_KEY, next);
+  }
+
+  // Advanced options (security work factor etc.) are collapsed by default for a minimalist screen
+  let showAdvanced = false;
+
+  // Group demo accounts by role (users | hubs | apps) so quick login can show separators
+  const DEMO_GROUPS: DemoAccount[][] = DEMO_ACCOUNTS.reduce((groups: DemoAccount[][], acc) => {
+    const last = groups[groups.length - 1];
+    if (last && last[0]?.role === acc.role) last.push(acc);
+    else groups.push([acc]);
+    return groups;
+  }, []);
+
+  // Live remote runtimes discovered from the server's import manifest (hubs + MM + custody),
+  // each carrying a fresh radapter capability token (admin).
+  type LiveRuntime = { label: string; access: 'admin' | 'read'; wsUrl: string; token: string };
+  let liveRuntimes: LiveRuntime[] = [];
+  let liveRuntimesLoading = false;
+  let liveRuntimesError = '';
+  let liveRuntimesLoaded = false;
+  let connectingRuntimeId = '';
+  let selectedRuntimeKey = '';
+
+  function connectSelectedRuntime(): void {
+    const rt = liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey);
+    if (rt) void connectLiveRuntime(rt);
+  }
+
+  async function discoverLiveRuntimes(): Promise<void> {
+    if (typeof window === 'undefined' || liveRuntimesLoading) return;
+    liveRuntimesLoading = true;
+    liveRuntimesError = '';
+    try {
+      const apiBase = resolveConfiguredApiBase(window.location.origin);
+      const url = new URL('/api/runtime-import', apiBase);
+      url.searchParams.set('access', 'admin');
+      url.searchParams.set('ts', String(Date.now()));
+      const res = await fetch(url.toString(), { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json() as { manifest?: { entries?: Array<Record<string, unknown>> } };
+      const next: LiveRuntime[] = [];
+      for (const entry of payload.manifest?.entries ?? []) {
+        const wsUrl = String(entry['wsUrl'] || '').trim();
+        const token = String(entry['token'] || '').trim();
+        const label = String(entry['label'] || wsUrl || 'runtime');
+        const access = entry['access'] === 'admin' ? 'admin' : 'read';
+        if (!wsUrl || !token) continue;
+        next.push({ label, access, wsUrl, token });
+      }
+      liveRuntimes = next;
+      liveRuntimesLoaded = true;
+    } catch (err) {
+      liveRuntimesError = err instanceof Error ? err.message : String(err);
+    } finally {
+      liveRuntimesLoading = false;
+    }
+  }
+
+  async function connectLiveRuntime(rt: LiveRuntime): Promise<void> {
+    if (connectingRuntimeId) return;
+    connectingRuntimeId = rt.wsUrl;
+    liveRuntimesError = '';
+    try {
+      const stored = await runtimeOperations.connectRemote(rt.wsUrl, rt.token, {
+        label: rt.label,
+        access: rt.access,
+      });
+      runtimeOperations.activateRemoteRuntime(stored.runtimeId, { href: '/app' });
+    } catch (err) {
+      liveRuntimesError = `${rt.label}: ${err instanceof Error ? err.message : String(err)}`;
+      connectingRuntimeId = '';
+    }
   }
 
   $: hasAnyPersistedState = typeof localStorage !== 'undefined' && (localStorage.length > 0 || typeof indexedDB !== 'undefined');
@@ -883,6 +957,9 @@
       scheme = 'light';
     }
 
+    // Auto-discover live runtimes (hubs) for the connect dropdown — standalone login only
+    if (!embedded) void discoverLiveRuntimes();
+
     // Run async init
     (async () => {
       // Init i18n
@@ -993,32 +1070,96 @@
         </div>
 
         <div class="quick-login-section">
-          <div class="quick-login-header">Quick Login (Testnet)</div>
+          <div class="quick-login-header">
+            <span class="ql-title">Quick login</span>
+            <span class="ql-temp">sandbox · resets on reload</span>
+          </div>
           <div class="quick-login-grid">
-            {#each DEMO_ACCOUNTS as account}
-              <button
-                class="quick-login-btn"
-                type="button"
-                on:click={() => {
-                  name = account.name;
-                  passphrase = account.password;
-                  shardInput = account.factor;
-                  inputMode = 'brainvault';
-                  createLoginType = 'demo';
-                  setTimeout(() => startDerivation(), 100);
-                }}
-              >
-                {account.name}
-              </button>
+            {#each DEMO_GROUPS as group, gi}
+              {#if gi > 0}
+                <span class="ql-divider" aria-hidden="true"></span>
+              {/if}
+              <div class="ql-group">
+                {#each group as account}
+                  <button
+                    class="quick-login-btn role-{account.role}"
+                    class:wide={account.label.length > 2}
+                    type="button"
+                    title={account.role === 'hub' ? 'Hub' : account.role === 'app' ? 'App entity' : 'User'}
+                    on:click={() => {
+                      name = account.name;
+                      passphrase = account.password;
+                      shardInput = account.factor;
+                      inputMode = 'brainvault';
+                      createLoginType = 'demo';
+                      setTimeout(() => startDerivation(), 100);
+                    }}
+                  >
+                    {account.label}
+                  </button>
+                {/each}
+              </div>
             {/each}
           </div>
         </div>
 
+        {#if !embedded}
+          <!-- Connect to a live remote runtime (radapter, admin) -->
+          <div class="live-runtime-section">
+            <div class="live-runtime-header">
+              <span class="ql-title">Connect to live runtime</span>
+              <button
+                type="button"
+                class="live-refresh"
+                title="Refresh"
+                aria-label="Refresh live runtimes"
+                disabled={liveRuntimesLoading}
+                on:click={discoverLiveRuntimes}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:spinning={liveRuntimesLoading}>
+                  <path d="M21 2v6h-6M3 22v-6h6M3.51 9a9 9 0 0114.13-3.36L21 8M3 16l3.36 2.36A9 9 0 0020.49 15"/>
+                </svg>
+              </button>
+            </div>
+
+            {#if liveRuntimes.length > 0}
+              <div class="live-runtime-row">
+                <select
+                  class="live-runtime-select"
+                  bind:value={selectedRuntimeKey}
+                  disabled={!!connectingRuntimeId}
+                >
+                  <option value="" disabled>Select a runtime…</option>
+                  {#each liveRuntimes as rt}
+                    <option value={rt.wsUrl}>{rt.label} · {new URL(rt.wsUrl).host}</option>
+                  {/each}
+                </select>
+                <button
+                  type="button"
+                  class="live-connect-btn"
+                  disabled={!selectedRuntimeKey || !!connectingRuntimeId}
+                  on:click={connectSelectedRuntime}
+                >
+                  {connectingRuntimeId ? 'Connecting…' : 'Connect · admin'}
+                </button>
+              </div>
+            {:else if liveRuntimesLoading}
+              <div class="live-runtime-hint">Discovering live runtimes…</div>
+            {:else if liveRuntimesLoaded}
+              <div class="live-runtime-hint">No live runtimes online.</div>
+            {/if}
+
+            {#if liveRuntimesError}
+              <div class="live-runtime-error">{liveRuntimesError}</div>
+            {/if}
+          </div>
+        {/if}
+
         {#if inputMode === 'brainvault'}
         <!-- Name Input -->
         <div class="input-group">
-          <label for="name">Display name</label>
-	          <span class="input-hint">This becomes the wallet and public entity name.</span>
+          <label for="name">Name <span class="label-aside">for seed derivation</span></label>
+	          <span class="input-hint">Becomes the wallet and public entity name.</span>
           <div class="input-wrapper">
             <input
               type="text"
@@ -1085,56 +1226,65 @@
           {/if}
         </div>
 
-        <!-- Security Factor -->
-        <div class="input-group factor-group">
-	          <label for="shards">Security work factor</label>
+        <!-- Advanced options - collapsed by default to keep the screen minimal -->
+        <button
+          type="button"
+          class="advanced-toggle"
+          class:open={showAdvanced}
+          aria-expanded={showAdvanced}
+          on:click={() => showAdvanced = !showAdvanced}
+        >
+          <span class="advanced-toggle-main">
+            <span class="advanced-toggle-label">Security work factor</span>
+            <span class="advanced-toggle-summary">{factorInfo.tier} · {factorInfo.shards.toLocaleString()} shards · {factorInfo.time}</span>
+          </span>
+          <svg class="advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
 
-          <div class="factor-buttons">
-            {#each FACTOR_INFO as info, i}
+        {#if showAdvanced}
+          <div class="input-group factor-group advanced-panel">
+            <div class="factor-buttons">
+              {#each FACTOR_INFO as info, i}
+                <button
+                  type="button"
+                  class="factor-btn"
+                  class:selected={shardInput === info.factor}
+                  on:click={() => shardInput = info.factor}
+                >
+                  <span class="factor-num">{info.factor}</span>
+                  <span class="factor-tier">{info.tier}</span>
+                </button>
+              {/each}
               <button
                 type="button"
-                class="factor-btn"
-                class:selected={shardInput === info.factor}
-                on:click={() => shardInput = info.factor}
+                class="factor-btn custom-btn"
+                class:selected={!isPreset}
+                on:click={() => { if (isPreset) shardInput = 6; }}
               >
-                <span class="factor-num">{info.factor}</span>
-                <span class="factor-tier">{info.tier}</span>
+                <span class="factor-num">⚙</span>
+                <span class="factor-tier">Custom</span>
               </button>
-            {/each}
-            <button
-              type="button"
-              class="factor-btn custom-btn"
-              class:selected={!isPreset}
-              on:click={() => { if (isPreset) shardInput = 6; }}
-            >
-              <span class="factor-num">⚙</span>
-              <span class="factor-tier">Custom</span>
-            </button>
-          </div>
-
-          {#if !isPreset}
-            <div class="custom-shard-input">
-              <input
-                type="number"
-                id="shards"
-                min="6"
-                max="100000"
-                bind:value={shardInput}
-                placeholder="6"
-              />
-              <span class="custom-label">shards</span>
             </div>
-          {/if}
 
-          <div class="factor-summary">
-            <span class="factor-detail">{factorInfo.shards.toLocaleString()} shards</span>
-            <span class="factor-separator">·</span>
-            <span class="factor-detail">{factorInfo.time}</span>
+            {#if !isPreset}
+              <div class="custom-shard-input">
+                <input
+                  type="number"
+                  id="shards"
+                  min="6"
+                  max="100000"
+                  bind:value={shardInput}
+                  placeholder="6"
+                />
+                <span class="custom-label">shards</span>
+              </div>
+            {/if}
+
+            <p class="warning-text">Your inputs generate a unique wallet. Encrypted backups and last-resort dispute services can be configured after the runtime is created.</p>
           </div>
-        </div>
-
-        <!-- Warning (subtle) -->
-	        <p class="warning-text">Your inputs generate a unique wallet. Encrypted backups and last-resort dispute services can be configured after the runtime is created.</p>
+        {/if}
         {:else}
         <!-- Mnemonic Input Mode -->
         <button type="button" class="back-to-create" on:click={() => inputMode = 'brainvault'}>
@@ -1605,45 +1755,245 @@
   }
 
   .quick-login-section {
-    margin-bottom: 12px;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.018);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin-bottom: 14px;
+    padding: 10px 12px 12px;
+    background: rgba(255, 255, 255, 0.012);
+    border: 1px dashed rgba(255, 255, 255, 0.14);
     border-radius: 8px;
     width: 100%;
     box-sizing: border-box;
   }
   .quick-login-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 9px;
+  }
+  .ql-title {
     font-size: 10px;
-    font-weight: 600;
-    color: rgba(156, 163, 175, 0.78);
+    font-weight: 700;
+    color: rgba(156, 163, 175, 0.85);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    margin-bottom: 8px;
+  }
+  .ql-temp {
+    font-size: 9.5px;
+    font-weight: 600;
+    color: rgba(156, 163, 175, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
   .quick-login-grid {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
     width: 100%;
   }
+  .ql-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .ql-divider {
+    flex: 0 0 auto;
+    align-self: stretch;
+    width: 1px;
+    min-height: 24px;
+    margin: 0 3px;
+    background: rgba(255, 255, 255, 0.12);
+  }
   .quick-login-btn {
-    padding: 8px 10px;
-    background: rgba(255, 255, 255, 0.06);
+    flex: 0 0 auto;
+    min-width: 38px;
+    padding: 7px 9px;
+    background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.92);
-    font-weight: 600;
+    border-radius: 7px;
+    color: rgba(255, 255, 255, 0.88);
+    font-weight: 650;
     font-size: 13px;
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-    text-transform: capitalize;
-    min-height: 34px;
+    min-height: 32px;
+  }
+  .quick-login-btn.wide {
+    padding-left: 12px;
+    padding-right: 12px;
   }
   .quick-login-btn:hover {
     background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 200, 100, 0.24);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.98);
+  }
+  /* Hubs = amber (routing infrastructure) */
+  .quick-login-btn.role-hub {
+    background: rgba(251, 191, 36, 0.08);
+    border-color: rgba(251, 191, 36, 0.28);
+    color: rgba(253, 215, 150, 0.95);
+  }
+  .quick-login-btn.role-hub:hover {
+    background: rgba(251, 191, 36, 0.16);
+    border-color: rgba(251, 191, 36, 0.5);
+    color: rgba(255, 224, 168, 1);
+  }
+  /* App entities = teal (custody app / MM user) */
+  .quick-login-btn.role-app {
+    background: rgba(45, 212, 191, 0.08);
+    border-color: rgba(45, 212, 191, 0.28);
+    color: rgba(153, 246, 228, 0.95);
+  }
+  .quick-login-btn.role-app:hover {
+    background: rgba(45, 212, 191, 0.16);
+    border-color: rgba(45, 212, 191, 0.5);
+    color: rgba(178, 248, 233, 1);
+  }
+
+  .label-aside {
+    font-weight: 400;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    color: rgba(255, 255, 255, 0.32);
+  }
+
+  /* Advanced toggle (collapses the security work factor) */
+  .advanced-toggle {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 16px;
+    padding: 11px 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.85);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    text-align: left;
+  }
+  .advanced-toggle:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 200, 100, 0.2);
+  }
+  .advanced-toggle-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .advanced-toggle-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(180, 140, 80, 0.85);
+  }
+  .advanced-toggle-summary {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: 'SF Mono', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .advanced-chevron {
+    flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.5);
+    transition: transform 0.2s ease;
+  }
+  .advanced-toggle.open .advanced-chevron {
+    transform: rotate(180deg);
+  }
+  .advanced-panel {
+    margin-top: -4px;
+  }
+
+  /* Connect to live runtime (radapter) */
+  .live-runtime-section {
+    margin-bottom: 14px;
+    padding: 10px 12px 12px;
+    background: rgba(255, 255, 255, 0.012);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+  }
+  .live-runtime-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 9px;
+  }
+  .live-refresh {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .live-refresh:hover:not(:disabled) {
     color: rgba(255, 200, 100, 0.95);
+    border-color: rgba(255, 200, 100, 0.24);
+  }
+  .live-refresh:disabled { cursor: default; opacity: 0.6; }
+  .live-refresh .spinning { animation: spin 0.9s linear infinite; }
+  .live-runtime-row {
+    display: flex;
+    gap: 8px;
+  }
+  .live-runtime-select {
+    flex: 1;
+    min-width: 0;
+    min-height: 36px;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 7px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .live-runtime-select:focus {
+    outline: none;
+    border-color: rgba(255, 200, 100, 0.4);
+  }
+  .live-connect-btn {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 8px 14px;
+    background: rgba(255, 200, 100, 0.1);
+    border: 1px solid rgba(255, 200, 100, 0.3);
+    border-radius: 7px;
+    color: rgba(255, 218, 150, 0.96);
+    font-size: 13px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease;
+    white-space: nowrap;
+  }
+  .live-connect-btn:hover:not(:disabled) {
+    background: rgba(255, 200, 100, 0.18);
+    border-color: rgba(255, 200, 100, 0.5);
+  }
+  .live-connect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .live-runtime-hint {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.42);
+  }
+  .live-runtime-error {
+    margin-top: 8px;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: rgba(255, 145, 120, 0.95);
+    overflow-wrap: anywhere;
   }
 
   .brainvault-wrapper {
@@ -2466,14 +2816,12 @@
     }
 
     .quick-login-grid {
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 6px;
+      gap: 5px;
     }
 
     .quick-login-btn {
-      padding: 9px 6px;
       font-size: 12px;
-      min-height: 38px;
+      min-height: 34px;
     }
 
     .factor-buttons {
@@ -2613,24 +2961,100 @@
 
   /* Quick login */
   .scheme-light .quick-login-section {
-    background: rgba(15, 23, 42, 0.015);
-    border-color: var(--l-border);
+    background: rgba(15, 23, 42, 0.012);
+    border-color: rgba(15, 23, 42, 0.16);
   }
-  .scheme-light .quick-login-header { color: var(--l-text-3); }
+  .scheme-light .ql-title { color: var(--l-text-2); }
+  .scheme-light .ql-temp { color: var(--l-text-3); }
+  .scheme-light .ql-divider { background: rgba(15, 23, 42, 0.12); }
   .scheme-light .quick-login-btn {
     background: var(--l-card);
-    border-color: var(--l-border);
+    border-color: var(--l-border-strong);
     color: var(--l-text);
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   }
   .scheme-light .quick-login-btn:hover {
-    background: var(--l-accent-soft);
-    border-color: var(--l-accent-ring);
-    color: var(--l-accent);
+    background: rgba(15, 23, 42, 0.03);
+    border-color: var(--l-border-strong);
+    color: var(--l-text);
   }
+  /* Hubs = amber */
+  .scheme-light .quick-login-btn.role-hub {
+    background: rgba(217, 119, 6, 0.08);
+    border-color: rgba(217, 119, 6, 0.28);
+    color: #b45309;
+  }
+  .scheme-light .quick-login-btn.role-hub:hover {
+    background: rgba(217, 119, 6, 0.14);
+    border-color: rgba(217, 119, 6, 0.45);
+    color: #92400e;
+  }
+  /* App entities = teal */
+  .scheme-light .quick-login-btn.role-app {
+    background: rgba(13, 148, 136, 0.08);
+    border-color: rgba(13, 148, 136, 0.28);
+    color: #0f766e;
+  }
+  .scheme-light .quick-login-btn.role-app:hover {
+    background: rgba(13, 148, 136, 0.14);
+    border-color: rgba(13, 148, 136, 0.45);
+    color: #115e59;
+  }
+
+  /* Advanced toggle */
+  .scheme-light .advanced-toggle {
+    background: var(--l-card);
+    border-color: var(--l-border);
+    color: var(--l-text);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  }
+  .scheme-light .advanced-toggle:hover {
+    background: rgba(15, 23, 42, 0.02);
+    border-color: var(--l-border-strong);
+  }
+  .scheme-light .advanced-toggle-label { color: var(--l-text-2); }
+  .scheme-light .advanced-toggle-summary { color: var(--l-text-3); }
+  .scheme-light .advanced-chevron { color: var(--l-text-3); }
+
+  /* Connect to live runtime */
+  .scheme-light .live-runtime-section {
+    background: rgba(15, 23, 42, 0.012);
+    border-color: var(--l-border);
+  }
+  .scheme-light .live-refresh {
+    border-color: var(--l-border-strong);
+    color: var(--l-text-3);
+  }
+  .scheme-light .live-refresh:hover:not(:disabled) {
+    color: var(--l-accent);
+    border-color: var(--l-accent-ring);
+  }
+  .scheme-light .live-runtime-select {
+    background: var(--l-field);
+    border-color: var(--l-border-strong);
+    color: var(--l-text);
+  }
+  .scheme-light .live-runtime-select:focus {
+    border-color: var(--l-accent);
+    box-shadow: 0 0 0 3px var(--l-accent-ring);
+  }
+  .scheme-light .live-connect-btn {
+    background: var(--l-accent);
+    border-color: transparent;
+    color: #ffffff;
+    box-shadow: 0 2px 6px rgba(79, 70, 229, 0.22);
+  }
+  .scheme-light .live-connect-btn:hover:not(:disabled) {
+    background: var(--l-accent-hover);
+    border-color: transparent;
+  }
+  .scheme-light .live-connect-btn:disabled { background: #e2e6ee; color: var(--l-text-3); box-shadow: none; }
+  .scheme-light .live-runtime-hint { color: var(--l-text-3); }
+  .scheme-light .live-runtime-error { color: #b91c1c; }
 
   /* Labels + hints + inputs */
   .scheme-light .input-group label { color: var(--l-text-2); }
+  .scheme-light .label-aside { color: var(--l-text-3); }
   .scheme-light .input-hint { color: var(--l-text-3); }
 
   .scheme-light .input-wrapper input,
