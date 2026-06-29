@@ -1437,6 +1437,16 @@ const countCrossPairCoverageGaps = (
   return crossSpecPairIds(specs).filter(pairId => (visibleByPair.get(pairId) || 0) === 0).length;
 };
 
+const hasFinalizedCrossRouteCoverage = (
+  env: Env,
+  specs: MarketMakerOfferSpec[],
+): boolean => specs.some(spec => hasFinalizedMarketMakerCrossOffer(env, spec));
+
+const countCrossRouteCoverageGaps = (
+  env: Env,
+  specs: MarketMakerOfferSpec[],
+): number => specs.length > 0 && !hasFinalizedCrossRouteCoverage(env, specs) ? 1 : 0;
+
 const ensureMarketMakerHubConnectivity = async (
   env: Env,
   mmEntityId: string,
@@ -2003,7 +2013,7 @@ export const buildMarketMakerCrossHealth = (
       sourceHubEntityId: group.sourceHubEntityId,
       targetHubEntityId: group.targetHubEntityId,
       offers,
-      ready: pairs.length > 0 && blockers.length === 0 && pairs.every(pair => pair.ready),
+      ready: offers > 0 && blockers.length === 0,
       depthReady: expectedOffers > 0 && offers >= expectedOffers && pairs.every(pair => pair.depthReady),
       blockers,
       pairs,
@@ -2211,7 +2221,7 @@ const maintainMarketMakerCrossQuotes = async (
         return {
           sourceHub,
           specs,
-          coverageGaps: countCrossPairCoverageGaps(env, specs),
+          coverageGaps: countCrossRouteCoverageGaps(env, specs),
           progress: countCrossSpecBootstrapProgress(env, specs, getPendingCrossRequestOrderIds),
         };
       })
@@ -2278,6 +2288,11 @@ const maintainMarketMakerCrossQuotes = async (
           remainingNewOffers,
         );
         if (allowedNewOffers <= 0) continue;
+        const routeHasFinalizedOffer = hasFinalizedCrossRouteCoverage(env, targetSpecs);
+        const routeHasInFlightProgress = !routeHasFinalizedOffer && targetSpecs.some(spec =>
+          hasCrossSpecBootstrapProgress(env, spec, getPendingCrossRequestOrderIds),
+        );
+        if (routeHasInFlightProgress) continue;
         const missingCandidates = targetSpecs
           .filter(spec =>
             spec.crossJurisdiction &&
@@ -2301,7 +2316,8 @@ const maintainMarketMakerCrossQuotes = async (
             compareStableText(left.offerId, right.offerId),
           );
         candidateCount += missingCandidates.length;
-        for (const spec of missingCandidates.slice(0, allowedNewOffers)) {
+        const selectedLimit = routeHasFinalizedOffer ? allowedNewOffers : Math.min(allowedNewOffers, 1);
+        for (const spec of missingCandidates.slice(0, selectedLimit)) {
           const route = spec.crossJurisdiction!;
           pushMarketMakerEntityTx(
             entityInputsByEntitySigner,

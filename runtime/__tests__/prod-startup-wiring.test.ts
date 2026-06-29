@@ -357,7 +357,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('if (isBootstrapDepthComplete(beforeDrive) && canCheckBootstrapCompletion()) return beforeDrive;');
     expect(mmNode).toContain('const hubsDepthReady = hubs.length > 0 && hubs.every((entry) => entry.depthReady);');
     expect(mmNode).toContain('const crossReady = !cross.applicable || (');
-    expect(mmNode).toContain('ready: pairs.length > 0 && blockers.length === 0 && pairs.every(pair => pair.ready)');
+    expect(mmNode).toContain('ready: offers > 0 && blockers.length === 0');
+    expect(mmNode).toContain('const routeHasInFlightProgress = !routeHasFinalizedOffer && targetSpecs.some(spec =>');
+    expect(mmNode).toContain('const selectedLimit = routeHasFinalizedOffer ? allowedNewOffers : Math.min(allowedNewOffers, 1);');
     expect(mmNode).toContain('cross.routes.every((route) => route.ready)');
     expect(mmNode).toContain('ok: hubsDepthReady && crossReady');
     expect(mmNode).toContain('countCommittedMarketMakerOffersForHub(env, mmEntityId, hubEntityId)');
@@ -621,7 +623,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain("process.env['MARKET_MAKER_BOOTSTRAP_CROSS_SOURCE_HUB_GROUPS_PER_WAVE'] || '1'");
     expect(mmNode).toContain('remainingSourceHubGroups -= 1;');
     expect(mmNode).toContain('const sourceHubScans = [...sourceHubs]');
-    expect(mmNode).toContain('coverageGaps: countCrossPairCoverageGaps(env, specs)');
+    expect(mmNode).toContain('coverageGaps: countCrossRouteCoverageGaps(env, specs)');
     expect(mmNode).toContain('right.coverageGaps - left.coverageGaps');
     expect(mmNode.indexOf('const sourceHubScans = [...sourceHubs]')).toBeLessThan(
       mmNode.indexOf("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-start'"),

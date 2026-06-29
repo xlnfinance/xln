@@ -358,8 +358,8 @@ test('runtime market maker health stays red when same-chain offers are committed
   expect(pendingRoute?.depthReady).toBe(false);
 });
 
-test('runtime market maker health is green when cross routes are ready before full depth', () => {
-  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+test('runtime market maker health is green when cross routes have coverage before full depth', () => {
+  const { env, contexts, visibleHubs, tokenIdsByContext } = buildBootstrapTopology();
   const sourceContext = contexts[0]!;
   const targetContext = contexts[1]!;
   const sourceHub = visibleHubs[0]!;
@@ -376,48 +376,43 @@ test('runtime market maker health is green when cross routes are ready before fu
   );
   addReplica(env, sourceContext.entityId, sourceContext.signerId, new Map([[sourceHub.entityId, sourceAccount]]));
   addReplica(env, targetContext.entityId, targetContext.signerId, new Map([[targetHub.entityId, targetAccount]]));
-  const crossOverride: MarketMakerHealth['cross'] = {
-    applicable: true,
-    ok: true,
-    expectedRoutes: 1,
-    expectedOffersPerRoute: 3,
-    expectedOffersPerPair: 3,
-    routes: [{
-      sourceJurisdiction: sourceContext.jurisdictionName,
-      targetJurisdiction: targetContext.jurisdictionName,
-      sourceMmEntityId: sourceContext.entityId,
-      targetMmEntityId: targetContext.entityId,
-      sourceHubEntityId: sourceHub.entityId,
-      targetHubEntityId: targetHub.entityId,
-      offers: 3,
-      ready: true,
-      depthReady: false,
-      blockers: [],
-      pairs: buildDefaultEntitySwapPairs([1, 2, 3]).map(pair => ({
-        pairId: pair.pairId,
-        offers: 1,
-        ready: true,
-        depthReady: false,
-        expectedOffers: 3,
-        sourceTokenIds: [pair.baseTokenId],
-        targetTokenIds: [pair.quoteTokenId],
-      })),
-    }],
-  };
+
+  const sourceToTargetSpec = buildMarketMakerCrossOfferSpecs(
+    env,
+    sourceContext,
+    targetContext,
+    [sourceHub],
+    [targetHub],
+    [1, 2, 3],
+    [1, 2, 3],
+  )[0]!;
+  const targetToSourceSpec = buildMarketMakerCrossOfferSpecs(
+    env,
+    targetContext,
+    sourceContext,
+    [targetHub],
+    [sourceHub],
+    [1, 2, 3],
+    [1, 2, 3],
+  )[0]!;
+  sourceAccount.swapOffers?.set(sourceToTargetSpec.offerId, { crossJurisdiction: sourceToTargetSpec.crossJurisdiction });
+  targetAccount.swapOffers?.set(targetToSourceSpec.offerId, { crossJurisdiction: targetToSourceSpec.crossJurisdiction });
 
   const health = getRuntimeMarketMakerHealth(
     env,
     sourceContext.entityId,
     [sourceHub.entityId],
     [1, 2, 3],
-    undefined,
-    crossOverride,
+    { contexts, visibleHubs, tokenIdsByContext },
   );
 
   expect(health.ok).toBe(true);
   expect(health.cross.ok).toBe(true);
+  expect(health.cross.expectedRoutes).toBe(2);
+  expect(health.cross.routes.map(route => route.offers)).toEqual([1, 1]);
   expect(health.cross.routes.every(route => route.ready)).toBe(true);
   expect(health.cross.routes.some(route => !route.depthReady)).toBe(true);
+  expect(health.cross.routes.flatMap(route => route.pairs).some(pair => !pair.ready)).toBe(true);
 });
 
 test('market maker finalized cross matching tolerates rolling route hash but rejects changed economics', () => {
