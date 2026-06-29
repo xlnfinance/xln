@@ -424,36 +424,53 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
   swapClosedOrders: undefined,
 });
 
+const compactMapTail = <K, V>(value: Map<K, V> | undefined, limit = 20): Map<K, V> | undefined =>
+  value instanceof Map ? new Map(Array.from(value.entries()).slice(-limit)) : undefined;
+
+const compactDebtLedgerForView = (
+  value: StorageEntityCoreDoc['outDebtsByToken'] | StorageEntityCoreDoc['inDebtsByToken'],
+  outerLimit = 20,
+  innerLimit = 20,
+): typeof value => {
+  if (!(value instanceof Map)) return undefined;
+  return new Map(Array.from(value.entries()).slice(0, outerLimit).map(([tokenId, bucket]) => [
+    tokenId,
+    bucket instanceof Map ? new Map(Array.from(bucket.entries()).slice(0, innerLimit)) : bucket,
+  ]));
+};
+
 const compactEntityCoreForRemote = (core: StorageEntityCoreDoc): StorageEntityCoreDoc => {
   const compact: StorageEntityCoreDoc = {
     ...core,
+    entityEncPrivKey: '',
     messages: core.messages.slice(-20),
     proposals: new Map(Array.from(core.proposals.entries()).slice(-20)),
     jBlockObservations: core.jBlockObservations.slice(-20),
     jBlockChain: core.jBlockChain.slice(-20),
+    htlcRoutes: compactMapTail(core.htlcRoutes, 20) ?? new Map(),
     lockBook: new Map(Array.from(core.lockBook.entries()).slice(-20)),
   };
 
-  if (core.deferredAccountProposals) {
-    compact.deferredAccountProposals = new Map(Array.from(core.deferredAccountProposals.entries()).slice(-20));
-  }
+  const deferredAccountProposals = compactMapTail(core.deferredAccountProposals, 20);
+  if (deferredAccountProposals) compact.deferredAccountProposals = deferredAccountProposals;
   if (core.batchHistory) compact.batchHistory = core.batchHistory.slice(-20);
   if (core.accountInputQueue) compact.accountInputQueue = core.accountInputQueue.slice(-20);
-  if (core.htlcNotes) compact.htlcNotes = new Map(Array.from(core.htlcNotes.entries()).slice(-20));
-  if (core.outDebtsByToken) compact.outDebtsByToken = new Map(Array.from(core.outDebtsByToken.entries()).slice(0, 20));
-  if (core.inDebtsByToken) compact.inDebtsByToken = new Map(Array.from(core.inDebtsByToken.entries()).slice(0, 20));
-  if (core.pendingSwapFillRatios) {
-    compact.pendingSwapFillRatios = new Map(Array.from(core.pendingSwapFillRatios.entries()).slice(-20));
-  }
-  if (core.pendingCrossJurisdictionFillAcks) {
-    compact.pendingCrossJurisdictionFillAcks = new Map(Array.from(core.pendingCrossJurisdictionFillAcks.entries()).slice(-20));
-  }
-  if (core.crossJurisdictionBookAdmissions) {
-    compact.crossJurisdictionBookAdmissions = new Map(Array.from(core.crossJurisdictionBookAdmissions.entries()).slice(-20));
-  }
-  if (core.orderbookReferrals) {
-    compact.orderbookReferrals = new Map(Array.from(core.orderbookReferrals.entries()).slice(0, 20));
-  }
+  const htlcNotes = compactMapTail(core.htlcNotes, 20);
+  if (htlcNotes) compact.htlcNotes = htlcNotes;
+  const outDebtsByToken = compactDebtLedgerForView(core.outDebtsByToken);
+  if (outDebtsByToken) compact.outDebtsByToken = outDebtsByToken;
+  const inDebtsByToken = compactDebtLedgerForView(core.inDebtsByToken);
+  if (inDebtsByToken) compact.inDebtsByToken = inDebtsByToken;
+  const pendingSwapFillRatios = compactMapTail(core.pendingSwapFillRatios, 20);
+  if (pendingSwapFillRatios) compact.pendingSwapFillRatios = pendingSwapFillRatios;
+  const crossJurisdictionSwaps = compactMapTail(core.crossJurisdictionSwaps, 20);
+  if (crossJurisdictionSwaps) compact.crossJurisdictionSwaps = crossJurisdictionSwaps;
+  const pendingCrossJurisdictionFillAcks = compactMapTail(core.pendingCrossJurisdictionFillAcks, 20);
+  if (pendingCrossJurisdictionFillAcks) compact.pendingCrossJurisdictionFillAcks = pendingCrossJurisdictionFillAcks;
+  const crossJurisdictionBookAdmissions = compactMapTail(core.crossJurisdictionBookAdmissions, 20);
+  if (crossJurisdictionBookAdmissions) compact.crossJurisdictionBookAdmissions = crossJurisdictionBookAdmissions;
+  const orderbookReferrals = compactMapTail(core.orderbookReferrals, 20);
+  if (orderbookReferrals) compact.orderbookReferrals = orderbookReferrals;
   return compact;
 };
 

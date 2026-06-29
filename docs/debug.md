@@ -178,6 +178,37 @@ For a failed payment:
    - ACK/consensus failures
    - WS disconnect gap
 
+## Radapter Oversized Responses
+
+Symptom:
+
+- Browser shows `runtime adapter response too large`
+- Login import succeeds, then `/app` never materializes `window.isolatedEnv`
+
+Source of truth:
+
+- Runtime log line: `[RADAPTER] RESPONSE_TOO_LARGE {...}`
+- Runtime event: `RuntimeAdapterResponseTooLarge`
+
+Useful prod commands:
+
+```bash
+ssh root@xln.finance 'grep -R "RADAPTER] RESPONSE_TOO_LARGE" -n /root/.pm2/logs /root/xln/db 2>/dev/null | tail -n 20'
+curl -fsS https://xln.finance/api/runtime-import | jq '.manifest.entries[] | {label,access,wsUrl,hasToken:(.token|length>0)}'
+```
+
+Expected event fields:
+
+- `op`, `path`, `query`
+- `bytes`, `maxBytes`
+- `runtimeId`, `height`
+- `payloadKeys`
+
+Root-cause rule:
+
+- Do not only raise `XLN_RADAPTER_MAX_MESSAGE_BYTES`.
+- First check whether the read path is supposed to be paged/compact. For `/view-frame`, accounts/books and heavy core maps must stay bounded.
+
 Minimal incident query:
 
 ```bash

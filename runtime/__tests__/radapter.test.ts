@@ -872,6 +872,66 @@ test('runtime adapter 1M account view-frame stays aggregate-first and under wire
   });
 });
 
+test('runtime adapter view-frame caps route-heavy core maps under wire budget', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const largeNote = 'x'.repeat(4_000);
+  replica.state.entityEncPrivKey = 'secret-key-must-not-leave-server';
+  replica.state.crossJurisdictionSwaps = new Map();
+  for (let index = 0; index < 400; index += 1) {
+    const id = `route-${index.toString().padStart(3, '0')}`;
+    const route = {
+      orderId: id,
+      makerEntityId: entityId,
+      hubEntityId: counterpartyId,
+      source: {
+        jurisdiction: 'Testnet',
+        entityId,
+        counterpartyEntityId: counterpartyId,
+        tokenId: 1,
+        amount: 1n,
+      },
+      target: {
+        jurisdiction: 'Tron',
+        entityId: counterpartyId,
+        counterpartyEntityId: entityId,
+        tokenId: 2,
+        amount: 1n,
+      },
+      status: 'resting',
+      createdAt: index,
+      updatedAt: index,
+      note: largeNote,
+    };
+    replica.state.htlcRoutes.set(id, { id, note: largeNote } as any);
+    replica.state.htlcNotes?.set(id, largeNote);
+    replica.state.crossJurisdictionSwaps.set(id, route as any);
+  }
+
+  const frame = await resolveRuntimeAdapterRead<{
+    activeEntity: {
+      core: {
+        entityEncPrivKey: string;
+        htlcRoutes: Map<string, unknown>;
+        htlcNotes?: Map<string, unknown>;
+        crossJurisdictionSwaps?: Map<string, unknown>;
+        pendingCrossJurisdictionFillAcks?: Map<string, unknown>;
+        crossJurisdictionBookAdmissions?: Map<string, unknown>;
+      };
+    } | null;
+  }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame', { accountsLimit: 1, booksLimit: 1 });
+  const encoded = encodeRuntimeAdapterMessage({ v: 1, inReplyTo: 'route-budget', ok: true, payload: frame });
+  const core = frame.activeEntity?.core;
+
+  expect(encoded.byteLength).toBeLessThan(1_048_576);
+  expect(core?.entityEncPrivKey).toBe('');
+  expect(core?.htlcRoutes.size).toBeLessThanOrEqual(20);
+  expect(core?.htlcNotes?.size ?? 0).toBeLessThanOrEqual(20);
+  expect(core?.crossJurisdictionSwaps?.size ?? 0).toBeLessThanOrEqual(20);
+  expect(core?.pendingCrossJurisdictionFillAcks?.size ?? 0).toBeLessThanOrEqual(20);
+  expect(core?.crossJurisdictionBookAdmissions?.size ?? 0).toBeLessThanOrEqual(20);
+});
+
 test('storage-backed historical view pages support desc account and book cursors', async () => {
   const env = makeEnv();
   const replica = Array.from(env.eReplicas.values())[0]!;

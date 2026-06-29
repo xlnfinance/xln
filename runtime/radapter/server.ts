@@ -1,7 +1,8 @@
 import type { EntityState, Env, RuntimeInput } from '../types';
-import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage } from './codec';
+import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../storage';
+import { safeStringify } from '../serialization-utils';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
@@ -29,6 +30,14 @@ type AdapterClientState = {
   controlBucket: TokenBucket;
   readBucket: TokenBucket;
   sendBucket: TokenBucket;
+};
+
+type RuntimeAdapterResponseDiagnostic = {
+  env?: Env | null;
+  op?: string;
+  path?: string;
+  query?: RuntimeAdapterReadQuery;
+  authLevel?: RuntimeAdapterAuthLevel | null;
 };
 
 export type RuntimeAdapterServerDeps = {
@@ -65,6 +74,63 @@ const createConfiguredBucket = (
 const runtimeAdapterBackpressureBytes = (): number =>
   readPositiveNumberEnv('XLN_RADAPTER_BACKPRESSURE_BYTES', RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES);
 
+const compactReadQueryForLog = (query: RuntimeAdapterReadQuery | undefined): Record<string, unknown> | undefined => {
+  if (!query) return undefined;
+  const keys: Array<keyof RuntimeAdapterReadQuery> = [
+    'atHeight',
+    'entityId',
+    'limit',
+    'accountsLimit',
+    'booksLimit',
+    'accountsPage',
+    'booksPage',
+    'accountId',
+    'cursor',
+    'accountsCursor',
+    'booksCursor',
+  ];
+  const compact: Record<string, unknown> = {};
+  for (const key of keys) {
+    const value = query[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') compact[key] = value;
+  }
+  return Object.keys(compact).length > 0 ? compact : undefined;
+};
+
+const emitRuntimeAdapterResponseTooLarge = (
+  diagnostic: RuntimeAdapterResponseDiagnostic | undefined,
+  response: RuntimeAdapterResponse,
+  bytes: number,
+  maxBytes: number,
+): void => {
+  const env = diagnostic?.env ?? null;
+  const payload = response.ok && response.payload && typeof response.payload === 'object'
+    ? response.payload as Record<string, unknown>
+    : null;
+  const event = {
+    code: 'RADAPTER_RESPONSE_TOO_LARGE',
+    bytes,
+    maxBytes,
+    inReplyTo: response.inReplyTo,
+    ok: response.ok,
+    op: diagnostic?.op ?? null,
+    path: diagnostic?.path ?? null,
+    query: compactReadQueryForLog(diagnostic?.query),
+    authLevel: diagnostic?.authLevel ?? null,
+    runtimeId: String(env?.runtimeId || '') || null,
+    height: Math.max(0, Math.floor(Number(env?.height ?? 0))),
+    payloadKeys: payload ? Object.keys(payload).slice(0, 20) : [],
+  };
+  if (typeof env?.emit === 'function') {
+    try {
+      env.emit('RuntimeAdapterResponseTooLarge', event);
+    } catch (error) {
+      console.warn(`[RADAPTER] RESPONSE_TOO_LARGE_EMIT_FAILED ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  console.warn(`[RADAPTER] RESPONSE_TOO_LARGE ${safeStringify(event)}`);
+};
+
 const getClientState = (ws: RuntimeAdapterSocket): AdapterClientState => {
   let state = clients.get(ws);
   if (!state) {
@@ -80,13 +146,21 @@ const getClientState = (ws: RuntimeAdapterSocket): AdapterClientState => {
   return state;
 };
 
-const sendResponse = (ws: RuntimeAdapterSocket, response: RuntimeAdapterResponse): void => {
+const sendResponse = (
+  ws: RuntimeAdapterSocket,
+  response: RuntimeAdapterResponse,
+  diagnostic?: RuntimeAdapterResponseDiagnostic,
+): void => {
   const buffered = (ws as RuntimeAdapterSocket & { getBufferedAmount?: () => number }).getBufferedAmount?.() ?? 0;
   if (buffered > runtimeAdapterBackpressureBytes()) {
     ws.close?.(1013, 'runtime adapter socket backpressure');
     return;
   }
   const encoded = encodeRuntimeAdapterMessage(response);
+  const maxBytes = runtimeAdapterMaxMessageBytes();
+  if (encoded.byteLength > maxBytes) {
+    emitRuntimeAdapterResponseTooLarge(diagnostic, response, encoded.byteLength, maxBytes);
+  }
   try {
     assertRuntimeAdapterMessageSize(encoded);
   } catch (error) {
@@ -113,12 +187,22 @@ const sendResponse = (ws: RuntimeAdapterSocket, response: RuntimeAdapterResponse
   ws.send(encoded);
 };
 
-const sendOk = (ws: RuntimeAdapterSocket, inReplyTo: string, payload: unknown): void => {
-  sendResponse(ws, { v: 1, inReplyTo, ok: true, payload });
+const sendOk = (
+  ws: RuntimeAdapterSocket,
+  inReplyTo: string,
+  payload: unknown,
+  diagnostic?: RuntimeAdapterResponseDiagnostic,
+): void => {
+  sendResponse(ws, { v: 1, inReplyTo, ok: true, payload }, diagnostic);
 };
 
-const sendErr = (ws: RuntimeAdapterSocket, inReplyTo: string, error: unknown): void => {
-  sendResponse(ws, { v: 1, inReplyTo, ok: false, error: toRuntimeAdapterErrorPayload(error) });
+const sendErr = (
+  ws: RuntimeAdapterSocket,
+  inReplyTo: string,
+  error: unknown,
+  diagnostic?: RuntimeAdapterResponseDiagnostic,
+): void => {
+  sendResponse(ws, { v: 1, inReplyTo, ok: false, error: toRuntimeAdapterErrorPayload(error) }, diagnostic);
 };
 
 const isRuntimeAdapterRequest = (msg: Record<string, unknown>): msg is RuntimeAdapterRequest => {
@@ -196,17 +280,28 @@ export const handleRuntimeAdapterMessage = async (
 ): Promise<boolean> => {
   if (!isRuntimeAdapterRequest(msg)) return false;
   const state = getClientState(ws);
+  const diagnostic = (): RuntimeAdapterResponseDiagnostic => {
+    const raw = msg as Record<string, unknown>;
+    const info: RuntimeAdapterResponseDiagnostic = {
+      env,
+      op: String(msg.op || ''),
+      authLevel: state.authLevel,
+    };
+    if (typeof raw['path'] === 'string') info.path = raw['path'];
+    if (raw['query'] && typeof raw['query'] === 'object') info.query = raw['query'] as RuntimeAdapterReadQuery;
+    return info;
+  };
   if (!consumeToken(state.controlBucket)) {
     sendErr(ws, msg.id, new RuntimeAdapterError(
       'E_RATE_LIMITED',
       'runtime adapter rate limit exceeded',
       true,
       tokenRetryAfterMs(state.controlBucket),
-    ));
+    ), diagnostic());
     return true;
   }
   if (!env) {
-    sendErr(ws, msg.id, new RuntimeAdapterError('E_INTERNAL', 'runtime not ready', true));
+    sendErr(ws, msg.id, new RuntimeAdapterError('E_INTERNAL', 'runtime not ready', true), diagnostic());
     return true;
   }
 
@@ -224,7 +319,7 @@ export const handleRuntimeAdapterMessage = async (
         authLevel: auth.level,
         expiresAtMs: auth.expiresAtMs,
         currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
-      });
+      }, diagnostic());
       return true;
     }
 
@@ -241,7 +336,7 @@ export const handleRuntimeAdapterMessage = async (
         ...(deps.loadEntityViewPage ? { loadEntityViewPage: (entityId, height, query) => deps.loadEntityViewPage?.(env, entityId, height, query) ?? Promise.resolve(null) } : {}),
         ...(deps.listEntityIdsAtHeight ? { listEntityIdsAtHeight: (height) => deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]) } : {}),
       }, msg.path, msg.query);
-      sendOk(ws, msg.id, payload);
+      sendOk(ws, msg.id, payload, diagnostic());
       return true;
     }
 
@@ -249,14 +344,14 @@ export const handleRuntimeAdapterMessage = async (
       requireAuth(state, 'admin');
       requireBucket(state.sendBucket, 'send');
       deps.enqueueRuntimeInput(env, msg.input);
-      sendOk(ws, msg.id, { height: Math.max(0, Math.floor(Number(env.height ?? 0))) });
+      sendOk(ws, msg.id, { height: Math.max(0, Math.floor(Number(env.height ?? 0))) }, diagnostic());
       return true;
     }
 
-    sendErr(ws, msg.id, new RuntimeAdapterError('E_BAD_PATH', `unsupported runtime adapter op: ${(msg as { op?: unknown }).op}`));
+    sendErr(ws, msg.id, new RuntimeAdapterError('E_BAD_PATH', `unsupported runtime adapter op: ${(msg as { op?: unknown }).op}`), diagnostic());
     return true;
   } catch (error) {
-    sendErr(ws, msg.id, error);
+    sendErr(ws, msg.id, error, diagnostic());
     return true;
   }
 };
