@@ -823,11 +823,14 @@ const pollMarketMakerHealthOnce = async (): Promise<void> => {
     return;
   }
   const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  const health = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS);
-  let info: MarketMakerInfoPayload | null = null;
-  if (!health && !marketMakerChild.lastInfo) {
-    info = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS);
+  // Fetch identity (/api/info) first and independently: it's fast and, unlike /api/health, does not
+  // hang when the MM runtime is busy. This keeps the runtimeId cached (so MM stays in the import
+  // manifest) even when /api/health is slow/unresponsive.
+  if (!marketMakerChild.lastInfo) {
+    const info = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS);
+    if (info) marketMakerChild.lastInfo = info;
   }
+  const health = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS);
   if (health) {
     marketMakerChild.lastHealth = health;
     const nextInfo: MarketMakerInfoPayload = { ...(marketMakerChild.lastInfo || {}) };
@@ -840,7 +843,6 @@ const pollMarketMakerHealthOnce = async (): Promise<void> => {
     if (health.startupPhase !== undefined) nextInfo.startupPhase = health.startupPhase;
     marketMakerChild.lastInfo = nextInfo;
   }
-  if (info) marketMakerChild.lastInfo = info;
   marketMakerChild.lastStartupPhase = String(
     marketMakerChild.lastHealth?.startupPhase ||
     marketMakerChild.lastInfo?.startupPhase ||
