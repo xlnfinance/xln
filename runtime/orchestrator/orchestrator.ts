@@ -158,6 +158,10 @@ const MARKET_MAKER_INFO_TIMEOUT_MS = Math.max(
   500,
   Math.min(CHILD_HEALTH_TIMEOUT_MS, Math.floor(Number(process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'))),
 );
+const MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS = Math.max(
+  CHILD_HEALTH_TIMEOUT_MS,
+  Math.floor(Number(process.env['XLN_MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS'] || '60000')),
+);
 const marketMakerReadyRestartLimit = Math.max(
   0,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
@@ -897,6 +901,18 @@ const pollMarketMakerHealthOnce = async (): Promise<void> => {
   if (health) applyMarketMakerHealth(health, proc, { trustStartupPhase: !infoFresh });
 };
 
+const fetchMarketMakerFullHealthForResponse = async (): Promise<MarketMakerHealthPayload | null> => {
+  const proc = marketMakerChild.proc;
+  if (!isCurrentMarketMakerProc(proc)) return null;
+  const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
+  await pollMarketMakerInfoOnce(proc);
+  if (!isCurrentMarketMakerProc(proc)) return null;
+  return await fetchJson<MarketMakerHealthPayload>(
+    `${apiBase}/api/health/full`,
+    MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS,
+  );
+};
+
 let lastHealthResponseRefreshMs: number | null = null;
 const refreshChildHealthForResponse = async (): Promise<void> => {
   const startedAt = Date.now();
@@ -1621,14 +1637,17 @@ const buildBootstrapTimeline = (params: {
   };
 };
 
-const computeAggregatedHealth = (): AggregatedHealth => {
+const computeAggregatedHealth = (options: {
+  marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;
+} = {}): AggregatedHealth => {
   const storage = getStorageHealthSnapshotSync();
+  const marketMakerHealth = options.marketMakerHealthOverride ?? marketMakerChild.lastHealth;
   const managedRuntimeIds = new Set<string>();
   for (const child of hubChildren) {
     const runtimeId = normalizeRuntimeKey(String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || ''));
     if (runtimeId) managedRuntimeIds.add(runtimeId);
   }
-  const marketMakerRuntimeId = normalizeRuntimeKey(String(marketMakerChild.lastInfo?.runtimeId || marketMakerChild.lastHealth?.runtimeId || ''));
+  const marketMakerRuntimeId = normalizeRuntimeKey(String(marketMakerChild.lastInfo?.runtimeId || marketMakerHealth?.runtimeId || ''));
   if (marketMakerRuntimeId) managedRuntimeIds.add(marketMakerRuntimeId);
   const relayClientIds = Array.from(relayStore.clients.keys()).map(normalizeRuntimeKey).filter(Boolean);
   const externalClientIds = relayClientIds.filter((runtimeId) => !managedRuntimeIds.has(runtimeId));
@@ -1728,9 +1747,9 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   const eventStartupPhase = String(marketMakerBootstrapEvent?.stage || '').trim() || null;
   const mmStartupPhase = eventStartupPhase || marketMakerChild.lastStartupPhase;
   const mmEntityId = marketMakerActive
-    ? String(marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId || '').trim() || null
+    ? String(marketMakerChild.lastInfo?.entityId || marketMakerHealth?.entityId || '').trim() || null
     : null;
-  const mmExpectedOffersPerHub = Number(marketMakerChild.lastHealth?.marketMaker?.expectedOffersPerHub || 0);
+  const mmExpectedOffersPerHub = Number(marketMakerHealth?.marketMaker?.expectedOffersPerHub || 0);
   const mmHubsById = new Map<string, {
     hubEntityId: string;
     offers: number;
@@ -1739,7 +1758,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     blockers: unknown[];
     pairs: Array<{ pairId: string; offers: number; ready: boolean; depthReady?: boolean; expectedOffers?: number }>;
   }>();
-  for (const hub of marketMakerChild.lastHealth?.marketMaker?.hubs ?? []) {
+  for (const hub of marketMakerHealth?.marketMaker?.hubs ?? []) {
     const hubEntityId = String(hub.hubEntityId || '').toLowerCase();
     if (!hubEntityId) continue;
     mmHubsById.set(hubEntityId, {
@@ -1759,7 +1778,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       : [],
     });
   }
-  const rawMmCross = marketMakerChild.lastHealth?.marketMaker?.cross;
+  const rawMmCross = marketMakerHealth?.marketMaker?.cross;
   const mmCross = {
     applicable: rawMmCross?.applicable === true || Number(rawMmCross?.expectedRoutes || 0) > 0,
     ok: rawMmCross?.ok === true,
@@ -1812,8 +1831,8 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       pairs: existing?.pairs ?? [],
     };
   });
-  const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);
-  const mmChildReady = marketMakerChild.lastHealth?.marketMaker?.ok === true;
+  const mmHealthReady = Boolean(marketMakerHealth?.marketMaker);
+  const mmChildReady = marketMakerHealth?.marketMaker?.ok === true;
   const mmCrossReady = Boolean(rawMmCross) && mmCross.ok;
   const mmOk = !args.mmEnabled
     ? true
@@ -1855,7 +1874,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   ].filter((value): value is string => Boolean(value));
   const sourceHeights = [
     ...hubChildren.map(child => Number(child.lastHealth?.height || 0)),
-    Number(marketMakerChild.lastHealth?.height || 0),
+    Number(marketMakerHealth?.height || 0),
   ].filter(height => Number.isFinite(height) && height > 0);
   const mmOfferTotal = mmHubs.reduce((sum, hub) => sum + Number(hub.offers || 0), 0);
   const mmExpectedTotal = mmExpectedOffersPerHub * Math.max(1, mmHubs.length || HUB_NAMES.length);
@@ -1930,7 +1949,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       entityId: mmEntityId,
       startupPhase: mmStartupPhase,
       expectedOffersPerHub: mmExpectedOffersPerHub,
-      expectedOffersPerPair: Number(marketMakerChild.lastHealth?.marketMaker?.expectedOffersPerPair || 0),
+      expectedOffersPerPair: Number(marketMakerHealth?.marketMaker?.expectedOffersPerPair || 0),
       cross: mmCross,
       hubs: mmHubs,
     },
@@ -2064,9 +2083,14 @@ type CustodyMePayload = {
 };
 
 const buildAggregatedHealthResponse = async (
-  options: { includeMarketSnapshots?: boolean } = {},
+  options: {
+    includeMarketSnapshots?: boolean;
+    marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;
+  } = {},
 ): Promise<AggregatedHealth> => {
-  const baseHealth = computeAggregatedHealth();
+  const baseHealth = computeAggregatedHealth({
+    marketMakerHealthOverride: options.marketMakerHealthOverride,
+  });
   const health = options.includeMarketSnapshots
     ? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)
     : baseHealth;
@@ -2521,6 +2545,17 @@ const server = Bun.serve({
 
     if (pathname === '/api/external-wallet/snapshot' && request.method === 'POST') {
       return await proxyEntityHubApi(request, '/api/external-wallet/snapshot');
+    }
+
+    if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')) {
+      void getStorageHealth().catch(() => {});
+      await refreshChildHealthForResponse();
+      const marketMakerHealthOverride = args.mmEnabled ? await fetchMarketMakerFullHealthForResponse() : null;
+      const health = await buildAggregatedHealthResponse({
+        marketMakerHealthOverride,
+        includeMarketSnapshots: url.searchParams.get('marketSnapshots') === '1',
+      });
+      return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicAggregatedHealth(health)), { headers });
     }
 
     if (pathname === '/api/health') {

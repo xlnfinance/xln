@@ -74,7 +74,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const applyMarketMakerInfo = (info: MarketMakerInfoPayload, proc: ChildProcess): void => {');
     expect(orchestrator).toContain('marketMakerChild.lastInfo = { ...(marketMakerChild.lastInfo || {}), ...info };');
     expect(orchestrator).toContain('if (!isCurrentMarketMakerProc(proc)) return;');
-    expect(orchestrator).toContain('const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);');
+    expect(orchestrator).toContain('const marketMakerHealth = options.marketMakerHealthOverride ?? marketMakerChild.lastHealth;');
+    expect(orchestrator).toContain('const mmHealthReady = Boolean(marketMakerHealth?.marketMaker);');
     expect(orchestrator).toContain('const mmOk = !args.mmEnabled');
     expect(orchestrator).toContain('marketMakerActive &&');
     const waitForMarketMakerReady = orchestrator.slice(orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'));
@@ -100,7 +101,7 @@ describe('production startup wiring', () => {
     );
     expect(orchestrator).toContain('let marketMakerInfoPollInFlight: Promise<void> | null = null;');
     expect(orchestrator).toContain('const pollMarketMakerInfo = async (): Promise<void> => {');
-    expect(orchestrator).toContain('const mmChildReady = marketMakerChild.lastHealth?.marketMaker?.ok === true;');
+    expect(orchestrator).toContain('const mmChildReady = marketMakerHealth?.marketMaker?.ok === true;');
     expect(orchestrator).toContain('mmChildReady &&');
     expect(orchestrator).toContain('mmHubs.every((hub) => hub.depthReady) &&');
     expect(orchestrator).toContain('routes.every(route => route.depthReady)');
@@ -565,11 +566,13 @@ describe('production startup wiring', () => {
   test('market maker info route keeps cross debug opt-in off the hot path', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const infoRouteStart = mmNode.indexOf("if (pathname === '/api/info')");
-    const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')");
+    const fullHealthRouteStart = mmNode.indexOf("if (pathname === '/api/health/full'");
+    const healthRouteStart = mmNode.indexOf("if (pathname === '/api/health')", fullHealthRouteStart + 1);
     expect(infoRouteStart).toBeGreaterThan(0);
-    expect(healthRouteStart).toBeGreaterThan(infoRouteStart);
+    expect(fullHealthRouteStart).toBeGreaterThan(infoRouteStart);
+    expect(healthRouteStart).toBeGreaterThan(fullHealthRouteStart);
 
-    const infoRoute = mmNode.slice(infoRouteStart, healthRouteStart);
+    const infoRoute = mmNode.slice(infoRouteStart, fullHealthRouteStart);
     expect(infoRoute).toContain("url.searchParams.get('crossDebug') === '1'");
     expect(infoRoute).toContain("url.searchParams.get('debug') === 'cross'");
     expect(infoRoute).toContain('return new Response(buildInfoResponseJson(true), { headers: JSON_HEADERS });');
@@ -684,9 +687,16 @@ describe('production startup wiring', () => {
       mmNode.indexOf('const crossQuoteJobs: CrossQuoteJob[] = [];'),
     );
     expect(mmNode).toContain('let bootstrapCompletionCheckArmed = false;');
+    expect(mmNode).toContain('let lastProgressAt = Date.now();');
+    expect(mmNode).toContain("emitBootstrapDebugEvent('progress'");
+    expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_STALLED');
+    expect(mmNode).toContain("markProgress('enqueue');");
+    expect(mmNode).not.toContain("startupPhase = 'bootstrap-degraded'");
     expect(mmNode).toContain("emitBootstrapDebugEvent('completion-health'");
     expect(mmNode).toContain('bootstrapCompletionCheckArmed = true;');
     expect(mmNode).toContain("emitBootstrapDebugEvent('finalize-step'");
+    expect(mmNode).toContain("pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1')");
+    expect(mmNode).toContain('const health = buildMarketMakerHealthSnapshot({ includeCross: true });');
     expect(mmNode).toContain("pathname === '/api/account/status'");
     expect(mmNode).toContain('pendingFrameTxs: (account?.pendingFrame?.accountTxs || []).map');
     expect(smoke).toContain("const shouldFetchMarketMakerHealth = (health: HealthPayload): boolean =>");
@@ -841,16 +851,23 @@ describe('production startup wiring', () => {
     expect(waitBaselineStart).toBeGreaterThan(buildHealthStart);
 
     const buildHealth = orchestrator.slice(buildHealthStart, waitBaselineStart);
-    expect(buildHealth).toContain('options: { includeMarketSnapshots?: boolean } = {},');
-    expect(buildHealth).toContain('const baseHealth = computeAggregatedHealth();');
+    expect(buildHealth).toContain('includeMarketSnapshots?: boolean;');
+    expect(buildHealth).toContain('marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;');
+    expect(buildHealth).toContain('const baseHealth = computeAggregatedHealth({');
+    expect(buildHealth).toContain('marketMakerHealthOverride: options.marketMakerHealthOverride,');
     expect(buildHealth).toContain('const health = options.includeMarketSnapshots');
     expect(buildHealth).toContain('? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)');
     expect(buildHealth).toContain(': baseHealth;');
 
-    const healthRouteStart = orchestrator.indexOf("if (pathname === '/api/health')");
+    const fullHealthRouteStart = orchestrator.indexOf("if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1'))");
+    const healthRouteStart = orchestrator.indexOf("if (pathname === '/api/health')", fullHealthRouteStart + 1);
     const metricsRouteStart = orchestrator.indexOf("if (pathname === '/api/metrics')");
+    expect(fullHealthRouteStart).toBeGreaterThan(0);
     expect(healthRouteStart).toBeGreaterThan(0);
     expect(metricsRouteStart).toBeGreaterThan(healthRouteStart);
+    const fullHealthRoute = orchestrator.slice(fullHealthRouteStart, healthRouteStart);
+    expect(fullHealthRoute).toContain('const marketMakerHealthOverride = args.mmEnabled ? await fetchMarketMakerFullHealthForResponse() : null;');
+    expect(fullHealthRoute).toContain('includeMarketSnapshots: url.searchParams.get(\'marketSnapshots\') === \'1\',');
     const healthRoute = orchestrator.slice(healthRouteStart, metricsRouteStart);
     expect(healthRoute).toContain('const health = await buildAggregatedHealthResponse();');
     expect(healthRoute).not.toContain('includeMarketSnapshots');
