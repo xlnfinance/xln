@@ -69,8 +69,9 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('if (marketMakerHealthPollInFlight) return marketMakerHealthPollInFlight;');
     expect(orchestrator).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)");
     expect(orchestrator).not.toContain('const [health, info] = await Promise.all([');
-    expect(orchestrator).toContain('if (!marketMakerChild.lastInfo) {');
     expect(orchestrator).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS)");
+    expect(orchestrator).not.toContain('if (!marketMakerChild.lastInfo) {');
+    expect(orchestrator).toContain('if (info) marketMakerChild.lastInfo = { ...(marketMakerChild.lastInfo || {}), ...info };');
     expect(orchestrator).toContain('const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);');
     expect(orchestrator).toContain('const mmOk = !args.mmEnabled');
     expect(orchestrator).toContain('marketMakerActive &&');
@@ -89,6 +90,10 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('if (health) {');
     expect(orchestrator).toContain('marketMakerChild.lastHealth = health;');
     expect(orchestrator).toContain('if (health.startupPhase !== undefined) nextInfo.startupPhase = health.startupPhase;');
+    const lastStartupPhaseUpdate = orchestrator.slice(orchestrator.indexOf('marketMakerChild.lastStartupPhase = String('));
+    expect(lastStartupPhaseUpdate.indexOf('marketMakerChild.lastInfo?.startupPhase ||')).toBeLessThan(
+      lastStartupPhaseUpdate.indexOf('marketMakerChild.lastHealth?.startupPhase ||'),
+    );
     expect(orchestrator).toContain('const mmChildDepthReady = marketMakerChild.lastHealth?.marketMaker?.ok === true;');
     expect(orchestrator).toContain('mmChildDepthReady &&');
     expect(orchestrator).toContain('mmHubs.every((hub) => hub.depthReady) &&');
@@ -651,6 +656,10 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('durationMs: Date.now() - startedAt');
     expect(smoke).toContain('const directMarketMakerHealth = fetchMarketMakerHealth(health);');
     expect(smoke).toContain('const stageHealth = healthWithDirectMarketMaker(health, directMarketMakerHealth);');
+    expect(smoke).toContain('if (iteration % 10 === 0 || healthReady(stageHealth))');
+    expect(smoke).toContain('if (healthReady(stageHealth))');
+    expect(smoke).toContain('return stageHealth;');
+    expect(smoke).not.toContain('healthReady(health))');
     expect(smoke).toContain('const summarizeBlockers = (blockers: unknown[] | undefined): unknown[] =>');
     expect(smoke).toContain('blockerDetails: health.marketMaker?.cross?.routes?.map(route => summarizeBlockers(route.blockers)) ?? []');
     expect(mmNode).toContain("persistRestoredEnvToDB");
@@ -673,6 +682,10 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("recordStage(`marketMaker:${marketMakerPhase}`, last);");
     expect(smoke).toContain("recordStageOnce('system:ready', last);");
     expect(smoke).toContain("recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });");
+    expect(smoke).toContain('const rawPostBootstrapHealth = await fetchHealth();');
+    expect(smoke).toContain('const postBootstrapDirectMarketMakerHealth = fetchMarketMakerHealth(rawPostBootstrapHealth);');
+    expect(smoke).toContain('const postBootstrapHealth = healthWithDirectMarketMaker(rawPostBootstrapHealth, postBootstrapDirectMarketMakerHealth);');
+    expect(smoke).not.toContain('const postBootstrapHealth = await fetchHealth();');
     expect(smoke).toContain("recordStage('post-bootstrap:stable', summarizeHealth(postBootstrapHealth));");
     expect(smoke).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS: process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
     expect(smoke).toContain("XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] || '1'");

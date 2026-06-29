@@ -600,12 +600,12 @@ const waitForHealth = async (): Promise<HealthPayload> => {
       }
       if (stageHealth.marketMaker?.ok === true) recordStageOnce('marketMaker:ready', last);
       enforceBootstrapStageBudgets(stageHealth, last as Record<string, unknown>);
-      if (iteration % 10 === 0 || healthReady(health)) {
+      if (iteration % 10 === 0 || healthReady(stageHealth)) {
         console.log(`[local-prod-smoke] health ${JSON.stringify(last)}`);
       }
-      if (healthReady(health)) {
+      if (healthReady(stageHealth)) {
         recordStageOnce('system:ready', last);
-        return health;
+        return stageHealth;
       }
     } catch (error) {
       if (fatalStageBudgetError) throw new Error(fatalStageBudgetError);
@@ -755,7 +755,9 @@ const main = async (): Promise<void> => {
   if (postBootstrapStabilityMs > 0) {
     recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });
     await sleep(postBootstrapStabilityMs);
-    const postBootstrapHealth = await fetchHealth();
+    const rawPostBootstrapHealth = await fetchHealth();
+    const postBootstrapDirectMarketMakerHealth = fetchMarketMakerHealth(rawPostBootstrapHealth);
+    const postBootstrapHealth = healthWithDirectMarketMaker(rawPostBootstrapHealth, postBootstrapDirectMarketMakerHealth);
     if (!healthReady(postBootstrapHealth)) {
       throw new Error(
         `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HEALTH_REGRESSED last=${JSON.stringify(summarizeHealth(postBootstrapHealth))}`,
