@@ -1361,6 +1361,9 @@ type LastBootstrapEvent = {
   at: string | null;
   height: number | null;
   backlog: unknown;
+  readyHash: string | null;
+  runtimeStateHash: string | null;
+  entityStateHash: string | null;
 };
 
 const readLastMarketMakerBootstrapEvent = (): LastBootstrapEvent | null => {
@@ -1379,6 +1382,9 @@ const readLastMarketMakerBootstrapEvent = (): LastBootstrapEvent | null => {
         at: String(parsed['at'] || '').trim() || null,
         height: toFiniteNumber(parsed['height']),
         backlog: parsed['backlog'],
+        readyHash: String(parsed['hash'] || '').trim() || null,
+        runtimeStateHash: String(parsed['runtimeStateHash'] || '').trim() || null,
+        entityStateHash: String(parsed['entityStateHash'] || '').trim() || null,
       };
     } catch {
       // The bounded tail can start mid-line; keep scanning older complete lines.
@@ -1458,10 +1464,11 @@ const buildBootstrapTimeline = (params: {
 }): AggregatedHealth['bootstrapTimeline'] => {
   const lastEvent = readLastMarketMakerBootstrapEvent();
   const mmBootstrap = marketMakerChild.lastHealth?.bootstrap ?? marketMakerChild.lastInfo?.bootstrap ?? null;
-  const readyHash = String(mmBootstrap?.readyHash || '').trim() || null;
-  const runtimeStateHash = String(mmBootstrap?.runtimeStateHash || '').trim() || null;
-  const entityStateHash = String(mmBootstrap?.entityStateHash || '').trim() || null;
-  const readyAt = toFiniteNumber(mmBootstrap?.readyAt);
+  const readyHash = String(mmBootstrap?.readyHash || '').trim() || lastEvent?.readyHash || null;
+  const runtimeStateHash = String(mmBootstrap?.runtimeStateHash || '').trim() || lastEvent?.runtimeStateHash || null;
+  const entityStateHash = String(mmBootstrap?.entityStateHash || '').trim() || lastEvent?.entityStateHash || null;
+  const eventReadyAt = lastEvent?.event === 'ready-hash' && lastEvent.at ? Date.parse(lastEvent.at) : null;
+  const readyAt = toFiniteNumber(mmBootstrap?.readyAt) ?? (Number.isFinite(eventReadyAt) ? eventReadyAt : null);
   const infoBacklog = (marketMakerChild.lastInfo as { runtimeBacklog?: unknown } | null)?.runtimeBacklog;
   const backlog = summarizeBootstrapBacklog(lastEvent?.backlog ?? infoBacklog);
   const resetClear = timingFor('reset_clear_state');
@@ -1530,7 +1537,7 @@ const buildBootstrapTimeline = (params: {
         key: 'same-chain',
         label: 'Same-Chain Books',
         status: stageStatus(params.sameChainOk, { active: params.marketMakerActive && !params.sameChainOk, disabled: !params.mmEnabled }),
-        reason: params.mmEnabled ? 'Market maker same-chain orderbooks have tradable coverage' : 'Market maker disabled',
+        reason: params.mmEnabled ? 'Market maker same-chain orderbooks have full configured depth' : 'Market maker disabled',
         budgetMs: MARKET_MAKER_READY_TIMEOUT_MS,
         actualMs: null,
         startedAt: resetMarketMaker.startedAt,
@@ -1544,7 +1551,7 @@ const buildBootstrapTimeline = (params: {
         key: 'cross-chain',
         label: 'Cross-Chain Routes',
         status: stageStatus(params.crossOk, { active: params.marketMakerActive && !params.crossOk, disabled: !params.mmEnabled }),
-        reason: params.mmEnabled ? 'Cross-jurisdiction routes have tradable coverage' : 'Market maker disabled',
+        reason: params.mmEnabled ? 'Cross-jurisdiction routes have full configured depth' : 'Market maker disabled',
         budgetMs: MARKET_MAKER_READY_TIMEOUT_MS,
         actualMs: null,
         startedAt: resetMarketMaker.startedAt,
@@ -1717,6 +1724,9 @@ const computeAggregatedHealth = (): AggregatedHealth => {
 
   const marketMakerOnline = marketMakerChild.proc?.exitCode === null && marketMakerChild.exitCode === null && marketMakerChild.exitSignal === null;
   const marketMakerActive = args.mmEnabled && marketMakerOnline;
+  const marketMakerBootstrapEvent = readLastMarketMakerBootstrapEvent();
+  const eventStartupPhase = String(marketMakerBootstrapEvent?.stage || '').trim() || null;
+  const mmStartupPhase = eventStartupPhase || marketMakerChild.lastStartupPhase;
   const mmEntityId = marketMakerActive
     ? String(marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId || '').trim() || null
     : null;
@@ -1810,7 +1820,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       mmHealthReady &&
       mmChildReady &&
       mmHubs.length === HUB_NAMES.length &&
-      mmHubs.every((hub) => hub.ready) &&
+      mmHubs.every((hub) => hub.depthReady) &&
       mmCrossReady;
   const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
   const hubMeshOk =
@@ -1864,7 +1874,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     sameChainOk,
     crossOk,
     mmOk,
-    mmStartupPhase: marketMakerChild.lastStartupPhase,
+    mmStartupPhase,
     mmOfferTotal,
     mmExpectedTotal,
     crossRouteCount: mmCross.routes.length,
@@ -1917,7 +1927,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       enabled: marketMakerActive,
       ok: mmOk,
       entityId: mmEntityId,
-      startupPhase: marketMakerChild.lastStartupPhase,
+      startupPhase: mmStartupPhase,
       expectedOffersPerHub: mmExpectedOffersPerHub,
       expectedOffersPerPair: Number(marketMakerChild.lastHealth?.marketMaker?.expectedOffersPerPair || 0),
       cross: mmCross,
@@ -2034,10 +2044,10 @@ const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth):
     ...cross,
     routes,
     ok: (cross.expectedRoutes > 0 ? routes.length >= cross.expectedRoutes : routes.length > 0) &&
-      routes.every(route => route.ready),
+      routes.every(route => route.depthReady),
   };
   const sameChainReady = !health.marketMaker.enabled ||
-    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.ready));
+    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.depthReady));
   const marketMaker = {
     ...health.marketMaker,
     ok: !health.marketMaker.enabled || (sameChainReady && enrichedCross.ok),

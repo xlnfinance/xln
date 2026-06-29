@@ -135,8 +135,8 @@ const healthPollIntervalMs = Math.max(
 );
 const stageBudgetsMs = {
   hubMesh: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_HUB_MESH_BUDGET_MS'] || '8000')),
-  sameChain: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '8000')),
-  cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '25000')),
+  sameChain: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '20000')),
+  cross: Math.max(1, Number(process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '60000')),
 };
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));

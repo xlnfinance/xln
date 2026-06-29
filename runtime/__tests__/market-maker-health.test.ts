@@ -358,7 +358,7 @@ test('runtime market maker health stays red when same-chain offers are committed
   expect(pendingRoute?.depthReady).toBe(false);
 });
 
-test('runtime market maker health is green when cross routes have coverage before full depth', () => {
+test('runtime market maker health reports cross coverage before full depth without marking ok', () => {
   const { env, contexts, visibleHubs, tokenIdsByContext } = buildBootstrapTopology();
   const sourceContext = contexts[0]!;
   const targetContext = contexts[1]!;
@@ -415,8 +415,8 @@ test('runtime market maker health is green when cross routes have coverage befor
     { contexts, visibleHubs, tokenIdsByContext },
   );
 
-  expect(health.ok).toBe(true);
-  expect(health.cross.ok).toBe(true);
+  expect(health.ok).toBe(false);
+  expect(health.cross.ok).toBe(false);
   expect(health.cross.expectedRoutes).toBe(2);
   expect(health.cross.routes.map(route => route.offers)).toEqual([sourcePairCoverage, targetPairCoverage]);
   expect(health.cross.routes.every(route => route.ready)).toBe(true);
