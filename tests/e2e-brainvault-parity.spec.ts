@@ -168,6 +168,8 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   await page.locator('#name').fill(name);
   await page.locator('#passphrase').fill(passphrase);
 
+  // Security work factor presets (incl. Custom) are collapsed under the "Advanced" toggle now.
+  await page.getByRole('button', { name: /Security work factor/i }).click();
   await page.getByRole('button', { name: /Custom/i }).click();
   await page.locator('#shards').fill(String(shards));
 
