@@ -1801,6 +1801,9 @@ type MarketMakerCrossBootstrapWaveDebug = {
   desiredOffers?: number;
   groupedSourceHubs?: number;
   groupedTargetHubs?: number;
+  side?: 'source' | 'target';
+  sourceHubs?: number;
+  targetHubs?: number;
   enqueuedEntityInputs?: number;
   enqueuedEntityTxs?: number;
   durationMs?: number;
@@ -2190,7 +2193,17 @@ const maintainMarketMakerCrossQuotes = async (
     sourceHubEntityIds,
     sourceTokenIds,
     connectivityBudget,
-  )) return true;
+  )) {
+    if (emitBootstrapWaveEvents) {
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-connectivity', {
+        direction,
+        side: 'source',
+        sourceHubs: sourceHubEntityIds.length,
+        targetHubs: targetHubEntityIds.length,
+      });
+    }
+    return true;
+  }
   if (!shouldContinue()) return false;
   if (await ensureMarketMakerHubConnectivity(
     env,
@@ -2199,7 +2212,17 @@ const maintainMarketMakerCrossQuotes = async (
     targetHubEntityIds,
     targetTokenIds,
     connectivityBudget,
-  )) return true;
+  )) {
+    if (emitBootstrapWaveEvents) {
+      emitMarketMakerCrossBootstrapWaveEvent('cross-wave-connectivity', {
+        direction,
+        side: 'target',
+        sourceHubs: sourceHubEntityIds.length,
+        targetHubs: targetHubEntityIds.length,
+      });
+    }
+    return true;
+  }
   if (!shouldContinue()) return false;
 
   if (emitBootstrapWaveEvents) {
@@ -3719,6 +3742,10 @@ const run = async (): Promise<void> => {
     if (bootstrapCompletionHealthHeight === env.height) return bootstrapCompletionHealth;
     bootstrapCompletionHealthHeight = env.height;
     bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });
+    if (bootstrapCompletionHealth) {
+      cachedMarketMakerHealth = bootstrapCompletionHealth;
+      rebuildCachedHealthResponseJson();
+    }
     return bootstrapCompletionHealth;
   };
   const hasExpectedBootstrapCrossRoutes = (visibleHubs: HubProfile[]): boolean =>
@@ -3921,16 +3948,6 @@ const run = async (): Promise<void> => {
             : quoteableHubsFor(targetContext);
           if (targetHubs.length === 0) continue;
           const targetTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, targetContext);
-          const specs = buildMarketMakerCrossOfferSpecs(
-            env,
-            sourceContext,
-            targetContext,
-            sourceHubs,
-            targetHubs,
-            sourceTokenIds,
-            targetTokenIds,
-          );
-          if (specs.length === 0) continue;
           crossQuoteJobs.push({
             sourceContext,
             targetContext,

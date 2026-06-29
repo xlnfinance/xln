@@ -347,7 +347,14 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const deferredBootstrapCrossInputs = mode === \'bootstrap\'');
     expect(mmNode).toContain("direction: 'bootstrap-batch'");
     expect(mmNode).toContain('if (mode === \'bootstrap\' && deferredBootstrapCrossInputs && deferredBootstrapCrossInputs.size > 0) break;');
-    expect(mmNode).toContain('const specs = buildMarketMakerCrossOfferSpecs(\n            env,\n            sourceContext,\n            targetContext,\n            sourceHubs,\n            targetHubs,\n            sourceTokenIds,\n            targetTokenIds,\n          );\n          if (specs.length === 0) continue;');
+    const crossJobPlanningStart = mmNode.indexOf('const crossQuoteJobs: CrossQuoteJob[] = [];');
+    const crossSelectionStart = mmNode.indexOf('const selectedCrossQuoteJobs: Array<{ index: number; job: CrossQuoteJob }>');
+    expect(crossJobPlanningStart).toBeGreaterThan(0);
+    expect(crossSelectionStart).toBeGreaterThan(crossJobPlanningStart);
+    const crossJobPlanning = mmNode.slice(crossJobPlanningStart, crossSelectionStart);
+    expect(crossJobPlanning).not.toContain('buildMarketMakerCrossOfferSpecs(');
+    expect(crossJobPlanning).toContain('crossQuoteJobs.push({');
+    expect(mmNode).toContain("emitMarketMakerCrossBootstrapWaveEvent('cross-wave-connectivity'");
     expect(mmNode).not.toContain('launch one per-account settlement wave and wait for');
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK");
     expect(mmNode).toContain('let bootstrapCrossStarted = false;');
@@ -512,6 +519,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain(': { includeCross: false },');
     expect(mmNode).toContain('const buildBootstrapCompletionHealth = (): MarketMakerHealth | null => {');
     expect(mmNode).toContain('bootstrapCompletionHealth = buildMarketMakerHealthSnapshot({ includeCross: true });');
+    expect(mmNode).toContain('cachedMarketMakerHealth = bootstrapCompletionHealth;');
+    expect(mmNode).toContain('rebuildCachedHealthResponseJson();');
     expect(mmNode).toContain("import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';");
     expect(mmNode).toContain('export const buildMarketMakerBootstrapEntityStateHash = (env: Env): string => {');
     expect(mmNode).toContain("schema: 'market-maker-bootstrap-entity-state-v1'");
