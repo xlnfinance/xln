@@ -28,9 +28,9 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [x] Make QA cockpit operator-open by default.
   - Impact: high.
-  - Product decision: auth is deferred to the next feature; central admin UX should not require tokens during local/operator runs.
-  - Status: done. If `XLN_QA_READ_TOKEN`/`XLN_QA_ADMIN_TOKEN` are unset, `/api/qa/*` works as open admin scope. If tokens are configured, read/admin checks still work.
-  - Evidence: unit covers open-default catalog access, configured-token 401/403 behavior, and explicit disabled escape hatch. UI collapses the bearer-token strip in open mode.
+  - Product decision: local/operator runs should not require tokens, but internet-facing QA must fail closed.
+  - Status: done. If `XLN_QA_READ_TOKEN`/`XLN_QA_ADMIN_TOKEN` are unset, `/api/qa/*` works as open admin scope only for loopback operator requests. Public requests return `QA_AUTH_REQUIRED`. If tokens are configured, read/admin checks still work.
+  - Evidence: unit covers local-open catalog access, public no-token 401, configured-token 401/403 behavior, and explicit disabled escape hatch. UI collapses the bearer-token strip in open mode.
 
 - [x] Remove `Access-Control-Allow-Origin: *` from QA artifact and story-image responses.
   - Impact: critical.
@@ -266,7 +266,7 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
 
 - [x] Separate privileged operations from read-only QA views.
   - Impact: high.
-  - UI: read scope sees the full QA evidence surface, including redacted text artifacts, while privileged controls remain visible but disabled. Admin/open scope can plan/backfill/purge, and restart run still requires reason, `RUN`, expected HEAD, and server-side `XLN_QA_RESTART_ALLOWED=1`.
+  - UI: read scope sees the full QA evidence surface, including redacted text artifacts, while privileged controls remain visible but disabled. Admin/local-open scope can plan/backfill/purge, and restart run still requires reason, `RUN`, expected HEAD, and server-side `XLN_QA_RESTART_ALLOWED=1`.
   - Status: done. Secret-bearing text artifacts are readable with read tokens after redaction; admin scope is now reserved for mutating operations (`restart`, `abort`, `history/backfill`, `retention`). QA cockpit read-mode e2e verifies verdict/gallery/runs/player remain visible while restart/backfill/purge buttons stay disabled and do not call admin endpoints.
   - Evidence: L1 `bun test runtime/__tests__/qa-story-report.test.ts` PASS `39/39`; `bun run check` PASS; focused QA cockpit e2e PASS `3/3`, run `20260624-134259-361`, wall `30.8s`, benchmark OK vs `20260624-134214-230`.
 

@@ -5,6 +5,7 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { DISPLAY, QA } from '../constants';
+import { isLocalOperatorRequest } from '../health-redaction';
 import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,
@@ -232,7 +233,10 @@ const authenticateQaRequest = (request: Request): QaAuthContext | Response => {
   const readTokens = splitTokenList(process.env['XLN_QA_READ_TOKEN']);
   const adminTokens = splitTokenList(process.env['XLN_QA_ADMIN_TOKEN']);
   if (readTokens.length === 0 && adminTokens.length === 0) {
-    return { scope: 'admin', disabled: true, actorKeyId: 'qa-open' };
+    if (isLocalOperatorRequest(request)) {
+      return { scope: 'admin', disabled: true, actorKeyId: 'qa-local-open' };
+    }
+    return jsonResponse({ ok: false, error: 'QA_AUTH_REQUIRED' }, 401, {});
   }
 
   const token = extractQaToken(request);

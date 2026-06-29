@@ -973,7 +973,7 @@ test('qa catalog and restart plan expose real runner commands', async () => {
   });
 });
 
-test('qa api is open by default when qa tokens are not configured', async () => {
+test('qa api without configured tokens is open only to local operator requests', async () => {
   const previousRead = process.env['XLN_QA_READ_TOKEN'];
   const previousAdmin = process.env['XLN_QA_ADMIN_TOKEN'];
   const previousDisabled = process.env['XLN_QA_AUTH_DISABLED'];
@@ -981,13 +981,13 @@ test('qa api is open by default when qa tokens are not configured', async () => 
   delete process.env['XLN_QA_ADMIN_TOKEN'];
   delete process.env['XLN_QA_AUTH_DISABLED'];
   try {
-    const response = await maybeHandleQaRequest(
+    const localResponse = await maybeHandleQaRequest(
       new Request('http://127.0.0.1:8080/api/qa/catalog'),
       '/api/qa/catalog',
       JSON_HEADERS,
     );
-    expect(response?.status).toBe(200);
-    const payload = await response!.json() as {
+    expect(localResponse?.status).toBe(200);
+    const payload = await localResponse!.json() as {
       ok?: boolean;
       qaAuth?: { scope?: string; disabled?: boolean; actorKeyId?: string };
       catalog?: unknown[];
@@ -995,8 +995,16 @@ test('qa api is open by default when qa tokens are not configured', async () => 
     expect(payload.ok).toBe(true);
     expect(payload.qaAuth?.scope).toBe('admin');
     expect(payload.qaAuth?.disabled).toBe(true);
-    expect(payload.qaAuth?.actorKeyId).toBe('qa-open');
+    expect(payload.qaAuth?.actorKeyId).toBe('qa-local-open');
     expect(Array.isArray(payload.catalog)).toBe(true);
+
+    const publicResponse = await maybeHandleQaRequest(
+      new Request('https://xln.finance/api/qa/catalog'),
+      '/api/qa/catalog',
+      JSON_HEADERS,
+    );
+    expect(publicResponse?.status).toBe(401);
+    expect((await publicResponse!.json() as { error?: string }).error).toBe('QA_AUTH_REQUIRED');
   } finally {
     if (previousRead === undefined) delete process.env['XLN_QA_READ_TOKEN'];
     else process.env['XLN_QA_READ_TOKEN'] = previousRead;

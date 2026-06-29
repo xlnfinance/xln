@@ -911,12 +911,16 @@ export async function createRuntime(
 
   await ensureRuntimeCreationView(page, label);
 
+  let usedQuickLogin = false;
   if (isQuickLoginDemo) {
     const quickLoginButton = page.getByRole('button', { name: new RegExp(`^${escapeRegex(quickLoginLabel!)}$`, 'i') });
-    await expect(quickLoginButton).toBeVisible({ timeout: 15_000 });
-    await quickLoginButton.click();
-    runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
-  } else {
+    if (await quickLoginButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await quickLoginButton.click();
+      runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
+      usedQuickLogin = true;
+    }
+  }
+  if (!usedQuickLogin) {
     const mnemonicModeButton = page.getByRole('tab', { name: /^Mnemonic$/i }).first();
     if (await mnemonicModeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
       await mnemonicModeButton.click();

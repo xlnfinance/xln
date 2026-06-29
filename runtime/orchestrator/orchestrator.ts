@@ -32,6 +32,11 @@ import { serveRuntimeBundle, serveStatic } from '../server/static-assets';
 import { handleWatchtowerProxy } from '../server/watchtower-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
+import {
+  normalizeRuntimeImportAccess,
+  resolveRuntimeImportAccessForRequest,
+  type RuntimeImportAccess,
+} from './runtime-import-access';
 import type {
   AggregatedHealth,
   CustodySupportState,
@@ -285,17 +290,12 @@ type RuntimeImportManifestEntry = {
   token: string;
 };
 
-type RuntimeImportAccess = 'read' | 'admin';
-
 type RuntimeImportManifest = {
   v: 1;
   issuedAt: number;
   expiresAt: number;
   entries: RuntimeImportManifestEntry[];
 };
-
-const normalizeRuntimeImportAccess = (value: unknown): RuntimeImportAccess =>
-  String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'read';
 
 const runtimeImportAccess = normalizeRuntimeImportAccess(process.env['XLN_RUNTIME_IMPORT_ACCESS']);
 const runtimeImportTokenTtlMs = Math.max(
@@ -2471,8 +2471,15 @@ const server = Bun.serve({
         args.mmEnabled ? pollMarketMakerHealth().catch(() => {}) : Promise.resolve(),
       ]);
       await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, 1200))]);
-      const access = normalizeRuntimeImportAccess(url.searchParams.get('access') || runtimeImportAccess);
-      const manifest = buildRuntimeImportManifest(access);
+      const access = resolveRuntimeImportAccessForRequest(
+        request,
+        url.searchParams.get('access'),
+        runtimeImportAccess,
+      );
+      if (!access.ok) {
+        return new Response(safeStringify({ error: access.error }), { status: access.status, headers });
+      }
+      const manifest = buildRuntimeImportManifest(access.access);
       if (!manifest) {
         return new Response(safeStringify({ error: 'RUNTIME_IMPORT_NOT_READY' }), { status: 503, headers });
       }

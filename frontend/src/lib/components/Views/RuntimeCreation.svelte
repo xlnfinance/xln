@@ -93,8 +93,7 @@
     return groups;
   }, []);
 
-  // Live remote runtimes discovered from the server's import manifest (hubs + MM + custody),
-  // each carrying a fresh radapter capability token (admin).
+  // Live remote runtimes discovered from the server's import manifest (hubs + MM + custody).
   type LiveRuntime = { label: string; access: 'admin' | 'read'; wsUrl: string; token: string };
   let liveRuntimes: LiveRuntime[] = [];
   let liveRuntimesLoading = false;
@@ -108,6 +107,10 @@
     if (rt) void connectLiveRuntime(rt);
   }
 
+  function selectedRuntimeAccessLabel(): 'read' | 'admin' {
+    return liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey)?.access ?? 'read';
+  }
+
   // `silent` (used for auto-discovery on mount) swallows errors so a login screen with no
   // reachable runtime server doesn't surface a scary fetch error before the user asks for it.
   async function discoverLiveRuntimes(silent = false): Promise<void> {
@@ -117,7 +120,7 @@
     try {
       const apiBase = resolveConfiguredApiBase(window.location.origin);
       const url = new URL('/api/runtime-import', apiBase);
-      url.searchParams.set('access', 'admin');
+      url.searchParams.set('access', 'read');
       url.searchParams.set('ts', String(Date.now()));
       const res = await fetch(url.toString(), { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -1109,7 +1112,7 @@
           </div>
         </div>
 
-          <!-- Connect to a live remote runtime (radapter, admin) -->
+          <!-- Connect to a live remote runtime (radapter, read-only) -->
           <div class="live-runtime-section">
             <div class="live-runtime-header">
               <span class="ql-title">Connect to live runtime</span>
@@ -1145,7 +1148,7 @@
                   disabled={!selectedRuntimeKey || !!connectingRuntimeId}
                   on:click={connectSelectedRuntime}
                 >
-                  {connectingRuntimeId ? 'Connecting…' : 'Connect · admin'}
+                  {connectingRuntimeId ? 'Connecting…' : `Connect · ${selectedRuntimeAccessLabel()}`}
                 </button>
               </div>
             {:else if liveRuntimesLoading}
