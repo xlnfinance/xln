@@ -27,8 +27,17 @@ type HealthPayload = {
     entityId?: string | null;
     startupPhase?: string | null;
     expectedOffersPerHub?: number;
-    hubs?: Array<{ offers?: number; blockers?: unknown[] }>;
-    cross?: { ok?: boolean; expectedRoutes?: number; routes?: Array<{ blockers?: unknown[] }> };
+    hubs?: Array<{
+      offers?: number;
+      ready?: boolean;
+      blockers?: unknown[];
+      pairs?: Array<{ offers?: number; ready?: boolean }>;
+    }>;
+    cross?: {
+      ok?: boolean;
+      expectedRoutes?: number;
+      routes?: Array<{ offers?: number; ready?: boolean; blockers?: unknown[] }>;
+    };
   };
   custody?: { ok?: boolean };
   bootstrapReserves?: { ok?: boolean; targetMet?: boolean };
@@ -443,7 +452,7 @@ const assertNoMarketMakerBootstrapBacklog = (payload: MarketMakerInfoPayload): v
 };
 
 const healthReady = (health: HealthPayload): boolean => {
-  const offers = health.marketMaker?.hubs?.map(hub => Number(hub.offers || 0)) ?? [];
+  const hubs = health.marketMaker?.hubs ?? [];
   const expectedOffersPerHub = Number(health.marketMaker?.expectedOffersPerHub || 0);
   return health.coreOk === true &&
     health.systemOk === true &&
@@ -454,12 +463,20 @@ const healthReady = (health: HealthPayload): boolean => {
     health.marketMaker?.startupPhase === 'offers-ready' &&
     Boolean(health.marketMaker?.entityId) &&
     expectedOffersPerHub > 0 &&
-    offers.length >= 3 &&
-    offers.every(offerCount => offerCount >= expectedOffersPerHub) &&
-    (health.marketMaker?.hubs ?? []).every(hub => (hub.blockers ?? []).length === 0) &&
+    hubs.length >= 3 &&
+    hubs.every(hub =>
+      hub.ready === true &&
+      Number(hub.offers || 0) > 0 &&
+      (hub.blockers ?? []).length === 0 &&
+      (hub.pairs ?? []).every(pair => pair.ready === true && Number(pair.offers || 0) > 0)
+    ) &&
     Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0 &&
     health.marketMaker?.cross?.ok === true &&
-    (health.marketMaker?.cross?.routes ?? []).every(route => (route.blockers ?? []).length === 0) &&
+    (health.marketMaker?.cross?.routes ?? []).every(route =>
+      route.ready === true &&
+      Number(route.offers || 0) > 0 &&
+      (route.blockers ?? []).length === 0
+    ) &&
     health.custody?.ok === true &&
     health.bootstrapReserves?.ok === true;
 };
@@ -691,7 +708,10 @@ const main = async (): Promise<void> => {
     MARKET_MAKER_CROSS_LEVELS_PER_PAIR: process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '3',
     MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE:
       process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000',
-    MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK: '1000',
+    MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK:
+      process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '6',
+    MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK:
+      process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '6',
     MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK:
       process.env['MARKET_MAKER_BOOTSTRAP_CROSS_OFFERS_PER_ACCOUNT_PER_TICK'] || '15',
     MARKET_MAKER_BOOTSTRAP_MAX_NEW_CROSS_OFFERS_PER_TICK:
@@ -751,7 +771,9 @@ const main = async (): Promise<void> => {
     runtimeStateHash: bootstrap.runtimeStateHash,
     entityStateHash: bootstrap.entityStateHash,
   });
-  if (marketMakerInfo) assertNoMarketMakerBootstrapBacklog(marketMakerInfo);
+  if (marketMakerInfo && process.env['XLN_LOCAL_PROD_SMOKE_REQUIRE_IDLE_AFTER_READY'] === '1') {
+    assertNoMarketMakerBootstrapBacklog(marketMakerInfo);
+  }
   if (postBootstrapStabilityMs > 0) {
     recordStage('post-bootstrap:observed', { stabilityMs: postBootstrapStabilityMs });
     await sleep(postBootstrapStabilityMs);
@@ -766,7 +788,9 @@ const main = async (): Promise<void> => {
     const postBootstrapInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'
       ? await assertMarketMakerInfoResponsive()
       : null;
-    if (postBootstrapInfo) assertNoMarketMakerBootstrapBacklog(postBootstrapInfo);
+    if (postBootstrapInfo && process.env['XLN_LOCAL_PROD_SMOKE_REQUIRE_IDLE_AFTER_READY'] === '1') {
+      assertNoMarketMakerBootstrapBacklog(postBootstrapInfo);
+    }
     const postBootstrapHash = postBootstrapInfo?.bootstrap?.readyHash ?? postBootstrapHealth.bootstrap?.readyHash ?? bootstrap.readyHash;
     if (postBootstrapHash !== bootstrap.readyHash) {
       throw new Error(

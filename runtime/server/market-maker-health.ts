@@ -223,5 +223,5 @@ export const getMarketMakerHealth = (
     };
   });
 
-  return { enabled: true, ok: perHub.length > 0 && perHub.every(entry => entry.depthReady), entityId, expectedOffersPerHub, expectedOffersPerPair, cross, hubs: perHub };
+  return { enabled: true, ok: perHub.length > 0 && perHub.every(entry => entry.ready), entityId, expectedOffersPerHub, expectedOffersPerPair, cross, hubs: perHub };
 };

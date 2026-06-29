@@ -226,11 +226,14 @@ export type HubInfoPayload = {
 export type MarketMakerCrossRouteHealthPayload = {
   sourceJurisdiction: string;
   targetJurisdiction: string;
+  sourceMmEntityId?: string;
+  targetMmEntityId?: string;
   sourceHubEntityId: string;
   targetHubEntityId: string;
   offers: number;
   ready: boolean;
   depthReady?: boolean;
+  blockers?: unknown[];
   pairs?: Array<{
     pairId: string;
     offers: number;
@@ -281,6 +284,7 @@ export type MarketMakerHealthPayload = {
       offers: number;
       ready: boolean;
       depthReady?: boolean;
+      blockers?: unknown[];
       pairs?: Array<{
         pairId: string;
         offers: number;
@@ -399,6 +403,7 @@ export type AggregatedHealth = {
       offers: number;
       ready: boolean;
       depthReady?: boolean;
+      blockers?: unknown[];
       pairs: Array<{
         pairId: string;
         offers: number;

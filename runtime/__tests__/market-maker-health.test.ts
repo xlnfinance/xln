@@ -39,7 +39,7 @@ test('market maker server health treats absent cross topology as neutral', () =>
   expect(health.cross.routes).toEqual([]);
 });
 
-test('market maker server health requires full quote depth', () => {
+test('market maker server health is ready with one committed offer per pair before full depth', () => {
   const state = createMarketMakerServerState();
   state.entityId = 'mm';
   state.targetHubIds = ['0x0000000000000000000000000000000000abcdef'];
@@ -57,7 +57,7 @@ test('market maker server health requires full quote depth', () => {
   };
   const health = getServerMarketMakerHealth({} as Env, state, () => account as any);
 
-  expect(health.ok).toBe(false);
+  expect(health.ok).toBe(true);
   expect(health.hubs[0]?.ready).toBe(true);
   expect(health.hubs[0]?.depthReady).toBe(false);
   expect(health.hubs[0]?.pairs.map(pair => ({
@@ -72,7 +72,7 @@ test('market maker server health requires full quote depth', () => {
   ]);
 });
 
-test('market maker server health is green only at full configured depth', () => {
+test('market maker server health reports depthReady at full configured depth', () => {
   const state = createMarketMakerServerState();
   state.entityId = 'mm';
   state.targetHubIds = ['0x0000000000000000000000000000000000abcdef'];
@@ -377,7 +377,7 @@ test('runtime market maker health is green when cross routes have coverage befor
   addReplica(env, sourceContext.entityId, sourceContext.signerId, new Map([[sourceHub.entityId, sourceAccount]]));
   addReplica(env, targetContext.entityId, targetContext.signerId, new Map([[targetHub.entityId, targetAccount]]));
 
-  const sourceToTargetSpec = buildMarketMakerCrossOfferSpecs(
+  const sourceToTargetSpecs = buildMarketMakerCrossOfferSpecs(
     env,
     sourceContext,
     targetContext,
@@ -385,8 +385,8 @@ test('runtime market maker health is green when cross routes have coverage befor
     [targetHub],
     [1, 2, 3],
     [1, 2, 3],
-  )[0]!;
-  const targetToSourceSpec = buildMarketMakerCrossOfferSpecs(
+  );
+  const targetToSourceSpecs = buildMarketMakerCrossOfferSpecs(
     env,
     targetContext,
     sourceContext,
@@ -394,9 +394,18 @@ test('runtime market maker health is green when cross routes have coverage befor
     [sourceHub],
     [1, 2, 3],
     [1, 2, 3],
-  )[0]!;
-  sourceAccount.swapOffers?.set(sourceToTargetSpec.offerId, { crossJurisdiction: sourceToTargetSpec.crossJurisdiction });
-  targetAccount.swapOffers?.set(targetToSourceSpec.offerId, { crossJurisdiction: targetToSourceSpec.crossJurisdiction });
+  );
+  const commitOneOfferPerPair = (account: AccountMachine, specs: ReturnType<typeof buildMarketMakerCrossOfferSpecs>): number => {
+    const coveredPairs = new Set<string>();
+    for (const spec of specs) {
+      if (coveredPairs.has(spec.pairId)) continue;
+      account.swapOffers?.set(spec.offerId, { crossJurisdiction: spec.crossJurisdiction });
+      coveredPairs.add(spec.pairId);
+    }
+    return coveredPairs.size;
+  };
+  const sourcePairCoverage = commitOneOfferPerPair(sourceAccount, sourceToTargetSpecs);
+  const targetPairCoverage = commitOneOfferPerPair(targetAccount, targetToSourceSpecs);
 
   const health = getRuntimeMarketMakerHealth(
     env,
@@ -409,10 +418,11 @@ test('runtime market maker health is green when cross routes have coverage befor
   expect(health.ok).toBe(true);
   expect(health.cross.ok).toBe(true);
   expect(health.cross.expectedRoutes).toBe(2);
-  expect(health.cross.routes.map(route => route.offers)).toEqual([1, 1]);
+  expect(health.cross.routes.map(route => route.offers)).toEqual([sourcePairCoverage, targetPairCoverage]);
   expect(health.cross.routes.every(route => route.ready)).toBe(true);
   expect(health.cross.routes.some(route => !route.depthReady)).toBe(true);
-  expect(health.cross.routes.flatMap(route => route.pairs).some(pair => !pair.ready)).toBe(true);
+  expect(health.cross.routes.flatMap(route => route.pairs).every(pair => pair.ready)).toBe(true);
+  expect(health.cross.routes.flatMap(route => route.pairs).some(pair => !pair.depthReady)).toBe(true);
 });
 
 test('market maker finalized cross matching tolerates rolling route hash but rejects changed economics', () => {

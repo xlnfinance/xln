@@ -776,11 +776,14 @@ const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSoc
 const cleanupRpcMarketSubscription = (ws: OrchestratorWebSocket): void => marketSubscriptionStack.cleanup(ws);
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
+  const proc = child.proc;
+  if (!proc || child.exitCode !== null || proc.exitCode !== null) return;
   const apiBase = `http://${args.host}:${child.apiPort}`;
   const [info, health] = await Promise.all([
     fetchJson<HubInfoPayload>(`${apiBase}/api/info`, CHILD_HEALTH_TIMEOUT_MS),
     fetchJson<HubHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS),
   ]);
+  if (child.proc !== proc || child.exitCode !== null || proc.exitCode !== null) return;
   if (info) child.lastInfo = info;
   if (health) child.lastHealth = health;
   const entityIds = new Set<string>();
@@ -810,6 +813,72 @@ const pollAllHubHealth = async (): Promise<void> => {
 };
 
 let marketMakerHealthPollInFlight: Promise<void> | null = null;
+let marketMakerInfoPollInFlight: Promise<void> | null = null;
+
+const isCurrentMarketMakerProc = (proc: ChildProcess | null): proc is ChildProcess =>
+  Boolean(
+    proc &&
+    marketMakerChild.proc === proc &&
+    proc.exitCode === null &&
+    marketMakerChild.exitCode === null &&
+    marketMakerChild.exitSignal === null,
+  );
+
+const refreshMarketMakerStartupPhase = (): void => {
+  marketMakerChild.lastStartupPhase = String(
+    marketMakerChild.lastInfo?.startupPhase ||
+    marketMakerChild.lastHealth?.startupPhase ||
+    '',
+  ).trim() || null;
+};
+
+const applyMarketMakerInfo = (info: MarketMakerInfoPayload, proc: ChildProcess): void => {
+  if (!isCurrentMarketMakerProc(proc)) return;
+  marketMakerChild.lastInfo = { ...(marketMakerChild.lastInfo || {}), ...info };
+  refreshMarketMakerStartupPhase();
+};
+
+const applyMarketMakerHealth = (
+  health: MarketMakerHealthPayload,
+  proc: ChildProcess,
+  options: { trustStartupPhase: boolean },
+): void => {
+  if (!isCurrentMarketMakerProc(proc)) return;
+  marketMakerChild.lastHealth = health;
+  const nextInfo: MarketMakerInfoPayload = { ...(marketMakerChild.lastInfo || {}) };
+  if (health.name !== undefined) nextInfo.name = health.name;
+  if (health.entityId !== undefined && health.entityId !== null) nextInfo.entityId = health.entityId;
+  if (health.runtimeId !== undefined && health.runtimeId !== null) nextInfo.runtimeId = health.runtimeId;
+  if (health.apiUrl !== undefined) nextInfo.apiUrl = health.apiUrl;
+  if (health.relayUrl !== undefined) nextInfo.relayUrl = health.relayUrl;
+  if (health.directWsUrl !== undefined) nextInfo.directWsUrl = health.directWsUrl;
+  if (health.startupPhase !== undefined && (options.trustStartupPhase || !nextInfo.startupPhase)) {
+    nextInfo.startupPhase = health.startupPhase;
+  }
+  marketMakerChild.lastInfo = nextInfo;
+  refreshMarketMakerStartupPhase();
+};
+
+const pollMarketMakerInfoOnce = async (proc: ChildProcess | null = marketMakerChild.proc): Promise<boolean> => {
+  if (!isCurrentMarketMakerProc(proc)) return false;
+  const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
+  const info = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS);
+  if (!info) return false;
+  applyMarketMakerInfo(info, proc);
+  return isCurrentMarketMakerProc(proc);
+};
+
+const pollMarketMakerInfo = async (): Promise<void> => {
+  if (marketMakerInfoPollInFlight) return marketMakerInfoPollInFlight;
+  const proc = marketMakerChild.proc;
+  marketMakerInfoPollInFlight = pollMarketMakerInfoOnce(proc)
+    .then(() => undefined)
+    .finally(() => {
+      marketMakerInfoPollInFlight = null;
+    });
+  return marketMakerInfoPollInFlight;
+};
+
 const pollMarketMakerHealth = async (): Promise<void> => {
   if (marketMakerHealthPollInFlight) return marketMakerHealthPollInFlight;
   marketMakerHealthPollInFlight = pollMarketMakerHealthOnce().finally(() => {
@@ -819,33 +888,13 @@ const pollMarketMakerHealth = async (): Promise<void> => {
 };
 
 const pollMarketMakerHealthOnce = async (): Promise<void> => {
-  if (!marketMakerChild.proc || marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null) {
-    return;
-  }
+  const proc = marketMakerChild.proc;
+  if (!isCurrentMarketMakerProc(proc)) return;
   const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  // Fetch identity (/api/info) first and independently: it's fast and, unlike /api/health, does not
-  // hang when the MM runtime is busy. Keep it current every poll so startupPhase/runtimeId do not lag
-  // behind a stale parent health snapshot when /api/health times out.
-  const info = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS);
-  if (info) marketMakerChild.lastInfo = { ...(marketMakerChild.lastInfo || {}), ...info };
+  const infoFresh = await pollMarketMakerInfoOnce(proc);
+  if (!isCurrentMarketMakerProc(proc)) return;
   const health = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS);
-  if (health) {
-    marketMakerChild.lastHealth = health;
-    const nextInfo: MarketMakerInfoPayload = { ...(marketMakerChild.lastInfo || {}) };
-    if (health.name !== undefined) nextInfo.name = health.name;
-    if (health.entityId !== undefined && health.entityId !== null) nextInfo.entityId = health.entityId;
-    if (health.runtimeId !== undefined && health.runtimeId !== null) nextInfo.runtimeId = health.runtimeId;
-    if (health.apiUrl !== undefined) nextInfo.apiUrl = health.apiUrl;
-    if (health.relayUrl !== undefined) nextInfo.relayUrl = health.relayUrl;
-    if (health.directWsUrl !== undefined) nextInfo.directWsUrl = health.directWsUrl;
-    if (health.startupPhase !== undefined) nextInfo.startupPhase = health.startupPhase;
-    marketMakerChild.lastInfo = nextInfo;
-  }
-  marketMakerChild.lastStartupPhase = String(
-    marketMakerChild.lastInfo?.startupPhase ||
-    marketMakerChild.lastHealth?.startupPhase ||
-    '',
-  ).trim() || null;
+  if (health) applyMarketMakerHealth(health, proc, { trustStartupPhase: !infoFresh });
 };
 
 let lastHealthResponseRefreshMs: number | null = null;
@@ -854,6 +903,7 @@ const refreshChildHealthForResponse = async (): Promise<void> => {
   await Promise.race([
     Promise.allSettled([
       pollAllHubHealth(),
+      pollMarketMakerInfo(),
       pollMarketMakerHealth(),
     ]).then(() => undefined),
     delay(HEALTH_RESPONSE_REFRESH_TIMEOUT_MS).then(() => undefined),
@@ -1480,7 +1530,7 @@ const buildBootstrapTimeline = (params: {
         key: 'same-chain',
         label: 'Same-Chain Books',
         status: stageStatus(params.sameChainOk, { active: params.marketMakerActive && !params.sameChainOk, disabled: !params.mmEnabled }),
-        reason: params.mmEnabled ? 'Market maker same-chain orderbooks reached target depth' : 'Market maker disabled',
+        reason: params.mmEnabled ? 'Market maker same-chain orderbooks have tradable coverage' : 'Market maker disabled',
         budgetMs: MARKET_MAKER_READY_TIMEOUT_MS,
         actualMs: null,
         startedAt: resetMarketMaker.startedAt,
@@ -1494,7 +1544,7 @@ const buildBootstrapTimeline = (params: {
         key: 'cross-chain',
         label: 'Cross-Chain Routes',
         status: stageStatus(params.crossOk, { active: params.marketMakerActive && !params.crossOk, disabled: !params.mmEnabled }),
-        reason: params.mmEnabled ? 'Cross-jurisdiction routes reached target depth' : 'Market maker disabled',
+        reason: params.mmEnabled ? 'Cross-jurisdiction routes have tradable coverage' : 'Market maker disabled',
         budgetMs: MARKET_MAKER_READY_TIMEOUT_MS,
         actualMs: null,
         startedAt: resetMarketMaker.startedAt,
@@ -1676,6 +1726,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     offers: number;
     ready: boolean;
     depthReady: boolean;
+    blockers: unknown[];
     pairs: Array<{ pairId: string; offers: number; ready: boolean; depthReady?: boolean; expectedOffers?: number }>;
   }>();
   for (const hub of marketMakerChild.lastHealth?.marketMaker?.hubs ?? []) {
@@ -1686,6 +1737,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       offers: Number(hub.offers || 0),
       ready: hub.ready === true,
       depthReady: hub.depthReady === true,
+      blockers: Array.isArray(hub.blockers) ? hub.blockers : [],
       pairs: Array.isArray(hub.pairs)
         ? hub.pairs.map((pair) => ({
             pairId: String(pair.pairId || ''),
@@ -1708,15 +1760,21 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       ? rawMmCross.routes.map((route) => ({
           sourceJurisdiction: String(route.sourceJurisdiction || ''),
           targetJurisdiction: String(route.targetJurisdiction || ''),
+          sourceMmEntityId: String(route.sourceMmEntityId || '').toLowerCase(),
+          targetMmEntityId: String(route.targetMmEntityId || '').toLowerCase(),
           sourceHubEntityId: String(route.sourceHubEntityId || '').toLowerCase(),
           targetHubEntityId: String(route.targetHubEntityId || '').toLowerCase(),
           offers: Number(route.offers || 0),
           ready: route.ready === true,
+          depthReady: route.depthReady === true,
+          blockers: Array.isArray(route.blockers) ? route.blockers : [],
           pairs: Array.isArray(route.pairs)
             ? route.pairs.map((pair) => ({
                 pairId: String(pair.pairId || ''),
                 offers: Number(pair.offers || 0),
                 ready: pair.ready === true,
+                depthReady: pair.depthReady === true,
+                expectedOffers: Number(pair.expectedOffers || 0),
                 sourceTokenIds: Array.isArray(pair.sourceTokenIds)
                   ? pair.sourceTokenIds.map(Number).filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
                   : [],
@@ -1733,24 +1791,26 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     const offers = existing?.offers ?? 0;
     const depthReady = existing?.depthReady === true ||
       (!!mmExpectedOffersPerHub && offers >= mmExpectedOffersPerHub);
+    const ready = existing?.ready === true || depthReady;
     return {
       hubEntityId,
       offers,
-      ready: existing?.ready === true || depthReady,
+      ready,
       depthReady,
+      blockers: existing?.blockers ?? [],
       pairs: existing?.pairs ?? [],
     };
   });
   const mmHealthReady = Boolean(marketMakerChild.lastHealth?.marketMaker);
-  const mmChildDepthReady = marketMakerChild.lastHealth?.marketMaker?.ok === true;
+  const mmChildReady = marketMakerChild.lastHealth?.marketMaker?.ok === true;
   const mmCrossReady = Boolean(rawMmCross) && mmCross.ok;
   const mmOk = !args.mmEnabled
     ? true
     : marketMakerActive &&
       mmHealthReady &&
-      mmChildDepthReady &&
+      mmChildReady &&
       mmHubs.length === HUB_NAMES.length &&
-      mmHubs.every((hub) => hub.depthReady) &&
+      mmHubs.every((hub) => hub.ready) &&
       mmCrossReady;
   const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
   const hubMeshOk =
@@ -1963,8 +2023,7 @@ const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth):
     return {
       ...route,
       offers,
-      ready: pairs.length > 0 &&
-        pairs.every(pair => pair.ready),
+      ready: route.ready === true || (pairs.length > 0 && pairs.every(pair => pair.ready)),
       depthReady: expectedOffers > 0 &&
         offers >= expectedOffers &&
         pairs.every(pair => pair.depthReady),
@@ -1975,10 +2034,10 @@ const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth):
     ...cross,
     routes,
     ok: (cross.expectedRoutes > 0 ? routes.length >= cross.expectedRoutes : routes.length > 0) &&
-      routes.every(route => route.depthReady),
+      routes.every(route => route.ready),
   };
   const sameChainReady = !health.marketMaker.enabled ||
-    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.depthReady));
+    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.ready));
   const marketMaker = {
     ...health.marketMaker,
     ok: !health.marketMaker.enabled || (sameChainReady && enrichedCross.ok),
@@ -2466,7 +2525,7 @@ const server = Bun.serve({
       // so cap the refresh and fall back to the last-known state.
       const refresh = Promise.all([
         pollAllHubHealth().catch(() => {}),
-        args.mmEnabled ? pollMarketMakerHealth().catch(() => {}) : Promise.resolve(),
+        args.mmEnabled ? pollMarketMakerInfo().catch(() => {}) : Promise.resolve(),
       ]);
       await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, 1200))]);
       const access = resolveRuntimeImportAccessForRequest(
