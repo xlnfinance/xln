@@ -27,6 +27,8 @@ type ManagedAnvilProcess = {
   exitCode: number | null;
   kill: (signal?: NodeJS.Signals | number) => boolean;
   unref?: () => void;
+  once?: (event: 'exit' | 'error', listener: (...args: unknown[]) => void) => unknown;
+  removeListener?: (event: 'exit' | 'error', listener: (...args: unknown[]) => void) => unknown;
 };
 
 let managedAnvil: ManagedAnvilProcess | null = null;
@@ -61,6 +63,48 @@ const killManagedAnvil = (): void => {
   }
 };
 
+const waitForManagedAnvilExit = async (
+  child: ManagedAnvilProcess,
+  timeoutMs: number,
+): Promise<void> => {
+  if (child.exitCode !== null || typeof child.once !== 'function') return;
+  await new Promise<void>((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      child.removeListener?.('exit', finish);
+      child.removeListener?.('error', finish);
+      if (timer) clearTimeout(timer);
+      resolve();
+    };
+    const timer = timeoutMs > 0 ? setTimeout(finish, timeoutMs) : null;
+    child.once?.('exit', finish);
+    child.once?.('error', finish);
+  });
+};
+
+export const stopManagedScenarioAnvil = async (timeoutMs = 3_000): Promise<void> => {
+  const child = managedAnvil;
+  managedAnvil = null;
+  managedAnvilRpc = null;
+  if (!child || child.exitCode !== null) return;
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    return;
+  }
+  await waitForManagedAnvilExit(child, timeoutMs);
+  if (child.exitCode === null) {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Ignore cleanup failures
+    }
+    await waitForManagedAnvilExit(child, Math.min(timeoutMs, 1_000));
+  }
+};
+
 const ensureAnvilCleanupHooks = (): void => {
   if (!IS_NODE_RUNTIME) return;
   if (managedAnvilCleanupRegistered) return;
@@ -91,7 +135,7 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
     return;
   }
 
-  killManagedAnvil();
+  await stopManagedScenarioAnvil();
   console.warn(`[Boot] RPC ${rpcUrl} unavailable, auto-starting local anvil (chainId=${chainId}, port=${port})`);
   const { spawn } = await import('node:child_process');
   // Keep scenario auto-start aligned with the E2E/dev stack. If this diverges,
@@ -280,6 +324,7 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   // 3. Create JAdapter (creates BrowserVM or connects to RPC)
   const jReplicaName = config.jurisdictionName ?? `${config.name} Demo`;
   const jadapter = await ensureJAdapter(env, config.mode, { deployStack: true });
+  env.jAdapter = jadapter;
   const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, jReplicaName);
 
   // 4. Create jReplica

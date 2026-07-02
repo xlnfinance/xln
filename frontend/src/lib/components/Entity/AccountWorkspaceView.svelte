@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
+  import type { Env, EnvSnapshot, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
   import type { ComponentType } from 'svelte';
   import { ArrowDownLeft, ArrowUpRight, Activity, Banknote, Landmark, PlusCircle, Repeat, Settings as SettingsIcon, SlidersHorizontal } from 'lucide-svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
@@ -18,9 +18,18 @@
   import ReceivePanel from './ReceivePanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
+  import type { SwapPanelRuntimeView } from './swap-panel-helpers';
   import type { DisputedAccountView, CrossJTargetDisputeRisk } from './account-dispute-view';
   import type { EntityActivityAccountOption, EntityActivityRow } from './entity-activity';
   import type { AccountWorkspaceTab, ConfigureWorkspaceTab } from './entity-panel-routing';
+  import {
+    emptyHubDiscoveryProjection,
+    type HubDiscoveryProjection,
+  } from './hub-discovery-profile';
+  import {
+    emptyPaymentPanelView,
+    type PaymentPanelView,
+  } from './payment-panel-view';
   import type { MoveEndpoint } from './move-routes';
 
   type IconTabConfig<T extends string> = {
@@ -60,10 +69,18 @@
 
   export let replica: EntityReplica | null = null;
   export let tab: Tab;
-  export let activeEnv: Env | EnvSnapshot;
+  export let activeEnv: Env | EnvSnapshot | null = null;
   export let liveRuntimeEnv: Env | null = null;
   export let activeIsLive = false;
   export let actionRuntimeEnv: Env | null = null;
+  export let runtimeHeight: number = 0;
+  export let entityNames: Map<string, string> = new Map();
+  export let profileByEntityId: Map<string, GossipProfile> = new Map();
+  export let isDevnet = false;
+  export let hubDiscoveryProjection: HubDiscoveryProjection = emptyHubDiscoveryProjection();
+  export let canOpenAccounts = true;
+  export let paymentView: PaymentPanelView = emptyPaymentPanelView();
+  export let swapRuntimeView: SwapPanelRuntimeView | null = null;
   export let accountIds: string[] = [];
   export let workspaceAccountIds: string[] = [];
   export let workspaceAccountId = '';
@@ -156,6 +173,8 @@
   export let rebroadcastPendingBatch: () => Promise<void>;
   export let broadcastPendingBatch: () => Promise<void>;
   export let handleWorkspaceAccountChange: (event: CustomEvent<{ value?: string }>) => void;
+
+  $: profiles = Array.from(profileByEntityId.values());
   export let getCrossJTargetDisputeRisk: (counterpartyEntityId: string) => CrossJTargetDisputeRisk | null;
   export let formatCrossJTargetDisputeRisk: (risk: CrossJTargetDisputeRisk) => string;
   export let confirmAndQueueDisputeFinalize: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
@@ -168,6 +187,7 @@
   export let addTokenToAccount: () => void | Promise<void>;
   export let handleOpenAccountTargetChange: (event: CustomEvent<{ value?: string }>) => void;
   export let openAccountWithFullId: (targetEntityId: string) => void | Promise<void>;
+  export let submitRuntimeInput: (input: RuntimeInput) => Promise<unknown> | unknown;
   export let openDisputedAccount: (counterpartyEntityId: string) => void;
   export let reopenDisputedAccount: (counterpartyEntityId: string) => void | Promise<void>;
   export let resolveSelfEntityId: () => string;
@@ -218,6 +238,7 @@
     <AccountDropdown
       {replica}
       {selectedAccountId}
+      {entityNames}
       on:accountSelect={handleAccountSelect}
     />
   </div>
@@ -227,6 +248,10 @@
   {replica}
   {selectedAccountId}
   pendingFaucetKeys={pendingOffchainFaucetKeys}
+  {runtimeHeight}
+  {entityNames}
+  {profileByEntityId}
+  {isDevnet}
   on:select={handleAccountSelect}
   on:faucet={handleAccountFaucet}
   on:settleApprove={handleQuickSettleApprove}
@@ -262,8 +287,11 @@
     {#if liveRuntimeEnv && activeIsLive}
       <PaymentPanel
         entityId={replica?.state?.entityId || tab.entityId}
-        env={liveRuntimeEnv}
+        {paymentView}
+        actionRuntimeEnv={liveRuntimeEnv}
         isLive={activeIsLive}
+        signerId={tab.signerId || null}
+        {submitRuntimeInput}
       />
     {:else}
       <LiveRequiredState message="Payments are only available in LIVE mode." />
@@ -273,12 +301,17 @@
     <ReceivePanel entityId={replica?.state?.entityId || tab.entityId} />
 
   {:else if accountWorkspaceTab === 'swap'}
-    <SwapPanel
-      {replica}
-      {tab}
-      env={activeEnv}
-      isLive={activeIsLive}
-    />
+    {#if activeEnv || swapRuntimeView}
+      <SwapPanel
+        {replica}
+        {tab}
+        env={activeIsLive ? (liveRuntimeEnv ?? actionRuntimeEnv) : null}
+        isLive={activeIsLive}
+        runtimeView={swapRuntimeView}
+      />
+    {:else}
+      <LiveRequiredState message="Swap projection is not available yet." />
+    {/if}
 
   {:else if accountWorkspaceTab === 'move'}
     <MoveWorkspace
@@ -334,6 +367,7 @@
       {moveEntityOptions}
       {moveHubEntityOptions}
       {moveSourceAccountOptions}
+      {profiles}
       reserveRecipientPreferredId={resolveSelfEntityId()}
       targetEntityPreferredId={resolveSelfEntityId()}
       entityId={replica?.state?.entityId || tab.entityId}
@@ -351,6 +385,7 @@
       entityId={replica?.state?.entityId || tab.entityId}
       {replica}
       accountIds={workspaceAccountIds}
+      {entityNames}
       isLive={activeIsLive}
     />
 
@@ -361,6 +396,7 @@
       env={activeEnv}
       isLive={activeIsLive}
       historyOnly={true}
+      {profiles}
     />
 
   {:else if accountWorkspaceTab === 'configure'}
@@ -371,6 +407,8 @@
       {liveRuntimeEnv}
       {workspaceAccountId}
       {workspaceAccountIds}
+      {entityNames}
+      {profileByEntityId}
       bind:configureWorkspaceTab
       bind:configureTokenId
       {configureTokenOptions}
@@ -383,6 +421,7 @@
       {confirmAndQueueDisputeStart}
       {confirmAndQueueDisputePrepare}
       {addTokenToAccount}
+      {submitRuntimeInput}
     />
 
   {:else if accountWorkspaceTab === 'appearance'}
@@ -394,11 +433,15 @@
       {tab}
       {activeIsLive}
       {actionRuntimeEnv}
+      {hubDiscoveryProjection}
+      {canOpenAccounts}
       bind:openAccountEntityId
       {openAccountEntityOptions}
+      {profiles}
       {disputedAccounts}
       {handleOpenAccountTargetChange}
       {openAccountWithFullId}
+      {submitRuntimeInput}
       {openDisputedAccount}
       {reopenDisputedAccount}
     />

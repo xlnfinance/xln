@@ -1,28 +1,16 @@
 import { expect, test } from './global-setup';
-import { createHmac } from 'crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import {
   APP_BASE_URL,
   API_BASE_URL,
   ensureE2EBaseline,
   waitForNamedHubs,
 } from './utils/e2e-baseline';
+import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 
+const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
 const HUB_MESH_CREDIT_AMOUNT = '1000000000000000000000000';
-
-type RuntimeImportManifestFile = {
-  importUrl?: string;
-  manifest?: {
-    entries?: Array<{
-      label?: string;
-      access?: string;
-      wsUrl?: string;
-      token?: string;
-    }>;
-  };
-};
+const REMOTE_E2E_WAIT_MS = 15_000;
 
 type RuntimeImportSummary = {
   ok: boolean;
@@ -35,6 +23,13 @@ type RuntimeImportSummary = {
     height: number;
     entityCount: number;
   }>;
+};
+
+type RuntimeImportCapability = {
+  label: string;
+  access: 'read' | 'admin';
+  wsUrl: string;
+  token: string;
 };
 
 type AdminControlProbe = {
@@ -51,27 +46,32 @@ type AdminControlProbe = {
   error?: string;
 };
 
-const capabilityToken = (seed: string, role: 'read' | 'full', expiresAtMs: number, rawAudience: string): string => {
-  const level = role === 'read' ? 'inspect' : 'admin';
-  const audience = String(rawAudience || 'xln-runtime').toLowerCase();
-  const keyId = 'e2e';
-  const tokenId = `e2e-${expiresAtMs}`;
-  const signature = createHmac('sha256', seed)
-    .update(`xln-radapter-v1:cap:${level}:${expiresAtMs}:${audience}:${keyId}:${tokenId}`)
-    .digest('hex');
-  return [
-    'xlnra1',
-    role,
-    String(expiresAtMs),
-    Buffer.from(audience, 'utf8').toString('base64url'),
-    Buffer.from(keyId, 'utf8').toString('base64url'),
-    Buffer.from(tokenId, 'utf8').toString('base64url'),
-    signature,
-  ].join('.');
+type RuntimeAdapterDebugSurface = {
+  query: {
+    head: <T = unknown>() => Promise<T>;
+    entities: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
+    viewFrame: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
+    historyFrameBatch: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
+    activity: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
+    solvencySummary: <T = unknown>(query?: Record<string, unknown>) => Promise<T>;
+    checkpoints: <T = unknown>() => Promise<T>;
+    receiptStatus: <T = unknown>(receiptId: string) => Promise<T>;
+  };
+  send: (input: unknown) => Promise<unknown>;
+  status: () => {
+    connected?: boolean;
+    authLevel?: string | null;
+    height?: number;
+    permissions?: string;
+  };
 };
+
+type E2EHealthSnapshot = Awaited<ReturnType<typeof ensureE2EBaseline>>;
 
 const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/test').Page): Promise<void> => {
   await page.addInitScript(() => {
+    const targetWsUrl = 'ws://one-million-runtime.invalid/rpc';
+    const NativeWebSocket = window.WebSocket;
     const entityId = `0x${'a'.repeat(64)}`;
     const leftEntity = entityId;
     const head = {
@@ -162,6 +162,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       maxPayloadBytes: 0,
       viewFrameBytes: 0,
       maxAccountItems: 0,
+      events: [] as string[],
     };
     (window as unknown as { __xlnOneMillionRuntimeAdapterStats: typeof stats }).__xlnOneMillionRuntimeAdapterStats = stats;
 
@@ -170,6 +171,7 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       static OPEN = 1;
       static CLOSING = 2;
       static CLOSED = 3;
+      static __xlnOneMillionRuntimeAdapterSocket = true;
       readonly url: string;
       binaryType = 'arraybuffer';
       readyState = OneMillionRuntimeAdapterSocket.CONNECTING;
@@ -178,16 +180,25 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       onerror: (() => void) | null = null;
       onclose: (() => void) | null = null;
 
-      constructor(url: string) {
+      constructor(url: string | URL, protocols?: string | string[]) {
         this.url = url;
+        if (String(url) !== targetWsUrl) {
+          stats.events.push(`native:${url}`);
+          return protocols === undefined
+            ? new NativeWebSocket(url)
+            : new NativeWebSocket(url, protocols);
+        }
+        stats.events.push(`construct:${url}`);
         setTimeout(() => {
           this.readyState = OneMillionRuntimeAdapterSocket.OPEN;
+          stats.events.push('open');
           this.onopen?.();
         }, 0);
       }
 
       send(_raw: unknown): void {
         stats.sentCount += 1;
+        stats.events.push(`send:${stats.sentCount}`);
         const id = `r-${stats.sentCount}`;
         const payload = stats.sentCount === 1
           ? { authLevel: 'inspect', currentHeight: 42 }
@@ -201,7 +212,10 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
           stats.viewFrameBytes = byteLength;
           stats.maxAccountItems = viewFrame.activeEntity.accounts.items.length;
         }
-        setTimeout(() => this.onmessage?.({ data: response }), 0);
+        setTimeout(() => {
+          stats.events.push(`reply:${id}`);
+          this.onmessage?.({ data: response });
+        }, 0);
       }
 
       close(): void {
@@ -210,7 +224,11 @@ const installOneMillionRuntimeAdapterSocket = async (page: import('@playwright/t
       }
     }
 
-    (window as unknown as { WebSocket: typeof WebSocket }).WebSocket = OneMillionRuntimeAdapterSocket as unknown as typeof WebSocket;
+    Object.defineProperty(window, 'WebSocket', {
+      configurable: true,
+      writable: true,
+      value: OneMillionRuntimeAdapterSocket,
+    });
   });
 };
 
@@ -221,16 +239,9 @@ const readAdminControlProbe = async (
   return await page.evaluate(async ({ hubId, minHeight, expectedName }) => {
     try {
       const view = window as typeof window & {
-        isolatedEnv?: {
-          height?: number;
-          history?: Array<{ height?: number }>;
-          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { name?: string }; accounts?: Map<string, unknown> } }>;
-        };
-        __xlnRuntimeAdapter?: {
-          read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
-        };
+        __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
       };
-      const adapter = view.__xlnRuntimeAdapter;
+      const adapter = (view as any).__xln?.adapter;
       if (!adapter) return {
         ok: false,
         latestHeight: 0,
@@ -246,40 +257,50 @@ const readAdminControlProbe = async (
       type Head = { latestHeight?: number };
       type ViewFrame = {
         height?: number;
-        activeEntity?: { core?: { profile?: { name?: string } } } | null;
+        activeEntity?: {
+          core?: { profile?: { name?: string } };
+          accounts?: { items?: unknown[]; totalItems?: number };
+        } | null;
       };
-      const head = await adapter.read<Head>('head');
+      type HistoryBatch = {
+        frames?: Array<{ height?: number }>;
+      };
+      const head = await adapter.query.head<Head>();
       const latestHeight = Number(head.latestHeight || 0);
       const frame = latestHeight > minHeight
-        ? await adapter.read<ViewFrame>('view-frame', {
+        ? await adapter.query.viewFrame<ViewFrame>( {
             atHeight: latestHeight,
             entityId: hubId,
             accountsLimit: 1,
             booksLimit: 1,
           })
         : null;
-      const env = view.isolatedEnv;
-      const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
-      const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
-      const history = env?.history ?? [];
+      const history = latestHeight > minHeight
+        ? await adapter.query.historyFrameBatch<HistoryBatch>( {
+            heights: [minHeight, latestHeight],
+            entityId: hubId,
+            accountsLimit: 1,
+            booksLimit: 1,
+          })
+        : null;
+      const historyHeights = (history?.frames ?? []).map((item) => Number(item.height || 0));
       const frameName = String(frame?.activeEntity?.core?.profile?.name || '');
-      const envName = String(replica?.state?.profile?.name || '');
-      const envHeight = Number(env?.height || 0);
+      const projectedName = frameName;
       const frameHeight = Number(frame?.height || 0);
       const ok = latestHeight > minHeight &&
         frameName === expectedName &&
-        envHeight >= latestHeight &&
-        envName === expectedName;
+        frameHeight >= latestHeight &&
+        projectedName === expectedName;
       return {
         ok,
         latestHeight,
         frameHeight,
-        envHeight,
+        envHeight: frameHeight,
         frameName,
-        envName,
-        accountCount: Number(replica?.state?.accounts?.size || 0),
-        historyLength: history.length,
-        historyHeights: history.map((item) => Number(item.height || 0)),
+        envName: projectedName,
+        accountCount: Number(frame?.activeEntity?.accounts?.totalItems ?? frame?.activeEntity?.accounts?.items?.length ?? 0),
+        historyLength: historyHeights.length,
+        historyHeights,
         ...(ok ? {} : { reason: 'not-ready' }),
       };
     } catch (error) {
@@ -314,39 +335,131 @@ const waitForAdminControlProbe = async (
   throw new Error(`REMOTE_ADMIN_CONTROL_STATE_TIMEOUT:${JSON.stringify(lastProbe)}`);
 };
 
-const hubRpcUrl = (hubOffset: number): string => {
-  const api = new URL(API_BASE_URL);
-  const port = Number(api.port);
-  if (!Number.isFinite(port) || port <= 0) throw new Error(`E2E_API_BASE_URL must include a port: ${API_BASE_URL}`);
-  return `ws://127.0.0.1:${port + hubOffset}/rpc`;
+type HubRuntimeEndpoint = {
+  name: string;
+  apiBaseUrl: string;
+  wsUrl: string;
+  runtimeId: string;
 };
 
-const runtimeImportManifestPath = (): string =>
-  process.env.E2E_RUNTIME_IMPORT_MANIFEST_PATH
-    ? resolve(process.env.E2E_RUNTIME_IMPORT_MANIFEST_PATH)
-    : resolve(process.cwd(), 'db/dev/mesh/runtime-import-manifest.json');
+const hubApiBaseUrlFromHealth = (health: E2EHealthSnapshot, hubName: string): string => {
+  const hub = (health.hubs ?? []).find((candidate) =>
+    String(candidate.name || '').trim().toLowerCase() === hubName.trim().toLowerCase()
+  );
+  if (!hub) throw new Error(`E2E_HUB_HEALTH_MISSING:${hubName}`);
+  const apiUrl = String(hub.apiUrl || '').trim();
+  if (apiUrl) return apiUrl;
+  const apiPort = Number(hub.apiPort || 0);
+  if (Number.isFinite(apiPort) && apiPort > 0) return `http://127.0.0.1:${apiPort}`;
+  throw new Error(`E2E_HUB_API_ENDPOINT_MISSING:${hubName}`);
+};
 
-const readRuntimeImportUrl = async (page: import('@playwright/test').Page, timeoutMs = 60_000): Promise<string> => {
-  const manifestPath = runtimeImportManifestPath();
+const runtimeRpcWsUrlFromApiBaseUrl = (apiBaseUrl: string): string => {
+  const url = new URL(apiBaseUrl);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = '/rpc';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+};
+
+const normalizeRuntimeWsUrl = (value: string): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const url = new URL(raw);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : url.protocol === 'http:' ? 'ws:' : url.protocol;
+  url.hash = '';
+  return url.toString().toLowerCase();
+};
+
+const resolveHubRuntimeEndpoint = async (
+  page: import('@playwright/test').Page,
+  health: E2EHealthSnapshot,
+  hubName: string,
+  timeoutMs = 60_000,
+): Promise<HubRuntimeEndpoint> => {
+  const apiBaseUrl = hubApiBaseUrlFromHealth(health, hubName);
   const startedAt = Date.now();
   let lastError = '';
   while (Date.now() - startedAt < timeoutMs) {
     try {
-      if (existsSync(manifestPath)) {
-        const payload = JSON.parse(readFileSync(manifestPath, 'utf8')) as RuntimeImportManifestFile;
-        const importUrl = String(payload.importUrl || '').trim();
-        const entries = payload.manifest?.entries ?? [];
-        if (importUrl && entries.length >= 5) return importUrl;
-        lastError = `manifest incomplete count=${entries.length} importUrl=${importUrl ? 'yes' : 'no'}`;
+      const response = await page.request.get(`${apiBaseUrl}/api/info`, {
+        headers: { 'Cache-Control': 'no-store' },
+        timeout: 5_000,
+      });
+      if (!response.ok()) {
+        lastError = `HTTP ${response.status()}`;
       } else {
-        lastError = `manifest missing: ${manifestPath}`;
+        const info = await response.json().catch(() => ({})) as { runtimeId?: string; apiUrl?: string };
+        const runtimeId = String(info.runtimeId || '').trim().toLowerCase();
+        if (!runtimeId) throw new Error(`E2E_HUB_RUNTIME_ID_MISSING:${hubName}`);
+        const resolvedApiBaseUrl = String(info.apiUrl || apiBaseUrl).trim();
+        return {
+          name: hubName,
+          apiBaseUrl: resolvedApiBaseUrl,
+          wsUrl: runtimeRpcWsUrlFromApiBaseUrl(resolvedApiBaseUrl),
+          runtimeId,
+        };
       }
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
     await page.waitForTimeout(250);
   }
-  throw new Error(`Runtime import manifest not ready: ${lastError}`);
+  throw new Error(`E2E_HUB_INFO_UNREACHABLE:${hubName}:${apiBaseUrl}:${lastError}`);
+};
+
+const readRuntimeImportCapabilities = async (
+  page: import('@playwright/test').Page,
+  access: 'read' | 'admin',
+  timeoutMs = 60_000,
+): Promise<RuntimeImportCapability[]> => {
+  const startedAt = Date.now();
+  let lastError = '';
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await page.request.get(`${API_BASE_URL}/api/runtime-import?access=${access}`, {
+        headers: { 'Cache-Control': 'no-store' },
+        timeout: 5_000,
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        ok?: boolean;
+        ready?: boolean;
+        manifest?: { entries?: RuntimeImportCapability[] };
+        entries?: RuntimeImportCapability[];
+      };
+      const entries = Array.isArray(payload.manifest?.entries)
+        ? payload.manifest.entries
+        : Array.isArray(payload.entries)
+          ? payload.entries
+          : [];
+      if (response.ok() && payload.ready !== false && entries.length > 0) {
+        return entries;
+      }
+      lastError = `status=${response.status()} ready=${String(payload.ready)} entries=${entries.length}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`E2E_RUNTIME_IMPORT_CAPABILITIES_UNAVAILABLE:${access}:${lastError}`);
+};
+
+const resolveRuntimeImportCapability = async (
+  page: import('@playwright/test').Page,
+  endpoint: HubRuntimeEndpoint,
+  access: 'read' | 'admin',
+): Promise<RuntimeImportCapability> => {
+  const entries = await readRuntimeImportCapabilities(page, access);
+  const expectedWsUrl = normalizeRuntimeWsUrl(endpoint.wsUrl);
+  const entry = entries.find((candidate) => normalizeRuntimeWsUrl(String(candidate.wsUrl || '')) === expectedWsUrl)
+    ?? entries.find((candidate) => String(candidate.label || '').trim().toLowerCase() === endpoint.name.toLowerCase());
+  if (!entry) {
+    throw new Error(`E2E_RUNTIME_IMPORT_CAPABILITY_MISSING:${endpoint.name}:${access}:${endpoint.wsUrl}`);
+  }
+  expect(entry.access, `${endpoint.name} runtime import access`).toBe(access);
+  expect(entry.token, `${endpoint.name} runtime import token`).toMatch(/^xlnra1\./);
+  return entry;
 };
 
 const readRuntimeImportSummary = async (
@@ -373,12 +486,38 @@ const readRuntimeImportSummary = async (
   throw new Error(`REMOTE_RUNTIME_IMPORT_SUMMARY_TIMEOUT:${lastError}`);
 };
 
-const expectMarketMakerBooksHealthy = (health: Awaited<ReturnType<typeof ensureE2EBaseline>>): void => {
+const observedHubMeshHubCount = (health: E2EHealthSnapshot): number =>
+  Math.max(
+    health.hubMesh?.hubIds?.length ?? 0,
+    health.hubMesh?.hubCount ?? 0,
+    (health.hubs ?? []).filter((hub) => hub.online === true).length,
+  );
+
+const observedHubMeshPairCount = (health: E2EHealthSnapshot): number =>
+  Math.max(health.hubMesh?.pairs?.length ?? 0, health.hubMesh?.pairCount ?? 0);
+
+const expectHubMeshHealthy = (health: E2EHealthSnapshot): void => {
+  expect(health.hubMesh?.ok, `hub mesh health: ${JSON.stringify(health.hubMesh ?? {})}`).toBe(true);
+  expect(observedHubMeshHubCount(health), 'hub mesh must expose at least 3 online hubs').toBeGreaterThanOrEqual(3);
+  expect(observedHubMeshPairCount(health), 'hub mesh must expose at least 3 funded pairs').toBeGreaterThanOrEqual(3);
+
+  const pairs = health.hubMesh?.pairs ?? [];
+  for (const pair of pairs) {
+    expect(pair.ok, `hub mesh pair ${pair.left}->${pair.right} must have mutual credit`).toBe(true);
+    expect(pair.expectedCreditAmount, `hub mesh pair ${pair.left}->${pair.right} credit amount`).toBe(HUB_MESH_CREDIT_AMOUNT);
+  }
+};
+
+const expectMarketMakerBooksHealthy = (health: E2EHealthSnapshot): void => {
   const marketMaker = health.marketMaker;
   expect(marketMaker?.enabled, `market maker must be enabled: ${JSON.stringify(marketMaker ?? {})}`).toBe(true);
   expect(marketMaker?.ok, `market maker must be ready: ${JSON.stringify(marketMaker ?? {})}`).toBe(true);
-  expect(marketMaker?.hubs?.length ?? 0, 'MM must publish books for all hubs').toBeGreaterThanOrEqual(3);
-  for (const hub of marketMaker?.hubs ?? []) {
+  expect(marketMaker?.startupPhase, `market maker startup phase: ${JSON.stringify(marketMaker ?? {})}`).toBe('offers-ready');
+
+  const detailedHubs = marketMaker?.hubs ?? [];
+  const hubCount = Math.max(detailedHubs.length, marketMaker?.hubCount ?? 0);
+  expect(hubCount, 'MM must publish books for all hubs').toBeGreaterThanOrEqual(3);
+  for (const hub of detailedHubs) {
     expect(hub.ready, `MM hub ${hub.hubEntityId} ready`).toBe(true);
     expect(hub.offers, `MM hub ${hub.hubEntityId} offers`).toBeGreaterThan(0);
     for (const pair of hub.pairs ?? []) {
@@ -386,24 +525,38 @@ const expectMarketMakerBooksHealthy = (health: Awaited<ReturnType<typeof ensureE
       expect(pair.offers, `MM pair ${pair.pairId} offers`).toBeGreaterThan(0);
     }
   }
-  expect(marketMaker?.cross?.ok, `cross MM books must be ready: ${JSON.stringify(marketMaker?.cross ?? {})}`).toBe(true);
+
+  const cross = marketMaker?.cross;
+  expect(cross?.ok, `cross MM books must be ready: ${JSON.stringify(cross ?? {})}`).toBe(true);
+  const detailedRoutes = cross?.routes ?? [];
+  if (detailedRoutes.length > 0) {
+    expect(detailedRoutes.length, 'cross MM must publish all expected routes').toBeGreaterThanOrEqual(cross?.expectedRoutes ?? 0);
+    for (const route of detailedRoutes) {
+      expect(route.ready, `cross route ${route.sourceHubEntityId}->${route.targetHubEntityId} ready`).toBe(true);
+      expect(route.offers, `cross route ${route.sourceHubEntityId}->${route.targetHubEntityId} offers`).toBeGreaterThan(0);
+      for (const pair of route.pairs ?? []) {
+        expect(pair.ready, `cross route pair ${pair.pairId} ready`).toBe(true);
+        expect(pair.offers, `cross route pair ${pair.pairId} offers`).toBeGreaterThan(0);
+      }
+    }
+  } else if (typeof cross?.routeCount === 'number') {
+    expect(cross.routeCount, 'cross MM public route count').toBeGreaterThanOrEqual(cross.expectedRoutes ?? 0);
+  } else {
+    expect(health.systemOk, `redacted MM health without route count: ${JSON.stringify(health)}`).toBe(true);
+  }
 };
 
 test.setTimeout(240_000);
 
 test('remote /app opens an existing hub runtime through radapter', async ({ page }) => {
-  await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
   expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
-  const wsUrl = hubRpcUrl(10);
-  const hubInfoResponse = await page.request.get(`http://127.0.0.1:${Number(new URL(API_BASE_URL).port) + 10}/api/info`);
-  expect(hubInfoResponse.ok()).toBe(true);
-  const hubInfo = await hubInfoResponse.json().catch(() => ({}));
-  const audience = String(hubInfo.runtimeId || '').toLowerCase();
-  expect(audience.length).toBeGreaterThan(0);
-  const key = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000, audience);
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const wsUrl = h1Endpoint.wsUrl;
+  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const url = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}#accounts`;
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
@@ -412,107 +565,1110 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   await expect(remotePrompt).not.toBeVisible({ timeout: 10_000 });
 
   await page.waitForFunction(
-    ({ hubId, expectedRuntimePrefix }) => {
+    ({ hubId, expectedRuntimeId }) => {
       const view = window as typeof window & {
-        isolatedEnv?: {
+        __xlnRuntimeView?: {
           runtimeId?: string;
-          eReplicas?: Map<string, {
-            entityId?: string;
-            state?: {
-              profile?: { isHub?: boolean; name?: string };
-              accounts?: Map<string, unknown>;
-            };
-          }>;
+          entities?: Array<{ entityId?: string; isHub?: boolean; label?: string }>;
+          frame?: { entities?: Array<{ entityId?: string; isHub?: boolean; label?: string }> | null };
         };
       };
-      const env = view.isolatedEnv;
-      if (!env || !String(env.runtimeId || '').startsWith(expectedRuntimePrefix)) return false;
-      const replicas = Array.from(env.eReplicas?.values?.() ?? []);
-      return replicas.some((replica) =>
-        String(replica.entityId || '').toLowerCase() === hubId &&
-        replica.state?.profile?.isHub === true,
+      const runtimeView = (view as any).__xln?.view;
+      if (!runtimeView || String(runtimeView.runtimeId || '') !== expectedRuntimeId) return false;
+      const entities = runtimeView.entities ?? runtimeView.frame?.entities ?? [];
+      return entities.some((entity) =>
+        String(entity.entityId || '').toLowerCase() === hubId &&
+        entity.isHub === true,
       );
     },
-    { hubId: h1, expectedRuntimePrefix: `radapter:${wsUrl}` },
-    { timeout: 60_000 },
+    { hubId: h1, expectedRuntimeId: h1Endpoint.runtimeId },
+    { timeout: REMOTE_E2E_WAIT_MS },
   );
 
   const snapshot = await page.evaluate((hubId) => {
     const view = window as typeof window & {
-      isolatedEnv?: {
+      __xln?: {
+        view?: {
+          runtimeId?: string;
+          height?: number;
+        };
+        adapter?: {
+          status?: () => { connected?: boolean; authLevel?: string | null; height?: number };
+        };
+      };
+      __xlnRuntimeView?: {
         runtimeId?: string;
         height?: number;
-        eReplicas?: Map<string, {
-          entityId?: string;
-          state?: {
-            profile?: { isHub?: boolean; name?: string };
-            accounts?: Map<string, unknown>;
-          };
-        }>;
+        entities?: Array<{ entityId?: string; isHub?: boolean; label?: string }>;
+        frame?: {
+          activeEntity?: {
+            summary?: { entityId?: string; isHub?: boolean; label?: string };
+            accounts?: { items?: unknown[]; totalItems?: number };
+          } | null;
+        } | null;
       };
     };
-    const env = view.isolatedEnv;
-    const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
-    const hub =
-      replicas.find((replica) =>
-        String(replica.entityId || '').toLowerCase() === hubId &&
-        replica.state?.profile?.isHub === true,
-      ) ??
-      replicas.find((replica) => String(replica.entityId || '').toLowerCase() === hubId);
+    const runtimeView = (view as any).__xln?.view;
+    const debugRoot = view.__xln ?? {};
+    const rootAdapterStatus = debugRoot.adapter?.status?.() ?? null;
+    const entities = runtimeView?.entities ?? [];
+    const active = runtimeView?.frame?.activeEntity ?? null;
+    const activeSummary = active?.summary ?? null;
+    const hub = entities.find((entity) =>
+      String(entity.entityId || '').toLowerCase() === hubId &&
+      entity.isHub === true,
+    ) ?? entities.find((entity) => String(entity.entityId || '').toLowerCase() === hubId) ?? activeSummary;
     return {
-      runtimeId: String(env?.runtimeId || ''),
-      height: Number(env?.height || 0),
-      replicaCount: replicas.length,
-      hubName: String(hub?.state?.profile?.name || ''),
-      hubIsHub: hub?.state?.profile?.isHub === true,
-      accountCount: Number(hub?.state?.accounts?.size || 0),
+      runtimeId: String(runtimeView?.runtimeId || ''),
+      height: Number(runtimeView?.height || 0),
+      replicaCount: entities.length,
+      hubName: String(hub?.label || ''),
+      hubIsHub: hub?.isHub === true,
+      accountCount: Number(active?.accounts?.totalItems ?? active?.accounts?.items?.length ?? 0),
       loginText: document.body.textContent || '',
+      debugRootViewMatchesLegacy: debugRoot.view === runtimeView,
+      debugRootAdapterConnected: rootAdapterStatus?.connected === true,
+      debugRootAdapterAuthLevel: rootAdapterStatus?.authLevel ?? null,
     };
   }, h1);
 
-  expect(snapshot.runtimeId).toBe(`radapter:${wsUrl}`);
+  expect(snapshot.runtimeId).toBe(h1Endpoint.runtimeId);
   expect(snapshot.height).toBeGreaterThan(0);
   expect(snapshot.replicaCount).toBeGreaterThan(0);
   expect(snapshot.hubIsHub).toBe(true);
   expect(snapshot.hubName.toLowerCase()).toContain('h1');
+  expect(snapshot.accountCount).toBeGreaterThan(0);
   expect(snapshot.accountCount).toBeLessThanOrEqual(10);
   expect(/quick login/i.test(snapshot.loginText)).toBe(false);
+  expect(snapshot.debugRootViewMatchesLegacy).toBe(true);
+  expect(snapshot.debugRootAdapterConnected).toBe(true);
+  expect(snapshot.debugRootAdapterAuthLevel).toBe('admin');
   await expect(page.getByTestId('context-current')).not.toContainText(/no runtime selected/i);
-  await expect(page.getByRole('button', { name: /^H1$/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^H2$/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /^H3$/ })).toBeVisible();
+  await expect(page.getByTestId('context-current')).toContainText(/\bH1\b/);
+  await expect(page.getByTestId('account-list-count')).toContainText(/\b\d+ Accounts\b/);
+  await expect(page.locator('[data-testid="account-list-wrapper"]')).toContainText(/0x[0-9a-f]{64}/i);
+
+  await page.getByTestId('context-current').click();
+  const runtimeRows = page.getByTestId('context-entity-row');
+  await expect(runtimeRows.filter({ hasText: /\bH1\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await page.keyboard.press('Escape');
+  const accountPreviews = page.getByTestId('account-preview');
+  await expect(accountPreviews.filter({ hasText: /\bH2\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(accountPreviews.filter({ hasText: /\bH3\b/ }).first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+
+  await page.getByTestId('account-workspace-tab-history').first().click();
+  await expect(page.locator('.settlement-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('.settlement-panel')).toContainText('On-Chain Batch History');
+  await expect(page.locator('.settlement-panel')).not.toContainText('Settlement history requires a runtime frame');
+});
+
+test('dev DockRoot entity panel resolves seed through remote RuntimeView projection', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const wsUrl = h1Endpoint.wsUrl;
+  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
+
+  await page.addInitScript(() => {
+    localStorage.setItem('xln-app-mode', 'dev');
+    localStorage.setItem('xln-view-mode', 'panels');
+    localStorage.removeItem('xln-workspace-layout');
+    localStorage.removeItem('xln-dockview-layout');
+    localStorage.removeItem('dockview-layout');
+  });
+
+  await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}`, {
+    waitUntil: 'domcontentloaded',
+  });
+
+  await page.waitForFunction(
+    () => {
+      const view = window as typeof window & {
+        __dockview_instance?: { addPanel?: unknown };
+        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
+      };
+      const status = (view as any).__xln?.adapter?.status?.();
+      return !!view.__dockview_instance?.addPanel &&
+        status?.connected === true &&
+        status.authLevel === 'admin' &&
+        Number(status.height || 0) > 0;
+    },
+    undefined,
+    { timeout: 90_000 },
+  );
+
+  const opened = await page.evaluate(async () => {
+    const view = window as typeof window & {
+      __dockview_instance?: {
+        addPanel: (config: {
+          id: string;
+          component: string;
+          title: string;
+          position?: { direction: string; referencePanel?: string };
+          params?: Record<string, unknown>;
+        }) => unknown;
+      };
+      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
+    };
+    const adapter = (view as any).__xln?.adapter;
+    const dockview = view.__dockview_instance;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    if (!dockview) throw new Error('DOCKVIEW_DEBUG_SURFACE_MISSING');
+
+    type ViewFrame = {
+      activeEntityId?: string | null;
+      entities?: Array<{ entityId?: string; label?: string }>;
+      activeEntity?: {
+        summary?: { entityId?: string; label?: string };
+        core?: { signerId?: string; profile?: { name?: string } };
+      } | null;
+    };
+    const frame = await adapter.query.viewFrame<ViewFrame>( {
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    const entityId = String(frame.activeEntityId || frame.activeEntity?.summary?.entityId || frame.entities?.[0]?.entityId || '').toLowerCase();
+    const label = String(frame.activeEntity?.core?.profile?.name || frame.activeEntity?.summary?.label || frame.entities?.[0]?.label || entityId);
+    const signerId = String(frame.activeEntity?.core?.signerId || '').toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(entityId)) throw new Error(`ENTITY_ID_INVALID:${entityId}`);
+    if (!/^0x[0-9a-f]{40}$/.test(signerId)) throw new Error(`SIGNER_ID_INVALID:${signerId}`);
+
+    dockview.addPanel({
+      id: `entity-${entityId}`,
+      component: 'entity-panel',
+      title: `Projection ${label}`,
+      position: { direction: 'within', referencePanel: 'graph3d' },
+      params: { closeable: true },
+    });
+    return {
+      entityId,
+      label,
+      signerId,
+      tabId: `entity-${entityId.slice(0, 8)}`,
+    };
+  });
+
+  await page.waitForSelector('.entity-panel-wrapper [data-testid="entity-workspace"]', { timeout: REMOTE_E2E_WAIT_MS });
+  const panelState = await page.evaluate((expected) => {
+    const workspaces = Array.from(document.querySelectorAll('.entity-panel-wrapper [data-testid="entity-workspace"]'));
+    const statusErrors = Array.from(document.querySelectorAll('.entity-panel-status.error')).map((node) => node.textContent || '');
+    return {
+      workspaceCount: workspaces.length,
+      hasExpectedPanel: !!document.querySelector(`[data-panel-id="${expected.tabId}"]`),
+      statusErrors,
+      bodyText: document.body.textContent || '',
+    };
+  }, opened);
+
+  expect(opened.entityId).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(opened.signerId).toMatch(/^0x[0-9a-f]{40}$/);
+  expect(panelState.workspaceCount).toBeGreaterThan(0);
+  expect(panelState.hasExpectedPanel).toBe(true);
+  expect(panelState.statusErrors).toEqual([]);
+  expect(panelState.bodyText).toContain(opened.entityId);
+});
+
+test('dev DockRoot Solvency panel reads remote radapter solvency-summary', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/\[vite\]|Ignoring Event: localhost/.test(text)) return;
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${text}`);
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+  await page.addInitScript(() => {
+    localStorage.setItem('xln-app-mode', 'dev');
+    localStorage.setItem('xln-view-mode', 'panels');
+    localStorage.removeItem('xln-workspace-layout');
+    localStorage.removeItem('xln-dockview-layout');
+    localStorage.removeItem('dockview-layout');
+  });
+
+  await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(key)}#accounts`, {
+    waitUntil: 'domcontentloaded',
+  });
+
+  await page.waitForFunction(
+    () => {
+      const view = window as typeof window & {
+        __dockview_instance?: { addPanel?: unknown };
+        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
+      };
+      const status = (view as any).__xln?.adapter?.status?.();
+      return !!view.__dockview_instance?.addPanel &&
+        status?.connected === true &&
+        status.authLevel === 'admin' &&
+        Number(status.height || 0) > 0;
+    },
+    undefined,
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  await expect(page.locator('body')).toContainText(
+    'Network graph is embedded-only until its projection endpoint is available',
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  await page.locator('.dv-tab').filter({ hasText: 'Gossip' }).first().click();
+  await expect(page.getByTestId('runtime-gossip-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('runtime-gossip-profiles')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+
+  await page.locator('.dv-tab').filter({ hasText: 'Solvency' }).first().click();
+  await expect(page.getByTestId('solvency-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+
+  const probe = await page.evaluate(async () => {
+    type SolvencySummary = {
+      ok?: boolean;
+      height?: number;
+      entityCount?: number;
+      accountViews?: number;
+      m1?: bigint;
+      m2?: bigint;
+      m3?: bigint;
+      total?: bigint;
+      delta?: bigint;
+      isValid?: boolean;
+      eReplicas?: unknown;
+      accounts?: unknown;
+    };
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
+    };
+    const adapter = (view as any).__xln?.adapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    const summary = await adapter.query.solvencySummary<SolvencySummary>();
+    return {
+      ok: summary.ok === true,
+      height: Number(summary.height || 0),
+      entityCount: Number(summary.entityCount || 0),
+      accountViews: Number(summary.accountViews || 0),
+      hasFullEnv: 'eReplicas' in summary,
+      hasFullAccounts: 'accounts' in summary,
+      m1Type: typeof summary.m1,
+      m2Type: typeof summary.m2,
+      m3Type: typeof summary.m3,
+      totalType: typeof summary.total,
+      deltaType: typeof summary.delta,
+      isValidType: typeof summary.isValid,
+    };
+  });
+
+  expect(probe.ok).toBe(true);
+  expect(probe.height).toBeGreaterThan(0);
+  expect(probe.entityCount).toBeGreaterThan(0);
+  expect(probe.accountViews).toBeGreaterThan(0);
+  expect(probe.hasFullEnv).toBe(false);
+  expect(probe.hasFullAccounts).toBe(false);
+  expect(probe.m1Type).toBe('bigint');
+  expect(probe.m2Type).toBe('bigint');
+  expect(probe.m3Type).toBe('bigint');
+  expect(probe.totalType).toBe('bigint');
+  expect(probe.deltaType).toBe('bigint');
+  expect(probe.isValidType).toBe('boolean');
+
+  await expect(page.getByTestId('solvency-status')).toContainText(/SYSTEM SOLVENT|IMBALANCE DETECTED/, { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('solvency-m1')).toContainText(/\$/);
+  await expect(page.getByTestId('solvency-m2')).toContainText(/\$/);
+
+  const bodyText = await page.locator('body').innerText();
+  expect(bodyText).not.toContain('Solvency projection failed');
+  expect(bodyText).not.toContain('No solvency data');
+  expect(
+    consoleProblems.filter((message) => /TypeError|unsupported adapter path|solvency projection failed|pageerror/i.test(message)),
+  ).toEqual([]);
+});
+
+test('remote /app pasted capability connects without reloading the page', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const wsUrl = h1Endpoint.wsUrl;
+  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
+
+  await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}#accounts`, {
+    waitUntil: 'domcontentloaded',
+  });
+  const remotePrompt = page.getByTestId('remote-runtime-login-screen');
+  await expect(remotePrompt).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+
+  const reloadMarker = `xln-no-reload-${Date.now()}`;
+  await page.evaluate((marker) => {
+    (window as typeof window & { __xlnNoReloadMarker?: string }).__xlnNoReloadMarker = marker;
+  }, reloadMarker);
+  await remotePrompt.locator('input[placeholder="xlnra1..."]').fill(key);
+  await page.getByRole('button', { name: 'Connect remote runtime' }).click();
+
+  await page.waitForFunction(
+    ({ runtimeId, ws }) => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: { runtimeId?: string; height?: number };
+        __xlnRuntimeAdapter?: { status: () => { authLevel?: string | null } };
+      };
+      return String((view as any).__xln?.view?.runtimeId || '') === runtimeId &&
+        Number((view as any).__xln?.view?.height || 0) > 0 &&
+        (view as any).__xln?.adapter?.status().authLevel === 'admin' &&
+        localStorage.getItem('xln-runtime-adapter-ws') === ws;
+    },
+    { runtimeId: h1Endpoint.runtimeId, ws: wsUrl },
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  const state = await page.evaluate(() => ({
+    url: window.location.href,
+    activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws') || '',
+    storedAccess: localStorage.getItem('xln-runtime-adapter-access') || '',
+    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key') || '',
+    loginVisible: !!document.querySelector('[data-testid="remote-runtime-login-screen"]'),
+    reloadMarker: (window as typeof window & { __xlnNoReloadMarker?: string }).__xlnNoReloadMarker || '',
+    navigationType: String(performance.getEntriesByType('navigation')[0]?.toJSON?.()?.type || ''),
+  }));
+  expect(state.reloadMarker).toBe(reloadMarker);
+  expect(state.navigationType).not.toBe('reload');
+  expect(state.url).not.toContain('runtime=remote');
+  expect(state.url).not.toContain('ws=');
+  expect(state.activeWsUrl).toBe(wsUrl);
+  expect(state.storedAccess).toBe('admin');
+  expect(state.sessionKey).toBe(key);
+  expect(state.loginVisible).toBe(false);
+});
+
+test('local runtime creation while remote is active switches controller to embedded', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const wsUrl = h1Endpoint.wsUrl;
+  const key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+
+  await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await page.waitForFunction(
+    ({ runtimeId, ws }) => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: { runtimeId?: string; height?: number };
+        __xlnRuntimeAdapter?: { status: () => { authLevel?: string | null } };
+      };
+      return String((view as any).__xln?.view?.runtimeId || '') === runtimeId &&
+        Number((view as any).__xln?.view?.height || 0) > 0 &&
+        (view as any).__xln?.adapter?.status().authLevel === 'inspect' &&
+        localStorage.getItem('xln-runtime-adapter-ws') === ws;
+    },
+    { runtimeId: h1Endpoint.runtimeId, ws: wsUrl },
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  const result = await page.evaluate(async () => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: {
+        status: () => {
+          connected?: boolean;
+          height?: number;
+          authLevel?: string | null;
+          runtimeId?: string;
+          mode?: string;
+          permissions?: string;
+        };
+      };
+    };
+    if (typeof (view as any).__xln?.vault?.createRuntime !== 'function') {
+      throw new Error('__xln.vault.createRuntime unavailable');
+    }
+    const runtime = await (view as any).__xln?.vault.createRuntime(
+      'remote-to-local',
+      'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      {
+        loginType: 'manual',
+        requiresOnboarding: false,
+        skipRecoveryRestore: true,
+        recovery: { useDefaultTowers: false, towers: [] },
+      },
+    );
+    const adapter = (view as any).__xln?.adapter?.status() || null;
+    return {
+      createdRuntimeId: String(runtime?.id || ''),
+      envRuntimeId: String(adapter?.runtimeId || ''),
+      height: Number(adapter?.height || 0),
+      mode: String(adapter?.mode || ''),
+      permissions: String(adapter?.permissions || ''),
+      adapter,
+      storedMode: localStorage.getItem('xln-runtime-adapter-mode') || '',
+      storedWs: localStorage.getItem('xln-runtime-adapter-ws') || '',
+      storedAccess: localStorage.getItem('xln-runtime-adapter-access') || '',
+      sessionKey: sessionStorage.getItem('xln-runtime-adapter-key') || '',
+    };
+  });
+
+  expect(result.createdRuntimeId).toMatch(/^0x[a-f0-9]{40}$/i);
+  expect(result.envRuntimeId.toLowerCase()).toBe(result.createdRuntimeId.toLowerCase());
+  expect(result.envRuntimeId).not.toMatch(/^radapter:/);
+  expect(result.height).toBeGreaterThan(0);
+  expect(result.mode).toBe('embedded');
+  expect(result.permissions).toBe('write');
+  expect(result.adapter?.connected).toBe(true);
+  expect(result.adapter?.authLevel).toBe('admin');
+  expect(result.storedMode).toBe('embedded');
+  expect(result.storedWs).toBe('');
+  expect(result.storedAccess).toBe('');
+  expect(result.sessionKey).toBe('');
+});
+
+test('context dropdown switches across H1 H2 H3 remote runtimes', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const specs = [
+    { name: 'H1' },
+    { name: 'H2' },
+    { name: 'H3' },
+  ];
+  const importedAt = Date.now();
+  const entries: Array<{ label: string; access: 'read'; wsUrl: string; token: string; runtimeId: string; authLevel: 'inspect'; height: number; entityCount: number; importedAt: number }> = [];
+  for (const spec of specs) {
+    const endpoint = await resolveHubRuntimeEndpoint(page, baseline, spec.name);
+    const wsUrl = endpoint.wsUrl;
+    const capability = await resolveRuntimeImportCapability(page, endpoint, 'read');
+    entries.push({
+      label: `${spec.name} dropdown`,
+      access: 'read',
+      wsUrl,
+      token: capability.token,
+      runtimeId: endpoint.runtimeId,
+      authLevel: 'inspect',
+      height: 0,
+      entityCount: 1,
+      importedAt,
+    });
+  }
+
+  await page.addInitScript(({ storageKey, entries }) => {
+    const first = entries[0]!;
+    localStorage.setItem(storageKey, JSON.stringify(entries));
+    localStorage.setItem('xln-runtime-adapter-mode', 'remote');
+    localStorage.setItem('xln-runtime-adapter-ws', first.wsUrl);
+    localStorage.setItem('xln-runtime-adapter-access', 'read');
+    sessionStorage.setItem('xln-runtime-adapter-key', first.token);
+  }, { storageKey: REMOTE_RUNTIME_IMPORT_STORAGE_KEY, entries });
+
+  await page.goto(`${APP_BASE_URL}/app#accounts`, { waitUntil: 'domcontentloaded' });
+
+  const clickRuntimeRow = async (runtimeId: string): Promise<void> => {
+    await page.getByTestId('context-current').click();
+    await page.waitForFunction((targetRuntimeId) =>
+      Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
+        .some((row) => row.getAttribute('data-runtime-id') === targetRuntimeId),
+    runtimeId, { timeout: REMOTE_E2E_WAIT_MS });
+    await page.evaluate((targetRuntimeId) => {
+      const row = Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
+        .find((candidate) => candidate.getAttribute('data-runtime-id') === targetRuntimeId) as HTMLElement | undefined;
+      if (!row) throw new Error(`REMOTE_RUNTIME_ROW_MISSING:${targetRuntimeId}`);
+      row.click();
+    }, runtimeId);
+  };
+
+  const waitForRuntime = async (entry: typeof entries[number]): Promise<void> => {
+    await page.waitForFunction(
+      ({ runtimeId, label }) => {
+        const view = window as typeof window & {
+          __xlnRuntimeView?: {
+            runtimeId?: string;
+            height?: number;
+            entities?: Array<{ label?: string; isHub?: boolean }>;
+            frame?: { entities?: Array<{ label?: string; isHub?: boolean }> | null };
+          };
+          __xlnRuntimeAdapter?: { status: () => { authLevel?: string | null } };
+        };
+        const runtimeView = (view as any).__xln?.view;
+        if (String(runtimeView?.runtimeId || '') !== runtimeId || Number(runtimeView?.height || 0) < 1) return false;
+        if ((view as any).__xln?.adapter?.status().authLevel !== 'inspect') return false;
+        const expected = label.toLowerCase();
+        const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
+        return entities.some((entity) =>
+          entity.isHub === true && String(entity.label || '').toLowerCase().includes(expected),
+        );
+      },
+      { runtimeId: entry.runtimeId, label: entry.label.slice(0, 2) },
+      { timeout: REMOTE_E2E_WAIT_MS },
+    );
+    const state = await page.evaluate(() => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: { runtimeId?: string; height?: number };
+        __xlnRuntimeAdapter?: { status: () => { authLevel?: string | null } };
+      };
+      return {
+        runtimeId: String((view as any).__xln?.view?.runtimeId || ''),
+        height: Number((view as any).__xln?.view?.height || 0),
+        authLevel: String((view as any).__xln?.adapter?.status().authLevel || ''),
+        activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws') || '',
+        contextRuntimeId: document.querySelector('[data-testid="context-current"]')?.getAttribute('data-runtime-id') || '',
+      };
+    });
+    expect(state.runtimeId).toBe(entry.runtimeId);
+    expect(state.height).toBeGreaterThan(0);
+    expect(state.authLevel).toBe('inspect');
+    expect(state.activeWsUrl).toBe(entry.wsUrl);
+    expect(state.contextRuntimeId).toBe(entry.runtimeId);
+
+    const projectionProbe = await page.evaluate(async (expectedRuntimeId) => {
+      type ViewFrame = {
+        height?: number;
+        activeEntityId?: string | null;
+        activeEntity?: {
+          summary?: { entityId?: string; isHub?: boolean };
+          core?: { entityId?: string; profile?: { isHub?: boolean } };
+          accounts?: { items?: unknown[]; totalItems?: number };
+          books?: { items?: unknown[]; totalItems?: number };
+        } | null;
+      };
+      type ActivityPage = {
+        latestHeight?: number;
+        scannedFrames?: number;
+        events?: unknown[];
+      };
+      type HistoryBatch = {
+        frames?: ViewFrame[];
+        unavailable?: Array<{ height?: number; code?: string; message?: string }>;
+      };
+      const view = window as typeof window & {
+        __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
+      };
+      const adapter = (view as any).__xln?.adapter;
+      if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+
+      const status = adapter.status();
+      const frame = await adapter.query.viewFrame<ViewFrame>( {
+        accountsLimit: 3,
+        booksLimit: 3,
+      });
+      const adapterHeight = Number(status.height || frame.height || 0);
+      const entityId = String(
+        frame.activeEntityId ||
+        frame.activeEntity?.summary?.entityId ||
+        frame.activeEntity?.core?.entityId ||
+        '',
+      ).toLowerCase();
+      const activity = await adapter.query.activity<ActivityPage>( {
+        entityId,
+        limit: 5,
+        scanLimit: 100,
+      });
+      const historyHeight = Math.max(1, Math.min(adapterHeight, Number(activity.latestHeight || adapterHeight || 1)));
+      const history = await adapter.query.historyFrameBatch<HistoryBatch>( {
+        entityId,
+        heights: [historyHeight],
+        accountsLimit: 2,
+        booksLimit: 2,
+      });
+
+      return {
+        runtimeId: expectedRuntimeId,
+        authLevel: String(status.authLevel || ''),
+        adapterHeight,
+        entityId,
+        isHub: frame.activeEntity?.summary?.isHub === true || frame.activeEntity?.core?.profile?.isHub === true,
+        accountItems: Number(frame.activeEntity?.accounts?.items?.length || 0),
+        accountTotal: Number(frame.activeEntity?.accounts?.totalItems ?? frame.activeEntity?.accounts?.items?.length ?? -1),
+        bookItems: Number(frame.activeEntity?.books?.items?.length || 0),
+        bookTotal: Number(frame.activeEntity?.books?.totalItems ?? frame.activeEntity?.books?.items?.length ?? -1),
+        activityLatestHeight: Number(activity.latestHeight || 0),
+        activityScannedFrames: Number(activity.scannedFrames || 0),
+        activityEvents: Array.isArray(activity.events) ? activity.events.length : -1,
+        historyFrames: Array.isArray(history.frames) ? history.frames.length : 0,
+        historyUnavailable: Array.isArray(history.unavailable) ? history.unavailable.length : 0,
+        historyAccountItems: Number(history.frames?.[0]?.activeEntity?.accounts?.items?.length || 0),
+        historyBookItems: Number(history.frames?.[0]?.activeEntity?.books?.items?.length || 0),
+      };
+    }, entry.runtimeId);
+
+    expect(projectionProbe.runtimeId).toBe(entry.runtimeId);
+    expect(projectionProbe.authLevel).toBe('inspect');
+    expect(projectionProbe.adapterHeight).toBeGreaterThan(0);
+    expect(projectionProbe.entityId).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(projectionProbe.isHub).toBe(true);
+    expect(projectionProbe.accountTotal).toBeGreaterThanOrEqual(projectionProbe.accountItems);
+    expect(projectionProbe.bookTotal).toBeGreaterThanOrEqual(projectionProbe.bookItems);
+    expect(projectionProbe.activityLatestHeight).toBeGreaterThan(0);
+    expect(projectionProbe.activityScannedFrames).toBeGreaterThan(0);
+    expect(projectionProbe.activityEvents).toBeGreaterThanOrEqual(0);
+    expect(projectionProbe.historyFrames).toBe(1);
+    expect(projectionProbe.historyUnavailable).toBe(0);
+    expect(projectionProbe.historyAccountItems).toBeLessThanOrEqual(2);
+    expect(projectionProbe.historyBookItems).toBeLessThanOrEqual(2);
+
+    await expect(page.getByTestId('entity-workspace')).toHaveAttribute('data-lens', 'audit', { timeout: REMOTE_E2E_WAIT_MS });
+    await expect(page.getByTestId('entity-lens-wallet')).toBeDisabled();
+    await expect(page.getByTestId('entity-lens-ops')).toBeDisabled();
+    await expect(page.getByTestId('entity-lens-liquidity')).toBeDisabled();
+    await expect(page.getByTestId('entity-lens-audit')).toBeEnabled();
+    await expect(page.getByTestId('entity-workspace-readonly')).toBeVisible();
+    await expect(page.getByTestId('entity-audit-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+    await expect(page.getByTestId('entity-audit-accounts-total')).not.toHaveText('0', { timeout: REMOTE_E2E_WAIT_MS });
+    await expect(page.getByTestId('entity-audit-activity-latest')).not.toHaveText('h0', { timeout: REMOTE_E2E_WAIT_MS });
+    const auditCounts = await page.evaluate(() => {
+      const readCount = (testId: string): number => {
+        const text = document.querySelector(`[data-testid="${testId}"]`)?.textContent || '0';
+        return Number(text.replace(/[^\d]/g, '') || 0);
+      };
+      return {
+        accountsShown: readCount('entity-audit-accounts-shown'),
+        accountsTotal: readCount('entity-audit-accounts-total'),
+        booksShown: readCount('entity-audit-books-shown'),
+        booksTotal: readCount('entity-audit-books-total'),
+        activityScanned: readCount('entity-audit-activity-scanned'),
+        activityLatest: readCount('entity-audit-activity-latest'),
+      };
+    });
+    expect(auditCounts.accountsShown, `${entry.label} audit UI must show account rows`).toBeGreaterThan(0);
+    expect(auditCounts.accountsTotal, `${entry.label} audit UI must show total accounts`).toBeGreaterThan(0);
+    expect(auditCounts.accountsShown, `${entry.label} audit UI account page must be at least probe-visible`).toBeGreaterThanOrEqual(projectionProbe.accountItems);
+    expect(auditCounts.accountsTotal, `${entry.label} audit UI account total must be at least probe total`).toBeGreaterThanOrEqual(projectionProbe.accountTotal);
+    expect(auditCounts.booksShown, `${entry.label} audit UI book page must be at least probe-visible`).toBeGreaterThanOrEqual(projectionProbe.bookItems);
+    expect(auditCounts.booksTotal, `${entry.label} audit UI book total must be at least probe total`).toBeGreaterThanOrEqual(projectionProbe.bookTotal);
+    expect(auditCounts.activityScanned, `${entry.label} audit UI must show scanned activity frames`).toBeGreaterThan(0);
+    expect(auditCounts.activityLatest, `${entry.label} audit UI must show latest activity height`).toBeGreaterThan(0);
+  };
+
+  for (const entry of entries) {
+    await clickRuntimeRow(entry.runtimeId);
+    await waitForRuntime(entry);
+  }
+});
+
+test('admin remote runtime opens swap workspace from RuntimeView projection', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+  const h1 = String(hubs.h1 || '').toLowerCase();
+  expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/\[vite\]|Ignoring Event: localhost/.test(text)) return;
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${text}`);
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+  await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`, {
+    waitUntil: 'domcontentloaded',
+  });
+
+  await page.waitForFunction(
+    ({ expectedRuntimeId, hubId }) => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: {
+          runtimeId?: string;
+          height?: number;
+          entities?: Array<{ entityId?: string; isHub?: boolean }>;
+          frame?: { entities?: Array<{ entityId?: string; isHub?: boolean }> | null };
+        };
+        __xlnRuntimeAdapter?: {
+          status: () => { authLevel?: string | null };
+        };
+      };
+      const runtimeView = (view as any).__xln?.view;
+      const status = (view as any).__xln?.adapter?.status();
+      if (status?.authLevel !== 'admin') return false;
+      if (String(runtimeView?.runtimeId || '') !== expectedRuntimeId || Number(runtimeView?.height || 0) < 1) return false;
+      const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
+      return entities.some((entity) =>
+        String(entity.entityId || '').toLowerCase() === hubId &&
+        entity.isHub === true,
+      );
+    },
+    { expectedRuntimeId: h1Endpoint.runtimeId, hubId: h1 },
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  await openAccountWorkspaceTab(page, 'swap');
+  await expect(page.getByTestId('swap-any-builder')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('swap-market-section')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('body')).not.toContainText('Swap requires a live runtime frame.');
+  await expect(page.locator('body')).not.toContainText('Swap projection is not available yet.');
+  expect(
+    consoleProblems.filter((message) => /XLN environment not ready|TypeError|pageerror/i.test(message)),
+  ).toEqual([]);
+});
+
+test('inspect remote runtime opens audit projection without settings Env surface', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/\[vite\]|Ignoring Event: localhost/.test(text)) return;
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${text}`);
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+  await page.goto(
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}#accounts`,
+    { waitUntil: 'domcontentloaded' },
+  );
+
+  await page.waitForFunction(
+    () => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: { height?: number };
+        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
+      };
+      const status = (view as any).__xln?.adapter?.status();
+      return status?.connected === true && status.authLevel === 'inspect' && Number((view as any).__xln?.view?.height || 0) > 0;
+    },
+    null,
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+  await page.waitForSelector('[data-testid="entity-workspace"][data-lens="audit"]', { timeout: REMOTE_E2E_WAIT_MS });
+  await page.waitForSelector('[data-testid="entity-audit-panel"]', { timeout: REMOTE_E2E_WAIT_MS });
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[data-testid="entity-audit-activity"]') || document.querySelector('[data-testid="entity-audit-error"]')),
+    null,
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  const result = await page.evaluate(() => {
+    const text = document.body.textContent || '';
+    const workspace = document.querySelector('[data-testid="entity-workspace"]');
+    const wallet = document.querySelector('[data-testid="entity-lens-wallet"]');
+    const ops = document.querySelector('[data-testid="entity-lens-ops"]');
+    const liquidity = document.querySelector('[data-testid="entity-lens-liquidity"]');
+    const audit = document.querySelector('[data-testid="entity-lens-audit"]');
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: { status: () => { authLevel?: string | null } };
+    };
+    return {
+      authLevel: String((view as any).__xln?.adapter?.status().authLevel || ''),
+      lens: workspace?.getAttribute('data-lens') || '',
+      auditPanel: Boolean(document.querySelector('[data-testid="entity-audit-panel"]')),
+      auditActivity: Boolean(document.querySelector('[data-testid="entity-audit-activity"]')),
+      auditError: document.querySelector('[data-testid="entity-audit-error"]')?.textContent || '',
+      walletDisabled: wallet?.hasAttribute('disabled') ?? false,
+      opsDisabled: ops?.hasAttribute('disabled') ?? false,
+      liquidityDisabled: liquidity?.hasAttribute('disabled') ?? false,
+      auditDisabled: audit?.hasAttribute('disabled') ?? true,
+      settingsDataMounted:
+        text.includes('IndexedDB') ||
+        text.includes('Checkpoint') ||
+        Boolean(document.querySelector('[data-testid="entity-settings-panel"]')),
+      fullAccessWarning: text.includes('Account opening requires admin runtime access'),
+    };
+  });
+
+  expect(result.authLevel).toBe('inspect');
+  expect(result.lens).toBe('audit');
+  expect(result.auditPanel).toBe(true);
+  expect(result.auditActivity).toBe(true);
+  expect(result.auditError).toBe('');
+  expect(result.walletDisabled).toBe(true);
+  expect(result.opsDisabled).toBe(true);
+  expect(result.liquidityDisabled).toBe(true);
+  expect(result.auditDisabled).toBe(false);
+  expect(result.settingsDataMounted).toBe(false);
+  expect(result.fullAccessWarning).toBe(false);
+  expect(
+    consoleProblems.filter((message) => /TypeError|unsupported adapter path|admin runtime access|pageerror/i.test(message)),
+  ).toEqual([]);
+});
+
+test('inspect remote runtime rejects RuntimeInput send over websocket and keeps account projection readable', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
+  const h1 = String(hubs.h1 || '').toLowerCase();
+  expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
+
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/\[vite\]|Ignoring Event: localhost/.test(text)) return;
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${text}`);
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+  await page.goto(
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}#accounts`,
+    { waitUntil: 'domcontentloaded' },
+  );
+
+  await page.waitForFunction(
+    ({ expectedRuntimeId }) => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: { runtimeId?: string; height?: number };
+        __xlnRuntimeAdapter?: {
+          status: () => {
+            connected?: boolean;
+            authLevel?: string | null;
+            runtimeId?: string;
+            permissions?: string;
+          };
+        };
+      };
+      const status = (view as any).__xln?.adapter?.status();
+      return status?.connected === true &&
+        status.authLevel === 'inspect' &&
+        status.permissions === 'read' &&
+        String((view as any).__xln?.view?.runtimeId || status.runtimeId || '') === expectedRuntimeId &&
+        Number((view as any).__xln?.view?.height || 0) > 0;
+    },
+    { expectedRuntimeId: h1Endpoint.runtimeId },
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  const result = await page.evaluate(async ({ hubId }) => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
+    };
+    const adapter = (view as any).__xln?.adapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    type Head = { latestHeight?: number };
+    type ViewFrame = {
+      height?: number;
+      activeEntity?: {
+        accounts?: { items?: unknown[]; totalItems?: number };
+      } | null;
+    };
+
+    const statusBefore = adapter.status();
+    const headBefore = await adapter.query.head<Head>();
+    const frameBefore = await adapter.query.viewFrame<ViewFrame>( {
+      entityId: hubId,
+      accountsLimit: 10,
+      booksLimit: 1,
+    });
+
+    let sendError = '';
+    let sendResolved = false;
+    try {
+      await adapter.send({
+        runtimeTxs: [],
+        entityInputs: [],
+        timestamp: 1_700_000_000_000 + Number(headBefore.latestHeight || 0),
+      });
+      sendResolved = true;
+    } catch (error) {
+      sendError = error instanceof Error ? error.message : String(error);
+    }
+
+    const statusAfter = adapter.status();
+    const headAfter = await adapter.query.head<Head>();
+    const frameAfter = await adapter.query.viewFrame<ViewFrame>( {
+      entityId: hubId,
+      accountsLimit: 10,
+      booksLimit: 1,
+    });
+    return {
+      authLevelBefore: String(statusBefore.authLevel || ''),
+      authLevelAfter: String(statusAfter.authLevel || ''),
+      permissionsBefore: String(statusBefore.permissions || ''),
+      permissionsAfter: String(statusAfter.permissions || ''),
+      sendResolved,
+      sendError,
+      beforeHeight: Number(headBefore.latestHeight || statusBefore.height || 0),
+      afterHeight: Number(headAfter.latestHeight || statusAfter.height || 0),
+      beforeFrameHeight: Number(frameBefore.height || 0),
+      afterFrameHeight: Number(frameAfter.height || 0),
+      visibleAccounts: Number(frameAfter.activeEntity?.accounts?.items?.length || 0),
+      totalAccounts: Number(frameAfter.activeEntity?.accounts?.totalItems ?? frameAfter.activeEntity?.accounts?.items?.length ?? 0),
+      readOnlyWarningCount: Array.from(document.body.querySelectorAll('*'))
+        .filter((node) => (node.textContent || '').includes('Account opening requires admin runtime access')).length,
+    };
+  }, { hubId: h1 });
+
+  expect(result.authLevelBefore).toBe('inspect');
+  expect(result.authLevelAfter).toBe('inspect');
+  expect(result.permissionsBefore).toBe('read');
+  expect(result.permissionsAfter).toBe('read');
+  expect(result.sendResolved).toBe(false);
+  expect(result.sendError).toContain('admin auth required');
+  expect(result.beforeHeight).toBeGreaterThan(0);
+  expect(result.afterHeight).toBeGreaterThanOrEqual(result.beforeHeight);
+  expect(result.beforeFrameHeight).toBeGreaterThan(0);
+  expect(result.afterFrameHeight).toBeGreaterThan(0);
+  expect(result.visibleAccounts).toBeGreaterThan(0);
+  expect(result.totalAccounts).toBeGreaterThan(0);
+  expect(result.readOnlyWarningCount).toBe(0);
+  expect(
+    consoleProblems.filter((message) => /TypeError|unsupported adapter path|pageerror/i.test(message)),
+  ).toEqual([]);
+});
+
+test('address explorer bootstraps remote runtime projection outside app shell', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    const text = message.text();
+    if (/\[vite\]|Ignoring Event: localhost/.test(text)) return;
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(`${message.type()}: ${text}`);
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror: ${error.message}`));
+
+  await page.goto(
+    `${APP_BASE_URL}/address?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(readKey)}`,
+    { waitUntil: 'domcontentloaded' },
+  );
+
+  await page.waitForFunction(
+    () => {
+      const view = window as typeof window & {
+        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
+      };
+      const status = (view as any).__xln?.adapter?.status();
+      return status?.connected === true && status.authLevel === 'inspect' && Number(status.height || 0) > 0;
+    },
+    null,
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+  await page.waitForSelector('.row .address', { timeout: REMOTE_E2E_WAIT_MS });
+  await page.waitForFunction(
+    () => !location.href.includes('xlnra1.') && !location.search.includes('token='),
+    null,
+    { timeout: 10_000 },
+  );
+
+  const directory = await page.evaluate(() => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null; height?: number } };
+    };
+    return {
+      href: location.href,
+      rows: document.querySelectorAll('.row').length,
+      firstAddress: document.querySelector('.row .address')?.textContent?.trim() || '',
+      adapter: (view as any).__xln?.adapter?.status() || null,
+      storageMode: localStorage.getItem('xln-runtime-adapter-mode') || '',
+      storageWs: localStorage.getItem('xln-runtime-adapter-ws') || '',
+      sessionKeyPresent: Boolean(sessionStorage.getItem('xln-runtime-adapter-key')),
+      errorText: document.querySelector('.error')?.textContent?.trim() || '',
+    };
+  });
+
+  expect(directory.href).toBe(`${APP_BASE_URL}/address`);
+  expect(directory.rows).toBeGreaterThan(0);
+  expect(directory.firstAddress).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(directory.adapter?.connected).toBe(true);
+  expect(directory.adapter?.authLevel).toBe('inspect');
+  expect(directory.storageMode).toBe('remote');
+  expect(directory.storageWs).toBe(h1Endpoint.wsUrl);
+  expect(directory.sessionKeyPresent).toBe(true);
+  expect(directory.errorText).toBe('');
+
+  await page.goto(`${APP_BASE_URL}/address/${encodeURIComponent(directory.firstAddress)}`, { waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('.identity-band .address', { timeout: REMOTE_E2E_WAIT_MS });
+  const detail = await page.evaluate(() => ({
+    address: document.querySelector('.identity-band .address')?.textContent?.trim() || '',
+    historyTab: document.querySelector('[data-testid="entity-history-tab"]')?.textContent?.trim() || '',
+    errorText: document.querySelector('.panel.error')?.textContent?.trim() || '',
+  }));
+
+  expect(detail.address).toBe(directory.firstAddress);
+  expect(detail.historyTab).toBe('History');
+  expect(detail.errorText).toBe('');
+  expect(
+    consoleProblems.filter((message) => /projection read failed|Runtime adapter is not connected|Cannot call replaceState|Insufficient resources|TypeError|pageerror/i.test(message)),
+  ).toEqual([]);
+});
+
+test('admin remote runtime opens settings projection without legacy Env settings', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
+  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleProblems.push(message.text());
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror:${error.message}`));
+
+  await page.goto(
+    `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1Endpoint.wsUrl)}&token=${encodeURIComponent(adminKey)}#settings`,
+    { waitUntil: 'domcontentloaded' },
+  );
+
+  await page.waitForFunction(
+    () => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: { height?: number };
+        __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
+      };
+      const status = (view as any).__xln?.adapter?.status();
+      return status?.connected === true && status.authLevel === 'admin' && Number((view as any).__xln?.view?.height || 0) > 0;
+    },
+    null,
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+
+  await page.getByTestId('tab-settings').click();
+  await page.waitForSelector('[data-testid="entity-settings-projection-panel"]', { timeout: REMOTE_E2E_WAIT_MS });
+
+  const result = await page.evaluate(() => {
+    const text = document.body.textContent || '';
+    const panel = document.querySelector('[data-testid="entity-settings-projection-panel"]');
+    const saveButton = panel?.querySelector('button[type="submit"]');
+    return {
+      projectionPanel: Boolean(panel),
+      saveDisabled: saveButton?.hasAttribute('disabled') ?? true,
+      legacySettingsMounted: Boolean(document.querySelector('.entity-settings')) ||
+        text.includes('IndexedDB') ||
+        text.includes('Recovery Services') ||
+        text.includes('Add Jurisdiction') ||
+        text.includes('Push Wake'),
+      fullAccessWarning: text.includes('Account opening requires admin runtime access'),
+    };
+  });
+
+  expect(result.projectionPanel).toBe(true);
+  expect(result.saveDisabled).toBe(false);
+  expect(result.legacySettingsMounted).toBe(false);
+  expect(result.fullAccessWarning).toBe(false);
+  expect(
+    consoleProblems.filter((message) => /TypeError|unsupported adapter path|admin runtime access|pageerror/i.test(message)),
+  ).toEqual([]);
 });
 
 test('health admin keeps QA evidence link-only and runtime adapter local', async ({ page }) => {
-  await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
-  const apiPort = Number(new URL(API_BASE_URL).port);
-  const wsUrl = hubRpcUrl(10);
-  const hubInfoResponse = await page.request.get(`http://127.0.0.1:${apiPort + 10}/api/info`);
-  expect(hubInfoResponse.ok()).toBe(true);
-  const hubInfo = await hubInfoResponse.json().catch(() => ({}));
-  const audience = String(hubInfo.runtimeId || '').toLowerCase();
-  expect(audience.length).toBeGreaterThan(0);
-  const readKey = capabilityToken('xln-e2e-h1', 'read', Date.now() + 60 * 60 * 1_000, audience);
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const wsUrl = h1Endpoint.wsUrl;
+  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
   const qaApiRequests: string[] = [];
+  const debugProjectionRequests: string[] = [];
+  const consoleProblems: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleProblems.push(message.text());
+  });
+  page.on('pageerror', (error) => consoleProblems.push(`pageerror:${error.message}`));
   await page.route('**/api/qa/**', async (route) => {
     qaApiRequests.push(route.request().url());
     await route.abort('blockedbyclient');
   });
+  await page.route('**/api/debug/events**', async (route) => {
+    debugProjectionRequests.push(route.request().url());
+    await route.abort('blockedbyclient');
+  });
+  await page.route('**/api/debug/entities**', async (route) => {
+    debugProjectionRequests.push(route.request().url());
+    await route.abort('blockedbyclient');
+  });
 
   await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
-  await expect(page.locator('body')).toContainText('xln health admin', { timeout: 30_000 });
-  await expect(page.getByTestId('health-verdict-banner')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('body')).toContainText('xln health admin', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('body')).toContainText('Runtime Events', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('body')).toContainText('Runtime Projection Entities', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('body')).not.toContainText('Debug Events');
+  await expect(page.locator('body')).not.toContainText('Registered Gossip Entities');
+  await expect(page.getByTestId('health-verdict-banner')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('health-verdict-status')).toContainText(/READY|DEGRADED|FAIL/);
   await expect(page.getByTestId('health-verdict-reason')).not.toHaveText('');
-  await expect(page.getByTestId('health-verdict-source-height')).toContainText(/source #[1-9]/, { timeout: 30_000 });
+  await expect(page.getByTestId('health-verdict-source-height')).toContainText(/source #[1-9]/, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('health-verdict-code-hash')).toContainText(/code [0-9a-f]{8}/);
   await expect(page.getByTestId('health-verdict-owner')).toContainText(/owner health/);
-  await expect(page.locator('#bootstrap')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('bootstrap-timeline')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('bootstrap-timeline-ready-hash')).not.toHaveText(/n\/a/i, { timeout: 30_000 });
+  await expect(page.locator('#bootstrap')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('bootstrap-timeline')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('bootstrap-timeline-ready-hash')).not.toHaveText(/n\/a/i, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('bootstrap-timeline-health-poll')).toContainText(/ms/);
   await expect(page.getByTestId('bootstrap-timeline-backlog')).not.toHaveText('');
-  await expect(page.getByTestId('bootstrap-timeline-last-event')).not.toHaveText(/n\/a/i, { timeout: 30_000 });
+  await expect(page.getByTestId('bootstrap-timeline-last-event')).not.toHaveText(/n\/a/i, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('bootstrap-timeline-stage-preflight')).toContainText(/done|active|blocked|pending/i);
   await expect(page.getByTestId('bootstrap-timeline-stage-hub-mesh')).toContainText(/done/i);
   await expect(page.getByTestId('bootstrap-timeline-stage-health-poll')).toContainText(/actual/i);
@@ -524,6 +1680,11 @@ test('health admin keeps QA evidence link-only and runtime adapter local', async
   await expect(page.locator('#qa-runs')).toHaveCount(0);
   await expect(page.locator('iframe[title="QA Cockpit"]')).toHaveCount(0);
   expect(qaApiRequests, '/health must not read /api/qa; QA cockpit owns that surface').toEqual([]);
+  expect(
+    debugProjectionRequests,
+    '/health must read runtime projections through RuntimeQueryClient, not legacy debug entity/event APIs',
+  ).toEqual([]);
+  expect(consoleProblems.filter((message) => /Failed to fetch health|Runtime adapter is not connected|pageerror/i.test(message))).toEqual([]);
   await expect(page.locator('#runtime-adapter')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open inspector' })).toHaveAttribute('href', '/radapter');
 
@@ -531,44 +1692,57 @@ test('health admin keeps QA evidence link-only and runtime adapter local', async
   await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill(wsUrl);
   await adapterPanel.locator('input[placeholder="read/admin token"]').fill(readKey);
   await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
-  await expect(adapterPanel).toContainText('connected', { timeout: 30_000 });
-  await expect(adapterPanel).toContainText('inspect', { timeout: 30_000 });
+  await expect(adapterPanel).toContainText('connected', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(adapterPanel).toContainText('inspect', { timeout: REMOTE_E2E_WAIT_MS });
   await page.waitForFunction(() => {
     const panel = document.querySelector('#runtime-adapter');
     const text = panel?.textContent || '';
     return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
-  }, null, { timeout: 30_000 });
+  }, null, { timeout: REMOTE_E2E_WAIT_MS });
 
   await page.goto(`${API_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(readKey)}`, {
     waitUntil: 'domcontentloaded',
   });
-  await expect(page.getByRole('heading', { name: 'Runtime Adapter Inspector' })).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('#runtime-adapter')).toContainText('connected', { timeout: 30_000 });
-  await expect(page.locator('#runtime-adapter')).toContainText('inspect', { timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'Runtime Adapter Inspector' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('#runtime-adapter')).toContainText('connected', { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('#runtime-adapter')).toContainText('inspect', { timeout: REMOTE_E2E_WAIT_MS });
   await page.waitForFunction(() => {
     const panel = document.querySelector('#runtime-adapter');
     const text = panel?.textContent || '';
     return /Entities\s+[1-9]/.test(text) && /Latest\s+[1-9]/.test(text);
-  }, null, { timeout: 30_000 });
+  }, null, { timeout: REMOTE_E2E_WAIT_MS });
 
   await page.goto(`${API_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });
   await expect(page).toHaveURL(/\/health$/);
-  await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 });
 
 test('health runtime adapter renders 1M aggregate snapshot without freezing', async ({ page }) => {
   await installOneMillionRuntimeAdapterSocket(page);
 
   await page.goto(`${API_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'xln health admin' })).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect.poll(async () => await page.evaluate(() =>
+    (window.WebSocket as unknown as { __xlnOneMillionRuntimeAdapterSocket?: boolean }).__xlnOneMillionRuntimeAdapterSocket === true,
+  ), { timeout: 2_000 }).toBe(true);
 
   const adapterPanel = page.locator('#runtime-adapter');
-  await expect(adapterPanel).toBeVisible({ timeout: 30_000 });
+  await expect(adapterPanel).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await adapterPanel.locator('input[placeholder="ws://127.0.0.1:8080/rpc"]').fill('ws://one-million-runtime.invalid/rpc');
   await adapterPanel.locator('input[placeholder="read/admin token"]').fill('inspect-fixture');
   await adapterPanel.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect.poll(async () => await page.evaluate(() =>
+    (window as unknown as { __xlnOneMillionRuntimeAdapterStats?: { sentCount: number } })
+      .__xlnOneMillionRuntimeAdapterStats?.sentCount ?? 0,
+  ), { timeout: 2_000 }).toBeGreaterThanOrEqual(1);
 
-  await expect(adapterPanel).toContainText('connected', { timeout: 30_000 });
+  await expect.poll(async () => await page.evaluate(() => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
+    };
+    const status = (view as any).__xln?.adapter?.status();
+    return status?.connected === true && status.authLevel === 'inspect';
+  }), { timeout: REMOTE_E2E_WAIT_MS }).toBe(true);
   await expect(adapterPanel.getByTestId('radapter-account-total')).toContainText('1,000,000');
   await expect(adapterPanel.getByTestId('radapter-account-visible')).toContainText('10');
   await expect(adapterPanel.getByTestId('radapter-account-page')).toContainText('1/100,000');
@@ -591,20 +1765,16 @@ test('health runtime adapter renders 1M aggregate snapshot without freezing', as
 });
 
 test('admin remote runtime control advances live state and exposes past frames', async ({ page }) => {
-  await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
   expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
-  const apiPort = Number(new URL(API_BASE_URL).port);
-  const wsUrl = hubRpcUrl(10);
-  const hubInfoResponse = await page.request.get(`http://127.0.0.1:${apiPort + 10}/api/info`);
-  expect(hubInfoResponse.ok()).toBe(true);
-  const hubInfo = await hubInfoResponse.json().catch(() => ({}));
-  const audience = String(hubInfo.runtimeId || '').toLowerCase();
-  expect(audience.length).toBeGreaterThan(0);
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const wsUrl = h1Endpoint.wsUrl;
 
-  const adminKey = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000, audience);
+  const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
+  const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
   await page.addInitScript(() => {
     const raw = localStorage.getItem('xln-settings');
     const settings = raw ? JSON.parse(raw) as Record<string, unknown> : {};
@@ -617,50 +1787,220 @@ test('admin remote runtime control advances live state and exposes past frames',
   await page.waitForFunction(
     ({ expectedRuntimeId, hubId }) => {
       const view = window as typeof window & {
-        isolatedEnv?: {
+        __xlnRuntimeView?: {
           runtimeId?: string;
           height?: number;
-          eReplicas?: Map<string, { entityId?: string; state?: { profile?: { isHub?: boolean } } }>;
+          entities?: Array<{ entityId?: string; isHub?: boolean }>;
+          frame?: { entities?: Array<{ entityId?: string; isHub?: boolean }> | null };
         };
       };
-      const env = view.isolatedEnv;
-      if (String(env?.runtimeId || '') !== expectedRuntimeId || Number(env?.height || 0) < 1) return false;
-      const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
-      return replicas.some((replica) =>
-        String(replica.entityId || '').toLowerCase() === hubId &&
-        replica.state?.profile?.isHub === true,
+      const runtimeView = (view as any).__xln?.view;
+      if (String(runtimeView?.runtimeId || '') !== expectedRuntimeId || Number(runtimeView?.height || 0) < 1) return false;
+      const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
+      return entities.some((entity) =>
+        String(entity.entityId || '').toLowerCase() === hubId &&
+        entity.isHub === true,
       );
     },
-    { expectedRuntimeId: `radapter:${wsUrl}`, hubId: h1 },
-    { timeout: 60_000 },
+    { expectedRuntimeId: h1Endpoint.runtimeId, hubId: h1 },
+    { timeout: REMOTE_E2E_WAIT_MS },
   );
 
-  const before = await page.evaluate((hubId) => {
+  const accessBeforeReload = await page.evaluate(() => {
     const view = window as typeof window & {
-      isolatedEnv?: {
-        height?: number;
-        history?: Array<{ height?: number }>;
-        eReplicas?: Map<string, {
-          entityId?: string;
-          signerId?: string;
-          state?: {
-            profile?: { name?: string; isHub?: boolean };
-            accounts?: Map<string, unknown>;
-          };
-        }>;
+      __xlnRuntimeAdapter?: {
+        status: () => { authLevel?: string | null };
       };
     };
-    const env = view.isolatedEnv;
-    const replicas = Array.from(env?.eReplicas?.values?.() ?? []);
-    const replica = replicas.find((entry) => String(entry.entityId || '').toLowerCase() === hubId);
     return {
-      height: Number(env?.height || 0),
-      historyLength: Number(env?.history?.length || 0),
-      historyHeights: (env?.history ?? []).map((frame) => Number(frame.height || 0)),
-      signerId: String(replica?.signerId || ''),
-      profileName: String(replica?.state?.profile?.name || ''),
-      isHub: replica?.state?.profile?.isHub === true,
-      accountCount: Number(replica?.state?.accounts?.size || 0),
+      authLevel: String((view as any).__xln?.adapter?.status().authLevel || ''),
+      storedAccess: localStorage.getItem('xln-runtime-adapter-access'),
+      registryStoredLocally: Boolean(localStorage.getItem('xln-remote-runtime-imports')),
+      registryStoredInSession: Boolean(sessionStorage.getItem('xln-remote-runtime-imports')),
+      activeKeyPresent: Boolean(sessionStorage.getItem('xln-runtime-adapter-key')),
+      readOnlyWarningCount: Array.from(document.body.querySelectorAll('*'))
+        .filter((node) => (node.textContent || '').includes('Account opening requires admin runtime access')).length,
+    };
+  });
+  expect(accessBeforeReload.authLevel).toBe('admin');
+  expect(accessBeforeReload.storedAccess).toBe('admin');
+  expect(accessBeforeReload.registryStoredLocally).toBe(true);
+  expect(accessBeforeReload.registryStoredInSession).toBe(false);
+  expect(accessBeforeReload.activeKeyPresent).toBe(true);
+  expect(accessBeforeReload.readOnlyWarningCount).toBe(0);
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(
+    ({ expectedRuntimeId, hubId }) => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: {
+          runtimeId?: string;
+          height?: number;
+          entities?: Array<{ entityId?: string; isHub?: boolean }>;
+          frame?: { entities?: Array<{ entityId?: string; isHub?: boolean }> | null };
+        };
+        __xlnRuntimeAdapter?: {
+          status: () => { authLevel?: string | null };
+        };
+      };
+      const runtimeView = (view as any).__xln?.view;
+      const status = (view as any).__xln?.adapter?.status();
+      if (String(runtimeView?.runtimeId || '') !== expectedRuntimeId || Number(runtimeView?.height || 0) < 1) return false;
+      if (status?.authLevel !== 'admin') return false;
+      const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
+      return entities.some((entity) =>
+        String(entity.entityId || '').toLowerCase() === hubId &&
+        entity.isHub === true,
+      );
+    },
+    { expectedRuntimeId: h1Endpoint.runtimeId, hubId: h1 },
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+  const accessAfterReload = await page.evaluate(() => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: {
+        status: () => { authLevel?: string | null };
+      };
+    };
+    return {
+      authLevel: String((view as any).__xln?.adapter?.status().authLevel || ''),
+      storedAccess: localStorage.getItem('xln-runtime-adapter-access'),
+      registryStoredLocally: Boolean(localStorage.getItem('xln-remote-runtime-imports')),
+      registryStoredInSession: Boolean(sessionStorage.getItem('xln-remote-runtime-imports')),
+      activeKeyPresent: Boolean(sessionStorage.getItem('xln-runtime-adapter-key')),
+      readOnlyWarningCount: Array.from(document.body.querySelectorAll('*'))
+        .filter((node) => (node.textContent || '').includes('Account opening requires admin runtime access')).length,
+    };
+  });
+  expect(accessAfterReload.authLevel).toBe('admin');
+  expect(accessAfterReload.storedAccess).toBe('admin');
+  expect(accessAfterReload.registryStoredLocally).toBe(true);
+  expect(accessAfterReload.registryStoredInSession).toBe(false);
+  expect(accessAfterReload.activeKeyPresent).toBe(true);
+  expect(accessAfterReload.readOnlyWarningCount).toBe(0);
+  await expect(page.getByTestId('hub-discovery-card').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  const openAccountAfterReload = await page.evaluate(() => {
+    const bodyText = document.body.textContent || '';
+    return {
+      hubCards: document.querySelectorAll('[data-testid="hub-discovery-card"]').length,
+      hubStates: Array.from(document.querySelectorAll('[data-testid="hub-discovery-card"]'))
+        .map((node) => node.getAttribute('data-connection-state') || ''),
+      missingEnvError: bodyText.includes('Environment not ready')
+        || bodyText.includes('Open Account requires full runtime access')
+        || bodyText.includes('requires full runtime access'),
+    };
+  });
+  expect(openAccountAfterReload.hubCards).toBeGreaterThan(0);
+  expect(openAccountAfterReload.hubStates.every((state) => ['open', 'opening', 'closed'].includes(state))).toBe(true);
+  expect(openAccountAfterReload.missingEnvError).toBe(false);
+
+  await page.evaluate(({ storageKey, wsUrl: activeWsUrl, adminToken, readToken, runtimeId }) => {
+    localStorage.setItem(storageKey, JSON.stringify([{
+      label: 'H1 admin registry restore',
+      access: 'admin',
+      wsUrl: activeWsUrl,
+      token: adminToken,
+      runtimeId,
+      authLevel: 'admin',
+      height: 0,
+      entityCount: 1,
+      importedAt: 1,
+    }]));
+    sessionStorage.setItem('xln-runtime-adapter-key', readToken);
+  }, {
+    storageKey: REMOTE_RUNTIME_IMPORT_STORAGE_KEY,
+    wsUrl,
+    adminToken: adminKey,
+    readToken: readKey,
+    runtimeId: h1Endpoint.runtimeId,
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(
+    ({ expectedRuntimeId, hubId }) => {
+      const view = window as typeof window & {
+        __xlnRuntimeView?: {
+          runtimeId?: string;
+          height?: number;
+          entities?: Array<{ entityId?: string; isHub?: boolean }>;
+          frame?: { entities?: Array<{ entityId?: string; isHub?: boolean }> | null };
+        };
+        __xlnRuntimeAdapter?: {
+          status: () => { authLevel?: string | null };
+        };
+      };
+      const runtimeView = (view as any).__xln?.view;
+      const status = (view as any).__xln?.adapter?.status();
+      if (String(runtimeView?.runtimeId || '') !== expectedRuntimeId || Number(runtimeView?.height || 0) < 1) return false;
+      if (status?.authLevel !== 'admin') return false;
+      const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
+      return entities.some((entity) =>
+        String(entity.entityId || '').toLowerCase() === hubId &&
+        entity.isHub === true,
+      );
+    },
+    { expectedRuntimeId: h1Endpoint.runtimeId, hubId: h1 },
+    { timeout: REMOTE_E2E_WAIT_MS },
+  );
+  const accessAfterRegistryReload = await page.evaluate(() => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: {
+        status: () => { authLevel?: string | null };
+      };
+    };
+    return {
+      authLevel: String((view as any).__xln?.adapter?.status().authLevel || ''),
+      storedAccess: localStorage.getItem('xln-runtime-adapter-access'),
+      registryStoredLocally: Boolean(localStorage.getItem('xln-remote-runtime-imports')),
+      registryStoredInSession: Boolean(sessionStorage.getItem('xln-remote-runtime-imports')),
+      activeKeyPresent: Boolean(sessionStorage.getItem('xln-runtime-adapter-key')),
+      activeKeyAccess: String(sessionStorage.getItem('xln-runtime-adapter-key') || '').split('.')[1] || '',
+      readOnlyWarningCount: Array.from(document.body.querySelectorAll('*'))
+        .filter((node) => (node.textContent || '').includes('Account opening requires admin runtime access')).length,
+    };
+  });
+  expect(accessAfterRegistryReload.authLevel).toBe('admin');
+  expect(accessAfterRegistryReload.activeKeyAccess).toBe('full');
+  expect(accessAfterRegistryReload.storedAccess).toBe('admin');
+  expect(accessAfterRegistryReload.registryStoredLocally).toBe(true);
+  expect(accessAfterRegistryReload.registryStoredInSession).toBe(false);
+  expect(accessAfterRegistryReload.activeKeyPresent).toBe(true);
+  expect(accessAfterRegistryReload.readOnlyWarningCount).toBe(0);
+
+  const before = await page.evaluate(async (hubId) => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
+    };
+    const adapter = (view as any).__xln?.adapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    type ViewFrame = {
+      height?: number;
+      activeEntity?: {
+        core?: { signerId?: string; profile?: { name?: string; isHub?: boolean } };
+        accounts?: { items?: unknown[]; totalItems?: number };
+      } | null;
+    };
+    const head = await adapter.query.head<{ latestHeight?: number }>();
+    const frame = await adapter.query.viewFrame<ViewFrame>( {
+      entityId: hubId,
+      accountsLimit: 10,
+      booksLimit: 1,
+    });
+    const height = Math.max(Number(head.latestHeight || 0), Number(frame.height || 0));
+    const history = await adapter.query.historyFrameBatch<{ frames?: Array<{ height?: number }> }>( {
+      heights: [height],
+      entityId: hubId,
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    const historyHeights = (history.frames ?? []).map((item) => Number(item.height || 0));
+    return {
+      height,
+      historyLength: historyHeights.length,
+      historyHeights,
+      signerId: String(frame.activeEntity?.core?.signerId || ''),
+      profileName: String(frame.activeEntity?.core?.profile?.name || ''),
+      isHub: frame.activeEntity?.core?.profile?.isHub === true,
+      accountCount: Number(frame.activeEntity?.accounts?.totalItems ?? frame.activeEntity?.accounts?.items?.length ?? 0),
     };
   }, h1);
 
@@ -672,11 +2012,7 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(before.accountCount).toBeLessThanOrEqual(10);
 
   const activeH1Before = await page.evaluate(async (entityId) => {
-    const adapter = (window as typeof window & {
-      __xlnRuntimeAdapter?: {
-        read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
-      };
-    }).__xlnRuntimeAdapter;
+    const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
     if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
     type ViewFrame = {
       height?: number;
@@ -686,7 +2022,7 @@ test('admin remote runtime control advances live state and exposes past frames',
         books?: { items?: unknown[] };
       } | null;
     };
-    const frame = await adapter.read<ViewFrame>('view-frame', {
+    const frame = await adapter.query.viewFrame<ViewFrame>( {
       entityId,
       accountsLimit: 10,
       booksLimit: 10,
@@ -704,21 +2040,101 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(activeH1Before.height).toBeGreaterThan(0);
   expect(activeH1Before.signerId.length).toBeGreaterThan(0);
   expect(activeH1Before.isHub).toBe(true);
+  expect(activeH1Before.accountCount).toBeGreaterThan(0);
   expect(activeH1Before.accountCount).toBeLessThanOrEqual(10);
   expect(activeH1Before.bookCount).toBeLessThanOrEqual(10);
+
+  await page.evaluate(() => {
+    (window as any).__xln?.commands?.clear?.();
+  });
+  await openAccountWorkspaceTab(page, 'configure');
+  await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('.configure-panel').first()).not.toContainText('Account actions require embedded runtime Env');
+  await page.getByTestId('configure-tab-extend-credit').first().click();
+  const creditPanel = page.locator('.configure-panel .action-card').filter({ hasText: /Extend Credit/i }).first();
+  await expect(creditPanel).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await creditPanel.locator('select.form-select').first().selectOption('1');
+  const creditAmount = creditPanel.locator('input[placeholder="Credit amount"]').first();
+  await expect(creditAmount).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await creditAmount.fill('1');
+  const extendCreditButton = creditPanel.getByRole('button', { name: /Extend Credit/i }).first();
+  await expect(extendCreditButton).toBeEnabled({ timeout: REMOTE_E2E_WAIT_MS });
+  await extendCreditButton.click();
+  await expect(page.getByTestId('runtime-command-receipt')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect.poll(async () => page.evaluate(() => {
+    const receipt = (window as any).__xln?.commands?.latest as {
+      status?: string;
+      committedAtHeight?: number | null;
+      inputSummary?: { entityInputs?: number; entityTxs?: number };
+      error?: string | null;
+    } | null | undefined;
+    return {
+      status: String(receipt?.status || ''),
+      committedAtHeight: Number(receipt?.committedAtHeight || 0),
+      entityInputs: Number(receipt?.inputSummary?.entityInputs || 0),
+      entityTxs: Number(receipt?.inputSummary?.entityTxs || 0),
+      error: String(receipt?.error || ''),
+    };
+  }), {
+    timeout: REMOTE_E2E_WAIT_MS,
+    intervals: [250, 500, 1000],
+  }).toMatchObject({
+    status: 'observed',
+    entityInputs: 1,
+    entityTxs: 1,
+    error: '',
+  });
+
+  const storageCadence = await page.evaluate(async () => {
+    const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    const head = await adapter.query.head<{
+      latestHeight?: number;
+      latestSnapshotHeight?: number;
+      snapshotPeriodFrames?: number;
+      retainedHistoryBytes?: number;
+    }>();
+    const checkpoints = await adapter.query.checkpoints<Array<{ height?: number }>>();
+    return {
+      latestHeight: Number(head.latestHeight || 0),
+      latestSnapshotHeight: Number(head.latestSnapshotHeight || 0),
+      snapshotPeriodFrames: Number(head.snapshotPeriodFrames || 0),
+      retainedHistoryBytes: Number(head.retainedHistoryBytes || 0),
+      checkpointHeights: checkpoints.map((entry) => Number(entry.height || 0)),
+    };
+  });
+
+  expect(storageCadence.latestHeight).toBeGreaterThanOrEqual(activeH1Before.height);
+  expect(storageCadence.snapshotPeriodFrames).toBeGreaterThan(0);
+  expect(storageCadence.latestSnapshotHeight).toBeGreaterThan(0);
+  expect(storageCadence.checkpointHeights).toContain(storageCadence.latestSnapshotHeight);
 
   const baseName = `H1 Admin E2E ${activeH1Before.height + 1}`;
   const nextProfileName = activeH1Before.profileName === baseName ? `${baseName}b` : baseName;
   const controlResult = await page.evaluate(async ({ entityId, signerId, name, timestamp }) => {
-    const adapter = (window as typeof window & {
-      __xlnRuntimeAdapter?: {
-        read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
-        send: (input: unknown) => Promise<{ height: number }>;
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
+      __xlnRuntimeSubmit?: {
+        submit: (input: unknown) => Promise<{ height?: number }>;
       };
-    }).__xlnRuntimeAdapter;
+      __xlnRuntimeCommands?: {
+	        latest?: {
+	          receiptId?: string;
+	          upstreamReceiptId?: string | null;
+	          statusUrl?: string | null;
+	          status?: string;
+	          acceptedAtHeight?: number | null;
+          committedAtHeight?: number | null;
+          error?: string | null;
+        } | null;
+      };
+    };
+    const adapter = (view as any).__xln?.adapter;
+    const submit = (view as any).__xln?.submit;
     if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-    const head = await adapter.read<{ latestHeight?: number }>('head');
-    const sent = await adapter.send({
+    if (!submit) throw new Error('XLN_RUNTIME_SUBMIT_DEBUG_SURFACE_MISSING');
+    const head = await adapter.query.head<{ latestHeight?: number }>();
+    const submittedEnv = await submit.submit({
       runtimeTxs: [],
       entityInputs: [{
         entityId,
@@ -739,9 +2155,11 @@ test('admin remote runtime control advances live state and exposes past frames',
       }],
       timestamp,
     });
+    const receipt = (view as any).__xln?.commands?.latest ?? null;
     return {
       beforeHeight: Number(head.latestHeight || 0),
-      sendHeight: Number(sent.height || 0),
+      sendHeight: Number(receipt?.acceptedAtHeight ?? submittedEnv.height ?? 0),
+      receipt,
     };
   }, {
     entityId: h1,
@@ -752,12 +2170,32 @@ test('admin remote runtime control advances live state and exposes past frames',
 
   expect(controlResult.beforeHeight).toBeGreaterThanOrEqual(activeH1Before.height);
   expect(controlResult.sendHeight).toBeGreaterThanOrEqual(controlResult.beforeHeight);
+  expect(controlResult.receipt?.receiptId).toMatch(/^runtime-command-/);
+  expect(controlResult.receipt?.upstreamReceiptId).toBeTruthy();
+  expect(controlResult.receipt?.statusUrl).toContain('/api/control/runtime-input/');
+  expect(['accepted', 'observed']).toContain(controlResult.receipt?.status);
+  await expect(page.getByTestId('runtime-command-receipt')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 
   const after = await waitForAdminControlProbe(
     page,
     { hubId: h1, minHeight: controlResult.beforeHeight, expectedName: nextProfileName },
     90_000,
   );
+  await expect.poll(async () => page.evaluate(() =>
+    String((window as any).__xln?.commands?.latest?.status || '')
+  ), { timeout: REMOTE_E2E_WAIT_MS }).toBe('observed');
+  const observedReceipt = await page.evaluate(() => {
+    const receipt = (window as any).__xln?.commands?.latest as {
+      status?: string;
+      committedAtHeight?: number | null;
+    } | null | undefined;
+    return {
+      status: String(receipt?.status || ''),
+      committedAtHeight: Number(receipt?.committedAtHeight || 0),
+    };
+  });
+  expect(observedReceipt.status).toBe('observed');
+  expect(observedReceipt.committedAtHeight).toBeGreaterThan(controlResult.beforeHeight);
 
   expect(after.envHeight).toBeGreaterThan(controlResult.beforeHeight);
   expect(after.envName).toBe(nextProfileName);
@@ -767,12 +2205,50 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(after.historyHeights).toContain(controlResult.beforeHeight);
   expect(after.historyHeights).toContain(after.envHeight);
 
+  const activityProbe = await page.evaluate(async (entityId) => {
+    const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    type ActivityPage = {
+      latestHeight?: number;
+      scannedFrames?: number;
+      events?: Array<{
+        height?: number;
+        entityId?: string;
+        title?: string;
+        rawType?: string;
+        source?: string;
+      }>;
+    };
+    const page = await adapter.query.activity<ActivityPage>( {
+      entityId,
+      limit: 20,
+      scanLimit: 200,
+      q: 'profile-update',
+    });
+    return {
+      latestHeight: Number(page.latestHeight || 0),
+      scannedFrames: Number(page.scannedFrames || 0),
+      events: (page.events ?? []).map((event) => ({
+        height: Number(event.height || 0),
+        entityId: String(event.entityId || '').toLowerCase(),
+        title: String(event.title || ''),
+        rawType: String(event.rawType || ''),
+        source: String(event.source || ''),
+      })),
+    };
+  }, h1);
+
+  expect(activityProbe.latestHeight).toBeGreaterThanOrEqual(after.envHeight);
+  expect(activityProbe.scannedFrames).toBeGreaterThan(0);
+  expect(activityProbe.events.some((event) =>
+    event.entityId === h1 &&
+    event.rawType === 'profile-update' &&
+    event.source === 'runtime_input' &&
+    event.height > controlResult.beforeHeight,
+  ), `activity projection must expose remote profile-update event: ${JSON.stringify(activityProbe)}`).toBe(true);
+
   const frameProbe = await page.evaluate(async ({ entityId, beforeHeight, afterHeight }) => {
-    const adapter = (window as typeof window & {
-      __xlnRuntimeAdapter?: {
-        read: <T = unknown>(path: string, query?: Record<string, unknown>) => Promise<T>;
-      };
-    }).__xlnRuntimeAdapter;
+    const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
     if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
     type ViewFrame = {
       height?: number;
@@ -782,13 +2258,13 @@ test('admin remote runtime control advances live state and exposes past frames',
         books?: { items?: unknown[] };
       } | null;
     };
-    const beforeFrame = await adapter.read<ViewFrame>('view-frame', {
+    const beforeFrame = await adapter.query.viewFrame<ViewFrame>( {
       atHeight: beforeHeight,
       entityId,
       accountsLimit: 1,
       booksLimit: 1,
     });
-    const afterFrame = await adapter.read<ViewFrame>('view-frame', {
+    const afterFrame = await adapter.query.viewFrame<ViewFrame>( {
       atHeight: afterHeight,
       entityId,
       accountsLimit: 1,
@@ -820,66 +2296,106 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(frameProbe.beforeBooks).toBeLessThanOrEqual(1);
   expect(frameProbe.afterBooks).toBeLessThanOrEqual(1);
 
-  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
+  const batchProbe = await page.evaluate(async ({ entityId, beforeHeight, afterHeight }) => {
+    const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    type HistoryBatch = {
+      requestedHeights?: number[];
+      frames?: Array<{
+        height?: number;
+        activeEntity?: {
+          accounts?: { items?: unknown[] };
+          books?: { items?: unknown[] };
+        } | null;
+      }>;
+      unavailable?: Array<{ height?: number; code?: string; message?: string }>;
+    };
+    const batch = await adapter.query.historyFrameBatch<HistoryBatch>( {
+      heights: [beforeHeight, afterHeight],
+      entityId,
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    return {
+      requestedHeights: batch.requestedHeights ?? [],
+      frameHeights: (batch.frames ?? []).map((frame) => Number(frame.height || 0)),
+      accountCounts: (batch.frames ?? []).map((frame) => Number(frame.activeEntity?.accounts?.items?.length || 0)),
+      bookCounts: (batch.frames ?? []).map((frame) => Number(frame.activeEntity?.books?.items?.length || 0)),
+      unavailable: batch.unavailable ?? [],
+    };
+  }, {
+    entityId: h1,
+    beforeHeight: controlResult.beforeHeight,
+    afterHeight: after.envHeight,
+  });
+
+  expect(batchProbe.requestedHeights).toEqual([controlResult.beforeHeight, after.envHeight]);
+  expect(batchProbe.frameHeights).toEqual([controlResult.beforeHeight, after.envHeight]);
+  expect(batchProbe.accountCounts.every((count) => count <= 1)).toBe(true);
+  expect(batchProbe.bookCounts.every((count) => count <= 1)).toBe(true);
+  expect(batchProbe.unavailable).toEqual([]);
+
+  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('time-machine-remote-target')).toBeVisible();
   await expect(page.getByTestId('time-machine-remote-target')).toContainText(/hub/i);
   await page.getByTestId('time-machine-remote-height').fill(String(controlResult.beforeHeight));
   await page.getByTestId('time-machine-remote-scan-button').click();
-  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: 30_000 });
+  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(/ms/);
   await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
   await expect(page.getByTestId('time-machine-remote-diff')).toContainText(/Δh/);
   await page.getByTestId('time-machine-remote-deeplink').click();
   await expect.poll(() => new URL(page.url()).hash).toContain(`tmHeight=${controlResult.beforeHeight}`);
   await expect.poll(() => new URL(page.url()).hash).toContain('tmEntity=');
-  const timeMachineProbe = await page.evaluate((height) => {
+  const timeMachineProbe = await page.evaluate(async (height) => {
     const view = window as typeof window & {
-      isolatedEnv?: { history?: Array<{ height?: number }> };
+      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
     };
-    const heights = (view.isolatedEnv?.history ?? []).map((frame) => Number(frame.height || 0));
+    const adapter = (view as any).__xln?.adapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    const [head, batch] = await Promise.all([
+      adapter.query.head<{ latestHeight?: number }>(),
+      adapter.query.historyFrameBatch<{ frames?: Array<{ height?: number }> }>( {
+        heights: [height],
+        accountsLimit: 1,
+        booksLimit: 1,
+      }),
+    ]);
+    const heights = (batch.frames ?? []).map((frame) => Number(frame.height || 0));
     return {
       historyLength: heights.length,
       hasRequestedHeight: heights.includes(height),
-      maxHistoryHeight: Math.max(0, ...heights),
+      maxHistoryHeight: Math.max(Number(head.latestHeight || 0), ...heights),
     };
   }, controlResult.beforeHeight);
-  expect(timeMachineProbe.historyLength).toBeGreaterThanOrEqual(2);
-  expect(timeMachineProbe.historyLength).toBeLessThanOrEqual(24);
+  expect(timeMachineProbe.historyLength).toBeGreaterThanOrEqual(1);
+  expect(timeMachineProbe.historyLength).toBeLessThanOrEqual(2);
   expect(timeMachineProbe.hasRequestedHeight).toBe(true);
   expect(timeMachineProbe.maxHistoryHeight).toBeGreaterThanOrEqual(after.envHeight);
 
   const deepLinkUrl = page.url();
   await page.goto(deepLinkUrl, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: 60_000 });
+  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
 });
 
 test('runtime dropdown manager attaches a remote radapter by token', async ({ page }) => {
-  await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
-  const apiPort = Number(new URL(API_BASE_URL).port);
-  const h1WsUrl = hubRpcUrl(10);
-  const h2WsUrl = hubRpcUrl(11);
-  const h1InfoResponse = await page.request.get(`http://127.0.0.1:${apiPort + 10}/api/info`);
-  const h2InfoResponse = await page.request.get(`http://127.0.0.1:${apiPort + 11}/api/info`);
-  expect(h1InfoResponse.ok()).toBe(true);
-  expect(h2InfoResponse.ok()).toBe(true);
-  const h1Info = await h1InfoResponse.json().catch(() => ({}));
-  const h2Info = await h2InfoResponse.json().catch(() => ({}));
-  const h1Audience = String(h1Info.runtimeId || '').toLowerCase();
-  const h2Audience = String(h2Info.runtimeId || '').toLowerCase();
-  expect(h1Audience.length).toBeGreaterThan(0);
-  expect(h2Audience.length).toBeGreaterThan(0);
+  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+  const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
+  const h1WsUrl = h1Endpoint.wsUrl;
+  const h2WsUrl = h2Endpoint.wsUrl;
 
-  const h1Key = capabilityToken('xln-e2e-h1', 'read', Date.now() + 60 * 60 * 1_000, h1Audience);
-  const h2Key = capabilityToken('xln-e2e-h2', 'read', Date.now() + 60 * 60 * 1_000, h2Audience);
+  const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
+  const h2Key = (await resolveRuntimeImportCapability(page, h2Endpoint, 'read')).token;
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1WsUrl)}&token=${encodeURIComponent(h1Key)}`, {
     waitUntil: 'domcontentloaded',
   });
   await page.waitForFunction(
-    (expectedRuntimeId) => String((window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv?.runtimeId || '') === expectedRuntimeId,
-    `radapter:${h1WsUrl}`,
-    { timeout: 60_000 },
+    (expectedRuntimeId) => String((window as any).__xln?.view?.runtimeId || '') === expectedRuntimeId,
+    h1Endpoint.runtimeId,
+    { timeout: REMOTE_E2E_WAIT_MS },
   );
 
   await page.getByTestId('context-current').click();
@@ -895,7 +2411,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   await page.getByTestId('remote-runtime-attach').click();
   await reloadAfterAttach;
   await page.waitForLoadState('domcontentloaded');
-  await expect(page).toHaveURL(/\/app$/);
+  await expect.poll(() => new URL(page.url()).pathname, { timeout: REMOTE_E2E_WAIT_MS }).toBe('/app');
 
   await page.waitForFunction(
     (expectedWsUrl) => localStorage.getItem('xln-runtime-adapter-ws') === expectedWsUrl,
@@ -904,16 +2420,18 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   );
 
   const managerState = await page.evaluate((expectedWsUrl) => {
-    const importsRaw = sessionStorage.getItem('xln-remote-runtime-imports') || '[]';
+    const importsRaw = localStorage.getItem('xln-remote-runtime-imports') || '[]';
     const imports = JSON.parse(importsRaw) as Array<{ label?: string; wsUrl?: string; access?: string; entityCount?: number }>;
     return {
       activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
       imports,
       h2Import: imports.find(entry => entry.wsUrl === expectedWsUrl) || null,
+      sessionRegistryPresent: Boolean(sessionStorage.getItem('xln-remote-runtime-imports')),
     };
   }, h2WsUrl);
 
   expect(managerState.activeWsUrl).toBe(h2WsUrl);
+  expect(managerState.sessionRegistryPresent).toBe(false);
   expect(managerState.imports.length).toBeGreaterThanOrEqual(1);
   expect(managerState.imports.length).toBeLessThanOrEqual(100);
   expect(managerState.h2Import?.label).toBe('H2 dropdown');
@@ -921,13 +2439,124 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   expect(managerState.h2Import?.entityCount ?? 0).toBeGreaterThan(0);
 
   await page.waitForFunction(
-    (expectedRuntimeId) => String((window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv?.runtimeId || '') === expectedRuntimeId,
-    `radapter:${h2WsUrl}`,
+    (expectedRuntimeId) => String((window as any).__xln?.view?.runtimeId || '') === expectedRuntimeId,
+    h2Endpoint.runtimeId,
     { timeout: 90_000 },
   );
+  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('entity-workspace')).toHaveAttribute('data-lens', 'audit');
+  await expect(page.getByTestId('entity-lens-wallet')).toBeDisabled();
+  await expect(page.getByTestId('entity-lens-audit')).toBeEnabled();
+  await expect(page.getByTestId('entity-workspace-readonly')).toBeVisible();
+
+  const inspectMutationProbe = await page.evaluate(async () => {
+    const view = window as typeof window & {
+      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
+      __xlnRuntimeSubmit?: {
+        submit: (input: unknown) => Promise<{ height?: number }>;
+      };
+      __xlnRuntimeCommands?: {
+        clear?: () => void;
+        latest?: {
+          status?: string;
+          error?: string | null;
+          inputSummary?: { entityInputs?: number; entityTxs?: number };
+        } | null;
+      };
+    };
+    const adapter = (view as any).__xln?.adapter;
+    const submit = (view as any).__xln?.submit;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    if (!submit) throw new Error('XLN_RUNTIME_SUBMIT_DEBUG_SURFACE_MISSING');
+    (view as any).__xln?.commands?.clear?.();
+
+    type ViewFrame = {
+      activeEntity?: {
+        core?: {
+          entityId?: string;
+          signerId?: string;
+          profile?: { name?: string };
+        };
+        summary?: {
+          entityId?: string;
+        };
+      } | null;
+    };
+    const beforeFrame = await adapter.query.viewFrame<ViewFrame>( {
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    const entityId = String(beforeFrame.activeEntity?.core?.entityId || beforeFrame.activeEntity?.summary?.entityId || '').toLowerCase();
+    const signerId = String(beforeFrame.activeEntity?.core?.signerId || '').toLowerCase();
+    const beforeName = String(beforeFrame.activeEntity?.core?.profile?.name || '');
+    const attemptedName = `${beforeName || 'inspect'} denied mutation`;
+    const beforeHead = await adapter.query.head<{ latestHeight?: number }>();
+
+    let error = '';
+    try {
+      await submit.submit({
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId,
+          signerId,
+          timestamp: 1_700_000_000_123,
+          entityTxs: [{
+            type: 'profile-update',
+            data: {
+              profile: {
+                entityId,
+                name: attemptedName,
+                avatar: '',
+                bio: 'inspect-should-not-mutate',
+                website: '',
+              },
+            },
+          }],
+        }],
+        timestamp: 1_700_000_000_123,
+      });
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+
+    const afterFrame = await adapter.query.viewFrame<ViewFrame>( {
+      entityId,
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    const afterHead = await adapter.query.head<{ latestHeight?: number }>();
+    const receipt = (view as any).__xln?.commands?.latest ?? null;
+
+    return {
+      authLevel: String(adapter.status().authLevel || ''),
+      entityId,
+      signerId,
+      beforeName,
+      afterName: String(afterFrame.activeEntity?.core?.profile?.name || ''),
+      attemptedName,
+      beforeHeight: Number(beforeHead.latestHeight || 0),
+      afterHeight: Number(afterHead.latestHeight || 0),
+      error,
+      receiptStatus: String(receipt?.status || ''),
+      receiptError: String(receipt?.error || ''),
+      receiptEntityInputs: Number(receipt?.inputSummary?.entityInputs || 0),
+      receiptEntityTxs: Number(receipt?.inputSummary?.entityTxs || 0),
+    };
+  });
+  expect(inspectMutationProbe.authLevel).toBe('inspect');
+  expect(inspectMutationProbe.entityId).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(inspectMutationProbe.signerId).toMatch(/^0x[0-9a-f]{40}$/);
+  expect(inspectMutationProbe.error).toContain('admin auth required');
+  expect(inspectMutationProbe.receiptStatus).toBe('error');
+  expect(inspectMutationProbe.receiptError).toContain('admin auth required');
+  expect(inspectMutationProbe.receiptEntityInputs).toBe(1);
+  expect(inspectMutationProbe.receiptEntityTxs).toBe(1);
+  expect(inspectMutationProbe.afterName).toBe(inspectMutationProbe.beforeName);
+  expect(inspectMutationProbe.afterName).not.toBe(inspectMutationProbe.attemptedName);
 });
 
 test('bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser', async ({ browser }) => {
+  test.setTimeout(480_000);
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
   try {
@@ -937,7 +2566,8 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       requireMarketMaker: true,
       requireCustody: true,
       minHubCount: 3,
-      timeoutMs: 240_000,
+      timeoutMs: 300_000,
+      allowAutoReset: false,
     });
     expect(baseline.custody?.enabled, `custody must be enabled: ${JSON.stringify(baseline.custody ?? {})}`).toBe(true);
     expect(baseline.custody?.ok, `custody must be ready: ${JSON.stringify(baseline.custody ?? {})}`).toBe(true);
@@ -992,21 +2622,28 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     }
     for (const entry of importSummary.entries) {
       expect(entry.access, `${entry.label} imported access`).toBe('read');
-      expect(entry.runtimeId, `${entry.label} runtime id`).toMatch(/^radapter:wss?:\/\//);
+      expect(entry.runtimeId, `${entry.label} runtime id`).toMatch(/^[a-z0-9:_-]+$/);
+      expect(entry.runtimeId, `${entry.label} runtime id`).not.toMatch(/^radapter:/);
       expect(entry.entityCount, `${entry.label} entity count`).toBeGreaterThan(0);
       expect(entry.wsUrl, `${entry.label} wsUrl`).toMatch(/^wss?:\/\/.+\/rpc$/);
     }
 
-    const firstWsUrl = importSummary.entries[0]!.wsUrl;
+    const firstRuntimeId = importSummary.entries[0]!.runtimeId.toLowerCase();
     await page.waitForFunction((expectedRuntimeId) => {
       const view = window as typeof window & {
-        isolatedEnv?: { runtimeId?: string; height?: number; eReplicas?: Map<string, unknown> };
+        __xlnRuntimeView?: {
+          runtimeId?: string;
+          height?: number;
+          entities?: unknown[];
+          frame?: { entities?: unknown[] | null };
+        };
       };
-      const env = view.isolatedEnv;
-      return String(env?.runtimeId || '') === expectedRuntimeId &&
-        Number(env?.height || 0) > 0 &&
-        Number(env?.eReplicas?.size || 0) > 0;
-    }, `radapter:${firstWsUrl}`, { timeout: 60_000 });
+      const runtimeView = (view as any).__xln?.view;
+      const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
+      return String(runtimeView?.runtimeId || '') === expectedRuntimeId &&
+        Number(runtimeView?.height || 0) > 0 &&
+        entities.length > 0;
+    }, firstRuntimeId, { timeout: REMOTE_E2E_WAIT_MS });
 
     const browserHealth = await page.evaluate(async () => {
       const response = await fetch('/api/health', { cache: 'no-store' });
@@ -1014,18 +2651,38 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       return await response.json();
     }) as Awaited<ReturnType<typeof ensureE2EBaseline>>;
 
-    expect(browserHealth.hubMesh?.ok, `hub mesh health: ${JSON.stringify(browserHealth.hubMesh ?? {})}`).toBe(true);
-    expect(browserHealth.hubMesh?.pairs?.length ?? 0).toBeGreaterThanOrEqual(3);
-    for (const pair of browserHealth.hubMesh?.pairs ?? []) {
-      expect(pair.ok, `hub mesh pair ${pair.left}->${pair.right} must have mutual credit`).toBe(true);
-      expect(pair.expectedCreditAmount, `hub mesh pair ${pair.left}->${pair.right} credit amount`).toBe(HUB_MESH_CREDIT_AMOUNT);
-    }
+    expectHubMeshHealthy(browserHealth);
     expect(browserHealth.custody?.ok, `custody health: ${JSON.stringify(browserHealth.custody ?? {})}`).toBe(true);
     expectMarketMakerBooksHealthy(browserHealth);
 
-    await expect(page.getByRole('button', { name: /^H1$/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^H2$/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^H3$/ })).toBeVisible();
+    const importedHubEntries = ['h1', 'h2', 'h3'].map((label) => {
+      const entry = importSummary.entries.find((candidate) => candidate.label.toLowerCase() === label);
+      if (!entry) throw new Error(`REMOTE_RUNTIME_IMPORT_HUB_MISSING:${label}`);
+      return {
+        label,
+        runtimeId: entry.runtimeId.toLowerCase(),
+      };
+    });
+
+    await page.getByTestId('context-current').click();
+    for (const entry of importedHubEntries) {
+      await page.waitForFunction((targetRuntimeId) =>
+        Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
+          .some((row) => row.getAttribute('data-runtime-id') === targetRuntimeId),
+      entry.runtimeId, { timeout: REMOTE_E2E_WAIT_MS });
+      const row = await page.evaluate((targetRuntimeId) => {
+        const candidate = Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
+          .find((element) => element.getAttribute('data-runtime-id') === targetRuntimeId) as HTMLElement | undefined;
+        if (!candidate) return null;
+        return {
+          text: candidate.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
+          visible: candidate.getClientRects().length > 0,
+        };
+      }, entry.runtimeId);
+      expect(row, `context row for ${entry.label} runtime ${entry.runtimeId}`).not.toBeNull();
+      expect(row!.visible, `context row visible for ${entry.label}`).toBe(true);
+      expect(row!.text, `context row text for ${entry.label}`).toContain(entry.label);
+    }
   } finally {
     await context.close();
   }

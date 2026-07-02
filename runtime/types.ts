@@ -619,6 +619,8 @@ export interface Env {
     frameDbOpenPromise?: Promise<boolean> | null | undefined;
     infraDb?: Level<Buffer, Buffer> | null | undefined;
     infraDbOpenPromise?: Promise<boolean> | null | undefined;
+    infraDbClosing?: boolean;
+    infraDbPendingWrites?: Set<Promise<void>>;
     logState?: {
       nextId: number;
       mirrorToConsole?: boolean;

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
-  // Removed WalletView - Entity = Wallet, no separate signer wallet view
+  // Runtime creation is entry only; entity capabilities are resolved in EntityWorkspace.
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { appStateOperations } from '$lib/stores/appStateStore';
   import {
@@ -136,6 +136,7 @@
       }
       liveRuntimes = next;
       liveRuntimesLoaded = true;
+      void runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString());
     } catch (err) {
       if (!silent) liveRuntimesError = err instanceof Error ? err.message : String(err);
     } finally {
@@ -152,8 +153,7 @@
         label: rt.label,
         access: rt.access,
       });
-      const activated = runtimeOperations.activateRemoteRuntime(stored.runtimeId, { href: '/app' });
-      // On success the page reloads into the runtime; if activation didn't take, don't leave a stuck spinner.
+      const activated = await runtimeOperations.activateRemoteRuntime(stored.runtimeId, { href: '/app' });
       if (!activated) {
         liveRuntimesError = `${rt.label}: connected but could not activate the runtime`;
         connectingRuntimeId = '';

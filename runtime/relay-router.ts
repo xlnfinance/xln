@@ -31,7 +31,9 @@ import { verifyHelloAuth } from './networking/hello-auth';
 import type { RuntimeWsMessage } from './networking/ws-protocol';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
+const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
+type DuplicateClosingRelaySocket = object & { [SOCKET_DUPLICATE_CLOSING]?: boolean };
 const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
   'invalid tag',
   'P2P_DECRYPT_ERROR',
@@ -61,6 +63,29 @@ const getRememberedSocketRuntimeId = (ws: unknown): string => {
 export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   delete (ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID];
+};
+
+const markDuplicateClosingSocket = (ws: unknown): void => {
+  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
+  Object.defineProperty(ws as DuplicateClosingRelaySocket, SOCKET_DUPLICATE_CLOSING, {
+    value: true,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+};
+
+const isDuplicateClosingSocket = (ws: unknown): boolean =>
+  !!ws && (typeof ws === 'object' || typeof ws === 'function') &&
+  (ws as DuplicateClosingRelaySocket)[SOCKET_DUPLICATE_CLOSING] === true;
+
+const closeDuplicateRuntimeSocket = (ws: RelaySocketLike): void => {
+  markDuplicateClosingSocket(ws);
+  try {
+    ws.close?.(4009, 'duplicate-runtime');
+  } catch {
+    // The live runtime socket remains registered; duplicate close failure is local to this socket.
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +153,7 @@ export const relayRoute = async (
   ws: RelaySocketLike,
   rawMsg: unknown,
 ): Promise<void> => {
+  if (isDuplicateClosingSocket(ws)) return;
   const { store, send } = config;
 
   // Validate message shape
@@ -273,7 +299,7 @@ export const relayRoute = async (
         reason: 'DUPLICATE_RUNTIME_CONNECTION',
         details: { traceId },
       });
-      send(ws, safeStringify({ type: 'error', error: 'Runtime already connected' }));
+      closeDuplicateRuntimeSocket(ws);
       return;
     }
     rememberSocketRuntimeId(ws, fromKey);

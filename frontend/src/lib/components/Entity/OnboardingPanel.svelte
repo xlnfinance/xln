@@ -7,8 +7,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
-  import type { Env } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, getEnv, resolveConfiguredApiBase, xlnFunctions } from '../../stores/xlnStore';
+  import { resolveConfiguredApiBase, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
   import {
     activeRuntime,
     buildRuntimeRecoveryConfigForMode,
@@ -31,11 +30,7 @@
     readOnboardingComplete,
     writeOnboardingCompleteForEntities,
   } from '../../utils/onboardingState';
-  import { normalizeEntityId, hasCounterpartyAccount } from '../../utils/entityReplica';
-  import {
-    hasUsableOpenAccountCounterpartyProfile,
-    waitForCounterpartyRuntimeRoutes,
-  } from '../../utils/p2pPrefetch';
+  import { normalizeEntityId } from '../../utils/entityReplica';
   import {
     getManualRecoveryTowers,
     isOfficialRecoveryTower,
@@ -50,9 +45,19 @@
     readRuntimeRecoveryDiscoveryStatus,
     type RuntimeRecoveryDiscoveryStatus,
   } from '../../utils/recoveryDiscoveryStatus';
+  import {
+    buildOnboardingHubOpenRuntimeInput,
+    buildOnboardingProfileRuntimeInput,
+    emptyOnboardingRuntimeProjection,
+    type OnboardingHubCandidate,
+    type OnboardingRuntimeTarget,
+    type OnboardingRuntimeProjection,
+  } from './onboarding-runtime-input';
+  import { hubDiscoveryJurisdictionKey } from './hub-discovery-profile';
 
   export let entityId: string = '';
   export let signerId: string = '';
+  export let runtimeProjection: OnboardingRuntimeProjection = emptyOnboardingRuntimeProjection();
 
   const dispatch = createEventDispatcher();
 
@@ -118,28 +123,17 @@
     }>;
   };
 
-  type OnboardingTarget = { entityId: string; signerId: string; jurisdiction: string };
+  type OnboardingTarget = OnboardingRuntimeTarget & { jurisdiction: string };
 
-  function hasEntityReplica(currentEnv: Env | null | undefined, target: OnboardingTarget): boolean {
-    const normalizedEntityId = normalizeEntityId(target.entityId);
-    const normalizedSignerId = String(target.signerId || '').trim().toLowerCase();
-    if (!normalizedEntityId || !normalizedSignerId || !currentEnv?.eReplicas) return false;
-    for (const key of currentEnv.eReplicas.keys()) {
-      const [replicaEntityId, replicaSignerId] = String(key || '').split(':');
-      if (
-        normalizeEntityId(replicaEntityId) === normalizedEntityId
-        && String(replicaSignerId || '').trim().toLowerCase() === normalizedSignerId
-      ) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function getRuntimeOnboardingTargets(currentEnv: Env | null | undefined = getEnv()): OnboardingTarget[] {
+  function getRuntimeOnboardingTargets(): OnboardingTarget[] {
     const targets: OnboardingTarget[] = [];
     const seen = new Set<string>();
-    const add = (rawEntityId: unknown, rawSignerId: unknown, rawJurisdiction: unknown = '') => {
+    const add = (
+      rawEntityId: unknown,
+      rawSignerId: unknown,
+      rawJurisdiction: unknown = '',
+      rawJurisdictionKey: unknown = '',
+    ) => {
       const nextEntityId = normalizeEntityId(String(rawEntityId || ''));
       const nextSignerId = String(rawSignerId || '').trim().toLowerCase();
       if (!nextEntityId || !nextSignerId) return;
@@ -150,12 +144,15 @@
         || String(signer.address || '').trim().toLowerCase() === nextSignerId
       );
       const jurisdiction = String(rawJurisdiction || runtimeSigner?.jurisdiction || 'Primary').trim() || 'Primary';
-      const target = { entityId: nextEntityId, signerId: nextSignerId, jurisdiction };
-      if (currentEnv && !hasEntityReplica(currentEnv, target)) return;
+      const jurisdictionKey = String(rawJurisdictionKey || '').trim();
+      const target = { entityId: nextEntityId, signerId: nextSignerId, jurisdiction, ...(jurisdictionKey ? { jurisdictionKey } : {}) };
       seen.add(key);
       targets.push(target);
     };
 
+    for (const target of runtimeProjection.targets || []) {
+      add(target.entityId, target.signerId, target.jurisdiction, target.jurisdictionKey);
+    }
     add(entityId, signerId);
     for (const runtimeSigner of $activeRuntime?.signers || []) {
       add(runtimeSigner.entityId, runtimeSigner.address, runtimeSigner.jurisdiction);
@@ -163,26 +160,18 @@
     return targets;
   }
 
-  function hasAnyCounterpartyAccount(currentEnv: Env | null | undefined, targetEntityId: string): boolean {
+  function hasAnyCounterpartyAccount(targetEntityId: string): boolean {
     const normalizedEntityId = normalizeEntityId(targetEntityId);
-    if (!normalizedEntityId || !currentEnv?.eReplicas) return false;
-    for (const [key, replica] of currentEnv.eReplicas.entries()) {
-      const [replicaEntityId] = String(key || '').split(':');
-      const stateEntityId = normalizeEntityId(replica?.state?.entityId || replicaEntityId);
-      if (stateEntityId !== normalizedEntityId) continue;
-      return (replica?.state?.accounts?.size || 0) > 0;
-    }
-    return false;
+    if (!normalizedEntityId) return false;
+    return (runtimeProjection.accountCounterpartiesByEntityId[normalizedEntityId] || []).length > 0;
   }
 
   const hasSavedHubJoinPreference = (): boolean =>
     typeof localStorage !== 'undefined' && localStorage.getItem(HUB_JOIN_STORAGE_KEY) !== null;
 
   const getRuntimeSuggestedName = (): string => {
-    const currentEnv = getEnv();
-    const replica = currentEnv?.eReplicas?.get(entityId);
-    const replicaName = String(replica?.state?.profile?.name || '').trim();
-    if (replicaName) return replicaName;
+    const projectedName = String(runtimeProjection.suggestedDisplayName || '').trim();
+    if (projectedName) return projectedName;
     const vaultLabel = String($activeRuntime?.label || '').trim();
     if (vaultLabel) return vaultLabel;
     if (typeof localStorage !== 'undefined') {
@@ -441,8 +430,7 @@
     }
 
     try {
-      const env = getEnv();
-      const activeJurisdiction = String(env?.activeJurisdiction || '').trim().toLowerCase();
+      const activeJurisdiction = String(runtimeProjection.activeJurisdictionName || '').trim().toLowerCase();
       const defaults = await hydrateJurisdictionPolicyDefaults(activeJurisdiction);
       defaultSoftLimitUsd = defaults.softLimitUsd;
       defaultHardLimitUsd = defaults.hardLimitUsd;
@@ -458,30 +446,48 @@
     }
   });
 
-  function getHubEntityIds(currentEnv: Env, targetEntityId: string): string[] {
+  function targetJurisdictionMatches(target: OnboardingTarget, candidate: OnboardingHubCandidate): boolean {
+    const targetKey = String(target.jurisdictionKey || '').trim();
+    const candidateKey = String(candidate.jurisdictionKey || hubDiscoveryJurisdictionKey(candidate.jurisdiction)).trim();
+    if (targetKey && candidateKey) return targetKey === candidateKey;
+    const targetName = String(target.jurisdiction || '').trim().toLowerCase();
+    const candidateName = String(candidate.jurisdiction || '').trim().toLowerCase();
+    return Boolean(targetName && candidateName && targetName === candidateName);
+  }
+
+  function hasProjectedCounterpartyAccount(targetEntityId: string, counterpartyEntityId: string): boolean {
+    const normalizedEntityId = normalizeEntityId(targetEntityId);
+    const normalizedCounterpartyId = normalizeEntityId(counterpartyEntityId);
+    if (!normalizedEntityId || !normalizedCounterpartyId) return false;
+    return (runtimeProjection.accountCounterpartiesByEntityId[normalizedEntityId] || [])
+      .some((candidate) => normalizeEntityId(candidate) === normalizedCounterpartyId);
+  }
+
+  function getHubEntityIds(target: OnboardingTarget): string[] {
     const discovered: string[] = [];
     const add = (value: unknown) => {
       const id = String(value || '').trim();
       if (!id) return;
-      if (normalizeEntityId(id) === normalizeEntityId(targetEntityId)) return;
+      if (normalizeEntityId(id) === normalizeEntityId(target.entityId)) return;
+      if (hasProjectedCounterpartyAccount(target.entityId, id)) return;
       if (!discovered.some(existing => normalizeEntityId(existing) === normalizeEntityId(id))) {
         discovered.push(id);
       }
     };
 
-    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
-    for (const profile of profiles) {
-      if (profile.metadata.isHub !== true) continue;
-      add(profile.entityId);
+    for (const candidate of runtimeProjection.hubCandidates || []) {
+      if (candidate.isHub === false) continue;
+      if (!targetJurisdictionMatches(target, candidate)) continue;
+      add(candidate.entityId);
     }
 
     return discovered;
   }
 
-  async function fetchPublicHubEntityIds(targetEntityId: string): Promise<string[]> {
+  async function fetchPublicHubEntityIds(target: OnboardingTarget): Promise<string[]> {
     if (typeof window === 'undefined') return [];
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2000);
+    const timer = setTimeout(() => controller.abort(), 1200);
     try {
       const apiBase = resolveConfiguredApiBase(window.location.origin);
       const url = new URL('/api/hubs', apiBase);
@@ -493,7 +499,17 @@
       for (const hub of payload.hubs || []) {
         if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
         const normalized = normalizeEntityId(hub.entityId);
-        if (!normalized || normalized === normalizeEntityId(targetEntityId)) continue;
+        if (!normalized || normalized === normalizeEntityId(target.entityId)) continue;
+        const jurisdiction = String(hub.metadata?.jurisdiction?.name || '').trim();
+        const jurisdictionKey = hubDiscoveryJurisdictionKey(hub.metadata?.jurisdiction);
+        const candidate: OnboardingHubCandidate = {
+          entityId: hub.entityId,
+          isHub: true,
+          ...(jurisdiction ? { jurisdiction } : {}),
+          ...(jurisdictionKey ? { jurisdictionKey } : {}),
+        };
+        if (!targetJurisdictionMatches(target, candidate)) continue;
+        if (hasProjectedCounterpartyAccount(target.entityId, hub.entityId)) continue;
         if (!out.some(existing => normalizeEntityId(existing) === normalized)) out.push(hub.entityId);
       }
       return out;
@@ -508,34 +524,20 @@
     if (joinCount <= 0 || !target.entityId || !target.signerId) return 0;
 
     const waitForCandidates = async (): Promise<string[]> => {
-      const timeoutMs = 20_000;
-      const pollMs = 300;
+      const timeoutMs = 3_000;
+      const pollMs = 100;
       const startedAt = Date.now();
       let best: string[] = [];
 
       while (Date.now() - startedAt < timeoutMs) {
-        const currentEnv = getEnv();
-        if (currentEnv) {
-          const ids = [
-            ...getHubEntityIds(currentEnv, target.entityId),
-            ...await fetchPublicHubEntityIds(target.entityId),
-          ];
-          const uniqueIds = Array.from(new Map(ids.map(id => [normalizeEntityId(id), id])).values());
-          const currentCandidates = uniqueIds
-            .filter((hubId) => !hasCounterpartyAccount(currentEnv, target.entityId, hubId));
-          if (currentCandidates.length > 0) {
-            await waitForCounterpartyRuntimeRoutes(currentEnv, currentCandidates, 2_000);
-          }
-          const readyCandidates = currentCandidates
-            .filter((hubId) => hasUsableOpenAccountCounterpartyProfile(
-              currentEnv,
-              target.entityId,
-              hubId,
-              { requireHub: true },
-            ));
-          if (readyCandidates.length > best.length) best = readyCandidates;
-          if (readyCandidates.length >= joinCount) return readyCandidates.slice(0, joinCount);
-        }
+        const ids = [
+          ...getHubEntityIds(target),
+          ...await fetchPublicHubEntityIds(target),
+        ];
+        const currentCandidates = Array.from(new Map(ids.map(id => [normalizeEntityId(id), id])).values())
+          .filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
+        if (currentCandidates.length > best.length) best = currentCandidates;
+        if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
         await sleep(pollMs);
       }
 
@@ -547,33 +549,17 @@
 
     const candidates = await waitForCandidates();
     if (candidates.length === 0) return 0;
-    const env = getEnv();
-    if (!env) return 0;
-    const readyCandidates = candidates
-      .filter((hubId) => hasUsableOpenAccountCounterpartyProfile(
-        env,
-        target.entityId,
-        hubId,
-        { requireHub: true },
-      ));
+    const readyCandidates = candidates.filter((hubId) => !hasProjectedCounterpartyAccount(target.entityId, hubId));
     if (readyCandidates.length === 0) return 0;
 
     const creditAmount = 10_000n * 10n ** 18n;
-    const entityTxs = readyCandidates.map((hubId) => ({
-      type: 'openAccount' as const,
-      data: {
-        targetEntityId: hubId,
-        creditAmount,
-        tokenId: 1,
-        rebalancePolicy,
-      },
+    await submitRuntimeInput(buildOnboardingHubOpenRuntimeInput({
+      target,
+      hubEntityIds: readyCandidates,
+      creditAmount,
+      tokenId: 1,
+      rebalancePolicy,
     }));
-
-    await enqueueEntityInputs(env, [{
-      entityId: target.entityId,
-      signerId: target.signerId,
-      entityTxs,
-    }]);
 
     return readyCandidates.length;
   }
@@ -589,6 +575,22 @@
     return joined;
   }
 
+  async function waitForEnabledOnboardingTargets(): Promise<{
+    allTargets: OnboardingTarget[];
+    targets: OnboardingTarget[];
+  }> {
+    const deadline = Date.now() + 3_000;
+    let allTargets: OnboardingTarget[] = [];
+    let targets: OnboardingTarget[] = [];
+    while (Date.now() < deadline) {
+      allTargets = getRuntimeOnboardingTargets();
+      targets = allTargets.filter(isTargetJurisdictionEnabled);
+      if (targets.length > 0) return { allTargets, targets };
+      await sleep(100);
+    }
+    return { allTargets, targets };
+  }
+
   async function finish() {
     if (!canFinish || submitting) return;
     submitting = true;
@@ -596,9 +598,11 @@
 
     try {
       const cleanDisplayName = displayName.trim();
-      const env = getEnv();
-      const allTargets = getRuntimeOnboardingTargets(env);
-      const targets = allTargets.filter(isTargetJurisdictionEnabled);
+      let allTargets = getRuntimeOnboardingTargets();
+      let targets = allTargets.filter(isTargetJurisdictionEnabled);
+      if (targets.length === 0) {
+        ({ allTargets, targets } = await waitForEnabledOnboardingTargets());
+      }
       if (targets.length === 0) {
         throw new Error('Select at least one jurisdiction to register automatically');
       }
@@ -611,23 +615,10 @@
       });
       const savedJoinPreference = writeHubJoinPreference(autoJoinHubs);
 
-      if (env && targets.length > 0) {
-        await enqueueEntityInputs(env, targets.map((target) => ({
-            entityId: target.entityId,
-            signerId: target.signerId,
-            entityTxs: [{
-              type: 'profile-update' as const,
-              data: {
-                profile: {
-                  entityId: target.entityId,
-                  name: cleanDisplayName,
-                  bio: '',
-                  website: '',
-                },
-              },
-            }],
-          })));
-      }
+      await submitRuntimeInput(buildOnboardingProfileRuntimeInput({
+        targets,
+        displayName: cleanDisplayName,
+      }));
 
       // Recovery must be committed before opening hub accounts. Account opens create
       // usable bilateral state; with a configured tower, the runtime backup barrier
@@ -635,8 +626,8 @@
       await saveRecoveryConfig();
 
       const autoJoinCount = parseJoinCount(savedJoinPreference);
-      const autoJoinTargets = env && autoJoinCount > 0
-        ? targets.filter((target) => !hasAnyCounterpartyAccount(env, target.entityId))
+      const autoJoinTargets = autoJoinCount > 0
+        ? targets.filter((target) => !hasAnyCounterpartyAccount(target.entityId))
         : targets;
       const autoJoinedCount = await queueAutoHubJoins(autoJoinCount, autoJoinTargets);
 

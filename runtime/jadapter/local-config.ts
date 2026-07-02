@@ -1,8 +1,28 @@
 import type { JAdapter } from './types';
 
+const DEFAULT_DISPUTE_DELAY_READ_TIMEOUT_MS = 5_000;
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error(`${label}_TIMEOUT:${timeoutMs}`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+  }
+};
+
 export async function readDefaultDisputeDelay(jadapter: JAdapter): Promise<number | null> {
   try {
-    const delay = await jadapter.depository.defaultDisputeDelay();
+    const delay = await withTimeout(
+      jadapter.depository.defaultDisputeDelay(),
+      DEFAULT_DISPUTE_DELAY_READ_TIMEOUT_MS,
+      'DEFAULT_DISPUTE_DELAY_READ',
+    );
     const asNumber = Number(delay);
     return Number.isFinite(asNumber) ? asNumber : null;
   } catch {

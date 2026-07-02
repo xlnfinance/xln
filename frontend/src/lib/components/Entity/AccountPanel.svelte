@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { AccountMachine, AccountTx, EntityReplica } from '$lib/types/ui';
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { p2pState, xlnFunctions } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
@@ -8,7 +7,6 @@
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
   import AccountTokenDetails from './shared/AccountTokenDetails.svelte';
   import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
-  import { resolveEntityName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
   import { faucetPendingKey } from './account-faucet';
 
@@ -16,13 +14,12 @@
   export let counterpartyId: string;
   export let entityId: string;
   export let replica: EntityReplica | null = null;
-  export let env: Env | EnvSnapshot;
+  export let entityNames: Map<string, string> = new Map();
   export let pendingFaucetKeys: Set<string> = new Set();
 
   const dispatch = createEventDispatcher();
 
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = env;
 
   let expandedTokenIds = new Set<number>();
   let nowMs = Date.now();
@@ -84,7 +81,7 @@
   })();
   $: relayStatus = $p2pState.connected ? 'connected' : reconnectCountdown ? 'reconnecting' : 'disconnected';
 
-  $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
+  $: counterpartyName = entityNames.get(String(counterpartyId || '').trim().toLowerCase()) || counterpartyId;
 
   $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
@@ -244,7 +241,7 @@
   function entityLabel(entityRaw: unknown): string {
     const entity = String(entityRaw || '');
     if (!entity) return '-';
-    const resolvedName = resolveEntityName(entity, activeEnv);
+    const resolvedName = entityNames.get(entity.trim().toLowerCase()) || '';
     const short = entity.length > 18 ? `${entity.slice(0, 10)}...${entity.slice(-4)}` : entity;
     if (resolvedName && resolvedName.toLowerCase() !== entity.toLowerCase()) return `${resolvedName} (${short})`;
     return short;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto, replaceState } from '$app/navigation';
   import { createEventDispatcher } from 'svelte';
   import { Check, Link, Upload } from 'lucide-svelte';
   import { runtimeOperations } from '$lib/stores/runtimeStore';
@@ -31,6 +32,12 @@
     detail: string;
   };
 
+  type ImportValidationResult =
+    | { ok: true; index: number; entry: RemoteRuntimeImportEntry; stored: StoredRemoteRuntimeImportEntry }
+    | { ok: false; index: number; entry: RemoteRuntimeImportEntry; reason: string };
+
+  const REMOTE_RUNTIME_IMPORT_CONCURRENCY = 4;
+
   const dispatch = createEventDispatcher<{ imported: { runtimeId: string; count: number } }>();
 
   let mode: ImportMode = 'bulk';
@@ -43,7 +50,10 @@
   let status = '';
   let error = '';
   let working = false;
+  let loadingImportSource = false;
   let lastFailedEntries: RemoteRuntimeImportEntry[] = [];
+
+  $: bulkImportDisabled = working || loadingImportSource || bulkText.trim().length === 0;
 
   const errorMessage = (value: unknown, entry?: RemoteRuntimeImportEntry): string => describeRemoteRuntimeImportError(value, entry);
 
@@ -111,7 +121,7 @@
 
   const scrubImportHash = (): void => {
     if (typeof window === 'undefined' || !window.location.hash) return;
-    history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    replaceState(`${window.location.pathname}${window.location.search}`, {});
   };
 
   const writeImportSummary = (
@@ -136,12 +146,49 @@
     }));
   };
 
+  const validateImportEntries = async (
+    entries: RemoteRuntimeImportEntry[],
+    importedAt: number,
+  ): Promise<ImportValidationResult[]> => {
+    const results: ImportValidationResult[] = new Array(entries.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(REMOTE_RUNTIME_IMPORT_CONCURRENCY, entries.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (nextIndex < entries.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const entry = entries[index]!;
+        status = `Checking ${entry.label || entry.wsUrl}`;
+        try {
+          results[index] = {
+            ok: true,
+            index,
+            entry,
+            stored: await validateRemoteRuntimeEntry(entry, {
+              index,
+              importedAt,
+              onProgress: (progress) => setRow(progress.index, {
+                status: progress.status,
+                detail: progress.detail,
+              }),
+            }),
+          };
+        } catch (err) {
+          results[index] = { ok: false, index, entry, reason: errorMessage(err, entry) };
+        }
+      }
+    });
+    await Promise.allSettled(workers);
+    return results;
+  };
+
   const prefillFromHash = async (): Promise<void> => {
     const payload = readImportPayloadFromHash();
     const source = readImportSourceFromHash();
     if (!payload && !source) return;
     mode = 'bulk';
     try {
+      loadingImportSource = Boolean(source);
       status = source ? 'Loading import list' : status;
       const entries = source
         ? await fetchImportSource(source)
@@ -156,6 +203,7 @@
       status = 'Import list needs review';
       error = errorMessage(err);
     } finally {
+      loadingImportSource = false;
       scrubImportHash();
     }
   };
@@ -169,36 +217,26 @@
     resetRows(entries);
     try {
       const importedAt = Date.now();
-      const validated: StoredRemoteRuntimeImportEntry[] = [];
-      const failed: Array<{ entry: RemoteRuntimeImportEntry; reason: string }> = [];
-      for (const [index, entry] of entries.entries()) {
-        status = `Checking ${entry.label || entry.wsUrl}`;
-        try {
-          validated.push(await validateRemoteRuntimeEntry(entry, {
-            index,
-            importedAt,
-            onProgress: (progress) => setRow(progress.index, {
-              status: progress.status,
-              detail: progress.detail,
-            }),
-          }));
-        } catch (err) {
-          failed.push({ entry, reason: errorMessage(err, entry) });
-        }
-      }
+      const results = await validateImportEntries(entries, importedAt);
+      const validated = results.flatMap((result) => result.ok ? [result.stored] : []);
+      const failed = results.flatMap((result) => result.ok ? [] : [{ entry: result.entry, reason: result.reason }]);
       lastFailedEntries = failed.map(item => item.entry);
       if (validated.length === 0) {
         throw new Error(failed[0]?.reason || 'REMOTE_RUNTIME_IMPORT_EMPTY');
       }
       const persisted = runtimeOperations.upsertRemoteRuntimeImports(validated);
-      writeImportSummary(validated, persisted.length, importedAt);
+      writeImportSummary(validated, entries.length, importedAt);
       status = failed.length === 0
         ? `Imported ${validated.length} remote runtime${validated.length === 1 ? '' : 's'}`
         : `Imported ${validated.length}/${entries.length}; ${failed.length} failed`;
       error = failed.length > 0 ? failed.map(item => item.reason).join('\n') : '';
       const first = validated[0]!;
       dispatch('imported', { runtimeId: first.runtimeId, count: validated.length });
-      runtimeOperations.activateRemoteRuntime(first.runtimeId, { href: '/app' });
+      const activated = await runtimeOperations.activateRemoteRuntime(first.runtimeId, { href: '/app' });
+      if (!activated) throw new Error(`${first.label}: connected but could not activate the runtime`);
+      if (typeof window !== 'undefined' && window.location.pathname !== '/app') {
+        await goto('/app');
+      }
     } catch (err) {
       error = errorMessage(err);
       status = 'Import failed';
@@ -212,6 +250,7 @@
   }
 
   async function importBulk(): Promise<void> {
+    if (bulkImportDisabled) return;
     await importEntries(parseRemoteRuntimeImportText(bulkText));
   }
 
@@ -258,9 +297,9 @@
       spellcheck="false"
       placeholder="H1 | read | ws://localhost:8080/rpc | xlnra1..."
     ></textarea>
-    <button class="bulk-button" data-testid="remote-runtime-bulk-confirm" type="button" disabled={working} on:click={() => void importBulk()}>
+    <button class="bulk-button" data-testid="remote-runtime-bulk-confirm" type="button" disabled={bulkImportDisabled} on:click={() => void importBulk()}>
       <Check size={14} />
-      <span>{working ? 'Checking' : `Import up to ${MAX_REMOTE_RUNTIME_IMPORTS}`}</span>
+      <span>{working ? 'Checking' : loadingImportSource ? 'Loading' : `Import up to ${MAX_REMOTE_RUNTIME_IMPORTS}`}</span>
     </button>
   {/if}
 

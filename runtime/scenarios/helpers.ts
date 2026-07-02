@@ -258,6 +258,20 @@ export async function processWithOffline(
   }
   env.pendingOutputs = filteredPending;
 
+  const queuedInputs = env.runtimeInput?.entityInputs || [];
+  const { filtered: filteredQueued, dropped: droppedQueued } = filterOfflineInputs(queuedInputs, offlineSigners);
+  if (droppedQueued.length > 0) {
+    env.info('network', 'OFFLINE_SIGNER_DROP', {
+      reason,
+      source: 'runtimeInput',
+      signers: Array.from(new Set(droppedQueued.map(i => i.signerId))),
+      count: droppedQueued.length,
+      entities: Array.from(new Set(droppedQueued.map(i => i.entityId))),
+    });
+    if (env.runtimeInput) env.runtimeInput.entityInputs = filteredQueued;
+    if (env.runtimeMempool) env.runtimeMempool.entityInputs = filteredQueued;
+  }
+
   const { filtered: filteredInputs, dropped: droppedInputs } = filterOfflineInputs(inputs || [], offlineSigners);
   if (droppedInputs.length > 0) {
     env.info('network', 'OFFLINE_SIGNER_DROP', {

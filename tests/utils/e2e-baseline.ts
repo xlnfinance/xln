@@ -24,6 +24,9 @@ export type E2EHubMeshPairHealth = {
 export type E2EHubMeshHealth = {
   ok?: boolean;
   hubIds?: string[];
+  hubCount?: number;
+  pairCount?: number;
+  directOpenLinkCount?: number;
   pairs?: E2EHubMeshPairHealth[];
 };
 
@@ -60,6 +63,7 @@ export type E2EMarketMakerCrossHealth = {
   expectedRoutes?: number;
   expectedOffersPerRoute?: number;
   expectedOffersPerPair?: number;
+  routeCount?: number;
   routes?: E2EMarketMakerCrossRouteHealth[];
 };
 
@@ -67,8 +71,10 @@ export type E2EMarketMakerHealth = {
   enabled?: boolean;
   ok?: boolean;
   entityId?: string | null;
+  startupPhase?: string | null;
   expectedOffersPerHub?: number;
   expectedOffersPerPair?: number;
+  hubCount?: number;
   cross?: E2EMarketMakerCrossHealth;
   hubs?: E2EMarketMakerHubHealth[];
 };
@@ -91,13 +97,14 @@ export type E2EBootstrapReserveEntityHealth = {
 
 export type E2EBootstrapReserveHealth = {
   ok: boolean;
+  targetMet?: boolean;
   requiredTokenCount: number;
   entityCount: number;
   entities: E2EBootstrapReserveEntityHealth[];
 };
 
 export type E2EHubHealth = {
-  entityId: string;
+  entityId?: string;
   name?: string;
   online?: boolean;
   runtimeId?: string;
@@ -108,6 +115,9 @@ export type E2EHubHealth = {
 
 export type E2EHealthResponse = {
   timestamp?: number;
+  systemOk?: boolean;
+  degraded?: string[];
+  degradedComponents?: string[];
   reset?: E2EResetHealth;
   hubMesh?: E2EHubMeshHealth;
   marketMaker?: E2EMarketMakerHealth;
@@ -132,6 +142,7 @@ export type E2EBaselineOptions = {
   minHubCount?: number;
   autoResetGraceMs?: number;
   forceReset?: boolean;
+  allowAutoReset?: boolean;
 };
 
 export type E2EResetOptions = E2EBaselineOptions & {
@@ -214,9 +225,14 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
   return JSON.stringify(
     {
       timestamp: health.timestamp ?? null,
+      systemOk: health.systemOk ?? null,
+      degraded: health.degraded ?? health.degradedComponents ?? [],
       reset: health.reset ?? null,
       hubMesh: {
         ok: health.hubMesh?.ok ?? false,
+        hubCount: health.hubMesh?.hubCount ?? null,
+        pairCount: health.hubMesh?.pairCount ?? null,
+        directOpenLinkCount: health.hubMesh?.directOpenLinkCount ?? null,
         hubIds: health.hubMesh?.hubIds ?? [],
         pairs: (health.hubMesh?.pairs ?? []).map((pair) => ({
           left: pair.left ?? null,
@@ -229,14 +245,17 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
         enabled: health.marketMaker?.enabled ?? false,
         ok: health.marketMaker?.ok ?? false,
         entityId: health.marketMaker?.entityId ?? null,
+        startupPhase: health.marketMaker?.startupPhase ?? null,
         expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? 0,
         expectedOffersPerPair: health.marketMaker?.expectedOffersPerPair ?? 0,
+        hubCount: health.marketMaker?.hubCount ?? null,
         cross: {
           applicable: health.marketMaker?.cross?.applicable ?? false,
           ok: health.marketMaker?.cross?.ok ?? false,
           expectedRoutes: health.marketMaker?.cross?.expectedRoutes ?? 0,
           expectedOffersPerRoute: health.marketMaker?.cross?.expectedOffersPerRoute ?? 0,
           expectedOffersPerPair: health.marketMaker?.cross?.expectedOffersPerPair ?? 0,
+          routeCount: health.marketMaker?.cross?.routeCount ?? null,
           routes: (health.marketMaker?.cross?.routes ?? []).map((route) => ({
             sourceJurisdiction: route.sourceJurisdiction,
             targetJurisdiction: route.targetJurisdiction,
@@ -266,6 +285,7 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
       },
       bootstrapReserves: {
         ok: health.bootstrapReserves?.ok ?? false,
+        targetMet: health.bootstrapReserves?.targetMet ?? null,
         requiredTokenCount: health.bootstrapReserves?.requiredTokenCount ?? 0,
         entityCount: health.bootstrapReserves?.entityCount ?? 0,
         entities: (health.bootstrapReserves?.entities ?? []).map((entity) => ({
@@ -299,19 +319,30 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
   );
 };
 
-const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2EBaselineOptions>): boolean => {
+const onlineHubCount = (health: E2EHealthResponse): number =>
+  (health.hubs ?? []).filter((hub) => hub.online === true).length;
+
+const reportedHubMeshHubCount = (health: E2EHealthResponse): number =>
+  Math.max(
+    health.hubMesh?.hubIds?.length ?? 0,
+    health.hubMesh?.hubCount ?? 0,
+    onlineHubCount(health),
+  );
+
+export const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2EBaselineOptions>): boolean => {
   if (!health) return false;
   if (typeof health.timestamp !== 'number') return false;
   if (health.reset?.inProgress === true) return false;
   if (options.requireHubMesh) {
     if (health.hubMesh?.ok !== true) return false;
-    const hubIds = health.hubMesh?.hubIds ?? [];
-    if (hubIds.length < options.minHubCount) return false;
+    if (reportedHubMeshHubCount(health) < options.minHubCount) return false;
   }
   if (options.requireMarketMaker) {
+    if (health.systemOk !== true) return false;
     if (health.marketMaker?.enabled !== true) return false;
     if (health.marketMaker?.ok !== true) return false;
-  } else if (health.marketMaker?.enabled === true) {
+    if (health.marketMaker?.startupPhase !== 'offers-ready') return false;
+  } else if (health.marketMaker?.enabled === true && health.marketMaker?.ok !== true) {
     return false;
   }
   if (options.requireCustody) {
@@ -321,6 +352,24 @@ const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2E
   if (!health.bootstrapReserves?.ok) return false;
   return true;
 };
+
+export const buildE2EResetBody = (
+  options: Pick<E2EResetOptions, 'requireMarketMaker' | 'requireCustody'> = {},
+): Record<string, unknown> => ({
+  confirm: RESET_CONFIRMATION,
+  ...(options.requireMarketMaker === true
+    ? { requireMarketMaker: true, enableMarketMaker: true }
+    : {}),
+  ...(options.requireCustody === true
+    ? { requireCustody: true }
+    : {}),
+});
+
+export const resolveE2EBaselineInitialWaitMs = (options: Pick<
+  Required<E2EBaselineOptions>,
+  'timeoutMs' | 'autoResetGraceMs' | 'allowAutoReset'
+>): number =>
+  options.allowAutoReset ? Math.min(options.timeoutMs, options.autoResetGraceMs) : options.timeoutMs;
 
 const namedHubsFromHealth = (health: E2EHealthResponse | null): Map<string, string> => {
   const hubs = Array.isArray(health?.hubs) ? health.hubs : [];
@@ -475,6 +524,7 @@ export const ensureE2EBaseline = async (
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
     forceReset: options.forceReset ?? false,
+    allowAutoReset: options.allowAutoReset ?? true,
   };
 
   // The isolated runner owns reset/readiness. Tests must not hide readiness
@@ -495,13 +545,20 @@ export const ensureE2EBaseline = async (
       minHubCount: resolved.minHubCount,
       autoResetGraceMs: resolved.timeoutMs,
       forceReset: true,
+      allowAutoReset: true,
     });
   }
 
-  const initialWaitMs = Math.min(resolved.timeoutMs, resolved.autoResetGraceMs);
+  const initialWaitMs = resolveE2EBaselineInitialWaitMs(resolved);
   try {
     return await withApiContext((api) => waitForBaselineReadyWithApi(page, api, resolved, initialWaitMs));
   } catch (initialError) {
+    if (!resolved.allowAutoReset) {
+      throw new Error(
+        `E2E baseline was not ready and automatic reset is disabled\n` +
+        `${initialError instanceof Error ? initialError.message : String(initialError)}`,
+      );
+    }
     const remainingTimeoutMs = resolved.timeoutMs - initialWaitMs;
     if (remainingTimeoutMs <= 0) throw initialError;
 
@@ -515,6 +572,7 @@ export const ensureE2EBaseline = async (
       requireCustody: resolved.requireCustody,
       minHubCount: resolved.minHubCount,
       autoResetGraceMs: remainingTimeoutMs,
+      allowAutoReset: true,
     });
   }
 };
@@ -537,6 +595,7 @@ export const resetProdServer = async (
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
     forceReset: options.forceReset ?? false,
+    allowAutoReset: options.allowAutoReset ?? true,
   };
 
   if (ISOLATED_STACK) {
@@ -573,12 +632,7 @@ export const resetProdServer = async (
 
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
-        const resetBody = {
-          confirm: RESET_CONFIRMATION,
-          requireMarketMaker: options.requireMarketMaker ?? false,
-          enableMarketMaker: options.requireMarketMaker ?? false,
-          requireCustody: options.requireCustody ?? false,
-        };
+        const resetBody = buildE2EResetBody(options);
         const coldResponse = await api.post(`${resetBaseUrl}/api/reset`, {
           data: resetBody,
           headers: {

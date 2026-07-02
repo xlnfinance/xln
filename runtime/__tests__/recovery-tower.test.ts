@@ -38,7 +38,7 @@ let runtimeCounter = 0;
 const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JurisdictionConfig => {
   const jurisdiction: JurisdictionConfig = {
     name: 'RecoveryTestnet',
-    address: 'rpc://recovery-testnet',
+    address: '',
     chainId: 31337,
     depositoryAddress: addr('11'),
     entityProviderAddress: addr('12'),
@@ -46,7 +46,7 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
   env.activeJurisdiction = jurisdiction.name;
   env.jReplicas.set(jurisdiction.name, {
     name: jurisdiction.name,
-    rpcs: [jurisdiction.address],
+    rpcs: [],
     chainId: jurisdiction.chainId,
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,

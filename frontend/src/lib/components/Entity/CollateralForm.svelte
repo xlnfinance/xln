@@ -1,6 +1,8 @@
 <script lang="ts">
-  import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, xlnFunctions, error } from '../../stores/xlnStore';
+  import { get } from 'svelte/store';
+  import type { AccountMachine, Env, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
+  import { xlnFunctions, error } from '../../stores/xlnStore';
+  import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import {
     getCounterpartyAccount,
     getReplicaForEntity,
@@ -12,14 +14,17 @@
   import { amountToUsd } from '$lib/utils/assetPricing';
 
   export let entityId: string;
-  export let env: Env;
+  export let actionRuntimeEnv: Env | null = null;
   export let isLive: boolean;
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
+  export let entityNames: Map<string, string> = new Map();
+  export let accountOverride: AccountMachine | null = null;
+  export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = env;
+  $: activeEnv = actionRuntimeEnv;
   $: activeIsLive = isLive;
 
   let selectedCounterparty = counterpartyId || '';
@@ -43,9 +48,11 @@
     return { id, symbol: info?.symbol || `TKN${id}` };
   });
   $: userDerivedDelta = (() => {
-    if (!activeEnv || !effectiveCounterparty || !activeXlnFunctions) return null;
-    const accountEntry = getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty);
-    const delta = accountEntry?.account.deltas?.get?.(selectedTokenId);
+    if (!effectiveCounterparty || !activeXlnFunctions) return null;
+    const account = accountOverride ?? (
+      activeEnv ? getCounterpartyAccount(activeEnv, entityId, effectiveCounterparty)?.account ?? null : null
+    );
+    const delta = account?.deltas?.get?.(selectedTokenId);
     if (!delta) return null;
 
     const isUserLeft =
@@ -163,6 +170,18 @@
     };
   }
 
+  function resolveProjectedCounterpartyPolicy(account: AccountMachine | null | undefined): CounterpartyFeePolicy | null {
+    const policy = account?.counterpartyRebalanceFeePolicy;
+    const policyVersion = Number(policy?.policyVersion ?? 0);
+    if (!Number.isFinite(policyVersion) || policyVersion <= 0) return null;
+    return {
+      policyVersion,
+      baseFee: parseBigIntSafe(policy?.baseFee, 0n),
+      liquidityFeeBps: parseBigIntSafe(policy?.liquidityFeeBps, 0n),
+      gasFee: parseBigIntSafe(policy?.gasFee, 0n),
+    };
+  }
+
   type CollateralEntityInput = {
     entityId: string;
     signerId: string;
@@ -183,12 +202,17 @@
     if (!effectiveCounterparty) return;
     try {
       const env = activeEnv;
-      if (!env) throw new Error('XLN environment not ready');
+      const handle = get(runtimeControllerHandle);
+      const remoteWritable = handle.mode === 'remote' && handle.authLevel === 'admin';
+      if (!env && !remoteWritable) throw new Error('Collateral command requires live embedded Env or admin remote runtime');
       if (!activeIsLive) throw new Error('Collateral request is only available in LIVE mode');
-      const resolvedSigner = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'collateral-form')
+      const resolvedSigner = (env && activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'collateral-form'))
         || signerId
-        || requireSignerIdForEntity(env, entityId, 'collateral-form');
-      const feePolicy = resolveCounterpartyPolicy(env, entityId, effectiveCounterparty);
+        || (env ? requireSignerIdForEntity(env, entityId, 'collateral-form') : '');
+      if (!resolvedSigner) throw new Error('Signer is required for collateral command');
+      const feePolicy = env
+        ? resolveCounterpartyPolicy(env, entityId, effectiveCounterparty)
+        : resolveProjectedCounterpartyPolicy(accountOverride);
       if (!feePolicy) {
         throw new Error('Missing counterparty rebalance fee policy. Sync gossip/profile first.');
       }
@@ -219,7 +243,8 @@
         }],
       };
 
-      await enqueueEntityInputs(env, [collateralInput]);
+      if (!submitRuntimeInput) throw new Error('Collateral command path is not connected');
+      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [collateralInput], jInputs: [] });
 
       collateralAmount = 0n;
     } catch (err) {
@@ -247,7 +272,7 @@
   <h4>Request Collateral</h4>
   <div class="action-form">
     {#if counterpartyId === null}
-      <EntitySelect bind:value={selectedCounterparty} options={accountIds} placeholder="Select account" />
+      <EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames} placeholder="Select account" />
     {/if}
     <select bind:value={selectedTokenId} class="form-select">
       {#each tokenList as token}

@@ -7,6 +7,8 @@ import type { ConsensusConfig, EntityState, HubRebalanceConfig } from '../types'
 
 const ENTITY_SEED = 'entity-hub-profile-test-seed';
 const SIGNER_LABEL = 'signer-1';
+const TEST_RUN_ID = `${Date.now().toString(36)}-${process.pid}`;
+let envCounter = 0;
 const TEST_JURISDICTION = {
   address: 'rpc://entity-hub-profile',
   name: 'Testnet',
@@ -32,6 +34,12 @@ const findEntityState = (env: ReturnType<typeof createEmptyEnv>, entityId: strin
   throw new Error(`ENTITY_STATE_NOT_FOUND: ${entityId}`);
 };
 
+const createHubProfileEnv = (label: string): ReturnType<typeof createEmptyEnv> => {
+  const env = createEmptyEnv(`${label}-${TEST_RUN_ID}-${++envCounter}`);
+  env.quietRuntimeLogs = true;
+  return env;
+};
+
 const DEFAULT_HUB_CONFIG: HubRebalanceConfig = {
   matchingStrategy: 'amount',
   policyVersion: 1,
@@ -45,7 +53,7 @@ const DEFAULT_HUB_CONFIG: HubRebalanceConfig = {
 
 describe('entity hub profile classification', () => {
   test('hub status is explicit state, not implied by hub config alone', async () => {
-    const env = createEmptyEnv('entity-hub-profile-runtime');
+    const env = createHubProfileEnv('entity-hub-profile-runtime');
     env.activeJurisdiction = TEST_JURISDICTION.name;
     env.jReplicas.set(TEST_JURISDICTION.name, {
       name: TEST_JURISDICTION.name,
@@ -112,5 +120,82 @@ describe('entity hub profile classification', () => {
     expect(stateAfter.profile.isHub).toBe(true);
     expect(buildLocalEntityProfile(env, stateAfter, 3).metadata.isHub).toBe(true);
     expect(env.gossip.getHubs().some((profile) => profile.entityId === entityId)).toBe(true);
+  });
+
+  test('hub gossip metadata carries stable hub name across display profile updates', async () => {
+    const env = createHubProfileEnv('entity-hub-profile-hub-name-runtime');
+    env.activeJurisdiction = TEST_JURISDICTION.name;
+    env.jReplicas.set(TEST_JURISDICTION.name, {
+      name: TEST_JURISDICTION.name,
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+      depositoryAddress: TEST_JURISDICTION.depositoryAddress,
+      entityProviderAddress: TEST_JURISDICTION.entityProviderAddress,
+      contracts: {
+        account: '0x00000000000000000000000000000000000000a1',
+        depository: TEST_JURISDICTION.depositoryAddress,
+        entityProvider: TEST_JURISDICTION.entityProviderAddress,
+        deltaTransformer: '0x00000000000000000000000000000000000000f1',
+      },
+      rpcs: [TEST_JURISDICTION.address],
+      chainId: TEST_JURISDICTION.chainId,
+    });
+    const signerKey = deriveSignerKeySync(`${ENTITY_SEED}-hub-name`, SIGNER_LABEL);
+    const signerId = deriveSignerAddressSync(`${ENTITY_SEED}-hub-name`, SIGNER_LABEL).toLowerCase();
+    registerSignerKey(signerId, signerKey);
+
+    const config = buildConsensusConfig(signerId);
+    const entityId = hashBoard(encodeBoard(config));
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId,
+        data: { config, isProposer: true, profileName: 'H1' },
+      }],
+      entityInputs: [],
+    });
+    await process(env);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{ type: 'setHubConfig', data: { ...DEFAULT_HUB_CONFIG, hubName: 'H1' } }],
+      }],
+    });
+    await process(env);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'profile-update',
+          data: {
+            profile: {
+              entityId,
+              name: 'Renamed Hub Display',
+              avatar: '',
+              bio: '',
+              website: '',
+            },
+          },
+        }],
+      }],
+    });
+    await process(env);
+
+    const stateAfterRename = findEntityState(env, entityId);
+    const profile = buildLocalEntityProfile(env, stateAfterRename, 4);
+    expect(profile.name).toBe('Renamed Hub Display');
+    expect(profile.metadata.hubName).toBe('H1');
+    expect(profile.metadata.isHub).toBe(true);
   });
 });

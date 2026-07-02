@@ -1,5 +1,6 @@
 /** Hub-level config: rebalance strategy + routing fees. Set via setHubConfig EntityTx. */
 export interface HubRebalanceConfig {
+  hubName?: string;
   matchingStrategy: 'amount' | 'time' | 'fee';
   policyVersion: number;
   routingFeePPM: number;

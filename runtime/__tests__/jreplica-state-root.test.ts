@@ -47,6 +47,19 @@ describe('JReplica stateRoot semantics', () => {
     expect(snapshot.stateRoot).not.toBe(root);
   });
 
+  test('canonical snapshots strip volatile watcher cursor fields', () => {
+    const snapshot = buildCanonicalJReplicaSnapshot(makeJReplica({
+      blockNumber: 42n,
+      lastBlockTimestamp: 1_700_000,
+      blockReady: true,
+      rpcs: ['http://127.0.0.1:8545'],
+    }));
+
+    expect(snapshot.blockNumber).toBe(0n);
+    expect(snapshot.lastBlockTimestamp).toBe(0);
+    expect('blockReady' in snapshot).toBe(false);
+  });
+
   test('legacy persisted RPC zero roots normalize to explicit unavailable', () => {
     const persisted = {
       jReplicas: new Map<string, unknown>([[

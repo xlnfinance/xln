@@ -1,94 +1,97 @@
 <script lang="ts">
-  /**
-   * GossipPanel - Shows all gossip profiles with full metadata
-   * For debugging and inspection of entity discovery
-   */
-  import type { Writable } from 'svelte/store';
-  import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
+  import { onDestroy } from 'svelte';
+  import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import {
+    buildGossipDirectoryViewFromRuntimeEntities,
+    emptyGossipDirectoryView,
+    type GossipDirectoryProfile,
+  } from '$lib/components/Entity/gossip-directory-view';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
 
-  export let isolatedEnv: Writable<Env | null> | undefined = undefined;
+  const frameStore = createRuntimeQueryStore((client) => client.readViewFrame({
+    accountsLimit: 1,
+    booksLimit: 1,
+  }));
 
-  $: env = isolatedEnv ? $isolatedEnv : null;
-  $: profiles = env?.gossip?.getProfiles?.() || [];
+  let search = '';
 
-  function formatTimestamp(ts: number): string {
-    return new Date(ts).toLocaleTimeString();
-  }
+  onDestroy(() => {
+    frameStore.destroy();
+  });
 
-  function formatEntityId(id: string): string {
-    return id;
-  }
+  $: frameState = $frameStore;
+  $: directoryView = frameState.data
+    ? buildGossipDirectoryViewFromRuntimeEntities({
+      entities: frameState.data.entities,
+      runtimeId: $runtimeControllerHandle.id,
+    })
+    : emptyGossipDirectoryView();
+  $: normalizedSearch = search.trim().toLowerCase();
+  $: filteredProfiles = directoryView.profiles.filter((profile) => {
+    if (!normalizedSearch) return true;
+    return profile.name.toLowerCase().includes(normalizedSearch)
+      || profile.entityId.toLowerCase().includes(normalizedSearch)
+      || profile.runtimeId.toLowerCase().includes(normalizedSearch)
+      || String(profile.jurisdictionName || '').toLowerCase().includes(normalizedSearch);
+  });
 
-  function getPrimaryBoardPublicKey(profile: GossipProfile): string {
-    const validator = profile.metadata.board.validators[0];
-    return validator ? validator.publicKey : '';
+  function displayName(profile: GossipDirectoryProfile): string {
+    return profile.name || profile.entityId;
   }
 </script>
 
-<div class="gossip-panel">
+<div class="gossip-panel" data-testid="runtime-gossip-panel">
   <div class="panel-header">
-    <h2>📡 Gossip Network</h2>
-    <div class="profile-count">{profiles.length} profiles</div>
+    <div>
+      <h2>Gossip Directory</h2>
+      <p>{directoryView.profileCount} profiles · {directoryView.hubCount} hubs</p>
+    </div>
+    <div class="runtime-pill" title={$runtimeControllerHandle.endpoint}>
+      {$runtimeControllerHandle.mode}
+      {#if $runtimeControllerHandle.authLevel}
+        · {$runtimeControllerHandle.authLevel}
+      {/if}
+      · h{$runtimeControllerHandle.height}
+    </div>
   </div>
 
-  <div class="profiles-container">
-    {#if profiles.length === 0}
-      <div class="empty-state">
-        <div class="empty-icon">📡</div>
-        <div class="empty-text">No gossip profiles yet</div>
-        <div class="empty-hint">Profiles appear when entities announce to the network</div>
-      </div>
-    {:else}
-      {#each profiles as profile (profile.entityId)}
-        <div class="profile-card">
-          <div class="profile-header">
-            <div class="entity-id">{formatEntityId(profile.entityId)}</div>
-            <div class="timestamp">{formatTimestamp(profile.lastUpdated)}</div>
-          </div>
+  <div class="search-row">
+    <input
+      type="text"
+      bind:value={search}
+      placeholder="Search by name, entity, runtime, jurisdiction"
+      aria-label="Search gossip directory"
+    />
+  </div>
 
-          <div class="profile-body">
-            <!-- Name -->
-            {#if profile.name}
-              <div class="field">
-                <div class="field-label">Name</div>
-                <div class="field-value">{profile.name}</div>
-              </div>
-            {/if}
-
-            <!-- Entity Public Key -->
-            {#if getPrimaryBoardPublicKey(profile)}
-              <div class="field">
-                <div class="field-label">Public Key</div>
-                <div class="field-value mono">{getPrimaryBoardPublicKey(profile).slice(0, 20)}...</div>
-              </div>
-            {/if}
-
-            <!-- Board -->
-            <div class="field">
-              <div class="field-label">Board</div>
-              <div class="field-value">
-                {profile.metadata.board.validators.length} validators
-              </div>
-            </div>
-
-            <!-- Accounts -->
-            <div class="field">
-              <div class="field-label">Accounts</div>
-              <div class="field-value">{profile.accounts.length} bilateral accounts</div>
-            </div>
-
-            <!-- Full Metadata (expandable) -->
-            <details class="metadata-details">
-              <summary>Full Metadata</summary>
-              <pre class="metadata-json">{JSON.stringify(profile.metadata, (key, value) =>
-                typeof value === 'bigint' ? value.toString() + 'n' : value
-              , 2)}</pre>
-            </details>
+  {#if frameState.error}
+    <div class="state-card error" data-testid="runtime-gossip-error">{frameState.error}</div>
+  {:else if frameState.loading && directoryView.profileCount === 0}
+    <div class="state-card" data-testid="runtime-gossip-loading">Loading runtime projection...</div>
+  {:else if filteredProfiles.length === 0}
+    <div class="state-card" data-testid="runtime-gossip-empty">No profiles in this runtime projection.</div>
+  {:else}
+    <div class="profiles-container" data-testid="runtime-gossip-profiles">
+      {#each filteredProfiles as profile (profile.entityId)}
+        <div class="profile-card" class:hub={profile.isHub}>
+          <EntityIdentity
+            entityId={profile.entityId}
+            name={displayName(profile)}
+            showAddress={true}
+            copyable={true}
+            clickable={true}
+          />
+          <div class="profile-meta">
+            {#if profile.isHub}<span class="chip hub-chip">hub</span>{/if}
+            {#if profile.jurisdictionName}<span class="chip">{profile.jurisdictionName}</span>{/if}
+            {#if profile.height}<span class="chip">h{profile.height}</span>{/if}
+            {#if profile.runtimeId}<span class="chip">{profile.runtimeId.slice(0, 18)}</span>{/if}
           </div>
         </div>
       {/each}
-    {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -96,188 +99,133 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: #1e1e1e;
+    min-height: 0;
+    background: #161616;
     color: rgba(255, 255, 255, 0.9);
     overflow: hidden;
   }
 
   .panel-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 16px;
     padding: 16px 20px;
-    background: #252526;
+    background: #202020;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .panel-header h2 {
     margin: 0;
     font-size: 16px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
+    font-weight: 700;
   }
 
-  .profile-count {
+  .panel-header p {
+    margin: 4px 0 0;
+    color: rgba(255, 255, 255, 0.56);
     font-size: 12px;
-    color: rgba(0, 122, 255, 0.8);
-    background: rgba(0, 122, 255, 0.1);
-    padding: 4px 10px;
-    border-radius: 12px;
+  }
+
+  .runtime-pill,
+  .chip {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.72);
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
+  .runtime-pill {
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .search-row {
+    padding: 14px 16px 0;
+  }
+
+  .search-row input {
+    width: 100%;
+    height: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.34);
+    color: rgba(255, 255, 255, 0.9);
+    padding: 0 10px;
+    outline: none;
   }
 
   .profiles-container {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
   }
 
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    gap: 12px;
-    padding: 40px;
-    text-align: center;
-  }
-
-  .empty-icon {
-    font-size: 48px;
-    opacity: 0.2;
-  }
-
-  .empty-text {
-    font-size: 16px;
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .empty-hint {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.4);
-    max-width: 300px;
+  .profile-card,
+  .state-card {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
   }
 
   .profile-card {
-    background: rgba(30, 30, 30, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    overflow: hidden;
-    transition: border-color 0.2s;
-  }
-
-  .profile-card:hover {
-    border-color: rgba(0, 122, 255, 0.3);
-  }
-
-  .profile-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
-    background: rgba(0, 0, 0, 0.3);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  }
-
-  .entity-id {
-    font-family: 'SF Mono', monospace;
-    font-size: 14px;
-    font-weight: 600;
-    color: rgba(0, 122, 255, 0.9);
-  }
-
-  .timestamp {
-    font-family: 'SF Mono', monospace;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.4);
-  }
-
-  .profile-body {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
     gap: 12px;
+    padding: 10px 12px;
   }
 
-  .field {
+  .profile-card.hub {
+    border-color: rgba(250, 204, 21, 0.34);
+    background: rgba(250, 204, 21, 0.08);
+  }
+
+  .profile-meta {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
-  .field-label {
+  .chip {
+    padding: 2px 8px;
     font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: rgba(255, 255, 255, 0.5);
-    font-weight: 500;
   }
 
-  .field-value {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.9);
+  .hub-chip {
+    color: rgba(250, 204, 21, 0.92);
+    border-color: rgba(250, 204, 21, 0.32);
   }
 
-  .field-value.mono {
-    font-family: 'SF Mono', monospace;
-    font-size: 12px;
+  .state-card {
+    margin: 16px;
+    padding: 18px;
+    color: rgba(255, 255, 255, 0.62);
+    text-align: center;
   }
 
-  .metadata-details {
-    margin-top: 8px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 12px;
+  .state-card.error {
+    color: #fecaca;
+    border-color: rgba(248, 113, 113, 0.42);
+    background: rgba(127, 29, 29, 0.26);
   }
 
-  .metadata-details summary {
-    cursor: pointer;
-    font-size: 12px;
-    color: rgba(0, 122, 255, 0.8);
-    user-select: none;
-    padding: 4px 0;
-  }
+  @media (max-width: 900px) {
+    .panel-header,
+    .profile-card {
+      flex-direction: column;
+      align-items: flex-start;
+    }
 
-  .metadata-details summary:hover {
-    color: rgba(0, 122, 255, 1);
-  }
-
-  .metadata-json {
-    margin: 8px 0 0 0;
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-    font-family: 'SF Mono', monospace;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.7);
-    overflow-x: auto;
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  .profiles-container::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  .profiles-container::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.2);
-  }
-
-  .profiles-container::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 4px;
-  }
-
-  .metadata-json::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-
-  .metadata-json::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 3px;
+    .profile-meta {
+      justify-content: flex-start;
+    }
   }
 </style>

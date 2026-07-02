@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { get } from 'svelte/store';
   import { Banknote, RefreshCw } from 'lucide-svelte';
   import type { EntityReplica } from '$lib/types/ui';
   import { xlnFunctions } from '../../stores/xlnStore';
+  import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
+  import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { toasts } from '../../stores/toastStore';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
@@ -9,6 +12,7 @@
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let accountIds: string[] = [];
+  export let entityNames: Map<string, string> = new Map();
   export let isLive: boolean = false;
 
   type TermId = '1h' | '1d' | '1m';
@@ -54,6 +58,27 @@
       availableAmount: string;
       borrowedAmount: string;
       activePrincipalAmount: string;
+    };
+  };
+
+  type LendingMutationResponse = {
+    success?: boolean;
+    status?: 'queued' | string;
+    error?: string;
+    requestId?: string;
+    statusUrl?: string;
+    runtimeId?: string | null;
+    receipt?: {
+      id?: string | null;
+      status?: string;
+      counts?: {
+        runtimeTxs?: number;
+        entityInputs?: number;
+        jInputs?: number;
+      };
+      enqueuedHeight?: number | null;
+      observedHeight?: number | null;
+      note?: string | null;
     };
   };
 
@@ -209,9 +234,18 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const result = await readJson(response) as { success?: boolean; error?: string };
+      const result = await readJson(response) as LendingMutationResponse;
       if (!response.ok || result.success !== true) {
         throw new Error(String(result.error || `Lending request failed (${response.status})`));
+      }
+      if (result.receipt) {
+        const handle = get(runtimeControllerHandle);
+        recordRuntimeIngressReceipt({
+          runtimeId: result.runtimeId || handle.runtimeId || handle.id || 'remote',
+          mode: 'remote',
+          receipt: result.receipt,
+          statusUrl: result.statusUrl ?? null,
+        });
       }
       lastSuccess = 'Submitted';
       toasts.success('Lending request submitted');
@@ -284,7 +318,7 @@
   <div class="control-strip">
     <label class="field hub-field">
       <span>Hub account</span>
-      <EntitySelect bind:value={selectedHubEntityId} options={normalizedAccounts} placeholder="Select hub account" />
+      <EntitySelect bind:value={selectedHubEntityId} options={normalizedAccounts} {entityNames} placeholder="Select hub account" />
     </label>
     <label class="field token-field">
       <span>Asset</span>

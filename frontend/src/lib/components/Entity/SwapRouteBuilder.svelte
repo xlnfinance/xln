@@ -1,10 +1,6 @@
 <script lang="ts">
-  import type { Action } from 'svelte/action';
   import type { RoutedSwapRouteCandidate } from './routed-swap-planner';
 
-  const noopAction: Action<HTMLElement> = () => {};
-
-  export let syncOrderAmountContainerAction: Action<HTMLElement> = noopAction;
   export let liveOrderAmountInput = '';
   export let orderAmountInput = '';
   export let latestOrderAmountDomValue = '';
@@ -29,8 +25,6 @@
   export let selectedRouteLabel = '';
   export let sourceRouteEntityLabel = '';
   export let targetRouteEntityLabel = '';
-  export let canAutoPrepareCrossInboundCapacity = false;
-  export let autoExtendCrossInbound = true;
   export let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
   export let showManualRouteRecommendation = false;
   export let routedRouteRecommendations: RoutedSwapRouteCandidate[] = [];
@@ -40,7 +34,6 @@
 <div
   class="route-builder"
   class:cross-route={swapRouteMode === 'cross'}
-  use:syncOrderAmountContainerAction
   data-testid="swap-route-picker"
   data-order-amount-input={liveOrderAmountInput}
   data-order-amount-state={orderAmountInput}
@@ -78,12 +71,6 @@
     <span title={`${sourceRouteEntityLabel} -> ${targetRouteEntityLabel}`}>{routePathLabel}</span>
     <em>via {routeVenueDisplayLabel}</em>
   </div>
-  {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
-    <label class="route-checkbox" data-testid="swap-cross-auto-extend">
-      <input type="checkbox" bind:checked={autoExtendCrossInbound} />
-      <span>Auto-extend target inbound capacity</span>
-    </label>
-  {/if}
   {#if swapRouteMode === 'cross'}
     <label class="route-select-row" data-testid="swap-cross-improvement-mode">
       <span>Price improvement</span>

@@ -1,54 +1,29 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { getXLN, xlnEnvironment } from '$lib/stores/xlnStore';
-  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
-  import { isCounterpartyBlockedByDispute } from '$lib/utils/entityReplica';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import {
+    emptyGossipDirectoryView,
+    type GossipDirectoryProfile,
+    type GossipDirectoryView,
+  } from './gossip-directory-view';
 
-  export let currentEntityId: string = '';
-
-  $: activeEnv = $xlnEnvironment;
-
-  let loading = false;
-  let error = '';
+  export let gossipDirectoryView: GossipDirectoryView = emptyGossipDirectoryView();
   let search = '';
-  let profiles: GossipProfile[] = [];
-  let lastRefreshAt = 0;
-
-  function isRuntimeEnv(value: unknown): value is { gossip?: { getProfiles?: () => GossipProfile[] } } {
-    if (!value || typeof value !== 'object') return false;
-    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
-    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
-  }
 
   $: normalizedSearch = search.trim().toLowerCase();
-  $: filtered = profiles.filter((p) => {
-    if (currentEntityId && isCounterpartyBlockedByDispute(activeEnv, currentEntityId, p.entityId)) return false;
+  $: filtered = gossipDirectoryView.profiles.filter((p) => {
     if (!normalizedSearch) return true;
-    const name = String(p.name || '').toLowerCase();
-    const id = String(p.entityId || '').toLowerCase();
-    const runtimeId = String(p.runtimeId || '').toLowerCase();
-    return name.includes(normalizedSearch) || id.includes(normalizedSearch) || runtimeId.includes(normalizedSearch);
+    return p.name.toLowerCase().includes(normalizedSearch)
+      || p.entityId.toLowerCase().includes(normalizedSearch)
+      || p.runtimeId.toLowerCase().includes(normalizedSearch);
   });
+  $: hubCount = gossipDirectoryView.hubCount;
+  $: lastRefreshAt = gossipDirectoryView.lastRefreshAt;
 
-  $: sortedProfiles = [...filtered].sort((a, b) => {
-    const aHub = isHub(a);
-    const bHub = isHub(b);
-    if (aHub !== bHub) return aHub ? -1 : 1;
-    const aName = String(a.name || '').toLowerCase();
-    const bName = String(b.name || '').toLowerCase();
-    if (aName && bName && aName !== bName) return compareStableText(aName, bName);
-    return compareStableText(String(a.entityId), String(b.entityId));
-  });
-
-  $: hubCount = profiles.filter(isHub).length;
-
-  function isHub(profile: GossipProfile): boolean {
-    return profile.metadata.isHub === true;
+  function isHub(profile: GossipDirectoryProfile): boolean {
+    return profile.isHub;
   }
 
-  function profileName(profile: GossipProfile): string {
+  function profileName(profile: GossipDirectoryProfile): string {
     return profile.name;
   }
 
@@ -60,72 +35,16 @@
       return '-';
     }
   }
-
-  function pullProfilesFromEnv() {
-    const gossip = activeEnv?.gossip;
-    if (!gossip?.getProfiles) {
-      profiles = [];
-      return;
-    }
-    const all = gossip.getProfiles() as GossipProfile[];
-    profiles = Array.isArray(all) ? all : [];
-    lastRefreshAt = Date.now();
-  }
-
-  async function refreshAll() {
-    loading = true;
-    error = '';
-    try {
-      const env = activeEnv;
-      if (!isRuntimeEnv(env)) throw new Error('Environment not ready');
-      const xln = await getXLN();
-      xln.refreshGossip?.(env);
-      await new Promise(resolve => setTimeout(resolve, 250));
-      pullProfilesFromEnv();
-    } catch (err) {
-      error = (err as Error).message || 'Failed to refresh gossip';
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function clearAll() {
-    loading = true;
-    error = '';
-    try {
-      const env = activeEnv;
-      if (!isRuntimeEnv(env)) throw new Error('Environment not ready');
-      const xln = await getXLN();
-      xln.clearGossip?.(env);
-      pullProfilesFromEnv();
-    } catch (err) {
-      error = (err as Error).message || 'Failed to clear gossip';
-    } finally {
-      loading = false;
-    }
-  }
-
-  onMount(() => {
-    pullProfilesFromEnv();
-  });
-
-  $: if (activeEnv) {
-    pullProfilesFromEnv();
-  }
 </script>
 
 <div class="gossip-wrap">
   <div class="gossip-head">
     <div>
       <h4 class="section-head">Gossip Directory</h4>
-      <p class="muted">{profiles.length} profiles ({hubCount} hubs)</p>
+      <p class="muted">{gossipDirectoryView.profileCount} profiles ({hubCount} hubs)</p>
       {#if lastRefreshAt > 0}
-        <p class="muted tiny">Last refresh: {formatTs(lastRefreshAt)}</p>
+        <p class="muted tiny">Latest profile update: {formatTs(lastRefreshAt)}</p>
       {/if}
-    </div>
-    <div class="actions">
-      <button class="btn-refresh-small" on:click={refreshAll} disabled={loading}>Refresh All</button>
-      <button class="btn-clear" on:click={clearAll} disabled={loading}>Clear All</button>
     </div>
   </div>
 
@@ -133,15 +52,11 @@
     <input type="text" placeholder="Search by name, entity, runtime" bind:value={search} />
   </div>
 
-  {#if error}
-    <div class="error">{error}</div>
-  {/if}
-
-  {#if sortedProfiles.length === 0}
+  {#if filtered.length === 0}
     <p class="muted">No gossip profiles found.</p>
   {:else}
     <div class="list">
-      {#each sortedProfiles as profile (profile.entityId)}
+      {#each filtered as profile (profile.entityId)}
         <div class="row" class:hub={isHub(profile)}>
           <EntityIdentity
             entityId={profile.entityId}
@@ -152,7 +67,7 @@
           />
           <div class="meta">
             {#if isHub(profile)}<span class="chip">hub</span>{/if}
-            <span class="chip">runtime {profile.runtimeId.slice(0, 10)}</span>
+            <span class="chip">runtime {profile.runtimeId.slice(0, 10) || 'unknown'}</span>
             <span class="chip">{formatTs(profile.lastUpdated)}</span>
           </div>
         </div>
@@ -173,27 +88,6 @@
     justify-content: space-between;
     gap: 12px;
     align-items: flex-start;
-  }
-
-  .actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .btn-clear {
-    border: 1px solid rgba(248, 113, 113, 0.28);
-    background: rgba(127, 29, 29, 0.12);
-    color: #fca5a5;
-    padding: 7px 10px;
-    border-radius: 8px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .btn-clear:disabled {
-    opacity: 0.6;
-    cursor: default;
   }
 
   .search-row input {
@@ -251,15 +145,6 @@
     padding: 2px 8px;
     font-size: 11px;
     white-space: nowrap;
-  }
-
-  .error {
-    border: 1px solid rgba(248, 113, 113, 0.32);
-    background: rgba(127, 29, 29, 0.14);
-    color: #fecaca;
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-size: 12px;
   }
 
   .tiny {

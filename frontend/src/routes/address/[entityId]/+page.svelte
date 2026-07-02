@@ -2,11 +2,17 @@
   import { browser } from '$app/environment';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
+  import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
   import ActivityHistoryPanel from '$lib/components/Entity/ActivityHistoryPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
-  import { vaultOperations } from '$lib/stores/vaultStore';
+  import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
+  import { runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
+  import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
+  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
 
-  type DebugEntity = {
+  type ExplorerEntity = {
     entityId: string;
     runtimeId?: string;
     name: string;
@@ -19,7 +25,7 @@
 
   let loading = true;
   let error: string | null = null;
-  let entity: DebugEntity | null = null;
+  let entity: ExplorerEntity | null = null;
   let lastLoadedEntityId = '';
   let mounted = false;
   let activeTab: 'overview' | 'history' = 'history';
@@ -27,6 +33,127 @@
   $: entityId = decodeURIComponent($page.params.entityId || '').trim();
   $: normalized = entityId.toLowerCase();
   $: validEntityId = /^0x[0-9a-f]{64}$/.test(normalized);
+
+  function normalizeEntityId(value: string | null | undefined): string {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function summaryMatches(summary: RuntimeAdapterEntitySummary | null | undefined, requestedEntityId: string): boolean {
+    return normalizeEntityId(summary?.entityId) === requestedEntityId;
+  }
+
+  function currentRuntimeId(): string {
+    return normalizeRuntimeId($runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id);
+  }
+
+  function normalizeRuntimeId(value: string | null | undefined): string {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function summaryRuntimeId(summary: RuntimeAdapterEntitySummary | null | undefined): string {
+    return normalizeRuntimeId(summary?.runtimeId) || currentRuntimeId();
+  }
+
+  function buildExplorerEntityFromSummary(
+    summary: RuntimeAdapterEntitySummary,
+    requestedEntityId: string,
+  ): ExplorerEntity | null {
+    if (!summaryMatches(summary, requestedEntityId)) return null;
+    const runtimeId = summaryRuntimeId(summary);
+    const isHub = summary.isHub === true;
+    return {
+      entityId: requestedEntityId,
+      runtimeId,
+      name: String(summary.label || requestedEntityId).trim(),
+      isHub,
+      online: $runtimeControllerHandle.status === 'connected',
+      lastUpdated: Math.max(0, Math.floor(Number(summary.height || $runtimeControllerHandle.height || 0))),
+      capabilities: ['entity', ...(isHub ? ['hub', 'routing'] : [])],
+      metadata: {
+        runtimeId,
+        height: Math.max(0, Math.floor(Number(summary.height || 0))),
+        jurisdiction: summary.jurisdiction ?? null,
+        accounts: {
+          shown: 0,
+          total: 0,
+          hasMore: false,
+          source: 'summary',
+        },
+        books: {
+          shown: 0,
+          total: 0,
+          hasMore: false,
+          source: 'summary',
+        },
+        profile: {
+          bio: '',
+          website: '',
+        },
+      },
+    };
+  }
+
+  function buildExplorerEntity(frame: RuntimeAdapterViewFrame, requestedEntityId: string): ExplorerEntity | null {
+    const active = frame.activeEntity;
+    const summary = active?.summary || frame.entities.find((candidate) => summaryMatches(candidate, requestedEntityId));
+    if (!summary || !summaryMatches(summary, requestedEntityId)) return null;
+    const core = active?.core;
+    const profile = core?.profile as { name?: string; isHub?: boolean; bio?: string; website?: string } | undefined;
+    const accountPage = active?.accounts;
+    const bookPage = active?.books;
+    const isHub = summary.isHub === true || profile?.isHub === true || Boolean(core?.orderbookHubProfile);
+    const runtimeId = summaryRuntimeId(summary);
+    return {
+      entityId: requestedEntityId,
+      runtimeId,
+      name: String(profile?.name || summary.label || requestedEntityId).trim(),
+      isHub,
+      online: $runtimeControllerHandle.status === 'connected',
+      lastUpdated: Math.max(0, Math.floor(Number(summary.height || frame.height || $runtimeControllerHandle.height || 0))),
+      capabilities: [
+        'entity',
+        ...(isHub ? ['hub', 'routing'] : []),
+        Number(accountPage?.totalItems ?? accountPage?.items?.length ?? 0) > 0 ? 'accounts' : '',
+        Number(bookPage?.totalItems ?? bookPage?.items?.length ?? 0) > 0 ? 'books' : '',
+      ].filter(Boolean),
+      metadata: {
+        runtimeId,
+        height: Math.max(0, Math.floor(Number(frame.height || 0))),
+        jurisdiction: summary.jurisdiction ?? null,
+        accounts: {
+          shown: accountPage?.items?.length ?? 0,
+          total: accountPage?.totalItems ?? accountPage?.items?.length ?? 0,
+          hasMore: Boolean(accountPage?.nextCursor),
+        },
+        books: {
+          shown: bookPage?.items?.length ?? 0,
+          total: bookPage?.totalItems ?? bookPage?.items?.length ?? 0,
+          hasMore: Boolean(bookPage?.nextCursor),
+        },
+        profile: {
+          bio: profile?.bio || '',
+          website: profile?.website || '',
+        },
+      },
+    };
+  }
+
+  async function fetchSummaryExplorerEntity(requestedEntityId: string): Promise<ExplorerEntity | null> {
+    const summaries = await runtimeQueryClient.readEntities({ limit: 5000 });
+    const summary = summaries.find((candidate) => summaryMatches(candidate, requestedEntityId));
+    return summary ? buildExplorerEntityFromSummary(summary, requestedEntityId) : null;
+  }
+
+  async function selectEntityRuntimeFromDirectory(requestedEntityId: string): Promise<boolean> {
+    const summaries = await runtimeQueryClient.readEntities({ limit: 5000 });
+    const summary = summaries.find((candidate) => summaryMatches(candidate, requestedEntityId));
+    const targetRuntimeId = summaryRuntimeId(summary);
+    if (!targetRuntimeId || targetRuntimeId === currentRuntimeId()) return false;
+    const targetRuntime = get(runtimes).get(targetRuntimeId);
+    if (!targetRuntime || targetRuntime.type !== 'local') return false;
+    await runtimeOperations.selectRuntime(targetRuntimeId);
+    return true;
+  }
 
   async function fetchExplorer(): Promise<void> {
     if (!validEntityId) {
@@ -37,15 +164,42 @@
     loading = true;
     error = null;
     try {
-      const entitiesRes = await fetch('/api/debug/entities?limit=1000');
-      if (!entitiesRes.ok) throw new Error(`entities HTTP ${entitiesRes.status}`);
-
-      const entitiesData = await entitiesRes.json() as { entities?: DebugEntity[] };
-      const allEntities = Array.isArray(entitiesData.entities) ? entitiesData.entities : [];
-      entity = allEntities.find((e) => e.entityId.toLowerCase() === normalized) || null;
-      if (!entity) error = 'Entity not found in registered gossip profiles.';
+      await ensureProjectionRuntimeConnected();
+      if (await selectEntityRuntimeFromDirectory(normalized)) {
+        await ensureProjectionRuntimeConnected();
+      }
+      const summaryEntity = await fetchSummaryExplorerEntity(normalized);
+      const summaryRuntime = normalizeRuntimeId(summaryEntity?.runtimeId);
+      if (
+        summaryEntity &&
+        $runtimeControllerHandle.mode === 'remote' &&
+        summaryRuntime &&
+        summaryRuntime !== currentRuntimeId()
+      ) {
+        entity = summaryEntity;
+        return;
+      }
+      let projectionError: unknown = null;
+      try {
+        const view = await refreshRuntimeView({
+          entityId: normalized,
+          accountsLimit: 8,
+          booksLimit: 8,
+        });
+        const frame = view.frame;
+        if (!frame) throw new Error('Runtime projection frame is not available.');
+        entity = buildExplorerEntity(frame, normalized);
+      } catch (err) {
+        projectionError = err;
+        entity = null;
+      }
+      if (!entity) entity = summaryEntity;
+      if (!entity && projectionError) throw projectionError;
+      if (!entity) error = 'Entity not found in runtime projection.';
     } catch (err) {
+      console.error('[EntityExplorer] projection read failed', err);
       error = err instanceof Error ? err.message : 'Failed to load entity explorer';
+      entity = null;
     } finally {
       loading = false;
     }
@@ -58,13 +212,17 @@
 
   onMount(() => {
     mounted = true;
-    void vaultOperations.initialize();
     if (entityId && entityId !== lastLoadedEntityId) {
       lastLoadedEntityId = entityId;
       void fetchExplorer();
     }
+    const unsubscribeHeight = runtimeAdapterHeight.subscribe(() => {
+      if (!mounted || !entityId || entityId !== lastLoadedEntityId) return;
+      void fetchExplorer();
+    });
     return () => {
       mounted = false;
+      unsubscribeHeight();
     };
   });
 </script>
@@ -92,7 +250,7 @@
         <span class="chip" class:ok={entity.online} class:bad={!entity.online}>{entity.online ? 'online' : 'offline'}</span>
         {#if entity.isHub}<span class="chip">hub</span>{/if}
         {#if entity.runtimeId}<span class="chip">runtime: {entity.runtimeId.slice(0, 14)}...</span>{/if}
-        <span class="chip">updated: {entity.lastUpdated ? new Date(entity.lastUpdated).toLocaleString() : 'n/a'}</span>
+        <span class="chip">h{entity.lastUpdated || 0}</span>
       </div>
     </section>
   {/if}

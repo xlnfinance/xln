@@ -6,15 +6,18 @@
   import type {
     AccountMachine,
     RoutedEntityInput as EntityInputPayload,
-    EntityReplica,
     Env,
-    EnvSnapshot,
     PaymentRoute,
     Profile as GossipProfile,
+    RuntimeInput,
   } from '@xln/runtime/xln-api';
-  import { getXLN, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
+  import {
+    refreshPaymentRuntimeGossip,
+    sendRuntimeDebugEvent,
+    xlnFunctions,
+  } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
-  import { isCounterpartyBlockedByDispute, requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
   import { keccak256, AbiCoder, hexlify } from 'ethers';
   import EntityInput from '../shared/EntityInput.svelte';
@@ -29,10 +32,18 @@
     quoteHop,
     sanitizeBigInt,
   } from './payment-routing';
+  import {
+    emptyPaymentPanelView,
+    type PaymentPanelView,
+    type PaymentReplicaView,
+  } from './payment-panel-view';
 
   export let entityId: string;
-  export let env: Env;
+  export let paymentView: PaymentPanelView = emptyPaymentPanelView();
+  export let actionRuntimeEnv: Env | null = null;
   export let isLive: boolean;
+  export let signerId: string | null = null;
+  export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   // Form state
   let targetEntityId = '';
@@ -92,8 +103,6 @@
   const MAX_CANDIDATE_PATHS = 500;
   const MAX_PATH_HOPS = 6;
   const MIN_SELF_CYCLE_INTERMEDIATES = 2;
-  const GOSSIP_REFRESH_ATTEMPTS = 3;
-  const GOSSIP_REFRESH_WAIT_MS = 100;
   const AUTO_ROUTE_RETRY_WINDOW_MS = 8_000;
   const AUTO_ROUTE_RETRY_DELAY_MS = 200;
   type LockBookEntry = {
@@ -111,18 +120,40 @@
   };
   type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
 
-  $: currentReplicas = env.eReplicas;
-  $: currentEnv = env;
+  let runtimeProfiles: GossipProfile[] = [];
+  let paymentProfilesSignature = '';
+  $: currentReplicas = paymentView.replicaMap;
+  $: currentEnv = actionRuntimeEnv;
   $: activeXlnFunctions = $xlnFunctions;
   $: activeIsLive = isLive;
+  $: paymentProjectionReady = currentReplicas instanceof Map && currentReplicas.size > 0;
   $: isSelfRecipient = Boolean(targetEntityId) && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId);
+  $: nextPaymentProfilesSignature = paymentView.profiles
+    .map((profile) => [
+      normalizeEntityId(profile.entityId),
+      String(profile.lastUpdated ?? 0),
+      String(profile.accounts?.length ?? 0),
+      String(profile.publicAccounts?.length ?? 0),
+    ].join(':'))
+    .join('|');
+  $: if (nextPaymentProfilesSignature !== paymentProfilesSignature) {
+    paymentProfilesSignature = nextPaymentProfilesSignature;
+    runtimeProfiles = [...paymentView.profiles];
+  }
 
-  const getGossipProfiles = (): GossipProfile[] => currentEnv?.gossip?.getProfiles?.() || [];
+  const getGossipProfiles = (): GossipProfile[] => runtimeProfiles;
 
-  $: knownRecipientEntities = getGossipProfiles()
-    .map((profile) => normalizeEntityId(profile.entityId))
-    .filter((option) => option && option !== normalizeEntityId(entityId))
-    .sort();
+  $: knownRecipientEntities = paymentView.knownRecipientEntities;
+
+  function mergeRuntimeProfiles(profiles: GossipProfile[]): void {
+    const byEntityId = new Map(runtimeProfiles.map((profile) => [normalizeEntityId(profile.entityId), profile]));
+    for (const profile of profiles) {
+      const entity = normalizeEntityId(profile?.entityId);
+      if (!entity) continue;
+      byEntityId.set(entity, profile);
+    }
+    runtimeProfiles = Array.from(byEntityId.values());
+  }
 
   function hasPendingOutgoingLock(from: string, to: string, token: number): boolean {
     if (!currentReplicas) return false;
@@ -330,6 +361,32 @@
     return typeof name === 'string' && name.trim() ? name.trim() : id;
   }
 
+  function resolveProjectedSignerId(): string {
+    const explicit = normalizeEntityId(signerId);
+    if (explicit) return explicit;
+    const owner = normalizeEntityId(entityId);
+    if (!owner || !(currentReplicas instanceof Map)) return '';
+    for (const replicaKey of currentReplicas.keys()) {
+      const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+      if (normalizeEntityId(replicaEntityId) !== owner) continue;
+      const projectedSignerId = normalizeEntityId(replicaSignerId);
+      if (projectedSignerId) return projectedSignerId;
+    }
+    return '';
+  }
+
+  function resolvePaymentSignerId(env: Env | null): string {
+    if (env) {
+      const runtimeSignerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel');
+      const normalizedRuntimeSignerId = normalizeEntityId(runtimeSignerId);
+      if (normalizedRuntimeSignerId) return normalizedRuntimeSignerId;
+    }
+    const projectedSignerId = resolveProjectedSignerId();
+    if (projectedSignerId) return projectedSignerId;
+    if (env) return normalizeEntityId(requireSignerIdForEntity(env, entityId, 'payment-panel'));
+    throw new Error('Payment signer is not available from the runtime projection');
+  }
+
   function getGossipProfileByEntityId(id: string): GossipProfile | undefined {
     return findProfileByEntityId(getGossipProfiles(), id) ?? undefined;
   }
@@ -368,7 +425,7 @@
   function isRouteableIntermediary(entity: string): boolean {
     // Routeability is a transport/security property, not a display-metadata property.
     // A hop is routeable iff we can encrypt for it and it is hub-like when profile exists.
-    if (currentEnv && entityId && isCounterpartyBlockedByDispute(currentEnv, entityId, entity)) return false;
+    if (paymentView.blockedCounterpartyIds.has(normalizeEntityId(entity))) return false;
     if (!extractEntityEncPubKey(currentReplicas, getGossipProfiles(), entity)) return false;
     const profile = getGossipProfileByEntityId(entity);
     if (!profile) return true; // allow local+gossip mixed discovery; key coverage is enforced above
@@ -444,8 +501,8 @@
 
   // Build bidirectional adjacency from all available sources
   function buildNetworkAdjacency(
-    env: Env | null | undefined,
-    replicaMap: Map<string, EntityReplica>,
+    profiles: readonly GossipProfile[],
+    replicaMap: ReadonlyMap<string, PaymentReplicaView>,
   ): AdjacencyBuildResult {
     const adjacency = new Map<string, Set<string>>();
     const canonicalIds = new Map<string, string>();
@@ -480,7 +537,6 @@
     }
 
     // Source 2: Gossip profiles (network-wide account graph)
-    const profiles = env?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       rememberCanonical(profile.entityId);
       if (!profile.accounts) continue;
@@ -568,14 +624,11 @@
       details,
     };
     try {
-      const p2p = currentEnv?.runtimeState?.p2p;
-      if (typeof p2p?.sendDebugEvent === 'function') p2p.sendDebugEvent(payload);
+      sendRuntimeDebugEvent(payload);
     } catch {
       // Best effort only; never block UI on debug forwarding.
     }
   }
-
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function startInvoiceScanner(): Promise<void> {
     scannerError = '';
@@ -768,76 +821,12 @@
   }
 
   async function refreshGossipOnDemand(reason: string, targetEntities: string[]): Promise<void> {
-    const env = currentEnv;
-    if (!env) return;
-    const xln = await getXLN();
-    const seedProfilesFromServer = async (entityIds: string[]): Promise<boolean> => {
-      if (typeof fetch === 'undefined' || !env.gossip?.announce) return false;
-      let seeded = false;
-      for (const entityId of entityIds) {
-        const target = normalizeEntityId(entityId);
-        if (!target) continue;
-        try {
-          const response = await fetch(`/api/gossip/profile?entityId=${encodeURIComponent(target)}`);
-          if (!response.ok) continue;
-          const payload = await response.json().catch(() => null) as {
-            profile?: GossipProfile | null;
-            peers?: GossipProfile[];
-          } | null;
-          const profiles: GossipProfile[] = [];
-          if (payload?.profile) profiles.push(payload.profile);
-          if (Array.isArray(payload?.peers)) profiles.push(...payload.peers);
-          for (const profile of profiles) {
-            if (!profile?.entityId) continue;
-            env.gossip.announce(profile);
-            seeded = true;
-          }
-        } catch {
-          // best effort only
-        }
-      }
-      return seeded;
-    };
-
-    if (targetEntities.length > 0) {
-      await seedProfilesFromServer(targetEntities);
-    }
-    try {
-      await env.runtimeState?.p2p?.syncProfiles?.();
-    } catch {
-      // fall through to targeted fetch / refresh loop
-    }
-    if (targetEntities.length > 0 && typeof xln.ensureGossipProfiles === 'function') {
-      emitUiDebugEvent('PAYMENT_PREFLIGHT_GOSSIP_FETCH', `Fetching gossip profiles (${reason})`, {
-        targetEntities,
-      });
-      try {
-        const resolved = await xln.ensureGossipProfiles(env, targetEntities);
-        if (resolved) return;
-      } catch {
-        // fall back to coarse refresh loop below
-      }
-    }
-    for (let attempt = 1; attempt <= GOSSIP_REFRESH_ATTEMPTS; attempt += 1) {
-      emitUiDebugEvent('PAYMENT_PREFLIGHT_GOSSIP_REFRESH', `Refreshing gossip (${reason})`, {
-        attempt,
-        targetEntities,
-      });
-      try {
-        xln.refreshGossip?.(env);
-      } catch {
-        // best effort only
-      }
-      try {
-        env.runtimeState?.p2p?.refreshGossip?.();
-      } catch {
-        // best effort only
-      }
-      await sleep(GOSSIP_REFRESH_WAIT_MS);
-      if (targetEntities.length > 0) {
-        await seedProfilesFromServer(targetEntities);
-      }
-    }
+    const result = await refreshPaymentRuntimeGossip({
+      reason,
+      targetEntities,
+      onDebug: emitUiDebugEvent,
+    });
+    mergeRuntimeProfiles(result.profiles);
   }
 
   async function ensureRecipientProfileReady() {
@@ -986,21 +975,7 @@
     }
 
     try {
-      const xln = await getXLN();
-      const env = currentEnv;
-      if (!env) throw new Error('Environment not ready');
-      try {
-        await env.runtimeState?.p2p?.syncProfiles?.();
-      } catch {
-        // best effort only
-      }
-      if (typeof xln.ensureGossipProfiles === 'function') {
-        try {
-          await xln.ensureGossipProfiles(env, [entityId, targetEntityId]);
-        } catch {
-          // best effort only
-        }
-      }
+      await refreshGossipOnDemand('route-preflight', [entityId, targetEntityId]);
       await ensureRecipientProfileReady();
 
       const amountInSmallestUnit = parseAmountToWei(amount, getTokenDecimals(tokenId));
@@ -1013,7 +988,7 @@
       const targetNorm = normalizeEntityId(targetEntityId);
       const isSelfTarget = sourceNorm === targetNorm;
       const collectCandidatePaths = async (): Promise<{ network: ReturnType<typeof buildNetworkAdjacency>; foundPaths: string[][] }> => {
-        const network = buildNetworkAdjacency(env, currentReplicas);
+          const network = buildNetworkAdjacency(getGossipProfiles(), currentReplicas);
         const pathSet = new Set<string>();
         const foundPaths: string[][] = [];
         const pushPath = (rawPath: unknown) => {
@@ -1030,7 +1005,7 @@
           foundPaths.push(normalizedPath);
         };
 
-        const runtimeGraph = env.gossip?.getNetworkGraph?.();
+        const runtimeGraph = paymentView.networkGraph;
         try {
           const runtimeRoutes: PaymentRoute[] =
             await runtimeGraph?.findPaths?.(entityId, targetEntityId, amountInSmallestUnit, tokenId) || [];
@@ -1181,7 +1156,7 @@
     pendingAutoRouteKey !== completedAutoRouteKey &&
     targetEntityId &&
     amount &&
-    currentEnv &&
+    paymentProjectionReady &&
     activeIsLive &&
     !findingRoutes &&
     !sendingPayment
@@ -1253,8 +1228,6 @@
     sendingPayment = true;
     let queued = false;
     try {
-      const env = currentEnv;
-      if (!env) throw new Error('Environment not ready');
       if (!activeIsLive) throw new Error('Payments are only available in LIVE mode');
       preflightError = null;
       await ensureRecipientProfileReady();
@@ -1269,15 +1242,14 @@
       await ensureRouteKeyCoverage(route.path);
       const routeTargetEntityId = route.path[route.path.length - 1] || targetEntityId;
 
-      const signerId = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'payment-panel')
-        || requireSignerIdForEntity(env, entityId, 'payment-panel');
+      const resolvedSignerId = resolvePaymentSignerId(currentEnv);
 
       const descriptionValue = description.trim();
       const { secret, hashlock } = generateSecretHashlock();
       const queuedHashlock: string | null = hashlock;
       const paymentInput: EntityInputPayload = {
         entityId,
-        signerId,
+        signerId: resolvedSignerId,
         entityTxs: [{
           type: 'htlcPayment' as const,
           data: {
@@ -1292,7 +1264,8 @@
         }],
       };
 
-      await enqueueEntityInputs(env, [paymentInput]);
+      if (!submitRuntimeInput) throw new Error('Payment command path is not connected');
+      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput], jInputs: [] });
       queued = true;
       return { queued: true, hashlock: queuedHashlock };
     } catch (error) {
@@ -1412,6 +1385,7 @@
           value={targetEntityId}
           rawTextOverride={invoiceValue}
           entities={knownRecipientEntities}
+          profiles={runtimeProfiles}
           excludeId={entityId}
           preferredId=""
           testId="payment-invoice"

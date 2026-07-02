@@ -1,20 +1,27 @@
 <script lang="ts">
-  import type { Env } from '@xln/runtime/xln-api';
+  import type { Env, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { DisputedAccountView } from './account-dispute-view';
   import EntityInput from '../shared/EntityInput.svelte';
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
-  import { requireRuntimeEnv } from './entity-panel-model';
+  import {
+    emptyHubDiscoveryProjection,
+    type HubDiscoveryProjection,
+  } from './hub-discovery-profile';
 
   export let replica: EntityReplica | null = null;
   export let tab: Tab;
   export let activeIsLive = false;
   export let actionRuntimeEnv: Env | null = null;
+  export let hubDiscoveryProjection: HubDiscoveryProjection = emptyHubDiscoveryProjection();
+  export let canOpenAccounts = true;
   export let openAccountEntityId = '';
   export let openAccountEntityOptions: string[] = [];
+  export let profiles: GossipProfile[] = [];
   export let disputedAccounts: DisputedAccountView[] = [];
   export let handleOpenAccountTargetChange: (event: CustomEvent<{ value?: string }>) => void;
   export let openAccountWithFullId: (targetEntityId: string) => void | Promise<void>;
+  export let submitRuntimeInput: (input: RuntimeInput) => Promise<unknown> | unknown;
   export let openDisputedAccount: (counterpartyEntityId: string) => void;
   export let reopenDisputedAccount: (counterpartyEntityId: string) => void | Promise<void>;
 </script>
@@ -27,40 +34,46 @@
         <h4 class="section-head">Open Account</h4>
       </div>
     </div>
-    {#if activeIsLive && actionRuntimeEnv}
+    {#if activeIsLive}
       <HubDiscoveryPanel
         entityId={replica?.state?.entityId || tab.entityId}
-        env={requireRuntimeEnv(actionRuntimeEnv, 'hub-discovery')}
+        {actionRuntimeEnv}
+        {hubDiscoveryProjection}
+        {canOpenAccounts}
+        {submitRuntimeInput}
       />
     {/if}
   </div>
-  <div class="open-section">
-    <div class="open-section-head compact">
-      <div class="open-section-copy">
-        <span class="open-section-kicker">Direct</span>
-        <h4 class="section-head">Open by ID</h4>
+  {#if canOpenAccounts}
+    <div class="open-section">
+      <div class="open-section-head compact">
+        <div class="open-section-copy">
+          <span class="open-section-kicker">Direct</span>
+          <h4 class="section-head">Open by ID</h4>
+        </div>
+      </div>
+      <div class="open-private-form">
+        <EntityInput
+          variant="move"
+          label="Recipient"
+          value={openAccountEntityId}
+          entities={openAccountEntityOptions}
+          {profiles}
+          excludeId={replica?.state?.entityId || tab.entityId}
+          placeholder="Select or paste entity ID"
+          disabled={!activeIsLive}
+          on:change={handleOpenAccountTargetChange}
+        />
+        <button
+          class="btn-add"
+          on:click={() => openAccountWithFullId(openAccountEntityId)}
+          disabled={!activeIsLive || !openAccountEntityId.trim()}
+        >
+          Open
+        </button>
       </div>
     </div>
-    <div class="open-private-form">
-      <EntityInput
-        variant="move"
-        label="Recipient"
-        value={openAccountEntityId}
-        entities={openAccountEntityOptions}
-        excludeId={replica?.state?.entityId || tab.entityId}
-        placeholder="Select or paste entity ID"
-        disabled={!activeIsLive}
-        on:change={handleOpenAccountTargetChange}
-      />
-      <button
-        class="btn-add"
-        on:click={() => openAccountWithFullId(openAccountEntityId)}
-        disabled={!activeIsLive || !openAccountEntityId.trim()}
-      >
-        Open
-      </button>
-    </div>
-  </div>
+  {/if}
 
   {#if disputedAccounts.length > 0}
     <div class="open-section disputed-section">

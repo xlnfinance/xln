@@ -14,9 +14,9 @@
   import ConsolePanel from './ConsolePanel.svelte';
 
   // Props (isolated stores - reserved for future time-travel settings UI)
-  export let isolatedEnv: Writable<any>; void isolatedEnv;
-  export let isolatedHistory: Writable<any[]>; void isolatedHistory;
-  export let isolatedTimeIndex: Writable<number>; void isolatedTimeIndex;
+  export let runtimeFrameEnv: Writable<any>; void runtimeFrameEnv;
+  export let runtimeFrameHistory: Writable<any[]>; void runtimeFrameHistory;
+  export let runtimeFrameTimeIndex: Writable<number>; void runtimeFrameTimeIndex;
 
   // Live camera state from Graph3D
   let liveCameraState = {
@@ -687,7 +687,7 @@
             on:change={() => {
               updateSetting('verboseLogging', settings.verboseLogging);
               setFrontendVerboseLogging(settings.verboseLogging);
-              isolatedEnv.update((env) => {
+              runtimeFrameEnv.update((env) => {
                 if (env) env.quietRuntimeLogs = !settings.verboseLogging;
                 return env;
               });
@@ -723,9 +723,9 @@
 
       <div class="console-embed">
         <ConsolePanel
-          {isolatedEnv}
-          {isolatedHistory}
-          {isolatedTimeIndex}
+          {runtimeFrameEnv}
+          {runtimeFrameHistory}
+          {runtimeFrameTimeIndex}
         />
       </div>
 

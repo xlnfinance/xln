@@ -25,6 +25,8 @@ export interface JMachineConfig {
   createdAt: number;
 }
 
+export type JMachineCreatedAtSeed = Pick<JMachineConfig, 'name' | 'mode' | 'chainId' | 'ticker' | 'rpcs' | 'blockTimeMs'>;
+
 interface JMachineStoreState {
   configs: JMachineConfig[];
   activeJMachine: string | null;
@@ -72,6 +74,23 @@ const normalizeBlockTimeMs = (value: unknown, chainId: number): number => {
   throw new Error(`J_MACHINE_BLOCK_TIME_REQUIRED:${chainId}`);
 };
 
+export const deriveJMachineCreatedAt = (config: JMachineCreatedAtSeed): number => {
+  const text = [
+    config.name.trim().toLowerCase(),
+    config.mode,
+    Math.floor(Number(config.chainId) || 0),
+    config.ticker.trim().toUpperCase(),
+    (config.rpcs || []).join('|'),
+    Math.floor(Number(config.blockTimeMs) || 0),
+  ].join('\n');
+  let hash = 2_166_136_261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16_777_619) >>> 0;
+  }
+  return hash || 1;
+};
+
 const normalizeContracts = (value: unknown): JMachineConfig['contracts'] | undefined => {
   if (!isRecord(value)) return undefined;
   const depository = normalizeAddress(value['depository']);
@@ -107,7 +126,9 @@ export function normalizeJMachineConfig(raw: unknown): JMachineConfig | null {
     rpcs: mode === 'browservm' ? [] : rpcs,
     blockTimeMs,
     ...(contracts ? { contracts } : {}),
-    createdAt: Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? Math.floor(createdAtRaw) : Date.now(),
+    createdAt: Number.isFinite(createdAtRaw) && createdAtRaw > 0
+      ? Math.floor(createdAtRaw)
+      : deriveJMachineCreatedAt({ name, mode, chainId, ticker, rpcs, blockTimeMs }),
   };
 }
 

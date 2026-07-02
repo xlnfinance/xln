@@ -6,6 +6,7 @@
     entityInitials,
     formatEntityNetworkLabel,
     jurisdictionBadgeText,
+    type CrossSwapSetupStep,
   } from './swap-panel-helpers';
   import SwapPriceVenueControls from './SwapPriceVenueControls.svelte';
   import SwapRouteBuilder from './SwapRouteBuilder.svelte';
@@ -43,7 +44,6 @@
     accountId: string;
   };
 
-  const noopAction: Action<HTMLElement> = () => ({});
   const noopButtonAction: Action<HTMLButtonElement> = () => ({});
   const noop = () => {};
 
@@ -137,7 +137,6 @@
   export let hubJurisdictionLabel: (entityIdValue: string) => string = () => '';
   export let applyOrderPercent: (percent: number) => void = noop;
 
-  export let syncOrderAmountContainerAction: Action<HTMLElement> = noopAction;
   export let liveOrderAmountInput = '';
   export let latestOrderAmountDomValue = '';
   export let hasLatestOrderAmountDomValue = false;
@@ -155,8 +154,6 @@
   export let routePathTargetLabel = '';
   export let sourceRouteEntityLabel = '';
   export let targetRouteEntityLabel = '';
-  export let canAutoPrepareCrossInboundCapacity = false;
-  export let autoExtendCrossInbound = true;
   export let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
   export let showManualRouteRecommendation = false;
   export let routedRouteRecommendations: RoutedSwapRouteCandidate[] = [];
@@ -164,8 +161,7 @@
 
   export let capacityWarning = '';
   export let autoCapacityNote = '';
-  export let showCrossAutoCapacityNote = false;
-  export let crossAutoCapacityNote = '';
+  export let crossSwapSetupSteps: CrossSwapSetupStep[] = [];
   export let selectedOrderLevel: SelectedOrderLevel | null = null;
   export let formatPriceTicks: (ticks: bigint) => string = () => '';
   export let formatAmount: (amount: bigint, tokenId: number) => string = () => '';
@@ -175,8 +171,6 @@
   export let swapActionDisabledReason = '';
   export let placeSwapOffer: () => void | Promise<void> = noop;
   export let swapSubmitLabel = '';
-  export let canCreateTargetAccount = false;
-  export let prepareSelectedTargetAccount: () => void | Promise<void> = noop;
   export let submitError = '';
 </script>
 
@@ -518,7 +512,6 @@
   />
 
   <SwapRouteBuilder
-    {syncOrderAmountContainerAction}
     {liveOrderAmountInput}
     {orderAmountInput}
     {latestOrderAmountDomValue}
@@ -543,8 +536,6 @@
     {selectedRouteLabel}
     {sourceRouteEntityLabel}
     {targetRouteEntityLabel}
-    {canAutoPrepareCrossInboundCapacity}
-    bind:autoExtendCrossInbound
     bind:crossPriceImprovementMode
     {showManualRouteRecommendation}
     {routedRouteRecommendations}
@@ -561,9 +552,6 @@
   {#if autoCapacityNote}
     <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
   {/if}
-  {#if showCrossAutoCapacityNote}
-    <p class="auto-capacity-note" data-testid="swap-cross-auto-capacity-note">{crossAutoCapacityNote}</p>
-  {/if}
 
   {#if selectedOrderLevel}
     <p class="size-hint" data-testid="swap-size-hint">
@@ -572,6 +560,20 @@
         : selectedOrderLevel.priceTicks)}
       from {accountLabel(selectedOrderLevel.accountId)}
     </p>
+  {/if}
+
+  {#if crossSwapSetupSteps.length > 0}
+    <div class="swap-setup-consent" data-testid="swap-setup-consent">
+      {#each crossSwapSetupSteps as step (step.id)}
+        <label class="swap-setup-step" data-testid="swap-setup-step" data-step-id={step.id}>
+          <input type="checkbox" checked disabled aria-label={step.label} />
+          <span>
+            <strong>{step.label}</strong>
+            <small>{step.detail}</small>
+          </span>
+        </label>
+      {/each}
+    </div>
   {/if}
 
   <button
@@ -584,16 +586,6 @@
   >
     {swapSubmitLabel}
   </button>
-  {#if canCreateTargetAccount}
-    <button
-      type="button"
-      class="secondary-setup-btn"
-      data-testid="swap-create-target-account"
-      on:click={prepareSelectedTargetAccount}
-    >
-      Create target account
-    </button>
-  {/if}
   {#if swapActionDisabledReason || submitError}
     <p class="form-error" data-testid="swap-form-error">{submitError || swapActionDisabledReason}</p>
   {/if}

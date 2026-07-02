@@ -4,14 +4,12 @@
    * Declarative Svelte (no innerHTML), uses base Dropdown component
    */
   import { createEventDispatcher } from 'svelte';
-  import { replicas, xlnFunctions, xlnInstance, xlnEnvironment } from '../../stores/xlnStore';
-  import { visibleReplicas } from '../../stores/timeStore';
+  import { xlnFunctions, xlnInstance } from '../../stores/xlnStore';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
-  import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
 
   export let tab: Tab;
   export let jurisdictionFilter: string | null = null;
@@ -19,7 +17,8 @@
   export let allowAdd: boolean = false;
   export let allowAddJurisdiction: boolean = false;
   export let replicasOverride: Map<string, EntityReplica> | null = null;
-  export let envOverride: Parameters<typeof resolveEntityName>[1] & { jReplicas?: unknown } | null = null;
+  export let entityNames: Map<string, string> = new Map();
+  export let jurisdictions: Array<{ name?: string }> = [];
 
   const dispatch = createEventDispatcher();
 
@@ -27,9 +26,8 @@
   let searchTerm = '';
 
   $: xlnReady = !!$xlnInstance;
-  $: activeReplicas = replicasOverride || $visibleReplicas || $replicas;
+  $: activeReplicas = replicasOverride;
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
-  $: activeEnv = envOverride || $xlnEnvironment;
 
   // Build tree structure reactively (grouped by signer, not entity)
   interface SignerNode {
@@ -53,20 +51,16 @@
     name: string;
   }
 
-  $: jMachines = buildJMachines(activeEnv);
+  $: jMachines = buildJMachines(jurisdictions);
   $: signerTree = buildSignerTree(
     activeReplicas,
     activeXlnFunctions,
     searchTerm
   );
 
-  function buildJMachines(env: { jReplicas?: unknown } | null | undefined): JMachineNode[] {
-    const jReplicas = env?.jReplicas;
-    if (!(jReplicas instanceof Map)) return [];
-    const list = Array.from(jReplicas.values());
-
-    return list
-      .map((jr: { name?: string } | unknown) => ({ name: (jr as { name?: string })?.name }))
+  function buildJMachines(items: Array<{ name?: string }> | null | undefined): JMachineNode[] {
+    return (items || [])
+      .map((jr) => ({ name: jr?.name }))
       .filter((jr): jr is JMachineNode => typeof jr.name === 'string' && jr.name.length > 0);
   }
 
@@ -137,8 +131,8 @@
   }
 
   function getEntityName(replica: EntityReplica): string {
-    const name = resolveEntityName(replica?.entityId || '', activeEnv);
-    return name || '';
+    const normalizedEntityId = String(replica?.entityId || '').trim().toLowerCase();
+    return normalizedEntityId ? entityNames.get(normalizedEntityId) || '' : '';
   }
 
   function shortEntity(id: string): string {
@@ -211,10 +205,7 @@
   }
 
   $: canAddEntity = allowAdd && !!(jurisdictionFilter || selectedJurisdiction);
-  $: canAddJurisdiction = allowAddJurisdiction && !!activeEnv;
-  $: if (isOpen && activeReplicas) {
-    scheduleGossipProfileFetch(Array.from(activeReplicas.values()).map((replica) => replica.entityId));
-  }
+  $: canAddJurisdiction = allowAddJurisdiction;
 </script>
 
 <Dropdown bind:open={isOpen} minWidth={420} maxWidth={650}>

@@ -9,75 +9,33 @@
    * Copyright (C) 2025 XLN Finance
    */
 
-  import { xlnEnvironment } from '$lib/stores/xlnStore';
+  import { onDestroy } from 'svelte';
+  import { readable, type Readable } from 'svelte/store';
+  import type { Env, RuntimeAdapterSolvencySummary } from '@xln/runtime/xln-api';
+  import { createRuntimeQueryStore } from '$lib/stores/runtimeQueryClient';
+  import { buildSolvencyProjection } from './solvency-panel-view';
 
-  // Props (Svelte 5 runes mode)
-  let {} = $props();
+  const emptyEnv = readable<Env | null>(null);
 
-  // Real-time solvency calculation
-  let solvencyData = $derived.by(() => {
-    const currentEnv = $xlnEnvironment;
-    if (!currentEnv) return null;
+  let {
+    runtimeFrameEnv = emptyEnv,
+  }: {
+    runtimeFrameEnv?: Readable<Env | null>;
+  } = $props();
 
-    // M1: Total reserves (on-chain, immediately available)
-    let totalReserves = 0n;
-    if (currentEnv.eReplicas) {
-      for (const [_, replica] of currentEnv.eReplicas.entries()) {
-        if (replica.state?.reserves) {
-          for (const [_, amount] of replica.state.reserves.entries()) {
-            totalReserves += amount;
-          }
-        }
-      }
-    }
+  const solvencyStore = createRuntimeQueryStore((client) => client.readSolvencySummary());
 
-    // M2: Confirmed collateral (current committed state)
-    // M3: Pending collateral (in pendingFrame, awaiting finalization)
-    let confirmedCollateral = 0n;
-    let pendingCollateral = 0n;
-
-    if (currentEnv.eReplicas) {
-      for (const [_, replica] of currentEnv.eReplicas.entries()) {
-        if (replica.state?.accounts) {
-          for (const [_, account] of replica.state.accounts.entries()) {
-            // Sum confirmed collateral from committed deltas
-            if (account.deltas) {
-              for (const [_, delta] of account.deltas.entries()) {
-                confirmedCollateral += delta.collateral || 0n;
-              }
-            }
-
-            // Sum pending collateral from pendingFrame (if exists)
-            if (account.pendingFrame?.deltas) {
-              for (const delta of account.pendingFrame.deltas) {
-                pendingCollateral += delta.collateral || 0n;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Divide by 2 (each account counted from both entity perspectives)
-    confirmedCollateral = confirmedCollateral / 2n;
-    pendingCollateral = pendingCollateral / 2n;
-
-    const totalCollateral = confirmedCollateral + pendingCollateral;
-    const delta = totalReserves - totalCollateral;
-    const isValid = delta === 0n;
-
-    return {
-      m1: totalReserves,        // Reserves (Basel M1 - most liquid)
-      m2: confirmedCollateral,  // Confirmed collateral (Basel M2 - finalized)
-      m3: pendingCollateral,    // Pending collateral (Basel M3 - in consensus)
-      total: totalCollateral,
-      delta,
-      isValid,
-      timestamp: Date.now()
-    };
+  onDestroy(() => {
+    solvencyStore.destroy();
   });
 
-  function formatAmount(amount: bigint): string {
+  let solvencyData = $derived.by(() => {
+    return $solvencyStore.data ?? buildSolvencyProjection($runtimeFrameEnv);
+  });
+
+  let solvencyError = $derived($solvencyStore.error);
+
+  function formatAmount(amount: bigint | RuntimeAdapterSolvencySummary['m1']): string {
     const num = Number(amount) / 1e18;
     if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(2)}M`;
     if (num >= 1_000) return `$${(num / 1_000).toFixed(1)}K`;
@@ -85,9 +43,9 @@
   }
 </script>
 
-<div class="solvency-panel glass-panel">
+<div class="solvency-panel glass-panel" data-testid="solvency-panel">
   <!-- Hero status -->
-  <div class="hero-status" class:valid={solvencyData?.isValid}>
+  <div class="hero-status" class:valid={solvencyData?.isValid} data-testid="solvency-status">
     <div class="status-icon">
       {solvencyData?.isValid ? '✓' : '⚠'}
     </div>
@@ -100,7 +58,7 @@
     <!-- Big beautiful reserves -->
     <div class="hero-metric animate-fade-in">
       <div class="metric-label">TOTAL RESERVES</div>
-      <div class="metric-value accent animate-glow">
+      <div class="metric-value accent animate-glow" data-testid="solvency-m1">
         {formatAmount(solvencyData.m1)}
       </div>
       <div class="metric-sublabel text-small">
@@ -112,7 +70,7 @@
     <div class="collateral-grid">
       <div class="glass-card metric-card">
         <div class="metric-label">CONFIRMED</div>
-        <div class="metric-value">
+          <div class="metric-value" data-testid="solvency-m2">
           {formatAmount(solvencyData.m2)}
         </div>
         <div class="text-tiny" style="color: var(--text-tertiary);">M2 • Finalized</div>
@@ -121,7 +79,7 @@
       {#if solvencyData.m3 > 0n}
         <div class="glass-card metric-card">
           <div class="metric-label">PENDING</div>
-          <div class="metric-value" style="color: var(--accent-orange);">
+            <div class="metric-value" style="color: var(--accent-orange);" data-testid="solvency-m3">
             {formatAmount(solvencyData.m3)}
           </div>
           <div class="text-tiny" style="color: var(--text-tertiary);">M3 • In consensus</div>
@@ -147,6 +105,11 @@
       {/if}
     </div>
 
+  {:else if solvencyError}
+    <div class="empty-state error text-small">
+      <div>Solvency projection failed</div>
+      <div class="error-text">{solvencyError}</div>
+    </div>
   {:else}
     <div class="empty-state text-small">
       <div style="opacity: 0.4; font-size: 2rem;">∅</div>
@@ -192,6 +155,15 @@
 
   .status-text {
     color: var(--text-secondary);
+  }
+
+  .empty-state.error {
+    color: var(--accent-red);
+  }
+
+  .error-text {
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
   }
 
   /* Hero metric */

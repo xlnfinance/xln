@@ -8,6 +8,8 @@
 
 export {
   applyJEventsToEnv,
+  buildJEventsRuntimeInput,
+  buildRawJEventsRuntimeInput,
   collectRelevantJEventReplicaKeys,
   getWatcherStartBlock,
   getMinimumCommittedSignerJHeight,
@@ -17,6 +19,7 @@ export {
   resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
+  type JEventsRuntimeInputBuildResult,
   type PendingWatcherJBlockMap,
   type RawJEvent,
   type RawJEventArgs,

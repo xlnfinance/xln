@@ -67,6 +67,7 @@ import type {
 export {
   buildAccountMerkleFromDocs,
   buildAccountMerkleFromState,
+  hydrateAccountDocFromStorage,
   hydrateEntityStateFromStorage,
   projectAccountDoc,
   projectEntityCoreDoc,

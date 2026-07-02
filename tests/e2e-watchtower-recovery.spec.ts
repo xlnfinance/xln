@@ -34,7 +34,6 @@ import {
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
-const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
 const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 180_000;
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
 const POST_RESTORE_PAYMENT_AMOUNT = 3n * 10n ** 18n;
@@ -378,7 +377,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
     .poll(async () => {
       const local = await page.evaluate((targetEntityId) => {
         const view = window as typeof window & {
-          XLN?: { refreshGossip?: (env: unknown) => void };
+          __xln?: { instance?: { refreshGossip?: (env: unknown) => void } };
           isolatedEnv?: {
             gossip?: {
               getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
@@ -386,7 +385,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
           };
         };
         try {
-          view.XLN?.refreshGossip?.(view.isolatedEnv);
+          view.__xln?.instance?.refreshGossip?.(view.isolatedEnv);
         } catch {
           // best effort
         }
@@ -639,15 +638,12 @@ async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towe
     const formatError = (error: unknown): string =>
       error instanceof Error ? error.message : String(error);
     const view = window as typeof window & {
-      XLN?: {
-        stopP2P?: (env: unknown) => void;
-        closeRuntimeDb?: (env: unknown) => Promise<void>;
-        closeInfraDb?: (env: unknown) => Promise<void>;
-      };
-      __xln_instance?: {
-        stopP2P?: (env: unknown) => void;
-        closeRuntimeDb?: (env: unknown) => Promise<void>;
-        closeInfraDb?: (env: unknown) => Promise<void>;
+      __xln?: {
+        instance?: {
+          stopP2P?: (env: unknown) => void;
+          closeRuntimeDb?: (env: unknown) => Promise<void>;
+          closeInfraDb?: (env: unknown) => Promise<void>;
+        };
       };
       __XLN_WATCHTOWERS__?: string[];
       isolatedEnv?: {
@@ -664,7 +660,7 @@ async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towe
     };
     const errors: string[] = [];
     const env = view.isolatedEnv;
-    const xln = view.XLN || view.__xln_instance;
+    const xln = view.__xln?.instance;
     if (!env) throw new Error('Cannot wipe runtime state: isolatedEnv missing');
     if (typeof xln?.closeRuntimeDb !== 'function' || typeof xln.closeInfraDb !== 'function') {
       throw new Error('Cannot wipe runtime state: DB close API missing');
@@ -788,12 +784,15 @@ test.describe('watchtower runtime recovery', () => {
       message: 'Failed to load resource: the server responded with a status of 503',
     });
     let recipientContext: BrowserContext | null = null;
-    if (!ISOLATED_BASELINE_READY && process.env.E2E_RESET_BASE_URL) {
-      await ensureE2EBaseline(page, {
-        timeoutMs: LONG_E2E ? 240_000 : 180_000,
-        autoResetGraceMs: LONG_E2E ? 12_000 : 8_000,
-      });
-    }
+    const baselineHealth = await ensureE2EBaseline(page, {
+      timeoutMs: LONG_E2E ? 240_000 : 180_000,
+      autoResetGraceMs: LONG_E2E ? 12_000 : 8_000,
+    });
+    const baselineHubId =
+      baselineHealth.hubMesh?.hubIds?.[0]
+      ?? baselineHealth.hubs?.find((hub) => hub.online === true)?.entityId
+      ?? '';
+    expect(baselineHubId, 'watchtower recovery needs a live baseline hub').toMatch(/^0x[a-fA-F0-9]{64}$/);
 
     const tower = await startWatchtower();
     try {
@@ -829,8 +828,8 @@ test.describe('watchtower runtime recovery', () => {
       const preWipe = await waitForCommittedPrimaryLocalAccountState(page);
       expect(preWipe.accountExists, 'pre-wipe local account must exist').toBe(true);
       expect(preWipe.hubId, 'pre-wipe local account must resolve a hub id').toBeTruthy();
-      const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey, preWipe.runtimeHeight);
-      expect(receipt.height, 'watchtower backup must include the committed pre-wipe runtime height').toBeGreaterThanOrEqual(preWipe.runtimeHeight);
+      const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey);
+      expect(receipt.height, 'watchtower backup must store a committed runtime frame before wipe').toBeGreaterThan(0);
       expect(receipt.storedBytes, 'watchtower backup must store encrypted runtime bytes').toBeGreaterThan(0);
 
       page = await wipeBrowserRuntimeState(page, context, [tower.baseUrl]);

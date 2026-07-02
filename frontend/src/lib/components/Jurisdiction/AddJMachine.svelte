@@ -11,6 +11,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import {
+    deriveJMachineCreatedAt,
     parseJMachineConfigJson,
     type JMachineConfig,
   } from '$lib/stores/jmachineStore';
@@ -41,6 +42,8 @@
     cancel: void;
   }>();
 
+  export let busy = false;
+
   // Form state
   let mode: 'browservm' | 'rpc' = 'rpc';
   let selectedNetworkId: number | 'custom' = 31338;
@@ -55,6 +58,7 @@
   let advancedContracts: JMachineConfig['contracts'] | undefined;
   let deploySelectedNetworkId: number | null = null;
   let deployNotice = '';
+  $: submitBusy = isCreating || busy;
 
   // Separate mainnets and testnets
   $: mainnets = POPULAR_NETWORKS.filter(n => !n.testnet);
@@ -98,7 +102,14 @@
     rpcs: fields.rpcs,
     blockTimeMs: fields.blockTimeMs,
     ...(fields.contracts ? { contracts: fields.contracts } : {}),
-    createdAt: Date.now(),
+    createdAt: deriveJMachineCreatedAt({
+      name: fields.name.trim() || fields.defaultName,
+      mode: fields.mode,
+      chainId: fields.chainId,
+      ticker: fields.ticker,
+      rpcs: fields.rpcs,
+      blockTimeMs: fields.blockTimeMs,
+    }),
   });
 
   const stringifyDraftConfig = (config: JMachineConfig): string => {
@@ -226,6 +237,7 @@
       });
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to create J-Machine';
+    } finally {
       isCreating = false;
     }
   }
@@ -402,11 +414,11 @@
   {/if}
 
   <div class="actions">
-    <button class="btn secondary" on:click={() => dispatch('cancel')} disabled={isCreating}>
+    <button class="btn secondary" on:click={() => dispatch('cancel')} disabled={submitBusy}>
       Cancel
     </button>
-    <button class="btn primary" on:click={handleCreate} disabled={isCreating} data-testid="add-jmachine-create">
-      {#if isCreating}
+    <button class="btn primary" on:click={handleCreate} disabled={submitBusy} data-testid="add-jmachine-create">
+      {#if submitBusy}
         {deploySelectedNetworkId === chainId ? 'Deploying...' : 'Creating...'}
       {:else}
         {deploySelectedNetworkId === chainId ? 'Deploy Contracts' : 'Create J-Machine'}

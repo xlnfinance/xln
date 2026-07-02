@@ -50,6 +50,8 @@ describe('production startup wiring', () => {
     );
 
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const marketMakerPoller = readFileSync(join(repoRoot, 'runtime/orchestrator/market-maker-child-poll.ts'), 'utf8');
+    const marketMakerAggregation = readFileSync(join(repoRoot, 'runtime/orchestrator/market-maker-aggregated-health.ts'), 'utf8');
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime-entity-routing.ts'), 'utf8');
     const runtimeMainSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
@@ -65,19 +67,29 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS');
     expect(orchestrator).toContain('let hubHealthPollInFlight: Promise<void> | null = null;');
     expect(orchestrator).toContain('if (hubHealthPollInFlight) return hubHealthPollInFlight;');
-    expect(orchestrator).toContain('let marketMakerHealthPollInFlight: Promise<void> | null = null;');
-    expect(orchestrator).toContain('if (marketMakerHealthPollInFlight) return marketMakerHealthPollInFlight;');
-    expect(orchestrator).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)");
+    expect(orchestrator).toContain('const marketMakerPoller = createMarketMakerChildPoller({');
+    expect(orchestrator).toContain('const pollMarketMakerInfo = marketMakerPoller.pollInfo;');
+    expect(orchestrator).toContain('const pollMarketMakerHealth = marketMakerPoller.pollHealth;');
+    expect(marketMakerPoller).toContain('let healthPollInFlight: Promise<void> | null = null;');
+    expect(marketMakerPoller).toContain('let infoPollInFlight: Promise<void> | null = null;');
+    expect(marketMakerPoller).toContain('if (healthPollInFlight) return healthPollInFlight;');
+    expect(marketMakerPoller).toContain('if (infoPollInFlight) return infoPollInFlight;');
+    expect(marketMakerPoller).toContain("fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs)");
     expect(orchestrator).not.toContain('const [health, info] = await Promise.all([');
-    expect(orchestrator).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS)");
+    expect(marketMakerPoller).toContain("fetchJson<MarketMakerInfoPayload>(`${apiBase()}/api/info`, infoTimeoutMs)");
     expect(orchestrator).not.toContain('if (!marketMakerChild.lastInfo) {');
-    expect(orchestrator).toContain('const applyMarketMakerInfo = (info: MarketMakerInfoPayload, proc: ChildProcess): void => {');
-    expect(orchestrator).toContain('marketMakerChild.lastInfo = { ...(marketMakerChild.lastInfo || {}), ...info };');
-    expect(orchestrator).toContain('if (!isCurrentMarketMakerProc(proc)) return;');
-    expect(orchestrator).toContain('const marketMakerHealth = options.marketMakerHealthOverride ?? marketMakerChild.lastHealth;');
-    expect(orchestrator).toContain('const mmHealthReady = Boolean(marketMakerHealth?.marketMaker);');
-    expect(orchestrator).toContain('const mmOk = !args.mmEnabled');
-    expect(orchestrator).toContain('marketMakerActive &&');
+    expect(marketMakerPoller).toContain('const applyInfo = (info: MarketMakerInfoPayload, proc: ChildProcess): void => {');
+    expect(marketMakerPoller).toContain('child.lastInfo = { ...(child.lastInfo || {}), ...info };');
+    expect(marketMakerPoller).toContain('if (!isCurrentProc(proc)) return;');
+    expect(orchestrator).toContain('normalizeMarketMakerHealthPayload');
+    expect(marketMakerPoller).toContain('type RawMarketMakerHealthPayload');
+    expect(marketMakerPoller).toContain('const health = await fetchJson<MarketMakerHealthPayload | RawMarketMakerHealthPayload>');
+    expect(marketMakerPoller).toContain('return normalizeMarketMakerHealthPayload(health);');
+    expect(orchestrator).toContain('const marketMakerHealth = normalizeMarketMakerHealthPayload(options.marketMakerHealthOverride ?? marketMakerChild.lastHealth);');
+    expect(orchestrator).toContain('const aggregatedMarketMakerHealth = buildAggregatedMarketMakerHealth({');
+    expect(marketMakerAggregation).toContain('const childReady = marketMakerHealth?.marketMaker?.ok === true;');
+    expect(marketMakerAggregation).toContain('const ok = !mmEnabled');
+    expect(marketMakerAggregation).toContain('marketMakerActive &&');
     const waitForMarketMakerReady = orchestrator.slice(orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'));
     const waitForMarketMakerReadyEnd = waitForMarketMakerReady.indexOf('const waitForHubSelfReady = async (child: HubChild): Promise<void> => {');
     expect(waitForMarketMakerReadyEnd).toBeGreaterThan(0);
@@ -87,24 +99,21 @@ describe('production startup wiring', () => {
     expect(waitForMarketMakerReady.indexOf('if (marketMakerChild.exitCode !== null || marketMakerChild.exitSignal !== null)')).toBeLessThan(
       waitForMarketMakerReady.indexOf('health.marketMaker.ok'),
     );
-    expect(orchestrator.indexOf("fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS)")).toBeLessThan(
-      orchestrator.indexOf("fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS)"),
+    expect(marketMakerPoller.indexOf("fetchJson<MarketMakerInfoPayload>(`${apiBase()}/api/info`, infoTimeoutMs)")).toBeLessThan(
+      marketMakerPoller.indexOf("fetchJson<MarketMakerHealthPayload>(`${apiBase()}/api/health`, healthTimeoutMs)"),
     );
-    expect(orchestrator).toContain('const applyMarketMakerHealth = (');
-    expect(orchestrator).toContain('marketMakerChild.lastHealth = health;');
-    expect(orchestrator).toContain('options: { trustStartupPhase: boolean },');
-    expect(orchestrator).toContain('if (health.startupPhase !== undefined && (options.trustStartupPhase || !nextInfo.startupPhase)) {');
-    expect(orchestrator).toContain('applyMarketMakerHealth(health, proc, { trustStartupPhase: !infoFresh });');
-    const lastStartupPhaseUpdate = orchestrator.slice(orchestrator.indexOf('marketMakerChild.lastStartupPhase = String('));
-    expect(lastStartupPhaseUpdate.indexOf('marketMakerChild.lastInfo?.startupPhase ||')).toBeLessThan(
-      lastStartupPhaseUpdate.indexOf('marketMakerChild.lastHealth?.startupPhase ||'),
+    expect(marketMakerPoller).toContain('const applyHealth = (');
+    expect(marketMakerPoller).toContain('child.lastHealth = health;');
+    expect(marketMakerPoller).toContain('options: { trustStartupPhase: boolean },');
+    expect(marketMakerPoller).toContain('if (health.startupPhase !== undefined && (options.trustStartupPhase || !nextInfo.startupPhase)) {');
+    expect(marketMakerPoller).toContain('if (health) applyHealth(health, proc, { trustStartupPhase: !infoFresh });');
+    const lastStartupPhaseUpdate = marketMakerPoller.slice(marketMakerPoller.indexOf('child.lastStartupPhase = String('));
+    expect(lastStartupPhaseUpdate.indexOf('child.lastInfo?.startupPhase ||')).toBeLessThan(
+      lastStartupPhaseUpdate.indexOf('child.lastHealth?.startupPhase ||'),
     );
-    expect(orchestrator).toContain('let marketMakerInfoPollInFlight: Promise<void> | null = null;');
-    expect(orchestrator).toContain('const pollMarketMakerInfo = async (): Promise<void> => {');
-    expect(orchestrator).toContain('const mmChildReady = marketMakerHealth?.marketMaker?.ok === true;');
-    expect(orchestrator).toContain('mmChildReady &&');
-    expect(orchestrator).toContain('mmHubs.every((hub) => hub.depthReady) &&');
-    expect(orchestrator).toContain('routes.every(route => route.depthReady)');
+    expect(marketMakerAggregation).toContain('hubs.every((hub) => hub.depthReady) &&');
+    expect(marketMakerAggregation).toContain('depthReady: route.depthReady === true');
+    expect(marketMakerAggregation).toContain('expectedOffers: Number(pair.expectedOffers || 0)');
     expect(orchestrator).toContain('health.marketMaker.hubs.every(hub => hub.depthReady)');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
     expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdictions.ts'), 'utf8'))
@@ -145,6 +154,17 @@ describe('production startup wiring', () => {
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime-tx-handlers.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
     const rpcAdapter = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+    for (const [marker, nextMarker] of [
+      ["if (pathname === '/api/lending/offer'", "if (pathname === '/api/lending/borrow'"],
+      ["if (pathname === '/api/lending/borrow'", "if (pathname === '/api/lending/repay'"],
+      ["if (pathname === '/api/lending/repay'", "if (pathname === '/api/tokens'"],
+    ] as const) {
+      const lendingBlock = extractSourceBlock(hubNode, marker, nextMarker);
+      expect(lendingBlock).toContain('validateRuntimeInputAdmission');
+      expect(lendingBlock).toContain('registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt)');
+      expect(lendingBlock).toContain('getCurrentRuntimeHeight: currentRuntimeHeight');
+      expect(lendingBlock).toContain('buildRuntimeInputStatusUrl: runtimeInputStatusUrl');
+    }
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
@@ -462,6 +482,9 @@ describe('production startup wiring', () => {
 
   test('deploy starts and checks the production Tron chain', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2');
     expect(deploy).toContain('wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"');
     expect(deploy).toContain('wait_for_public_rpc_chain "/rpc2" "0x7a6a"');
@@ -472,14 +495,54 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('public /rpc must proxy through orchestrator safety filter');
     expect(deploy).toContain('fail_deploy_with_debug "anvil2 did not become ready on :8546"');
     expect(deploy).toContain('local deadline=$((SECONDS + 1800))');
+    expect(deploy).toContain('RESET_PRODUCTION_MESH=0');
+    expect(deploy).toContain('--reset-mesh');
+    expect(deploy).toContain('--code-only');
+    expect(deploy).toContain('if [ "$RESET_PRODUCTION_MESH" = "1" ]; then');
+    expect(deploy).toContain('echo "[deploy] restarting production services without resetting anvil/runtime state"');
     expect(deploy).toContain('echo "[deploy] resetting production anvil + runtime state"');
     expect(deploy).toContain('rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody');
     expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset');
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset');
+    expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M');
+    expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M');
     expect(deploy).toContain('pm2 delete xln-server >/dev/null 2>&1 || true');
     expect(deploy).toContain('run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M');
     expect(deploy).not.toContain('pm2 restart xln-server');
-    expect(deploy).not.toContain('preserving production anvil + runtime state');
+    expect(packageJson.scripts['deploy:prod:runtime']).toContain('--code-only');
+    expect(packageJson.scripts['deploy:prod:runtime:code']).toContain('--code-only');
+    expect(packageJson.scripts['deploy:prod:runtime:reset']).toContain('--reset-mesh');
+    expect(packageJson.scripts['deploy:prod:fresh']).toContain('--reset-mesh');
+  });
+
+  test('prod remote runtime import e2e cannot reset the shared prod mesh implicitly', () => {
+    const baseline = readFileSync(join(repoRoot, 'tests/utils/e2e-baseline.ts'), 'utf8');
+    const radapterRemote = readFileSync(join(repoRoot, 'tests/e2e-radapter-remote.spec.ts'), 'utf8');
+    const manager = readFileSync(join(repoRoot, 'frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte'), 'utf8');
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+
+    expect(baseline).toContain('allowAutoReset?: boolean;');
+    expect(baseline).toContain('if (!resolved.allowAutoReset) {');
+    expect(baseline).toContain('E2E baseline was not ready and automatic reset is disabled');
+    expect(radapterRemote).toContain('allowAutoReset: false');
+    expect(orchestrator).toContain('const publishRuntimeImportManifest = async (): Promise<boolean> => {');
+    expect(orchestrator).toContain('const health = await buildAggregatedHealthResponse();');
+    expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
+    expect(orchestrator).toContain('if (!readiness.ok) {');
+    expect(orchestrator).toContain('ready: false,');
+    expect(orchestrator).toContain('entries: [],');
+    expect(orchestrator).toContain("'Retry-After': '2'");
+    expect(orchestrator).not.toContain('status: readiness.status, headers');
+    expect(orchestrator).toContain('clearRuntimeImportManifestFile();');
+    expect(orchestrator).toContain('scheduleRuntimeImportManifestRefresh(null);');
+    expect(orchestrator).toContain('clearRuntimeImportManifestFile();\n  const preserveState');
+    expect(orchestrator).not.toContain('await persistHubReadySnapshots();\n    publishRuntimeImportManifest();');
+    expect(orchestrator).toContain('resetState.inProgress = false;\n  }\n  await publishRuntimeImportManifest();');
+
+    expect(manager).toContain('let loadingImportSource = false;');
+    expect(manager).toContain('bulkImportDisabled = working || loadingImportSource || bulkText.trim().length === 0');
+    expect(manager).toContain('disabled={bulkImportDisabled}');
+    expect(manager).toContain('if (bulkImportDisabled) return;');
   });
 
   test('prod diagnose accepts the market maker terminal startup phase', () => {
@@ -648,7 +711,11 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('LOCAL_PROD_SMOKE_STAGE_BUDGET_EXCEEDED');
     expect(smoke).toContain("const crossReadyAt = stageElapsed('marketMaker:cross-ready');");
     expect(smoke).toContain("requireStageBudget('marketMaker:cross', crossReadyAt - crossStartedAt, stageBudgetsMs.cross, snapshot);");
-    expect(smoke).toContain('Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0');
+    expect(smoke).toContain('const marketMakerFullDepthReady = (health: HealthPayload): boolean => {');
+    expect(smoke).toContain('const expectedRoutes = Number(health.marketMaker?.cross?.expectedRoutes || 0);');
+    expect(smoke).toContain('hub.depthReady === true');
+    expect(smoke).toContain('route.depthReady === true');
+    expect(smoke).toContain('marketMakerFullDepthReady(health) &&');
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_SAME_CHAIN_BUDGET_MS'] || '20000'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_CROSS_BUDGET_MS'] || '60000'");
     expect(smoke).toContain("process.env['XLN_LOCAL_PROD_SMOKE_HEALTH_POLL_MAX_MS'] || '2000'");
@@ -988,11 +1055,21 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
 
+  test('offchain faucet exposes all local hub bootstrap entities', () => {
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    expect(hubNode).toContain('faucetRelayStore.activeHubEntityIds = hubBootstraps.map(entry => entry.entityId);');
+    expect(hubNode).not.toContain('faucetRelayStore.activeHubEntityIds = [readyBootstrap.entityId];');
+  });
+
   test('orchestrator exposes the gossip profile bundle endpoint used by payments', () => {
     const debugApi = readFileSync(join(repoRoot, 'runtime/orchestrator/debug-api.ts'), 'utf8');
     const paymentPanel = readFileSync(join(repoRoot, 'frontend/src/lib/components/Entity/PaymentPanel.svelte'), 'utf8');
+    const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
 
-    expect(paymentPanel).toContain('/api/gossip/profile?entityId=');
+    expect(paymentPanel).not.toContain('/api/gossip/profile?entityId=');
+    expect(paymentPanel).toContain('refreshPaymentRuntimeGossip');
+    expect(xlnStore).toContain('/api/gossip/profile?entityId=');
+    expect(xlnStore).toContain('export async function refreshPaymentRuntimeGossip');
     expect(debugApi).toContain("import { buildKnownProfileBundle } from '../server/gossip-profiles';");
     expect(debugApi).toContain("if (deps.pathname === '/api/gossip/profile')");
     expect(debugApi).toContain('const bundle = buildKnownProfileBundle({');

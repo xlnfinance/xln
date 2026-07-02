@@ -1131,19 +1131,57 @@
     font-style: normal;
   }
 
-  .swap-panel .secondary-setup-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 34px;
-    margin-top: 8px;
-    border-radius: 7px;
-    border: 1px solid rgba(251, 191, 36, 0.35);
-    background: rgba(251, 191, 36, 0.12);
+  .swap-panel .swap-setup-consent {
+    display: grid;
+    gap: 6px;
+    margin: 8px 0;
+    padding: 8px 10px;
+    border: 1px solid rgba(251, 191, 36, 0.24);
+    border-radius: 8px;
+    background: rgba(251, 191, 36, 0.07);
+  }
+
+  .swap-panel .swap-setup-step {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    min-width: 0;
+    color: #d1d5db;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .swap-panel .swap-setup-step input {
+    width: 13px;
+    height: 13px;
+    margin: 1px 0 0;
+    accent-color: #fbbf24;
+  }
+
+  .swap-panel .swap-setup-step span {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .swap-panel .swap-setup-step strong,
+  .swap-panel .swap-setup-step small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .swap-panel .swap-setup-step strong {
     color: #fde68a;
-    font-size: 12px;
-    font-weight: 800;
+    font-size: 11px;
+    font-weight: 900;
+  }
+
+  .swap-panel .swap-setup-step small {
+    color: #9ca3af;
+    font-size: 10px;
+    font-weight: 700;
   }
 
   .swap-panel .step-btn {

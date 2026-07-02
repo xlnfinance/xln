@@ -1,6 +1,5 @@
 <script lang="ts">
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
-  import type { Writable } from 'svelte/store';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import AssetFaucetCard from './AssetFaucetCard.svelte';
   import AssetLedgerTable from './AssetLedgerTable.svelte';
@@ -14,13 +13,9 @@
 
   export let replica: EntityReplica;
   export let tab: Tab;
-  export let activeEnv: Env | EnvSnapshot;
-  export let activeLiveEnv: Env | null = null;
   export let activeIsLive = false;
-  export let envRevision = '';
-  export let liveEnvResolver: (() => Env | null) | null = null;
-  export let liveEnvStore: Writable<Env | null> | null = null;
-  export let currentSignerId = '';
+  export let profileByEntityId: Map<string, GossipProfile> = new Map();
+  export let entityNames: Map<string, string> = new Map();
   export let currentExternalEoaValue = '';
   export let copiedMetaField = '';
   export let externalWalletSnapshotSource: ExternalWalletSnapshotSource | null = null;
@@ -119,6 +114,8 @@
   export let enforceOutstandingDebt: (detail: any) => void | Promise<void>;
   export let openAssetMoveWorkspace: () => void;
   export let openAssetHistoryWorkspace: () => void;
+
+  $: profiles = Array.from(profileByEntityId.values());
   export let clearPendingBatch: () => void | Promise<void>;
   export let rebroadcastPendingBatch: () => void | Promise<void>;
   export let broadcastPendingBatch: () => void | Promise<void>;
@@ -169,13 +166,8 @@
 />
 
 <DebtPanel
-  entityId={replica.state?.entityId || tab.entityId}
-  signerId={currentSignerId}
-  sourceEnv={activeLiveEnv ?? activeEnv}
   entityStateOverride={replica.state ?? null}
-  sourceRevision={envRevision}
-  sourceEnvResolver={liveEnvResolver}
-  sourceEnvStore={liveEnvStore}
+  {entityNames}
   canEnforce={activeIsLive}
   on:enforce={(event) => enforceOutstandingDebt(event.detail)}
 />
@@ -261,6 +253,7 @@
       {moveEntityOptions}
       {moveHubEntityOptions}
       {moveSourceAccountOptions}
+      {profiles}
       reserveRecipientPreferredId={resolveSelfEntityId()}
       targetEntityPreferredId={resolveSelfEntityId()}
       entityId={replica?.state?.entityId || tab.entityId}
@@ -276,9 +269,9 @@
     <SettlementPanel
       entityId={replica.state?.entityId || tab.entityId}
       {replica}
-      env={activeEnv}
       isLive={activeIsLive}
       historyOnly={true}
+      {profiles}
     />
   {/if}
 </section>

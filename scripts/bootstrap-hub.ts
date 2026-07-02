@@ -166,6 +166,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
       {
         type: 'setHubConfig',
         data: {
+          hubName: hubConfig.name,
           matchingStrategy: hubConfig.matchingStrategy ?? 'amount',
           ...(hubConfig.policyVersion !== undefined ? { policyVersion: hubConfig.policyVersion } : {}),
           routingFeePPM: hubConfig.routingFeePPM ?? 100,

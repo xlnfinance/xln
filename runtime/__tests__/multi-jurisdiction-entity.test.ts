@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createEmptyEnv, enqueueRuntimeInput, process, submitDebtEnforcement } from '../runtime';
+import { buildDebtEnforcementRuntimeInput, createEmptyEnv, enqueueRuntimeInput, process } from '../runtime';
 import { applyEntityTx } from '../entity-tx/apply';
 import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -345,6 +345,44 @@ describe('multi-jurisdiction entity binding', () => {
     expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
   });
 
+  test('accountInput for an unknown non-genesis account requires account-chain sync', async () => {
+    const env = makeEnv('multi-jurisdiction-account-input-sync-required');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+
+    const entityA = entity('17');
+    const entityB = entity('18');
+    await importEntity(env, entityA, '47', j1);
+    await importEntity(env, entityB, '48', j1);
+
+    const overlayStart = env.overlay?.length ?? 0;
+    const result = await applyEntityTx(env, findState(env, entityA)!, {
+      type: 'accountInput',
+      data: {
+        kind: 'frame',
+        fromEntityId: entityB,
+        toEntityId: entityA,
+        height: 2,
+        newHanko: '0x',
+        newAccountFrame: {
+          height: 2,
+          timestamp: 1,
+          jHeight: 0,
+          accountTxs: [],
+          prevFrameHash: `0x${'aa'.repeat(32)}`,
+          stateHash: `0x${'bb'.repeat(32)}`,
+          deltas: [],
+          byLeft: false,
+        },
+      },
+    } as never);
+
+    expect(result.skippedError).toContain('ACCOUNT_SYNC_REQUIRED');
+    expect(result.newState.messages.some((message) => message.includes('ACCOUNT_SYNC_REQUIRED'))).toBe(true);
+    expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
+    expect((env.overlay ?? []).slice(overlayStart).some((record) => record.family === 'account')).toBe(false);
+  });
+
   test('openAccount rejects unknown jurisdiction for a bound entity', async () => {
     const env = makeEnv('multi-jurisdiction-open-unknown');
     const j1 = makeJurisdiction('J1', 31337, '11', '12');
@@ -431,7 +469,7 @@ describe('multi-jurisdiction entity binding', () => {
     ).toThrow('ACCOUNT_JURISDICTION_UNKNOWN');
   });
 
-  test('debt enforcement uses the entity jurisdiction instead of active jurisdiction', async () => {
+  test('debt enforcement RuntimeInput uses the entity jurisdiction instead of active jurisdiction', async () => {
     const env = makeEnv('multi-jurisdiction-debt');
     const j1 = makeJurisdiction('J1', 31337, '11', '12');
     const j2 = makeJurisdiction('J2', 31338, '21', '22');
@@ -442,10 +480,18 @@ describe('multi-jurisdiction entity binding', () => {
       enforceDebts: async () => {
         j1Calls += 1;
       },
+      submitTx: async (jTx) => {
+        if (jTx.type === 'debtEnforcement') j1Calls += 1;
+        return { success: true };
+      },
     });
     installJurisdiction(env, j2, {
       enforceDebts: async () => {
         j2Calls += 1;
+      },
+      submitTx: async (jTx) => {
+        if (jTx.type === 'debtEnforcement') j2Calls += 1;
+        return { success: true };
       },
     });
     env.activeJurisdiction = 'J1';
@@ -466,7 +512,13 @@ describe('multi-jurisdiction entity binding', () => {
     });
     await process(env);
 
-    await submitDebtEnforcement(env, entityId, 1, 10n, signerId);
+    enqueueRuntimeInput(env, buildDebtEnforcementRuntimeInput(env, {
+      entityId,
+      signerId,
+      tokenId: 1,
+      maxIterations: 10n,
+    }));
+    await process(env);
 
     expect(j1Calls).toBe(0);
     expect(j2Calls).toBe(1);

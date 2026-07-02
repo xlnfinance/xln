@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import {
   assertExternalSnapshotCount,
@@ -62,5 +63,19 @@ describe('external wallet snapshot helpers', () => {
       .rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_FINALITY_UNAVAILABLE:head=1:depth=2');
     await expect(readExternalWalletSnapshotSource(adapterFixture({ head: 3, finalityDepth: 1, blockHash: null }) as any))
       .rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:2');
+  });
+
+  test('remote projection sessions do not call external wallet snapshot API without live Env', () => {
+    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    const fetchStart = source.indexOf('async function fetchExternalTokens');
+    const fetchEnd = source.indexOf('const jadapter = envAtStart', fetchStart);
+    expect(fetchStart).toBeGreaterThan(0);
+    expect(fetchEnd).toBeGreaterThan(fetchStart);
+    const guardSource = source.slice(fetchStart, fetchEnd);
+    expect(guardSource).toContain("$runtimeControllerHandle.mode === 'remote'");
+    expect(guardSource).toContain('!envAtStart');
+    expect(guardSource).toContain('externalTokens = []');
+    expect(guardSource).toContain('externalWalletSnapshotSource = null');
+    expect(guardSource).toContain('return;');
   });
 });

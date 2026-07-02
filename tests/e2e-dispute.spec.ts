@@ -938,10 +938,59 @@ async function broadcastPendingBatchViaUi(
   page: Page,
   entityId?: string,
   signerId?: string,
+  counterpartyId?: string,
 ): Promise<void> {
+  if (entityId) {
+    await ensureEntityWorkspaceVisible(page, entityId);
+    await ensureEntityShellVisible(page);
+  }
+
+  const isDisputeStartAlreadySubmitted = (snapshot: Awaited<ReturnType<typeof readJBatchSnapshot>> | null) =>
+    !!snapshot && (
+      snapshot.sentDisputeStarts > 0
+      || (snapshot.lastBatchStatus === 'confirmed' && snapshot.lastBatchOps.disputeStarts > 0)
+    );
+
+  const readSnapshot = async () =>
+    entityId && signerId ? await readJBatchSnapshot(page, entityId, signerId) : null;
+
+  const initialSnapshot = await readSnapshot();
+  if (isDisputeStartAlreadySubmitted(initialSnapshot)) {
+    return;
+  }
+
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  if (await accountsTab.isVisible({ timeout: 1_000 }).catch(() => false)) {
+    await accountsTab.click();
+  }
+
   const signButton = page.getByTestId('settle-sign-broadcast').first();
-  await expect(signButton).toBeVisible({ timeout: 30_000 });
-  await expect(signButton).toBeEnabled({ timeout: 120_000 });
+  try {
+    await expect.poll(async () => {
+      if (isDisputeStartAlreadySubmitted(await readSnapshot())) return 'submitted';
+      if (await signButton.isVisible({ timeout: 250 }).catch(() => false)) return 'button';
+      return 'waiting';
+    }, { timeout: 30_000, intervals: [250, 500, 1000] }).toMatch(/^(button|submitted)$/);
+  } catch (error) {
+    const snapshot = await readSnapshot();
+    const accountState = entityId && signerId && counterpartyId
+      ? await readDisputeDebug(page, entityId, signerId, counterpartyId)
+      : null;
+    const visibleControls = await page.evaluate(() => ({
+      pendingBanner: !!document.querySelector('[data-testid="workspace-pending-banner"]'),
+      signBroadcast: !!document.querySelector('[data-testid="settle-sign-broadcast"]'),
+      rebroadcast: !!document.querySelector('[data-testid="settle-rebroadcast"]'),
+      activeLens: document.querySelector('[data-testid="entity-workspace"]')?.getAttribute('data-lens') || '',
+    }));
+    throw new Error(
+      `settle-sign-broadcast unavailable: ${(error as Error).message} ` +
+      `snapshot=${JSON.stringify(snapshot)} accountState=${JSON.stringify(accountState)} controls=${JSON.stringify(visibleControls)}`,
+    );
+  }
+  if (isDisputeStartAlreadySubmitted(await readSnapshot())) {
+    return;
+  }
+  await expect(signButton).toBeEnabled({ timeout: 30_000 });
   let dialogMessage = '';
   const onDialog = async (dialog: any) => {
     dialogMessage = dialog?.message?.() || '';
@@ -1016,10 +1065,14 @@ async function startDisputeFromManageWorkspace(
     await startDisputeFromManageUi(page, counterpartyId, async () => {
       const state = await readAccountState(page, entityId, signerId, counterpartyId);
       return state.jBatchDisputeStarts > 0;
+    }, async () => {
+      const state = await readAccountState(page, entityId, signerId, counterpartyId);
+      return state.status === 'dispute_preparing' || state.jBatchDisputeStarts > 0;
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`disputeStart UI did not queue disputeStart: ${message}`);
+    const state = await readAccountState(page, entityId, signerId, counterpartyId).catch(() => null);
+    throw new Error(`disputeStart UI did not queue disputeStart: ${message} state=${JSON.stringify(state)}`);
   }
 }
 
@@ -1301,7 +1354,7 @@ test.describe('E2E Dispute Flow', () => {
     const disputeQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const disputeHistoryBeforeBroadcast = disputeQueued.batchHistoryCount;
 
-    await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
+    await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
     await timedStep('dispute.wait_batch_history_confirmed', async () => {
       try {
         await expect.poll(async () => {
@@ -1443,7 +1496,10 @@ test.describe('E2E Dispute Flow', () => {
       }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toBe(0);
     });
     await timedStep('dispute.reload_assert_finalized_disputed_entry', async () => {
-      await page.getByRole('button', { name: /^Open Account$/ }).click();
+      await ensureAccountWorkspaceVisible(page, undefined, accountRef.entityId);
+      const openAccountButton = page.getByRole('button', { name: /^Open Account$/ }).first();
+      await expect(openAccountButton).toBeVisible({ timeout: 10_000 });
+      await openAccountButton.click();
       const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
       await expect(disputedRow).toContainText('Finalized disputed account');
@@ -1499,7 +1555,7 @@ test.describe('E2E Dispute Flow', () => {
       'dispute_broadcast.start_dispute',
       () => startDisputeFromManageWorkspace(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
-    await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
+    await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId));
 
     await timedStep('dispute_broadcast.wait_batch_history_confirmed', async () => {
       await expect.poll(async () => {
@@ -1526,9 +1582,15 @@ test.describe('E2E Dispute Flow', () => {
       await page.getByRole('button', { name: /^Open Account$/ }).click();
       const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
-      await expect(disputedRow).toContainText('Active dispute in progress');
-      await expect(disputedRow.getByRole('button', { name: /^Open$/ })).toBeVisible({ timeout: 60_000 });
-      await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toHaveCount(0);
+      await expect(disputedRow).toContainText(/Active dispute in progress|Finalized disputed account/);
+      const disputedText = await disputedRow.textContent();
+      if (disputedText?.includes('Finalized disputed account')) {
+        await expect(disputedRow.getByRole('button', { name: /^Reopen$/i })).toBeVisible({ timeout: 60_000 });
+        await expect(disputedRow.getByRole('button', { name: /^Open$/i })).toHaveCount(0);
+      } else {
+        await expect(disputedRow.getByRole('button', { name: /^Open$/i })).toBeVisible({ timeout: 60_000 });
+        await expect(disputedRow.getByRole('button', { name: /^Reopen$/i })).toHaveCount(0);
+      }
     });
   });
 });

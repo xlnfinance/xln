@@ -13,8 +13,8 @@
  * outCollateral is already secured value and must not inflate trigger metric.
  */
 
-import type { Env, EntityReplica, AccountMachine, JReplica } from '../types';
-import { commitRuntimeInput, getProcess, usd, ensureSignerKeysFromSeed, converge as _converge } from './helpers';
+import type { Env, AccountMachine, JReplica } from '../types';
+import { commitRuntimeInput, getProcess, usd, ensureSignerKeysFromSeed, converge as _converge, findReplica } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
@@ -47,12 +47,6 @@ const requireEntity = (entity: Entity | undefined, name: string): Entity => {
   }
   return entity;
 };
-
-function findReplica(env: Env, entityId: string): [string, EntityReplica] {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-  if (!entry) throw new Error(`Replica not found: ${entityId}`);
-  return entry as [string, EntityReplica];
-}
 
 const converge = (env: Env, maxCycles = 15) => _converge(env, maxCycles);
 

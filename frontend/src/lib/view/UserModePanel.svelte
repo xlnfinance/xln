@@ -15,17 +15,14 @@
   import { activeRuntime as activeRuntimeStore, vaultOperations, allRuntimes } from '$lib/stores/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import {
-    appRuntimeAdapterMode,
     entityPositions,
     xlnFunctions,
     xlnInstance,
-    getXLN,
-    enqueueAndProcess,
-    refreshRuntimeAdapterEnvironment,
-    setRuntimeAdapterActiveEntityId,
+    refreshCurrentRuntimeProjection,
   } from '$lib/stores/xlnStore';
-  import { jmachineOperations } from '$lib/stores/jmachineStore';
-  import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
+  import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import type { Tab } from '$lib/types/ui';
   import type { Env } from '@xln/runtime/xln-api';
@@ -38,54 +35,57 @@
   } from '$lib/utils/onboardingState';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 
-  import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
+  import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
+  import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
   import OnboardingPanel from '$lib/components/Entity/OnboardingPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
-  // Removed WalletView - using EntityPanelTabs for everything (Entity = Wallet)
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
+  import {
+    importJMachineViaRuntime,
+    type JMachineCreateDetail,
+  } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import TimeMachine from './core/TimeMachine.svelte';
+  import {
+    type OnboardingHubCandidate,
+    type OnboardingRuntimeProjection,
+    type OnboardingRuntimeTarget,
+  } from '$lib/components/Entity/onboarding-runtime-input';
+  import {
+    type FormationRuntimeProjection,
+  } from '$lib/components/Entity/formation-runtime-projection';
+  import { hubDiscoveryJurisdictionKey } from '$lib/components/Entity/hub-discovery-profile';
 
   type RuntimeFrame = Env | EnvSnapshot;
   type JurisdictionLike = { name: string };
   type JurisdictionEntry = { name?: string; rpcs?: string[] };
-  type JMachineCreateDetail = {
-    name: string;
-    mode: 'browservm' | 'rpc';
-    chainId: number;
-    rpcs: string[];
-    blockTimeMs: number;
-    ticker: string;
-    contracts?: {
-      depository?: string;
-      entityProvider?: string;
-      account?: string;
-      deltaTransformer?: string;
-    } | undefined;
-    deploy?: boolean;
-  };
-
   interface Props {
-    isolatedEnv: Writable<Env | null>;
-    isolatedRevision?: Writable<number>;
-    isolatedHistory?: Writable<EnvSnapshot[]>;
-    isolatedTimeIndex?: Writable<number>;
-    isolatedIsLive?: Writable<boolean>;
+    runtimeFrameEnv: Writable<Env | null>;
+    runtimeFrameRevision?: Writable<number>;
+    runtimeFrameHistory?: Writable<EnvSnapshot[]>;
+    runtimeFrameTimeIndex?: Writable<number>;
+    runtimeFrameIsLive?: Writable<boolean>;
+    liveEnvResolver?: () => Env | null;
   }
 
   let {
-    isolatedEnv,
-    isolatedRevision = writable(0),
-    isolatedHistory = writable([]),
-    isolatedTimeIndex = writable(-1),
-    isolatedIsLive = writable(true)
+    runtimeFrameEnv,
+    runtimeFrameRevision = writable(0),
+    runtimeFrameHistory = writable([]),
+    runtimeFrameTimeIndex = writable(-1),
+    runtimeFrameIsLive = writable(true),
+    liveEnvResolver = () => null,
   }: Props = $props();
 
-  function publishIsolatedEnv(env: Env | null) {
-    isolatedEnv.set(env ? createRuntimeViewEnv(unwrapLiveRuntimeEnv(env) ?? env) : null);
-    isolatedRevision.update((revision) => revision + 1);
+  function publishRuntimeFrameEnv(env: Env | null) {
+    const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
+    runtimeFrameEnv.set(runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null);
+    if (runtimeEnv) runtimeOperations.updateLocalEnv(runtimeEnv);
+    runtimeFrameRevision.update((revision) => revision + 1);
   }
+
+  const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
   function isLiveRuntimeFrame(frame: RuntimeFrame): frame is Env {
     return unwrapLiveRuntimeEnv(frame) !== null;
@@ -108,7 +108,7 @@
     return isLiveRuntimeFrame(frame) ? cloneLiveEnv(frame) : cloneEnvSnapshot(frame);
   }
 
-  function runtimeFrameRevision(frame: RuntimeFrame | null | undefined): string {
+  function runtimeFrameFingerprint(frame: RuntimeFrame | null | undefined): string {
     if (!frame) return 'none';
     let accountCount = 0;
     let accountHeightTotal = 0;
@@ -133,9 +133,9 @@
   }
 
   onMount(async () => {
-    isolatedTimeIndex.set(-1);
-    isolatedIsLive.set(true);
-    if (get(appRuntimeAdapterMode) !== 'remote') {
+    runtimeFrameTimeIndex.set(-1);
+    runtimeFrameIsLive.set(true);
+    if (get(runtimeControllerHandle).mode !== 'remote') {
       await vaultOperations.initialize();
     }
   });
@@ -147,7 +147,8 @@
   let selectedSignerId = $state<string | null>(null);
   let selectedAccountId = $state<string | null>(null);
   let selectedJurisdictionName = $state<string | null>(null);
-  let isCreatingJMachine = false; // Stays true on failure to prevent retry
+  let isCreatingJMachine = $state(false);
+  let jMachineCreateError = $state('');
   // Inline panels - NO POPUPS! All panels are inline for desktop/mobile
   type InlinePanel = 'none' | 'formation' | 'add-jmachine';
   let activeInlinePanel = $state<InlinePanel>('none');
@@ -173,7 +174,14 @@
 
   // Active runtime (optional for multi-runtime setups)
   const activeRuntime = $derived.by(() => $runtimes.get($activeRuntimeId));
-  const isRemoteRuntime = $derived(activeRuntime?.type === 'remote' || $appRuntimeAdapterMode === 'remote');
+  const isRemoteRuntime = $derived(activeRuntime?.type === 'remote' || $runtimeControllerHandle.mode === 'remote');
+  const currentLiveRuntimeEnv = $derived.by(() => {
+    void $runtimeFrameRevision;
+    void $runtimeControllerHandle.height;
+    if (isRemoteRuntime) return null;
+    const live = liveEnvResolver?.() ?? null;
+    return live ? (unwrapLiveRuntimeEnv(live) ?? live) : null;
+  });
   let lastRuntimeId: string | null = null;
   let lastVaultId: string | null = null;
 
@@ -181,15 +189,16 @@
   $effect(() => {
     if (!activeRuntime) return;
     if (lastRuntimeId && lastRuntimeId !== activeRuntime.id) {
-      isolatedTimeIndex.set(-1);
-      isolatedIsLive.set(true);
+      runtimeFrameTimeIndex.set(-1);
+      runtimeFrameIsLive.set(true);
       selectedEntityId = null;
       selectedSignerId = null;
       selectedAccountId = null;
       selectedJurisdictionName = null;
       selfEntityChecked.clear();
       selfEntityInFlight.clear();
-      isCreatingJMachine = false; // Allow attempt for new runtime
+      isCreatingJMachine = false;
+      jMachineCreateError = '';
     }
     lastRuntimeId = activeRuntime.id;
   });
@@ -204,18 +213,20 @@
       selectedJurisdictionName = null;
       selfEntityChecked.clear();
       selfEntityInFlight.clear();
-      isCreatingJMachine = false; // Allow attempt for new vault
+      isCreatingJMachine = false;
+      jMachineCreateError = '';
     }
     lastVaultId = currentVaultId;
   });
 
   // Current frame follows isolated time controls, but user mode should boot LIVE by default.
   const currentFrame: RuntimeFrame | null = $derived.by((): RuntimeFrame | null => {
-    const isLive = $isolatedIsLive;
-    const timeIdx = $isolatedTimeIndex;
-    const hist = $isolatedHistory;
-    const env = $isolatedEnv;
-    const revision = $isolatedRevision;
+    const isLive = $runtimeFrameIsLive;
+    const timeIdx = $runtimeFrameTimeIndex;
+    const hist = $runtimeFrameHistory;
+    const env = $runtimeFrameEnv;
+    const revision = $runtimeFrameRevision;
+    const liveRuntimeEnv = currentLiveRuntimeEnv;
     void revision;
 
     if (!isLive && timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
@@ -224,9 +235,10 @@
     }
     // Publish a fresh frame object for Svelte on every runtime revision, while
     // retaining a hidden live-env handle for runtime actions.
-    return cloneRuntimeFrame(env);
+    const frame = !isRemoteRuntime && liveRuntimeEnv ? createRuntimeViewEnv(liveRuntimeEnv) : env;
+    return cloneRuntimeFrame(frame);
   });
-  const currentFrameRevision = $derived.by(() => `${$isolatedRevision}:${runtimeFrameRevision(currentFrame)}`);
+  const currentFrameRevision = $derived.by(() => `${$runtimeFrameRevision}:${runtimeFrameFingerprint(currentFrame)}`);
 
   // Available jurisdictions (time-aware)
   const availableJurisdictions = $derived.by(() => {
@@ -292,14 +304,43 @@
     return null;
   }
 
+  function findReplicaByEntityInFrame(frame: RuntimeFrame | null | undefined, entityId: string): EntityReplica | null {
+    const normalized = String(entityId || '').trim().toLowerCase();
+    const replicas = frame?.eReplicas;
+    if (!normalized || !replicas) return null;
+    for (const replica of replicas.values()) {
+      if (String(replica?.entityId || '').trim().toLowerCase() === normalized && replica?.signerId) {
+        return replica;
+      }
+    }
+    return null;
+  }
+
+  function firstReplicaWithRelationshipsInFrame(frame: RuntimeFrame | null | undefined): EntityReplica | null {
+    const replicas = frame?.eReplicas;
+    if (!replicas) return null;
+    let best: { replica: EntityReplica; score: number } | null = null;
+    for (const replica of replicas.values()) {
+      if (!replica?.entityId || !replica?.signerId) continue;
+      const accountCount = Number(replica.state?.accounts?.size || 0);
+      const bookCount = Number(replica.state?.orderbookExt?.books?.size || 0);
+      const score = accountCount * 1_000_000 + bookCount * 1_000 + Number(replica.state?.height || 0);
+      if (!best || score > best.score) best = { replica, score };
+    }
+    return best?.replica ?? null;
+  }
+
   $effect(() => {
-    if (!isRemoteRuntime || !currentFrame?.eReplicas) return;
-    if (selectedEntityId && selectedReplica) return;
-    const replica = firstReplicaInFrame(currentFrame);
-    if (!replica?.entityId || !replica?.signerId) return;
+    if (!isRemoteRuntime) return;
+    const frame = $runtimeView.frame;
+    const active = frame?.activeEntity ?? null;
+    const entityId = normalizeId($runtimeView.activeEntityId || frame?.activeEntityId || active?.summary?.entityId || active?.core?.entityId);
+    const signerId = normalizeId(active?.core?.signerId || selectedSignerId);
+    if (!entityId) return;
+    if (selectedEntityId === entityId && (!signerId || selectedSignerId === signerId)) return;
     viewMode = 'entity';
-    selectedEntityId = String(replica.entityId).toLowerCase();
-    selectedSignerId = String(replica.signerId).toLowerCase();
+    selectedEntityId = entityId;
+    selectedSignerId = signerId || null;
     selectedAccountId = null;
     selectedJurisdictionName = null;
   });
@@ -382,6 +423,165 @@
 	      || '',
 	  ).trim());
 
+  function normalizeProjectionId(value: unknown): string {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function replicaProjectionEntityId(key: unknown, replica: EntityReplica | null | undefined): string {
+    const [keyEntityId] = String(key || '').split(':');
+    return normalizeProjectionId(replica?.entityId || replica?.state?.entityId || keyEntityId);
+  }
+
+  function replicaProjectionSignerId(key: unknown, replica: EntityReplica | null | undefined): string {
+    const [, keySignerId] = String(key || '').split(':');
+    return normalizeProjectionId(replica?.signerId || keySignerId);
+  }
+
+  function replicaProjectionJurisdictionName(replica: EntityReplica | null | undefined): string {
+    return String(
+      replica?.state?.config?.jurisdiction?.name
+        || replica?.position?.jurisdiction
+        || replica?.position?.xlnomy
+        || '',
+    ).trim();
+  }
+
+  function replicaProjectionJurisdictionKey(replica: EntityReplica | null | undefined): string {
+    return hubDiscoveryJurisdictionKey(replica?.state?.config?.jurisdiction)
+      || hubDiscoveryJurisdictionKey(replica?.position?.jurisdiction);
+  }
+
+  function frameReplicas(frame: RuntimeFrame | null | undefined): Map<string, EntityReplica> {
+    const replicas = frame?.eReplicas;
+    return replicas instanceof Map
+      ? replicas as Map<string, EntityReplica>
+      : new Map<string, EntityReplica>();
+  }
+
+  function accountProjectionCounterpartyId(ownerEntityId: string, key: unknown, account: unknown): string {
+    const record = account as { leftEntity?: unknown; rightEntity?: unknown } | null | undefined;
+    const owner = normalizeProjectionId(ownerEntityId);
+    const left = normalizeProjectionId(record?.leftEntity);
+    const right = normalizeProjectionId(record?.rightEntity);
+    if (left === owner && right) return right;
+    if (right === owner && left) return left;
+    return normalizeProjectionId(key);
+  }
+
+  function collectProjectionCounterparties(ownerEntityId: string, replica: EntityReplica | null | undefined): string[] {
+    const accounts = replica?.state?.accounts;
+    if (!(accounts instanceof Map)) return [];
+    const ids = new Set<string>();
+    for (const [key, account] of accounts.entries()) {
+      const counterpartyId = accountProjectionCounterpartyId(ownerEntityId, key, account);
+      if (counterpartyId && counterpartyId !== ownerEntityId) ids.add(counterpartyId);
+    }
+    return Array.from(ids);
+  }
+
+  const formationRuntimeProjection = $derived.by((): FormationRuntimeProjection => {
+    const jurisdictions = Array.from(currentFrame?.jReplicas?.values?.() || []).map((replica) => ({
+      name: String(replica?.name || ''),
+      address: String(replica?.depositoryAddress || ''),
+      entityProviderAddress: String(replica?.entityProviderAddress || ''),
+      depositoryAddress: String(replica?.depositoryAddress || ''),
+      ...(typeof replica?.chainId === 'number' ? { chainId: replica.chainId } : {}),
+    }));
+    const existingEntityIds = new Set<string>();
+    for (const [key, replica] of frameReplicas(currentFrame).entries()) {
+      const entityId = replicaProjectionEntityId(key, replica);
+      if (entityId) existingEntityIds.add(entityId);
+    }
+    return {
+      jurisdictions,
+      existingEntityIds: Array.from(existingEntityIds),
+    };
+  });
+
+  const onboardingRuntimeProjection = $derived.by((): OnboardingRuntimeProjection => {
+    const replicas = frameReplicas(currentFrame);
+    const targets: OnboardingRuntimeTarget[] = [];
+    const targetKeys = new Set<string>();
+    const accountCounterpartiesByEntityId: Record<string, string[]> = {};
+    const addTarget = (
+      rawEntityId: unknown,
+      rawSignerId: unknown,
+      rawJurisdiction: unknown = '',
+      rawJurisdictionKey: unknown = '',
+    ): void => {
+      const entityId = normalizeProjectionId(rawEntityId);
+      const signerId = normalizeProjectionId(rawSignerId);
+      if (!entityId || !signerId) return;
+      const key = `${entityId}:${signerId}`;
+      if (targetKeys.has(key)) return;
+      targetKeys.add(key);
+      const jurisdiction = String(rawJurisdiction || '').trim();
+      const jurisdictionKey = String(rawJurisdictionKey || '').trim();
+      targets.push({
+        entityId,
+        signerId,
+        ...(jurisdiction ? { jurisdiction } : {}),
+        ...(jurisdictionKey ? { jurisdictionKey } : {}),
+      });
+    };
+
+    for (const [key, replica] of replicas.entries()) {
+      const entityId = replicaProjectionEntityId(key, replica);
+      const signerId = replicaProjectionSignerId(key, replica);
+      if (!entityId) continue;
+      accountCounterpartiesByEntityId[entityId] = collectProjectionCounterparties(entityId, replica);
+      addTarget(entityId, signerId, replicaProjectionJurisdictionName(replica), replicaProjectionJurisdictionKey(replica));
+    }
+
+    addTarget(
+      selectedEntityId,
+      selectedSignerId,
+      selectedReplicaJurisdiction,
+      replicaProjectionJurisdictionKey(selectedReplica),
+    );
+
+    for (const runtimeSigner of $activeRuntimeStore?.signers || []) {
+      const signerEntityId = normalizeProjectionId(runtimeSigner.entityId);
+      const signerAddress = normalizeProjectionId(runtimeSigner.address);
+      const matchingReplica = signerEntityId
+        ? findReplicaByEntityInFrame(currentFrame, signerEntityId)
+        : signerAddress
+          ? findReplicaBySigner(currentFrame, signerAddress, runtimeSigner.jurisdiction)
+          : null;
+      addTarget(
+        signerEntityId || matchingReplica?.entityId,
+        signerAddress || matchingReplica?.signerId,
+        runtimeSigner.jurisdiction || replicaProjectionJurisdictionName(matchingReplica),
+        replicaProjectionJurisdictionKey(matchingReplica),
+      );
+    }
+
+    const hubCandidates: OnboardingHubCandidate[] = [];
+    const hubIds = new Set<string>();
+    for (const [key, replica] of replicas.entries()) {
+      const state = replica?.state;
+      if (state?.profile?.isHub !== true) continue;
+      const entityId = replicaProjectionEntityId(key, replica);
+      if (!entityId || hubIds.has(entityId)) continue;
+      hubIds.add(entityId);
+      hubCandidates.push({
+        entityId,
+        isHub: true,
+        jurisdiction: replicaProjectionJurisdictionName(replica),
+        jurisdictionKey: replicaProjectionJurisdictionKey(replica),
+        runtimeId: String(currentFrame?.runtimeId || ''),
+      });
+    }
+
+    return {
+      targets,
+      suggestedDisplayName: String(selectedReplica?.state?.profile?.name || ''),
+      activeJurisdictionName: getFrameActiveJurisdiction(currentFrame) || selectedReplicaJurisdiction,
+      hubCandidates,
+      accountCounterpartiesByEntityId,
+    };
+  });
+
   function listJMachineNames(env: RuntimeFrame | null | undefined): string[] {
     const jReplicas = env?.jReplicas;
     if (!jReplicas) return [];
@@ -418,57 +618,19 @@
     return null;
   }
 
-  async function createJMachineInEnv(env: Env | null): Promise<string | null> {
-    if (!env || isCreatingJMachine) return null;
-
-    isCreatingJMachine = true; // Never reset on failure - no retries
-    try {
-      const names = listJMachineNames(env);
-      let index = names.length + 1;
-      let name = `xlnomy${index}`;
-      while (names.includes(name)) {
-        index += 1;
-        name = `xlnomy${index}`;
-      }
-
-      const xln = await getXLN();
-      await enqueueAndProcess(env, {
-        runtimeTxs: [{
-          type: 'importJ',
-          data: {
-            name,
-            chainId: 31337,
-            ticker: 'SIM',
-            rpcs: [],
-            blockTimeMs: 1_000,
-          }
-        }],
-        entityInputs: []
-      });
-
-      publishIsolatedEnv(env);
-      isCreatingJMachine = false; // Only reset on success
-      return name;
-    } catch (err) {
-      console.error('[createJMachineInEnv] ❌ ERROR:', err);
-      // isCreatingJMachine stays true - no retry
-      return null;
-    }
-  }
-
   async function ensureSelfEntities() {
     const runEpoch = ++ensureSelfEntitiesEpoch;
-    const env = get(isolatedEnv);
+    const env = get(runtimeFrameEnv);
     const vault = get(activeRuntimeStore);
 
     if (!env || !vault?.signers?.length) return;
 
     const names = listJMachineNames(env);
 
-    // VaultStore imports the default jurisdiction set; user-created jurisdictions stay explicit.
+    // VaultStore imports the default jurisdiction set; this can be briefly empty
+    // while runtime restore is still wiring the embedded adapter.
     if (names.length === 0) {
-      console.warn('[ensureSelfEntities] No J-machines - VaultStore should import default jurisdictions');
-      return; // Don't auto-create xlnomy1
+      return;
     }
 
     const selectedSignerLower = String(selectedSignerId || '').trim().toLowerCase();
@@ -535,7 +697,7 @@
           const canonical = findReplicaBySigner(env, signerAddress, jurisdiction);
           const finalEntityId = canonical?.entityId || entityId;
           vaultOperations.setSignerEntity(signerEntry.index, finalEntityId);
-          publishIsolatedEnv(env);
+          publishRuntimeFrameEnv(env);
           selfEntityChecked.add(selfEntityKey);
 
           // Auto-select entity after creation
@@ -555,7 +717,7 @@
 
   // Trigger entity creation when env becomes available OR vault changes
   $effect(() => {
-    if (!isRemoteRuntime && !!$isolatedEnv && !!$activeRuntimeStore) {
+    if (!isRemoteRuntime && !!$runtimeFrameEnv && !!$activeRuntimeStore) {
       void ensureSelfEntities();
     }
   });
@@ -575,6 +737,30 @@
   const onboardingRequiredForRuntime = $derived(!isRemoteRuntime && $activeRuntimeStore?.requiresOnboarding !== false);
   const showVaultGate = $derived(!isRemoteRuntime && !hasSigner);
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
+  const remoteWorkspaceAvailable = $derived(
+    isRemoteRuntime && $runtimeControllerHandle.status === 'connected',
+  );
+  const workspaceEnv = $derived.by<RuntimeFrame | null>(() =>
+    isRemoteRuntime ? null : currentFrame,
+  );
+  const workspaceLiveEnv = $derived.by<Env | null>(() =>
+    isRemoteRuntime ? null : (currentLiveRuntimeEnv ?? $runtimeFrameEnv),
+  );
+
+  function resolveWorkspaceLiveEnv(): Env | null {
+    return isRemoteRuntime ? null : (currentLiveRuntimeEnv ?? $runtimeFrameEnv);
+  }
+
+  const workspaceRuntimeFrameContext = $derived.by<EntityWorkspaceRuntimeFrameContext>(() => ({
+    env: workspaceEnv,
+    liveEnv: workspaceLiveEnv,
+    liveEnvResolver: resolveWorkspaceLiveEnv,
+    envRevision: currentFrameRevision,
+    history: $runtimeFrameHistory,
+    timeIndex: $runtimeFrameTimeIndex,
+    isLive: $runtimeFrameIsLive,
+    onGoToLive: handleGoToLiveOverride,
+  }));
 
   function getRuntimeOnboardingEntityIds(): string[] {
     const ids = new Set<string>();
@@ -582,8 +768,18 @@
       const normalized = String(value || '').trim().toLowerCase();
       if (normalized) ids.add(normalized);
     };
+    const signerEntityIds = new Set<string>();
+    for (const runtimeSigner of $activeRuntimeStore?.signers || []) {
+      const normalized = String(runtimeSigner.entityId || '').trim().toLowerCase();
+      if (normalized) signerEntityIds.add(normalized);
+    }
+    const activeSignerEntityId = String(signer?.entityId || '').trim().toLowerCase();
+    if (activeSignerEntityId) signerEntityIds.add(activeSignerEntityId);
+    if (signerEntityIds.size > 0) {
+      for (const entityId of signerEntityIds) add(entityId);
+      return [...ids];
+    }
     add(selectedEntityId);
-    add(String(signer?.entityId || ''));
     for (const runtimeSigner of $activeRuntimeStore?.signers || []) {
       add(runtimeSigner.entityId);
     }
@@ -637,8 +833,8 @@
     selectedAccountId = null;
     selectedJurisdictionName = null; // Clear filter to allow any entity
     if (isRemoteRuntime) {
-      setRuntimeAdapterActiveEntityId(entityId);
-      void refreshRuntimeAdapterEnvironment();
+      setRuntimeViewActiveEntityId(entityId);
+      void refreshCurrentRuntimeProjection();
     }
   }
 
@@ -705,36 +901,19 @@
   }
 
   async function handleJMachineCreate(event: CustomEvent<JMachineCreateDetail>) {
-    const { name, mode, chainId, rpcs, blockTimeMs, ticker, contracts } = event.detail;
-    const env = get(isolatedEnv);
-    if (!env) return;
+    const env = get(runtimeFrameEnv);
+    if (!env) {
+      jMachineCreateError = 'Embedded runtime workspace is not available';
+      return;
+    }
 
     isCreatingJMachine = true;
+    jMachineCreateError = '';
     try {
-      const xln = await getXLN();
-      await enqueueAndProcess(env, {
-        runtimeTxs: [{
-          type: 'importJ',
-          data: { name, chainId, ticker, rpcs, blockTimeMs, ...(contracts ? { contracts } : {}) }
-        }],
-        entityInputs: []
-      });
-
-      // Persist config for reconnection on reload
-      jmachineOperations.upsert({
-        name,
-        mode,
-	        chainId,
-	        ticker,
-	        rpcs,
-	        blockTimeMs,
-	        ...(contracts ? { contracts } : {}),
-        createdAt: Date.now(),
-      });
-
-      publishIsolatedEnv(env);
-      selectedJurisdictionName = name;
-      const signerForJurisdiction = vaultOperations.addSigner(`${name} signer`, name);
+      const result = await importJMachineViaRuntime(env, event.detail);
+      publishRuntimeFrameEnv(result.env);
+      selectedJurisdictionName = result.config.name;
+      const signerForJurisdiction = vaultOperations.addSigner(`${result.config.name} signer`, result.config.name);
       if (signerForJurisdiction?.address) {
         vaultOperations.selectSigner(signerForJurisdiction.index);
         selectedSignerId = signerForJurisdiction.address;
@@ -744,8 +923,8 @@
       isCreatingJMachine = false;
     } catch (err) {
       console.error('[handleJMachineCreate] ERROR:', err);
+      jMachineCreateError = err instanceof Error ? err.message : String(err);
       isCreatingJMachine = false;
-      // Don't close form on error - let user retry
     }
   }
 
@@ -758,8 +937,8 @@
   }
 
   function handleGoToLiveOverride(): void {
-    isolatedTimeIndex.set(-1);
-    isolatedIsLive.set(true);
+    runtimeFrameTimeIndex.set(-1);
+    runtimeFrameIsLive.set(true);
   }
 
 </script>
@@ -772,7 +951,7 @@
         <button class="back-btn" onclick={handleEntityFormationClose}>← Back</button>
         <h3>Create Entity</h3>
       </div>
-      <FormationPanel onCreated={() => { activeInlinePanel = 'none'; }} />
+      <FormationPanel runtimeProjection={formationRuntimeProjection} onCreated={() => { activeInlinePanel = 'none'; }} />
     </div>
   </main>
 {:else if activeInlinePanel === 'add-jmachine'}
@@ -784,9 +963,13 @@
         <h3>Add Jurisdiction</h3>
       </div>
       <AddJMachine
+        busy={isCreatingJMachine}
         on:create={(event) => void handleJMachineCreate(event)}
         on:cancel={() => activeInlinePanel = 'none'}
       />
+      {#if jMachineCreateError}
+        <p class="inline-error" data-testid="user-mode-jmachine-error">{jMachineCreateError}</p>
+      {/if}
     </div>
   </main>
 {:else if showVaultPanelVisible}
@@ -800,11 +983,12 @@
     <OnboardingPanel
       entityId={selectedEntityId}
       signerId={selectedSignerId}
+      runtimeProjection={onboardingRuntimeProjection}
       on:complete={handleOnboardingComplete}
     />
   </main>
-{:else if viewMode === 'entity' && currentFrame}
-  <EntityPanelTabs
+{:else if viewMode === 'entity' && (currentFrame || remoteWorkspaceAvailable)}
+  <EntityWorkspace
     tab={entityTab}
     userModeHeader={true}
     showJurisdiction={false}
@@ -812,15 +996,7 @@
     allowHeaderAddRuntime={true}
     allowHeaderDeleteRuntime={true}
     headerRuntimeAddLabel="+ Add Runtime"
-    env={currentFrame}
-    liveEnv={$isolatedEnv}
-    liveEnvResolver={() => $isolatedEnv}
-    liveEnvStore={isolatedEnv}
-    envRevision={currentFrameRevision}
-    history={$isolatedHistory}
-    timeIndex={$isolatedTimeIndex}
-    isLive={$isolatedIsLive}
-    onGoToLive={handleGoToLiveOverride}
+    runtimeFrameContext={workspaceRuntimeFrameContext}
     on:signerSelect={handleSignerSelect}
     on:addSigner={handleAddSigner}
     on:entitySelect={handleEntitySelect}
@@ -835,19 +1011,19 @@
 {:else if viewMode === 'jurisdiction'}
   <main class="panel-content">
     <JurisdictionPanel
-      {isolatedEnv}
-      {isolatedHistory}
-      {isolatedTimeIndex}
+      {runtimeFrameEnv}
+      {runtimeFrameHistory}
+      {runtimeFrameTimeIndex}
     />
   </main>
 {/if}
 
 {#if $settings.showTimeMachine}
   <TimeMachine
-    history={isolatedHistory}
-    timeIndex={isolatedTimeIndex}
-    isLive={isolatedIsLive}
-    env={isolatedEnv}
+    history={runtimeFrameHistory}
+    timeIndex={runtimeFrameTimeIndex}
+    isLive={runtimeFrameIsLive}
+    env={runtimeFrameEnv}
   />
 {/if}
 
@@ -912,6 +1088,13 @@
     background: color-mix(in srgb, var(--theme-surface-hover, var(--theme-card-bg, #1c1c20)) 96%, transparent);
     color: var(--theme-text-primary, #e6edf3);
     border-color: color-mix(in srgb, var(--theme-card-hover-border, var(--theme-border, #27272a)) 82%, transparent);
+  }
+
+  .inline-error {
+    margin: 10px 16px 0;
+    color: #fb7185;
+    font-size: 13px;
+    font-weight: 700;
   }
 
   @media (max-width: 768px) {

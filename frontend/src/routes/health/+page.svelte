@@ -5,6 +5,10 @@
   import HealthQaLinkPanel from '$lib/components/Health/HealthQaLinkPanel.svelte';
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
+  import type { RuntimeActivityEvent, RuntimeAdapterEntitySummary } from '@xln/runtime/xln-api';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
   import { DISPLAY } from '@xln/runtime/constants';
 
@@ -239,8 +243,8 @@
     };
   };
 
-  type RelayDebugEvent = {
-    id: number;
+  type RuntimeProjectionEvent = {
+    id: string;
     ts: number;
     event: string;
     runtimeId?: string;
@@ -255,15 +259,7 @@
     details?: unknown;
   };
 
-  type DebugResponse = {
-    ok: boolean;
-    total: number;
-    returned: number;
-    serverTime: number;
-    events: RelayDebugEvent[];
-  };
-
-  type DebugEntity = {
+  type ProjectionEntity = {
     entityId: string;
     runtimeId?: string;
     name: string;
@@ -272,14 +268,6 @@
     lastUpdated: number;
     capabilities: string[];
     metadata: Record<string, unknown>;
-  };
-
-  type DebugEntitiesResponse = {
-    ok: boolean;
-    totalRegistered: number;
-    returned: number;
-    serverTime: number;
-    entities: DebugEntity[];
   };
 
   type TestnetGate = QaSeveritySignal & {
@@ -299,9 +287,9 @@
   };
 
   let health = $state<HealthData | null>(null);
-  let events = $state<RelayDebugEvent[]>([]);
-  let entities = $state<DebugEntity[]>([]);
-  let filteredEvents = $state<RelayDebugEvent[]>([]);
+  let events = $state<RuntimeProjectionEvent[]>([]);
+  let entities = $state<ProjectionEntity[]>([]);
+  let filteredEvents = $state<RuntimeProjectionEvent[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let autoRefresh = $state(true);
@@ -425,11 +413,11 @@
     return id.length <= len ? id : `${id.slice(0, len)}...`;
   }
 
-  function eventBlob(e: RelayDebugEvent): string {
+  function eventBlob(e: RuntimeProjectionEvent): string {
     return JSON.stringify(e).toLowerCase();
   }
 
-  function isCriticalEvent(e: RelayDebugEvent): boolean {
+  function isCriticalEvent(e: RuntimeProjectionEvent): boolean {
     if (e.event === 'error') return true;
     const blob = eventBlob(e);
     return BUG_PATTERNS.some((p) => blob.includes(p));
@@ -671,7 +659,7 @@
     });
   }
 
-  function buildFlowEdges(input: RelayDebugEvent[]): FlowEdge[] {
+  function buildFlowEdges(input: RuntimeProjectionEvent[]): FlowEdge[] {
     const edges = new Map<string, FlowEdge>();
     for (const event of input) {
       const from = endpointLabel(event.from || event.runtimeId || 'runtime');
@@ -776,23 +764,72 @@
     document.getElementById(section)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  function projectionEventFromActivity(event: RuntimeActivityEvent): RuntimeProjectionEvent {
+    return {
+      id: String(event.id || `${event.height}:${event.rawType}`),
+      ts: Math.max(0, Number(event.timestamp || 0)),
+      event: String(event.rawType || event.type || 'runtime_event'),
+      ...(event.runtimeId ? { runtimeId: event.runtimeId } : {}),
+      ...(event.entityId ? { from: event.entityId } : {}),
+      ...(event.counterpartyId ? { to: event.counterpartyId } : {}),
+      msgType: event.type,
+      status: event.status,
+      ...(event.subtitle ? { reason: event.subtitle } : {}),
+      encrypted: false,
+      details: {
+        height: event.height,
+        kind: event.kind,
+        source: event.source,
+        direction: event.direction,
+        title: event.title,
+        amount: event.amount,
+        tokenId: event.tokenId,
+        hash: event.hash,
+      },
+    };
+  }
+
+  function projectionEntityFromSummary(summary: RuntimeAdapterEntitySummary): ProjectionEntity {
+    const handle = $runtimeControllerHandle;
+    const entityId = String(summary.entityId || '').trim().toLowerCase();
+    const name = String(summary.label || entityId || 'Unknown').trim();
+    return {
+      entityId,
+      runtimeId: String(handle.id || '').trim(),
+      name,
+      isHub: summary.isHub === true,
+      online: handle.status === 'connected',
+      lastUpdated: Math.max(0, Math.floor(Number(summary.height || handle.height || 0))),
+      capabilities: summary.isHub === true ? ['hub', 'routing'] : ['entity'],
+      metadata: {
+        height: summary.height,
+        jurisdiction: summary.jurisdiction ?? null,
+        runtimeMode: handle.mode,
+        authLevel: handle.authLevel,
+      },
+    };
+  }
+
+  async function fetchRuntimeProjections(): Promise<void> {
+    await ensureProjectionRuntimeConnected();
+    const [activity, summaries] = await Promise.all([
+      runtimeQueryClient.readActivity({ limit: 1000, scanLimit: 1000 }),
+      runtimeQueryClient.readEntities({ limit: 1000 }),
+    ]);
+    events = (activity.events ?? []).map(projectionEventFromActivity);
+    entities = summaries.map(projectionEntityFromSummary);
+  }
+
   async function fetchHealth(): Promise<void> {
     try {
-      const [hRes, dRes, eRes] = await Promise.all([
+      const [hRes] = await Promise.all([
         fetch('/api/health'),
-        fetch('/api/debug/events?last=1000'),
-        fetch('/api/debug/entities?limit=1000'),
+        fetchRuntimeProjections(),
       ]);
 
       if (!hRes.ok) throw new Error(`health HTTP ${hRes.status}`);
-      if (!dRes.ok) throw new Error(`debug HTTP ${dRes.status}`);
-      if (!eRes.ok) throw new Error(`entities HTTP ${eRes.status}`);
 
       health = normalizeHealthData(await hRes.json());
-      const debugData = (await dRes.json()) as DebugResponse;
-      const entitiesData = (await eRes.json()) as DebugEntitiesResponse;
-      events = Array.isArray(debugData.events) ? debugData.events : [];
-      entities = Array.isArray(entitiesData.entities) ? entitiesData.entities : [];
 
       eventOptions = [...new Set(events.map((e) => e.event).filter(Boolean))].sort();
       msgTypeOptions = [...new Set(events.map((e) => e.msgType).filter(Boolean) as string[])].sort();
@@ -802,7 +839,8 @@
       applyFilters();
       error = null;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to fetch health/debug data';
+      console.error('[HealthAdmin] runtime projection health read failed', err);
+      error = err instanceof Error ? err.message : 'Failed to fetch health/runtime projection data';
     } finally {
       loading = false;
     }
@@ -963,7 +1001,7 @@
       <article class="metric"><div class="k">J Block</div><div class="v">#{health.jMachines?.[0]?.lastBlock ?? '-'}</div></article>
       <article class="metric"><div class="k">Direct Links</div><div class="v">{directOpenLinks}</div></article>
       <article class="metric"><div class="k">Disk Free</div><div class="v" class:ok={health.disk?.ok !== false} class:bad={health.disk?.ok === false}>{health.disk?.freeGiB !== undefined ? `${health.disk.freeGiB.toFixed(1)} GiB` : formatBytes(health.disk?.freeBytes)}</div></article>
-      <article class="metric"><div class="k">Debug Events</div><div class="v">{events.length}</div></article>
+      <article class="metric"><div class="k">Runtime Events</div><div class="v">{events.length}</div></article>
       <article class="metric"><div class="k">Relay Clients</div><div class="v">{health.relay?.activeClientCount ?? 0}</div></article>
     </section>
 
@@ -1119,13 +1157,13 @@
       <div class="panel-head">
         <div>
           <h2>Event Flow</h2>
-          <p class="sub">Top routes in latest relay timeline window</p>
+          <p class="sub">Top routes in latest runtime activity projection</p>
         </div>
         <span class="chip">{flowEdges.length} edges</span>
       </div>
       <div class="flow-grid">
         {#if flowEdges.length === 0}
-          <div class="empty">No relay edges in current window.</div>
+          <div class="empty">No runtime activity edges in current window.</div>
         {:else}
           {#each flowEdges as edge}
             <article class="flow-edge" class:bad={edge.critical > 0}>
@@ -1165,8 +1203,8 @@
     </section>
 
     <section class="panel">
-      <h2>Registered Gossip Entities</h2>
-      <p class="sub">{entities.length} registered in relay gossip cache</p>
+      <h2>Runtime Projection Entities</h2>
+      <p class="sub">{entities.length} entities from active runtime projection</p>
       <div class="entity-list">
         {#if entities.length === 0}
           <div class="empty">No registered entities found.</div>
@@ -1193,14 +1231,14 @@
 
     <section class="panel split">
       <div>
-        <h2>Latest 1000 Debug Events</h2>
+        <h2>Latest 1000 Runtime Events</h2>
         <p class="sub">{filteredEvents.length} shown</p>
         <div class="stream">
           {#if filteredEvents.length === 0}
             <div class="empty">No events match filters.</div>
           {:else}
             {#each filteredEvents as e}
-              <article class="evt" class:err={e.event === 'error' || e.status === 'rejected' || e.status === 'local-delivery-failed'} class:warn={e.status === 'queued' || e.event === 'debug_event'}>
+              <article class="evt" class:err={e.event === 'error' || e.status === 'rejected' || e.status === 'local-delivery-failed'} class:warn={e.status === 'queued'}>
                 <div class="evt-head">
                   <span>{new Date(e.ts).toLocaleString()}</span>
                   <span class="chip">{e.event}</span>

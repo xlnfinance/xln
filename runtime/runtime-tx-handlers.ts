@@ -6,8 +6,7 @@ import { getSignerPrivateKey } from './account-crypto';
 import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from './account-utils';
 import { markStorageEntityDirty } from './env-events';
 import {
-  deriveLocalEntityCryptoKeys,
-  hasLocalSignerKey,
+  canonicalizeLocalEntityCryptoKeys,
   resolveReplicaEntityCryptoKeys,
 } from './runtime-entity-crypto';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
@@ -212,15 +211,7 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
     existingReplica.signerId = importedSignerId;
     existingReplica.state.entityId = importedEntityId;
     existingReplica.state.config = config;
-    if (hasLocalSignerKey(env, importedSignerId)) {
-      const expectedKeys = deriveLocalEntityCryptoKeys(env, importedEntityId, importedSignerId);
-      if (
-        existingReplica.state.entityEncPubKey !== expectedKeys.publicKey ||
-        existingReplica.state.entityEncPrivKey !== expectedKeys.privateKey
-      ) {
-        throw new Error(`ENTITY_CRYPTO_KEY_MISMATCH: entity=${importedEntityId} signer=${importedSignerId}`);
-      }
-    }
+    canonicalizeLocalEntityCryptoKeys(env, importedEntityId, importedSignerId, existingReplica.state);
     normalizeEntitySwapTradingPairs(existingReplica.state);
     if (existingReplicaKey !== replicaKey) {
       env.eReplicas.delete(existingReplicaKey);

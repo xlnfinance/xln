@@ -255,6 +255,17 @@ export async function createBrowserVMAdapter(
         return { success: true, events, blockNumber: receiptFromEvents(events).blockNumber };
       }
 
+      if (jTx.type === 'debtEnforcement') {
+        const entityId = String(jTx.entityId || '').toLowerCase();
+        const tokenId = Number(jTx.data.tokenId);
+        const maxIterations = BigInt(jTx.data.maxIterations);
+        if (!entityId || !Number.isInteger(tokenId) || tokenId < 0 || maxIterations <= 0n) {
+          return { success: false, error: 'Invalid debt enforcement payload' };
+        }
+        await adapter.enforceDebts(entityId, tokenId, maxIterations);
+        return { success: true };
+      }
+
       if (jTx.type === 'batch') {
         const batchData = jTx.data;
         const batch = batchData.batch;

@@ -28,6 +28,7 @@ type P2Pish = {
   matchesIdentity?: (runtimeId: string, signerId?: string) => boolean;
   updateConfig?: (config: P2PConfig) => void;
   isConnected?: () => boolean;
+  isConnecting?: () => boolean;
   connect?: () => void;
   close?: () => void;
 };
@@ -73,9 +74,12 @@ export const startRuntimeP2P = (
     if (typeof existingGlobalP2P.updateConfig === 'function') {
       existingGlobalP2P.updateConfig(config);
     }
+    const existingGlobalP2PConnecting =
+      typeof existingGlobalP2P.isConnecting === 'function' && existingGlobalP2P.isConnecting();
     if (
       typeof existingGlobalP2P.isConnected === 'function' &&
       !existingGlobalP2P.isConnected() &&
+      !existingGlobalP2PConnecting &&
       typeof existingGlobalP2P.connect === 'function'
     ) {
       existingGlobalP2P.connect();
@@ -87,7 +91,7 @@ export const startRuntimeP2P = (
   if (state.p2p) {
     if (state.p2p.matchesIdentity(resolvedRuntimeId, config.signerId)) {
       state.p2p.updateConfig(config);
-      if (!state.p2p.isConnected()) {
+      if (!state.p2p.isConnected() && !state.p2p.isConnecting()) {
         state.p2p.connect();
       }
       return state.p2p;

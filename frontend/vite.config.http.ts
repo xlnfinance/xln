@@ -23,6 +23,7 @@ const BUILD_NUMBER = (() => {
 const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8081');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8081;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
+const VITE_CACHE_DIR = process.env['VITE_HTTP_CACHE_DIR'] || 'node_modules/.vite-http';
 const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
 
 const ENABLE_HMR = (() => {
@@ -37,9 +38,11 @@ const ENABLE_HMR = (() => {
 
 export default defineConfig({
   plugins: [sveltekit()],
+  cacheDir: VITE_CACHE_DIR,
   server: {
     host: '0.0.0.0',
     port: DEV_PORT,
+    strictPort: true,
     // NO HTTPS - plain HTTP only
     allowedHosts: ['all'],
     fs: {
@@ -75,6 +78,11 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
         secure: false,
+      },
+      '/relay': {
+        target: API_PROXY_TARGET,
+        ws: true,
+        changeOrigin: true,
       },
     },
     headers: {

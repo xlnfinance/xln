@@ -13,6 +13,7 @@ import {
   buildMarketMakerCrossOfferSpecs,
   getMarketMakerHealth as getRuntimeMarketMakerHealth,
   hasFinalizedMarketMakerCrossOffer,
+  readVisibleHubProfiles,
   type HubProfile,
   type MarketMakerEntityContext,
   type MarketMakerHealth,
@@ -356,6 +357,32 @@ test('runtime market maker health stays red when same-chain offers are committed
   expect(health.hubs[0]?.blockers[0]?.reason).toBe('pending-frame');
   expect(pendingRoute?.offers).toBe(0);
   expect(pendingRoute?.depthReady).toBe(false);
+});
+
+test('market maker hub discovery uses stable hubName instead of mutable display name', () => {
+  const env = createEmptyEnv('market-maker-stable-hub-name');
+  env.gossip = {
+    getProfiles: () => [{
+      name: 'Desk Renamed By Admin',
+      entityId: entity('90'),
+      runtimeId: '0xruntime',
+      metadata: {
+        isHub: true,
+        hubName: 'H1',
+        jurisdiction: {
+          name: 'Arrakis',
+          chainId: 31337,
+          depositoryAddress: addr('11'),
+        },
+        board: { validators: [{ signerId: addr('90') }] },
+      },
+    }],
+  } as Env['gossip'];
+
+  const visibleHubs = readVisibleHubProfiles(env);
+  expect(visibleHubs.map(hub => hub.entityId)).toEqual([entity('90')]);
+  expect(visibleHubs[0]?.name).toBe('Desk Renamed By Admin');
+  expect(visibleHubs[0]?.hubName).toBe('h1');
 });
 
 test('runtime market maker health reports cross coverage before full depth without marking ok', () => {

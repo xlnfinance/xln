@@ -1,17 +1,15 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
-  import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { xlnFunctions } from '../../stores/xlnStore';
   import { entityAvatar } from '$lib/utils/avatar';
-  import { getGossipProfiles, resolveEntityName, scheduleGossipProfileFetch } from '../../utils/entityNaming';
 
   export let value: string = '';
   export let options: string[] = [];
   export let placeholder: string = 'Select entity';
+  export let entityNames: Map<string, string> = new Map();
 
   const dispatch = createEventDispatcher();
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = $xlnEnvironment;
 
   let open = false;
   let copied = '';
@@ -23,24 +21,8 @@
   function getOptionName(id: string): string {
     const norm = normalizeEntityId(id);
     if (!norm) return id;
-    const name = resolveEntityName(norm, activeEnv);
-    if (!name) {
-      scheduleGossipProfileFetch([norm]);
-    }
+    const name = entityNames.get(norm) || '';
     return name || id;
-  }
-
-  $: missingOptionIds = options.filter((id) => {
-    const norm = normalizeEntityId(id);
-    if (!norm) return false;
-    const profiles = getGossipProfiles(activeEnv);
-    return !profiles.some((profile: GossipProfile) => normalizeEntityId(profile.entityId) === norm);
-  });
-  $: if (missingOptionIds.length > 0) {
-    scheduleGossipProfileFetch(missingOptionIds);
-  }
-  $: if (open && options.length > 0) {
-    scheduleGossipProfileFetch(options);
   }
 
   $: optionViews = options.map((id) => ({

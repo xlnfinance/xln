@@ -90,8 +90,36 @@ async function getRenderedPrimaryCapacity(page: Page, selectors: string): Promis
     ?? (cards.length === 1 ? cards[0] : null);
 
   if (!targetCard) {
+    const debug = await page.evaluate(() => {
+      const env = (window as any).isolatedEnv;
+      const replicas = env?.eReplicas instanceof Map ? Array.from(env.eReplicas.entries()) : [];
+      const descriptor = Object.getOwnPropertyDescriptor(window, 'isolatedEnv');
+      const xlnRoot = (window as any).__xln || {};
+      return {
+        runtimeId: String(env?.runtimeId || ''),
+        height: Number(env?.height || 0),
+        selectedRuntimeId: String(document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId || ''),
+        runtimeSelection: (window as any).__xlnRuntimeSelection ?? xlnRoot.runtimeSelection ?? null,
+        isolatedEnvDescriptor: {
+          configurable: Boolean(descriptor?.configurable),
+          enumerable: Boolean(descriptor?.enumerable),
+          hasGet: typeof descriptor?.get === 'function',
+          hasSet: typeof descriptor?.set === 'function',
+          valueType: typeof descriptor?.value,
+        },
+        activeEntityText: String(document.querySelector('[data-testid="entity-header-id"], .entity-id, [data-entity-id]')?.textContent || '').trim(),
+        replicas: replicas.map(([key, replica]: [unknown, any]) => ({
+          key: String(key || ''),
+          entityId: String(replica?.entityId || replica?.state?.entityId || ''),
+          signerId: String(replica?.signerId || ''),
+          accounts: replica?.state?.accounts instanceof Map
+            ? Array.from(replica.state.accounts.keys()).map((item) => String(item))
+            : [],
+        })),
+      };
+    }).catch((error) => ({ error: error instanceof Error ? error.message : String(error) }));
     throw new Error(
-      `Primary rendered capacity is ambiguous. Selected=${selectedCards.length} visible=${cards.map((card) => card.counterpartyId || 'unknown').join(',') || 'none'}`,
+      `Primary rendered capacity is ambiguous. Selected=${selectedCards.length} visible=${cards.map((card) => card.counterpartyId || 'unknown').join(',') || 'none'} debug=${JSON.stringify(debug)}`,
     );
   }
 

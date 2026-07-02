@@ -208,7 +208,7 @@ export class RuntimeWsClient {
           (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
           if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
           this.scheduleReconnect();
-        } else {
+        } else if (!this.isDuplicateRuntimeClose(Number(code || 0), reason)) {
           console.warn(`[WS] ${summary} — reconnect disabled`);
         }
       });
@@ -249,7 +249,7 @@ export class RuntimeWsClient {
           (normalClose ? console.warn : console.error)(`[WS] ${summary} — scheduling reconnect`);
           if (!normalClose) this.options.onError?.(new Error(`WS_DISCONNECTED: ${summary}`));
           this.scheduleReconnect();
-        } else {
+        } else if (!this.isDuplicateRuntimeClose(code, reason)) {
           console.warn(`[WS] ${summary} — reconnect disabled`);
         }
       };
@@ -298,14 +298,12 @@ export class RuntimeWsClient {
 
   private shouldReconnectAfterClose(code: number, reason: string): boolean {
     if (this.closed) return false;
-    const normalizedReason = String(reason || '').toLowerCase();
-    const isDuplicateRuntime = code === 4009 || normalizedReason.includes('duplicate-runtime');
-    if (isDuplicateRuntime) {
+    if (this.isDuplicateRuntimeClose(code, reason)) {
       const browserStandby = typeof document !== 'undefined';
       if (!browserStandby) {
         this.closed = true;
       }
-      console.warn(
+      console.info(
         `[WS] Duplicate runtime session for ${this.options.runtimeId} on ${this.options.url}; ` +
         (browserStandby
           ? 'entering standby until this tab is visible again'
@@ -314,6 +312,11 @@ export class RuntimeWsClient {
       return false;
     }
     return true;
+  }
+
+  private isDuplicateRuntimeClose(code: number, reason: string): boolean {
+    const normalizedReason = String(reason || '').toLowerCase();
+    return code === 4009 || normalizedReason.includes('duplicate-runtime');
   }
 
   getReconnectState(): { attempt: number; nextAt: number } | null {

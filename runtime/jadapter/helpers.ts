@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
-import type { DisputeFinalizationEvidence, EntityInput, Env, JReplica, JurisdictionConfig, JurisdictionEvent } from '../types';
+import type { DisputeFinalizationEvidence, EntityInput, Env, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput } from '../types';
 import { createEmptyBatch, type JBatch } from '../j-batch';
 import { enqueueRuntimeInput } from '../runtime';
 import { signAccountFrame } from '../account-crypto';
@@ -622,7 +622,12 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
  * If this logic ever needs to change, change it here once rather than forking
  * subtle variants across the codebase.
  */
-function enqueueRawJEventsToRuntime(
+export type JEventsRuntimeInputBuildResult = {
+  input: RuntimeInput;
+  evidenceEvents: RawJEvent[];
+};
+
+export function buildRawJEventsRuntimeInput(
   env: Env,
   rawEvents: RawJEvent[],
   options: {
@@ -633,8 +638,8 @@ function enqueueRawJEventsToRuntime(
     logBatch?: boolean;
     emitSettledDebugEvents?: boolean;
   },
-): void {
-  if (rawEvents.length === 0) return;
+): JEventsRuntimeInputBuildResult | null {
+  if (rawEvents.length === 0) return null;
 
   const {
     blockNumber,
@@ -784,13 +789,26 @@ function enqueueRawJEventsToRuntime(
     }
   }
 
-  if (entityInputs.length === 0) return;
-  rememberRecentJEvents(env, [...evidenceEventsByLog.values()]);
-  enqueueRuntimeInput(env, {
-    timestamp: env.timestamp ?? 0,
-    runtimeTxs: [],
-    entityInputs,
-  });
+  if (entityInputs.length === 0) return null;
+  return {
+    input: {
+      timestamp: env.timestamp ?? 0,
+      runtimeTxs: [],
+      entityInputs,
+    },
+    evidenceEvents: [...evidenceEventsByLog.values()],
+  };
+}
+
+function enqueueRawJEventsToRuntime(
+  env: Env,
+  rawEvents: RawJEvent[],
+  options: Parameters<typeof buildRawJEventsRuntimeInput>[2],
+): void {
+  const built = buildRawJEventsRuntimeInput(env, rawEvents, options);
+  if (!built) return;
+  rememberRecentJEvents(env, built.evidenceEvents);
+  enqueueRuntimeInput(env, built.input);
 }
 
 export function applyJEventsToEnv(env: Env, events: JEvent[], label = 'J-EVENTS'): void {
@@ -831,6 +849,49 @@ export function applyJEventsToEnv(env: Env, events: JEvent[], label = 'J-EVENTS'
     const blockHash = groupedEvents[0]?.blockHash ?? '0x';
     processEventBatch(groupedEvents, env, blockNumber, blockHash, dedupCounter, label);
   }
+}
+
+export function buildJEventsRuntimeInput(env: Env, events: JEvent[], label = 'J-EVENTS'): RuntimeInput | null {
+  if (!events || events.length === 0) return null;
+  assertJEventIngressOpen(env, label);
+  const rawEvents: RawJEvent[] = events
+    .filter((event): event is JEvent & { name: string; args?: Record<string, unknown> } => typeof event?.name === 'string')
+    .map((event) => ({
+      name: event.name,
+      args: (event.args ?? {}) as RawJEventArgs,
+      blockNumber: event.blockNumber,
+      blockHash: event.blockHash,
+      transactionHash: event.transactionHash,
+    }));
+  if (rawEvents.length === 0) return null;
+
+  const blockGroups = new Map<number, RawJEvent[]>();
+  for (const event of rawEvents) {
+    const blockNumber = Number(event.blockNumber ?? 0);
+    if (!blockGroups.has(blockNumber)) blockGroups.set(blockNumber, []);
+    blockGroups.get(blockNumber)!.push(event);
+  }
+
+  const txCounter: EventBatchCounter = { value: 0 };
+  const entityInputs: EntityInput[] = [];
+  for (const [blockNumber, groupedEvents] of blockGroups) {
+    const blockHash = groupedEvents[0]?.blockHash ?? '0x';
+    const built = buildRawJEventsRuntimeInput(env, groupedEvents.filter(isCanonicalEvent), {
+      blockNumber,
+      blockHash,
+      adapterLabel: label,
+      txCounter,
+      logBatch: false,
+      emitSettledDebugEvents: false,
+    });
+    if (built?.input.entityInputs?.length) entityInputs.push(...built.input.entityInputs);
+  }
+  if (entityInputs.length === 0) return null;
+  return {
+    timestamp: env.timestamp ?? 0,
+    runtimeTxs: [],
+    entityInputs,
+  };
 }
 
 /**

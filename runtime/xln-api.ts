@@ -82,10 +82,11 @@ export type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-hi
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
-  RuntimeAdapterConfig,
-  RuntimeAdapterReadQuery,
-  RuntimeAdapterStatus,
-} from './radapter';
+	  RuntimeAdapterConfig,
+	  RuntimeAdapterReadQuery,
+	  RuntimeAdapterSendResult,
+	  RuntimeAdapterStatus,
+	} from './radapter';
 export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -153,14 +154,20 @@ import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
-import type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
+import type { RuntimeActivityFilters } from './activity-history';
 import type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
+  RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterViewFrame,
   resolveRuntimeAdapterRead,
 } from './radapter/resolve';
-import type { RuntimeAdapterEntitySummary, RuntimeAdapterReadQuery } from './radapter/types';
+import type {
+	  RuntimeAdapterActivityPage,
+	  RuntimeAdapterEntitySummary,
+	  RuntimeAdapterReadQuery,
+	  RuntimeAdapterSolvencySummary,
+	} from './radapter/types';
 
 export type QueueEntityInputPayload = {
   type: string;
@@ -191,9 +198,12 @@ export type VerifyRuntimeChainResult = {
 export type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
-  RuntimeAdapterViewFrame,
-  RuntimeAdapterEntitySummary,
-};
+  RuntimeAdapterHistoryFrameBatch,
+	  RuntimeAdapterViewFrame,
+	  RuntimeAdapterActivityPage,
+	  RuntimeAdapterEntitySummary,
+	  RuntimeAdapterSolvencySummary,
+	};
 
 export type P2PConfig = {
   relayUrls?: string[];
@@ -279,8 +289,9 @@ export interface BigIntMathUtils {
  */
 export interface XLNModule {
   // Core lifecycle
-  main: () => Promise<Env>;
+  main: (runtimeSeedOverride?: string | null) => Promise<Env>;
   process: (env: Env, inputs?: unknown[], delay?: number) => Promise<Env>;
+  hasRuntimeWork?: (env: Env) => boolean;
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   registerRecoveryBackupBarrier?: (
     env: Env,
@@ -289,15 +300,16 @@ export interface XLNModule {
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   getEntityJAdapter: (env: Env, entityId: string, signerId?: string) => JAdapter | null;
-  submitDebtEnforcement: (
+  buildDebtEnforcementRuntimeInputFromProjection: (
+    params: import('./runtime-jurisdiction-api').DebtEnforcementProjectionRuntimeInputParams,
+  ) => RuntimeInput;
+  buildDebtEnforcementRuntimeInput: (
     env: Env,
-    entityId: string,
-    tokenId: number,
-    maxIterations?: number | bigint,
-    signerId?: string,
-  ) => Promise<void>;
+    params: import('./runtime-jurisdiction-api').DebtEnforcementRuntimeInputParams,
+  ) => RuntimeInput;
   processJBlockEvents?: (env: Env) => Promise<void>;
   applyJEventsToEnv?: (env: Env, events: import('./jadapter/types').JEvent[], label?: string) => void;
+  buildJEventsRuntimeInput?: (env: Env, events: import('./jadapter/types').JEvent[], label?: string) => RuntimeInput | null;
   queueEntityInput?: (env: Env, entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
   submitCrossJurisdictionSwap?: (
     env: Env,
@@ -454,14 +466,7 @@ export interface XLNModule {
       limit?: number | undefined;
       scanLimit?: number | undefined;
     },
-  ) => Promise<{
-    latestHeight: number;
-    scannedFrames: number;
-    returned: number;
-    limit: number;
-    nextBeforeHeight: number | null;
-    events: RuntimeActivityEvent[];
-  }>;
+  ) => Promise<RuntimeAdapterActivityPage>;
   readPersistedStorageHead: (env: Env) => Promise<import('./storage/types').StorageHead | null>;
   readPersistedStorageFrameRecord: (env: Env, height: number) => Promise<import('./storage/types').StorageFrameRecord | null>;
   listPersistedCheckpointHeights: (env: Env) => Promise<number[]>;

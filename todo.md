@@ -55,6 +55,110 @@ file and older docs disagree, prefer code and tests first, then this file.
 
 ## P0 - Release And Mainnet Readiness
 
+### Current Runtime-Client Audit Closure
+
+Status markers in this block are live. Do not mark an item closed without a
+regression test or executable gate that would fail if the issue returns.
+
+- [x] **P0: deterministic release gate exits cleanly.**
+  - Current failure: `bun run check:determinism` reaches PASS summary but keeps
+    watcher/anvil handles alive and must be stopped manually.
+  - Exit: command exits `0` on its own, with a regression guard for cleanup.
+  - Closed: scenario cleanup stops runtime loop, waits for in-flight watcher
+    polls, shuts down managed Anvil, and `check-determinism` exits `0` on
+    success. Guard: `runtime/__tests__/determinism-cleanup.test.ts`.
+
+- [x] **P1: remote admin actions are projection/command based.**
+  - Remove remaining embedded `Env` requirements from reserve-to-external,
+    external-to-reserve, debt enforcement, and pending batch admin actions.
+  - Exit: writable remote admin surfaces build and submit `RuntimeInput`
+    through shared command paths without `requireRuntimeEnv`.
+  - Closed: move draft and pending-batch actions resolve signer from
+    projection-aware command context, and debt enforcement builds `jInputs`
+    from projected jurisdiction data. Guards:
+    `tests/frontend/runtime-command-bus.test.ts`,
+    `tests/frontend/pending-batch-actions.test.ts`, and
+    `tests/frontend/debt-enforcement-command.test.ts`.
+
+- [x] **P1: no arbitrary direct adapter read escape hatch.**
+  - Replace raw `runtimeAdapterRead`/debug `read(path)` with typed
+    `RuntimeQueryClient` reads, including receipt status.
+  - Exit: frontend grep/test proves UI/debug surfaces cannot issue arbitrary
+    adapter read paths.
+  - Closed: `RuntimeQueryClient.readReceiptStatus()` owns receipt reads,
+    `window.__xlnRuntimeAdapter` exposes typed `query.*` helpers only, and
+    radapter e2e probes use that typed surface. Guard:
+    `tests/frontend/runtime-query-client.test.ts`.
+
+- [x] **P2: remove or rename legacy `isolatedEnv` public surface.**
+  - `window.isolatedEnv` and `isolatedEnv` prop names are legacy debug names and
+    conflict with the RuntimeView ownership model.
+  - Exit: app code uses a typed live-runtime snapshot/debug surface name; E2E
+    helpers are updated or bridged only through explicit compatibility tests.
+  - Closed: `frontend/src/lib/view` now uses `runtimeFrame*` store names and
+    publishes local debug state through `window.__xln.liveRuntimeSnapshot` /
+    `window.__xln.publishLiveRuntimeSnapshot`, with no top-level
+    `window.isolatedEnv` compatibility surface. Guard:
+    `tests/frontend/runtime-store-hot-swap.test.ts`.
+
+- [x] **P2: EntityWorkspace API is projection-first.**
+  - Remove `Env | EnvSnapshot` ownership from the workspace boundary once the
+    action modules above no longer need live embedded env.
+  - Exit: workspace tests fail on `Env | EnvSnapshot` props in the entity shell.
+  - Closed: `EntityWorkspace.svelte` no longer exports separate Env/history/live
+    props and its projection model file does not import full Env. The remaining
+    embedded action passthrough is isolated as `EntityWorkspaceRuntimeFrameContext`
+    for `EntityPanelTabs`. Guard: `tests/frontend/entity-workspace.test.ts`.
+
+### Current Runtime-Client Cleanup Pass
+
+Status markers in this block track the audit items that reduce runtime-client
+surface area. Prefer deletion or stricter boundaries over compatibility shims.
+
+- [x] **P1: radapter current head preserves persisted checkpoints.**
+  - Failure: browser e2e saw `latestSnapshotHeight=0` after remote admin
+    command even though H1 persisted a ready snapshot.
+  - Exit: stale persisted heads keep snapshot cadence/checkpoint metadata while
+    live runtime height advances.
+  - Closed: `readBestHead()` now merges stale persisted snapshot metadata with
+    live height instead of discarding storage head entirely. Guards:
+    `runtime/__tests__/radapter.test.ts` and focused remote browser e2e.
+
+- [x] **P1: gate debug globals consistently.**
+  - Remove ungated `window.__xln_env` / `window.__xln_instance` writes or route
+    them through the localhost-only debug surface helper.
+  - Exit: non-localhost console cannot mutate live embedded runtime state via
+    global Env handles.
+  - Closed: both legacy names are localhost-only `registerDebugSurface` getters
+    under `window.__xln`; direct global assignment is source-guarded by
+    `tests/frontend/runtime-store-hot-swap.test.ts`.
+
+- [x] **P1: remove dead arbitrary read exports.**
+  - Delete unused `runtimeQueryRead` and `createRuntimeReadStore`; keep generic
+    adapter reads private inside `RuntimeQueryClient`.
+  - Exit: only typed query helpers are exported/used by frontend surfaces.
+  - Closed: `RuntimeQueryClient.read/cachedRead` are private, no public
+    `runtimeQueryRead` or `createRuntimeReadStore` remains. Guard:
+    `tests/frontend/runtime-query-client.test.ts`.
+
+- [x] **P1: share debt enforcement command builder with runtime.**
+  - Delete frontend duplicate `debt-enforcement-command.ts` protocol shape.
+  - Exit: frontend and embedded Env path use one pure runtime builder.
+  - Closed: pure builder lives in `runtime/debt-enforcement-command.ts`;
+    frontend and env-aware runtime wrapper call the same function. Guards:
+    `tests/frontend/debt-enforcement-command.test.ts`,
+    `tests/frontend/runtime-command-bus.test.ts`, and
+    `runtime/__tests__/multi-jurisdiction-entity.test.ts`.
+
+- [x] **P2: finish `isolatedRevision` naming cleanup.**
+  - Rename remaining `isolatedRevision` prop/store names to
+    `runtimeFrameRevision`.
+  - Exit: source grep only finds archived/test allowlist references for
+    `isolated[A-Z]`.
+  - Closed: `UserModePanel` and `View` use `runtimeFrameRevision`; legacy
+    isolated names are source-guarded by
+    `tests/frontend/runtime-store-hot-swap.test.ts`.
+
 1. **Publish the GitHub Release object for `v0.1.5`.**
    - Tag `v0.1.5` is pushed.
    - `gh release create` is blocked until `gh auth login` or `GH_TOKEN` is
@@ -154,20 +258,29 @@ file and older docs disagree, prefer code and tests first, then this file.
    - A send/seed/quote action should be impossible before its barrier is met.
    - Exit: production health can show the exact blocked phase and dependency.
 
-10. **Orchestrator blast-radius boundaries.**
+10. **Cold system fixture for fast tests.**
+    - Build a verified cold fixture/template for the whole system: anvil
+      chains, hub mesh, custody, MM same-chain books, MM cross books, watchtower,
+      and runtime import manifest.
+    - Tests should clone or hydrate from this fixture instead of rebuilding the
+      full mesh for every short local loop.
+    - Exit: local browser/radapter tests can start from a known full-ready
+      state without weakening production readiness semantics.
+
+11. **Orchestrator blast-radius boundaries.**
     - Decouple child process supervision from whole-tree failure.
     - Ancillary feature failure degrades that feature and keeps diagnostics
       queryable; protocol contradiction remains a loud fatal stop.
     - Exit: faucet/demo/MM/watchtower failure cannot take down the health
       endpoint needed to debug the node.
 
-11. **Settlement conservation proof.**
+12. **Settlement conservation proof.**
     - Prove fund conservation across `pull_lock -> resolve -> on-chain release`
       on both legs, including debt/collateral and dispute finalization.
     - Cover `_disputeFinalizeInternal` line-by-line with adversarial fixtures.
     - Exit: external audit gets executable invariants, not just E2E success.
 
-12. **Economics and scale validation.**
+13. **Economics and scale validation.**
     - Document fee design, collateral ratios, market-maker incentives, and
       griefing costs for swaps and disputes.
     - Profile runtime/orderbook/MM under contention before raising real-money

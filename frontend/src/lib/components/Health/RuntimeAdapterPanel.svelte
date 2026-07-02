@@ -3,16 +3,13 @@
   import {
     connectRuntimeAdapter,
     disconnectRuntimeAdapter,
-    runtimeAdapterAuthLevel,
-    runtimeAdapterHeight,
-    runtimeAdapterRead,
-    runtimeAdapterStatus,
-  } from '$lib/stores/runtimeAdapterStore';
-  import type {
-    RuntimeAdapterEntitySummary,
-    RuntimeAdapterViewFrame,
-  } from '@xln/runtime/xln-api';
-  import type { StorageHead } from '@xln/runtime/storage/types';
+    runtimeControllerHandle,
+  } from '$lib/stores/runtimeControllerStore';
+  import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
+  import {
+    readStoredRemoteRuntimeImports,
+    resolveStoredRemoteRuntimeAuthKey,
+  } from '$lib/utils/remoteRuntimeImport';
   import { makeQaSeveritySignal, type QaSeveritySignal } from '@xln/runtime/qa/severity';
 
   type Props = {
@@ -25,55 +22,57 @@
   let wsUrl = $state('');
   let authKey = $state('');
   let selectedEntityId = $state('');
-  let head = $state<StorageHead | null>(null);
-  let viewFrame = $state<RuntimeAdapterViewFrame | null>(null);
   let loading = $state(false);
   let error = $state<string | null>(null);
 
+  const head = $derived($runtimeView.head);
+  const viewFrame = $derived($runtimeView.frame);
   const entities = $derived(viewFrame?.entities ?? []);
   const activeEntity = $derived(viewFrame?.activeEntity ?? null);
   const activeAccounts = $derived(activeEntity?.accounts?.items ?? []);
   const activeAccountSummary = $derived(activeEntity?.accounts?.summary ?? null);
   const activeBooks = $derived(activeEntity?.books?.items ?? []);
+  const busy = $derived(loading || $runtimeView.loading);
+  const effectiveError = $derived(error ?? $runtimeView.error);
   const adapterSeverity = $derived.by<QaSeveritySignal>(() => {
-    if (error) {
+    if (effectiveError) {
       return makeQaSeveritySignal({
         severity: 'FAIL',
-        reason: error,
+        reason: effectiveError,
         since: Date.now(),
         owner: 'remote-adapter',
-        evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+        evidence: [{ label: 'status', value: $runtimeControllerHandle.status }],
       });
     }
-    if (loading) {
+    if (busy) {
       return makeQaSeveritySignal({
         severity: 'UNKNOWN',
         reason: 'Runtime adapter request is in flight',
         since: Date.now(),
         owner: 'remote-adapter',
-        evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+        evidence: [{ label: 'status', value: $runtimeControllerHandle.status }],
       });
     }
-    if ($runtimeAdapterStatus === 'connected') {
+    if ($runtimeControllerHandle.status === 'connected') {
       return makeQaSeveritySignal({
         severity: viewFrame ? 'OK' : 'WARN',
         reason: viewFrame ? 'Remote runtime compact frame is loaded' : 'Remote adapter is connected; compact frame not loaded yet',
         since: Date.now(),
         owner: 'remote-adapter',
         evidence: [
-          { label: 'height', value: $runtimeAdapterHeight },
-          { label: 'auth', value: $runtimeAdapterAuthLevel ?? 'none' },
+          { label: 'height', value: $runtimeControllerHandle.height },
+          { label: 'auth', value: $runtimeControllerHandle.authLevel ?? 'none' },
           { label: 'entities', value: entities.length },
         ],
       });
     }
-    if ($runtimeAdapterStatus === 'error') {
+    if ($runtimeControllerHandle.status === 'error') {
       return makeQaSeveritySignal({
         severity: 'FAIL',
         reason: 'Remote adapter connection failed',
         since: Date.now(),
         owner: 'remote-adapter',
-        evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+        evidence: [{ label: 'status', value: $runtimeControllerHandle.status }],
       });
     }
     return makeQaSeveritySignal({
@@ -81,7 +80,7 @@
       reason: 'Remote adapter is not connected',
       since: 0,
       owner: 'remote-adapter',
-      evidence: [{ label: 'status', value: $runtimeAdapterStatus }],
+      evidence: [{ label: 'status', value: $runtimeControllerHandle.status }],
     });
   });
 
@@ -125,16 +124,13 @@
     loading = true;
     error = null;
     try {
-      const nextHead = await runtimeAdapterRead<StorageHead>('head');
-      const nextFrame = await runtimeAdapterRead<RuntimeAdapterViewFrame>('view-frame', {
+      const nextView = await refreshRuntimeView({
         limit: 12,
         accountsLimit: 10,
         booksLimit: 10,
         ...(selectedEntityId ? { entityId: selectedEntityId } : {}),
       });
-      head = nextHead;
-      viewFrame = nextFrame;
-      selectedEntityId = nextFrame.activeEntityId || nextFrame.entities[0]?.entityId || selectedEntityId;
+      selectedEntityId = nextView.activeEntityId || nextView.entities[0]?.entityId || selectedEntityId;
     } catch (err) {
       error = errorMessage(err);
     } finally {
@@ -164,23 +160,49 @@
     await refresh();
   }
 
-  function hydrateFromLocation(): void {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    wsUrl = params.get('ws') || defaultWsUrl();
-    authKey = params.get('token') || params.get('key') || params.get('auth') || '';
-    if (params.has('token') || params.has('key') || params.has('auth')) {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('token');
-      url.searchParams.delete('key');
-      url.searchParams.delete('auth');
-      history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  function readStoredActiveRemote(): { wsUrl: string; authKey: string } | null {
+    if (typeof localStorage === 'undefined') return null;
+    const mode = localStorage.getItem('xln-runtime-adapter-mode') || '';
+    const storedWs = localStorage.getItem('xln-runtime-adapter-ws') || '';
+    if (mode !== 'remote' || !storedWs) return null;
+    const storedAccess = localStorage.getItem('xln-runtime-adapter-access') === 'admin' ? 'admin' : 'read';
+    const token = resolveStoredRemoteRuntimeAuthKey(storedWs, { requiredAccess: storedAccess });
+    return token ? { wsUrl: storedWs, authKey: token } : null;
+  }
+
+  function hydrateFromLocation(): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const explicitWsUrl = params.get('ws') || '';
+      const explicitAuthKey = params.get('token') || params.get('key') || params.get('auth') || '';
+      if (explicitWsUrl) {
+        wsUrl = explicitWsUrl;
+        authKey = explicitAuthKey || resolveStoredRemoteRuntimeAuthKey(explicitWsUrl);
+      } else {
+        const stored = readStoredActiveRemote();
+        wsUrl = stored?.wsUrl || readStoredRemoteRuntimeImports()[0]?.wsUrl || defaultWsUrl();
+        authKey = stored?.authKey || '';
+      }
+      if (params.has('token') || params.has('key') || params.has('auth')) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('token');
+        url.searchParams.delete('key');
+        url.searchParams.delete('auth');
+        history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      }
+      return Boolean(explicitWsUrl || authKey);
+    } catch (err) {
+      error = errorMessage(err);
+      wsUrl = defaultWsUrl();
+      authKey = '';
+      return false;
     }
   }
 
   onMount(() => {
-    hydrateFromLocation();
-    if (autoConnect) void connect();
+    const shouldAutoConnect = hydrateFromLocation();
+    if (autoConnect && shouldAutoConnect) void connect();
   });
 </script>
 
@@ -206,9 +228,9 @@
   <div class="status-line">
     <span class:ok={adapterSeverity.severity === 'OK'} class:bad={adapterSeverity.severity === 'FAIL'}>{adapterSeverity.severity}</span>
     <span title={adapterSeverity.reason}>{adapterSeverity.reason}</span>
-    <span class:ok={$runtimeAdapterStatus === 'connected'} class:bad={$runtimeAdapterStatus === 'error'}>{$runtimeAdapterStatus}</span>
-    <span>height {$runtimeAdapterHeight}</span>
-    <span>{$runtimeAdapterAuthLevel ?? 'no auth'}</span>
+    <span class:ok={$runtimeControllerHandle.status === 'connected'} class:bad={$runtimeControllerHandle.status === 'error'}>{$runtimeControllerHandle.status}</span>
+    <span>height {$runtimeControllerHandle.height}</span>
+    <span>{$runtimeControllerHandle.authLevel ?? 'no auth'}</span>
   </div>
 
   <div class="connect-band">
@@ -220,13 +242,13 @@
       Token
       <input bind:value={authKey} type="password" placeholder="read/admin token" />
     </label>
-    <button onclick={connect} disabled={loading}>{loading ? 'Loading' : 'Connect'}</button>
-    <button class="secondary" onclick={refresh} disabled={loading || $runtimeAdapterStatus !== 'connected'}>Refresh</button>
+    <button onclick={connect} disabled={busy}>{busy ? 'Loading' : 'Connect'}</button>
+    <button class="secondary" onclick={refresh} disabled={busy || $runtimeControllerHandle.status !== 'connected'}>Refresh</button>
     <button class="secondary" onclick={disconnectRuntimeAdapter}>Disconnect</button>
   </div>
 
-  {#if error}
-    <div class="error-band">{error}</div>
+  {#if effectiveError}
+    <div class="error-band">{effectiveError}</div>
   {/if}
 
   <div class="summary-grid">

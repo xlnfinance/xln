@@ -11,6 +11,7 @@ type DevRadapterKeys = {
 
 type Args = {
   webPort: number;
+  webHttpPort: number | null;
   apiPort: number;
   rpcPort: number;
   rpc2Port: number;
@@ -47,6 +48,11 @@ const numberFlag = (name: string): number => {
   return value;
 };
 
+const optionalNumberFlag = (name: string): number | null => {
+  if (!flags.has(name)) return null;
+  return numberFlag(name);
+};
+
 const stringFlag = (name: string): string => {
   const value = flags.get(name)?.trim();
   if (!value) throw new Error(`DEV_LINKS_ARG_INVALID:${name}`);
@@ -70,6 +76,7 @@ const readKeys = (path: string): DevRadapterKeys => {
 
 const args: Args = {
   webPort: numberFlag('--web-port'),
+  webHttpPort: optionalNumberFlag('--web-http-port'),
   apiPort: numberFlag('--api-port'),
   rpcPort: numberFlag('--rpc-port'),
   rpc2Port: numberFlag('--rpc2-port'),
@@ -81,6 +88,7 @@ const args: Args = {
 
 const keys = readKeys(args.keysPath);
 const web = `https://localhost:${args.webPort}`;
+const webHttp = args.webHttpPort ? `http://localhost:${args.webHttpPort}` : null;
 const api = `http://127.0.0.1:${args.apiPort}`;
 const custody = `https://localhost:${args.custodyPort}`;
 const custodyDaemon = `http://127.0.0.1:${args.custodyDaemonPort}`;
@@ -91,8 +99,14 @@ const hyperlink = (label: string, url: string): string => {
   return `\u001B]8;;${url}\u0007${label}\u001B]8;;\u0007`;
 };
 
+const browserRows: LinkRow[] = webHttp ? [
+  { label: 'wallet browser QA', url: `${webHttp}/app` },
+  { label: 'radapter manager QA', url: `${webHttp}/radapter/manage` },
+] : [];
+
 const rows: LinkRow[] = [
   { label: 'wallet', url: `${web}/app` },
+  ...browserRows,
   { label: 'remote import read', url: keys.importUrl!, display: '[open read import]' },
   { label: 'remote import admin', url: keys.adminImportUrl!, display: '[open admin import]' },
   { label: 'health admin', url: `${web}/health` },
@@ -123,6 +137,6 @@ for (const row of rows) {
 console.log('-'.repeat(88));
 console.log(`plain import URLs: ${resolve(args.keysPath)}`);
 console.log('runtime import links fetch fresh tokens into the manager; press Confirm in the browser.');
-console.log('logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE');
+console.log('logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
 console.log(line);
 console.log('');

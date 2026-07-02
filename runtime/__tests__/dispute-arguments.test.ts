@@ -10,6 +10,7 @@ import { buildAccountProofBody, setDeltaTransformerAddress } from '../proof-buil
 import type { AccountMachine, AccountTx, EntityState, SwapOffer } from '../types';
 
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
+const TEST_WATCH_SEED = `0x${'d1'.repeat(32)}`;
 
 function offer(offerId: string, makerIsLeft: boolean, giveTokenId: number, wantTokenId: number): SwapOffer {
   return {
@@ -30,6 +31,7 @@ function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountMachine {
   return {
     leftEntity: 'left',
     rightEntity: 'right',
+    watchSeed: TEST_WATCH_SEED,
     status: 'active',
     mempool: [],
     currentFrame: {

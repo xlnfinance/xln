@@ -10,9 +10,9 @@
   export let miniPanelEntityId = '';
   export let miniPanelEntityName = '';
   export let miniPanelPosition: { x: number; y: number } = { x: 0, y: 0 };
-  export let isolatedEnv: Writable<Env | null>;
-  export let isolatedHistory: Writable<EnvSnapshot[]>;
-  export let isolatedTimeIndex: Writable<number>;
+  export let runtimeFrameEnv: Writable<Env | null>;
+  export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
+  export let runtimeFrameTimeIndex: Writable<number>;
   export let showFpsOverlay = false;
   export let renderFps = 0;
   export let frameTime = 0;
@@ -38,9 +38,9 @@
       entityId={miniPanelEntityId}
       entityName={miniPanelEntityName}
       position={miniPanelPosition}
-      {isolatedEnv}
-      {isolatedHistory}
-      {isolatedTimeIndex}
+      {runtimeFrameEnv}
+      {runtimeFrameHistory}
+      {runtimeFrameTimeIndex}
       on:close={closeMiniPanel}
       on:action={handleMiniPanelAction}
       on:openFull={handleOpenFullPanel}

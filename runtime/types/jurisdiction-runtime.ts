@@ -76,4 +76,14 @@ export type JTx =
         amount: bigint;
       };
       timestamp: number;
+    }
+  | {
+      type: 'debtEnforcement'; // Drain FIFO debt from Depository reserves.
+      entityId: string;
+      data: {
+        tokenId: number;
+        maxIterations: bigint;
+        signerId?: string;
+      };
+      timestamp: number;
     };

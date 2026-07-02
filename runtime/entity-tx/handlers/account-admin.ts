@@ -59,6 +59,7 @@ export const handleSetHubConfigEntityTx = (
 ): AccountAdminResult => {
   const newState = cloneEntityState(entityState);
   const {
+    hubName: hubNameRaw,
     matchingStrategy: matchingStrategyRaw = 'amount',
     policyVersion: policyVersionRaw,
     routingFeePPM = 1,
@@ -76,6 +77,9 @@ export const handleSetHubConfigEntityTx = (
 
   const matchingStrategy = normalizeRebalanceMatchingStrategy(matchingStrategyRaw);
   const previousConfig = entityState.hubRebalanceConfig;
+  const hubName = typeof hubNameRaw === 'string' && hubNameRaw.trim().length > 0
+    ? hubNameRaw.trim()
+    : previousConfig?.hubName;
   const previousVersion = previousConfig?.policyVersion ?? 0;
   const feePolicyChanged = !previousConfig ||
     (previousConfig.rebalanceBaseFee ?? 10n ** 17n) !== rebalanceBaseFee ||
@@ -108,6 +112,7 @@ export const handleSetHubConfigEntityTx = (
   const normalizedSwapTakerFeeBps = Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBps) || 0)));
 
   newState.hubRebalanceConfig = {
+    ...(hubName ? { hubName } : {}),
     matchingStrategy,
     policyVersion,
     routingFeePPM,

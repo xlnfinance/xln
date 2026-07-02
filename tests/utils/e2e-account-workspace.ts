@@ -96,8 +96,9 @@ export async function startDisputeFromManageUi(
   page: Page,
   counterpartyId: string,
   waitUntilQueued: () => Promise<boolean>,
+  waitUntilPrepared?: () => Promise<boolean>,
 ): Promise<void> {
-  await queueDisputeActionFromManageUi(page, counterpartyId, 'start', waitUntilQueued);
+  await queueDisputeActionFromManageUi(page, counterpartyId, 'start', waitUntilQueued, waitUntilPrepared);
 }
 
 export async function finalizeDisputeFromManageUi(
@@ -113,6 +114,7 @@ async function queueDisputeActionFromManageUi(
   counterpartyId: string,
   action: 'start' | 'finalize',
   waitUntilQueued: () => Promise<boolean>,
+  waitUntilPrepared?: () => Promise<boolean>,
 ): Promise<void> {
   const buttonTestId = action === 'start'
     ? 'configure-dispute-start'
@@ -164,19 +166,34 @@ async function queueDisputeActionFromManageUi(
     if (needsPrepare) {
       await expect(prepareButton).toBeEnabled({ timeout: 20_000 });
       const prepareDialogs = await clickWithDialogAccept(page, async () => {
+        await prepareButton.scrollIntoViewIfNeeded();
         await prepareButton.click();
       });
       const prepareAlert = prepareDialogs.find((entry) => entry.type === 'alert');
       if (prepareAlert) {
         throw new Error(`dispute prepare alert: ${prepareAlert.message}`);
       }
-      await expect.poll(
-        async () => page.locator('[data-testid="configure-dispute-start"]:visible').first().isVisible().catch(() => false),
-        {
+      try {
+        await expect.poll(async () => {
+          if (await waitUntilQueued()) return 'queued';
+          if (waitUntilPrepared && await waitUntilPrepared()) return 'prepared';
+          const startVisible = await page.locator('[data-testid="configure-dispute-start"]:visible').first()
+            .isVisible()
+            .catch(() => false);
+          return startVisible ? 'start-visible' : 'waiting';
+        }, {
           timeout: 20_000,
           intervals: [500, 1000, 2000],
-        },
-      ).toBe(true);
+        }).not.toBe('waiting');
+      } catch (error) {
+        throw new Error(
+          `dispute prepare did not transition to start: ${(error as Error).message} ` +
+          `controls=${JSON.stringify(await readDisputeManageDiagnostics(page))}`,
+        );
+      }
+      if (await waitUntilQueued()) return;
+      await expect(disputeTab).toBeVisible({ timeout: 20_000 });
+      await disputeTab.click();
       disputeButton = page.locator('[data-testid="configure-dispute-start"]:visible').first();
     }
   }
@@ -192,8 +209,35 @@ async function queueDisputeActionFromManageUi(
     throw new Error(`dispute ${action} alert: ${alertDialog.message}`);
   }
 
-  await expect.poll(waitUntilQueued, {
-    timeout: 15_000,
-    intervals: [500, 1000, 2000],
-  }).toBe(true);
+  try {
+    await expect.poll(waitUntilQueued, {
+      timeout: 15_000,
+      intervals: [500, 1000, 2000],
+    }).toBe(true);
+  } catch (error) {
+    throw new Error(
+      `dispute ${action} did not queue: ${(error as Error).message} ` +
+      `controls=${JSON.stringify(await readDisputeManageDiagnostics(page))}`,
+    );
+  }
+}
+
+async function readDisputeManageDiagnostics(page: Page): Promise<Record<string, unknown>> {
+  return await page.evaluate(() => {
+    const text = (selector: string) => String(document.querySelector(selector)?.textContent || '').trim();
+    const visible = (selector: string) => {
+      const el = document.querySelector(selector) as HTMLElement | null;
+      if (!el) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
+    };
+    return {
+      selectedAccount: text('[data-testid="configure-account-selector"]'),
+      prepareVisible: visible('[data-testid="configure-dispute-prepare"]'),
+      startVisible: visible('[data-testid="configure-dispute-start"]'),
+      finalizeVisible: visible('[data-testid="configure-dispute-finalize"]'),
+      activeLens: document.querySelector('[data-testid="entity-workspace"]')?.getAttribute('data-lens') || '',
+      commandState: String(document.querySelector('[data-testid^="runtime-command-"]')?.textContent || '').trim(),
+    };
+  });
 }

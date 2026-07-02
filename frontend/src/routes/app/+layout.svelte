@@ -1,20 +1,20 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
+  import { replaceState } from '$app/navigation';
   import { page } from '$app/stores';
   import RuntimeStateCard from '$lib/components/shared/RuntimeStateCard.svelte';
   import { appState } from '$lib/stores/appStateStore';
   import {
     initializeXLN,
-    appRuntimeAdapterMode,
-    appRuntimeAdapterPageInfo,
-    refreshRuntimeAdapterEnvironment,
-    setRuntimeAdapterPage,
+    refreshCurrentRuntimeProjection,
     isLoading,
     error,
     suspendClientActivity,
     xlnFunctions
   } from '$lib/stores/xlnStore';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { runtimeViewPageInfo, setRuntimeViewPage } from '$lib/stores/runtimeViewStore';
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
@@ -25,10 +25,19 @@
     initializeActiveTabLock,
     isInactiveTabStandby
   } from '$lib/utils/activeTabLock';
-  import { normalizeWsConnectUrl } from '$lib/utils/wsUrl';
   import {
     REMOTE_RUNTIME_IMPORT_HASH_PARAM,
   } from '$lib/utils/remoteRuntimeImport';
+  import {
+    hasAcceptedRemoteRuntime,
+    persistRemoteRuntimeRequest,
+    readRemoteRuntimeImportPayloadFromHash,
+    readRemoteRuntimeImportPayloadFromUrl,
+    readRemoteRuntimeRequestFromUrl,
+    remoteAcceptKey,
+    stripRemoteRuntimeParamsFromHistory,
+    type RemoteRuntimeRequest,
+  } from '$lib/utils/runtimeConnection';
 
   let { children } = $props();
 
@@ -43,21 +52,12 @@
   let pendingRemoteRuntime = $state<RemoteRuntimeRequest | null>(null);
   let remoteRuntimeAuthInput = $state('');
   let remoteRuntimeAuthError = $state('');
+  let claimingActiveTabLock = $state(false);
+  let releaseActiveTabLock: (() => void) | null = null;
   const pageSearch = $derived(browser ? $page.url.search : '');
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
-  const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';
-
   type DeployVersionPayload = {
     version: string;
-  };
-
-  type RemoteRuntimeRequest = {
-    wsUrl: string;
-    authKey: string;
-    hostLabel: string;
-    keyLabel: string;
-    acceptKey: string;
-    requiresAuthPaste?: boolean;
   };
 
   type HashRouteState = {
@@ -86,11 +86,11 @@
     if (!isResetHashActive()) return false;
     const confirmed = window.confirm('reset everything');
     if (confirmed) {
-      history.replaceState(null, '', '/app');
+      replaceState('/app', {});
       await resetEverything({ confirmed: true, reason: 'hash-reset' });
       return true;
     }
-    history.replaceState(null, '', '/app');
+    replaceState('/app', {});
     return false;
   }
 
@@ -119,78 +119,16 @@
     currentHash = readCurrentHash();
   }
 
-  function normalizeRuntimeWsUrl(value: string): string {
-    const parsed = new URL(normalizeWsConnectUrl(String(value || '').trim()));
-    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-      throw new Error('REMOTE_RUNTIME_WS_REQUIRED');
-    }
-    return parsed.toString();
-  }
-
-  function describeAuthKey(key: string): string {
-    if (!key) return 'no key';
-    if (key.startsWith('xlnra1.read.')) return 'read capability';
-    if (key.startsWith('xlnra1.full.')) return 'full capability';
-    return `${key.slice(0, 6)}...${key.slice(-4)}`;
-  }
-
-  function hostLabelForWsUrl(wsUrl: string): string {
-    try {
-      const parsed = new URL(wsUrl);
-      return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
-    } catch {
-      return wsUrl;
-    }
-  }
-
-  function remoteAcceptKey(wsUrl: string, authKey: string): string {
-    return `${REMOTE_ACCEPT_PREFIX}${wsUrl}|${authKey.slice(0, 16)}|${authKey.slice(-16)}`;
-  }
-
-  function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
-    if (!browser) return null;
+  function shouldBootRemoteRuntime(): boolean {
+    if (!browser) return false;
     const params = new URLSearchParams(window.location.search);
-    const mode = String(params.get('runtime') || params.get('adapter') || '').trim().toLowerCase();
-    const wsParam = String(params.get('ws') || params.get('runtimeWs') || '').trim();
-    if (mode !== 'remote' || !wsParam) return null;
-    const keyParam = String(params.get('token') || params.get('authKey') || params.get('key') || params.get('auth') || '').trim();
-    const authKey = keyParam.startsWith('xlnra1.') ? keyParam : '';
-    const requiresAuthPaste = !authKey && (params.has('key') || params.has('auth'));
-    const wsUrl = normalizeRuntimeWsUrl(wsParam);
-    return {
-      wsUrl,
-      authKey,
-      hostLabel: hostLabelForWsUrl(wsUrl),
-      keyLabel: requiresAuthPaste ? 'capability must be pasted' : describeAuthKey(authKey),
-      acceptKey: remoteAcceptKey(wsUrl, authKey),
-      requiresAuthPaste,
-    };
-  }
-
-  function runtimeImportPayloadFromParams(params: URLSearchParams): string {
-    return String(
-      params.get('runtimeList') ||
-      params.get('runtime-list') ||
-      params.get('runtimeImport') ||
-      params.get(REMOTE_RUNTIME_IMPORT_HASH_PARAM) ||
-      params.get('runtimes') ||
-      params.get('remote-runtimes') ||
-      params.get('xlnRemoteRuntimes') ||
-      '',
-    ).trim();
-  }
-
-  function readRemoteRuntimeImportPayloadFromUrl(): string {
-    if (!browser) return '';
-    return runtimeImportPayloadFromParams(new URLSearchParams(window.location.search));
-  }
-
-  function readRemoteRuntimeImportPayloadFromHash(): string {
-    if (!browser) return '';
-    const hash = readCurrentHash().trim();
-    if (!hash) return '';
-    const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
-    return runtimeImportPayloadFromParams(params);
+    const rawMode = (
+      params.get('runtime') ||
+      params.get('adapter') ||
+      localStorage.getItem('xln-runtime-adapter-mode') ||
+      ''
+    ).trim().toLowerCase();
+    return rawMode === 'remote' || rawMode === 'ws' || params.has('ws') || params.has('runtimeWs');
   }
 
   function redirectRemoteRuntimeImportToManager(payload: string): void {
@@ -202,36 +140,78 @@
 
   function stripRemoteRuntimeParams(): void {
     if (!browser) return;
-    const url = new URL(window.location.href);
-    for (const key of ['runtime', 'adapter', 'ws', 'runtimeWs', 'token', 'authKey', 'key', 'auth']) {
-      url.searchParams.delete(key);
-    }
-    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    stripRemoteRuntimeParamsFromHistory();
   }
 
-  function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {
-    localStorage.setItem('xln-runtime-adapter-mode', 'remote');
-    localStorage.setItem('xln-runtime-adapter-ws', request.wsUrl);
-    if (request.authKey) {
-      localStorage.removeItem('xln-runtime-adapter-key');
-      sessionStorage.setItem('xln-runtime-adapter-key', request.authKey);
-    } else {
-      localStorage.removeItem('xln-runtime-adapter-key');
-      sessionStorage.removeItem('xln-runtime-adapter-key');
-    }
-    sessionStorage.setItem(request.acceptKey, '1');
-  }
-
-  function hasAcceptedRemoteRuntime(request: RemoteRuntimeRequest): boolean {
+  async function bootAfterActiveTabClaim(options: {
+    replaceExistingLock?: boolean;
+    persistDeployVersionAfterBoot?: boolean;
+    errorLabel: string;
+  }): Promise<void> {
+    activeTabLockReady = false;
+    hasActiveTabLock = false;
+    isLoading.set(true);
+    error.set(null);
     try {
-      localStorage.removeItem('xln-runtime-adapter-key');
-      return sessionStorage.getItem(request.acceptKey) === '1';
-    } catch {
-      return false;
+      if (options.replaceExistingLock) {
+        releaseActiveTabLock?.();
+        releaseActiveTabLock = null;
+      }
+      if (!releaseActiveTabLock) {
+        releaseActiveTabLock = await initializeActiveTabLock(async () => {
+          await deactivateThisTab();
+        });
+      }
+      hasActiveTabLock = true;
+      activeTabLockReady = true;
+      if (lockTestMode) {
+        isLoading.set(false);
+        error.set(null);
+        embedBootReady = true;
+        return;
+      }
+      await bootApp();
+      if (options.persistDeployVersionAfterBoot) {
+        try {
+          persistDeployVersion(await fetchCurrentDeployVersion());
+        } catch (deployError) {
+          console.warn('[deploy-version] failed to persist deploy version:', deployError);
+        }
+      }
+    } catch (err) {
+      console.error(`${options.errorLabel}:`, err);
+      error.set((err as Error)?.message || options.errorLabel);
+      activeTabLockReady = true;
+      hasActiveTabLock = false;
+      isLoading.set(false);
     }
   }
 
-  function acceptRemoteRuntime(): void {
+  async function activateAppAfterRuntimeChoice(): Promise<void> {
+    pendingRemoteRuntime = null;
+    remoteRuntimeAuthInput = '';
+    remoteRuntimeAuthError = '';
+    await bootAfterActiveTabClaim({
+      persistDeployVersionAfterBoot: true,
+      errorLabel: 'Runtime activation failed',
+    });
+  }
+
+  async function claimActiveTabLockInPlace(): Promise<void> {
+    if (claimingActiveTabLock) return;
+    claimingActiveTabLock = true;
+    clearInactiveTabStandby();
+    try {
+      await bootAfterActiveTabClaim({
+        replaceExistingLock: true,
+        errorLabel: 'Active tab lock claim failed',
+      });
+    } finally {
+      claimingActiveTabLock = false;
+    }
+  }
+
+  async function acceptRemoteRuntime(): Promise<void> {
     const request = pendingRemoteRuntime;
     if (!request) return;
     const authKey = request.requiresAuthPaste ? remoteRuntimeAuthInput.trim() : request.authKey;
@@ -246,18 +226,22 @@
       acceptKey: remoteAcceptKey(request.wsUrl, authKey),
     });
     stripRemoteRuntimeParams();
-    window.location.reload();
+    await activateAppAfterRuntimeChoice();
   }
 
-  function useLocalBrowserRuntime(): void {
+  async function useLocalBrowserRuntime(): Promise<void> {
     localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
+    localStorage.removeItem('xln-runtime-adapter-ws');
+    localStorage.removeItem('xln-runtime-adapter-access');
+    localStorage.removeItem('xln-runtime-adapter-key');
+    sessionStorage.removeItem('xln-runtime-adapter-key');
     stripRemoteRuntimeParams();
-    window.location.reload();
+    await activateAppAfterRuntimeChoice();
   }
 
   async function changeRemotePage(kind: 'accounts' | 'books', pageIndex: number): Promise<void> {
-    setRuntimeAdapterPage(kind, pageIndex);
-    await refreshRuntimeAdapterEnvironment();
+    setRuntimeViewPage(kind, pageIndex);
+    await refreshCurrentRuntimeProjection();
   }
 
   function readStoredDeployVersion(): string {
@@ -350,9 +334,14 @@
       settingsOperations.initialize();
       tabOperations.loadFromStorage();
       tabOperations.initializeDefaultTabs();
+      const bootingRemoteRuntime = shouldBootRemoteRuntime();
+      if (!bootingRemoteRuntime) {
+        await vaultOperations.initialize();
+      }
+      if (generation !== bootGeneration || !hasActiveTabLock) return;
       await initializeXLN();
       if (generation !== bootGeneration || !hasActiveTabLock) return;
-      if ($appRuntimeAdapterMode !== 'remote') {
+      if (!bootingRemoteRuntime && $runtimeControllerHandle.mode !== 'remote') {
         await vaultOperations.initialize();
       }
       if (generation !== bootGeneration || !hasActiveTabLock) return;
@@ -371,7 +360,6 @@
 
   onMount(() => {
     let disposed = false;
-    let releaseLock: (() => void) | null = null;
 
     const handleLocationChange = () => {
       syncHashLocation();
@@ -410,7 +398,7 @@
         error.set(null);
         return;
       }
-      releaseLock = await initializeActiveTabLock(async () => {
+      releaseActiveTabLock = await initializeActiveTabLock(async () => {
         await deactivateThisTab();
       });
       if (disposed) return;
@@ -445,7 +433,8 @@
     return () => {
       disposed = true;
       window.removeEventListener('hashchange', handleLocationChange);
-      releaseLock?.();
+      releaseActiveTabLock?.();
+      releaseActiveTabLock = null;
     };
   });
 </script>
@@ -500,13 +489,11 @@
       <h2>Inactive Tab</h2>
       <p>This wallet tab lost the active lock to a newer tab.</p>
       <button
-        data-testid="inactive-tab-reload"
-        onclick={() => {
-          clearInactiveTabStandby();
-          window.location.reload();
-        }}
+        data-testid="inactive-tab-acquire"
+        disabled={claimingActiveTabLock}
+        onclick={claimActiveTabLockInPlace}
       >
-        Reload to acquire active lock
+        {claimingActiveTabLock ? 'Claiming active lock...' : 'Take active lock'}
       </button>
     </div>
   {/if}
@@ -539,36 +526,36 @@
     />
   </div>
 {:else}
-  {#if $appRuntimeAdapterMode === 'remote' && $appRuntimeAdapterPageInfo && ($appRuntimeAdapterPageInfo.accountsHasMore || $appRuntimeAdapterPageInfo.booksHasMore)}
+  {#if $runtimeControllerHandle.mode === 'remote' && $runtimeViewPageInfo && ($runtimeViewPageInfo.accountsHasMore || $runtimeViewPageInfo.booksHasMore)}
     <div class="remote-page-notice" data-testid="remote-page-notice">
       <span>
-        Accounts {$appRuntimeAdapterPageInfo.accountsPageIndex + 1}/{$appRuntimeAdapterPageInfo.accountsPageCount || 1}
-        ({$appRuntimeAdapterPageInfo.accountsShown}/{$appRuntimeAdapterPageInfo.accountsTotal})
+        Accounts {$runtimeViewPageInfo.accountsPageIndex + 1}/{$runtimeViewPageInfo.accountsPageCount || 1}
+        ({$runtimeViewPageInfo.accountsShown}/{$runtimeViewPageInfo.accountsTotal})
       </span>
       <button
         type="button"
-        disabled={$appRuntimeAdapterPageInfo.accountsPageIndex <= 0}
-        onclick={() => changeRemotePage('accounts', $appRuntimeAdapterPageInfo!.accountsPageIndex - 1)}
+        disabled={$runtimeViewPageInfo.accountsPageIndex <= 0}
+        onclick={() => changeRemotePage('accounts', $runtimeViewPageInfo!.accountsPageIndex - 1)}
       >Prev</button>
       <button
         type="button"
-        disabled={!$appRuntimeAdapterPageInfo.accountsHasMore}
-        onclick={() => changeRemotePage('accounts', $appRuntimeAdapterPageInfo!.accountsPageIndex + 1)}
+        disabled={!$runtimeViewPageInfo.accountsHasMore}
+        onclick={() => changeRemotePage('accounts', $runtimeViewPageInfo!.accountsPageIndex + 1)}
       >Next</button>
-      {#if $appRuntimeAdapterPageInfo.booksTotal > 0}
+      {#if $runtimeViewPageInfo.booksTotal > 0}
         <span>
-          Books {$appRuntimeAdapterPageInfo.booksPageIndex + 1}/{$appRuntimeAdapterPageInfo.booksPageCount || 1}
-          ({$appRuntimeAdapterPageInfo.booksShown}/{$appRuntimeAdapterPageInfo.booksTotal})
+          Books {$runtimeViewPageInfo.booksPageIndex + 1}/{$runtimeViewPageInfo.booksPageCount || 1}
+          ({$runtimeViewPageInfo.booksShown}/{$runtimeViewPageInfo.booksTotal})
         </span>
         <button
           type="button"
-          disabled={$appRuntimeAdapterPageInfo.booksPageIndex <= 0}
-          onclick={() => changeRemotePage('books', $appRuntimeAdapterPageInfo!.booksPageIndex - 1)}
+          disabled={$runtimeViewPageInfo.booksPageIndex <= 0}
+          onclick={() => changeRemotePage('books', $runtimeViewPageInfo!.booksPageIndex - 1)}
         >Prev</button>
         <button
           type="button"
-          disabled={!$appRuntimeAdapterPageInfo.booksHasMore}
-          onclick={() => changeRemotePage('books', $appRuntimeAdapterPageInfo!.booksPageIndex + 1)}
+          disabled={!$runtimeViewPageInfo.booksHasMore}
+          onclick={() => changeRemotePage('books', $runtimeViewPageInfo!.booksPageIndex + 1)}
         >Next</button>
       {/if}
     </div>

@@ -16,12 +16,31 @@ export type RemoteRuntimeImportEntry = {
   token: string;
 };
 
+export type RemoteRuntimeHubJurisdiction = {
+  name?: string;
+  address?: string;
+  chainId?: number | string;
+  depositoryAddress?: string;
+  entityProviderAddress?: string;
+};
+
+export type RemoteRuntimeHubSummary = {
+  entityId: string;
+  label: string;
+  height: number;
+  jurisdiction?: RemoteRuntimeHubJurisdiction;
+};
+
 export type StoredRemoteRuntimeImportEntry = RemoteRuntimeImportEntry & {
   runtimeId: string;
   authLevel: 'inspect' | 'admin';
   height: number;
   entityCount: number;
   importedAt: number;
+  hubEntityId?: string;
+  hubName?: string;
+  hubJurisdiction?: RemoteRuntimeHubJurisdiction;
+  hubEntities?: RemoteRuntimeHubSummary[];
 };
 
 export type RemoteRuntimeImportManifest = {
@@ -65,6 +84,23 @@ export const readRemoteRuntimeTokenExpiry = (token: string): number | null => {
   if (parts.length !== 7 || parts[0] !== 'xlnra1') return null;
   const expiresAt = Math.floor(Number(parts[2]));
   return Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : null;
+};
+
+export const readRemoteRuntimeTokenAudience = (token: string): string => {
+  const parts = String(token || '').trim().split('.');
+  if (parts.length !== 7 || parts[0] !== 'xlnra1') return '';
+  try {
+    return decodeBase64UrlUtf8(parts[3] || '').trim().toLowerCase();
+  } catch {
+    return '';
+  }
+};
+
+export const readRemoteRuntimeTokenAccess = (token: string): RemoteRuntimeImportAccess | '' => {
+  const role = String(token || '').trim().split('.')[1]?.trim().toLowerCase();
+  if (role === 'full' || role === 'admin' || role === 'write') return 'admin';
+  if (role === 'read' || role === 'inspect') return 'read';
+  return '';
 };
 
 export const assertRemoteRuntimeTokenFresh = (entry: Pick<RemoteRuntimeImportEntry, 'label' | 'token'>, now = Date.now()): void => {
@@ -135,6 +171,62 @@ const entriesFromJson = (value: unknown): RemoteRuntimeImportEntry[] => {
       : [];
   if (entries.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_ENTRIES_MISSING');
   return limitRemoteRuntimeImportEntries(entries.map(entryFromUnknown));
+};
+
+const hubJurisdictionFromUnknown = (value: unknown): RemoteRuntimeHubJurisdiction | undefined => {
+  if (!isRecord(value)) return undefined;
+  const jurisdiction: RemoteRuntimeHubJurisdiction = {};
+  const name = String(value['name'] || '').trim();
+  const address = String(value['address'] || '').trim();
+  const chainIdValue = value['chainId'];
+  const depositoryAddress = String(value['depositoryAddress'] || '').trim();
+  const entityProviderAddress = String(value['entityProviderAddress'] || '').trim();
+  if (name) jurisdiction.name = name;
+  if (address) jurisdiction.address = address;
+  if (typeof chainIdValue === 'number' || typeof chainIdValue === 'string') jurisdiction.chainId = chainIdValue;
+  if (depositoryAddress) jurisdiction.depositoryAddress = depositoryAddress;
+  if (entityProviderAddress) jurisdiction.entityProviderAddress = entityProviderAddress;
+  return Object.keys(jurisdiction).length > 0 ? jurisdiction : undefined;
+};
+
+const hubSummaryFromUnknown = (value: unknown): RemoteRuntimeHubSummary | null => {
+  if (!isRecord(value)) return null;
+  const entityId = String(value['entityId'] || '').trim().toLowerCase();
+  if (!entityId) return null;
+  const label = String(value['label'] || value['name'] || entityId).trim();
+  const height = Math.max(0, Math.floor(Number(value['height'] || 0)));
+  const jurisdiction = hubJurisdictionFromUnknown(value['jurisdiction']);
+  return {
+    entityId,
+    label,
+    height,
+    ...(jurisdiction ? { jurisdiction } : {}),
+  };
+};
+
+const readHubSummaries = (value: unknown): RemoteRuntimeHubSummary[] => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const summary = hubSummaryFromUnknown(entry);
+    return summary ? [summary] : [];
+  });
+};
+
+const storedHubFieldsFromSource = (source: Record<string, unknown>): Pick<
+  StoredRemoteRuntimeImportEntry,
+  'hubEntityId' | 'hubName' | 'hubJurisdiction' | 'hubEntities'
+> => {
+  const hubEntities = readHubSummaries(source['hubEntities']);
+  const primaryHub = hubEntities[0] ?? null;
+  const hubEntityId = String(source['hubEntityId'] || primaryHub?.entityId || '').trim().toLowerCase();
+  const hubName = String(source['hubName'] || primaryHub?.label || '').trim();
+  const hubJurisdiction = hubJurisdictionFromUnknown(source['hubJurisdiction']) ?? primaryHub?.jurisdiction;
+  return {
+    ...(hubEntityId ? { hubEntityId } : {}),
+    ...(hubName ? { hubName } : {}),
+    ...(hubJurisdiction ? { hubJurisdiction } : {}),
+    ...(hubEntities.length > 0 ? { hubEntities } : {}),
+  };
 };
 
 export const parseRemoteRuntimeImportSourcePayload = (value: unknown): RemoteRuntimeImportEntry[] => {
@@ -231,7 +323,30 @@ export const mergeStoredRemoteRuntimeImports = (
 ): StoredRemoteRuntimeImportEntry[] => {
   const byId = new Map<string, StoredRemoteRuntimeImportEntry>();
   for (const entry of current) byId.set(remoteRuntimeIdForWsUrl(entry.wsUrl), entry);
-  for (const entry of next) byId.set(remoteRuntimeIdForWsUrl(entry.wsUrl), entry);
+  for (const entry of next) {
+    const id = remoteRuntimeIdForWsUrl(entry.wsUrl);
+    const existing = byId.get(id);
+    if (existing?.access === 'admin' && entry.access !== 'admin') {
+      byId.set(id, {
+        ...existing,
+        label: existing.label || entry.label,
+        height: Math.max(existing.height || 0, entry.height || 0),
+        entityCount: Math.max(existing.entityCount || 0, entry.entityCount || 0),
+        ...(entry.hubEntityId ? { hubEntityId: entry.hubEntityId } : {}),
+        ...(entry.hubName ? { hubName: entry.hubName } : {}),
+        ...(entry.hubJurisdiction ? { hubJurisdiction: entry.hubJurisdiction } : {}),
+        ...(entry.hubEntities?.length ? { hubEntities: entry.hubEntities } : {}),
+      });
+      continue;
+    }
+    byId.set(id, {
+      ...entry,
+      ...(!entry.hubEntityId && existing?.hubEntityId ? { hubEntityId: existing.hubEntityId } : {}),
+      ...(!entry.hubName && existing?.hubName ? { hubName: existing.hubName } : {}),
+      ...(!entry.hubJurisdiction && existing?.hubJurisdiction ? { hubJurisdiction: existing.hubJurisdiction } : {}),
+      ...(!entry.hubEntities?.length && existing?.hubEntities?.length ? { hubEntities: existing.hubEntities } : {}),
+    });
+  }
   const merged = Array.from(byId.values()).sort((a, b) => {
     const importedDelta = (a.importedAt || 0) - (b.importedAt || 0);
     if (importedDelta !== 0) return importedDelta;
@@ -240,14 +355,31 @@ export const mergeStoredRemoteRuntimeImports = (
   return limitRemoteRuntimeImportEntries(merged);
 };
 
+const remoteRuntimePersistentStorage = (): Storage | null => {
+  if (typeof localStorage !== 'undefined') return localStorage;
+  if (typeof sessionStorage !== 'undefined') return sessionStorage;
+  return null;
+};
+
+const remoteRuntimeSessionStorage = (): Storage | null =>
+  typeof sessionStorage !== 'undefined' ? sessionStorage : null;
+
 export const writeStoredRemoteRuntimeImports = (entries: StoredRemoteRuntimeImportEntry[]): void => {
-  if (typeof sessionStorage === 'undefined') return;
-  sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify(limitRemoteRuntimeImportEntries(entries)));
+  const storage = remoteRuntimePersistentStorage();
+  if (!storage) return;
+  storage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify(limitRemoteRuntimeImportEntries(entries)));
+  if (storage !== remoteRuntimeSessionStorage()) {
+    remoteRuntimeSessionStorage()?.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
+  }
 };
 
 export const readStoredRemoteRuntimeImports = (): StoredRemoteRuntimeImportEntry[] => {
-  if (typeof sessionStorage === 'undefined') return [];
-  const raw = String(sessionStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY) || '').trim();
+  const storage = remoteRuntimePersistentStorage();
+  const session = remoteRuntimeSessionStorage();
+  if (!storage && !session) return [];
+  const persistentRaw = String(storage?.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY) || '').trim();
+  const sessionRaw = String(session?.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY) || '').trim();
+  const raw = persistentRaw || sessionRaw;
   if (!raw) return [];
   const parsed = JSON.parse(raw) as unknown;
   const entries: StoredRemoteRuntimeImportEntry[] = entriesFromJson(parsed).map((entry, index): StoredRemoteRuntimeImportEntry => {
@@ -264,9 +396,34 @@ export const readStoredRemoteRuntimeImports = (): StoredRemoteRuntimeImportEntry
       height: Math.max(0, Math.floor(Number(source['height'] || 0))),
       entityCount: Math.max(0, Math.floor(Number(source['entityCount'] || 0))),
       importedAt: Math.max(0, Math.floor(Number(source['importedAt'] || 0))),
+      ...storedHubFieldsFromSource(source),
     };
   });
-  return limitRemoteRuntimeImportEntries(entries);
+  const limited = limitRemoteRuntimeImportEntries(entries);
+  if (!persistentRaw && sessionRaw && storage) writeStoredRemoteRuntimeImports(limited);
+  return limited;
+};
+
+export const resolveStoredRemoteRuntimeAuthKey = (
+  wsUrl: string,
+  options: { requiredAccess?: RemoteRuntimeImportAccess } = {},
+): string => {
+  const normalizedWsUrl = normalizeRemoteRuntimeWsUrl(wsUrl);
+  const targetId = remoteRuntimeIdForWsUrl(normalizedWsUrl);
+  const entry = readStoredRemoteRuntimeImports().find(candidate =>
+    remoteRuntimeIdForWsUrl(candidate.wsUrl) === targetId
+  );
+  if (!entry) {
+    if (options.requiredAccess === 'admin') {
+      throw new Error(`REMOTE_RUNTIME_ACTIVE_ADMIN_TOKEN_MISSING:${normalizedWsUrl}`);
+    }
+    return '';
+  }
+  if (options.requiredAccess === 'admin' && entry.access !== 'admin') {
+    throw new Error(`REMOTE_RUNTIME_ACTIVE_ADMIN_TOKEN_MISSING:${normalizedWsUrl}`);
+  }
+  assertRemoteRuntimeTokenFresh(entry);
+  return entry.token;
 };
 
 export const persistRemoteRuntimeImports = (
@@ -282,8 +439,17 @@ export const persistRemoteRuntimeImports = (
 
 export const removeStoredRemoteRuntimeImport = (runtimeIdOrWsUrl: string): StoredRemoteRuntimeImportEntry[] => {
   const raw = String(runtimeIdOrWsUrl || '').trim().toLowerCase();
-  const targetId = raw.startsWith('radapter:') ? raw : remoteRuntimeIdForWsUrl(raw);
-  const next = readStoredRemoteRuntimeImports().filter(entry => remoteRuntimeIdForWsUrl(entry.wsUrl) !== targetId);
+  let targetEndpointId = '';
+  try {
+    targetEndpointId = raw.startsWith('radapter:') ? raw : remoteRuntimeIdForWsUrl(raw);
+  } catch {
+    targetEndpointId = '';
+  }
+  const next = readStoredRemoteRuntimeImports().filter((entry) => {
+    const entryRuntimeId = String(entry.runtimeId || '').trim().toLowerCase();
+    if (entryRuntimeId && entryRuntimeId === raw) return false;
+    return !targetEndpointId || remoteRuntimeIdForWsUrl(entry.wsUrl) !== targetEndpointId;
+  });
   writeStoredRemoteRuntimeImports(next);
   return next;
 };

@@ -63,13 +63,15 @@ export const buildCanonicalEntityReplicaSnapshot = (
 
 export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   name: jr.name,
-  blockNumber: jr.blockNumber,
+  // J events carry consensus evidence with explicit blockNumber/blockHash.
+  // The live replica cursor is adapter liveness state, not replay state: RPC
+  // watchers can observe a different latest tip between equivalent runs.
+  blockNumber: 0n,
   stateRoot: cloneJStateRoot(jr.stateRoot, { rpcBacked: Boolean(jr.rpcs?.length) }),
   mempool: [],
   blockDelayMs: jr.blockDelayMs,
-  lastBlockTimestamp: jr.lastBlockTimestamp,
+  lastBlockTimestamp: 0,
   ...(jr.defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks: jr.defaultDisputeDelayBlocks } : {}),
-  ...(jr.blockReady !== undefined ? { blockReady: jr.blockReady } : {}),
   ...(jr.rpcs ? { rpcs: [...jr.rpcs] } : {}),
   ...(jr.chainId !== undefined ? { chainId: jr.chainId } : {}),
   position: { ...jr.position },

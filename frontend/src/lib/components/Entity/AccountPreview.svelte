@@ -1,7 +1,8 @@
 <script lang="ts">
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { AccountMachine, DerivedDelta } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
-  import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { xlnFunctions } from '../../stores/xlnStore';
   import { settings } from '$lib/stores/settingsStore';
   import { p2pState } from '../../stores/xlnStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
@@ -11,16 +12,18 @@
   import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { amountToUsdMicros } from '$lib/utils/assetPricing';
   import { formatEntityId } from '$lib/utils/format';
-  import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusDescription, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
   import { faucetPendingKey } from './account-faucet';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
   export let entityId: string;
+  export let counterpartyName: string = '';
+  export let counterpartyProfile: GossipProfile | null = null;
   export let isSelected: boolean = false;
   export let entityHeight: number = 0;
   export let runtimeHeight: number = 0;
+  export let isDevnet = false;
   export let lockSummary: {
     incomingCount: number;
     incomingAmount: bigint;
@@ -47,11 +50,6 @@
   let expandedDetailTokenId: number | 'all' | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = $xlnEnvironment;
-
-  function getProfile(id: string): ReturnType<typeof getGossipProfile> {
-    return getGossipProfile(id, activeEnv);
-  }
 
   function normalizeJurisdictionDisplayName(value: unknown): string {
     const name = String(value || '').trim();
@@ -83,17 +81,9 @@
     return cleanJurisdiction ? `${cleanName} (${cleanJurisdiction})` : cleanName;
   }
 
-  $: counterpartyProfile = getProfile(counterpartyId);
-  $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
   $: counterpartyJurisdiction = normalizeJurisdictionDisplayName(counterpartyProfile?.metadata?.jurisdiction?.name);
   $: counterpartyDisplayName = formatEntityNetworkLabel(counterpartyName || formatEntityId(counterpartyId), counterpartyJurisdiction);
   $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
-
-  $: isHub = (() => {
-    const profile = counterpartyProfile;
-    if (!profile) return false;
-    return profile.metadata.isHub === true;
-  })();
 
   // P2P connection state
   $: connState = (() => {
@@ -260,13 +250,6 @@
   $: showDeltaRows = hasCommittedFrame && hasAnyDeltas;
   $: tokenDetailById = new Map(tokenDetails.map((detail) => [detail.tokenId, detail] as const));
 
-  $: isDevnet = (() => {
-    if (!activeEnv?.jReplicas) return false;
-    for (const [, jr] of activeEnv.jReplicas) {
-      if (jr?.chainId === 31337) return true;
-    }
-    return false;
-  })();
   $: faucetLabel = isDevnet ? 'Faucet' : '';
   $: liteMode = !!$settings.liteMode;
   $: uiStatus = getAccountUiStatus(account);
@@ -392,9 +375,11 @@
 <div
   class="account-preview"
   class:selected={isSelected}
+  data-testid="account-preview"
   data-counterparty-id={counterpartyId}
   data-owner-entity-id={entityId}
 >
+  <span class="sr-only" data-testid="account-counterparty-full-id">{counterpartyId}</span>
   <!-- Row 1: Entity name + status dot -->
   <div class="row-header">
     <div class="entity-col">
@@ -411,13 +396,23 @@
           class:gray={uiStatus !== 'ready' && uiStatus !== 'sent' && uiStatus !== 'dispute_preparing' && uiStatus !== 'disputed' && uiStatus !== 'finalized_disputed' && connState !== 'disconnected' && connState !== 'queued'}
           type="button"
           title="Account status"
+          data-testid="account-status-indicator"
+          data-ui-status={uiStatus}
+          data-connection-state={connState}
+          data-coverage-pct={coveragePct === null ? '' : coveragePct.toFixed(0)}
         >
           <span class="status-dot-inner"></span>
           {#if !liteMode}
             <span class="status-frame">#{accountHeight}</span>
           {/if}
           {#if !liteMode && coveragePct !== null}
-            <span class="status-coverage" class:cov-warn={coveragePct < 40} class:cov-caution={coveragePct >= 40 && coveragePct < 75} class:cov-good={coveragePct >= 75}>{coveragePct.toFixed(0)}%</span>
+            <span
+              class="status-coverage"
+              class:cov-warn={coveragePct < 40}
+              class:cov-caution={coveragePct >= 40 && coveragePct < 75}
+              class:cov-good={coveragePct >= 75}
+              data-testid="account-status-coverage"
+            >{coveragePct.toFixed(0)}%</span>
           {/if}
         </button>
         <div class="consensus-popover" role="tooltip">
@@ -652,6 +647,19 @@
     box-shadow: 0 6px 14px color-mix(in srgb, var(--theme-background, #09090b) 4%, transparent);
     max-width: 100%;
   }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   .account-preview:hover {
     border-color: var(--account-preview-border-strong);
     background: var(--account-preview-bg-hover);

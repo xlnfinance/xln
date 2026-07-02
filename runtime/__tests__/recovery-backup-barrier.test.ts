@@ -17,7 +17,7 @@ test('stale pending network outputs fail fast instead of retrying after backup r
     loopActive: false,
     wakeRequested: false,
     clockPrimed: true,
-    entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: Date.now() }]]),
+    entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.timestamp }]]),
     directEntityInputDispatch: () => {
       dispatchCount += 1;
       return true;
@@ -44,7 +44,7 @@ test('direct remote sends fail closed while recovery backup barrier is active', 
   let dispatchCount = 0;
   env.runtimeState = {
     ...(env.runtimeState || {}),
-    entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: Date.now() }]]),
+    entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.timestamp }]]),
     directEntityInputDispatch: () => {
       dispatchCount += 1;
       return true;

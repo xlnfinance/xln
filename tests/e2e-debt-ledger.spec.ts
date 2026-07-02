@@ -1003,20 +1003,26 @@ async function enforceDebtDirect(page: Page, entityId: string, tokenId: number):
       isolatedEnv?: unknown;
       __xln_env?: unknown;
       XLN?: {
-        submitDebtEnforcement?: (env: unknown, entityIdValue: string, tokenIdValue: number) => Promise<void>;
+        buildDebtEnforcementRuntimeInput?: (env: unknown, params: { entityId: string; tokenId: number }) => unknown;
+        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
+        process?: (env: unknown) => Promise<unknown>;
       };
       __xln_instance?: {
-        submitDebtEnforcement?: (env: unknown, entityIdValue: string, tokenIdValue: number) => Promise<void>;
+        buildDebtEnforcementRuntimeInput?: (env: unknown, params: { entityId: string; tokenId: number }) => unknown;
+        enqueueRuntimeInput?: (env: unknown, input: unknown) => void;
+        process?: (env: unknown) => Promise<unknown>;
       };
     };
     const env = view.isolatedEnv ?? view.__xln_env;
     const XLN = view.XLN
       ?? view.__xln_instance
       ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.submitDebtEnforcement) {
+    if (!env || !XLN?.buildDebtEnforcementRuntimeInput || !XLN?.enqueueRuntimeInput || !XLN?.process) {
       return { ok: false, error: 'isolatedEnv/XLN missing' };
     }
-    await XLN.submitDebtEnforcement(env, entityId, tokenId);
+    const input = XLN.buildDebtEnforcementRuntimeInput(env, { entityId, tokenId });
+    XLN.enqueueRuntimeInput(env, input);
+    await XLN.process(env);
     return { ok: true };
   }, { entityId, tokenId });
   expect(result.ok, result.error || 'failed to enforce debt').toBe(true);

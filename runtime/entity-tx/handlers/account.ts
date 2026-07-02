@@ -91,19 +91,31 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // AccountMachine still uses canonical left/right internally
   const counterpartyId = normalizeEntityRef(input.fromEntityId);
   markStorageEntityDirty(env, newState.entityId);
-  markStorageAccountDirty(env, newState.entityId, counterpartyId);
   const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
   let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
   assertSameJurisdictionAccount(env, newState.entityId, newState.config?.jurisdiction, counterpartyId);
+  if (accountMachine) {
+    markStorageAccountDirty(env, newState.entityId, counterpartyId);
+  }
   const inputWatchSeed = input.watchSeed === undefined
     ? undefined
     : normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
   if (accountMachine && inputWatchSeed && accountMachine.watchSeed.toLowerCase() !== inputWatchSeed) {
     throw new Error(`ACCOUNT_WATCH_SEED_MISMATCH:${counterpartyId}`);
   }
-  let isNewAccount = false;
   if (!accountMachine) {
-    isNewAccount = true;
+    if (input.prevHanko && !input.newAccountFrame) {
+      const error = `ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`;
+      throw new Error(error);
+    }
+    const incomingFrameHeight = Number(input.newAccountFrame?.height ?? input.height ?? 0);
+    if (incomingFrameHeight > 1) {
+      const error =
+        `ACCOUNT_SYNC_REQUIRED: entity=${shortId(newState.entityId)} ` +
+        `counterparty=${shortId(counterpartyId)} inputHeight=${incomingFrameHeight}`;
+      addMessage(newState, error);
+      throw new Error(error);
+    }
     const watchSeed = normalizeAccountWatchSeed(inputWatchSeed, 'ACCOUNT_INPUT_GENESIS');
     accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
 
@@ -175,12 +187,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     // Store with counterparty ID as key (simpler than canonical)
     // Type assertion safe: accountMachine was just created above in this block
     upsertSortedStringMapEntry(newState.accounts, counterpartyId, accountMachine as AccountMachine);
+    markStorageAccountDirty(env, newState.entityId, counterpartyId);
     accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
-  }
-
-  if (isNewAccount && input.prevHanko && !input.newAccountFrame) {
-    const error = `ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`;
-    throw new Error(error);
   }
 
   // FINTECH-SAFETY: Ensure accountMachine exists

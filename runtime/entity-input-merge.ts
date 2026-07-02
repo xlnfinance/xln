@@ -1,10 +1,20 @@
 import type { EntityTx, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
 import { signatureMapSize } from './consensus-signatures';
-import { safeStringify } from './serialization-utils';
+import { compareStableText, safeStringify } from './serialization-utils';
 import { HEAVY_LOGS } from './utils';
 
 const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   const merged: EntityTx[] = [];
+
+  const normalizeJEventList = (data: JurisdictionEventData, source: string): JurisdictionEvent[] => {
+    if (data.events !== undefined) {
+      if (!Array.isArray(data.events)) {
+        throw new Error(`RUNTIME_J_EVENT_EVENTS_NOT_ARRAY:${source}`);
+      }
+      return data.events;
+    }
+    return data.event ? [data.event] : [];
+  };
 
   for (const tx of txs) {
     if (tx.type !== 'j_event' || !tx.data) {
@@ -30,8 +40,8 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
     }
 
     const existingData = existing.data as JurisdictionEventData;
-    const existingEvents = existingData.events || (existingData.event ? [existingData.event] : []);
-    const incomingEvents = data.events || (data.event ? [data.event] : []);
+    const existingEvents = normalizeJEventList(existingData, 'existing');
+    const incomingEvents = normalizeJEventList(data, 'incoming');
 
     const seen = new Set<string>();
     const mergedEvents: JurisdictionEvent[] = [];
@@ -62,6 +72,25 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
 
   return merged;
 };
+
+const canonicalEntityInputSortKey = (input: RoutedEntityInput): string => safeStringify({
+  entityId: String(input.entityId || '').toLowerCase(),
+  signerId: String(input.signerId || '').toLowerCase(),
+  from: String(input.from || '').toLowerCase(),
+  runtimeId: String(input.runtimeId || '').toLowerCase(),
+  proposedFrame: input.proposedFrame
+    ? {
+        height: input.proposedFrame.height,
+        hash: input.proposedFrame.hash,
+      }
+    : null,
+  hashPrecommitCount: signatureMapSize(input.hashPrecommits),
+  entityTxs: input.entityTxs ?? [],
+});
+
+const sortMergedEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] =>
+  [...inputs].sort((left, right) =>
+    compareStableText(canonicalEntityInputSortKey(left), canonicalEntityInputSortKey(right)));
 
 export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] => {
   const merged = new Map<string, RoutedEntityInput>();
@@ -143,10 +172,10 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
   }
 
   const mergedInputs = Array.from(merged.values());
-  return [...mergedInputs, ...conflicts].map(input => {
+  return sortMergedEntityInputs([...mergedInputs, ...conflicts].map(input => {
     if (input.entityTxs && input.entityTxs.length > 1) {
       return { ...input, entityTxs: mergeJEventTxs(input.entityTxs) };
     }
     return input;
-  });
+  }));
 };

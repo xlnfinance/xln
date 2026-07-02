@@ -17,14 +17,17 @@ import {
   handleRuntimeAdapterMessage,
   type RuntimeAdapterSocket,
 } from '../radapter/server';
+import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
+import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import {
   getActiveJAdapter,
   getP2PState,
   closeInfraDb,
   closeRuntimeDb,
-  main,
-  enqueueRuntimeInput,
-  handleInboundP2PEntityInput,
+	  main,
+	  enqueueRuntimeInput,
+	  validateRuntimeInputAdmission,
+	  handleInboundP2PEntityInput,
   startP2P,
   stopP2P,
   startRuntimeLoop,
@@ -33,6 +36,7 @@ import {
   persistRestoredEnvToDB,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
+  readPersistedRuntimeActivityPage,
   listPersistedCheckpointHeights,
   loadEntityAccountDocFromStorageDb,
   loadEntityStateFromStorageDb,
@@ -113,6 +117,7 @@ type JurisdictionConfig = MeshJurisdictionConfig & {
 
 export type HubProfile = {
   name: string;
+  hubName?: string;
   entityId: string;
   signerId?: string;
   runtimeId?: string;
@@ -733,6 +738,12 @@ const ensureJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string)
 };
 
 const hubBaseName = (name: string): string => String(name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
+const hubRoleName = (profile: Pick<HubProfile, 'name' | 'hubName'>): string =>
+  hubBaseName(profile.hubName || profile.name);
+const readHubRoleName = (profile: { name?: string; metadata?: { hubName?: unknown } }): string => {
+  const metadataName = typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName : '';
+  return hubBaseName(metadataName || String(profile.name || ''));
+};
 
 const readHubSignerId = (profile: { metadata?: { board?: { validators?: Array<{ signerId?: string; signer?: string }> } } }): string => {
   const validators = profile.metadata?.board?.validators;
@@ -741,7 +752,7 @@ const readHubSignerId = (profile: { metadata?: { board?: { validators?: Array<{ 
   return String(first.signerId || first.signer || '').trim().toLowerCase();
 };
 
-const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[] => {
+export const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[] => {
   const required = new Set(resolvedArgs.meshHubNames.map((name) => name.toLowerCase()));
   return (env.gossip?.getProfiles?.() || [])
     .filter(profile =>
@@ -750,13 +761,13 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       profile.metadata?.isHub === true,
     )
     .filter(profile => {
-      const name = String(profile.name || '').trim();
-      const lower = name.toLowerCase();
-      if (required.has(lower)) return true;
-      return includeSiblings && required.has(hubBaseName(name));
+      const roleName = readHubRoleName(profile);
+      if (required.has(roleName)) return true;
+      return includeSiblings && roleName.length > 0;
     })
     .map(profile => ({
       name: String(profile.name || '').trim(),
+      hubName: readHubRoleName(profile),
       entityId: String(profile.entityId || '').toLowerCase(),
       signerId: readHubSignerId(profile),
       runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
@@ -769,7 +780,7 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       }),
     }))
     .sort((left, right) =>
-      compareStableText(hubBaseName(left.name), hubBaseName(right.name)) ||
+      compareStableText(hubRoleName(left), hubRoleName(right)) ||
       (Number(left.chainId || 0) - Number(right.chainId || 0)) ||
       compareStableText(left.entityId, right.entityId),
     );
@@ -1211,11 +1222,11 @@ export const buildMarketMakerCrossOfferSpecs = (
   if (!sourceJurisdictionRef || !targetJurisdictionRef) return [];
   const specs: MarketMakerOfferSpec[] = [];
   const crossPairs = buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds);
-  const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
+  const targetByBaseName = new Map(targetHubs.map(hub => [hubRoleName(hub), hub] as const));
   const now = Number(env.timestamp || Date.now());
 
   for (const sourceHub of sourceHubs) {
-    const targetHub = targetByBaseName.get(hubBaseName(sourceHub.name));
+    const targetHub = targetByBaseName.get(hubRoleName(sourceHub));
     if (!targetHub || sameJurisdiction(sourceHub, targetHub)) continue;
     const sourceHubSuffix = sourceHub.entityId.slice(-6).toLowerCase();
     const targetHubSuffix = targetHub.entityId.slice(-6).toLowerCase();
@@ -2012,10 +2023,10 @@ const buildMarketMakerCrossPlanSummary = (
       if (targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT) continue;
       const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
       if (targetHubs.length === 0) continue;
-      const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
+      const targetByBaseName = new Map(targetHubs.map(hub => [hubRoleName(hub), hub] as const));
       let routeGroupsForJob = 0;
       for (const sourceHub of sourceHubs) {
-        const targetHub = targetByBaseName.get(hubBaseName(sourceHub.name));
+        const targetHub = targetByBaseName.get(hubRoleName(sourceHub));
         if (!targetHub || sameJurisdiction(sourceHub, targetHub)) continue;
         routeGroupsForJob += 1;
       }
@@ -2823,7 +2834,7 @@ const canonicalMarketMakerRole = (context: MarketMakerEntityContext): string =>
   `mm:${canonicalJurisdictionRole(context)}`;
 
 const canonicalHubRole = (profile: HubProfile): string =>
-  `hub:${canonicalJurisdictionRole(profile)}:${hubBaseName(profile.name)}`;
+  `hub:${canonicalJurisdictionRole(profile)}:${hubRoleName(profile)}`;
 
 const buildUniqueRoleMap = <T>(
   entries: T[],
@@ -3177,8 +3188,16 @@ const getMarketMakerRuntimeBacklogSnapshot = (
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
-  const env = await main(resolvedArgs.seed);
-  configureMarketMakerStorage(env);
+	  const env = await main(resolvedArgs.seed);
+	  const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
+	  const currentRuntimeHeight = (targetEnv: Env | null): number =>
+	    Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
+	  const runtimeInputStatusUrl = (id: string): string =>
+	    `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
+	  registerEnvChangeCallback(env, (changedEnv) => {
+	    runtimeIngressReceipts.observeLatestRuntimeFrame(changedEnv);
+	  });
+	  configureMarketMakerStorage(env);
   configureMarketMakerRuntimeLogging(env);
   prewarmLocalMarketMakerSignerKeys();
   startRuntimeLoop(env, {
@@ -3542,15 +3561,20 @@ const run = async (): Promise<void> => {
       closeInvalidRuntimeAdapterMessage(ws, error);
       return;
     }
-    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
-      enqueueRuntimeInput,
-      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
+	    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
+	      enqueueRuntimeInput,
+	      validateRuntimeInputAdmission,
+	      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+	      readReceipt: (id) => runtimeIngressReceipts.get(id),
+	      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
+	      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
       loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
       loadEntityAccountDoc: (targetEnv, entityId, counterpartyId, height) => loadEntityAccountDocFromStorageDb(targetEnv, entityId, counterpartyId, height),
       loadEntityViewPage: (targetEnv, entityId, height, query) => loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
       listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
+      readActivityPage: (targetEnv, opts) => readPersistedRuntimeActivityPage(targetEnv, opts),
     })).catch(error => {
       ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${(error as Error).message}` }));
     });
@@ -3617,12 +3641,21 @@ const run = async (): Promise<void> => {
           return new Response(health ? safeStringify(health) : '{}', { headers: JSON_HEADERS });
         }
 
-        if (pathname === '/api/health') {
-          if (!cachedHealthResponseJson) rebuildCachedHealthResponseJson();
-          return new Response(cachedHealthResponseJson ?? '{}', { headers: JSON_HEADERS });
-        }
+	        if (pathname === '/api/health') {
+	          if (!cachedHealthResponseJson) rebuildCachedHealthResponseJson();
+	          return new Response(cachedHealthResponseJson ?? '{}', { headers: JSON_HEADERS });
+	        }
 
-        if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
+	        const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
+	        if (runtimeInputStatusMatch && request.method === 'GET') {
+	          const receiptId = decodeURIComponent(runtimeInputStatusMatch[1] || '');
+	          return handleRuntimeInputStatus(receiptId, JSON_HEADERS, env, {
+	            receipts: runtimeIngressReceipts,
+	            getCurrentRuntimeHeight: currentRuntimeHeight,
+	          });
+	        }
+
+	        if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
           shuttingDown = true;
           if (loop) clearInterval(loop);
           if (healthRefreshLoop) clearInterval(healthRefreshLoop);

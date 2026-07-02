@@ -1,9 +1,13 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import { get } from 'svelte/store';
   import { onMount } from 'svelte';
-  import { runtimes } from '$lib/stores/runtimeStore';
-  import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+  import type {
+    RuntimeAdapterActivityPage,
+    RuntimeAdapterReadQuery,
+    RuntimeActivityEvent,
+  } from '@xln/runtime/xln-api';
+  import { runtimeControllerHandle, runtimeAdapterHeight } from '$lib/stores/runtimeControllerStore';
+  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import {
     Calendar,
     ChevronLeft,
@@ -20,58 +24,11 @@
   type ActivityKind = 'all' | 'onchain' | 'offchain';
   type ViewMode = 'paged' | 'infinite' | 'timeframe';
 
-  type ActivityEvent = {
-    id: string;
-    runtimeId?: string;
-    height: number;
-    timestamp: number;
-    kind: 'onchain' | 'offchain';
-    type: string;
-    source: string;
-    direction: 'in' | 'out' | 'neutral';
-    title: string;
-    subtitle: string;
-    status: string;
-    entityId?: string;
-    counterpartyId?: string;
-    tokenId?: number;
-    amount?: string;
-    quoteTokenId?: number;
-    quoteAmount?: string;
-    orderId?: string;
-    hash?: string;
-    rawType: string;
-  };
+  type ActivityEvent = RuntimeActivityEvent;
 
-  type ActivityResponse = {
-    ok?: boolean;
+  type ActivityResponse = RuntimeAdapterActivityPage & {
     partial?: boolean;
-    latestHeight?: number;
-    scannedFrames?: number;
-    returned?: number;
-    limit?: number;
-    nextBeforeHeight?: number | null;
-    events?: ActivityEvent[];
     failures?: Array<{ hub?: string; apiPort?: number; error?: string }>;
-  };
-
-  type LocalRuntimeApi = {
-    readPersistedRuntimeActivityPage?: (env: unknown, opts: {
-      entityId?: string;
-      kind?: ActivityKind;
-      types?: string[];
-      query?: string;
-      fromTimestamp?: number;
-      toTimestamp?: number;
-      beforeHeight?: number;
-      limit?: number;
-      scanLimit?: number;
-    }) => Promise<ActivityResponse>;
-  };
-
-  type RuntimeWindow = typeof window & {
-    XLN?: LocalRuntimeApi;
-    isolatedEnv?: unknown;
   };
 
   const typeOptions = [
@@ -103,7 +60,7 @@
   let fromLocal = '';
   let toLocal = '';
   let lastEntityId = '';
-  let lastLocalRuntimeKey = '';
+  let lastRuntimeKey = '';
   let mounted = false;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -152,189 +109,44 @@
     return Number.isFinite(ts) ? ts : undefined;
   }
 
-  function typeParam(): string {
-    return selectedTypes.join(',');
-  }
-
-  function buildParams(beforeHeight: number | null): URLSearchParams {
-    const params = new URLSearchParams();
-    params.set('entityId', normalizeEntityId(entityId));
-    params.set('kind', kind);
-    params.set('limit', String(pageSize));
-    params.set('scanLimit', '100');
-    if (beforeHeight !== null) params.set('beforeHeight', String(beforeHeight));
-    if (typeParam()) params.set('types', typeParam());
-    if (search.trim()) params.set('q', search.trim());
-    if (mode === 'timeframe') {
-      const from = localToTimestamp(fromLocal);
-      const to = localToTimestamp(toLocal);
-      if (from !== undefined) params.set('fromTimestamp', String(from));
-      if (to !== undefined) params.set('toTimestamp', String(to));
-    }
-    return params;
-  }
-
-  function buildActivityOptions(beforeHeight: number | null): {
-    entityId: string;
-    kind?: ActivityKind;
-    types?: string[];
-    query?: string;
-    fromTimestamp?: number;
-    toTimestamp?: number;
-    beforeHeight?: number;
-    limit: number;
-    scanLimit: number;
-  } {
-    const opts: {
-      entityId: string;
-      kind?: ActivityKind;
-      types?: string[];
-      query?: string;
-      fromTimestamp?: number;
-      toTimestamp?: number;
-      beforeHeight?: number;
-      limit: number;
-      scanLimit: number;
-    } = {
+  function buildActivityQuery(beforeHeight: number | null): RuntimeAdapterReadQuery {
+    const query: RuntimeAdapterReadQuery = {
       entityId: normalizeEntityId(entityId),
+      kind,
       limit: pageSize,
       scanLimit: 100,
     };
-    if (kind !== 'all') opts.kind = kind;
-    if (selectedTypes.length > 0) opts.types = selectedTypes;
-    if (search.trim()) opts.query = search.trim();
-    if (beforeHeight !== null) opts.beforeHeight = beforeHeight;
+    if (selectedTypes.length > 0) query.types = selectedTypes;
+    if (search.trim()) query.q = search.trim();
+    if (beforeHeight !== null) query.beforeHeight = beforeHeight;
     if (mode === 'timeframe') {
       const from = localToTimestamp(fromLocal);
       const to = localToTimestamp(toLocal);
-      if (from !== undefined) opts.fromTimestamp = from;
-      if (to !== undefined) opts.toTimestamp = to;
+      if (from !== undefined) query.fromTimestamp = from;
+      if (to !== undefined) query.toTimestamp = to;
     }
-    return opts;
+    return query;
   }
 
-  async function loadRuntimeApi(): Promise<LocalRuntimeApi | null> {
-    const view = window as RuntimeWindow;
-    if (view.XLN?.readPersistedRuntimeActivityPage) return view.XLN;
-    try {
-      const imported = await import(/* @vite-ignore */ `${window.location.origin}/runtime.js?v=${Date.now()}`) as LocalRuntimeApi;
-      if (!view.XLN?.readPersistedRuntimeActivityPage) view.XLN = imported;
-      return imported;
-    } catch {
-      return null;
-    }
+  function activeRuntimeKey(): string {
+    const handle = $runtimeControllerHandle;
+    return normalizeRuntimeId(handle.runtimeId || handle.id);
   }
 
-  async function fetchServerActivity(beforeHeight: number | null): Promise<ActivityResponse> {
-    const response = await fetch(`/api/debug/activity?${buildParams(beforeHeight).toString()}`, {
-      cache: 'no-store',
-    });
-    const body = await response.json() as ActivityResponse;
-    if (!response.ok) throw new Error(String((body as { error?: string }).error || `HTTP ${response.status}`));
-    return body;
-  }
-
-  function getLocalRuntimeEnvCandidates(): unknown[] {
-    const view = window as RuntimeWindow;
-    const candidates: unknown[] = [];
-    const targetRuntimeId = normalizeRuntimeId(runtimeId);
-    const runtimeEntry = targetRuntimeId ? get(runtimes).get(targetRuntimeId) : null;
-    if (runtimeEntry?.env) candidates.push(runtimeEntry.env);
-    if (view.isolatedEnv) candidates.push(view.isolatedEnv);
-    const seen = new Set<string>();
-    return candidates.filter((candidate) => {
-      const env = (unwrapLiveRuntimeEnv(candidate as never) ?? candidate) as { runtimeId?: string } | undefined;
-      const candidateRuntimeId = normalizeRuntimeId(env?.runtimeId);
-      const key = candidateRuntimeId || String(candidates.indexOf(candidate));
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return !targetRuntimeId || !candidateRuntimeId || candidateRuntimeId === targetRuntimeId;
-    });
-  }
-
-  async function fetchLocalActivity(beforeHeight: number | null): Promise<ActivityResponse | null> {
-    const envCandidates = getLocalRuntimeEnvCandidates();
-    if (envCandidates.length === 0) return null;
-    const api = await loadRuntimeApi();
-    if (!api?.readPersistedRuntimeActivityPage) return null;
-    const pages: ActivityResponse[] = [];
-    const failures: ActivityResponse['failures'] = [];
-    for (const candidate of envCandidates) {
-      const env = unwrapLiveRuntimeEnv(candidate as never) ?? candidate;
-      try {
-        const body = await api.readPersistedRuntimeActivityPage(env, buildActivityOptions(beforeHeight));
-        const localRuntimeId = String((env as { runtimeId?: string } | undefined)?.runtimeId || '');
-        pages.push({
-          ...body,
-          events: Array.isArray(body.events)
-            ? body.events.map((event) => ({
-              ...event,
-              runtimeId: event.runtimeId || localRuntimeId,
-            }))
-            : [],
-        });
-      } catch (err) {
-        failures.push({ error: `local runtime ${String((env as { runtimeId?: string } | undefined)?.runtimeId || 'unknown')}: ${err instanceof Error ? err.message : String(err)}` });
-      }
-    }
-    if (pages.length === 0) {
-      if (failures.length > 0) throw new Error(failures.map((failure) => failure.error).join('; '));
-      return null;
-    }
-    const cursors = pages
-      .map((page) => page.nextBeforeHeight)
-      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-    return {
-      ok: failures.length === 0,
-      partial: failures.length > 0,
-      latestHeight: Math.max(0, ...pages.map((page) => Number(page.latestHeight || 0))),
-      scannedFrames: pages.reduce((sum, page) => sum + Number(page.scannedFrames || 0), 0),
-      returned: pages.reduce((sum, page) => sum + Number(page.returned || page.events?.length || 0), 0),
-      limit: pageSize,
-      nextBeforeHeight: cursors.length > 0 ? Math.max(...cursors) : null,
-      failures,
-      events: dedupe(pages.flatMap((page) => Array.isArray(page.events) ? page.events : [])),
-    };
+  function assertRequestedRuntimeActive(): void {
+    const requested = normalizeRuntimeId(runtimeId);
+    if (!requested) return;
+    const active = activeRuntimeKey();
+    if (!active || active === requested) return;
+    throw new Error(`History is connected to runtime ${active}; select runtime ${requested} to inspect this entity.`);
   }
 
   async function readActivitySources(beforeHeight: number | null): Promise<ActivityResponse> {
-    const [localResult, serverResult] = await Promise.allSettled([
-      fetchLocalActivity(beforeHeight),
-      fetchServerActivity(beforeHeight),
-    ]);
-    const failures: ActivityResponse['failures'] = [];
-    const pages: ActivityResponse[] = [];
-
-    if (localResult.status === 'fulfilled' && localResult.value) {
-      pages.push(localResult.value);
-    } else if (localResult.status === 'rejected') {
-      failures.push({ error: `local runtime: ${localResult.reason instanceof Error ? localResult.reason.message : String(localResult.reason)}` });
-    }
-
-    if (serverResult.status === 'fulfilled') {
-      pages.push(serverResult.value);
-      failures.push(...(Array.isArray(serverResult.value.failures) ? serverResult.value.failures : []));
-    } else {
-      failures.push({ error: `server activity: ${serverResult.reason instanceof Error ? serverResult.reason.message : String(serverResult.reason)}` });
-    }
-
-    if (pages.length === 0) {
-      throw new Error(failures.map((failure) => failure.error || 'history source failed').join('; ') || 'No history source answered');
-    }
-
-    const cursors = pages
-      .map((page) => page.nextBeforeHeight)
-      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    assertRequestedRuntimeActive();
+    const body = await runtimeQueryClient.readActivity(buildActivityQuery(beforeHeight));
     return {
-      ok: failures.length === 0,
-      partial: failures.length > 0,
-      latestHeight: Math.max(0, ...pages.map((page) => Number(page.latestHeight || 0))),
-      scannedFrames: pages.reduce((sum, page) => sum + Number(page.scannedFrames || 0), 0),
-      returned: pages.reduce((sum, page) => sum + Number(page.returned || page.events?.length || 0), 0),
-      limit: pageSize,
-      nextBeforeHeight: cursors.length > 0 ? Math.max(...cursors) : null,
-      failures,
-      events: dedupe(pages.flatMap((page) => Array.isArray(page.events) ? page.events : [])),
+      ...body,
+      failures: [],
     };
   }
 
@@ -466,16 +278,16 @@
   }
 
   $: {
-    const targetRuntimeId = normalizeRuntimeId(runtimeId);
-    const hasTargetRuntime = targetRuntimeId && Boolean($runtimes.get(targetRuntimeId)?.env);
-    if (browser && mounted && hasTargetRuntime && targetRuntimeId !== lastLocalRuntimeKey) {
-      lastLocalRuntimeKey = targetRuntimeId;
+    const key = `${activeRuntimeKey()}:${Math.max(0, Math.floor(Number($runtimeAdapterHeight || 0)))}`;
+    if (browser && mounted && key !== lastRuntimeKey) {
+      lastRuntimeKey = key;
       resetAndLoad();
     }
   }
 
   onMount(() => {
     mounted = true;
+    lastRuntimeKey = `${activeRuntimeKey()}:${Math.max(0, Math.floor(Number($runtimeAdapterHeight || 0)))}`;
     resetAndLoad();
     return () => {
       mounted = false;

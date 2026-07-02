@@ -2,12 +2,10 @@
  * Entity Factory - Auto-create ephemeral entities for signers
  */
 
-import { get } from 'svelte/store';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { Env, EntityReplica } from '@xln/runtime/xln-api';
 import { unwrapLiveRuntimeEnv } from './liveRuntimeEnv';
-import { xlnEnvironment, getXLN } from '$lib/stores/xlnStore';
-import { activeEnv } from '$lib/stores/runtimeStore';
+import { getXLN, submitRuntimeInput } from '$lib/stores/xlnStore';
 
 type JurisdictionConfig = {
   name: string;
@@ -20,7 +18,6 @@ type JurisdictionConfig = {
 type JReplica = Env['jReplicas'] extends Map<string, infer T> ? T : never;
 
 const inflightAutoCreates = new Map<string, Promise<string | null>>();
-let warnedMissingEnv = false;
 let isCreatingJMachine = false;
 
 const normalizeJurisdictionKey = (value: string | null | undefined): string =>
@@ -108,8 +105,8 @@ export async function createEphemeralEntity(
     entityInputs: []
   };
 
-  // Apply runtime input
-  xln.enqueueRuntimeInput(runtimeEnv, runtimeInput);
+  // Apply runtime input through the shared command path so receipts and permissions stay consistent.
+  await submitRuntimeInput(runtimeInput);
   await waitForCondition(
     () => {
       const expected = String(entityId).toLowerCase();
@@ -227,7 +224,8 @@ export async function createSelfEntity(
  */
 export async function autoCreateEntityForSigner(
   signerAddress: string,
-  jurisdiction: string = 'default'
+  env: Env,
+  jurisdiction: string = 'default',
 ): Promise<string | null> {
   if (!signerAddress) return null;
   const inflightKey = `${signerAddress.toLowerCase()}:${normalizeJurisdictionKey(jurisdiction || 'default')}`;
@@ -237,25 +235,21 @@ export async function autoCreateEntityForSigner(
 
   const task = (async () => {
     try {
-      const env = unwrapLiveRuntimeEnv(get(xlnEnvironment) || get(activeEnv));
+      const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
 
-      if (!env) {
-        if (!warnedMissingEnv) {
-          warnedMissingEnv = true;
-          console.warn('[EntityFactory] No env available, skipping auto-create');
-        }
-        return null;
+      if (!runtimeEnv) {
+        throw new Error('[EntityFactory] No runtime env available for auto-create');
       }
 
-      const names = listJMachineNames(env);
+      const names = listJMachineNames(runtimeEnv);
       const targetJurisdiction =
         (jurisdiction && jurisdiction !== 'default' && names.includes(jurisdiction))
           ? jurisdiction
-          : (names[0] || env.activeJurisdiction || null);
+          : (names[0] || runtimeEnv.activeJurisdiction || null);
 
-      const existing = findReplicaBySigner(env, signerAddress, targetJurisdiction);
+      const existing = findReplicaBySigner(runtimeEnv, signerAddress, targetJurisdiction);
       if (existing?.entityId) return existing.entityId;
-      const existingForSigner = findReplicaBySigner(env, signerAddress);
+      const existingForSigner = findReplicaBySigner(runtimeEnv, signerAddress);
       const existingJurisdiction = String(existingForSigner?.state?.config?.jurisdiction?.name || '').trim();
       if (
         existingForSigner?.entityId &&
@@ -269,10 +263,10 @@ export async function autoCreateEntityForSigner(
         return null;
       }
 
-      return await createSelfEntity(env, signerAddress, targetJurisdiction || undefined);
+      return await createSelfEntity(runtimeEnv, signerAddress, targetJurisdiction || undefined);
     } catch (error) {
       console.error('[EntityFactory] Failed to auto-create entity:', error);
-      return null;
+      throw error;
     }
   })();
 

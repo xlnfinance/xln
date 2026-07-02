@@ -743,7 +743,28 @@ export async function gotoApp(
   const apiBaseUrl = appBaseUrl;
   await page.addInitScript((configuredApiBaseUrl: string) => {
     try {
-      (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__ = configuredApiBaseUrl;
+      const target = window as typeof window & {
+        __XLN_API_BASE_URL__?: string;
+        __xln?: Record<string, unknown>;
+        isolatedEnv?: unknown;
+      };
+      target.__XLN_API_BASE_URL__ = configuredApiBaseUrl;
+      Object.defineProperty(target, 'isolatedEnv', {
+        configurable: true,
+        enumerable: false,
+        get() {
+          const debugRoot = target.__xln;
+          return debugRoot?.liveRuntimeSnapshot || debugRoot?.env || null;
+        },
+        set(value: unknown) {
+          Reflect.defineProperty(target, '__xlnLegacyIsolatedEnv', {
+            configurable: true,
+            enumerable: false,
+            value,
+            writable: true,
+          });
+        },
+      });
       localStorage.setItem('xln-api-base-url', configuredApiBaseUrl);
     } catch {
       // no-op
@@ -855,13 +876,15 @@ export async function createRuntime(
     : await getActiveEntity(page).then((entity) => entity?.runtimeId ?? null);
   const canCreateDirectly = await page.evaluate(() => {
     const view = window as typeof window & {
-      __xlnVaultOperations?: {
-        createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
-        deleteRuntime?: (id: string) => Promise<unknown>;
+      __xln?: {
+        vault?: {
+          createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+          deleteRuntime?: (id: string) => Promise<unknown>;
+        };
       };
     };
     const hostname = window.location.hostname;
-    return Boolean(view.__xlnVaultOperations?.createRuntime)
+    return Boolean(view.__xln?.vault?.createRuntime)
       && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1');
   }).catch(() => false);
 
@@ -869,12 +892,15 @@ export async function createRuntime(
     if (options.fresh) {
       await page.evaluate(async ({ targetRuntimeId }) => {
         const view = window as typeof window & {
-          __xlnVaultOperations?: {
+        __xln?: {
+          vault?: {
             deleteRuntime?: (id: string) => Promise<unknown>;
           };
         };
-        if (typeof view.__xlnVaultOperations?.deleteRuntime !== 'function') return;
-        await view.__xlnVaultOperations.deleteRuntime(targetRuntimeId);
+        };
+        const operations = view.__xln?.vault;
+        if (typeof operations?.deleteRuntime !== 'function') return;
+        await operations.deleteRuntime(targetRuntimeId);
       }, { targetRuntimeId: runtimeId.toLowerCase() }).catch(() => {});
     }
     const loginType = isQuickLoginDemo ? 'demo' : 'manual';
@@ -882,13 +908,15 @@ export async function createRuntime(
     const skipRecoveryRestore = options.fresh === true;
     await page.evaluate(async ({ runtimeLabel, seed, loginType, requiresOnboarding, skipRecoveryRestore }) => {
       const view = window as typeof window & {
-        __xlnVaultOperations?: {
-          createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+        __xln?: {
+          vault?: {
+            createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+          };
         };
       };
-      const operations = view.__xlnVaultOperations;
+      const operations = view.__xln?.vault;
       if (typeof operations?.createRuntime !== 'function') {
-        throw new Error('__xlnVaultOperations.createRuntime unavailable');
+        throw new Error('__xln.vault.createRuntime unavailable');
       }
       await operations.createRuntime(runtimeLabel, seed, {
         loginType,
@@ -1124,23 +1152,6 @@ export async function createRuntimeIdentity(
 
 export async function getActiveEntity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string; jurisdiction?: string } | null> {
   return page.evaluate(() => {
-    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '').trim();
-    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '').trim();
-    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').trim();
-    const selectedJurisdiction = String(selectedTrigger?.dataset?.jurisdiction || '').trim();
-    if (
-      /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-    ) {
-      return {
-        entityId: selectedEntityId,
-        signerId: selectedSignerId,
-        runtimeId: selectedRuntimeId,
-        jurisdiction: selectedJurisdiction,
-      };
-    }
-
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -1152,8 +1163,42 @@ export async function getActiveEntity(page: Page): Promise<{ entityId: string; s
         }>;
       };
     }).isolatedEnv;
+    const runtimeId = String(env?.runtimeId || '').toLowerCase();
+    if (runtimeId && env?.eReplicas) {
+      for (const [replicaKey, replica] of env.eReplicas.entries()) {
+        const [entityId, signerId] = String(replicaKey).split(':');
+        const normalizedSignerId = String(signerId || '').toLowerCase();
+        if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+        if (normalizedSignerId !== runtimeId) continue;
+        const jurisdiction = String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || '').trim();
+        return {
+          entityId,
+          signerId,
+          runtimeId: String(env.runtimeId || ''),
+          jurisdiction,
+        };
+      }
+    }
+
+    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '').trim();
+    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '').trim();
+    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').trim();
+    const selectedJurisdiction = String(selectedTrigger?.dataset?.jurisdiction || '').trim();
+    if (
+      /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+      && (!runtimeId || selectedRuntimeId.toLowerCase() === runtimeId)
+    ) {
+      return {
+        entityId: selectedEntityId,
+        signerId: selectedSignerId,
+        runtimeId: selectedRuntimeId,
+        jurisdiction: selectedJurisdiction,
+      };
+    }
+
     if (!env?.eReplicas) return null;
-    const runtimeId = String(env.runtimeId || '').toLowerCase();
     const validReplicas: Array<{ entityId: string; signerId: string; jurisdiction?: string }> = [];
     for (const [replicaKey, replica] of env.eReplicas.entries()) {
       const [entityId, signerId] = String(replicaKey).split(':');

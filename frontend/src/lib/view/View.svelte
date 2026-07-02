@@ -8,13 +8,26 @@
   import { paymentSpotlight } from '$lib/stores/paymentSpotlightStore';
   import UserModePanel from './UserModePanel.svelte';
   import CommandPalette from '../components/shared/CommandPalette.svelte';
+  import {
+    buildCommandPaletteView,
+    buildCommandPaletteViewFromRuntimeView,
+    emptyCommandPaletteView,
+    type CommandPaletteView,
+  } from '$lib/components/shared/command-palette-view';
   import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
   import { panelBridge } from './utils/panelBridge';
-  import { activeRuntimeId, runtimes } from '$lib/stores/runtimeStore';
-  import { getXLN, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
-  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+  import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
+  import {
+    onRuntimeControllerStatus,
+    runtimeControllerHandle,
+  } from '$lib/stores/runtimeControllerStore';
+  import { activeRuntimeId } from '$lib/stores/runtimeStore';
+  import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
+  import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+  import { isLocalDebugSurfaceAllowed, registerDebugSurface } from '$lib/utils/debugSurface';
 
   let commandPaletteOpen = false;
+  let commandPaletteView: CommandPaletteView = emptyCommandPaletteView();
 
   function handlePaletteCommand(event: CustomEvent<{ type: string; args: Record<string, unknown> }>) {
     const { type, args } = event.detail;
@@ -59,15 +72,62 @@
   const unsubLocalEnvSync = () => undefined;
 
   const LOG_TOAST_COOLDOWN_MS = 12000;
+  const RUNTIME_VIEW_REFRESH_MIN_INTERVAL_MS = 250;
   const lastSeenFrameLogIdByRuntime = new Map<string, number>();
   const lastToastAtByKey = new Map<string, number>();
   const PAYMENT_SPOTLIGHT_COOLDOWN_MS = 60000;
   const lastPaymentSpotlightAtByKey = new Map<string, number>();
+  const normalizeRuntimeId = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+  const runtimeEnvMatchesActiveSelection = (env: Env | null): boolean => {
+    const selectedRuntimeId = normalizeRuntimeId(get(activeRuntimeId));
+    if (!selectedRuntimeId) return true;
+    return normalizeRuntimeId(env?.runtimeId) === selectedRuntimeId;
+  };
 
   const publishLocalEnv = (env: Env | null) => {
     const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
-    localEnvStore.set(runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null);
+    if (runtimeEnv && !runtimeEnvMatchesActiveSelection(runtimeEnv)) {
+      console.error(`[View] Refusing local env publish for inactive runtime ${normalizeRuntimeId(runtimeEnv.runtimeId)}`);
+      localEnvStore.set(null);
+      commandPaletteView = emptyCommandPaletteView();
+      localEnvRevisionStore.update((revision) => revision + 1);
+      return;
+    }
+    const viewEnv = runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null;
+    localEnvStore.set(viewEnv);
+    commandPaletteView = viewEnv
+      ? buildCommandPaletteView(viewEnv)
+      : (get(runtimeControllerHandle).mode === 'remote'
+        ? buildCommandPaletteViewFromRuntimeView(get(runtimeView).frame)
+        : emptyCommandPaletteView());
     localEnvRevisionStore.update((revision) => revision + 1);
+  };
+
+  const resolveLocalDebugEnv = (): Env | null => {
+    const projectedEnv = get(localEnvStore);
+    const projectedRuntimeEnv = projectedEnv ? (unwrapLiveRuntimeEnv(projectedEnv) ?? projectedEnv) : null;
+    const activeEnv = getEnv();
+    const liveRuntimeEnv = activeEnv ? (unwrapLiveRuntimeEnv(activeEnv) ?? activeEnv) : null;
+    const selectedRuntimeId = normalizeRuntimeId(get(activeRuntimeId));
+    const projectedRuntimeId = normalizeRuntimeId(projectedRuntimeEnv?.runtimeId);
+    const liveRuntimeId = normalizeRuntimeId(liveRuntimeEnv?.runtimeId);
+    const liveRuntimeMatchesSelection = Boolean(!selectedRuntimeId || (liveRuntimeId && liveRuntimeId === selectedRuntimeId));
+    const projectedRuntimeMatchesSelection = Boolean(projectedRuntimeEnv && (!selectedRuntimeId || projectedRuntimeId === selectedRuntimeId));
+    const liveRuntimeMatchesProjection = Boolean(
+      liveRuntimeEnv &&
+      liveRuntimeId &&
+      liveRuntimeMatchesSelection &&
+      (!projectedRuntimeId || projectedRuntimeId === liveRuntimeId),
+    );
+    const liveRuntimeOwnsInfra = Boolean(
+      liveRuntimeEnv?.runtimeState?.p2p ||
+      liveRuntimeEnv?.runtimeState?.loopActive,
+    );
+    if (projectedRuntimeEnv && !projectedRuntimeMatchesSelection) return null;
+    return liveRuntimeMatchesProjection && liveRuntimeOwnsInfra
+      ? liveRuntimeEnv
+      : (projectedRuntimeMatchesSelection ? projectedRuntimeEnv : null);
   };
 
   const forceLiveCursor = () => {
@@ -177,27 +237,67 @@
     }
   });
 
-  if (
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '::1')
-  ) {
-    Object.defineProperty(window, 'isolatedEnv', {
-      get() {
-        return get(localEnvStore);
-      },
-      set(value: Env | null) {
-        publishLocalEnv(value);
-      },
-      configurable: true,
+  if (isLocalDebugSurfaceAllowed()) {
+    registerDebugSurface('liveRuntimeSnapshot', () => {
+      const runtimeEnv = resolveLocalDebugEnv();
+      return runtimeEnv ? createDetachedRuntimeViewEnv(runtimeEnv) : null;
+    }, { enumerable: true });
+    registerDebugSurface('publishLiveRuntimeSnapshot', () => publishLocalEnv, { enumerable: true });
+    registerDebugSurface('view', () => get(runtimeView), {
       enumerable: true,
     });
   }
 
-  let unsubActiveRuntime: (() => void) | null = null;
-  let envChangeRegisteredFor: string | null = null;
-  let unregisterEnvChange: (() => void) | null = null;
-  let unsubGlobalEnv: (() => void) | null = null;
+  let unsubRuntimeEnv: (() => void) | null = null;
+  let unsubRuntimeHistory: (() => void) | null = null;
+  let unsubRuntimeViewPalette: (() => void) | null = null;
+  let publishedRuntimeKey: string | null = null;
+  let unregisterRuntimeStatus: (() => void) | null = null;
+  let runtimeViewRefreshPromise: Promise<unknown> | null = null;
+  let runtimeViewRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let runtimeViewRefreshQueued = false;
+  let lastRuntimeViewRefreshAt = 0;
   let dockRootPromise: Promise<typeof import('./DockRoot.svelte')> | null = null;
+
+  const surfaceRuntimeViewError = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error || 'RuntimeView error');
+    console.error('[View] RuntimeView projection failed:', error);
+    toasts.error(`Runtime view failed: ${message}`, 9000);
+  };
+
+  const refreshCurrentRuntimeView = (immediate = false): Promise<unknown> => {
+    if (runtimeViewRefreshPromise) {
+      runtimeViewRefreshQueued = true;
+      return runtimeViewRefreshPromise;
+    }
+    const now = Date.now();
+    const waitMs = immediate
+      ? 0
+      : Math.max(0, RUNTIME_VIEW_REFRESH_MIN_INTERVAL_MS - (now - lastRuntimeViewRefreshAt));
+    if (waitMs > 0) {
+      runtimeViewRefreshQueued = true;
+      if (!runtimeViewRefreshTimer) {
+        runtimeViewRefreshTimer = setTimeout(() => {
+          runtimeViewRefreshTimer = null;
+          void refreshCurrentRuntimeView(true);
+        }, waitMs);
+      }
+      return Promise.resolve(null);
+    }
+    lastRuntimeViewRefreshAt = now;
+    runtimeViewRefreshPromise = refreshRuntimeView()
+      .catch((error) => {
+        surfaceRuntimeViewError(error);
+      })
+      .finally(() => {
+        runtimeViewRefreshPromise = null;
+        if (runtimeViewRefreshQueued) {
+          runtimeViewRefreshQueued = false;
+          void refreshCurrentRuntimeView();
+        }
+      });
+    return runtimeViewRefreshPromise;
+  };
 
   $: if (typeof document !== 'undefined') {
     const isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
@@ -211,67 +311,43 @@
   onMount(async () => {
     void scenarioId;
     try {
-      const XLN = await getXLN();
-      xlnInstance.set(XLN);
+      xlnInstance.set(await getXLN());
 
-      let env;
-
-      const runtimeId = get(activeRuntimeId);
-      if (runtimeId) {
-        const runtime = get(runtimes).get(runtimeId);
-        if (runtime?.env) env = runtime.env;
-      }
-      if (!env) {
-        env = get(xlnEnvironment);
-      }
-
-      const registerEnvChanges = (envToRegister: Env | null) => {
-        const runtimeEnv = envToRegister ? (unwrapLiveRuntimeEnv(envToRegister) ?? envToRegister) : null;
-        if (!runtimeEnv || !XLN.registerEnvChangeCallback) return;
-        const runtimeKey = runtimeEnv.runtimeId || null;
-        if (envChangeRegisteredFor === runtimeKey) return;
-        if (unregisterEnvChange) {
-          unregisterEnvChange();
-          unregisterEnvChange = null;
+      unsubRuntimeHistory = runtimeHistory.subscribe((frames) => {
+        if (!publishedRuntimeKey) {
+          localHistoryStore.set(frames);
+          return;
         }
-        unregisterEnvChange = XLN.registerEnvChangeCallback(runtimeEnv, (nextEnv: Env) => {
-          publishLocalEnv(nextEnv);
-          const nextRuntimeEnv = unwrapLiveRuntimeEnv(nextEnv) ?? nextEnv;
-          setLocalHistoryPreservingCursor(nextRuntimeEnv.history || []);
-        });
-        envChangeRegisteredFor = runtimeKey;
-      };
-
-      if (env) {
-        publishLocalEnv(env);
-        localHistoryStore.set((unwrapLiveRuntimeEnv(env) ?? env).history || []);
-        forceLiveCursor();
-        registerEnvChanges(env);
-      }
-
-      unsubActiveRuntime = activeRuntimeId.subscribe((runtimeId) => {
-        if (!runtimeId) return;
-        const allRuntimes = get(runtimes);
-        const runtime = allRuntimes.get(runtimeId);
-        if (!runtime?.env) return;
-
-        publishLocalEnv(runtime.env);
-        localHistoryStore.set((unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env).history || []);
-        forceLiveCursor();
-        registerEnvChanges(runtime.env);
+        setLocalHistoryPreservingCursor(frames);
       });
 
-      unsubGlobalEnv = xlnEnvironment.subscribe((nextEnv) => {
-        if (!nextEnv) return;
-        const runtimeId = get(activeRuntimeId);
-        const activeRuntime = runtimeId ? get(runtimes).get(runtimeId) : null;
-        const activeLiveEnv = activeRuntime?.env ? (unwrapLiveRuntimeEnv(activeRuntime.env) ?? activeRuntime.env) : null;
-        const nextLiveEnv = unwrapLiveRuntimeEnv(nextEnv) ?? nextEnv;
-        if (activeLiveEnv && activeLiveEnv !== nextLiveEnv) return;
-        publishLocalEnv(nextEnv);
-        setLocalHistoryPreservingCursor(nextLiveEnv.history || []);
-        registerEnvChanges(nextEnv);
+      unsubRuntimeEnv = xlnEnvironment.subscribe((env) => {
+        try {
+          const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
+          const runtimeKey = String(runtimeEnv?.runtimeId || '').trim().toLowerCase() || null;
+          publishLocalEnv(runtimeEnv);
+          const frames = get(runtimeHistory);
+          if (publishedRuntimeKey !== runtimeKey) {
+            localHistoryStore.set(frames);
+            forceLiveCursor();
+            publishedRuntimeKey = runtimeKey;
+          } else {
+            setLocalHistoryPreservingCursor(frames);
+          }
+        } catch (error) {
+          surfaceRuntimeViewError(error);
+        }
       });
+
+      unsubRuntimeViewPalette = runtimeView.subscribe((view) => {
+        if (get(runtimeControllerHandle).mode !== 'remote') return;
+        commandPaletteView = buildCommandPaletteViewFromRuntimeView(view.frame);
+      });
+
+      unregisterRuntimeStatus = onRuntimeControllerStatus((status) => {
+        if (status === 'connected') void refreshCurrentRuntimeView();
+      });
+      void refreshCurrentRuntimeView(true);
     } catch (err) {
       console.error('[View] Failed to initialize XLN:', err);
     }
@@ -283,37 +359,45 @@
       document.documentElement.classList.remove('xln-user-mode');
       document.body.classList.remove('xln-user-mode');
     }
-    unregisterEnvChange?.();
     unsubLocalEnvSync();
     unsubRuntimeErrorToasts();
-    unsubActiveRuntime?.();
-    unsubGlobalEnv?.();
+    unsubRuntimeEnv?.();
+    unsubRuntimeHistory?.();
+    unsubRuntimeViewPalette?.();
+    unregisterRuntimeStatus?.();
+    if (runtimeViewRefreshTimer) clearTimeout(runtimeViewRefreshTimer);
     lastSeenFrameLogIdByRuntime.clear();
     lastToastAtByKey.clear();
     lastPaymentSpotlightAtByKey.clear();
   });
 </script>
 
-<CommandPalette bind:isOpen={commandPaletteOpen} on:command={handlePaletteCommand} on:close={() => commandPaletteOpen = false} />
+<CommandPalette
+  bind:isOpen={commandPaletteOpen}
+  {commandPaletteView}
+  on:command={handlePaletteCommand}
+  on:close={() => commandPaletteOpen = false}
+/>
 <PaymentSpotlight />
 
 {#if userMode}
   <UserModePanel
-    isolatedEnv={localEnvStore}
-    isolatedRevision={localEnvRevisionStore}
-    isolatedHistory={localHistoryStore}
-    isolatedTimeIndex={localTimeIndex}
-    isolatedIsLive={localIsLive}
+    runtimeFrameEnv={localEnvStore}
+    runtimeFrameRevision={localEnvRevisionStore}
+    runtimeFrameHistory={localHistoryStore}
+    runtimeFrameTimeIndex={localTimeIndex}
+    runtimeFrameIsLive={localIsLive}
+    liveEnvResolver={resolveLocalDebugEnv}
   />
 {:else if dockRootPromise}
   {#await dockRootPromise then module}
     <svelte:component
       this={module.default}
       {embedMode}
-      isolatedEnv={localEnvStore}
-      isolatedHistory={localHistoryStore}
-      isolatedTimeIndex={localTimeIndex}
-      isolatedIsLive={localIsLive}
+      runtimeFrameEnv={localEnvStore}
+      runtimeFrameHistory={localHistoryStore}
+      runtimeFrameTimeIndex={localTimeIndex}
+      runtimeFrameIsLive={localIsLive}
     />
   {:catch err}
     <div class="view-error">

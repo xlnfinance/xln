@@ -3,29 +3,33 @@
   Compact sortable list with expandable details.
 -->
 <script lang="ts">
-  import type { Env } from '@xln/runtime/xln-api';
-  import { getJurisdictionStackId } from '@xln/runtime/xln-api';
-  import {
-    xlnFunctions,
-    enqueueEntityInputs,
-    resolveConfiguredApiBase,
-  } from '../../stores/xlnStore';
+  import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
+  import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
-  import { entityAvatar } from '$lib/utils/avatar';
   import {
     normalizeEntityId,
     requireSignerIdForEntity,
-    getCounterpartyAccount,
-    isCommittedAccount,
-    isOpeningAccount,
   } from '$lib/utils/entityReplica';
-  import { waitForCounterpartyRuntimeRoutes } from '$lib/utils/p2pPrefetch';
+  import {
+    emptyHubDiscoveryProjection,
+    buildHubOpenAccountRuntimeInput,
+    canSubmitHubOpenAccount,
+    ensureHubOpenAccountProfileReady,
+    getHubOpenAccountPermissionError,
+    hubDiscoveryJurisdictionKey,
+    isSameEntityId,
+    normalizeHubEntityId,
+    type HubDiscoveryHub,
+    type HubDiscoveryProjection,
+  } from './hub-discovery-profile';
   import { compareStableText } from '$lib/utils/stableSort';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';
-  export let env: Env;
-  $: activeFunctions = $xlnFunctions;
+  export let actionRuntimeEnv: Env | null = null;
+  export let hubDiscoveryProjection: HubDiscoveryProjection = emptyHubDiscoveryProjection();
+  export let canOpenAccounts = true;
+  export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   // State
   let loading = false;
@@ -33,102 +37,27 @@
   let connectingHubIds = new Set<string>();
   let expandedHub: string | null = null;
 
-  // Hub data structure
-  interface Hub {
-    entityId: string;
-    name: string;
-    metadata: {
-      description?: string;
-      website?: string;
-      jurisdiction?: { name?: string; chainId?: number | string; depositoryAddress?: string };
-      fee: number;
-      peerCount: number;
-    };
-    runtimeId: string;
-    wsUrl: string | null;
-    lastSeen: number;
-    raw: string;
-    avatar: string;
-  }
+  type Hub = HubDiscoveryHub;
 
   let hubs: Hub[] = [];
-  const DISCOVERY_TIMEOUT_MS = 8000;
-  const DISCOVERY_POLL_MS = 350;
-
-  type JurisdictionLike = {
-    name?: unknown;
-    chainId?: unknown;
-    depositoryAddress?: unknown;
-  };
-
-  const jurisdictionKey = (value: unknown): string => {
-    if (value && typeof value === 'object') {
-      const jurisdiction = value as JurisdictionLike;
-      const chainId = Number(jurisdiction.chainId);
-      const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
-      if (!Number.isFinite(chainId) || chainId <= 0 || !depository) return '';
-      return getJurisdictionStackId({ chainId, depositoryAddress: depository });
-    }
-    return '';
-  };
-
-  function getEntityJurisdictionKey(currentEnv: Env | undefined, targetEntityId: string): string {
-    const normalizedEntityId = normalizeEntityId(targetEntityId);
-    if (!normalizedEntityId || !currentEnv?.eReplicas) return '';
-    for (const [key, replica] of currentEnv.eReplicas.entries()) {
-      const [replicaEntityId] = String(key || '').split(':');
-      if (normalizeEntityId(replicaEntityId) !== normalizedEntityId) continue;
-      return jurisdictionKey(replica?.state?.config?.jurisdiction)
-        || jurisdictionKey(replica?.position?.jurisdiction);
-    }
-    return '';
-  }
-
-  function getDiscoveryKey(currentEnv: Env | undefined, targetEntityId: string): string {
-    const normalizedEntityId = normalizeEntityId(targetEntityId);
-    const jurisdiction = getEntityJurisdictionKey(currentEnv, targetEntityId);
-    if (!normalizedEntityId || !jurisdiction) return '';
-    return `${String(currentEnv?.runtimeId || '')}:${normalizedEntityId}:${jurisdiction}`;
-  }
-
-  type PublicHubResponse = {
-    ok: boolean;
-    hubs?: Array<{
-      entityId: string;
-      runtimeId?: string | null;
-      name?: string;
-      bio?: string | null;
-      website?: string | null;
-      wsUrl?: string | null;
-      publicAccounts?: string[];
-      metadata?: {
-        isHub?: boolean;
-        routingFeePPM?: number;
-        jurisdiction?: { name?: string; chainId?: number | string; depositoryAddress?: string };
-      };
-      lastUpdated?: number;
-      online?: boolean;
-    }>;
-  };
-
-  function isHubConnected(currentEnv: Env, ownerEntityId: string, hubId: string): boolean {
-    const entry = getCounterpartyAccount(currentEnv, ownerEntityId, hubId);
-    return isCommittedAccount(entry?.account);
-  }
-
-  function isHubOpening(currentEnv: Env, ownerEntityId: string, hubId: string): boolean {
-    const entry = getCounterpartyAccount(currentEnv, ownerEntityId, hubId);
-    return isOpeningAccount(entry?.account);
-  }
 
   // Sorted hubs (with live connection status from current account state)
-  $: sortedHubs = hubs
+  $: projectedHubs = mergeHubs(hubDiscoveryProjection.localHubs, hubs);
+  $: visibleHubs = projectedHubs.filter((hub) => !isSameEntityId(entityId, hub.entityId));
+  $: sortedHubs = visibleHubs
     .map((hub) => ({
       ...hub,
-      isConnected: isHubConnected(env, entityId, hub.entityId),
-      isOpening: isHubOpening(env, entityId, hub.entityId),
+      ...(hubDiscoveryProjection.connectionByHubId.get(normalizeHubEntityId(hub.entityId)) ?? {}),
     }))
     .sort((a, b) => compareStableText(a.name, b.name));
+  $: openAccountPermissionError = getHubOpenAccountPermissionError({
+    adapterMode: $runtimeControllerHandle.mode,
+    authLevel: $runtimeControllerHandle.authLevel,
+  });
+  $: canOpenHubAccount = canOpenAccounts && canSubmitHubOpenAccount({
+    adapterMode: $runtimeControllerHandle.mode,
+    authLevel: $runtimeControllerHandle.authLevel,
+  });
 
   function hubConnectionState(hub: Hub & { isConnected?: boolean; isOpening?: boolean }): 'open' | 'opening' | 'closed' {
     const hubId = normalizeEntityId(hub.entityId);
@@ -142,50 +71,6 @@
     return (ppm / 100).toFixed(2) + ' bps';
   }
 
-  const formatRawProfile = (profile: unknown): string => {
-    if (activeFunctions?.safeStringify) {
-      return activeFunctions.safeStringify(profile, 2);
-    }
-    try {
-      return JSON.stringify(profile, null, 2);
-    } catch {
-      return '[unserializable profile]';
-    }
-  };
-
-  function collectLocalHubs(): Hub[] {
-    const replicas = env?.eReplicas;
-    if (!replicas) return [];
-    const entityJurisdiction = getEntityJurisdictionKey(env, entityId);
-    if (!entityJurisdiction) return [];
-    const result: Hub[] = [];
-    for (const replica of replicas.values()) {
-      const state = replica?.state;
-      const profile = state?.profile;
-      if (!replica?.entityId || profile?.isHub !== true) continue;
-      const hubJurisdiction = jurisdictionKey(state?.config?.jurisdiction);
-      if (entityJurisdiction && (!hubJurisdiction || hubJurisdiction !== entityJurisdiction)) continue;
-      const fullEntityId = replica.entityId.startsWith('0x') ? replica.entityId : `0x${replica.entityId}`;
-      result.push({
-        entityId: replica.entityId,
-        name: String(profile.name || replica.entityId),
-        metadata: {
-          description: String(profile.bio || 'Payment hub'),
-          ...(profile.website ? { website: String(profile.website) } : {}),
-          ...(state?.config?.jurisdiction ? { jurisdiction: state.config.jurisdiction } : {}),
-          fee: Number((profile as { routingFeePPM?: number })?.routingFeePPM ?? 0),
-          peerCount: state?.accounts?.size ?? 0,
-        },
-        runtimeId: String(env.runtimeId || ''),
-        wsUrl: null,
-        lastSeen: Number(state?.timestamp || Date.now()),
-        raw: formatRawProfile(profile),
-        avatar: entityAvatar(activeFunctions, fullEntityId),
-      });
-    }
-    return result;
-  }
-
   function mergeHubs(primary: Hub[], secondary: Hub[]): Hub[] {
     const byId = new Map<string, Hub>();
     for (const hub of secondary) byId.set(normalizeEntityId(hub.entityId), hub);
@@ -197,87 +82,25 @@
     expandedHub = expandedHub === hubId ? null : hubId;
   }
 
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  async function requireHubRuntimeRoute(currentEnv: Env, hubId: string): Promise<void> {
-    const ready = await waitForCounterpartyRuntimeRoutes(currentEnv, [hubId], 5_000);
-    if (!ready) throw new Error('Hub routing profile is not ready. Refresh hubs and try again.');
+  async function requireHubReadyForOpenAccount(currentEnv: Env | null, ownerEntityId: string, hub: Hub): Promise<void> {
+    await ensureHubOpenAccountProfileReady({
+      env: currentEnv,
+      sourceEntityId: ownerEntityId,
+      hub,
+      timeoutMs: 5_000,
+    });
   }
 
-  async function fetchPublicHubs(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Hub[]> {
-    if (typeof window === 'undefined') return [];
-    if (entityId && !getEntityJurisdictionKey(env, entityId)) return [];
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const apiBase = resolveConfiguredApiBase(window.location.origin);
-      const url = new URL('/api/hubs', apiBase);
-      url.searchParams.set('ts', String(Date.now()));
-      const response = await fetch(url.toString(), {
-        cache: 'no-store',
-        signal: controller.signal,
-      });
-      if (!response.ok) return [];
-      const payload = await response.json() as PublicHubResponse;
-      const serverHubs = Array.isArray(payload.hubs) ? payload.hubs : [];
-      const entityJurisdiction = getEntityJurisdictionKey(env, entityId);
-      return serverHubs
-        .filter((hub) => hub?.entityId && hub?.metadata?.isHub === true)
-        .filter((hub) => {
-          if (!entityJurisdiction) return false;
-          return jurisdictionKey(hub.metadata?.jurisdiction) === entityJurisdiction;
-        })
-        .map((hub) => {
-          const fullEntityId = hub.entityId.startsWith('0x') ? hub.entityId : `0x${hub.entityId}`;
-          const peerCount = Array.isArray(hub.publicAccounts) ? hub.publicAccounts.length : 0;
-          const feePpm = Number(hub.metadata?.routingFeePPM ?? 0);
-          return {
-            entityId: hub.entityId,
-            name: hub.name || hub.entityId,
-            metadata: {
-              description: hub.bio || 'Payment hub',
-              ...(hub.website ? { website: hub.website } : {}),
-              ...(hub.metadata?.jurisdiction ? { jurisdiction: hub.metadata.jurisdiction } : {}),
-              fee: feePpm,
-              peerCount,
-            },
-            runtimeId: hub.runtimeId || '',
-            wsUrl: hub.wsUrl || null,
-            lastSeen: Number(hub.lastUpdated || 0),
-            raw: formatRawProfile(hub),
-            avatar: entityAvatar(activeFunctions, fullEntityId),
-          } satisfies Hub;
-        });
-    } catch {
-      return [];
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  async function fetchPublicHubsUntilReady(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Hub[]> {
-    const startedAt = Date.now();
-    let last: Hub[] = [];
-    while (Date.now() - startedAt <= timeoutMs) {
-      last = await fetchPublicHubs(Math.min(2000, timeoutMs));
-      if (last.length > 0) return last;
-      await sleep(DISCOVERY_POLL_MS);
-    }
-    return last;
-  }
-
-  // Discover hubs from gossip network
+  // Discover hubs from the active RuntimeView/radapter projection.
   async function discoverHubs() {
     loading = true;
     error = '';
 
     try {
-      const localHubs = collectLocalHubs();
-      if (localHubs.length > 0) hubs = localHubs;
-      const fetchedHubs = await fetchPublicHubsUntilReady();
-      hubs = mergeHubs(fetchedHubs, localHubs);
-      if (hubs.length === 0) {
-        error = 'No public hubs discovered for this jurisdiction yet. Refresh after the relay and hub runtimes are online.';
+      const localHubs = hubDiscoveryProjection.localHubs;
+      hubs = mergeHubs(localHubs, hubs);
+      if (hubs.filter((hub) => !isSameEntityId(entityId, hub.entityId)).length === 0) {
+        error = 'No projected hubs for this jurisdiction yet. Refresh after the active runtime projection advances.';
       }
 
     } catch (err) {
@@ -294,22 +117,26 @@
 
     const hubId = normalizeEntityId(hub.entityId);
     if (connectingHubIds.has(hubId)) return;
+    const projectedConnection = hubDiscoveryProjection.connectionByHubId.get(normalizeHubEntityId(hub.entityId));
+    if (projectedConnection?.isConnected || projectedConnection?.isOpening) return;
 
     connectingHubIds = new Set(connectingHubIds).add(hubId);
     error = '';
 
     try {
-      const currentEnv = env;
-      if (!currentEnv) throw new Error('Environment not ready');
-      const entityJurisdiction = getEntityJurisdictionKey(currentEnv, entityId);
-      const hubJurisdiction = jurisdictionKey(hub.metadata?.jurisdiction);
+      const currentEnv = actionRuntimeEnv;
+      if (!canOpenHubAccount) throw new Error(openAccountPermissionError || 'Open Account is not available');
+      if (!submitRuntimeInput) throw new Error('Open Account command path is not connected');
+      const entityJurisdiction = hubDiscoveryProjection.entityJurisdictionKey;
+      const hubJurisdiction = hubDiscoveryJurisdictionKey(hub.metadata?.jurisdiction);
       if (!entityJurisdiction) throw new Error('Entity jurisdiction is still loading');
       if (!hubJurisdiction || hubJurisdiction !== entityJurisdiction) {
         throw new Error('Hub belongs to a different or unknown jurisdiction');
       }
 
-      // Find signer for our entity
-      const signerId = requireSignerIdForEntity(currentEnv, entityId, 'hub-connect');
+      const signerId = hubDiscoveryProjection.sourceSignerId
+        || (currentEnv ? requireSignerIdForEntity(currentEnv, entityId, 'hub-connect') : '');
+      if (!signerId) throw new Error('No signer available for hub account setup');
 
       // Default credit amount: 10,000 tokens (with 18 decimals)
       const creditAmount = 10_000n * 10n ** 18n;
@@ -317,25 +144,16 @@
 
       // Preload signed gossip/runtime routing metadata first so the initial
       // openAccount does not sit in the local pending queue waiting for pubkey discovery.
-      await requireHubRuntimeRoute(currentEnv, hub.entityId);
+      await requireHubReadyForOpenAccount(currentEnv, entityId, hub);
 
-      // Open account WITH credit extension (both in same frame)
-      // Frame #1 will have: [add_delta, set_credit_limit] - order matters!
-      await enqueueEntityInputs(currentEnv, [{
-        entityId,
+      await submitRuntimeInput(buildHubOpenAccountRuntimeInput({
+        sourceEntityId: entityId,
         signerId,
-        entityTxs: [
-          {
-            type: 'openAccount' as const,
-            data: {
-              targetEntityId: hub.entityId,
-              creditAmount,
-              tokenId: 1,
-              ...(rebalancePolicy ? { rebalancePolicy } : {}),
-            }
-          },
-        ],
-      }]);
+        hubEntityId: hub.entityId,
+        creditAmount,
+        tokenId: 1,
+        rebalancePolicy,
+      }));
 
     } catch (err) {
       console.error('[HubDiscovery] Connect failed:', err);
@@ -351,7 +169,16 @@
   let hasDiscoveredOnce = false;
   let activeDiscoveryKey = '';
 
-  $: currentDiscoveryKey = getDiscoveryKey(env, entityId);
+  $: localHubProjectionSignature = hubDiscoveryProjection.localHubs
+    .map((hub) => `${normalizeHubEntityId(hub.entityId)}:${hub.lastSeen}`)
+    .join('|');
+  let lastLocalHubProjectionSignature = '';
+  $: if (localHubProjectionSignature !== lastLocalHubProjectionSignature) {
+    lastLocalHubProjectionSignature = localHubProjectionSignature;
+    if (localHubProjectionSignature) hubs = mergeHubs(hubDiscoveryProjection.localHubs, hubs);
+  }
+
+  $: currentDiscoveryKey = hubDiscoveryProjection.discoveryKey;
   $: if (currentDiscoveryKey !== activeDiscoveryKey) {
     activeDiscoveryKey = currentDiscoveryKey;
     hubs = [];
@@ -362,7 +189,7 @@
   }
 
   // Also refresh when env becomes available (only once)
-  $: if (env && currentDiscoveryKey && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
+  $: if (currentDiscoveryKey && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
     hasDiscoveredOnce = true;
     (async () => {
       await discoverHubs();
@@ -399,7 +226,7 @@
       <span class="pulse"><RefreshCw size={20} /></span>
       <span>Scanning network...</span>
     </div>
-  {:else if hubs.length === 0}
+  {:else if sortedHubs.length === 0}
     <div class="empty-state">
       <span>No counterparties found</span>
     </div>
@@ -427,7 +254,7 @@
                 <span class="connection-state"><Check size={12} /> Open</span>
               {:else if hub.isOpening || connectingHubIds.has(normalizeEntityId(hub.entityId))}
                 <span class="connection-state opening"><span class="opening-icon"><RefreshCw size={12} /></span> Opening</span>
-              {:else if entityId}
+              {:else if entityId && canOpenHubAccount}
                 <button
                   class="btn-connect"
                   data-testid="hub-connect-button"

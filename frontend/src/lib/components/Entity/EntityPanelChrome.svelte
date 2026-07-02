@@ -1,7 +1,7 @@
 <script lang="ts">
   import { AlertTriangle } from 'lucide-svelte';
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import type { EntityReplica, Tab } from '$lib/types/ui';
+  import type { EntityPanelJurisdictionView } from './entity-panel-model';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
   import EntityDropdown from './EntityDropdown.svelte';
 
@@ -11,7 +11,8 @@
   export let userModeHeader = false;
   export let selectedJurisdictionName: string | null = null;
   export let activeReplicas: Map<string, EntityReplica> | null = null;
-  export let activeEnv: (Env | EnvSnapshot) & { jReplicas?: unknown } | null = null;
+  export let entityNames: Map<string, string> = new Map();
+  export let jurisdictions: EntityPanelJurisdictionView[] = [];
   export let activeIsLive = true;
   export let handleJurisdictionSelect: (event: CustomEvent<{ selected: string | null }>) => void = () => {};
   export let handleEntitySelect: (event: CustomEvent) => void = () => {};
@@ -23,13 +24,15 @@
     {#if showJurisdiction}
       <JurisdictionDropdown
         bind:selected={selectedJurisdictionName}
+        {jurisdictions}
         on:select={handleJurisdictionSelect}
       />
     {/if}
     <EntityDropdown
       {tab}
       replicasOverride={activeReplicas}
-      envOverride={activeEnv}
+      {entityNames}
+      {jurisdictions}
       on:entitySelect={handleEntitySelect}
     />
   </header>

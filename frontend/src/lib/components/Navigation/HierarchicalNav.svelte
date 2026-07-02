@@ -1,103 +1,26 @@
 <script lang="ts">
   import Breadcrumb from './Breadcrumb.svelte';
   import { appState, appStateOperations } from '$lib/stores/appStateStore';
-  import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
-  import { activeRuntime, activeSigner, allRuntimes } from '$lib/stores/vaultStore';
+  import { runtimes, runtimeOperations } from '$lib/stores/runtimeStore';
+  import { activeRuntime, activeSigner } from '$lib/stores/vaultStore';
+  import { runtimeView } from '$lib/stores/runtimeViewStore';
+  import { buildHierarchicalNavigationView } from './runtime-navigation-view';
 
-  // Compute items for each level based on current selection
+  $: navigationView = buildHierarchicalNavigationView($runtimes, $appState.navigation, $activeRuntime, $runtimeView);
 
-  // Runtime items
-  $: runtimeItems = Array.from($runtimes.values()).map(runtime => ({
-    id: runtime.id,
-    label: runtime.label,
-    count: runtime.env?.eReplicas?.size || 0
-  }));
-
-  // Jurisdiction items (from active runtime)
-  $: jurisdictionItems = (() => {
-    if (!$appState.navigation.runtime) return [];
-    const runtime = $runtimes.get($appState.navigation.runtime);
-    if (!runtime?.env?.jReplicas) return [];
-
-    return Array.from(runtime.env.jReplicas.keys()).map(jName => ({
-      id: jName,
-      label: jName,
-      count: 0 // Could show entity count per jurisdiction
-    }));
-  })();
-
-  // Signer items (from active vault)
-  $: signerItems = (() => {
-    if (!$activeRuntime) return [];
-    return $activeRuntime.signers.map(signer => ({
-      id: signer.address,
-      label: signer.name
-    }));
-  })();
-
-  // Entity items (from active runtime, filtered by signer if selected)
-  $: entityItems = (() => {
-    if (!$appState.navigation.runtime) return [];
-    const runtime = $runtimes.get($appState.navigation.runtime);
-    if (!runtime?.env?.eReplicas) return [];
-
-    const entities: Array<{id: string, label: string, count?: number}> = [];
-    for (const [replicaKey, replica] of runtime.env.eReplicas.entries()) {
-      // Extract entity ID from replica key (format: "entityId:signerId")
-      const [entityId] = replicaKey.split(':');
-      if (!entityId) continue;
-
-      // Filter by selected signer
-      if ($appState.navigation.signer && !replicaKey.includes($appState.navigation.signer)) {
-        continue;
-      }
-
-      // Count accounts for this entity
-      const accountCount = (replica as any).state?.accounts?.size || 0;
-
-      entities.push({
-        id: entityId,
-        label: `${entityId}`,
-        count: accountCount
-      });
-    }
-
-    return entities;
-  })();
-
-  // Account items (from selected entity)
-  $: accountItems = (() => {
-    if (!$appState.navigation.runtime || !$appState.navigation.entity) return [];
-    const runtime = $runtimes.get($appState.navigation.runtime);
-    if (!runtime?.env?.eReplicas) return [];
-
-    // Find replica for this entity
-    let targetReplica: any = null;
-    for (const [replicaKey, replica] of runtime.env.eReplicas.entries()) {
-      if (replicaKey.startsWith($appState.navigation.entity + ':')) {
-        targetReplica = replica;
-        break;
-      }
-    }
-
-    if (!targetReplica?.state?.accounts) return [];
-
-    const accounts: Array<{id: string, label: string}> = [];
-    for (const [accountKey] of targetReplica.state.accounts) {
-      accounts.push({
-        id: accountKey,
-        label: `A${accountKey.slice(0, 8)}`
-      });
-    }
-
-    return accounts;
-  })();
+  let runtimeSwitchError = '';
 
   // Handlers
-  function handleRuntimeSelect(id: string) {
-    appStateOperations.navigate('runtime', id);
-    // Also update activeRuntimeId for time machine
-    activeRuntimeId.set(id);
+  async function handleRuntimeSelect(id: string) {
+    runtimeSwitchError = '';
+    try {
+      const switched = await runtimeOperations.selectRuntime(id);
+      if (!switched) throw new Error(`Runtime switch rejected: ${id}`);
+      appStateOperations.navigate('runtime', id);
+    } catch (error) {
+      runtimeSwitchError = error instanceof Error ? error.message : String(error || 'Runtime switch failed');
+      console.error('[HierarchicalNav] Runtime switch failed:', error);
+    }
   }
 
   function handleJurisdictionSelect(id: string) {
@@ -130,46 +53,49 @@
 <nav class="hierarchical-nav">
   <Breadcrumb
     label="Runtime"
-    items={runtimeItems}
+    items={navigationView.runtimeItems}
     selected={$appState.navigation.runtime}
     onSelect={handleRuntimeSelect}
     onNew={null}
   />
+  {#if runtimeSwitchError}
+    <span class="nav-error" role="alert">{runtimeSwitchError}</span>
+  {/if}
 
   <Breadcrumb
     label="Jurisdiction"
-    items={jurisdictionItems}
+    items={navigationView.jurisdictionItems}
     selected={$appState.navigation.jurisdiction}
     onSelect={handleJurisdictionSelect}
     onNew={null}
-    disabled={!$appState.navigation.runtime || jurisdictionItems.length === 0}
+    disabled={!$appState.navigation.runtime || navigationView.jurisdictionItems.length === 0}
   />
 
   <Breadcrumb
     label="Signer"
-    items={signerItems}
+    items={navigationView.signerItems}
     selected={$appState.navigation.signer}
     onSelect={handleSignerSelect}
     onNew={null}
-    disabled={signerItems.length === 0}
+    disabled={navigationView.signerItems.length === 0}
   />
 
   <Breadcrumb
     label="Entity"
-    items={entityItems}
+    items={navigationView.entityItems}
     selected={$appState.navigation.entity}
     onSelect={handleEntitySelect}
     onNew={null}
-    disabled={!$appState.navigation.runtime || entityItems.length === 0}
+    disabled={!$appState.navigation.runtime || navigationView.entityItems.length === 0}
   />
 
   <Breadcrumb
     label="Account"
-    items={accountItems}
+    items={navigationView.accountItems}
     selected={$appState.navigation.account}
     onSelect={handleAccountSelect}
     onNew={null}
-    disabled={!$appState.navigation.entity || accountItems.length === 0}
+    disabled={!$appState.navigation.entity || navigationView.accountItems.length === 0}
   />
 </nav>
 
@@ -183,6 +109,16 @@
     height: 48px;
     align-items: center;
     overflow-x: auto;
+  }
+
+  .nav-error {
+    color: #ff6b6b;
+    font-size: 12px;
+    font-family: 'SF Mono', monospace;
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   @media (max-width: 768px) {

@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * Runtime I/O Panel - Shows frame-by-frame input/output data
-   * + FULL DATA DUMP for time machine debugging
+   * via compact projections only. It must not render full Env documents.
    *
    * @license AGPL-3.0
    * Copyright (C) 2025 XLN Finance
@@ -40,16 +40,13 @@
   type RuntimeEnvLike = { history?: RuntimeFrameLike[] };
 
   // Receive isolated env as prop (passed from View.svelte)
-  export let isolatedEnv: Writable<RuntimeEnvLike | null>;
-  export let isolatedHistory: Writable<RuntimeFrameLike[]> | null = null;
-  export let isolatedTimeIndex: Writable<number> | null = null;
+  export let runtimeFrameEnv: Writable<RuntimeEnvLike | null>;
+  export let runtimeFrameHistory: Writable<RuntimeFrameLike[]> | null = null;
+  export let runtimeFrameTimeIndex: Writable<number> | null = null;
 
   // Expandable sections
   let expandedReplicas: Set<string> = new Set();
   let expandedXlnomies: Set<string> = new Set();
-  let showFullJson = false;
-  let showInputJson = false;
-  let showOutputJson = false;
   let showLogs = true;
 
   // Log filtering
@@ -110,29 +107,20 @@
 
   // Get current frame data based on time machine index
   $: currentFrame = (() => {
-    if (isolatedTimeIndex && isolatedHistory) {
-      const timeIdx = $isolatedTimeIndex;
-      const hist = $isolatedHistory;
+    if (runtimeFrameTimeIndex && runtimeFrameHistory) {
+      const timeIdx = $runtimeFrameTimeIndex;
+      const hist = $runtimeFrameHistory;
       if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
         const idx = Math.min(timeIdx, hist.length - 1);
         return hist[idx];
       }
     }
     // Fallback to live state
-    if ($isolatedEnv && $isolatedEnv.history && $isolatedEnv.history.length > 0) {
-      return $isolatedEnv.history[$isolatedEnv.history.length - 1];
+    if ($runtimeFrameEnv && $runtimeFrameEnv.history && $runtimeFrameEnv.history.length > 0) {
+      return $runtimeFrameEnv.history[$runtimeFrameEnv.history.length - 1];
     }
     return null;
   })();
-
-  // Safe JSON stringify that handles BigInt and Map
-  function safeStringify(obj: unknown, indent = 2): string {
-    return JSON.stringify(obj, (key, value) => {
-      if (typeof value === 'bigint') return value.toString() + 'n';
-      if (value instanceof Map) return Object.fromEntries(value);
-      return value;
-    }, indent);
-  }
 
   // Toggle replica expansion
   function toggleReplica(entityId: string) {
@@ -167,6 +155,14 @@
 
   function getGossipProfiles(frame: RuntimeFrameLike): unknown[] {
     return frame.gossip?.profiles ?? [];
+  }
+
+  function countEntries(source: unknown): number {
+    if (!source) return 0;
+    if (source instanceof Map) return source.size;
+    if (Array.isArray(source)) return source.length;
+    if (typeof source === 'object') return Object.keys(source as Record<string, unknown>).length;
+    return 0;
   }
 
   // Format bigint for display
@@ -225,7 +221,7 @@
                     <span class="event-level" style="color: {levelColors[log.level]}">{log.level}</span>
                   </summary>
                   {#if log.data}
-                    <pre class="event-data">{safeStringify(log.data, 2)}</pre>
+                    <div class="event-data">Structured data present; open the typed activity projection for details.</div>
                   {/if}
                 </details>
               {/each}
@@ -292,7 +288,8 @@
                 </button>
                 {#if expandedXlnomies.has(xlnomy.name)}
                   <div class="replica-body">
-                    <pre class="json-block-small">{safeStringify(xlnomy.jMachine)}</pre>
+                    <div class="data-row"><span>Block:</span> {xlnomy.jMachine?.blockNumber || 0}</div>
+                    <div class="data-row"><span>Entities:</span> {xlnomy.jMachine?.entities?.length || 0}</div>
                   </div>
                 {/if}
               </div>
@@ -362,10 +359,7 @@
                         <span class="log-entity">{shortAddress(log.entityId)}</span>
                       {/if}
                       {#if log.data}
-                        <details class="log-data">
-                          <summary>data</summary>
-                          <pre>{safeStringify(log.data)}</pre>
-                        </details>
+                        <span class="log-data">data</span>
                       {/if}
                     </div>
                   {/each}
@@ -435,7 +429,7 @@
                           {#each accounts as [counterparty, account]}
                             <div class="account-card">
                               <div class="account-header">↔ {shortAddress(counterparty)}</div>
-                              <pre class="json-mini">{safeStringify(account)}</pre>
+                              <div class="data-row"><span>Deltas:</span> {countEntries(account.deltas)}</div>
                             </div>
                           {/each}
                         {:else}
@@ -448,7 +442,7 @@
                       {#if debts.length > 0}
                         <div class="replica-section">
                           <h5>💳 Debts</h5>
-                          <pre class="json-mini">{safeStringify(debts)}</pre>
+                          <div class="data-row"><span>Entries:</span> {debts.length}</div>
                         </div>
                       {/if}
 
@@ -456,15 +450,9 @@
                       {#if mempool.length > 0}
                         <div class="replica-section">
                           <h5>📦 Mempool ({mempool.length} txs)</h5>
-                          <pre class="json-mini">{safeStringify(mempool)}</pre>
+                          <div class="data-row"><span>Queued txs:</span> {mempool.length}</div>
                         </div>
                       {/if}
-
-                      <!-- Full State JSON -->
-                      <div class="replica-section">
-                        <h5>📝 Full State JSON</h5>
-                        <pre class="json-block-small">{safeStringify(replica.state)}</pre>
-                      </div>
                     </div>
                   {/if}
                 </div>
@@ -478,42 +466,9 @@
           {#if getGossipProfiles(currentFrame).length > 0}
             <div class="section">
               <h4>📡 Gossip Profiles ({getGossipProfiles(currentFrame).length})</h4>
-              <pre class="json-block">{safeStringify(getGossipProfiles(currentFrame))}</pre>
+              <div class="empty-data">Raw gossip payload hidden; use the typed gossip directory projection.</div>
             </div>
           {/if}
-
-          <!-- Runtime Input (collapsible) -->
-          <div class="section">
-            <button class="section-header" on:click={() => showInputJson = !showInputJson}>
-              <span class="expand-icon">{showInputJson ? '▼' : '▶'}</span>
-              <h4>📥 Runtime Input</h4>
-            </button>
-            {#if showInputJson}
-              <pre class="json-block">{safeStringify(currentFrame.runtimeInput)}</pre>
-            {/if}
-          </div>
-
-          <!-- Runtime Output (collapsible) -->
-          <div class="section">
-            <button class="section-header" on:click={() => showOutputJson = !showOutputJson}>
-              <span class="expand-icon">{showOutputJson ? '▼' : '▶'}</span>
-              <h4>📤 Runtime Outputs</h4>
-            </button>
-            {#if showOutputJson}
-              <pre class="json-block">{safeStringify(currentFrame.runtimeOutputs)}</pre>
-            {/if}
-          </div>
-
-          <!-- Full Frame JSON (collapsible) -->
-          <div class="section">
-            <button class="section-header" on:click={() => showFullJson = !showFullJson}>
-              <span class="expand-icon">{showFullJson ? '▼' : '▶'}</span>
-              <h4>🔬 Full Frame JSON</h4>
-            </button>
-            {#if showFullJson}
-              <pre class="json-block">{safeStringify(currentFrame)}</pre>
-            {/if}
-          </div>
         </div>
     {/if}
   </div>
@@ -560,20 +515,6 @@
   .empty-state p {
     margin: 8px 0;
     font-size: 14px;
-  }
-
-  .json-block {
-    background: #252526;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
-    padding: 12px;
-    margin: 0;
-    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
-    font-size: 11px;
-    line-height: 1.5;
-    color: #d4d4d4;
-    overflow-x: auto;
-    white-space: pre;
   }
 
   .section {
@@ -639,7 +580,6 @@
     background: #4e4e4e;
   }
 
-  /* Full Data View Styles */
   .full-view {
     padding: 12px;
   }
@@ -737,29 +677,6 @@
     font-size: 11px;
     color: #d4d4d4;
     font-family: 'Consolas', monospace;
-  }
-
-  .json-mini {
-    margin: 0;
-    padding: 8px;
-    font-size: 10px;
-    color: #9cdcfe;
-    background: #1e1e1e;
-    overflow-x: auto;
-    max-height: 150px;
-    overflow-y: auto;
-  }
-
-  .json-block-small {
-    margin: 0;
-    padding: 8px;
-    font-size: 10px;
-    color: #9cdcfe;
-    background: #1e1e1e;
-    border-radius: 4px;
-    overflow-x: auto;
-    max-height: 200px;
-    overflow-y: auto;
   }
 
   .empty-data {
@@ -913,24 +830,11 @@
   }
 
   .log-data {
-    width: 100%;
-    margin-top: 4px;
-  }
-
-  .log-data summary {
     font-size: 10px;
     color: #6e7681;
-    cursor: pointer;
-  }
-
-  .log-data pre {
-    margin: 4px 0 0 0;
-    padding: 6px;
-    font-size: 10px;
     background: #252526;
+    padding: 1px 4px;
     border-radius: 3px;
-    color: #9cdcfe;
-    overflow-x: auto;
   }
 
   /* R→E→A Event Stack Styles */

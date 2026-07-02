@@ -84,6 +84,11 @@ const signerKeys = new Map<string, Uint8Array>();
 const signerPublicKeys = new Map<string, Uint8Array>();
 const signerAddresses = new Map<string, string>();
 const externalPublicKeys = new Map<string, Uint8Array>();
+const seedScopedNumericSignerKeys = new Map<string, {
+  privateKey: Uint8Array;
+  publicKey: Uint8Array;
+  address: string;
+}>();
 let runtimeSeedLocked = false;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -102,6 +107,8 @@ const toSeedBytes = (seed: Uint8Array | string): Uint8Array =>
   typeof seed === 'string' ? textEncoder.encode(seed) : seed;
 const toSeedText = (seed: Uint8Array | string): string =>
   typeof seed === 'string' ? seed : textDecoder.decode(seed);
+const seedScopedNumericSignerCacheKey = (seed: Uint8Array | string, signerId: string): string =>
+  `${bytesToHex(sha256(toSeedBytes(seed)))}:${signerId.toLowerCase()}`;
 
 const parseSignerIndex = (signerId: string): number | null => {
   const trimmed = signerId.trim();
@@ -197,6 +204,7 @@ export function setRuntimeSeed(_seed: Uint8Array | string | null): void {
   signerPublicKeys.clear();
   signerAddresses.clear();
   externalPublicKeys.clear();
+  seedScopedNumericSignerKeys.clear();
   mnemonicCache.clear();
 }
 
@@ -231,19 +239,27 @@ const assertSignerKeyMatchesId = (signerId: string, privateKey: Uint8Array, cont
 
 const cacheNumericSigner = (seed: Uint8Array | string, signerId: string): Uint8Array => {
   const key = signerId.toLowerCase();
-  const cached = signerKeys.get(key);
-  if (cached) return cached;
+  const cacheKey = seedScopedNumericSignerCacheKey(seed, key);
+  const cached = seedScopedNumericSignerKeys.get(cacheKey);
+  if (cached) return cached.privateKey;
   const privateKey = deriveSignerKeySync(seed, signerId);
   const address = deriveSignerAddressSync(seed, signerId).toLowerCase();
-  signerKeys.set(key, privateKey);
-  signerPublicKeys.set(key, secp256k1.getPublicKey(privateKey));
-  signerAddresses.set(key, address);
+  const publicKey = secp256k1.getPublicKey(privateKey);
+  seedScopedNumericSignerKeys.set(cacheKey, { privateKey, publicKey, address });
   registerSignerKey(address, privateKey);
   return privateKey;
 };
 
 const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Array => {
   const canonicalSignerId = signerId.toLowerCase();
+  const signerIndex = parseSignerIndex(canonicalSignerId);
+  if (signerIndex !== null) {
+    if (envSeed === undefined || envSeed === null) {
+      throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${canonicalSignerId}`);
+    }
+    return cacheNumericSigner(envSeed, canonicalSignerId);
+  }
+
   const cached = signerKeys.get(signerId) || signerKeys.get(canonicalSignerId);
   if (cached) {
     assertSignerKeyMatchesId(canonicalSignerId, cached, 'getOrDeriveKey(cache)');
@@ -252,11 +268,6 @@ const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Ar
 
   if (envSeed === undefined || envSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${canonicalSignerId}`);
-  }
-
-  const signerIndex = parseSignerIndex(canonicalSignerId);
-  if (signerIndex !== null) {
-    return cacheNumericSigner(envSeed, canonicalSignerId);
   }
 
   if (isHexAddress(canonicalSignerId)) {
@@ -354,15 +365,15 @@ export function getCachedSignerAddress(signerId: string): string | null {
 // Export for runtime/hanko/signing.ts
 export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8Array {
   const key = signerId.toLowerCase();
-  const exactRegistered = getExactRegisteredSignerPrivateKey(key);
-  if (exactRegistered) {
-    return exactRegistered;
-  }
   if (parseSignerIndex(key) !== null) {
     if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
       throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getSignerPrivateKey called without env.runtimeSeed for signer ${key}`);
     }
     return getOrDeriveKey(env.runtimeSeed, key);
+  }
+  const exactRegistered = getExactRegisteredSignerPrivateKey(key);
+  if (exactRegistered) {
+    return exactRegistered;
   }
   if (isHexAddress(key)) {
     throw new Error(
@@ -375,8 +386,6 @@ export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8A
 
 export function getSignerPublicKey(env: SignerKeyEnv, signerId: string): Uint8Array | null {
   const key = signerId.toLowerCase();
-  const exactRegistered = getExactRegisteredSignerPublicKey(key);
-  if (exactRegistered) return exactRegistered;
   if (parseSignerIndex(key) !== null) {
     if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
       return null;
@@ -384,6 +393,8 @@ export function getSignerPublicKey(env: SignerKeyEnv, signerId: string): Uint8Ar
     const privateKey = getOrDeriveKey(env.runtimeSeed, key);
     return secp256k1.getPublicKey(privateKey);
   }
+  const exactRegistered = getExactRegisteredSignerPublicKey(key);
+  if (exactRegistered) return exactRegistered;
   const external = externalPublicKeys.get(key);
   if (external) return external;
   const cached = signerPublicKeys.get(key);
@@ -399,8 +410,6 @@ export function deriveSignerAddressSync(seed: Uint8Array | string, signerId: str
 
 export function getSignerAddress(env: SignerKeyEnv, signerId: string): string | null {
   const key = signerId.toLowerCase();
-  const exactRegistered = getExactRegisteredSignerAddress(key);
-  if (exactRegistered) return exactRegistered;
   if (parseSignerIndex(key) !== null) {
     if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
       return null;
@@ -408,6 +417,8 @@ export function getSignerAddress(env: SignerKeyEnv, signerId: string): string | 
     const privateKey = getOrDeriveKey(env.runtimeSeed, key);
     return privateKeyToAddress(privateKey);
   }
+  const exactRegistered = getExactRegisteredSignerAddress(key);
+  if (exactRegistered) return exactRegistered;
   return isHexAddress(key) ? key : null;
 }
 
@@ -481,6 +492,7 @@ export function clearSignerKeys(): void {
   signerPublicKeys.clear();
   signerAddresses.clear();
   externalPublicKeys.clear();
+  seedScopedNumericSignerKeys.clear();
 }
 
 /**

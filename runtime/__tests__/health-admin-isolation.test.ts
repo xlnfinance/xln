@@ -21,8 +21,8 @@ test('health admin route reads only health/debug surfaces and links to QA', () =
   }
 
   expect(route).toContain("fetch('/api/health')");
-  expect(route).toContain("fetch('/api/debug/events?last=1000')");
-  expect(route).toContain("fetch('/api/debug/entities?limit=1000')");
+  expect(route).toContain('runtimeQueryClient.readActivity({ limit: 1000, scanLimit: 1000 })');
+  expect(route).toContain('runtimeQueryClient.readEntities({ limit: 1000 })');
   expect(route).toContain('HealthQaLinkPanel');
   expect(qaLinkPanel).toContain('href="/qa"');
   expect(qaLinkPanel).not.toContain('fetch(');

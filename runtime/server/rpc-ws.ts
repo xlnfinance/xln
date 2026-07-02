@@ -8,6 +8,7 @@ import {
   loadEntityAccountDocFromStorageDb,
   loadEntityStateFromStorageDb,
   loadEntityViewPageFromStorageDb,
+  readPersistedRuntimeActivityPage,
   readPersistedFrameJournals,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
@@ -23,9 +24,14 @@ import { isEntityId32 } from '../server-utils';
 import { requireDaemonRpcAuth } from './auth';
 import { getEntityReplicaById } from './entity-lookup';
 import type { RelaySocket } from './relay-direct';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 
 type ServerRpcHandlerDeps = {
   getRelayStore: () => RelayStore;
+  validateRuntimeInputAdmission?: (env: Env, input: Parameters<typeof enqueueRuntimeInput>[1]) => void;
+  registerRuntimeInputReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
+  readRuntimeInputReceipt?: (id: string) => RuntimeIngressReceipt | null;
+  buildRuntimeInputStatusUrl?: (id: string) => string;
 };
 
 type ReceiptLog = {
@@ -121,11 +127,21 @@ const resolveRpcPaymentRoute = async (
   return retryRoutes[0]!.path;
 };
 
-export const createServerRpcMessageHandler = ({ getRelayStore }: ServerRpcHandlerDeps) =>
-  async (ws: RelaySocket, msg: Record<string, unknown>, env: Env | null): Promise<void> => {
-    const handledByRuntimeAdapter = await handleRuntimeAdapterMessage(ws, msg, env, {
-      enqueueRuntimeInput,
-      readHead: targetEnv => readPersistedStorageHead(targetEnv),
+export const createServerRpcMessageHandler = ({
+  getRelayStore,
+  validateRuntimeInputAdmission,
+  registerRuntimeInputReceipt,
+  readRuntimeInputReceipt,
+  buildRuntimeInputStatusUrl,
+	}: ServerRpcHandlerDeps) =>
+	  async (ws: RelaySocket, msg: Record<string, unknown>, env: Env | null): Promise<void> => {
+	    const handledByRuntimeAdapter = await handleRuntimeAdapterMessage(ws, msg, env, {
+	      enqueueRuntimeInput,
+	      ...(validateRuntimeInputAdmission ? { validateRuntimeInputAdmission } : {}),
+	      ...(registerRuntimeInputReceipt ? { registerReceipt: registerRuntimeInputReceipt } : {}),
+	      ...(readRuntimeInputReceipt ? { readReceipt: readRuntimeInputReceipt } : {}),
+	      ...(buildRuntimeInputStatusUrl ? { buildRuntimeInputStatusUrl } : {}),
+	      readHead: targetEnv => readPersistedStorageHead(targetEnv),
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: targetEnv => listPersistedCheckpointHeights(targetEnv),
       loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
@@ -133,6 +149,7 @@ export const createServerRpcMessageHandler = ({ getRelayStore }: ServerRpcHandle
         loadEntityAccountDocFromStorageDb(targetEnv, entityId, counterpartyId, height),
       loadEntityViewPage: (targetEnv, entityId, height, query) => loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
       listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
+      readActivityPage: (targetEnv, opts) => readPersistedRuntimeActivityPage(targetEnv, opts),
     });
     if (handledByRuntimeAdapter) return;
 

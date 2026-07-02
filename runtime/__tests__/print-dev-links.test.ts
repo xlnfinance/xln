@@ -33,6 +33,8 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
       'runtime/scripts/print-dev-links.ts',
       '--web-port',
       '8084',
+      '--web-http-port',
+      '8085',
       '--api-port',
       '8082',
       '--rpc-port',
@@ -58,6 +60,10 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('Open any subsystem from here');
     expect(banner.stdout).toContain('wallet');
     expect(banner.stdout).toContain('https://localhost:8084/app');
+    expect(banner.stdout).toContain('wallet browser QA');
+    expect(banner.stdout).toContain('http://localhost:8085/app');
+    expect(banner.stdout).toContain('radapter manager QA');
+    expect(banner.stdout).toContain('http://localhost:8085/radapter/manage');
     expect(banner.stdout).toContain('health admin');
     expect(banner.stdout).toContain('https://localhost:8084/health');
     expect(banner.stdout).toContain('qa cockpit');
@@ -72,6 +78,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('https://localhost:8087');
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');
     expect(banner.stdout).toContain('runtime import links fetch fresh tokens');
+    expect(banner.stdout).toContain('VITE_HTTP');
     expect(banner.stdout).not.toContain('key=paste');
     expect(banner.stdout).not.toContain('Open these URLs');
     expect(banner.stdout).not.toContain('?runtimeList=');

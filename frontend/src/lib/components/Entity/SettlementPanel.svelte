@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { getXLN, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
+  import { getXLN, submitEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica, EntityTx, AccountMachine, EntityState } from '$lib/types/ui';
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
+  import type { Env, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
@@ -10,8 +10,9 @@
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let historyOnly = false;
-  export let env: Env | EnvSnapshot;
+  export let env: Env | EnvSnapshot | null = null;
   export let isLive: boolean;
+  export let profiles: GossipProfile[] = [];
   type Action = 'r2c' | 'c2r' | 'transfer' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
   type BatchDetailField = { label: string; value: string };
@@ -69,11 +70,6 @@
     if (!value || typeof value !== 'object') return false;
     const obj = value as { eReplicas?: unknown; jReplicas?: unknown; runtimeInput?: unknown };
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
-  }
-
-  function getFrameReplicaMap(sourceEnv: RuntimeEnv | EnvSnapshot | null | undefined): Map<string, EntityReplica> | null {
-    if (!sourceEnv || !(sourceEnv.eReplicas instanceof Map)) return null;
-    return sourceEnv.eReplicas as Map<string, EntityReplica>;
   }
 
   function resolveSignerId(env: RuntimeEnv): string {
@@ -174,9 +170,6 @@
     if (!canonical) return 'Unknown';
     const normalized = normalizeEntityId(canonical);
     if (normalized === normalizeEntityId(entityId)) return 'You';
-    const profiles = activeEnv?.gossip && 'getProfiles' in activeEnv.gossip && typeof activeEnv.gossip.getProfiles === 'function'
-      ? activeEnv.gossip.getProfiles()
-      : [];
     for (const profile of profiles) {
       if (normalizeEntityId(profile.entityId) !== normalized) continue;
       const profileName = profile.name.trim();
@@ -511,10 +504,6 @@
     };
 
     for (const accountId of accountEntityIds) add(accountId);
-    for (const key of getFrameReplicaMap(activeEnv)?.keys?.() || []) add(String(key).split(':')[0]);
-    const profiles = activeEnv?.gossip && 'getProfiles' in activeEnv.gossip && typeof activeEnv.gossip.getProfiles === 'function'
-      ? activeEnv.gossip.getProfiles()
-      : [];
     for (const profile of profiles) add(profile.entityId);
 
     return Array.from(ids.values());
@@ -698,7 +687,7 @@
       if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
       const signerId = resolveSignerId(env);
 
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId,
         signerId,
         entityTxs: [{ type: 'j_clear_batch', data: { reason: 'manual-clear-from-ui' } }],
@@ -725,7 +714,7 @@
         type: 'j_broadcast',
         data: feeOverrides ? { feeOverrides } : {},
       }];
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId,
         signerId,
         entityTxs,
@@ -748,7 +737,7 @@
       const signerId = resolveSignerId(env);
 
       const gasBumpBps = gasPreset === 'urgent' ? 5_000 : gasPreset === 'fast' ? 2_000 : gasPreset === 'custom' ? 3_000 : 1_000;
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId,
         signerId,
         entityTxs: [{ type: 'j_rebroadcast', data: { gasBumpBps } }],
@@ -784,7 +773,7 @@
         },
       };
 
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId,
         signerId,
         entityTxs: [entityTx],
@@ -817,7 +806,7 @@
     if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
     if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
     const signerId = resolveSignerId(env);
-    await enqueueEntityInputs(env, [{
+    await submitEntityInputs([{
       entityId,
       signerId,
       entityTxs: [{
@@ -841,7 +830,7 @@
     if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
     if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
     const signerId = resolveSignerId(env);
-    await enqueueEntityInputs(env, [{
+    await submitEntityInputs([{
       entityId,
       signerId,
       entityTxs: [{
@@ -858,6 +847,7 @@
   }
 
   async function autoAddSignedWorkspaceToDraft(): Promise<void> {
+    if (historyOnly) return;
     const account = selectedAccount;
     const counterparty = String(counterpartyEntityId || '').trim();
     if (!counterparty || !account) return;
@@ -872,7 +862,7 @@
     autoExecutingWorkspaceKey = workspaceKey;
     try {
       const signerId = resolveSignerId(env);
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId,
         signerId,
         entityTxs: [{
@@ -916,20 +906,27 @@
   })();
 
   $: {
-    const workspace = selectedAccount?.settlementWorkspace;
-    const workspaceKey = getWorkspaceAutoExecuteKey(counterpartyEntityId, selectedAccount ?? null);
-    if (!workspace || workspace.status !== 'ready_to_submit') {
+    if (historyOnly) {
+      autoExecutingWorkspaceKey = '';
       autoExecuteWorkspaceKey = '';
     } else if (
-      isLocalExecutorForWorkspace(counterpartyEntityId, selectedAccount ?? null)
-      && workspaceKey
-      && workspaceKey !== autoExecuteWorkspaceKey
-      && workspaceKey !== autoExecutingWorkspaceKey
+      !selectedAccount?.settlementWorkspace
+      || selectedAccount.settlementWorkspace.status !== 'ready_to_submit'
     ) {
-      // Once the counterparty has signed, the local executor should immediately
-      // materialize the signed settlement into the local draft batch. This is
-      // still a local draft step only; j_broadcast remains an explicit user action.
-      void autoAddSignedWorkspaceToDraft();
+      autoExecuteWorkspaceKey = '';
+    } else {
+      const workspaceKey = getWorkspaceAutoExecuteKey(counterpartyEntityId, selectedAccount ?? null);
+      if (
+        isLocalExecutorForWorkspace(counterpartyEntityId, selectedAccount ?? null)
+        && workspaceKey
+        && workspaceKey !== autoExecuteWorkspaceKey
+        && workspaceKey !== autoExecutingWorkspaceKey
+      ) {
+        // Once the counterparty has signed, the local executor should immediately
+        // materialize the signed settlement into the local draft batch. This is
+        // still a local draft step only; j_broadcast remains an explicit user action.
+        void autoAddSignedWorkspaceToDraft();
+      }
     }
   }
 
@@ -1190,6 +1187,7 @@
       label="Account"
       value={counterpartyEntityId}
       entities={accountEntityIds}
+      {profiles}
       excludeId={entityId}
       disabled={sending}
       on:change={handleAccountChange}
@@ -1242,6 +1240,7 @@
       label="Recipient"
       value={recipientEntityId}
       entities={transferEntityOptions}
+      {profiles}
       excludeId={entityId}
       disabled={sending}
       on:change={handleRecipientChange}

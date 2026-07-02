@@ -1,8 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '$lib/types/ui';
-import type { GossipLayer, Profile as GossipProfile } from '@xln/runtime/xln-api';
-import type { Env, EnvSnapshot, EntityReplica } from '@xln/runtime/xln-api';
-import { xlnEnvironment, history } from './xlnStore';
+import type { EnvSnapshot } from '@xln/runtime/xln-api';
+import { history } from './xlnStore';
 
 const defaultTimeState: TimeState = {
   currentTimeIndex: -1,
@@ -19,10 +18,6 @@ export const currentTimeIndex = derived(timeState, $state => $state.currentTimeI
 export const isLive = derived(timeState, $state => $state.isLive);
 export const maxTimeIndex = derived(timeState, $state => $state.maxTimeIndex);
 
-function cloneReplicaMap(replicas: Map<string, EntityReplica>): Map<string, EntityReplica> {
-  return new Map(replicas);
-}
-
 function requireHistoricalFrame(
   frames: EnvSnapshot[],
   currentTimeIndex: number,
@@ -34,75 +29,6 @@ function requireHistoricalFrame(
   }
   return frame;
 }
-
-// When not live, expose replicas from the selected snapshot; otherwise use live env replicas
-export const visibleReplicas = derived(
-  [timeState, history, xlnEnvironment],
-  ([$timeState, $history, $env]) => {
-    if ($timeState.isLive) {
-      return $env ? cloneReplicaMap($env.eReplicas) : new Map();
-    }
-    if ($history.length === 0) {
-      throw new Error('Time machine entered historical mode without any history');
-    }
-    const frame = requireHistoricalFrame($history, $timeState.currentTimeIndex);
-    return cloneReplicaMap(frame.eReplicas);
-  }
-);
-
-// Derived store for getting current visible gossip (based on time index)
-type StoredGossip = {
-  profiles: GossipProfile[];
-};
-
-const isStoredGossip = (value: unknown): value is StoredGossip =>
-  typeof value === 'object' &&
-  value !== null &&
-  Array.isArray((value as { profiles?: unknown }).profiles);
-
-function normalizeGossip(gossip: GossipLayer | StoredGossip | null | undefined): GossipLayer | null {
-  if (!gossip) return null;
-  if ('getProfiles' in gossip && typeof gossip.getProfiles === 'function') {
-    return gossip;
-  }
-
-  if (isStoredGossip(gossip)) {
-    const cachedProfiles = gossip.profiles.map((profile) => ({ ...profile }));
-    return {
-      getProfiles: () => cachedProfiles
-    } as GossipLayer;
-  }
-
-  return null;
-}
-
-export const visibleGossip = derived(
-  [timeState, history, xlnEnvironment],
-  ([$timeState, $history, $env]) => {
-    if ($timeState.isLive) {
-      return normalizeGossip($env?.gossip);
-    }
-    const idx = $timeState.currentTimeIndex;
-    if (idx >= 0 && idx < $history.length) {
-      return normalizeGossip($history[idx]?.gossip);
-    }
-    return null;
-  }
-);
-
-// Derived store for getting current visible environment (full snapshot)
-export const visibleEnvironment = derived(
-  [timeState, history, xlnEnvironment],
-  ([$timeState, $history, $env]) => {
-    if ($timeState.isLive) {
-      return $env;
-    }
-    if ($history.length === 0) {
-      throw new Error('Time machine entered historical mode without any history');
-    }
-    return requireHistoricalFrame($history, $timeState.currentTimeIndex);
-  }
-);
 
 // Time operations
 const timeOperations = {

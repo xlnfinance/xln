@@ -3,7 +3,7 @@
    * EntityMiniPanel - Compact popup when clicking entity in Graph3D
    * Shows quick info + actions, can expand to full panel
    *
-   * TIME-TRAVEL AWARE: Reads from isolatedHistory[timeIndex] when scrubbing
+   * TIME-TRAVEL AWARE: Reads from runtimeFrameHistory[timeIndex] when scrubbing
    */
   import { createEventDispatcher } from 'svelte';
   import type { Writable } from 'svelte/store';
@@ -24,21 +24,21 @@
   export let entityId: string;
   export let entityName: string = '';
   export let position: { x: number; y: number } = { x: 0, y: 0 };
-  export let isolatedEnv: Writable<Env | null>;
-  export let isolatedHistory: Writable<EnvSnapshot[]>;
-  export let isolatedTimeIndex: Writable<number>;
+  export let runtimeFrameEnv: Writable<Env | null>;
+  export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
+  export let runtimeFrameTimeIndex: Writable<number>;
 
   const dispatch = createEventDispatcher();
 
   // TIME-TRAVEL AWARE: Read from history[timeIndex] when scrubbing, else live state
   $: env = ((): FrameLike => {
-    const timeIdx = $isolatedTimeIndex;
-    const hist = $isolatedHistory;
+    const timeIdx = $runtimeFrameTimeIndex;
+    const hist = $runtimeFrameHistory;
     if (timeIdx >= 0 && hist && hist.length > 0) {
       const idx = Math.min(timeIdx, hist.length - 1);
       return hist[idx] ?? null;  // Historical frame
     }
-    return $isolatedEnv;  // Live state
+    return $runtimeFrameEnv;  // Live state
   })();
 
   /**

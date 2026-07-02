@@ -1,8 +1,8 @@
-  <script lang="ts">
-  import { flushSync, onMount, tick } from 'svelte';
-    import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
+<script lang="ts">
+  import { flushSync, tick } from 'svelte';
+  import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
   import { writable } from 'svelte/store';
-  import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityState, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
+  import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityTx, Env } from '@xln/runtime/xln-api';
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
     deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -13,25 +13,30 @@
   } from '@xln/runtime/xln-api';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
+  import { submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
   import { amountToUsd } from '$lib/utils/assetPricing';
-  import { resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
   import {
+    buildSwapPanelRuntimeView,
+    buildCrossSwapRuntimeInputPlan,
+    buildCrossSwapSetupSteps,
     crossOrderbookPairLabel,
     firstAvailableHubId,
     formatEntityNetworkLabel,
     getTokenMapValue,
+    maxBigInt,
     normalizeJurisdictionDisplayName,
     nonNegative,
     parseCrossAssetKey,
     resolveHubIdCandidate,
     sameOrderbookPairLabel,
     tokenNetworkLabel,
+    type CrossSwapSetupStep,
+    type SwapPanelRuntimeView,
     type TokenKeyedMap,
   } from './swap-panel-helpers';
   import {
@@ -101,8 +106,9 @@
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
-  export let env: Env | EnvSnapshot;
+  export let env: Env | null = null;
   export let isLive: boolean;
+  export let runtimeView: SwapPanelRuntimeView | null = null;
 
   // Props
   export let counterpartyId: string = '';
@@ -133,7 +139,6 @@
     accountId: string;
     accountIds: string[];
   };
-  type FrameLike = Env | EnvSnapshot | EntityState | null | undefined;
   let selectedOrderLevel: ClickedOrderLevel | null = null;
   let orderbookSnapshot: OrderbookSnapshot = {
     pairId: '1/2',
@@ -223,7 +228,6 @@
   let showManualRouteRecommendation = false;
   let lastPriceContextSignature = '';
   let preservePriceOnNextContextChange = false;
-  let autoExtendCrossInbound = true;
   let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
   let selectedSourceEntityValue = '';
   let routeDetailsOpen = false;
@@ -240,16 +244,27 @@
   let ignoreWindowMenuClickCount = 0;
   let hubMenuOpen = false;
   let crossTargetInCapacity = 0n;
+  let selectedCrossTargetReplica: EntityReplica | null = null;
+  let crossTargetHasAccount = false;
+  let needsCrossTargetAccountSetup = false;
+  let canAutoOpenCrossTargetAccount = false;
+  let needsCrossTargetCreditSetup = false;
+  let crossDesiredInboundAmount = 0n;
   let crossAutoInboundCreditTarget: bigint | null = null;
   let crossCurrentPeerCreditLimit = 0n;
   let canAutoPrepareCrossInboundCapacity = false;
+  let crossSetupCreditLimitLabel = '';
+  let crossSetupCreditIncreaseLabel = '';
+  let crossSwapSetupSteps: CrossSwapSetupStep[] = [];
   let placingSwapOffer = false;
+  let swapRuntimeView: SwapPanelRuntimeView = buildSwapPanelRuntimeView(null);
 
     $: activeXlnFunctions = $xlnFunctions;
     $: activeFrame = env;
     $: runtimeEnv = unwrapLiveRuntimeEnv(activeFrame);
+    $: swapRuntimeView = runtimeView ?? buildSwapPanelRuntimeView(activeFrame);
     $: activeIsLive = isLive;
-    $: sourceEntityOptions = buildSourceEntityOptions(activeFrame, tab.entityId);
+    $: sourceEntityOptions = buildSourceEntityOptions(swapRuntimeView, tab.entityId);
     $: if (!sourceEntityOptions.some((option) => option.value === selectedSourceEntityValue)) {
       const tabEntityId = String(tab.entityId || '').trim().toLowerCase();
       selectedSourceEntityValue = sourceEntityOptions.find((option) => option.value === tabEntityId)?.value
@@ -271,18 +286,10 @@
     if (!selected || !baseAccountIds.includes(selected)) return baseAccountIds;
     return [selected, ...baseAccountIds.filter((id) => id !== selected)];
   })();
-  const getGossipProfiles = (): GossipProfile[] => {
-    if (!activeFrame?.gossip) return [];
-    if ('getProfiles' in activeFrame.gossip && typeof activeFrame.gossip.getProfiles === 'function') {
-      return activeFrame.gossip.getProfiles();
-    }
-    return Array.isArray(activeFrame.gossip.profiles) ? activeFrame.gossip.profiles : [];
-  };
   function isHubAccount(accountIdValue: string): boolean {
     const normalized = String(accountIdValue || '').trim().toLowerCase();
     if (!normalized) return false;
-    const profile = getGossipProfiles().find((entry) => String(entry?.entityId || '').trim().toLowerCase() === normalized);
-    return profile?.metadata?.isHub === true;
+    return swapRuntimeView.isHubEntity(normalized);
   }
   $: hubAccountIds = accountIds.filter((id) => isHubAccount(id)).slice(0, 10);
   $: hiddenAccountCount = Math.max(0, accountIds.length - hubAccountIds.length);
@@ -347,7 +354,8 @@
     return match || String(input || '').trim();
   }
   function accountLabel(accountIdValue: string): string {
-    const resolved = resolveEntityName(accountIdValue, activeFrame);
+    const normalized = String(accountIdValue || '').trim().toLowerCase();
+    const resolved = swapRuntimeView.entityNames.get(normalized) || '';
     return resolved || formatEntityId(accountIdValue);
   }
 
@@ -374,7 +382,7 @@
   }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
   $: selectedHubOption = selectedHubOptions.find((hub) => hub.value === (createOrderAccountId || activeOrderAccountId)) || null;
-  $: crossTargetOptions = buildCrossTargetOptions(activeFrame, sourceEntityIdValue, currentReplica);
+  $: crossTargetOptions = buildCrossTargetOptions(swapRuntimeView, sourceEntityIdValue, currentReplica);
   $: routeOptions = buildRouteOptions(sourceEntityIdValue, currentReplica, activeOrderAccountId, crossTargetOptions);
   $: visibleRouteOptions = selectedRouteOptionOverride
     && routeMatchesCurrentSource(selectedRouteOptionOverride)
@@ -479,15 +487,24 @@
     ? `${tokenNetworkLabel(giveToken, sourceJurisdictionLabel, tokenSymbol)} -> ${tokenNetworkLabel(wantToken, targetJurisdictionLabel, tokenSymbol)}`
     : `${giveTokenSymbol} -> ${wantTokenSymbol}`;
   $: swapTokenPairLabel = `${giveTokenSymbol} -> ${wantTokenSymbol}`;
-  $: targetAccountReady = swapRouteMode !== 'cross' || Boolean(selectedCrossTarget && hasReplicaAccount(
-    findReplicaByEntityId(selectedCrossTarget.targetEntityId),
-    selectedCrossTarget.targetHubEntityId,
-  ));
-  $: canCreateTargetAccount = Boolean(
+  $: selectedCrossTargetReplica = selectedCrossTarget ? findReplicaByEntityId(selectedCrossTarget.targetEntityId) : null;
+  $: crossTargetHasAccount = Boolean(
     swapRouteMode === 'cross'
     && selectedCrossTarget
     && selectedCrossTarget.targetHubEntityId
-    && !targetAccountReady
+    && hasReplicaAccount(selectedCrossTargetReplica, selectedCrossTarget.targetHubEntityId)
+  );
+  $: targetAccountReady = swapRouteMode !== 'cross' || crossTargetHasAccount;
+  $: needsCrossTargetAccountSetup = Boolean(
+    swapRouteMode === 'cross'
+    && selectedCrossTarget
+    && !crossTargetHasAccount
+  );
+  $: canAutoOpenCrossTargetAccount = Boolean(
+    needsCrossTargetAccountSetup
+    && selectedCrossTarget
+    && selectedCrossTargetReplica
+    && selectedCrossTarget.targetHubEntityId
     && activeIsLive
   );
   $: orderbookSourceLabels = Object.fromEntries(
@@ -624,25 +641,11 @@
     }
   }
 
-  function localEntityReplicas(frame: FrameLike = activeFrame): EntityReplica[] {
-    if (!frame || !('eReplicas' in frame) || !(frame.eReplicas instanceof Map)) return [];
-    const seen = new Set<string>();
-    const out: EntityReplica[] = [];
-    for (const [key, candidate] of frame.eReplicas.entries()) {
-      if (!candidate?.state) continue;
-      const entityId = String(candidate.entityId || key.split(':')[0] || candidate.state.entityId || '').trim().toLowerCase();
-      if (!entityId || seen.has(entityId)) continue;
-      seen.add(entityId);
-      out.push(candidate);
-    }
-    return out;
-  }
-
   function buildSourceEntityOptions(
-    frame: FrameLike = activeFrame,
+    view: SwapPanelRuntimeView = swapRuntimeView,
     currentEntityId = String(tab.entityId || '').trim().toLowerCase(),
   ): SourceEntityOption[] {
-    const options = localEntityReplicas(frame)
+    const options = view.localReplicas
       .map((candidate) => {
         const entityId = String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase();
         const signerId = String(candidate.signerId || '').trim().toLowerCase();
@@ -673,12 +676,7 @@
   }
 
   function getHubProfile(entityIdValue: string): GossipProfile | null {
-    const normalized = String(entityIdValue || '').trim().toLowerCase();
-    if (!normalized) return null;
-    return getGossipProfiles().find((profile) =>
-      profile?.metadata?.isHub === true
-      && String(profile?.entityId || '').trim().toLowerCase() === normalized
-    ) || null;
+    return swapRuntimeView.getHubProfile(entityIdValue);
   }
 
   function orderbookRelayUrlForHub(entityIdValue: string): string {
@@ -715,7 +713,7 @@
   function findHubProfileForJurisdiction(jurisdictionName: string): GossipProfile | null {
     const normalized = String(jurisdictionName || '').trim().toLowerCase();
     if (!normalized) return null;
-    const profiles = getGossipProfiles()
+    const profiles = swapRuntimeView.profiles
       .filter((profile) => profile?.metadata?.isHub === true)
       .filter((profile) => getProfileJurisdictionName(profile).toLowerCase() === normalized);
     return profiles.sort((a, b) => compareStableText(String(a.name || a.entityId), String(b.name || b.entityId)))[0] || null;
@@ -724,14 +722,14 @@
   function findHubProfilesForJurisdiction(jurisdictionName: string): GossipProfile[] {
     const normalized = String(jurisdictionName || '').trim().toLowerCase();
     if (!normalized) return [];
-    return getGossipProfiles()
+    return swapRuntimeView.profiles
       .filter((profile) => profile?.metadata?.isHub === true)
       .filter((profile) => getProfileJurisdictionName(profile).toLowerCase() === normalized)
       .sort((a, b) => compareStableText(String(a.name || a.entityId), String(b.name || b.entityId)));
   }
 
   function buildCrossTargetOptions(
-    frame: FrameLike = activeFrame,
+    view: SwapPanelRuntimeView = swapRuntimeView,
     sourceEntityId = sourceEntityIdValue,
     sourceReplica: EntityReplica | null | undefined = currentReplica,
   ): CrossTargetOption[] {
@@ -739,7 +737,7 @@
     const sourceJurisdictionRef = getReplicaJurisdictionRef(sourceReplica);
     if (!sourceEntityId || !sourceJurisdiction || !sourceJurisdictionRef) return [];
     const options: CrossTargetOption[] = [];
-    for (const candidate of localEntityReplicas(frame)) {
+    for (const candidate of view.localReplicas) {
       const targetEntityId = String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase();
       if (!targetEntityId || targetEntityId === sourceEntityId) continue;
       const targetJurisdiction = getReplicaJurisdictionName(candidate);
@@ -1329,6 +1327,8 @@
 
   function setSwapTokens(nextGiveToken: number, nextWantToken: number, allowSameToken = false): void {
     if (!Number.isFinite(nextGiveToken) || !Number.isFinite(nextWantToken)) return;
+    const previousGiveTokenId = String(giveTokenId);
+    const previousWantTokenId = String(wantTokenId);
     if (nextGiveToken <= 0 || nextWantToken <= 0) {
       giveTokenId = String(nextGiveToken || '');
       wantTokenId = String(nextWantToken || '');
@@ -1346,9 +1346,12 @@
     }
     const oriented = resolvePairOrientation(nextGiveToken, nextWantToken);
     tradeSide = nextGiveToken === oriented.baseTokenId ? 'sell-base' : 'buy-base';
-    giveTokenId = String(nextGiveToken);
-    wantTokenId = String(nextWantToken);
-    selectedOrderLevel = null;
+    const nextGiveTokenId = String(nextGiveToken);
+    const nextWantTokenId = String(nextWantToken);
+    const tokensChanged = previousGiveTokenId !== nextGiveTokenId || previousWantTokenId !== nextWantTokenId;
+    giveTokenId = nextGiveTokenId;
+    wantTokenId = nextWantTokenId;
+    if (tokensChanged) selectedOrderLevel = null;
     submitError = '';
   }
 
@@ -1531,41 +1534,12 @@
   function handleOrderAmountInput(event: Event): void {
     setOrderAmountInputValue(String((event.currentTarget as HTMLInputElement | null)?.value || ''));
   }
-  function syncOrderAmountInputFromContainer(node: HTMLElement): void {
-    const input = node.closest('.swap-panel')?.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]') || null;
-    if (!input) return;
-    const previousValue = String(node.dataset['orderAmountActionValue'] || '');
-    const ticks = Number(node.dataset['orderAmountActionTicks'] || 0) + 1;
-    node.dataset['orderAmountActionTicks'] = String(ticks);
-    node.dataset['orderAmountActionValue'] = input.value;
-    if (previousValue !== input.value) {
-      node.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-    routedOrderAmountInput.set(input.value);
-    setOrderAmountInputValue(input.value);
-  }
   function handleSwapPanelAmountSync(event: Event): void {
-    const panel = event.currentTarget as HTMLElement | null;
-    const input = panel?.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]') || null;
+    const input = event.target instanceof HTMLInputElement && event.target.dataset['testid'] === 'swap-order-amount'
+      ? event.target
+      : null;
     if (!input) return;
     setOrderAmountInputValue(input.value);
-  }
-  function syncOrderAmountContainerAction(node: HTMLElement): { update: () => void; destroy: () => void } {
-    const sync = () => syncOrderAmountInputFromContainer(node);
-    sync();
-    window.addEventListener('input', sync, true);
-    window.addEventListener('change', sync, true);
-    window.addEventListener('keyup', sync, true);
-    const interval = window.setInterval(sync, 100);
-    return {
-      update: sync,
-      destroy() {
-        window.removeEventListener('input', sync, true);
-        window.removeEventListener('change', sync, true);
-        window.removeEventListener('keyup', sync, true);
-        window.clearInterval(interval);
-      },
-    };
   }
 
   function tokenIconText(symbol: string): string {
@@ -1694,54 +1668,6 @@
       detail: { value: nextValue },
     }));
   }
-
-  function syncRouteSelectDomValue(): void {
-    const node = routeSelectElement;
-    if (!node) return;
-    node.dataset['routeDomSyncTicks'] = String(Number(node.dataset['routeDomSyncTicks'] || 0) + 1);
-    const nextValue = String(node.value || '');
-    if (!nextValue || nextValue === liveSelectedRouteValue) return;
-    node.dataset['routeDomSyncValue'] = nextValue;
-    const selection = buildCommittedRouteSelectionFromDom(node, nextValue);
-    if (!selection) return;
-    dispatchRouteCommit(node, selection.route.value);
-  }
-
-  function syncRouteSelectAction(node: HTMLSelectElement): { update: () => void; destroy: () => void } {
-    let lastDispatchedValue = '';
-    const sync = () => {
-      node.dataset['routeActionTicks'] = String(Number(node.dataset['routeActionTicks'] || 0) + 1);
-      const nextValue = String(node.value || '');
-      if (nextValue && nextValue !== liveSelectedRouteValue) {
-        node.dataset['routeSyncValue'] = nextValue;
-        const selection = buildCommittedRouteSelectionFromDom(node, nextValue);
-        node.dataset['routeSyncKnown'] = selection ? 'true' : 'false';
-        node.dataset['routeSyncDisabled'] = selection?.route.disabled ? 'true' : 'false';
-        if (selection && selection.route.value !== lastDispatchedValue) {
-          lastDispatchedValue = selection.route.value;
-          dispatchRouteCommit(node, selection.route.value);
-          node.dataset['routeCommitNonce'] = String(Number(node.dataset['routeCommitNonce'] || 0) + 1);
-        }
-      }
-    };
-    sync();
-    node.addEventListener('change', sync);
-    node.addEventListener('input', sync);
-    const interval = window.setInterval(sync, 100);
-    return {
-      update: sync,
-      destroy() {
-        node.removeEventListener('change', sync);
-        node.removeEventListener('input', sync);
-        window.clearInterval(interval);
-      },
-    };
-  }
-
-  onMount(() => {
-    const interval = window.setInterval(syncRouteSelectDomValue, 100);
-    return () => window.clearInterval(interval);
-  });
 
   function closeSwapMenus(reason = 'window-close'): void {
     sourceMenuOpen = false;
@@ -1892,10 +1818,10 @@
     return nonNegative(toBigIntSafe(raw) ?? 0n);
   }
 
-  function findReplicaByEntityId(entityId: string, frame: FrameLike = activeFrame): EntityReplica | null {
+  function findReplicaByEntityId(entityId: string, view: SwapPanelRuntimeView = swapRuntimeView): EntityReplica | null {
     const normalized = String(entityId || '').trim().toLowerCase();
     if (!normalized) return null;
-    return localEntityReplicas(frame).find((candidate) =>
+    return view.localReplicas.find((candidate) =>
       String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase() === normalized,
     ) || null;
   }
@@ -2006,30 +1932,38 @@
     currentPeerCreditLimit = readPeerCreditLimit(activeOrderAccountId, wantToken);
   }
   $: {
-    const targetReplica = selectedCrossTarget ? findReplicaByEntityId(selectedCrossTarget.targetEntityId) : null;
     crossTargetInCapacity = selectedCrossTarget
-      ? readInCapacityForReplica(targetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
+      ? readInCapacityForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
       : 0n;
-    const desiredCrossInboundAmount = crossPriceImprovementMode === 'target_bonus'
+    crossDesiredInboundAmount = crossPriceImprovementMode === 'target_bonus'
       ? withCrossTargetInboundBuffer(canonicalWantAmount)
       : canonicalWantAmount;
-    crossAutoInboundCreditTarget = selectedCrossTarget
+    crossAutoInboundCreditTarget = selectedCrossTarget && crossTargetHasAccount
       ? computeAutoInboundCreditTargetForReplica(
-          targetReplica,
+          selectedCrossTargetReplica,
           selectedCrossTarget.targetEntityId,
           selectedCrossTarget.targetHubEntityId,
           wantToken,
-          desiredCrossInboundAmount,
+          crossDesiredInboundAmount,
         )
-      : null;
-    crossCurrentPeerCreditLimit = selectedCrossTarget
-      ? readPeerCreditLimitForReplica(targetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
+      : selectedCrossTarget && needsCrossTargetAccountSetup && crossDesiredInboundAmount > 0n
+        ? maxBigInt(defaultCreditLimitForToken(wantToken), crossDesiredInboundAmount)
+        : null;
+    const currentPeerCreditLimit = selectedCrossTarget && crossTargetHasAccount
+      ? readPeerCreditLimitForReplica(selectedCrossTargetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
       : 0n;
+    crossCurrentPeerCreditLimit = currentPeerCreditLimit;
+    needsCrossTargetCreditSetup = Boolean(
+      swapRouteMode === 'cross'
+      && selectedCrossTarget
+      && (crossTargetHasAccount || canAutoOpenCrossTargetAccount)
+      && crossAutoInboundCreditTarget !== null
+      && crossAutoInboundCreditTarget > crossCurrentPeerCreditLimit,
+    );
     canAutoPrepareCrossInboundCapacity = Boolean(
       swapRouteMode === 'cross'
       && selectedCrossTarget
-      && crossAutoInboundCreditTarget !== null
-      && crossAutoInboundCreditTarget > crossCurrentPeerCreditLimit,
+      && needsCrossTargetCreditSetup,
     );
   }
   $: formattedAvailableGiveAmount = Number.isFinite(giveToken) && giveToken > 0
@@ -2049,6 +1983,23 @@
     ? formatAmount(targetCapacityAmount, wantToken)
     : targetCapacityAmount.toString();
   $: targetCapacityLabel = targetAccountReady ? formattedTargetCapacityAmount : 'Account setup required';
+  $: crossSetupCreditLimitLabel = crossAutoInboundCreditTarget !== null && Number.isFinite(wantToken) && wantToken > 0
+    ? `${formatAmount(crossAutoInboundCreditTarget, wantToken)} ${wantTokenSymbol}`
+    : '';
+  $: crossSetupCreditIncreaseLabel = crossAutoInboundCreditTarget !== null && crossAutoInboundCreditTarget > crossCurrentPeerCreditLimit
+    ? `+${formatAmount(crossAutoInboundCreditTarget - crossCurrentPeerCreditLimit, wantToken)} ${wantTokenSymbol}`
+    : '';
+  $: crossSwapSetupSteps = buildCrossSwapSetupSteps({
+    routeMode: swapRouteMode,
+    targetAccountReady,
+    canOpenTargetAccount: canAutoOpenCrossTargetAccount,
+    needsCreditLimit: needsCrossTargetCreditSetup,
+    targetHubLabel: selectedCrossTarget ? accountLabel(selectedCrossTarget.targetHubEntityId) : '',
+    targetJurisdictionLabel,
+    creditLimitLabel: crossSetupCreditLimitLabel,
+    creditIncreaseLabel: crossSetupCreditIncreaseLabel,
+    tokenSymbol: wantTokenSymbol,
+  });
   $: estimatedPrice = limitPriceTicks && limitPriceTicks > 0n ? formatPriceTicks(limitPriceTicks) : 'n/a';
   $: estimatedReceiveLabel = Number.isFinite(wantToken) && wantToken > 0
     ? `${formatAmount(canonicalWantAmount, wantToken)} ${wantTokenSymbol}`
@@ -2100,23 +2051,14 @@
   }
 
   function readPairBook(hubEntityId: string, pairIdValue: string): BookState | null {
-    if (!(activeFrame?.eReplicas instanceof Map) || !hubEntityId) return null;
-    const normalizedHubId = String(hubEntityId).trim().toLowerCase();
-    if (!normalizedHubId) return null;
-    const normalizedPairId = String(pairIdValue || '').trim();
-    if (!normalizedPairId) return null;
-    for (const [key, replica] of activeFrame.eReplicas.entries()) {
-      const entityId = String(key || '').split(':')[0]?.trim().toLowerCase();
-      if (entityId !== normalizedHubId) continue;
-      return replica?.state?.orderbookExt?.books?.get?.(normalizedPairId) || null;
-    }
-    return null;
+    return swapRuntimeView.getPairBook(hubEntityId, pairIdValue);
   }
 
   function validateCrossSwapForm(
     input: SwapFormValidationInput,
     target: CrossTargetOption | null,
     allowAutoPrepareTargetInbound: boolean,
+    allowAutoOpenTargetAccount: boolean,
     unavailableReason = selectedRouteUnavailableReason,
   ): string {
     if (!target) return 'Select target jurisdiction account.';
@@ -2149,7 +2091,7 @@
 
     const targetReplica = findReplicaByEntityId(target.targetEntityId);
     if (!hasReplicaAccount(targetReplica, target.targetHubEntityId)) {
-      return 'Target entity must already have an account with the hub.';
+      return allowAutoOpenTargetAccount ? '' : 'Target account setup is required.';
     }
     const targetHasToken = hasTokenInReplicaAccount(
       targetReplica,
@@ -2246,7 +2188,8 @@
             canonicalPriceTicks,
           ),
           selectedCrossTarget,
-          autoExtendCrossInbound && canAutoPrepareCrossInboundCapacity,
+          canAutoPrepareCrossInboundCapacity,
+          canAutoOpenCrossTargetAccount,
         )
       : validateSwapForm(
           buildSwapValidationInput(
@@ -2273,16 +2216,6 @@
   })();
   $: sourceCapacityShortfall = canonicalGiveAmount > availableGiveCapacity ? canonicalGiveAmount - availableGiveCapacity : 0n;
   $: hasSourceCapacityShortfall = canonicalGiveAmount > 0n && sourceCapacityShortfall > 0n;
-  $: crossAutoCapacityNote = (() => {
-    if (swapRouteMode !== 'cross' || !selectedCrossTarget || !canAutoPrepareCrossInboundCapacity) return '';
-    const targetLabel = formatAmount(crossAutoInboundCreditTarget ?? 0n, wantToken);
-    const increase = (crossAutoInboundCreditTarget ?? 0n) > crossCurrentPeerCreditLimit
-      ? (crossAutoInboundCreditTarget ?? 0n) - crossCurrentPeerCreditLimit
-      : 0n;
-    const increaseLabel = formatAmount(increase, wantToken);
-    return `Auto: extend target inbound to ${targetLabel} ${wantTokenSymbol} on ${selectedCrossTarget.targetJurisdiction} (+${increaseLabel}).`;
-  })();
-  $: showCrossAutoCapacityNote = Boolean(crossAutoCapacityNote && autoExtendCrossInbound && !hasSourceCapacityShortfall);
   $: leftoverGiveNote = giveAmountLeftover > 0n
     ? `Canonical order leaves ${leftoverGiveLabel} unspent after lot quantization.`
     : '';
@@ -2354,6 +2287,28 @@
   function readLogicalNumber(value: unknown): number {
     const numeric = Number(value ?? 0);
     return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
+  }
+
+  function resolveProjectedSignerId(entityId: string): string {
+    const normalized = String(entityId || '').trim().toLowerCase();
+    if (!normalized) return '';
+    if (normalized === sourceEntityIdValue && sourceSignerIdValue) return sourceSignerIdValue;
+    for (const entry of swapRuntimeView.localReplicaEntries) {
+      if (entry.entityId === normalized && entry.signerId) return entry.signerId;
+    }
+    return '';
+  }
+
+  function resolveSwapLogicalClock(sourceReplica: EntityReplica | null | undefined = currentReplica): {
+    logicalTimestamp: number;
+    logicalHeight: number;
+  } {
+    const logicalTimestamp = readLogicalNumber(sourceReplica?.state?.timestamp ?? runtimeEnv?.timestamp);
+    const logicalHeight = readLogicalNumber(sourceReplica?.state?.height ?? runtimeEnv?.height);
+    if (logicalTimestamp <= 0 || logicalHeight <= 0) {
+      throw new Error('Swap runtime clock is unavailable');
+    }
+    return { logicalTimestamp, logicalHeight };
   }
 
   function handleOrderbookSnapshot(event: CustomEvent<OrderbookSnapshot>) {
@@ -2468,41 +2423,23 @@
     return 10_000n * 10n ** decimals;
   }
 
-  async function prepareSelectedTargetAccount(): Promise<void> {
-    submitError = '';
-    try {
-      const env = runtimeEnv;
-      if (!env) throw new Error('XLN environment not ready');
-      if (!activeIsLive) throw new Error('Target account setup requires LIVE mode');
-      const target = selectedCrossTarget;
-      if (!target) throw new Error('Select target network first');
-      if (!target.targetHubEntityId) throw new Error('No hub is available for target network');
-      const targetReplica = findReplicaByEntityId(target.targetEntityId);
-      if (!targetReplica) throw new Error('Target sibling entity is not available in this runtime');
-      const targetSignerId = String(target.targetSignerId || targetReplica.signerId || '').trim().toLowerCase();
-      if (!targetSignerId) throw new Error('Target signer is not available');
-      const desiredCredit = crossAutoInboundCreditTarget && crossAutoInboundCreditTarget > 0n
-        ? crossAutoInboundCreditTarget
-        : defaultCreditLimitForToken(wantToken);
-      await prewarmCounterpartyProfiles(env, [target.targetHubEntityId]);
-      await enqueueEntityInputs(env, [{
-        entityId: target.targetEntityId,
-        signerId: targetSignerId,
-        entityTxs: [{
-          type: 'openAccount' as const,
-          data: {
-            targetEntityId: target.targetHubEntityId,
-            tokenId: wantToken,
-            creditAmount: desiredCredit,
-          },
-        }],
-      }]);
-      toasts.success(`Target account setup queued on ${target.targetJurisdiction}`);
-    } catch (error) {
-      const message = (error as Error)?.message || 'Unknown error';
-      submitError = `Target account setup failed: ${message}`;
-      toasts.error(submitError);
+  function computeCrossTargetCreditLimit(
+    target: CrossTargetOption,
+    targetReplica: EntityReplica | null,
+    tokenIdValue: number,
+    requiredInboundAmount: bigint,
+  ): bigint | null {
+    if (requiredInboundAmount <= 0n) return null;
+    if (!hasReplicaAccount(targetReplica, target.targetHubEntityId)) {
+      return maxBigInt(defaultCreditLimitForToken(tokenIdValue), requiredInboundAmount);
     }
+    return computeAutoInboundCreditTargetForReplica(
+      targetReplica,
+      target.targetEntityId,
+      target.targetHubEntityId,
+      tokenIdValue,
+      requiredInboundAmount,
+    );
   }
 
   function handleOrderbookLevelClick(event: CustomEvent<SwapOrderbookLevelClickDetail>) {
@@ -2605,11 +2542,15 @@
   }
 
   function resolveSignerId(entityId: string): string {
+    const projectedSignerId = resolveProjectedSignerId(entityId);
+    if (projectedSignerId) return projectedSignerId;
     if (runtimeEnv && activeXlnFunctions?.resolveEntityProposerId) {
       const proposerId = activeXlnFunctions.resolveEntityProposerId(runtimeEnv, entityId, 'swap-panel');
       if (proposerId) return proposerId;
     }
-    return requireSignerIdForEntity(runtimeEnv, entityId, 'swap-panel');
+    if (runtimeEnv) return requireSignerIdForEntity(runtimeEnv, entityId, 'swap-panel');
+    const normalized = String(entityId || 'unknown').trim().toLowerCase() || 'unknown';
+    throw new Error(`No signer available for entity ${normalized} (swap-panel)`);
   }
 
   function getTokenDecimals(tokenIdValue: number): number {
@@ -2927,13 +2868,11 @@
     placingSwapOffer = true;
     submitError = '';
     try {
-      const env = runtimeEnv;
-      if (!env) throw new Error('XLN environment not ready');
       if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
       const sourceEntityId = sourceEntityIdValue;
+      if (!sourceEntityId) throw new Error('No source entity selected');
       const signerId = sourceSignerIdValue || resolveSignerId(sourceEntityId);
       if (!signerId) throw new Error('No signer available for selected entity');
-      if (!sourceEntityId) throw new Error('No source entity selected');
 
       const resolvedCounterparty = resolveCounterpartyId(activeOrderAccountId);
       if (!resolvedCounterparty) {
@@ -2979,7 +2918,7 @@
         canonicalPriceTicks,
       );
       const liveValidationReason = swapRouteMode === 'cross'
-      ? validateCrossSwapForm(liveValidation, selectedCrossTarget, autoExtendCrossInbound && canAutoPrepareCrossInboundCapacity)
+        ? validateCrossSwapForm(liveValidation, selectedCrossTarget, canAutoPrepareCrossInboundCapacity, canAutoOpenCrossTargetAccount)
         : validateSwapForm(liveValidation);
       if (
         liveValidationReason
@@ -2988,8 +2927,7 @@
         throw new Error(liveValidationReason);
       }
 
-      const logicalNow = readLogicalNumber(currentReplica?.state?.timestamp || env.timestamp);
-      const logicalHeight = readLogicalNumber(currentReplica?.state?.height || env.height);
+      const { logicalTimestamp: logicalNow, logicalHeight } = resolveSwapLogicalClock(currentReplica);
       const offerId = buildSwapOfferId({
         logicalTimestamp: logicalNow,
         logicalHeight,
@@ -3022,20 +2960,19 @@
         ? withCrossTargetInboundBuffer(effectiveWantAmount)
         : effectiveWantAmount;
       const requiredTargetInboundCreditLimit = targetRoute
-        ? computeAutoInboundCreditTargetForReplica(
-            targetReplica,
-            targetRoute.targetEntityId,
-            targetRoute.targetHubEntityId,
-            wantToken,
-            requiredTargetInboundAmount,
-          )
+        ? computeCrossTargetCreditLimit(targetRoute, targetReplica, wantToken, requiredTargetInboundAmount)
         : null;
-      const currentTargetInboundCreditLimit = targetRoute
+      const targetAccountExists = Boolean(targetRoute && hasReplicaAccount(targetReplica, targetRoute.targetHubEntityId));
+      const currentTargetInboundCreditLimit = targetRoute && targetAccountExists
         ? readPeerCreditLimitForReplica(targetReplica, targetRoute.targetEntityId, targetRoute.targetHubEntityId, wantToken)
         : 0n;
+      const shouldAutoOpenCrossTargetAccount = Boolean(
+        swapRouteMode === 'cross'
+        && targetRoute
+        && !targetAccountExists,
+      );
       const shouldAutoPrepareCrossInbound = Boolean(
         swapRouteMode === 'cross'
-        && autoExtendCrossInbound
         && requiredTargetInboundCreditLimit !== null
         && requiredTargetInboundCreditLimit > currentTargetInboundCreditLimit,
       );
@@ -3100,7 +3037,7 @@
           expiresAt: now + 24 * 60 * 60 * 1000,
         } satisfies CrossJurisdictionSwapRoute;
       })();
-      const entityTxs = [];
+      const entityTxs: EntityTx[] = [];
       if (shouldAutoPrepareInbound) {
         entityTxs.push({
           type: 'extendCredit' as const,
@@ -3113,34 +3050,24 @@
       }
 
       if (crossJurisdiction && targetRoute) {
-        const inputs: RoutedEntityInput[] = [];
-        const targetEntityTxs = [];
-        if (shouldAutoPrepareCrossInbound && requiredTargetInboundCreditLimit !== null) {
-          targetEntityTxs.push({
-            type: 'extendCredit' as const,
-            data: {
-              counterpartyEntityId: targetRoute.targetHubEntityId,
-              tokenId: wantToken,
-              amount: requiredTargetInboundCreditLimit,
-            },
-          });
-        }
-        if (targetEntityTxs.length > 0) {
-          inputs.push({
-            entityId: targetRoute.targetEntityId,
-            signerId: targetRoute.targetSignerId,
-            entityTxs: targetEntityTxs,
-          });
-        }
-        inputs.push({
-          entityId: sourceEntityId,
-          signerId,
-          entityTxs: [{
-            type: 'requestCrossJurisdictionSwap' as const,
-            data: { route: crossJurisdiction },
-          }],
+        const crossInputPlan = buildCrossSwapRuntimeInputPlan({
+          sourceEntityId,
+          sourceSignerId: signerId,
+          route: crossJurisdiction,
+          targetEntityId: targetRoute.targetEntityId,
+          targetSignerId: targetRoute.targetSignerId,
+          targetHubEntityId: targetRoute.targetHubEntityId,
+          tokenId: wantToken,
+          requiredCreditLimit: requiredTargetInboundCreditLimit,
+          shouldOpenTargetAccount: shouldAutoOpenCrossTargetAccount,
+          shouldExtendTargetCredit: shouldAutoPrepareCrossInbound,
         });
-        await enqueueEntityInputs(env, inputs);
+        if (crossInputPlan.setupInput) {
+          await prewarmCounterpartyProfiles(runtimeEnv, [targetRoute.targetHubEntityId]);
+        }
+        for (const runtimeInput of crossInputPlan.orderedInputs) {
+          await submitRuntimeInput(runtimeInput);
+        }
       } else {
         entityTxs.push({
           type: 'placeSwapOffer' as const,
@@ -3155,7 +3082,7 @@
             minFillRatio,
           },
         });
-        await enqueueEntityInputs(env, [{
+        await submitEntityInputs([{
           entityId: sourceEntityId,
           signerId,
           entityTxs,
@@ -3184,13 +3111,11 @@
     if (!sourceEntityId) return;
 
     try {
-      const env = runtimeEnv;
-      if (!env) throw new Error('XLN environment not ready');
       if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
       const signerId = sourceSignerIdValue || resolveSignerId(sourceEntityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId: sourceEntityId,
         signerId,
         entityTxs: [{
@@ -3217,13 +3142,11 @@
     if (!sourceEntityId) return;
 
     try {
-      const env = runtimeEnv;
-      if (!env) throw new Error('XLN environment not ready');
       if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
       const signerId = sourceSignerIdValue || resolveSignerId(sourceEntityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId: sourceEntityId,
         signerId,
         entityTxs: [{
@@ -3381,7 +3304,6 @@
       {selectHubOption}
       {hubJurisdictionLabel}
       {applyOrderPercent}
-      {syncOrderAmountContainerAction}
       {liveOrderAmountInput}
       {latestOrderAmountDomValue}
       {hasLatestOrderAmountDomValue}
@@ -3399,16 +3321,13 @@
       {routePathTargetLabel}
       {sourceRouteEntityLabel}
       {targetRouteEntityLabel}
-      {canAutoPrepareCrossInboundCapacity}
-      bind:autoExtendCrossInbound
       bind:crossPriceImprovementMode
       {showManualRouteRecommendation}
       {routedRouteRecommendations}
       {manualRouteEstimateLabel}
       {capacityWarning}
       {autoCapacityNote}
-      {showCrossAutoCapacityNote}
-      {crossAutoCapacityNote}
+      {crossSwapSetupSteps}
       {selectedOrderLevel}
       {formatPriceTicks}
       {formatAmount}
@@ -3417,8 +3336,6 @@
       {swapActionDisabledReason}
       {placeSwapOffer}
       {swapSubmitLabel}
-      {canCreateTargetAccount}
-      {prepareSelectedTargetAccount}
       {submitError}
     />
 

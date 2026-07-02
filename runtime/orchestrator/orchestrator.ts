@@ -46,7 +46,6 @@ import type {
   ManagedRuntimeSpec,
   MarketMakerChild,
   MarketMakerHealthPayload,
-  MarketMakerInfoPayload,
   OrchestratorWebSocket,
   ResetState,
   TimingMap,
@@ -106,6 +105,12 @@ import {
   type MeshJurisdictionConfig,
 } from './mesh-jurisdictions';
 import { buildRuntimeImportLogLine } from './runtime-import-log';
+import {
+  normalizeMarketMakerHealthPayload,
+} from './market-maker-health-payload';
+import { createMarketMakerChildPoller } from './market-maker-child-poll';
+import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
+import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -429,9 +434,24 @@ const buildRuntimeImportManifest = (access: RuntimeImportAccess = runtimeImportA
   return entries.length > 0 ? { v: 1, issuedAt, expiresAt, entries } : null;
 };
 
-const publishRuntimeImportManifest = (): void => {
+const clearRuntimeImportManifestFile = (): void => {
+  rmSync(runtimeImportManifestPath, { force: true });
+};
+
+const publishRuntimeImportManifest = async (): Promise<boolean> => {
+  const health = await buildAggregatedHealthResponse();
+  const readiness = resolveRuntimeImportReadiness(health);
+  if (!readiness.ok) {
+    clearRuntimeImportManifestFile();
+    scheduleRuntimeImportManifestRefresh(null);
+    return false;
+  }
   const manifest = buildRuntimeImportManifest();
-  if (!manifest) return;
+  if (!manifest) {
+    clearRuntimeImportManifestFile();
+    scheduleRuntimeImportManifestRefresh(null);
+    return false;
+  }
   const importUrl = buildRuntimeImportUrl(manifest);
   mkdirSync(dirname(runtimeImportManifestPath), { recursive: true });
   writeFileSync(
@@ -447,16 +467,23 @@ const publishRuntimeImportManifest = (): void => {
     exposeUrl: runtimeImportLogUrlEnabled,
   }));
   scheduleRuntimeImportManifestRefresh(manifest);
+  return true;
 };
 
 let runtimeImportRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
-const scheduleRuntimeImportManifestRefresh = (manifest: RuntimeImportManifest): void => {
+const scheduleRuntimeImportManifestRefresh = (manifest: RuntimeImportManifest | null): void => {
   if (runtimeImportRefreshTimer) clearTimeout(runtimeImportRefreshTimer);
-  const delayMs = Math.max(10_000, manifest.expiresAt - Date.now() - runtimeImportRefreshMarginMs);
+  const delayMs = manifest
+    ? Math.max(10_000, manifest.expiresAt - Date.now() - runtimeImportRefreshMarginMs)
+    : 10_000;
   runtimeImportRefreshTimer = setTimeout(() => {
     runtimeImportRefreshTimer = null;
-    publishRuntimeImportManifest();
+    void publishRuntimeImportManifest().catch((error) => {
+      console.warn(`[MESH] runtime import manifest refresh failed: ${serializeError(error)}`);
+      clearRuntimeImportManifestFile();
+      scheduleRuntimeImportManifestRefresh(null);
+    });
   }, delayMs);
 };
 
@@ -816,102 +843,18 @@ const pollAllHubHealth = async (): Promise<void> => {
   return hubHealthPollInFlight;
 };
 
-let marketMakerHealthPollInFlight: Promise<void> | null = null;
-let marketMakerInfoPollInFlight: Promise<void> | null = null;
+const marketMakerPoller = createMarketMakerChildPoller({
+  child: marketMakerChild,
+  host: args.host,
+  infoTimeoutMs: MARKET_MAKER_INFO_TIMEOUT_MS,
+  healthTimeoutMs: CHILD_HEALTH_TIMEOUT_MS,
+  fullHealthTimeoutMs: MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS,
+  fetchJson,
+});
 
-const isCurrentMarketMakerProc = (proc: ChildProcess | null): proc is ChildProcess =>
-  Boolean(
-    proc &&
-    marketMakerChild.proc === proc &&
-    proc.exitCode === null &&
-    marketMakerChild.exitCode === null &&
-    marketMakerChild.exitSignal === null,
-  );
-
-const refreshMarketMakerStartupPhase = (): void => {
-  marketMakerChild.lastStartupPhase = String(
-    marketMakerChild.lastInfo?.startupPhase ||
-    marketMakerChild.lastHealth?.startupPhase ||
-    '',
-  ).trim() || null;
-};
-
-const applyMarketMakerInfo = (info: MarketMakerInfoPayload, proc: ChildProcess): void => {
-  if (!isCurrentMarketMakerProc(proc)) return;
-  marketMakerChild.lastInfo = { ...(marketMakerChild.lastInfo || {}), ...info };
-  refreshMarketMakerStartupPhase();
-};
-
-const applyMarketMakerHealth = (
-  health: MarketMakerHealthPayload,
-  proc: ChildProcess,
-  options: { trustStartupPhase: boolean },
-): void => {
-  if (!isCurrentMarketMakerProc(proc)) return;
-  marketMakerChild.lastHealth = health;
-  const nextInfo: MarketMakerInfoPayload = { ...(marketMakerChild.lastInfo || {}) };
-  if (health.name !== undefined) nextInfo.name = health.name;
-  if (health.entityId !== undefined && health.entityId !== null) nextInfo.entityId = health.entityId;
-  if (health.runtimeId !== undefined && health.runtimeId !== null) nextInfo.runtimeId = health.runtimeId;
-  if (health.apiUrl !== undefined) nextInfo.apiUrl = health.apiUrl;
-  if (health.relayUrl !== undefined) nextInfo.relayUrl = health.relayUrl;
-  if (health.directWsUrl !== undefined) nextInfo.directWsUrl = health.directWsUrl;
-  if (health.startupPhase !== undefined && (options.trustStartupPhase || !nextInfo.startupPhase)) {
-    nextInfo.startupPhase = health.startupPhase;
-  }
-  marketMakerChild.lastInfo = nextInfo;
-  refreshMarketMakerStartupPhase();
-};
-
-const pollMarketMakerInfoOnce = async (proc: ChildProcess | null = marketMakerChild.proc): Promise<boolean> => {
-  if (!isCurrentMarketMakerProc(proc)) return false;
-  const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  const info = await fetchJson<MarketMakerInfoPayload>(`${apiBase}/api/info`, MARKET_MAKER_INFO_TIMEOUT_MS);
-  if (!info) return false;
-  applyMarketMakerInfo(info, proc);
-  return isCurrentMarketMakerProc(proc);
-};
-
-const pollMarketMakerInfo = async (): Promise<void> => {
-  if (marketMakerInfoPollInFlight) return marketMakerInfoPollInFlight;
-  const proc = marketMakerChild.proc;
-  marketMakerInfoPollInFlight = pollMarketMakerInfoOnce(proc)
-    .then(() => undefined)
-    .finally(() => {
-      marketMakerInfoPollInFlight = null;
-    });
-  return marketMakerInfoPollInFlight;
-};
-
-const pollMarketMakerHealth = async (): Promise<void> => {
-  if (marketMakerHealthPollInFlight) return marketMakerHealthPollInFlight;
-  marketMakerHealthPollInFlight = pollMarketMakerHealthOnce().finally(() => {
-    marketMakerHealthPollInFlight = null;
-  });
-  return marketMakerHealthPollInFlight;
-};
-
-const pollMarketMakerHealthOnce = async (): Promise<void> => {
-  const proc = marketMakerChild.proc;
-  if (!isCurrentMarketMakerProc(proc)) return;
-  const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  const infoFresh = await pollMarketMakerInfoOnce(proc);
-  if (!isCurrentMarketMakerProc(proc)) return;
-  const health = await fetchJson<MarketMakerHealthPayload>(`${apiBase}/api/health`, CHILD_HEALTH_TIMEOUT_MS);
-  if (health) applyMarketMakerHealth(health, proc, { trustStartupPhase: !infoFresh });
-};
-
-const fetchMarketMakerFullHealthForResponse = async (): Promise<MarketMakerHealthPayload | null> => {
-  const proc = marketMakerChild.proc;
-  if (!isCurrentMarketMakerProc(proc)) return null;
-  const apiBase = `http://${args.host}:${marketMakerChild.apiPort}`;
-  await pollMarketMakerInfoOnce(proc);
-  if (!isCurrentMarketMakerProc(proc)) return null;
-  return await fetchJson<MarketMakerHealthPayload>(
-    `${apiBase}/api/health/full`,
-    MARKET_MAKER_FULL_HEALTH_TIMEOUT_MS,
-  );
-};
+const pollMarketMakerInfo = marketMakerPoller.pollInfo;
+const pollMarketMakerHealth = marketMakerPoller.pollHealth;
+const fetchMarketMakerFullHealthForResponse = marketMakerPoller.fetchFullHealthForResponse;
 
 let lastHealthResponseRefreshMs: number | null = null;
 const refreshChildHealthForResponse = async (): Promise<void> => {
@@ -1641,7 +1584,7 @@ const computeAggregatedHealth = (options: {
   marketMakerHealthOverride?: MarketMakerHealthPayload | null | undefined;
 } = {}): AggregatedHealth => {
   const storage = getStorageHealthSnapshotSync();
-  const marketMakerHealth = options.marketMakerHealthOverride ?? marketMakerChild.lastHealth;
+  const marketMakerHealth = normalizeMarketMakerHealthPayload(options.marketMakerHealthOverride ?? marketMakerChild.lastHealth);
   const managedRuntimeIds = new Set<string>();
   for (const child of hubChildren) {
     const runtimeId = normalizeRuntimeKey(String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || ''));
@@ -1749,99 +1692,19 @@ const computeAggregatedHealth = (options: {
   const mmEntityId = marketMakerActive
     ? String(marketMakerChild.lastInfo?.entityId || marketMakerHealth?.entityId || '').trim() || null
     : null;
-  const mmExpectedOffersPerHub = Number(marketMakerHealth?.marketMaker?.expectedOffersPerHub || 0);
-  const mmHubsById = new Map<string, {
-    hubEntityId: string;
-    offers: number;
-    ready: boolean;
-    depthReady: boolean;
-    blockers: unknown[];
-    pairs: Array<{ pairId: string; offers: number; ready: boolean; depthReady?: boolean; expectedOffers?: number }>;
-  }>();
-  for (const hub of marketMakerHealth?.marketMaker?.hubs ?? []) {
-    const hubEntityId = String(hub.hubEntityId || '').toLowerCase();
-    if (!hubEntityId) continue;
-    mmHubsById.set(hubEntityId, {
-      hubEntityId,
-      offers: Number(hub.offers || 0),
-      ready: hub.ready === true,
-      depthReady: hub.depthReady === true,
-      blockers: Array.isArray(hub.blockers) ? hub.blockers : [],
-      pairs: Array.isArray(hub.pairs)
-        ? hub.pairs.map((pair) => ({
-            pairId: String(pair.pairId || ''),
-            offers: Number(pair.offers || 0),
-            ready: pair.ready === true,
-            depthReady: pair.depthReady === true,
-            expectedOffers: Number(pair.expectedOffers || 0),
-          }))
-      : [],
-    });
-  }
-  const rawMmCross = marketMakerHealth?.marketMaker?.cross;
-  const mmCross = {
-    applicable: rawMmCross?.applicable === true || Number(rawMmCross?.expectedRoutes || 0) > 0,
-    ok: rawMmCross?.ok === true,
-    expectedRoutes: Number(rawMmCross?.expectedRoutes || 0),
-    expectedOffersPerRoute: Number(rawMmCross?.expectedOffersPerRoute || 0),
-    expectedOffersPerPair: Number(rawMmCross?.expectedOffersPerPair || 0),
-    routeCount: Number(rawMmCross?.routeCount || (Array.isArray(rawMmCross?.routes) ? rawMmCross.routes.length : 0)),
-    routes: Array.isArray(rawMmCross?.routes)
-      ? rawMmCross.routes.map((route) => ({
-          sourceJurisdiction: String(route.sourceJurisdiction || ''),
-          targetJurisdiction: String(route.targetJurisdiction || ''),
-          sourceMmEntityId: String(route.sourceMmEntityId || '').toLowerCase(),
-          targetMmEntityId: String(route.targetMmEntityId || '').toLowerCase(),
-          sourceHubEntityId: String(route.sourceHubEntityId || '').toLowerCase(),
-          targetHubEntityId: String(route.targetHubEntityId || '').toLowerCase(),
-          offers: Number(route.offers || 0),
-          ready: route.ready === true,
-          depthReady: route.depthReady === true,
-          blockers: Array.isArray(route.blockers) ? route.blockers : [],
-          pairs: Array.isArray(route.pairs)
-            ? route.pairs.map((pair) => ({
-                pairId: String(pair.pairId || ''),
-                offers: Number(pair.offers || 0),
-                ready: pair.ready === true,
-                depthReady: pair.depthReady === true,
-                expectedOffers: Number(pair.expectedOffers || 0),
-                sourceTokenIds: Array.isArray(pair.sourceTokenIds)
-                  ? pair.sourceTokenIds.map(Number).filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
-                  : [],
-                targetTokenIds: Array.isArray(pair.targetTokenIds)
-                  ? pair.targetTokenIds.map(Number).filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
-                  : [],
-              }))
-            : [],
-        }))
-      : [],
-  };
-  const mmHubs = hubIds.map((hubEntityId) => {
-    const existing = mmHubsById.get(hubEntityId);
-    const offers = existing?.offers ?? 0;
-    const depthReady = existing?.depthReady === true ||
-      (!!mmExpectedOffersPerHub && offers >= mmExpectedOffersPerHub);
-    const ready = existing?.ready === true || depthReady;
-    return {
-      hubEntityId,
-      offers,
-      ready,
-      depthReady,
-      blockers: existing?.blockers ?? [],
-      pairs: existing?.pairs ?? [],
-    };
+  const aggregatedMarketMakerHealth = buildAggregatedMarketMakerHealth({
+    mmEnabled: args.mmEnabled,
+    marketMakerActive,
+    marketMakerHealth,
+    hubEntityIds: hubIds,
+    expectedHubCount: HUB_NAMES.length,
+    entityId: mmEntityId,
+    startupPhase: mmStartupPhase,
   });
-  const mmHealthReady = Boolean(marketMakerHealth?.marketMaker);
-  const mmChildReady = marketMakerHealth?.marketMaker?.ok === true;
-  const mmCrossReady = Boolean(rawMmCross) && mmCross.ok;
-  const mmOk = !args.mmEnabled
-    ? true
-    : marketMakerActive &&
-      mmHealthReady &&
-      mmChildReady &&
-      mmHubs.length === HUB_NAMES.length &&
-      mmHubs.every((hub) => hub.depthReady) &&
-      mmCrossReady;
+  const mmExpectedOffersPerHub = aggregatedMarketMakerHealth.expectedOffersPerHub;
+  const mmHubs = aggregatedMarketMakerHealth.hubs;
+  const mmCross = aggregatedMarketMakerHealth.cross;
+  const mmOk = aggregatedMarketMakerHealth.ok;
   const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
   const hubMeshOk =
     hubsOnline &&
@@ -1897,7 +1760,7 @@ const computeAggregatedHealth = (options: {
     mmStartupPhase,
     mmOfferTotal,
     mmExpectedTotal,
-    crossRouteCount: mmCross.routeCount,
+    crossRouteCount: Number(mmCross.routeCount || 0),
     expectedCrossRoutes: mmCross.expectedRoutes,
     custodyEnabled: args.custodyEnabled,
     custodyOk,
@@ -1943,16 +1806,7 @@ const computeAggregatedHealth = (options: {
         ),
       },
     },
-    marketMaker: {
-      enabled: marketMakerActive,
-      ok: mmOk,
-      entityId: mmEntityId,
-      startupPhase: mmStartupPhase,
-      expectedOffersPerHub: mmExpectedOffersPerHub,
-      expectedOffersPerPair: Number(marketMakerHealth?.marketMaker?.expectedOffersPerPair || 0),
-      cross: mmCross,
-      hubs: mmHubs,
-    },
+    marketMaker: aggregatedMarketMakerHealth,
     bootstrapTimeline,
     custody: {
       enabled: args.custodyEnabled,
@@ -2297,6 +2151,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
   resetState.completedAt = null;
   resetState.failedAt = null;
   resetState.resolvedAt = null;
+  clearRuntimeImportManifestFile();
   const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';
 
   const resetTotalStartedAt = startTiming('reset_total');
@@ -2394,7 +2249,6 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     if (custodyBootstrapError) throw custodyBootstrapError;
 
     await persistHubReadySnapshots();
-    publishRuntimeImportManifest();
 
     finishTiming('reset_total', resetTotalStartedAt);
     resetState.completedAt = Date.now();
@@ -2406,6 +2260,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
   } finally {
     resetState.inProgress = false;
   }
+  await publishRuntimeImportManifest();
 };
 
 const ensureReset = async (): Promise<void> => {
@@ -2566,14 +2421,24 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/runtime-import' && request.method === 'GET') {
-      // Refresh child identities best-effort, but never let an unhealthy child (whose /api/health
-      // hangs) block manifest generation. The manifest only needs each child's cached runtimeId,
-      // so cap the refresh and fall back to the last-known state.
-      const refresh = Promise.all([
-        pollAllHubHealth().catch(() => {}),
-        args.mmEnabled ? pollMarketMakerInfo().catch(() => {}) : Promise.resolve(),
-      ]);
-      await Promise.race([refresh, new Promise((resolve) => setTimeout(resolve, 1200))]);
+      void getStorageHealth().catch(() => {});
+      await refreshChildHealthForResponse();
+      const health = await buildAggregatedHealthResponse();
+      const readiness = resolveRuntimeImportReadiness(health);
+      if (!readiness.ok) {
+        return new Response(safeStringify({
+          ok: false,
+          ready: false,
+          error: readiness.error,
+          reason: readiness.reason,
+          degraded: readiness.degraded,
+          manifest: {
+            issuedAt: 0,
+            expiresAt: 0,
+            entries: [],
+          },
+        }), { headers: { ...headers, 'Retry-After': '2' } });
+      }
       const access = resolveRuntimeImportAccessForRequest(
         request,
         url.searchParams.get('access'),
@@ -2584,9 +2449,18 @@ const server = Bun.serve({
       }
       const manifest = buildRuntimeImportManifest(access.access);
       if (!manifest) {
-        return new Response(safeStringify({ error: 'RUNTIME_IMPORT_NOT_READY' }), { status: 503, headers });
+        return new Response(safeStringify({
+          ok: false,
+          ready: false,
+          error: 'RUNTIME_IMPORT_NOT_READY',
+          manifest: {
+            issuedAt: 0,
+            expiresAt: 0,
+            entries: [],
+          },
+        }), { headers: { ...headers, 'Retry-After': '2' } });
       }
-      return new Response(safeStringify({ importUrl: buildRuntimeImportUrl(manifest), manifest }), { headers });
+      return new Response(safeStringify({ ok: true, ready: true, importUrl: buildRuntimeImportUrl(manifest), manifest }), { headers });
     }
 
     if (pathname === '/api/metrics') {

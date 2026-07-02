@@ -248,6 +248,9 @@ export const REMOTE_RUNTIME = {
   /** Number of recent frames requested for the live remote history tail. */
   HISTORY_FRAME_LIMIT: 12,
 
+  /** Per-frame page size for history tail reads; live view pages stay larger. */
+  HISTORY_VIEW_PAGE_SIZE: 1,
+
   /** Browser-side cap for scanned historical remote frames. */
   HISTORY_SCAN_CACHE_LIMIT: 24,
 

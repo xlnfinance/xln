@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import {
@@ -8,13 +8,14 @@
     runtimes as runtimeEntries,
     type Runtime as StoreRuntime,
   } from '$lib/stores/runtimeStore';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
-  import type { Env } from '@xln/runtime/xln-api';
-  import type { Tab, EntityReplica } from '$lib/types/ui';
+  import type { RuntimeAdapterEntitySummary } from '@xln/runtime/xln-api';
+  import type { Tab } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
-  import { resolveEntityName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
 
   export let tab: Tab;
@@ -27,6 +28,10 @@
   const dispatch = createEventDispatcher();
 
   let open = false;
+
+  onMount(() => {
+    runtimeOperations.hydrateRemoteRuntimeImports();
+  });
 
   type RuntimeSummary = {
     runtimeId: string;
@@ -52,7 +57,9 @@
   $: xlnReady = !!$xlnInstance;
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
   $: runtimeGroups = buildRuntimeGroups();
-  $: currentGroup = runtimeGroups.find((group) => group.runtimeId === $activeStoreRuntimeId)
+  $: controllerRuntimeId = normalizeId($runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id);
+  $: currentGroup = runtimeGroups.find((group) => normalizeId(group.runtimeId) === controllerRuntimeId)
+    || runtimeGroups.find((group) => group.runtimeId === $activeStoreRuntimeId)
     || runtimeGroups.find((group) => group.runtimeId === $activeRuntime?.id)
     || null;
   $: currentEntity = resolveCurrentEntity();
@@ -66,7 +73,9 @@
     ? formatEntityMeta(currentEntity.entityId)
     : currentGroup?.selfEntity?.entityId
       ? formatEntityMeta(currentGroup.selfEntity.entityId)
-    : 'No runtime selected';
+    : currentGroup
+      ? resolveRuntimeMeta(currentGroup)
+      : 'No runtime selected';
 
   function buildRuntimeGroups(): RuntimeSummary[] {
     const groups: RuntimeSummary[] = [];
@@ -79,8 +88,18 @@
       const signerId = signer?.address || '';
       const runtimeEntry = $runtimeEntries.get(runtime.id);
       const status = runtimeEntry?.status || 'inactive';
-      const env = runtimeEntry?.env || null;
-      const entityMap = collectEntities(env, signerId, signer?.entityId || null);
+      const fallbackSummaries = signer?.entityId ? [{
+        entityId: signer.entityId,
+        signerId,
+        label: signer.entityId,
+        height: 0,
+        ...(signer.jurisdiction ? { jurisdiction: { name: signer.jurisdiction } } : {}),
+      }] : [];
+      const entityMap = collectEntitySummaries(
+        projectionSummariesForRuntime(runtime.id, fallbackSummaries),
+        signerId,
+        signer?.entityId || null,
+      );
       const selfEntityId = normalizeId(signer?.entityId);
       const selfEntity = selfEntityId ? entityMap.find((entity) => normalizeId(entity.entityId) === selfEntityId) || null : null;
       const derivedEntities = entityMap.filter((entity) => !selfEntity || normalizeId(entity.entityId) !== normalizeId(selfEntity.entityId));
@@ -109,8 +128,12 @@
   }
 
   function buildRemoteRuntimeGroup(runtime: StoreRuntime): RuntimeSummary {
-    const entities = collectEntities(runtime.env, '', null);
-    const selfEntity = entities[0] || null;
+    const entities = collectEntitySummaries(
+      projectionSummariesForRuntime(runtime.id, remoteRuntimeFallbackSummaries(runtime)),
+      '',
+      runtime.hubEntityId || null,
+    );
+    const selfEntity = resolveRemotePrimaryEntity(runtime, entities);
     return {
       runtimeId: runtime.id,
       runtimeLabel: runtime.label || 'Remote runtime',
@@ -119,35 +142,120 @@
       avatar: selfEntity?.avatar || '',
       source: 'remote',
       selfEntity,
-      derivedEntities: selfEntity ? entities.slice(1) : entities,
+      derivedEntities: selfEntity
+        ? entities.filter((entity) => normalizeId(entity.entityId) !== normalizeId(selfEntity.entityId))
+        : entities,
     };
   }
 
-  function collectEntities(
-    env: Env | null,
+  function remoteRuntimeFallbackSummaries(runtime: StoreRuntime): RuntimeAdapterEntitySummary[] {
+    const summaries: RuntimeAdapterEntitySummary[] = [];
+    const seen = new Set<string>();
+    const add = (
+      entityId: string | null | undefined,
+      label: string | null | undefined,
+      height: number,
+      jurisdiction: RuntimeAdapterEntitySummary['jurisdiction'] | undefined,
+    ): void => {
+      const normalized = normalizeId(entityId);
+      if (!normalized || seen.has(normalized)) return;
+      seen.add(normalized);
+      summaries.push({
+        entityId: normalized,
+        label: String(label || normalized).trim(),
+        height: Math.max(0, Math.floor(Number(height || 0))),
+        isHub: true,
+        ...(jurisdiction ? { jurisdiction } : {}),
+      });
+    };
+    for (const hub of runtime.hubEntities ?? []) {
+      add(hub.entityId, hub.label, hub.height, hub.jurisdiction);
+    }
+    add(runtime.hubEntityId, runtime.hubName || runtime.label, 0, runtime.hubJurisdiction);
+    return summaries;
+  }
+
+  function projectionSummariesForRuntime(
+    runtimeId: string,
+    fallbackSummaries: RuntimeAdapterEntitySummary[],
+  ): RuntimeAdapterEntitySummary[] {
+    const summaries = new Map<string, RuntimeAdapterEntitySummary>();
+    const add = (summary: RuntimeAdapterEntitySummary | null | undefined): void => {
+      const entityId = normalizeId(summary?.entityId);
+      if (!entityId) return;
+      const previous = summaries.get(entityId);
+      const merged: RuntimeAdapterEntitySummary = {
+        entityId,
+        label: String(summary?.label || previous?.label || entityId).trim(),
+        height: Math.max(0, Math.floor(Number(summary?.height ?? previous?.height ?? 0))),
+      };
+      const signerId = String(summary?.signerId || previous?.signerId || '').trim();
+      const jurisdiction = summary?.jurisdiction ?? previous?.jurisdiction;
+      if (signerId) merged.signerId = signerId;
+      if (jurisdiction) merged.jurisdiction = jurisdiction;
+      if (summary?.isHub === true || previous?.isHub === true) merged.isHub = true;
+      summaries.set(entityId, merged);
+    };
+    for (const summary of fallbackSummaries) add(summary);
+    if (normalizeId(runtimeId) === controllerRuntimeId || normalizeId(runtimeId) === normalizeId($runtimeView.runtimeId)) {
+      for (const summary of $runtimeView.entities ?? []) add(summary);
+      add($runtimeView.frame?.activeEntity?.summary ?? null);
+    }
+    return Array.from(summaries.values());
+  }
+
+  function normalizeRuntimeEntityLabel(value: string | null | undefined): string {
+    return String(value || '').trim().toLowerCase().replace(/^remote\s+/, '');
+  }
+
+  function remoteEntityNameMatchesRuntimeLabel(runtimeLabel: string, entityName: string): boolean {
+    const label = normalizeRuntimeEntityLabel(runtimeLabel);
+    const name = normalizeRuntimeEntityLabel(entityName);
+    if (!label || !name) return false;
+    return name === label || name.startsWith(`${label} `) || name.startsWith(`${label}(`);
+  }
+
+  function resolveRemotePrimaryEntity(runtime: StoreRuntime, entities: EntitySummary[]): EntitySummary | null {
+    const hubEntityId = normalizeId(runtime.hubEntityId);
+    if (hubEntityId) {
+      const hubEntity = entities.find((entity) => normalizeId(entity.entityId) === hubEntityId);
+      if (hubEntity) return hubEntity;
+    }
+    const label = String(runtime.label || '').trim();
+    if (!label) return null;
+    return entities.find((entity) => normalizeRuntimeEntityLabel(entity.name) === normalizeRuntimeEntityLabel(label))
+      || entities.find((entity) => remoteEntityNameMatchesRuntimeLabel(label, entity.name))
+      || null;
+  }
+
+  function collectEntitySummaries(
+    summaries: RuntimeAdapterEntitySummary[],
     signerId: string,
     selfEntityId: string | null,
   ): EntitySummary[] {
-    if (!env) return [];
-    const entries = Array.from(env.eReplicas.values());
-
     const seen = new Set<string>();
     const entities: EntitySummary[] = [];
 
-    for (const replica of entries) {
-      const entityId = replica.entityId || '';
+    for (const summary of summaries) {
+      const entityId = summary.entityId || '';
       const normalizedEntityId = normalizeId(entityId);
       if (!normalizedEntityId || seen.has(normalizedEntityId)) continue;
       seen.add(normalizedEntityId);
+      const rawChainId = summary.jurisdiction?.chainId;
+      const chainId = typeof rawChainId === 'number'
+        ? rawChainId
+        : typeof rawChainId === 'string' && rawChainId.trim()
+          ? Number(rawChainId)
+          : null;
       entities.push({
-        entityId,
-        signerId: replica.signerId || signerId,
-        name: getEntityLabel(entityId, env, replica),
+        entityId: normalizedEntityId,
+        signerId: summary.signerId || signerId,
+        name: String(summary.label || entityId).trim(),
         avatar: entityAvatar(activeXlnFunctions, entityId),
-        jurisdiction: String(replica.state?.config?.jurisdiction?.name || replica.position?.jurisdiction || '').trim(),
+        jurisdiction: String(summary.jurisdiction?.name || '').trim(),
         jurisdictionBadge: getJurisdictionBadgeInfo(
-          replica.state?.config?.jurisdiction?.name || replica.position?.jurisdiction || null,
-          replica.state?.config?.jurisdiction?.chainId ?? null,
+          summary.jurisdiction?.name || null,
+          Number.isFinite(chainId) ? chainId : null,
         ),
         isSelf: normalizedEntityId === normalizeId(selfEntityId),
       });
@@ -157,11 +265,6 @@
       if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1;
       return compareStableText(a.name, b.name);
     });
-  }
-
-  function getEntityLabel(entityId: string, env: unknown, replica: EntityReplica | null | undefined): string {
-    const resolved = resolveEntityName(entityId, env as Parameters<typeof resolveEntityName>[1]);
-    return resolved || replica?.entityId || entityId;
   }
 
   function resolveCurrentEntity(): EntitySummary | null {
@@ -210,21 +313,33 @@
     return entity ? `${source} · ${entity}` : source;
   }
 
+  async function selectRemoteRuntime(runtimeId: string): Promise<void> {
+    await runtimeOperations.selectRuntime(runtimeId);
+    await refreshRuntimeView({});
+  }
+
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entity: EntitySummary) {
     const group = runtimeGroups.find((candidate) => candidate.runtimeId === runtimeId);
-    if (group?.source === 'remote') runtimeOperations.selectRuntime(runtimeId);
-    else await vaultOperations.selectRuntime(runtimeId);
+    open = false;
+    if (group?.source === 'remote') {
+      await selectRemoteRuntime(runtimeId);
+      return;
+    }
+    await vaultOperations.selectRuntime(runtimeId);
     dispatch('entitySelect', {
       jurisdiction: entity.jurisdiction || 'browservm',
       signerId: entity.signerId || signerId,
       entityId: entity.entityId
     });
-    open = false;
   }
 
   async function selectRuntimeSelf(group: RuntimeSummary) {
-    if (group.source === 'remote') runtimeOperations.selectRuntime(group.runtimeId);
-    else await vaultOperations.selectRuntime(group.runtimeId);
+    open = false;
+    if (group.source === 'remote') {
+      await selectRemoteRuntime(group.runtimeId);
+      return;
+    }
+    await vaultOperations.selectRuntime(group.runtimeId);
     if (group.selfEntity) {
       dispatch('entitySelect', {
         jurisdiction: group.selfEntity.jurisdiction || 'browservm',
@@ -232,7 +347,6 @@
         entityId: group.selfEntity.entityId
       });
     }
-    open = false;
   }
 
   function handleAddRuntime() {
@@ -250,9 +364,9 @@
     open = false;
   }
 
-  function handleDeleteRuntime(event: MouseEvent, group: RuntimeSummary) {
+  async function handleDeleteRuntime(event: MouseEvent, group: RuntimeSummary): Promise<void> {
     event.stopPropagation();
-    if (group.source === 'remote') runtimeOperations.disconnect(group.runtimeId);
+    if (group.source === 'remote') await runtimeOperations.disconnect(group.runtimeId);
     else dispatch('deleteRuntime', { runtimeId: group.runtimeId });
     open = false;
   }
@@ -265,15 +379,22 @@
 </script>
 
 <div class="context-switcher">
-<Dropdown bind:open minWidth={300} maxWidth={620} local={true}>
+<Dropdown
+  bind:open
+  minWidth={300}
+  maxWidth={620}
+  local={true}
+  ariaLabel={currentTitle}
+  triggerTestId="context-current"
+  triggerRuntimeId={currentRuntimeId}
+  triggerEntityId={currentEntityId}
+  triggerSignerId={currentSignerId}
+  triggerJurisdiction={currentEntity?.jurisdiction || ''}
+  triggerText={currentTitle}
+>
   <span
     slot="trigger"
     class="pill-trigger"
-    data-testid="context-current"
-    data-runtime-id={currentRuntimeId}
-    data-entity-id={currentEntityId}
-    data-signer-id={currentSignerId}
-    data-jurisdiction={currentEntity?.jurisdiction || ''}
   >
     <span class="pill-avatar-wrap">
       {#if currentAvatar}
@@ -305,10 +426,11 @@
             <button
               class="runtime-main"
               data-testid="context-entity-row"
+              data-runtime-id={normalizeId(group.runtimeId)}
               data-entity-id={normalizeId(group.selfEntity?.entityId)}
               data-signer-id={normalizeId(group.selfEntity?.signerId || group.signerId)}
               data-jurisdiction={group.selfEntity?.jurisdiction || ''}
-              on:click={() => selectRuntimeSelf(group)}
+              on:click={() => void selectRuntimeSelf(group)}
             >
               {#if group.avatar}
                 <img src={group.avatar} alt="" class="runtime-avatar" />
@@ -330,7 +452,7 @@
               <span class="status-badge {group.status}">{group.status}</span>
             </button>
             {#if group.source === 'remote' || allowDeleteRuntime}
-              <button class="runtime-delete" on:click={(event) => handleDeleteRuntime(event, group)} title={group.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}>
+              <button class="runtime-delete" on:click={(event) => void handleDeleteRuntime(event, group)} title={group.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}>
                 ×
               </button>
             {/if}
@@ -342,10 +464,11 @@
                 <button
                   class="entity-row"
                   data-testid="context-entity-row"
+                  data-runtime-id={normalizeId(group.runtimeId)}
                   data-entity-id={normalizeId(entity.entityId)}
                   data-signer-id={normalizeId(entity.signerId)}
                   data-jurisdiction={entity.jurisdiction || ''}
-                  on:click={() => selectRuntimeEntity(group.runtimeId, group.signerId, entity)}
+                  on:click={() => void selectRuntimeEntity(group.runtimeId, group.signerId, entity)}
                 >
                   <span class="entity-avatar-wrap">
                     {#if entity.avatar}

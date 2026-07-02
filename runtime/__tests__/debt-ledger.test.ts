@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
+import { signAccountFrame } from '../account-crypto';
+import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
 import { decode, encode } from '../snapshot-coder';
 import { cloneEntityState } from '../state-helpers';
 import { handleJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
 import { createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityState, JurisdictionEvent } from '../types';
 
-const SIGNER_ID = '0x1111111111111111111111111111111111111111';
+const SIGNER_ID = '1';
 const ALICE = `0x${'11'.repeat(32)}`;
 const BOB = `0x${'22'.repeat(32)}`;
 
@@ -48,14 +50,34 @@ const makeState = (entityId: string): EntityState => ({
   pendingSwapFillRatios: new Map(),
 });
 
-const makeJEventInput = (event: JurisdictionEvent, blockNumber: number, transactionHash: string): JEventEntityTxData => ({
-  from: SIGNER_ID,
-  event,
-  observedAt: 1_000 + blockNumber,
-  blockNumber,
-  blockHash: `0x${String(blockNumber).padStart(64, '0')}`,
-  transactionHash,
-});
+const makeJEventInput = (
+  env: ReturnType<typeof createEmptyEnv>,
+  entityId: string,
+  event: JurisdictionEvent,
+  blockNumber: number,
+  transactionHash: string,
+): JEventEntityTxData => {
+  const blockHash = `0x${String(blockNumber).padStart(64, '0')}`;
+  const eventsHash = canonicalJurisdictionEventsHash([event]);
+  const signature = signAccountFrame(env, SIGNER_ID, buildJEventObservationDigest({
+    entityId,
+    signerId: SIGNER_ID,
+    blockNumber,
+    blockHash,
+    transactionHash,
+    eventsHash,
+  }));
+  return {
+    from: SIGNER_ID,
+    event,
+    observedAt: 1_000 + blockNumber,
+    blockNumber,
+    blockHash,
+    transactionHash,
+    eventsHash,
+    signature,
+  };
+};
 
 const findOnlyDebt = (state: EntityState, direction: 'out' | 'in', tokenId = 1) => {
   const bucket = (direction === 'out' ? state.outDebtsByToken : state.inDebtsByToken)?.get(tokenId);
@@ -84,8 +106,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await handleJEvent(aliceState, makeJEventInput(created, 12, String(created.transactionHash)), env)).newState;
-    bobState = (await handleJEvent(bobState, makeJEventInput(created, 12, String(created.transactionHash)), env)).newState;
+    aliceState = (await handleJEvent(aliceState, makeJEventInput(env, ALICE, created, 12, String(created.transactionHash)), env)).newState;
+    bobState = (await handleJEvent(bobState, makeJEventInput(env, BOB, created, 12, String(created.transactionHash)), env)).newState;
 
     const aliceOpen = findOnlyDebt(aliceState, 'out');
     const bobIncoming = findOnlyDebt(bobState, 'in');
@@ -113,8 +135,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await handleJEvent(aliceState, makeJEventInput(enforced, 13, String(enforced.transactionHash)), env)).newState;
-    bobState = (await handleJEvent(bobState, makeJEventInput(enforced, 13, String(enforced.transactionHash)), env)).newState;
+    aliceState = (await handleJEvent(aliceState, makeJEventInput(env, ALICE, enforced, 13, String(enforced.transactionHash)), env)).newState;
+    bobState = (await handleJEvent(bobState, makeJEventInput(env, BOB, enforced, 13, String(enforced.transactionHash)), env)).newState;
 
     const alicePartial = findOnlyDebt(aliceState, 'out');
     const bobPartial = findOnlyDebt(bobState, 'in');
@@ -139,8 +161,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await handleJEvent(aliceState, makeJEventInput(forgiven, 14, String(forgiven.transactionHash)), env)).newState;
-    bobState = (await handleJEvent(bobState, makeJEventInput(forgiven, 14, String(forgiven.transactionHash)), env)).newState;
+    aliceState = (await handleJEvent(aliceState, makeJEventInput(env, ALICE, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
+    bobState = (await handleJEvent(bobState, makeJEventInput(env, BOB, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
 
     const aliceSettled = findOnlyDebt(aliceState, 'out');
     const bobSettled = findOnlyDebt(bobState, 'in');

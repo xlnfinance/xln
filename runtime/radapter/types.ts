@@ -1,4 +1,6 @@
+import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../activity-history';
 import type { RuntimeInput } from '../types';
+import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
 
 export type RuntimeAdapterMode = 'embedded' | 'remote';
 export type RuntimeAdapterStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
@@ -7,6 +9,7 @@ export type RuntimeAdapterAuthRole = RuntimeAdapterAuthLevel | 'read' | 'full';
 
 export type RuntimeAdapterConfig = {
   mode: RuntimeAdapterMode;
+  runtimeId?: string;
   wsUrl?: string;
   authKey?: string;
   seed?: string;
@@ -16,6 +19,7 @@ export type RuntimeAdapterConfig = {
 
 export type RuntimeAdapterReadQuery = {
   atHeight?: number;
+  heights?: number[] | string;
   cursor?: string;
   limit?: number;
   entityId?: string;
@@ -28,10 +32,53 @@ export type RuntimeAdapterReadQuery = {
   booksLimit?: number;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
+  kind?: RuntimeActivityFilters['kind'];
+  types?: string[] | string;
+  q?: string;
+  query?: string;
+  fromTimestamp?: number;
+  toTimestamp?: number;
+  beforeHeight?: number;
+  scanLimit?: number;
+};
+
+export type RuntimeAdapterActivityPage = {
+  ok: true;
+  runtimeId?: string | undefined;
+  latestHeight: number;
+  fromHeight: number;
+  toHeight: number;
+  scannedFrames: number;
+  returned: number;
+  limit: number;
+  scanLimit: number;
+  nextBeforeHeight: number | null;
+  filters: RuntimeActivityFilters;
+  events: RuntimeActivityEvent[];
+};
+
+export type RuntimeAdapterSolvencySummary = {
+  ok: true;
+  height: number;
+  entityCount: number;
+  accountViews: number;
+  m1: bigint;
+  m2: bigint;
+  m3: bigint;
+  total: bigint;
+  delta: bigint;
+  isValid: boolean;
+};
+
+export type RuntimeAdapterSendResult = {
+  height: number;
+  receipt?: RuntimeIngressReceipt;
+  statusUrl?: string;
 };
 
 export interface RuntimeAdapter {
   readonly mode: RuntimeAdapterMode;
+  readonly runtimeId: string;
   readonly status: RuntimeAdapterStatus;
   readonly currentHeight: number;
   readonly authLevel: RuntimeAdapterAuthLevel | null;
@@ -40,7 +87,7 @@ export interface RuntimeAdapter {
   disconnect(): void;
 
   read<T = unknown>(path: string, query?: RuntimeAdapterReadQuery): Promise<T>;
-  send(input: RuntimeInput): Promise<{ height: number }>;
+  send(input: RuntimeInput): Promise<RuntimeAdapterSendResult>;
   onChange(cb: (height: number) => void): () => void;
   onStatus(cb: (status: RuntimeAdapterStatus) => void): () => void;
 }
@@ -77,6 +124,8 @@ export type RuntimeAdapterPush = {
 
 export type RuntimeAdapterEntitySummary = {
   entityId: string;
+  runtimeId?: string;
+  signerId?: string;
   label: string;
   height: number;
   isHub?: boolean;

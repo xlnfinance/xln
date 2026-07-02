@@ -5,18 +5,22 @@
   Features: Jurisdiction, entity type (numbered/lazy/named), validators with weights, threshold.
 -->
 <script lang="ts">
-  import { createEventDispatcher, onMount } from 'svelte';
-  import type { ConsensusConfig, Env, JurisdictionConfig } from '@xln/runtime/xln-api';
-  import { xlnFunctions, getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
+  import { createEventDispatcher } from 'svelte';
+  import type { ConsensusConfig } from '@xln/runtime/xln-api';
+  import { getXLN, submitRuntimeInput } from '../../stores/xlnStore';
   import { activeRuntime, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
-  import { Plus, X, Copy, Download, Upload, Users, User, Shield, Hash, Tag, Zap } from 'lucide-svelte';
+  import { Plus, X, Download, Upload, Shield, Hash, Tag, Zap } from 'lucide-svelte';
+  import {
+    emptyFormationRuntimeProjection,
+    hasProjectedEntityId,
+    type FormationRuntimeProjection,
+  } from './formation-runtime-projection';
 
   export let onCreated: ((entityId: string) => void) | undefined = undefined;
+  export let runtimeProjection: FormationRuntimeProjection = emptyFormationRuntimeProjection();
 
   const dispatch = createEventDispatcher();
-  $: env = $xlnEnvironment as Env | null;
-  $: activeFunctions = $xlnFunctions;
   $: vault = $activeRuntime;
 
   // Form state
@@ -35,21 +39,7 @@
   let showImport = false;
   let importJson = '';
 
-  // Available jurisdictions from env
-  type FormationJurisdiction = JurisdictionConfig & {
-    chainId?: number;
-  };
-
-  $: jurisdictions = (() => {
-    if (!env?.jReplicas) return [] as FormationJurisdiction[];
-    return Array.from(env.jReplicas.values()).map((replica) => ({
-      name: String(replica.name || ''),
-      address: String(replica.depositoryAddress || ''),
-      entityProviderAddress: String(replica.entityProviderAddress || ''),
-      depositoryAddress: String(replica.depositoryAddress || ''),
-      ...(typeof replica.chainId === 'number' ? { chainId: replica.chainId } : {}),
-    }));
-  })();
+  $: jurisdictions = runtimeProjection.jurisdictions;
 
   // Auto-select first jurisdiction
   $: if (jurisdictions.length > 0 && !selectedJurisdiction) {
@@ -138,9 +128,6 @@
       const xln = await getXLN();
       if (!xln) throw new Error('XLN not initialized');
 
-      const currentEnv = env;
-      if (!currentEnv) throw new Error('Environment not ready');
-
       const validatorNames = validators.map(v => v.name);
       const thresholdBigInt = BigInt(threshold);
 
@@ -158,8 +145,7 @@
         entityId = xln.generateLazyEntityId(validatorNames, thresholdBigInt);
 
         // Check for duplicates
-        const existingReplicas = Array.from(currentEnv.eReplicas.keys());
-        if (existingReplicas.some((key: string) => key.startsWith(entityId + ':'))) {
+        if (hasProjectedEntityId(runtimeProjection, entityId)) {
           throw new Error(`This validator configuration already exists! Entity ${formatShortId(entityId)} is in use.`);
         }
 
@@ -188,7 +174,7 @@
       }));
 
       // Apply to runtime
-      await enqueueAndProcess(currentEnv, {
+      await submitRuntimeInput({
         runtimeTxs: serverTxs,
         entityInputs: []
       });

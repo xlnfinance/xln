@@ -1,5 +1,4 @@
 <script lang="ts">
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
   import AccountPanel from './AccountPanel.svelte';
 
@@ -7,7 +6,7 @@
   export let selectedAccountId: string;
   export let tab: Tab;
   export let replica: EntityReplica | null = null;
-  export let activeEnv: Env | EnvSnapshot;
+  export let entityNames: Map<string, string> = new Map();
   export let pendingOffchainFaucetKeys: Set<string> = new Set();
   export let handleBackToAccounts: () => void = () => {};
   export let handleAccountFaucet: (event: CustomEvent<{ counterpartyId: string; tokenId: number }>) => void = () => {};
@@ -21,7 +20,7 @@
       counterpartyId={selectedAccountId}
       entityId={tab.entityId}
       {replica}
-      env={activeEnv}
+      {entityNames}
       pendingFaucetKeys={pendingOffchainFaucetKeys}
       on:back={handleBackToAccounts}
       on:faucet={handleAccountFaucet}

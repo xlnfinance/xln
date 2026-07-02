@@ -24,7 +24,7 @@ import { getOpenSwapOfferEntries } from '../open-swap-offers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
-import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput } from './helpers';
+import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 import { swapKey } from '../swap-execution';
 
@@ -151,14 +151,6 @@ function getRegisteredEntityId(signerId: string): string {
     throw new Error(`Missing registered entityId for signer ${signerId} - run swap() first`);
   }
   return entityId;
-}
-
-function findReplica(env: Env, entityId: string) {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-  if (!entry) {
-    throw new Error(`Replica for entity ${entityId} not found`);
-  }
-  return entry;
 }
 
 function requireAccount(account: AccountMachine | undefined, label: string): AccountMachine {

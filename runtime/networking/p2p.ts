@@ -250,10 +250,11 @@ export class RuntimeP2P {
   }
 
   connect() {
-    this.closeClients();
     this.registerVisibilityReconnect();
     this.startPolling();
     this.startRetryLoop();
+    if (this.hasRelayConnectionActivity()) return;
+    this.closeClients();
     for (const url of this.relayUrls) {
       const runtimeSeed = this.env.runtimeSeed;
       const client = new RuntimeWsClient({
@@ -440,6 +441,10 @@ export class RuntimeP2P {
     this.connect();
   }
 
+  isConnecting(): boolean {
+    return this.clients.some(client => client.isConnecting());
+  }
+
   getDirectPeerState(): Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }> {
     const rows: Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }> = [];
     for (const [runtimeId, client] of this.directClients.entries()) {
@@ -556,6 +561,10 @@ export class RuntimeP2P {
 
   isConnected(): boolean {
     return !!this.getActiveClient();
+  }
+
+  private hasRelayConnectionActivity(): boolean {
+    return this.clients.some(client => client.isOpen() || client.isConnecting());
   }
 
   sendDebugEvent(payload: unknown): boolean {

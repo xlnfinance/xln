@@ -49,6 +49,7 @@ export const handleRuntimeInputControl = async (
         jInputs: jInputs.length,
       },
       enqueuedHeight: deps.getCurrentRuntimeHeight(env),
+      runtimeInput,
     });
     return new Response(
       serializeTaggedJson({

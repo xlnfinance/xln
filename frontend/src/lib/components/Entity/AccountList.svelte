@@ -1,18 +1,21 @@
 <script lang="ts">
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
-  import { xlnEnvironment } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
-  import { getEntityDisplayName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
-  import { buildAccountPageView } from './account-list-view';
+  import { buildAccountPageView, resolveAccountListEntityName } from './account-list-view';
 
   export let replica: EntityReplica | null;
   export let selectedAccountId: string | null = null;
   export let pendingFaucetKeys: Set<string> = new Set();
+  export let runtimeHeight: number = 0;
+  export let entityNames: Map<string, string> = new Map();
+  export let profileByEntityId: Map<string, GossipProfile> = new Map();
+  export let isDevnet = false;
 
   $: entityHeight = Number(replica?.state?.height ?? 0);
-  $: runtimeHeight = Number($xlnEnvironment?.height ?? 0);
+  $: effectiveRuntimeHeight = Number(runtimeHeight || 0);
 
   const dispatch = createEventDispatcher();
   let accountBrowserOpen = false;
@@ -76,9 +79,12 @@
     accountPage = 0;
   }
   $: if (!accountBrowserOpen && accountPage !== 0) accountPage = 0;
-  $: accountPageView = buildAccountPageView(replica, accountBrowserOpen, accountPage, accountSearch);
-  $: visibleAccounts = accountPageView.entries;
-  $: hasAccountsToShow = visibleAccounts.length > 0;
+	  $: accountPageView = buildAccountPageView(replica, accountBrowserOpen, accountPage, accountSearch);
+	  $: visibleAccounts = accountPageView.entries;
+	  $: hasAccountsToShow = visibleAccounts.length > 0;
+	  $: accountTotal = replica?.state?.accounts instanceof Map
+	    ? replica.state.accounts.size
+	    : visibleAccounts.length;
 
   function selectAccount(event: CustomEvent) {
     dispatch('select', event.detail);
@@ -175,11 +181,7 @@
       const peerEntityId = lock.direction === 'incoming'
         ? String(matchedRoute?.inboundEntity || counterpartyId)
         : String(matchedRoute?.outboundEntity || counterpartyId);
-      const peerName = getEntityDisplayName(peerEntityId, {
-        source: $xlnEnvironment,
-        selfEntityId: replica?.entityId || '',
-        selfLabel: 'You',
-      });
+      const peerName = resolveAccountListEntityName(peerEntityId, replica?.entityId || '', entityNames, 'You');
 
       const subtitle = paymentNote
         || (matchedRoute?.secretAckPending
@@ -231,8 +233,11 @@
           {/if}
         </div>
       {:else}
-        <div class="list-header">
-          <div class="list-controls">
+	        <div class="list-header">
+	          <div class="account-count" data-testid="account-list-count">
+	            {accountTotal} Accounts
+	          </div>
+	          <div class="list-controls">
             {#if accountBrowserOpen}
               <input
                 class="account-search"
@@ -288,7 +293,10 @@
               counterpartyId={entry.counterpartyId}
               entityId={replica?.entityId || ''}
               {entityHeight}
-              {runtimeHeight}
+              runtimeHeight={effectiveRuntimeHeight}
+              counterpartyName={resolveAccountListEntityName(entry.counterpartyId, replica?.entityId || '', entityNames, 'You')}
+              counterpartyProfile={profileByEntityId.get(normalizeId(entry.counterpartyId)) ?? null}
+              {isDevnet}
               lockSummary={getLockSummary(entry.counterpartyId)}
               activeFlows={activeFlowSummary.items}
               activeFlowOverflowCount={activeFlowSummary.overflowCount}
@@ -362,12 +370,21 @@
     gap: 12px;
   }
 
-  .list-header {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    padding: 2px 8px 6px;
-  }
+	  .list-header {
+	    display: flex;
+	    justify-content: space-between;
+	    align-items: center;
+	    gap: 12px;
+	    padding: 2px 8px 6px;
+	  }
+
+	  .account-count {
+	    color: var(--theme-text-muted, #a1a1aa);
+	    font-size: 0.78rem;
+	    font-weight: 700;
+	    letter-spacing: 0;
+	    white-space: nowrap;
+	  }
 
   .list-controls {
     display: flex;

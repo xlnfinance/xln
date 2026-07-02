@@ -460,7 +460,12 @@ export const closeRuntimeDb = async (env: Env): Promise<void> => {
   }
 };
 
-export const closeInfraDb = (env: Env): Promise<void> => closeInfraDbStorage(env);
+export const closeInfraDb = async (env: Env): Promise<void> => {
+  const state = ensureRuntimeState(env);
+  state.infraDbClosing = true;
+  await drainInfraDbWrites(env);
+  await closeInfraDbStorage(env);
+};
 
 const requestRuntimeLoopWake = (env: Env): void => {
   const state = ensureRuntimeState(env);
@@ -585,6 +590,7 @@ function getRuntimeInputQueueDeps(): RuntimeInputQueueDeps {
 
 export async function tryOpenInfraDb(env: Env): Promise<boolean> {
   const state = ensureRuntimeState(env);
+  if (state.infraDbClosing) return false;
   if (!state.infraDbOpenPromise) {
     const db = getInfraDb(env);
     state.infraDbOpenPromise = (async () => {
@@ -614,6 +620,22 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
 
 const infraGossipDbAccess = { tryOpenInfraDb, getInfraDb };
 
+const trackInfraDbWrite = (env: Env, promise: Promise<void>): void => {
+  const state = ensureRuntimeState(env);
+  if (!state.infraDbPendingWrites) state.infraDbPendingWrites = new Set();
+  const tracked = promise.finally(() => {
+    state.infraDbPendingWrites?.delete(tracked);
+  });
+  state.infraDbPendingWrites.add(tracked);
+};
+
+const drainInfraDbWrites = async (env: Env): Promise<void> => {
+  const state = ensureRuntimeState(env);
+  while (state.infraDbPendingWrites && state.infraDbPendingWrites.size > 0) {
+    await Promise.allSettled([...state.infraDbPendingWrites]);
+  }
+};
+
 export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
   const ingressTimestamp = env.scenarioMode
     ? (runtimeInput.timestamp ?? env.timestamp ?? 0)
@@ -627,7 +649,7 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
   );
 };
 
-const hasRuntimeWork = (env: Env): boolean => {
+export const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
   if ((mempool.jInputs?.length ?? 0) > 0) return true;
@@ -2022,12 +2044,14 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const gossip = createGossipLayer({
     onAnnounce: (profile) => {
       if (!env) return;
-      void persistGossipProfileToInfraDb(env, infraGossipDbAccess, profile).catch((error) => {
+      if (env.runtimeState?.infraDbClosing) return;
+      const persist = persistGossipProfileToInfraDb(env, infraGossipDbAccess, profile).catch((error) => {
         console.warn(
           `[infra-db] failed to persist gossip profile ${String(profile?.entityId || '').slice(-8)}:`,
           error instanceof Error ? error.message : String(error),
         );
       });
+      trackInfraDbWrite(env, persist);
     },
     getLiveProfiles: () => {
       if (!env?.eReplicas || env.eReplicas.size === 0) return [];
@@ -2583,6 +2607,8 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     markProcessProfile('frameReady');
 
     const state = ensureRuntimeState(env);
+    const mempool = ensureRuntimeMempool(env);
+    const mempoolQueuedAt = mempool.queuedAt;
     const quietRuntimeLogs = env.quietRuntimeLogs === true;
     for (const jReplica of env.jReplicas?.values?.() ?? []) {
       jReplica.jadapter?.setQuietLogs?.(quietRuntimeLogs);
@@ -2591,9 +2617,6 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     if (env.scenarioMode) {
       env.timestamp = (env.timestamp ?? 0) + 100;
     } else {
-      // Live R-frame time is the wall clock at block creation. queuedAt is only
-      // scheduler/ingress metadata; using it here can resurrect a stale browser
-      // snapshot timestamp and make hubs reject account frames for drift.
       const liveNow = getWallClockMs();
       const previousTimestamp = Math.max(0, Math.floor(Number(env.timestamp ?? 0)));
       if (previousTimestamp > liveNow + TIMING.TIMESTAMP_DRIFT_MS) {
@@ -2601,7 +2624,9 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           `RUNTIME_CLOCK_AHEAD: env.timestamp=${previousTimestamp} wall=${liveNow}`,
         );
       }
-      env.timestamp = Math.max(previousTimestamp, liveNow);
+      const ingressTimestamp = Math.max(0, Math.floor(Number(mempoolQueuedAt ?? liveNow)));
+      const boundedIngressTimestamp = Math.min(ingressTimestamp, liveNow + TIMING.TIMESTAMP_DRIFT_MS);
+      env.timestamp = Math.max(previousTimestamp, boundedIngressTimestamp);
     }
     for (const jReplica of env.jReplicas?.values?.() ?? []) {
       jReplica.jadapter?.setBlockTimestamp(env.timestamp);
@@ -2610,7 +2635,6 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     // Inject pings for entities with due scheduled hooks (setTimeout-like)
     generateHookPings(env);
 
-    const mempool = ensureRuntimeMempool(env);
     const accountWakeInputs = collectAccountMempoolWakeInputs(env);
     const explicitEntityInputKeys = new Set(
       mempool.entityInputs.map((input) =>
@@ -2632,7 +2656,6 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       0,
     );
     processProfileMetrics.jInputs = runtimeInput.jInputs?.length ?? 0;
-    const mempoolQueuedAt = mempool.queuedAt;
     mempool.runtimeTxs = [];
     mempool.entityInputs = [];
     if (mempool.jInputs) mempool.jInputs = [];
@@ -2818,7 +2841,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         ? env.frameLogs.map((entry): FrameLogEntry => ({ ...entry }))
         : [];
       const snapshot = buildCanonicalEnvSnapshot(env, {
-        runtimeInput: env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        runtimeInput: appliedRuntimeInputForPersistence ?? { runtimeTxs: [], entityInputs: [] },
         runtimeOutputs: env.pendingOutputs ?? [],
         description: env.extra?.description ?? `Frame ${env.height}`,
         meta: {
@@ -4001,15 +4024,18 @@ const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayIn
 // JAdapter - Unified J-Machine interface (replaces old evms/ and jurisdiction/)
 export { createJAdapter } from './jadapter';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from './jadapter';
-export { applyJEventsToEnv } from './jadapter/watcher';
+export { applyJEventsToEnv, buildJEventsRuntimeInput } from './jadapter/watcher';
 export {
   getActiveJAdapter,
   getEntityJAdapter,
-  submitDebtEnforcement,
+  buildDebtEnforcementRuntimeInputFromProjection,
+  buildDebtEnforcementRuntimeInput,
 } from './runtime-jurisdiction-api';
 export type {
   CrossJurisdictionSwapSubmitParams,
   CrossJurisdictionSwapSubmitResult,
+  DebtEnforcementProjectionRuntimeInputParams,
+  DebtEnforcementRuntimeInputParams,
 } from './runtime-jurisdiction-api';
 
 export async function submitCrossJurisdictionSwap(

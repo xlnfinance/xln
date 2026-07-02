@@ -125,7 +125,11 @@ async function main(): Promise<void> {
   await runDeterminismTests();
 }
 
-main().catch((error) => {
-  console.log('check-determinism failed:', error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.log('check-determinism failed:', error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });

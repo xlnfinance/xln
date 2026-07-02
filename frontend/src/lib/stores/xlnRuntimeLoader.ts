@@ -1,10 +1,12 @@
 import { writable } from 'svelte/store';
 import type { XLNModule } from '@xln/runtime/xln-api';
+import { registerDebugSurface } from '$lib/utils/debugSurface';
 
 let XLN: XLNModule | null = null;
 let xlnLoadPromise: Promise<XLNModule> | null = null;
 
 export const xlnInstance = writable<XLNModule | null>(null);
+registerDebugSurface('instance', () => XLN);
 
 export async function getXLN(): Promise<XLNModule> {
 	if (XLN) return XLN;
@@ -23,9 +25,6 @@ export async function getXLN(): Promise<XLNModule> {
 		}
 		XLN = loaded;
 		xlnInstance.set(XLN);
-		if (typeof window !== 'undefined') {
-			window.__xln_instance = XLN;
-		}
 		return XLN;
 	})();
 

@@ -18,19 +18,18 @@ export const deriveAccountWatchSeed = (params: {
   runtimeId?: string | null;
   entityId: string;
   counterpartyId: string;
+  /** Kept for caller compatibility. Account watch seeds must be stable across retry/recovery. */
   timestamp: number;
 }): string => {
   const runtimeSeed = typeof params.runtimeSeed === 'string'
     ? params.runtimeSeed
     : ethers.hexlify(params.runtimeSeed);
   if (!runtimeSeed) throw new Error('ACCOUNT_WATCH_SEED_RUNTIME_SEED_MISSING');
-  const timestamp = Math.max(0, Math.floor(Number(params.timestamp || 0)));
   return ethers.keccak256(ethers.toUtf8Bytes([
     ACCOUNT_WATCH_SEED_DOMAIN,
     runtimeSeed,
     String(params.runtimeId || '').toLowerCase(),
     String(params.entityId || '').toLowerCase(),
     String(params.counterpartyId || '').toLowerCase(),
-    String(timestamp),
   ].join('|'))).toLowerCase();
 };

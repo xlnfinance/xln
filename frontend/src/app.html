@@ -54,10 +54,18 @@
 		<link rel="manifest" href="/site.webmanifest">
 
 		<!-- Plausible Analytics -->
-		<script async src="https://plausible.io/js/pa-xeU-A89j2Mpz0DGp8BnVt.js"></script>
 		<script>
-			window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
-			plausible.init()
+			(function() {
+				var host = window.location.hostname;
+				if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return;
+				window.plausible = window.plausible || function(){ (plausible.q = plausible.q || []).push(arguments); };
+				plausible.init = plausible.init || function(i){ plausible.o = i || {}; };
+				var script = document.createElement('script');
+				script.async = true;
+				script.src = 'https://plausible.io/js/pa-xeU-A89j2Mpz0DGp8BnVt.js';
+				document.head.appendChild(script);
+				plausible.init();
+			})();
 		</script>
 		<script>
 				(function() {

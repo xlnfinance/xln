@@ -1,13 +1,16 @@
+import type { RuntimeActivityFilters } from '../activity-history';
 import type { EntityState, Env, RuntimeInput } from '../types';
 import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../storage';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../server/ingress-receipts';
 import { safeStringify } from '../serialization-utils';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import type {
   RuntimeAdapterAuthLevel,
+  RuntimeAdapterActivityPage,
   RuntimeAdapterReadQuery,
   RuntimeAdapterRequest,
   RuntimeAdapterResponse,
@@ -48,8 +51,20 @@ export type RuntimeAdapterServerDeps = {
   loadEntityAccountDoc?: (env: Env, entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
   loadEntityViewPage?: (env: Env, entityId: string, height: number, query?: RuntimeAdapterReadQuery) => Promise<StorageEntityViewPage | null>;
   listEntityIdsAtHeight?: (env: Env, height: number) => Promise<string[]>;
-  enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
-};
+	  readActivityPage?: (
+    env: Env,
+    opts: RuntimeActivityFilters & {
+      beforeHeight?: number | undefined;
+      limit?: number | undefined;
+      scanLimit?: number | undefined;
+    },
+	  ) => Promise<RuntimeAdapterActivityPage>;
+	  enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
+	  validateRuntimeInputAdmission?: (env: Env, input: RuntimeInput) => void;
+	  registerReceipt?: (input: RegisterReceiptOptions) => RuntimeIngressReceipt;
+	  readReceipt?: (id: string) => RuntimeIngressReceipt | null;
+	  buildRuntimeInputStatusUrl?: (id: string) => string;
+	};
 
 const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
 let attachedEnv: Env | null = null;
@@ -97,6 +112,31 @@ const compactReadQueryForLog = (query: RuntimeAdapterReadQuery | undefined): Rec
   return Object.keys(compact).length > 0 ? compact : undefined;
 };
 
+const encodedByteLengthForLog = (value: unknown): number | null => {
+  try {
+    return encodeRuntimeAdapterMessage(value).byteLength;
+  } catch {
+    return null;
+  }
+};
+
+const countRuntimeInput = (input: RuntimeInput): RegisterReceiptOptions['counts'] => ({
+  runtimeTxs: Array.isArray(input.runtimeTxs) ? input.runtimeTxs.length : 0,
+  entityInputs: Array.isArray(input.entityInputs) ? input.entityInputs.length : 0,
+  jInputs: Array.isArray(input.jInputs) ? input.jInputs.length : 0,
+});
+
+const recordOf = (value: unknown): Record<string, unknown> | null =>
+  value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+
+const byteBreakdownForLog = (value: unknown, limit = 20): Record<string, number | null> | undefined => {
+  const record = recordOf(value);
+  if (!record) return undefined;
+  return Object.fromEntries(Object.entries(record)
+    .slice(0, limit)
+    .map(([key, entry]) => [key, encodedByteLengthForLog(entry)]));
+};
+
 const emitRuntimeAdapterResponseTooLarge = (
   diagnostic: RuntimeAdapterResponseDiagnostic | undefined,
   response: RuntimeAdapterResponse,
@@ -107,6 +147,8 @@ const emitRuntimeAdapterResponseTooLarge = (
   const payload = response.ok && response.payload && typeof response.payload === 'object'
     ? response.payload as Record<string, unknown>
     : null;
+  const activeEntity = recordOf(payload?.['activeEntity']);
+  const activeCore = recordOf(activeEntity?.['core']);
   const event = {
     code: 'RADAPTER_RESPONSE_TOO_LARGE',
     bytes,
@@ -120,6 +162,9 @@ const emitRuntimeAdapterResponseTooLarge = (
     runtimeId: String(env?.runtimeId || '') || null,
     height: Math.max(0, Math.floor(Number(env?.height ?? 0))),
     payloadKeys: payload ? Object.keys(payload).slice(0, 20) : [],
+    payloadBytes: byteBreakdownForLog(payload),
+    activeEntityBytes: byteBreakdownForLog(activeEntity),
+    activeCoreBytes: byteBreakdownForLog(activeCore),
   };
   if (typeof env?.emit === 'function') {
     try {
@@ -319,6 +364,7 @@ export const handleRuntimeAdapterMessage = async (
         authLevel: auth.level,
         expiresAtMs: auth.expiresAtMs,
         currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
+        runtimeId: String(env.runtimeId || '').trim().toLowerCase(),
       }, diagnostic());
       return true;
     }
@@ -335,18 +381,33 @@ export const handleRuntimeAdapterMessage = async (
         ...(deps.loadEntityAccountDoc ? { loadEntityAccountDoc: (entityId, counterpartyId, height) => deps.loadEntityAccountDoc?.(env, entityId, counterpartyId, height) ?? Promise.resolve(null) } : {}),
         ...(deps.loadEntityViewPage ? { loadEntityViewPage: (entityId, height, query) => deps.loadEntityViewPage?.(env, entityId, height, query) ?? Promise.resolve(null) } : {}),
         ...(deps.listEntityIdsAtHeight ? { listEntityIdsAtHeight: (height) => deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]) } : {}),
+        ...(deps.readActivityPage ? { readActivityPage: (opts) => deps.readActivityPage?.(env, opts) ?? Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'activity reader did not return')) } : {}),
+        ...(deps.readReceipt ? { readReceipt: (id) => deps.readReceipt?.(id) ?? null } : {}),
       }, msg.path, msg.query);
       sendOk(ws, msg.id, payload, diagnostic());
       return true;
     }
 
-    if (msg.op === 'send') {
-      requireAuth(state, 'admin');
-      requireBucket(state.sendBucket, 'send');
-      deps.enqueueRuntimeInput(env, msg.input);
-      sendOk(ws, msg.id, { height: Math.max(0, Math.floor(Number(env.height ?? 0))) }, diagnostic());
-      return true;
-    }
+	    if (msg.op === 'send') {
+	      requireAuth(state, 'admin');
+	      requireBucket(state.sendBucket, 'send');
+	      deps.validateRuntimeInputAdmission?.(env, msg.input);
+	      const acceptedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
+	      deps.enqueueRuntimeInput(env, msg.input);
+	      const receipt = deps.registerReceipt?.({
+	        kind: 'radapter-runtime-input',
+	        counts: countRuntimeInput(msg.input),
+	        enqueuedHeight: acceptedHeight,
+	        runtimeInput: msg.input,
+	        note: 'Runtime adapter command accepted into the runtime queue; poll account/entity projections for semantic commit details.',
+	      });
+	      sendOk(ws, msg.id, {
+	        height: acceptedHeight,
+	        ...(receipt ? { receipt } : {}),
+	        ...(receipt && deps.buildRuntimeInputStatusUrl ? { statusUrl: deps.buildRuntimeInputStatusUrl(receipt.id) } : {}),
+	      }, diagnostic());
+	      return true;
+	    }
 
     sendErr(ws, msg.id, new RuntimeAdapterError('E_BAD_PATH', `unsupported runtime adapter op: ${(msg as { op?: unknown }).op}`), diagnostic());
     return true;

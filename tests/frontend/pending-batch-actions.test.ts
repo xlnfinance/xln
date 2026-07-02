@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import type { Env } from '@xln/runtime/xln-api';
-
+import { readFileSync } from 'node:fs';
 import {
   buildPendingBatchEntityInput,
   enqueuePendingBatchAction,
 } from '../../frontend/src/lib/components/Entity/pending-batch-actions';
 
-const runtimeEnv = {
-  eReplicas: new Map(),
-  jReplicas: new Map(),
-  history: [],
-} as unknown as Env;
-
 describe('pending batch action helpers', () => {
+  test('pending batch actions do not require embedded Env', () => {
+    const source = readFileSync('frontend/src/lib/components/Entity/pending-batch-actions.ts', 'utf8');
+    expect(source).not.toContain('EnvSnapshot');
+    expect(source).not.toContain('requireRuntimeEnv');
+    expect(source).not.toContain('activeEnv');
+  });
+
   test('builds routed entity inputs for pending batch actions', () => {
     expect(buildPendingBatchEntityInput(' entity-1 ', ' signer-1 ', 'broadcast')).toEqual({
       entityId: 'entity-1',
@@ -31,12 +31,11 @@ describe('pending batch action helpers', () => {
     }]);
   });
 
-  test('fails fast before enqueueing when entity, signer, live mode, or env is missing', async () => {
+  test('fails fast before enqueueing when entity, signer, or live mode is missing', async () => {
     expect(() => buildPendingBatchEntityInput('', 'signer-1', 'broadcast')).toThrow('Active entity missing');
     expect(() => buildPendingBatchEntityInput('entity-1', '', 'broadcast')).toThrow('Signer missing');
 
     await expect(enqueuePendingBatchAction({
-      activeEnv: runtimeEnv,
       activeIsLive: false,
       entityId: 'entity-1',
       action: 'broadcast',
@@ -44,19 +43,19 @@ describe('pending batch action helpers', () => {
       resolveEntitySigner: () => {
         throw new Error('resolveEntitySigner should not run before live-mode validation');
       },
-      enqueueEntityInputs: async () => {
-        throw new Error('enqueueEntityInputs should not run before live-mode validation');
+      submitEntityInputs: async () => {
+        throw new Error('submitEntityInputs should not run before live-mode validation');
       },
     })).rejects.toThrow('Batch actions require LIVE mode');
 
-    await expect(enqueuePendingBatchAction({
-      activeEnv: null,
+    const submitted = await enqueuePendingBatchAction({
       activeIsLive: true,
       entityId: 'entity-1',
       action: 'broadcast',
       context: 'test-broadcast',
       resolveEntitySigner: () => 'signer-1',
-      enqueueEntityInputs: async (env) => env,
-    })).rejects.toThrow('test-broadcast requires live runtime environment');
+      submitEntityInputs: async (env) => env,
+    });
+    expect(submitted).toBeUndefined();
   });
 });

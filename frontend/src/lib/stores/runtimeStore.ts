@@ -1,32 +1,45 @@
 import { writable, derived, get } from 'svelte/store';
-import type { Env } from '@xln/runtime/xln-api';
+import type { Env, RuntimeAdapterConfig } from '@xln/runtime/xln-api';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
   normalizeRemoteRuntimeWsUrl,
+  parseRemoteRuntimeImportSourcePayload,
   persistRemoteRuntimeImports,
   readStoredRemoteRuntimeImports,
   removeStoredRemoteRuntimeImport,
   writeStoredRemoteRuntimeImports,
+  type RemoteRuntimeHubJurisdiction,
+  type RemoteRuntimeHubSummary,
   type RemoteRuntimeImportAccess,
   type RemoteRuntimeImportEntry,
   type StoredRemoteRuntimeImportEntry,
 } from '$lib/utils/remoteRuntimeImport';
 import { validateRemoteRuntimeEntry } from '$lib/utils/remoteRuntimeValidation';
 import { getXLN } from './xlnRuntimeLoader';
+import {
+  getRuntimeControllerConfig,
+  runtimeControllerHandle,
+  setRuntimeControllerPendingRuntimeId,
+} from './runtimeControllerStore';
 
 export interface Runtime {
   id: string;                    // Runtime identifier (EOA for local runtimes)
   type: 'local' | 'remote';
   label: string;                 // Display name: "Local" or "CEX Production"
-  env: Env | null;               // Local: full state, Remote: synced subset
+  env: Env | null;               // Active view snapshot for this runtime
   wsUrl?: string;                // Remote runtime adapter endpoint
   seed?: string;                 // BrainVault seed backing this runtime (if any)
   vaultId?: string;              // Vault name bound to this runtime (if any)
-  connection?: WebSocket;        // For remote runtimes
   apiKey?: string;               // HMAC(seed, "read"|"write")
   remoteAccess?: 'read' | 'admin';
   permissions: 'read' | 'write';
   status: 'connected' | 'syncing' | 'disconnected' | 'error';
+  entityCount?: number;
+  hubEntityId?: string;
+  hubName?: string;
+  hubJurisdiction?: RemoteRuntimeHubJurisdiction;
+  hubEntities?: RemoteRuntimeHubSummary[];
   lastSynced?: number;
   latencyMs?: number;            // Connection latency
 }
@@ -34,8 +47,25 @@ export interface Runtime {
 // All runtimes (EOA-keyed for local, URI-keyed for remote)
 export const runtimes = writable<Map<string, Runtime>>(new Map());
 
-// Active runtime (which one time machine controls)
-export const activeRuntimeId = writable<string>('');
+const normalizeRuntimeId = (id: string | null | undefined): string =>
+  String(id || '').trim().toLowerCase();
+
+let remoteImportSourceHydration: Promise<StoredRemoteRuntimeImportEntry[]> | null = null;
+
+export const activeRuntimeId = derived(
+  [runtimeControllerHandle, runtimes],
+  ([$handle, $runtimes]) => {
+    const pendingId = normalizeRuntimeId($handle.pendingRuntimeId);
+    if (pendingId && $runtimes.has(pendingId)) {
+      return pendingId;
+    }
+    const controllerId = normalizeRuntimeId($handle.runtimeId || $handle.id);
+    if (controllerId && controllerId !== 'embedded' && $runtimes.has(controllerId)) {
+      return controllerId;
+    }
+    return pendingId;
+  },
+);
 
 // Derived: Get active runtime's env
 export const activeRuntime = derived(
@@ -48,6 +78,14 @@ export const activeEnv = derived(
   activeRuntime,
   ($activeRuntime) => $activeRuntime?.env || null
 );
+
+type RuntimeAdapterStorageSnapshot = {
+  mode: string | null;
+  wsUrl: string | null;
+  access: string | null;
+  localKey: string | null;
+  sessionKey: string | null;
+};
 
 const getEnvRuntimeId = (env: Env | null | undefined): string => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
@@ -74,10 +112,40 @@ const persistActiveRemoteRuntime = (runtime: Runtime): boolean => {
   if (typeof window === 'undefined' || runtime.type !== 'remote' || !runtime.wsUrl) return false;
   localStorage.setItem('xln-runtime-adapter-mode', 'remote');
   localStorage.setItem('xln-runtime-adapter-ws', runtime.wsUrl);
+  localStorage.setItem('xln-runtime-adapter-access', runtime.remoteAccess ?? (runtime.permissions === 'write' ? 'admin' : 'read'));
   localStorage.removeItem('xln-runtime-adapter-key');
   if (runtime.apiKey) sessionStorage.setItem('xln-runtime-adapter-key', runtime.apiKey);
   else sessionStorage.removeItem('xln-runtime-adapter-key');
   return true;
+};
+
+const readRuntimeAdapterStorageSnapshot = (): RuntimeAdapterStorageSnapshot | null => {
+  if (typeof window === 'undefined') return null;
+  return {
+    mode: localStorage.getItem('xln-runtime-adapter-mode'),
+    wsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
+    access: localStorage.getItem('xln-runtime-adapter-access'),
+    localKey: localStorage.getItem('xln-runtime-adapter-key'),
+    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key'),
+  };
+};
+
+const writeStorageValue = (
+  storage: Storage,
+  key: string,
+  value: string | null,
+): void => {
+  if (value === null) storage.removeItem(key);
+  else storage.setItem(key, value);
+};
+
+const restoreRuntimeAdapterStorageSnapshot = (snapshot: RuntimeAdapterStorageSnapshot | null): void => {
+  if (typeof window === 'undefined' || !snapshot) return;
+  writeStorageValue(localStorage, 'xln-runtime-adapter-mode', snapshot.mode);
+  writeStorageValue(localStorage, 'xln-runtime-adapter-ws', snapshot.wsUrl);
+  writeStorageValue(localStorage, 'xln-runtime-adapter-access', snapshot.access);
+  writeStorageValue(localStorage, 'xln-runtime-adapter-key', snapshot.localKey);
+  writeStorageValue(sessionStorage, 'xln-runtime-adapter-key', snapshot.sessionKey);
 };
 
 const clearActiveRemoteRuntimeStorage = (runtime: Runtime | null | undefined): boolean => {
@@ -92,9 +160,38 @@ const clearActiveRemoteRuntimeStorage = (runtime: Runtime | null | undefined): b
   if (!matchesActiveStorage) return false;
   localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
   localStorage.removeItem('xln-runtime-adapter-ws');
+  localStorage.removeItem('xln-runtime-adapter-access');
   localStorage.removeItem('xln-runtime-adapter-key');
   sessionStorage.removeItem('xln-runtime-adapter-key');
   return true;
+};
+
+const persistActiveEmbeddedRuntime = (): void => {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
+  localStorage.removeItem('xln-runtime-adapter-ws');
+  localStorage.removeItem('xln-runtime-adapter-access');
+  localStorage.removeItem('xln-runtime-adapter-key');
+  sessionStorage.removeItem('xln-runtime-adapter-key');
+};
+
+const switchToRuntimeAdapter = async (config: RuntimeAdapterConfig): Promise<void> => {
+  const { switchAppRuntimeAdapter } = await import('./xlnStore');
+  await switchAppRuntimeAdapter(config);
+};
+
+const runtimeControllerAlreadyTargets = (runtime: Runtime, id: string): boolean => {
+  const config = getRuntimeControllerConfig();
+  const handle = get(runtimeControllerHandle);
+  if (handle.status !== 'connected') return false;
+  if (String(handle.runtimeId || handle.id || '').toLowerCase() !== id) return false;
+  if (runtime.type === 'remote') {
+    if (config?.mode !== 'remote' || !runtime.wsUrl || !config.wsUrl) return false;
+    const expectedAuth = runtime.remoteAccess === 'admin' ? 'admin' : 'inspect';
+    return handle.authLevel === expectedAuth &&
+      normalizeRemoteRuntimeWsUrl(config.wsUrl) === normalizeRemoteRuntimeWsUrl(runtime.wsUrl);
+  }
+  return config?.mode === 'embedded' && String(config.runtimeId || '').toLowerCase() === id;
 };
 
 const upsertRemoteImportEntry = (
@@ -104,6 +201,10 @@ const upsertRemoteImportEntry = (
   const id = String(entry.runtimeId || `radapter:${entry.wsUrl}`).toLowerCase();
   const existing = current.get(id);
   const lastSynced = existing?.lastSynced;
+  const hubEntityId = entry.hubEntityId || existing?.hubEntityId || '';
+  const hubName = entry.hubName || existing?.hubName || '';
+  const hubJurisdiction = entry.hubJurisdiction ?? existing?.hubJurisdiction;
+  const hubEntities = entry.hubEntities?.length ? entry.hubEntities : existing?.hubEntities;
   return setRuntimeEntry(current, id, {
     ...existing,
     id,
@@ -115,13 +216,36 @@ const upsertRemoteImportEntry = (
     remoteAccess: entry.access,
     permissions: entry.access === 'admin' ? 'write' : 'read',
     status: existing?.status === 'connected' ? 'connected' : 'disconnected',
+    entityCount: Math.max(0, Math.floor(Number(entry.entityCount || existing?.entityCount || 0))),
+    ...(hubEntityId ? { hubEntityId } : {}),
+    ...(hubName ? { hubName } : {}),
+    ...(hubJurisdiction ? { hubJurisdiction } : {}),
+    ...(hubEntities?.length ? { hubEntities } : {}),
     ...(existing?.latencyMs !== undefined ? { latencyMs: existing.latencyMs } : {}),
     ...(lastSynced !== undefined ? { lastSynced } : {}),
   });
 };
 
+const fetchRemoteRuntimeImportSource = async (
+  source = '/api/runtime-import',
+): Promise<RemoteRuntimeImportEntry[]> => {
+  if (typeof window === 'undefined') return [];
+  const url = new URL(source, window.location.href);
+  if (url.origin !== window.location.origin) {
+    throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_ORIGIN_INVALID:${url.origin}`);
+  }
+  const response = await fetch(url, { cache: 'no-store' });
+  if (response.status === 404) return [];
+  if (!response.ok) throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_FAILED:${response.status}`);
+  return parseRemoteRuntimeImportSourcePayload(await response.json());
+};
+
 // Operations
 export const runtimeOperations = {
+  setActiveRuntimeId(id: string): void {
+    setRuntimeControllerPendingRuntimeId(id);
+  },
+
   // Add local runtime (for multi-party testing)
   async addLocalRuntime(label: string): Promise<string> {
     const currentRuntimes = get(runtimes);
@@ -157,54 +281,72 @@ export const runtimeOperations = {
     const validated = await validateRemoteRuntimeEntry(entry, { importedAt: Date.now() });
     const latencyMs = Math.max(0, Math.round(performance.now() - startedAt));
     const stored = { ...validated, runtimeId: validated.runtimeId };
-    persistRemoteRuntimeImports([stored], { merge: true });
+    const persisted = persistRemoteRuntimeImports([stored], { merge: true });
+    const persistedStored = persisted.find(candidate => candidate.runtimeId === stored.runtimeId) ?? stored;
     runtimes.update((current) => {
-      const updated = upsertRemoteImportEntry(current, stored);
-      const runtime = updated.get(stored.runtimeId);
+      const updated = upsertRemoteImportEntry(current, persistedStored);
+      const runtime = updated.get(persistedStored.runtimeId);
       if (!runtime) return updated;
-      return setRuntimeEntry(updated, stored.runtimeId, { ...runtime, status: 'connected', latencyMs });
+      return setRuntimeEntry(updated, persistedStored.runtimeId, { ...runtime, status: 'connected', latencyMs });
     });
-    return stored;
+    return persistedStored;
   },
 
   upsertRemoteRuntimeImports(entries: StoredRemoteRuntimeImportEntry[]): StoredRemoteRuntimeImportEntry[] {
     const persisted = persistRemoteRuntimeImports(entries, { merge: true });
-    runtimes.update((current) => entries.reduce(upsertRemoteImportEntry, current));
+    runtimes.update((current) => persisted.reduce(upsertRemoteImportEntry, current));
     return persisted;
   },
 
   // Switch active runtime
-  selectRuntime(id: string) {
+  async selectRuntime(id: string): Promise<boolean> {
     const runtime = get(runtimes).get(id);
     if (runtime?.type === 'remote') {
-      const activeId = get(activeRuntimeId);
-      let storedWsUrl = '';
-      try {
-        storedWsUrl = localStorage.getItem('xln-runtime-adapter-ws') || '';
-      } catch {
-        storedWsUrl = '';
-      }
-      if (activeId !== id || storedWsUrl !== runtime.wsUrl) {
-        if (persistActiveRemoteRuntime(runtime)) {
-          activeRuntimeId.set(id);
-          window.location.reload();
-          return;
+      if (!runtime.wsUrl) throw new Error(`REMOTE_RUNTIME_WS_MISSING:${id}`);
+      const previousStorage = readRuntimeAdapterStorageSnapshot();
+      const previousPendingRuntimeId = get(runtimeControllerHandle).pendingRuntimeId;
+      const persisted = persistActiveRemoteRuntime(runtime);
+      if (!persisted) return false;
+      setRuntimeControllerPendingRuntimeId(id);
+      if (!runtimeControllerAlreadyTargets(runtime, id)) {
+        try {
+          await switchToRuntimeAdapter({
+            mode: 'remote',
+            runtimeId: id,
+            wsUrl: runtime.wsUrl,
+            ...(runtime.apiKey ? { authKey: runtime.apiKey } : {}),
+          });
+        } catch (error) {
+          restoreRuntimeAdapterStorageSnapshot(previousStorage);
+          setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId);
+          throw error;
         }
       }
+      if (!runtimeControllerAlreadyTargets(runtime, id)) {
+        throw new Error(`REMOTE_RUNTIME_SWITCH_TARGET_MISMATCH:${id}`);
+      }
+      return persistActiveRemoteRuntime(runtime);
     }
-    activeRuntimeId.set(id);
+    const previousPendingRuntimeId = get(runtimeControllerHandle).pendingRuntimeId;
+    setRuntimeControllerPendingRuntimeId(id);
+    try {
+      if (runtime && !runtimeControllerAlreadyTargets(runtime, id)) {
+        await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id });
+      } else if (!runtime) {
+        await switchToRuntimeAdapter({ mode: 'embedded', runtimeId: id });
+      }
+    } catch (error) {
+      setRuntimeControllerPendingRuntimeId(previousPendingRuntimeId);
+      throw error;
+    }
+    persistActiveEmbeddedRuntime();
+    return true;
   },
 
-  activateRemoteRuntime(runtimeId: string, options: { href?: string } = {}): boolean {
+  async activateRemoteRuntime(runtimeId: string, _options: { href?: string } = {}): Promise<boolean> {
     const runtime = get(runtimes).get(runtimeId);
     if (!runtime || runtime.type !== 'remote') return false;
-    if (!persistActiveRemoteRuntime(runtime)) return false;
-    activeRuntimeId.set(runtimeId);
-    if (typeof window !== 'undefined') {
-      if (options.href) window.location.assign(options.href);
-      else window.location.reload();
-    }
-    return true;
+    return runtimeOperations.selectRuntime(runtimeId);
   },
 
   hydrateRemoteRuntimeImports() {
@@ -219,17 +361,36 @@ export const runtimeOperations = {
     runtimes.update((current) => entries.reduce(upsertRemoteImportEntry, current));
   },
 
+  async hydrateRemoteRuntimeImportSource(source = '/api/runtime-import'): Promise<StoredRemoteRuntimeImportEntry[]> {
+    if (typeof window === 'undefined') return [];
+    if (remoteImportSourceHydration) return remoteImportSourceHydration;
+    remoteImportSourceHydration = (async () => {
+      const importedAt = Date.now();
+      const entries = await fetchRemoteRuntimeImportSource(source);
+      if (entries.length === 0) return [];
+      const results = await Promise.allSettled(entries.map((entry, index) =>
+        validateRemoteRuntimeEntry(entry, { index, importedAt })
+      ));
+      const validated = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+      if (validated.length === 0) return [];
+      return runtimeOperations.upsertRemoteRuntimeImports(validated);
+    })().catch((error) => {
+      console.warn('[runtimeStore] Remote runtime import source hydration failed:', error);
+      return [];
+    }).finally(() => {
+      remoteImportSourceHydration = null;
+    });
+    return remoteImportSourceHydration;
+  },
+
   // Disconnect runtime
-  disconnect(id: string) {
-    let shouldReload = false;
+  async disconnect(id: string): Promise<void> {
+    let shouldSwitchToEmbedded = false;
     runtimes.update(r => {
       const runtime = r.get(id);
-      if (runtime?.connection) {
-        runtime.connection.close();
-      }
       if (runtime?.type === 'remote') {
         removeStoredRemoteRuntimeImport(runtime.id);
-        shouldReload = clearActiveRemoteRuntimeStorage(runtime) || get(activeRuntimeId) === id;
+        shouldSwitchToEmbedded = clearActiveRemoteRuntimeStorage(runtime) || get(activeRuntimeId) === id;
       }
       const updated = new Map(r);
       updated.delete(id);
@@ -238,20 +399,17 @@ export const runtimeOperations = {
 
     // If we just deleted the active runtime, clear selection.
     if (get(activeRuntimeId) === id) {
-      activeRuntimeId.set('');
+      setRuntimeControllerPendingRuntimeId('');
     }
-    if (shouldReload && typeof window !== 'undefined') window.location.reload();
+    if (shouldSwitchToEmbedded) await switchToRuntimeAdapter({ mode: 'embedded' });
   },
 
   resetAll() {
-    runtimes.update((currentRuntimes) => {
-      for (const runtime of currentRuntimes.values()) {
-        runtime.connection?.close();
-      }
+    runtimes.update(() => {
       writeStoredRemoteRuntimeImports([]);
       return new Map();
     });
-    activeRuntimeId.set('');
+    setRuntimeControllerPendingRuntimeId('');
   },
 
   // Update active runtime env.
@@ -335,3 +493,33 @@ export const runtimeOperations = {
     return Array.from(get(runtimes).values());
   }
 };
+
+registerDebugSurface('registry', () => runtimeOperations.getAllRuntimes().map((runtime) => ({
+  id: runtime.id,
+  type: runtime.type,
+  label: runtime.label,
+  wsUrl: runtime.wsUrl,
+  remoteAccess: runtime.remoteAccess,
+  permissions: runtime.permissions,
+  status: runtime.status,
+  entityCount: runtime.entityCount,
+  hubEntityId: runtime.hubEntityId,
+  hubName: runtime.hubName,
+  hubJurisdiction: runtime.hubJurisdiction,
+  hubEntities: runtime.hubEntities,
+  lastSynced: runtime.lastSynced,
+  latencyMs: runtime.latencyMs,
+})));
+
+registerDebugSurface('runtimeSelection', () => ({
+  activeRuntimeId: get(activeRuntimeId),
+  controller: get(runtimeControllerHandle),
+  config: getRuntimeControllerConfig(),
+  runtimes: runtimeOperations.getAllRuntimes().map((runtime) => ({
+    id: runtime.id,
+    type: runtime.type,
+    status: runtime.status,
+    envRuntimeId: getEnvRuntimeId(runtime.env),
+    hasEnv: Boolean(runtime.env),
+  })),
+}));

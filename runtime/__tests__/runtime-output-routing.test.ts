@@ -136,7 +136,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       warn: (_scope: string, code: string) => warnings.push(code),
       error: () => {},
-      runtimeState: {},
+      runtimeState: { entityRuntimeHints: new Map() },
     } as unknown as Env;
 
     const result = planEntityOutputs(env, [{
@@ -359,6 +359,7 @@ describe('runtime output routing', () => {
     const targetRuntimeId = runtimeId('6e');
     const targetEntityId = entityId('6f');
     const env = {
+      timestamp: 1234,
       runtimeState: {},
       gossip: {
         getProfiles: () => [{
@@ -374,6 +375,33 @@ describe('runtime output routing', () => {
     });
 
     expect(resolved).toBe(targetRuntimeId);
+    expect(env.runtimeState.entityRuntimeHints?.get(targetEntityId)?.seenAt).toBe(1234);
+  });
+
+  test('entity runtime hint ttl uses deterministic env timestamp', () => {
+    const targetRuntimeId = runtimeId('71');
+    const targetEntityId = entityId('72');
+    const env = {
+      timestamp: 10_000,
+      runtimeState: { entityRuntimeHints: new Map() },
+      gossip: {
+        getProfiles: () => [{
+          entityId: targetEntityId,
+          runtimeId: targetRuntimeId,
+          metadata: { board: { validators: [{ signerId: runtimeId('73') }] } },
+        }],
+      },
+    } as unknown as Env;
+    const deps = {
+      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState!,
+    };
+
+    expect(resolveRuntimeIdForEntity(env, targetEntityId, deps)).toBe(targetRuntimeId);
+    expect(env.runtimeState!.entityRuntimeHints!.get(targetEntityId)?.seenAt).toBe(10_000);
+
+    env.timestamp = 70_001;
+    env.gossip = { getProfiles: () => [] } as never;
+    expect(resolveRuntimeIdForEntity(env, targetEntityId, deps)).toBeNull();
   });
 
   test('fails fast on tx-bearing local outputs with stale signer instead of enqueueing a retry loop', () => {

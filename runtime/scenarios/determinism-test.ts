@@ -13,6 +13,8 @@ import { createGossipLayer } from '../networking/gossip';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 import { assertRuntimeIdle } from './helpers';
 import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../entity-consensus-frame';
+import { stopManagedScenarioAnvil } from './boot';
+import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';
 
 const RUNS = 2;
 const SEED = 'determinism-test-seed-42';
@@ -49,6 +51,13 @@ type ScenarioResult = {
   error?: string;
 };
 
+const isJEventObservationEnvelope = (value: Record<string, unknown>): boolean =>
+  typeof value['signature'] === 'string' &&
+  typeof value['blockHash'] === 'string' &&
+  typeof value['eventsHash'] === 'string' &&
+  (typeof value['blockNumber'] === 'number' || typeof value['blockNumber'] === 'string') &&
+  (typeof value['from'] === 'string' || typeof value['signerId'] === 'string');
+
 const normalizeOracleValue = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(normalizeOracleValue);
   if (typeof value === 'string') {
@@ -58,14 +67,62 @@ const normalizeOracleValue = (value: unknown): unknown => {
 
   const source = value as Record<string, unknown>;
   const normalized: Record<string, unknown> = {};
+  const isJEventObservation = isJEventObservationEnvelope(source);
   for (const key of Object.keys(source)) {
     // Anvil block hashes include external block metadata and can differ even
     // when event bodies, tx hashes, nonces, balances, and RJEA transitions match.
-    normalized[key] = key === 'blockHash' || key === 'jBlockHash'
-      ? '<external-block-hash>'
-      : normalizeOracleValue(source[key]);
+    if (key === 'blockHash' || key === 'jBlockHash') {
+      normalized[key] = '<external-block-hash>';
+      continue;
+    }
+    if (isJEventObservation && key === 'blockNumber') {
+      normalized[key] = '<external-block-number>';
+      continue;
+    }
+    // J-event observation signatures sign the external block hash above. Once
+    // the oracle normalizes that block hash, comparing the raw signature would
+    // only compare the hidden external block metadata, not RJEA state behavior.
+    // Do not mask other signatures: account/entity consensus signatures remain
+    // deterministic acceptance evidence.
+    if (isJEventObservation && key === 'signature') {
+      normalized[key] = '<external-j-event-signature>';
+      continue;
+    }
+    normalized[key] = normalizeOracleValue(source[key]);
   }
   return normalized;
+};
+
+const normalizeFrameLogDataForOracle = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(normalizeFrameLogDataForOracle);
+  if (value === null || typeof value !== 'object') return value;
+
+  const source = value as Record<string, unknown>;
+  const normalized: Record<string, unknown> = {};
+  for (const key of Object.keys(source)) {
+    // Frame logs are diagnostic UI/audit records. Their external chain cursor
+    // can drift between fresh Anvil runs while RJEA state and J replicas still
+    // match. Only mask this log metadata; protocol state is normalized through
+    // snapshotEnvProjection/snapshotProjection and remains fully compared.
+    if (key === 'blockNumber' || key === 'jBlockNumber') {
+      normalized[key] = '<external-frame-log-block-number>';
+      continue;
+    }
+    normalized[key] = normalizeFrameLogDataForOracle(source[key]);
+  }
+  return normalized;
+};
+
+const normalizeFrameLogsForOracle = (logs: Env['frameLogs'] | undefined): unknown[] => {
+  if (!Array.isArray(logs) || logs.length === 0) return [];
+  return logs.map((entry) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+    const source = entry as unknown as Record<string, unknown>;
+    return {
+      ...source,
+      ...(source['data'] !== undefined ? { data: normalizeFrameLogDataForOracle(source['data']) } : {}),
+    };
+  });
 };
 
 const toOracleValue = (value: unknown): unknown => {
@@ -121,20 +178,7 @@ const restoreConsole = (original: ConsoleFns): void => {
 const projectJReplicas = (jReplicas: Env['jReplicas'] | undefined): Map<string, unknown> => {
   const projected = new Map<string, unknown>();
   for (const [key, replica] of jReplicas ?? new Map()) {
-    projected.set(key, {
-      name: replica.name,
-      chainId: replica.chainId,
-      blockNumber: replica.blockNumber,
-      stateRoot: replica.stateRoot,
-      blockDelayMs: replica.blockDelayMs,
-      blockTimeMs: replica.blockTimeMs,
-      lastBlockTimestamp: replica.lastBlockTimestamp,
-      blockReady: replica.blockReady,
-      depositoryAddress: replica.depositoryAddress,
-      entityProviderAddress: replica.entityProviderAddress,
-      contracts: replica.contracts,
-      mempool: replica.mempool,
-    });
+    projected.set(key, buildCanonicalJReplicaSnapshot(replica));
   }
   return projected;
 };
@@ -164,7 +208,7 @@ const snapshotProjection = (snapshot: Env['history'][number]): Record<string, un
   runtimeOutputs: snapshot.runtimeOutputs,
   description: snapshot.description,
   meta: snapshot.meta,
-  logs: snapshot.logs ?? [],
+  logs: normalizeFrameLogsForOracle(snapshot.logs),
 });
 
 const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =>
@@ -266,6 +310,9 @@ const assertMatchingOracles = (scenario: ScenarioEntry, runs: ScenarioOracle[]):
 };
 
 const cleanupScenarioEnv = async (env: Env): Promise<void> => {
+  const { closeRuntimeDb, closeInfraDb, stopRuntimeLoopAndWait } = await import('../runtime');
+  await stopRuntimeLoopAndWait(env, 5_000);
+
   const adapters = new Set<unknown>();
   if (env.jAdapter) adapters.add(env.jAdapter);
   for (const replica of env.jReplicas?.values() ?? []) {
@@ -279,7 +326,6 @@ const cleanupScenarioEnv = async (env: Env): Promise<void> => {
     }
   }
 
-  const { closeRuntimeDb, closeInfraDb } = await import('../runtime');
   await closeRuntimeDb(env);
   await closeInfraDb(env);
 };
@@ -347,6 +393,7 @@ const runScenarioOnce = async (
     for (const targetEnv of cleanupTargets) {
       await cleanupScenarioEnv(targetEnv);
     }
+    await stopManagedScenarioAnvil();
     restoreConsole(originalConsole);
   }
 };

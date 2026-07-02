@@ -15,17 +15,17 @@
 
   // Props
   interface Props {
-    isolatedEnv: Writable<Env | null>;
-    isolatedHistory?: Writable<EnvSnapshot[]> | undefined;
-    isolatedTimeIndex?: Writable<number> | undefined;
+    runtimeFrameEnv: Writable<Env | null>;
+    runtimeFrameHistory?: Writable<EnvSnapshot[]> | undefined;
+    runtimeFrameTimeIndex?: Writable<number> | undefined;
     selectedJurisdiction?: string | null;
     hideSelector?: boolean;
   }
 
   let {
-    isolatedEnv,
-    isolatedHistory = undefined,
-    isolatedTimeIndex = undefined,
+    runtimeFrameEnv,
+    runtimeFrameHistory = undefined,
+    runtimeFrameTimeIndex = undefined,
     selectedJurisdiction = $bindable<string | null>(null),
     hideSelector = false,
   }: Props = $props();
@@ -100,9 +100,9 @@
 
   // Get current frame based on timeIndex
   function getCurrentFrame(): Env | EnvSnapshot | null {
-    const timeIndex = isolatedTimeIndex ? get(isolatedTimeIndex) : -1;
-    const history = isolatedHistory ? get(isolatedHistory) : [];
-    const env = get(isolatedEnv);
+    const timeIndex = runtimeFrameTimeIndex ? get(runtimeFrameTimeIndex) : -1;
+    const history = runtimeFrameHistory ? get(runtimeFrameHistory) : [];
+    const env = get(runtimeFrameEnv);
 
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex, history.length - 1);
@@ -112,15 +112,15 @@
   }
 
   let isLive = $derived.by(() => {
-    const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
+    const timeIndex = runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1;
     return timeIndex < 0;
   });
 
   // Get jurisdictions from current frame
   let jurisdictions = $derived.by<JurisdictionView[]>(() => {
-    const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
-    const history = isolatedHistory ? $isolatedHistory : [];
-    const env = $isolatedEnv;
+    const timeIndex = runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1;
+    const history = runtimeFrameHistory ? $runtimeFrameHistory : [];
+    const env = $runtimeFrameEnv;
 
     // From historical frame
     if (timeIndex >= 0 && history && history.length > 0) {
@@ -156,9 +156,9 @@
   // Get entity names from gossip profiles (time-aware)
   function getEntityNames(): Map<string, string> {
     const names = new Map<string, string>();
-    const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
-    const history = isolatedHistory ? $isolatedHistory : [];
-    const env = $isolatedEnv;
+    const timeIndex = runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1;
+    const history = runtimeFrameHistory ? $runtimeFrameHistory : [];
+    const env = $runtimeFrameEnv;
 
     // Get gossip profiles for name resolution
     const rawProfiles = env?.gossip?.getProfiles?.() || env?.gossip?.profiles || [];
@@ -268,9 +268,9 @@
       initialDisputeNonce: number;
     }> = [];
 
-    const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
-    const history = isolatedHistory ? $isolatedHistory : [];
-    const env = $isolatedEnv;
+    const timeIndex = runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1;
+    const history = runtimeFrameHistory ? $runtimeFrameHistory : [];
+    const env = $runtimeFrameEnv;
 
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
@@ -323,7 +323,7 @@
       browserVmTokens = [];
       return;
     }
-    const env = get(isolatedEnv);
+    const env = get(runtimeFrameEnv);
     if (!env) {
       browserVmTokens = [];
       return;
@@ -455,7 +455,7 @@
       return;
     }
 
-    const env = get(isolatedEnv);
+    const env = get(runtimeFrameEnv);
     if (!env) {
       externalBalances = [];
       externalBalancesLoading = false;
@@ -518,7 +518,7 @@
       return;
     }
 
-    const env = get(isolatedEnv);
+    const env = get(runtimeFrameEnv);
     if (!env) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
@@ -582,7 +582,7 @@
       return;
     }
 
-    const env = get(isolatedEnv);
+    const env = get(runtimeFrameEnv);
     if (!env) {
       entityDebts = [];
       debtsLoading = false;
@@ -597,16 +597,16 @@
     const getDebts = jadapter.getDebts.bind(jadapter);
 
     // Get entity IDs from eReplicas
-    const isolatedEnvValue = $isolatedEnv;
-    const timeIndex = isolatedTimeIndex ? (get(isolatedTimeIndex) ?? -1) : -1;
-    const history = isolatedHistory ? get(isolatedHistory) : [];
+    const runtimeFrameEnvValue = $runtimeFrameEnv;
+    const timeIndex = runtimeFrameTimeIndex ? (get(runtimeFrameTimeIndex) ?? -1) : -1;
+    const history = runtimeFrameHistory ? get(runtimeFrameHistory) : [];
 
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex, history.length - 1);
       eReplicas = history[idx]?.eReplicas ?? null;
     } else {
-      eReplicas = isolatedEnvValue?.eReplicas ?? null;
+      eReplicas = runtimeFrameEnvValue?.eReplicas ?? null;
     }
 
     if (!eReplicas || eReplicas.size === 0) {

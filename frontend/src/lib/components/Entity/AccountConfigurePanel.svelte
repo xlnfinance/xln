@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { Env } from '@xln/runtime/xln-api';
+  import type { Env, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import CollateralForm from './CollateralForm.svelte';
   import ConfigureAccountSelector from './ConfigureAccountSelector.svelte';
@@ -24,6 +25,8 @@
   export let liveRuntimeEnv: Env | null = null;
   export let workspaceAccountId = '';
   export let workspaceAccountIds: string[] = [];
+  export let entityNames: Map<string, string> = new Map();
+  export let profileByEntityId: Map<string, GossipProfile> = new Map();
   export let configureWorkspaceTab: ConfigureWorkspaceTab = 'extend-credit';
   export let configureTokenId = 1;
   export let configureTokenOptions: ConfigureTokenOption[] = [];
@@ -36,15 +39,23 @@
   export let confirmAndQueueDisputeStart: (counterpartyEntityId: string, reason: string, options?: Record<string, unknown>) => void | Promise<void>;
   export let confirmAndQueueDisputePrepare: (counterpartyEntityId: string, reason: string) => void | Promise<void>;
   export let addTokenToAccount: () => void | Promise<void>;
+  export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   $: configureAccount = replica?.state?.accounts?.get?.(workspaceAccountId);
   $: crossJTargetRisk = getCrossJTargetDisputeRisk(workspaceAccountId);
+  $: profiles = Array.from(profileByEntityId.values());
+  $: remoteAdminReady = $runtimeControllerHandle.mode === 'remote' && $runtimeControllerHandle.authLevel === 'admin';
+  $: commandReady = activeIsLive && Boolean(liveRuntimeEnv || remoteAdminReady);
+  $: commandUnavailableMessage = activeIsLive
+    ? 'Account actions require embedded runtime Env or admin remote runtime.'
+    : 'Account actions are only available in LIVE mode.';
 </script>
 
 <div class="configure-panel">
   <ConfigureAccountSelector
     value={workspaceAccountId}
     accountIds={workspaceAccountIds}
+    {profiles}
     excludeId={replica?.state?.entityId || tab.entityId}
     disabled={!activeIsLive || workspaceAccountIds.length === 0}
     on:change={handleWorkspaceAccountChange}
@@ -56,36 +67,43 @@
 
   {#if !workspaceAccountId}
     <LiveRequiredState message="Select workspace account above first." />
-  {:else if !liveRuntimeEnv || !activeIsLive}
-    <LiveRequiredState message="Account actions are only available in LIVE mode." />
+  {:else if !commandReady}
+    <LiveRequiredState message={commandUnavailableMessage} />
   {:else if configureWorkspaceTab === 'extend-credit'}
     <CreditForm
       entityId={replica?.state?.entityId || tab.entityId}
-      env={liveRuntimeEnv}
+      actionRuntimeEnv={liveRuntimeEnv}
       isLive={activeIsLive}
       signerId={tab.signerId || null}
       counterpartyId={workspaceAccountId}
       accountIds={workspaceAccountIds}
+      {entityNames}
       mode="extend"
+      {submitRuntimeInput}
     />
   {:else if configureWorkspaceTab === 'request-credit'}
     <CreditForm
       entityId={replica?.state?.entityId || tab.entityId}
-      env={liveRuntimeEnv}
+      actionRuntimeEnv={liveRuntimeEnv}
       isLive={activeIsLive}
       signerId={tab.signerId || null}
       counterpartyId={workspaceAccountId}
       accountIds={workspaceAccountIds}
+      {entityNames}
       mode="request"
+      {submitRuntimeInput}
     />
   {:else if configureWorkspaceTab === 'collateral'}
     <CollateralForm
       entityId={replica?.state?.entityId || tab.entityId}
-      env={liveRuntimeEnv}
+      actionRuntimeEnv={liveRuntimeEnv}
       isLive={activeIsLive}
       signerId={tab.signerId || null}
       counterpartyId={workspaceAccountId}
       accountIds={workspaceAccountIds}
+      {entityNames}
+      accountOverride={configureAccount ?? null}
+      {submitRuntimeInput}
     />
   {:else if configureWorkspaceTab === 'dispute'}
     <div class="configure-token-card danger-card">

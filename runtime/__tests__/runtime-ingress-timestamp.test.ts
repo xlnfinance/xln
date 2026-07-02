@@ -6,6 +6,7 @@ import { initCrontab, scheduleHook } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
 import { processEventBatch } from '../jadapter/watcher';
 import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
+import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { AccountMachine, EntityReplica, Env, JurisdictionConfig } from '../types';
 
 const TEST_JURISDICTION = {
@@ -350,6 +351,86 @@ describe('runtime ingress timestamp', () => {
 
     expect(env.timestamp).toBeGreaterThanOrEqual(before);
     expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
+  });
+
+  test('explicit live ingress timestamp controls delayed R-frame timestamp', async () => {
+    const env = createIsolatedEnv('runtime-explicit-ingress-timestamp');
+    env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
+
+    const signerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
+    registerSignerKey(signerId, deriveSignerKeySync(env.runtimeSeed!, '1'));
+    const entityId = generateLazyEntityId([signerId], 1n);
+    const replica = makeReplica(entityId, 1_000, signerId);
+    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+
+    enqueueRuntimeInput(env, {
+      timestamp: 20_000,
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'profile-update',
+          data: {
+            profile: {
+              entityId,
+              name: 'Explicit Timestamp',
+            },
+          },
+        }],
+      }],
+    });
+    await sleep(20);
+    await process(env);
+
+    expect(env.timestamp).toBe(20_000);
+    const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
+    expect(updatedReplica?.state.timestamp).toBe(20_000);
+    expect(env.history.at(-1)?.runtimeInput.entityInputs[0]?.entityTxs?.[0]).toMatchObject({
+      type: 'profile-update',
+      data: { profile: { entityId, name: 'Explicit Timestamp' } },
+    });
+  });
+
+  test('explicit live ingress timestamp keeps canonical state hash deterministic across wall-clock delay', async () => {
+    const seed = uniqueSeed('runtime-explicit-ingress-deterministic-hash');
+    const buildEnv = (dbSuffix: string): { env: Env; entityId: string; signerId: string } => {
+      const env = createEmptyEnv(seed);
+      env.dbNamespace = `${String(env.runtimeId || 'runtime')}-${dbSuffix}`;
+      env.quietRuntimeLogs = true;
+      env.timestamp = 1_000;
+      const signerId = deriveSignerAddressSync(env.runtimeSeed!, '1').toLowerCase();
+      registerSignerKey(signerId, deriveSignerKeySync(env.runtimeSeed!, '1'));
+      const entityId = generateLazyEntityId([signerId], 1n);
+      env.eReplicas.set(`${entityId}:${signerId}`, makeReplica(entityId, 1_000, signerId));
+      return { env, entityId, signerId };
+    };
+    const submit = async (env: Env, entityId: string, signerId: string): Promise<string> => {
+      enqueueRuntimeInput(env, {
+        timestamp: 20_000,
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId,
+          signerId,
+          entityTxs: [{
+            type: 'profile-update',
+            data: { profile: { entityId, name: 'Deterministic Timestamp' } },
+          }],
+        }],
+      });
+      await process(env);
+      expect(env.timestamp).toBe(20_000);
+      return computeCanonicalStateHashFromEnv(env);
+    };
+
+    const first = buildEnv('deterministic-hash-a');
+    const firstHash = await submit(first.env, first.entityId, first.signerId);
+    await sleep(25);
+    const second = buildEnv('deterministic-hash-b');
+    const secondHash = await submit(second.env, second.entityId, second.signerId);
+
+    expect(secondHash).toBe(firstHash);
   });
 
   test('empty entity ingress advances runtime clock and fires due hooks', async () => {

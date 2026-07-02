@@ -6,6 +6,8 @@ import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '
 import { resolveEntityProposerId } from './state-helpers';
 import type { CrossJurisdictionSwapRoute, EntityState, Env, RuntimeInput } from './types';
 import { getWallClockMs } from './utils';
+import { buildDebtEnforcementRuntimeInputFromProjection } from './debt-enforcement-command';
+import type { DebtEnforcementProjectionRuntimeInputParams } from './debt-enforcement-command';
 
 export function getActiveJAdapter(env: Env): JAdapter | null {
   if (!env.activeJurisdiction) return null;
@@ -50,6 +52,16 @@ export type CrossJurisdictionSwapSubmitResult = {
 export type CrossJurisdictionSwapSubmission = CrossJurisdictionSwapSubmitResult & {
   input: RuntimeInput;
 };
+
+export type DebtEnforcementRuntimeInputParams = {
+  entityId: string;
+  tokenId: number;
+  maxIterations?: number | bigint;
+  signerId?: string;
+};
+
+export { buildDebtEnforcementRuntimeInputFromProjection };
+export type { DebtEnforcementProjectionRuntimeInputParams };
 
 const normalizeRuntimeEntityId = (entityId: string): string => String(entityId || '').toLowerCase();
 
@@ -195,17 +207,22 @@ export function buildCrossJurisdictionSwapSubmission(
   };
 }
 
-export async function submitDebtEnforcement(
+export function buildDebtEnforcementRuntimeInput(
   env: Env,
-  entityId: string,
-  tokenId: number,
-  maxIterations: number | bigint = 100n,
-  signerId?: string,
-): Promise<void> {
+  params: DebtEnforcementRuntimeInputParams,
+): RuntimeInput {
+  const entityId = String(params.entityId || '').trim().toLowerCase();
+  if (!entityId) throw new Error('DEBT_ENFORCEMENT_ENTITY_REQUIRED');
+  const signerId = params.signerId ? String(params.signerId).trim().toLowerCase() : undefined;
   const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
-  const jAdapter = getEntityJAdapter(env, entityId, signerId);
-  if (!jAdapter) {
-    throw new Error(`ENTITY_JADAPTER_UNAVAILABLE: ${jurisdiction.name}`);
-  }
-  await jAdapter.enforceDebts(entityId, tokenId, maxIterations);
+  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
+
+  return buildDebtEnforcementRuntimeInputFromProjection({
+    entityId,
+    jurisdictionName: jurisdiction.name,
+    tokenId: params.tokenId,
+    ...(params.maxIterations === undefined ? {} : { maxIterations: params.maxIterations }),
+    ...(signerId ? { signerId } : {}),
+    timestamp: now,
+  });
 }

@@ -2,10 +2,11 @@ import type { RuntimeInput, Env } from '../types';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
-  RuntimeAdapterConfig,
-  RuntimeAdapterReadQuery,
-  RuntimeAdapterStatus,
-} from './types';
+	  RuntimeAdapterConfig,
+	  RuntimeAdapterReadQuery,
+	  RuntimeAdapterSendResult,
+	  RuntimeAdapterStatus,
+	} from './types';
 import { RuntimeAdapterError } from './errors';
 import { resolveRuntimeAdapterRead, type RuntimeAdapterResolveContext } from './resolve';
 
@@ -24,6 +25,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   private statusCbs = new Set<(status: RuntimeAdapterStatus) => void>();
   private changeCbs = new Set<(height: number) => void>();
   private currentStatus: RuntimeAdapterStatus = 'disconnected';
+  private configuredRuntimeId = '';
 
   constructor(private readonly deps: EmbeddedRuntimeAdapterDeps) {}
 
@@ -31,8 +33,13 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     return this.currentStatus;
   }
 
+  get runtimeId(): string {
+    return String(this.resolveEnv()?.runtimeId || this.configuredRuntimeId || 'embedded').trim().toLowerCase();
+  }
+
   get currentHeight(): number {
-    return Math.max(0, Math.floor(Number(this.env?.height ?? 0)));
+    const env = this.resolveEnv();
+    return Math.max(0, Math.floor(Number(env?.height ?? 0)));
   }
 
   get authLevel(): RuntimeAdapterAuthLevel | null {
@@ -42,6 +49,7 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   async connect(config: RuntimeAdapterConfig): Promise<void> {
     if (config.mode !== 'embedded') throw new RuntimeAdapterError('E_BAD_QUERY', 'EmbeddedRuntimeAdapter requires mode=embedded');
     this.setStatus('connecting');
+    this.configuredRuntimeId = String(config.runtimeId || '').trim().toLowerCase();
     const env = config.seed && this.deps.main
       ? await this.deps.main(config.seed)
       : this.deps.getEnv();
@@ -63,13 +71,13 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
   }
 
   read<T = unknown>(path: string, query?: RuntimeAdapterReadQuery): Promise<T> {
-    const env = this.env ?? this.deps.getEnv();
+    const env = this.resolveEnv();
     if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
     return resolveRuntimeAdapterRead<T>({ env, ...this.deps.buildReadContext?.(env) }, path, query);
   }
 
-  send(input: RuntimeInput): Promise<{ height: number }> {
-    const env = this.env ?? this.deps.getEnv();
+	  send(input: RuntimeInput): Promise<RuntimeAdapterSendResult> {
+    const env = this.resolveEnv();
     if (!env) return Promise.reject(new RuntimeAdapterError('E_INTERNAL', 'embedded runtime env is not ready', true));
     this.deps.enqueueRuntimeInput(env, input);
     return Promise.resolve({ height: Math.max(0, Math.floor(Number(env.height ?? 0))) });
@@ -89,5 +97,9 @@ export class EmbeddedRuntimeAdapter implements RuntimeAdapter {
     if (this.currentStatus === status) return;
     this.currentStatus = status;
     for (const cb of this.statusCbs) cb(status);
+  }
+
+  private resolveEnv(): Env | null {
+    return this.deps.getEnv() ?? this.env;
   }
 }

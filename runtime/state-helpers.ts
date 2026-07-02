@@ -718,7 +718,7 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
     entityId: replica.entityId,
     signerId: replica.signerId,
     state: cloneEntityState(replica.state, forSnapshot), // forSnapshot excludes clonedForValidation
-    mempool: cloneArray(replica.mempool),
+    mempool: Array.isArray(replica.mempool) ? cloneArray(replica.mempool) : [],
     ...(replica.proposal && {
       proposal: {
         height: replica.proposal.height,
@@ -791,13 +791,14 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
  * Manual AccountMachine cloning
  */
 function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidation: boolean = false): AccountMachine {
+  const proofBody = account.proofBody ?? { tokenIds: [], deltas: [] };
   const result: AccountMachine = {
     ...account,
-    mempool: [...account.mempool],
+    mempool: Array.isArray(account.mempool) ? [...account.mempool] : [],
     currentFrame: cloneAccountFrame(account.currentFrame),
-    deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
-    locks: new Map(Array.from(account.locks.entries()).map(([key, lock]) => [key, { ...lock }])),
-    swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
+    deltas: new Map(Array.from((account.deltas ?? new Map()).entries()).map(([key, delta]) => [key, { ...delta }])),
+    locks: new Map(Array.from((account.locks ?? new Map()).entries()).map(([key, lock]) => [key, { ...lock }])),
+    swapOffers: new Map(Array.from((account.swapOffers ?? new Map()).entries()).map(([key, offer]) => [key, { ...offer }])),
     pulls: new Map(Array.from((account.pulls ?? new Map()).entries()).map(([key, pull]) => [key, { ...pull }])),
     ...(account.swapOrderHistory instanceof Map
       ? {
@@ -829,31 +830,31 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
           ),
         }
       : {}),
-    pendingSignatures: [...account.pendingSignatures],
-    globalCreditLimits: { ...account.globalCreditLimits },
-    proofHeader: { ...account.proofHeader },
+    pendingSignatures: Array.isArray(account.pendingSignatures) ? [...account.pendingSignatures] : [],
+    globalCreditLimits: { ...(account.globalCreditLimits ?? {}) },
+    proofHeader: { ...(account.proofHeader ?? {}) },
     proofBody: {
-      ...account.proofBody,
-      tokenIds: [...account.proofBody.tokenIds],
-      deltas: [...account.proofBody.deltas],
+      ...proofBody,
+      tokenIds: Array.isArray(proofBody.tokenIds) ? [...proofBody.tokenIds] : [],
+      deltas: Array.isArray(proofBody.deltas) ? [...proofBody.deltas] : [],
     },
-    disputeConfig: { ...account.disputeConfig },
-    leftJObservations: account.leftJObservations.map(obs => ({
+    disputeConfig: { ...(account.disputeConfig ?? {}) },
+    leftJObservations: (Array.isArray(account.leftJObservations) ? account.leftJObservations : []).map(obs => ({
       ...obs,
       events: Array.isArray(obs.events) ? [...obs.events] : [],
     })),
-    rightJObservations: account.rightJObservations.map(obs => ({
+    rightJObservations: (Array.isArray(account.rightJObservations) ? account.rightJObservations : []).map(obs => ({
       ...obs,
       events: Array.isArray(obs.events) ? [...obs.events] : [],
     })),
-    jEventChain: account.jEventChain.map(entry => ({
+    jEventChain: (Array.isArray(account.jEventChain) ? account.jEventChain : []).map(entry => ({
       ...entry,
       events: Array.isArray(entry.events) ? [...entry.events] : [],
     })),
     lastFinalizedJHeight: account.lastFinalizedJHeight,
     onChainSettlementNonce: account.onChainSettlementNonce,
-    pendingWithdrawals: new Map(account.pendingWithdrawals), // Phase 2: Clone withdrawal tracking
-    requestedRebalance: new Map(account.requestedRebalance), // Phase 3: Clone rebalance hints
+    pendingWithdrawals: new Map(account.pendingWithdrawals ?? []), // Phase 2: Clone withdrawal tracking
+    requestedRebalance: new Map(account.requestedRebalance ?? []), // Phase 3: Clone rebalance hints
     requestedRebalanceFeeState: new Map(
       Array.from(account.requestedRebalanceFeeState || []).map(([tokenId, feeState]) => [
         tokenId,

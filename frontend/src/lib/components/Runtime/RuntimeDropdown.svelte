@@ -19,7 +19,8 @@
     runtimeOperations,
     type Runtime as StoreRuntime,
   } from '$lib/stores/runtimeStore';
-  import { appRuntimeAdapterEndpoint, appRuntimeAdapterMode, appRuntimeAdapterStatus, p2pState } from '$lib/stores/xlnStore';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { p2pState } from '$lib/stores/xlnStore';
   import { settings } from '$lib/stores/settingsStore';
 
   export let allowAdd = false;
@@ -51,7 +52,7 @@
   };
 
   const remoteHostLabel = (runtime: StoreRuntime | null | undefined): string => {
-    const raw = String(runtime?.label || runtime?.id || $appRuntimeAdapterEndpoint || 'remote runtime');
+    const raw = String(runtime?.label || runtime?.id || $runtimeControllerHandle.endpoint || 'remote runtime');
     const match = raw.match(/wss?:\/\/[^/\s]+(?:\/[^\s]*)?/);
     if (!match) return raw.replace(/^Remote\s+/i, '');
     try {
@@ -88,11 +89,11 @@
   });
 
   $: connStatus = ($p2pState.connected ? 'connected' : $p2pState.reconnect ? 'reconnecting' : 'disconnected') as RuntimeDotStatus;
-  $: runtimeAdapterDotStatus = ($appRuntimeAdapterStatus === 'connected'
+  $: runtimeAdapterDotStatus = ($runtimeControllerHandle.status === 'connected'
     ? 'connected'
-    : $appRuntimeAdapterStatus === 'connecting'
+    : $runtimeControllerHandle.status === 'connecting'
       ? 'reconnecting'
-      : $appRuntimeAdapterStatus === 'error'
+      : $runtimeControllerHandle.status === 'error'
         ? 'error'
         : 'disconnected') as RuntimeDotStatus;
   $: relayUrl = $settings.relayUrl;
@@ -101,16 +102,16 @@
     ...remoteRuntimes.map(fromRemoteRuntime),
     ...$allVaultRuntimes.map(fromVaultRuntime),
   ];
-  $: currentRemoteRuntime = $activeStoreRuntime?.type === 'remote' || $appRuntimeAdapterMode === 'remote'
+  $: currentRemoteRuntime = $activeStoreRuntime?.type === 'remote' || $runtimeControllerHandle.mode === 'remote'
     ? ($activeStoreRuntime?.type === 'remote' ? $activeStoreRuntime : remoteRuntimes[0] ?? null)
     : null;
   $: currentRuntime = currentRemoteRuntime ? fromRemoteRuntime(currentRemoteRuntime) : ($activeVaultRuntime ? fromVaultRuntime($activeVaultRuntime) : null);
 
-  function selectRuntime(entry: RuntimeEntry) {
+  async function selectRuntime(entry: RuntimeEntry): Promise<void> {
     if (entry.source === 'remote') {
-      runtimeOperations.selectRuntime(entry.id);
+      await runtimeOperations.selectRuntime(entry.id);
     } else {
-      vaultOperations.selectRuntime(entry.id);
+      await vaultOperations.selectRuntime(entry.id);
     }
     isOpen = false;
   }
@@ -121,10 +122,10 @@
     isOpen = false;
   }
 
-  function handleDeleteRuntime(event: MouseEvent, runtime: RuntimeEntry) {
+  async function handleDeleteRuntime(event: MouseEvent, runtime: RuntimeEntry): Promise<void> {
     event.stopPropagation();
     if (runtime.source === 'remote') {
-      runtimeOperations.disconnect(runtime.id);
+      await runtimeOperations.disconnect(runtime.id);
     } else {
       dispatch('deleteRuntime', { runtimeId: runtime.id });
     }
@@ -134,7 +135,7 @@
   function handleRuntimeKeydown(event: KeyboardEvent, runtime: RuntimeEntry) {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    selectRuntime(runtime);
+    void selectRuntime(runtime);
   }
 
   function runtimeLabel(runtime: RuntimeEntry | null): string {
@@ -161,7 +162,7 @@
           class:selected={runtime.id === currentRuntime?.id}
           role="button"
           tabindex="0"
-          on:click={() => selectRuntime(runtime)}
+          on:click={() => void selectRuntime(runtime)}
           on:keydown={(event) => handleRuntimeKeydown(event, runtime)}
         >
           <span class="conn-dot {runtime.id === currentRuntime?.id ? runtime.status : 'inactive'}"></span>
@@ -170,7 +171,7 @@
           {#if runtime.source === 'remote' || (allowDelete && runtime.source === 'browser')}
             <button
               class="delete-btn"
-              on:click={(e) => handleDeleteRuntime(e, runtime)}
+              on:click={(e) => void handleDeleteRuntime(e, runtime)}
               title={runtime.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}
             >
               <Trash2 size={12} />
@@ -191,7 +192,7 @@
     <!-- Relay Status -->
     <div class="menu-divider"></div>
     <div class="status-section">
-      {#if $appRuntimeAdapterMode === 'remote'}
+      {#if $runtimeControllerHandle.mode === 'remote'}
         <div class="status-row">
           <span class="conn-dot {runtimeAdapterDotStatus}"></span>
           <span class="status-label">Runtime</span>
@@ -199,7 +200,7 @@
         </div>
         <div class="status-row">
           <span class="status-label">Host</span>
-          <span class="status-value url" title={$appRuntimeAdapterEndpoint}>{$appRuntimeAdapterEndpoint}</span>
+          <span class="status-value url" title={$runtimeControllerHandle.endpoint}>{$runtimeControllerHandle.endpoint}</span>
         </div>
       {:else}
       <div class="status-row">

@@ -193,6 +193,7 @@ export function buildEntityProfile(
       ...(hubConfig?.swapTakerFeeBps !== undefined ? { swapTakerFeeBps: hubConfig.swapTakerFeeBps } : {}),
       ...(isHub && hubConfig
         ? {
+            ...(hubConfig.hubName ? { hubName: hubConfig.hubName } : {}),
             policyVersion: hubConfig.policyVersion,
             rebalanceBaseFee: String(hubConfig.rebalanceBaseFee ?? 10n ** 17n),
             rebalanceLiquidityFeeBps: String(hubConfig.rebalanceLiquidityFeeBps ?? hubConfig.minFeeBps ?? 1n),

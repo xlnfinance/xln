@@ -30,13 +30,20 @@ type HealthPayload = {
     hubs?: Array<{
       offers?: number;
       ready?: boolean;
+      depthReady?: boolean;
       blockers?: unknown[];
-      pairs?: Array<{ offers?: number; ready?: boolean }>;
+      pairs?: Array<{ offers?: number; ready?: boolean; depthReady?: boolean; expectedOffers?: number }>;
     }>;
     cross?: {
       ok?: boolean;
       expectedRoutes?: number;
-      routes?: Array<{ offers?: number; ready?: boolean; blockers?: unknown[] }>;
+      routes?: Array<{
+        offers?: number;
+        ready?: boolean;
+        depthReady?: boolean;
+        blockers?: unknown[];
+        pairs?: Array<{ offers?: number; ready?: boolean; depthReady?: boolean; expectedOffers?: number }>;
+      }>;
     };
   };
   custody?: { ok?: boolean };
@@ -451,32 +458,50 @@ const assertNoMarketMakerBootstrapBacklog = (payload: MarketMakerInfoPayload): v
   }
 };
 
-const healthReady = (health: HealthPayload): boolean => {
+const marketMakerFullDepthReady = (health: HealthPayload): boolean => {
   const hubs = health.marketMaker?.hubs ?? [];
+  const routes = health.marketMaker?.cross?.routes ?? [];
   const expectedOffersPerHub = Number(health.marketMaker?.expectedOffersPerHub || 0);
+  const expectedRoutes = Number(health.marketMaker?.cross?.expectedRoutes || 0);
+  return health.marketMaker?.ok === true &&
+    health.marketMaker?.startupPhase === 'offers-ready' &&
+    expectedOffersPerHub > 0 &&
+    hubs.length >= 3 &&
+    hubs.every(hub =>
+      hub.ready === true &&
+      hub.depthReady === true &&
+      Number(hub.offers || 0) >= expectedOffersPerHub &&
+      (hub.blockers ?? []).length === 0 &&
+      (hub.pairs ?? []).every(pair =>
+        pair.ready === true &&
+        pair.depthReady === true &&
+        Number(pair.offers || 0) >= Number(pair.expectedOffers || 1)
+      )
+    ) &&
+    expectedRoutes > 0 &&
+    health.marketMaker?.cross?.ok === true &&
+    routes.length >= expectedRoutes &&
+    routes.every(route =>
+      route.ready === true &&
+      route.depthReady === true &&
+      Number(route.offers || 0) > 0 &&
+      (route.blockers ?? []).length === 0 &&
+      (route.pairs ?? []).every(pair =>
+        pair.ready === true &&
+        pair.depthReady === true &&
+        Number(pair.offers || 0) >= Number(pair.expectedOffers || 1)
+      )
+    );
+};
+
+const healthReady = (health: HealthPayload): boolean => {
   return health.coreOk === true &&
     health.systemOk === true &&
     Number(health.hubs?.length || 0) >= 3 &&
     health.system?.relay === true &&
     health.hubMesh?.ok === true &&
-    health.marketMaker?.ok === true &&
-    health.marketMaker?.startupPhase === 'offers-ready' &&
+    marketMakerFullDepthReady(health) &&
     Boolean(health.marketMaker?.entityId) &&
-    expectedOffersPerHub > 0 &&
-    hubs.length >= 3 &&
-    hubs.every(hub =>
-      hub.ready === true &&
-      Number(hub.offers || 0) > 0 &&
-      (hub.blockers ?? []).length === 0 &&
-      (hub.pairs ?? []).every(pair => pair.ready === true && Number(pair.offers || 0) > 0)
-    ) &&
-    Number(health.marketMaker?.cross?.expectedRoutes || 0) > 0 &&
-    health.marketMaker?.cross?.ok === true &&
-    (health.marketMaker?.cross?.routes ?? []).every(route =>
-      route.ready === true &&
-      Number(route.offers || 0) > 0 &&
-      (route.blockers ?? []).length === 0
-    ) &&
     health.custody?.ok === true &&
     health.bootstrapReserves?.ok === true;
 };
@@ -496,11 +521,13 @@ const summarizeHealth = (health: HealthPayload): Record<string, unknown> => ({
     entity: Boolean(health.marketMaker?.entityId),
     expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? null,
     offers: health.marketMaker?.hubs?.map(hub => hub.offers ?? 0) ?? [],
+    depthReady: health.marketMaker?.hubs?.map(hub => hub.depthReady === true) ?? [],
     blockers: health.marketMaker?.hubs?.map(hub => hub.blockers?.length ?? 0) ?? [],
     blockerDetails: health.marketMaker?.hubs?.map(hub => summarizeBlockers(hub.blockers)) ?? [],
     cross: {
       ok: health.marketMaker?.cross?.ok ?? null,
       expectedRoutes: health.marketMaker?.cross?.expectedRoutes ?? null,
+      depthReady: health.marketMaker?.cross?.routes?.map(route => route.depthReady === true) ?? [],
       blockers: health.marketMaker?.cross?.routes?.map(route => route.blockers?.length ?? 0) ?? [],
       blockerDetails: health.marketMaker?.cross?.routes?.map(route => summarizeBlockers(route.blockers)) ?? [],
     },
@@ -788,8 +815,10 @@ const main = async (): Promise<void> => {
     const postBootstrapInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'
       ? await assertMarketMakerInfoResponsive()
       : null;
-    if (postBootstrapInfo && process.env['XLN_LOCAL_PROD_SMOKE_REQUIRE_IDLE_AFTER_READY'] === '1') {
-      assertNoMarketMakerBootstrapBacklog(postBootstrapInfo);
+    if (!marketMakerFullDepthReady(postBootstrapHealth)) {
+      throw new Error(
+        `LOCAL_PROD_SMOKE_POST_BOOTSTRAP_DEPTH_REGRESSED last=${JSON.stringify(summarizeHealth(postBootstrapHealth))}`,
+      );
     }
     const postBootstrapHash = postBootstrapInfo?.bootstrap?.readyHash ?? postBootstrapHealth.bootstrap?.readyHash ?? bootstrap.readyHash;
     if (postBootstrapHash !== bootstrap.readyHash) {

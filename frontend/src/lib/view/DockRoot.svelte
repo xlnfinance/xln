@@ -1,11 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy, mount, unmount } from 'svelte';
-  import { writable, get, type Writable } from 'svelte/store';
+  import { writable, type Writable } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
-  import type { Env } from '@xln/runtime/xln-api';
+  import type { Env, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
   import type { EnvSnapshot } from '$types';
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
-  import ArchitectPanel from './panels/ArchitectPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
@@ -17,13 +16,15 @@
   import TimeMachine from './core/TimeMachine.svelte';
   import { panelBridge } from './utils/panelBridge';
   import { settings } from '$lib/stores/settingsStore';
+  import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
-  export let isolatedEnv: Writable<Env | null>;
-  export let isolatedHistory: Writable<EnvSnapshot[]>;
-  export let isolatedTimeIndex: Writable<number>;
-  export let isolatedIsLive: Writable<boolean>;
+  export let runtimeFrameEnv: Writable<Env | null>;
+  export let runtimeFrameHistory: Writable<EnvSnapshot[]>;
+  export let runtimeFrameTimeIndex: Writable<number>;
+  export let runtimeFrameIsLive: Writable<boolean>;
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -35,6 +36,7 @@
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
   let showSidebarInEmbed = false;
+  let devLabEnabled = false;
 
   type EntityPanelSeed = { entityId: string; entityName: string; signerId: string; action?: 'r2r' | 'r2c' };
   type DockviewInitParams = { api: { id: string; close?: () => void } };
@@ -44,23 +46,111 @@
 
   const graphInitSignal = writable<boolean>(embedMode);
   const pendingEntityData = new Map<string, EntityPanelSeed>();
+  const LEGACY_DEV_PANEL_NAMES = new Set([
+    'architect',
+    'console',
+    'runtime-io',
+    'settings',
+    'jurisdiction',
+  ]);
+  const ENV_ONLY_PANEL_NAMES = new Set([
+    'graph3d',
+    ...LEGACY_DEV_PANEL_NAMES,
+  ]);
 
-  function resolveEntityPanelData(panelId: string) {
+  function resolveDevLabEnabled(): boolean {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('devLab') === '1' || localStorage.getItem('xln-dev-lab') === '1';
+  }
+
+  function layoutRequiresDevLab(rawLayout: string): boolean {
+    try {
+      const text = JSON.stringify(JSON.parse(rawLayout)).toLowerCase();
+      return Array.from(LEGACY_DEV_PANEL_NAMES).some((panelName) =>
+        text.includes(`"component":"${panelName}"`) ||
+        text.includes(`"id":"${panelName}"`) ||
+        text.includes(`"${panelName}"`)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function panelRequiresDevLab(panelName: string): boolean {
+    return LEGACY_DEV_PANEL_NAMES.has(panelName);
+  }
+
+  function panelRequiresRuntimeEnv(panelName: string): boolean {
+    return ENV_ONLY_PANEL_NAMES.has(panelName);
+  }
+
+  function panelDisplayName(panelName: string): string {
+    if (panelName === 'graph3d') return 'Network graph';
+    if (panelName === 'runtime-io') return 'Runtime IO';
+    return panelName.charAt(0).toUpperCase() + panelName.slice(1);
+  }
+
+  function shouldBlockRemoteEnvOnlyPanel(panelName: string): boolean {
+    return $runtimeControllerHandle.mode === 'remote' && panelRequiresRuntimeEnv(panelName);
+  }
+
+  function showRemoteProjectionBoundary(div: HTMLDivElement, panelName: string): void {
+    showEntityPanelStatus(
+      div,
+      `${panelDisplayName(panelName)} is embedded-only until its projection endpoint is available. Remote runtime state is readable in Entity, Gossip, Activity, and Time Machine.`,
+      false,
+    );
+  }
+
+  function primaryDockReferencePanel(): string {
+    return devLabEnabled ? 'architect' : 'graph3d';
+  }
+
+  function entityIdFromPanelId(panelId: string): string | null {
     if (!panelId.startsWith('entity-')) return null;
-    const entityId = panelId.slice('entity-'.length);
-    const env = get(isolatedEnv);
-    const entries = env?.eReplicas
-      ? Array.from(env.eReplicas.entries()) as Array<[string, { name?: string }]>
-      : [];
-    const entry = entries.find(([replicaKey]) => replicaKey.startsWith(`${entityId}:`));
-    if (!entry) return null;
-    const [replicaKey, replica] = entry;
-    const signerId = replicaKey.split(':')[1] || entityId;
+    return panelId.slice('entity-'.length).trim().toLowerCase();
+  }
+
+  function showEntityPanelStatus(target: HTMLElement, message: string, isError = false): void {
+    target.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = `entity-panel-status${isError ? ' error' : ''}`;
+    box.textContent = message;
+    target.appendChild(box);
+  }
+
+  function seedFromViewFrame(
+    entityId: string,
+    frame: RuntimeAdapterViewFrame,
+    existing?: EntityPanelSeed,
+  ): EntityPanelSeed | null {
+    const activeEntityId = String(frame.activeEntityId || frame.activeEntity?.summary?.entityId || '').trim().toLowerCase();
+    if (activeEntityId !== entityId || !frame.activeEntity) return null;
+    const core = frame.activeEntity.core;
+    const summary = frame.activeEntity.summary;
+    const signerId = String(core.signerId || existing?.signerId || '').trim().toLowerCase();
+    if (!signerId) return null;
     return {
       entityId,
-      entityName: replica?.name || entityId,
+      entityName: String(core.profile?.name || summary.label || existing?.entityName || entityId).trim() || entityId,
       signerId,
+      ...(existing?.action ? { action: existing.action } : {}),
     };
+  }
+
+  async function resolveEntityPanelDataFromProjection(
+    panelId: string,
+    existing?: EntityPanelSeed,
+  ): Promise<EntityPanelSeed | null> {
+    const entityId = entityIdFromPanelId(panelId);
+    if (!entityId) return null;
+    const view = await refreshRuntimeView({
+      entityId,
+      accountsLimit: 1,
+      booksLimit: 1,
+    });
+    return view.frame ? seedFromViewFrame(entityId, view.frame, existing) : null;
   }
 
   function toggleEmbedSidebar() {
@@ -74,6 +164,7 @@
 
   onMount(() => {
     graphInitSignal.set(embedMode);
+    devLabEnabled = resolveDevLabEnabled();
 
     dockview = new DockviewComponent(container, {
       className: 'dockview-theme-dark',
@@ -84,55 +175,95 @@
 
         let component: MountedComponent = null;
 
+        if (!devLabEnabled && panelRequiresDevLab(options.name)) {
+          showEntityPanelStatus(div, 'Legacy Dev Lab panel is disabled for the operator cockpit.', true);
+          return {
+            element: div,
+            init: () => {},
+            dispose: () => {},
+          };
+        }
+
+        if (shouldBlockRemoteEnvOnlyPanel(options.name)) {
+          showRemoteProjectionBoundary(div, options.name);
+          return {
+            element: div,
+            init: () => {},
+            dispose: () => {},
+          };
+        }
+
         if (options.name === 'graph3d') {
           component = mount(Graph3DPanel, {
             target: div,
             props: {
-              isolatedEnv,
-              isolatedHistory,
-              isolatedTimeIndex,
-              isolatedIsLive,
+              runtimeFrameEnv,
+              runtimeFrameHistory,
+              runtimeFrameTimeIndex,
+              runtimeFrameIsLive,
               graphInitSignal,
             },
           });
         } else if (options.name === 'brainvault') {
           component = mount(RuntimeCreation, { target: div, props: {} });
         } else if (options.name === 'architect') {
-          component = mount(ArchitectPanel, {
-            target: div,
-            props: {
-              isolatedEnv,
-              isolatedHistory,
-              isolatedTimeIndex,
-              isolatedIsLive,
+          showEntityPanelStatus(div, 'Loading Dev Lab...');
+          let disposed = false;
+          void import('./panels/ArchitectPanel.svelte')
+            .then((module) => {
+              if (disposed) return;
+              div.innerHTML = '';
+              component = mount(module.default, {
+                target: div,
+                props: {
+                  runtimeFrameEnv,
+                  runtimeFrameHistory,
+                  runtimeFrameTimeIndex,
+                  runtimeFrameIsLive,
+                },
+              });
+            })
+            .catch((error) => {
+              console.error('[DockRoot] Failed to load Dev Lab:', error);
+              const message = error instanceof Error ? error.message : String(error || 'Dev Lab load failed');
+              showEntityPanelStatus(div, `Dev Lab failed: ${message}`, true);
+            });
+          return {
+            element: div,
+            init: () => {},
+            dispose: () => {
+              disposed = true;
+              if (!component) return;
+              void unmount(component);
+              component = null;
             },
-          });
+          };
         } else if (options.name === 'console') {
           component = mount(ConsolePanel, {
             target: div,
-            props: { isolatedEnv, isolatedHistory, isolatedTimeIndex },
+            props: { runtimeFrameEnv, runtimeFrameHistory, runtimeFrameTimeIndex },
           });
         } else if (options.name === 'runtime-io') {
           component = mount(RuntimeIOPanel, {
             target: div,
-            props: { isolatedEnv, isolatedHistory, isolatedTimeIndex },
+            props: { runtimeFrameEnv, runtimeFrameHistory, runtimeFrameTimeIndex },
           });
         } else if (options.name === 'settings') {
           component = mount(SettingsPanel, {
             target: div,
-            props: { isolatedEnv, isolatedHistory, isolatedTimeIndex },
+            props: { runtimeFrameEnv, runtimeFrameHistory, runtimeFrameTimeIndex },
           });
         } else if (options.name === 'solvency') {
-          component = mount(SolvencyPanel, { target: div, props: {} });
+          component = mount(SolvencyPanel, { target: div, props: { runtimeFrameEnv } });
         } else if (options.name === 'jurisdiction') {
           component = mount(JurisdictionPanel, {
             target: div,
-            props: { isolatedEnv, isolatedHistory, isolatedTimeIndex },
+            props: { runtimeFrameEnv, runtimeFrameHistory, runtimeFrameTimeIndex },
           });
         } else if (options.name === 'gossip') {
           component = mount(GossipPanel, {
             target: div,
-            props: { isolatedEnv },
+            props: {},
           });
         }
 
@@ -141,32 +272,45 @@
           init: (parameters: DockviewInitParams) => {
             if (options.name === 'entity-panel') {
               const panelId = parameters.api.id;
-              let data = pendingEntityData.get(panelId);
+              const mountEntityPanel = (data: EntityPanelSeed): void => {
+                pendingEntityData.delete(panelId);
+                if (component) void unmount(component);
+                component = mount(EntityPanelWrapper, {
+                  target: div,
+                  props: {
+                    entityId: data.entityId,
+                    entityName: data.entityName,
+                    signerId: data.signerId,
+                    runtimeFrameEnv,
+                    runtimeFrameHistory,
+                    runtimeFrameTimeIndex,
+                    runtimeFrameIsLive,
+                    ...(data.action && { initialAction: data.action }),
+                  },
+                });
+              };
+              const data = pendingEntityData.get(panelId);
 
-              if (!data) {
-                data = resolveEntityPanelData(panelId) || undefined;
-                if (data) pendingEntityData.set(panelId, data);
-              }
-
-              if (!data) {
-                queueMicrotask(() => parameters.api?.close?.());
+              if (data?.signerId && data.entityName) {
+                mountEntityPanel(data);
                 return;
               }
 
-              pendingEntityData.delete(panelId);
-              component = mount(EntityPanelWrapper, {
-                target: div,
-                props: {
-                  entityId: data.entityId,
-                  entityName: data.entityName,
-                  signerId: data.signerId,
-                  isolatedEnv,
-                  isolatedHistory,
-                  isolatedTimeIndex,
-                  isolatedIsLive,
-                  ...(data.action && { initialAction: data.action }),
-                },
-              });
+              showEntityPanelStatus(div, 'Loading entity projection...');
+              void resolveEntityPanelDataFromProjection(panelId, data)
+                .then((resolved) => {
+                  if (!resolved) {
+                    showEntityPanelStatus(div, `Entity projection not found for ${panelId}`, true);
+                    return;
+                  }
+                  mountEntityPanel(resolved);
+                })
+                .catch((error) => {
+                  console.error('[DockRoot] Failed to resolve entity panel projection:', error);
+                  const message = error instanceof Error ? error.message : String(error || 'projection failed');
+                  showEntityPanelStatus(div, `Entity projection failed: ${message}`, true);
+                });
+              return;
             }
           },
           dispose: () => {
@@ -188,6 +332,12 @@
       try {
         const config = JSON.parse(savedLayout);
         if (config.dockview) shouldRestoreLayout = true;
+        if (!devLabEnabled && layoutRequiresDevLab(savedLayout)) {
+          shouldRestoreLayout = false;
+          localStorage.removeItem('xln-workspace-layout');
+          localStorage.removeItem('xln-dockview-layout');
+          localStorage.removeItem('dockview-layout');
+        }
       } catch {
         localStorage.removeItem('xln-workspace-layout');
       }
@@ -206,46 +356,57 @@
       params: { closeable: false },
     });
 
-    ensurePanel({
-      id: 'architect',
-      component: 'architect',
-      title: '🎬 Architect',
-      position: { direction: 'right', referencePanel: 'graph3d' },
-      params: { closeable: false },
-    });
+    if (devLabEnabled) {
+      ensurePanel({
+        id: 'architect',
+        component: 'architect',
+        title: '🎬 Dev Lab',
+        position: { direction: 'right', referencePanel: 'graph3d' },
+        params: { closeable: false },
+      });
 
-    ensurePanel({
-      id: 'jurisdiction',
-      component: 'jurisdiction',
-      title: '🏛️ Jurisdiction',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-      params: { closeable: false },
-    });
+      ensurePanel({
+        id: 'jurisdiction',
+        component: 'jurisdiction',
+        title: '🏛️ Jurisdiction',
+        position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
+        inactive: true,
+        params: { closeable: false },
+      });
 
-    ensurePanel({
-      id: 'runtime-io',
-      component: 'runtime-io',
-      title: '🔄 Runtime I/O',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-      params: { closeable: false },
-    });
+      ensurePanel({
+        id: 'runtime-io',
+        component: 'runtime-io',
+        title: '🔄 Runtime I/O',
+        position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
+        inactive: true,
+        params: { closeable: false },
+      });
 
-    ensurePanel({
-      id: 'settings',
-      component: 'settings',
-      title: '⚙️ Settings',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-      params: { closeable: false },
-    });
+      ensurePanel({
+        id: 'settings',
+        component: 'settings',
+        title: '⚙️ Settings',
+        position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
+        inactive: true,
+        params: { closeable: false },
+      });
+    }
 
     ensurePanel({
       id: 'gossip',
       component: 'gossip',
       title: '📡 Gossip',
-      position: { direction: 'within', referencePanel: 'architect' },
+      position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
+      inactive: true,
+      params: { closeable: false },
+    });
+
+    ensurePanel({
+      id: 'solvency',
+      component: 'solvency',
+      title: '⚖️ Solvency',
+      position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
       inactive: true,
       params: { closeable: false },
     });
@@ -264,8 +425,8 @@
       }, 100);
     } else {
       setTimeout(() => {
-        const architectPanel = dockview.getPanel('architect');
-        architectPanel?.api.setActive();
+        const primaryPanel = dockview.getPanel(primaryDockReferencePanel());
+        primaryPanel?.api.setActive();
       }, 0);
     }
 
@@ -319,7 +480,7 @@
           id: panelId,
           component: 'entity-panel',
           title: `🏢 ${entityName || entityId}`,
-          position: { direction: 'within', referencePanel: 'architect' },
+          position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
           params: { closeable: true },
         });
       } catch (err) {
@@ -369,10 +530,10 @@
         <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
       {/if}
       <TimeMachine
-        history={isolatedHistory}
-        timeIndex={isolatedTimeIndex}
-        isLive={isolatedIsLive}
-        env={isolatedEnv}
+        history={runtimeFrameHistory}
+        timeIndex={runtimeFrameTimeIndex}
+        isLive={runtimeFrameIsLive}
+        env={runtimeFrameEnv}
       />
       {#if !embedMode}
         <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
@@ -463,6 +624,22 @@
   :global(.dockview-theme-dark .dv-groupview) {
     background: var(--theme-background, #09090b);
     color: var(--theme-text-primary, #e4e4e7);
+  }
+
+  :global(.entity-panel-status) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100%;
+    padding: 24px;
+    color: var(--theme-text-secondary, #a1a1aa);
+    text-align: center;
+    font-size: 14px;
+  }
+
+  :global(.entity-panel-status.error) {
+    color: #fecaca;
+    background: rgba(127, 29, 29, 0.18);
   }
 
   .time-machine-bar {

@@ -401,6 +401,7 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
 
   let lastUiState = 'not-read';
+  let connectClicked = false;
   try {
     await expect
       .poll(
@@ -423,6 +424,10 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
           }
 
           const dataState = String(await hubCard.getAttribute('data-connection-state').catch(() => '') || '').toLowerCase();
+          if (connectClicked) {
+            lastUiState = `connect-clicked-awaiting-state:${dataState || 'unknown'}`;
+            return false;
+          }
           if (dataState === 'open') {
             lastUiState = 'open-awaiting-committed-card';
             return false;
@@ -452,8 +457,23 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
             await connectButton.isVisible().catch(() => false)
             && await connectButton.isEnabled().catch(() => false)
           ) {
-            await connectButton.click({ timeout: 5_000 });
-            lastUiState = 'connect-clicked';
+            try {
+              await connectButton.click({ timeout: 5_000 });
+              connectClicked = true;
+              lastUiState = 'connect-clicked';
+            } catch (clickError) {
+              if (await hasRenderedCommittedAccountCard(page, hubId)) {
+                lastUiState = 'connect-click-raced-committed-account-card';
+                return true;
+              }
+              const message = clickError instanceof Error ? clickError.message : String(clickError);
+              if (/detached from the DOM|not visible|Timeout/i.test(message)) {
+                connectClicked = true;
+                lastUiState = `connect-click-raced:${message.split('\n')[0]?.slice(0, 120) || 'transient click race'}`;
+                return false;
+              }
+              throw clickError;
+            }
             return false;
           }
 
@@ -469,11 +489,85 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
       )
       .toBe(true);
   } catch (error) {
+    const localRuntime = await readLocalConnectRuntimeDiagnostic(page, hubId).catch((debugError) => ({
+      error: debugError instanceof Error ? debugError.message : String(debugError),
+    }));
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\n` +
-      `lastHubConnectUiState=${lastUiState}`,
+      `lastHubConnectUiState=${lastUiState}\n` +
+      `localRuntime=${stringifyDebug(localRuntime)}`,
     );
   }
+}
+
+async function readLocalConnectRuntimeDiagnostic(page: Page, hubId: string): Promise<unknown> {
+  return page.evaluate(({ hubId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        height?: number;
+        timestamp?: number;
+        runtimeId?: string;
+        runtimeState?: {
+          halted?: boolean;
+          fatalDebugPayload?: unknown;
+          loopActive?: boolean;
+        };
+        runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
+        runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
+        eReplicas?: Map<string, {
+          entityId?: string;
+          signerId?: string;
+          state?: {
+            entityId?: string;
+            messages?: string[];
+            accounts?: Map<string, {
+              currentHeight?: number;
+              pendingFrame?: { height?: number };
+              mempool?: Array<{ type?: string }>;
+              deltas?: Map<number, unknown>;
+            }>;
+          };
+        }>;
+      };
+    }).isolatedEnv;
+    const summarizeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
+      (inputs || []).slice(-10).map((input) => ({
+        entityId: String(input.entityId || '').slice(-8),
+        txs: (input.entityTxs || []).map((tx) => String(tx?.type || '')),
+      }));
+    const normalize = (value: unknown): string => String(value || '').trim().toLowerCase();
+    const targetHub = normalize(hubId);
+    const replicas = Array.from(env?.eReplicas?.entries?.() || []).map(([key, replica]) => {
+      const account = replica.state?.accounts instanceof Map
+        ? replica.state.accounts.get(targetHub) ?? null
+        : null;
+      return {
+        key,
+        entityId: replica.state?.entityId ?? replica.entityId ?? null,
+        signerId: replica.signerId ?? null,
+        messages: (replica.state?.messages || []).slice(-10),
+        hubAccount: account ? {
+          currentHeight: Number(account.currentHeight || 0),
+          pendingFrameHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+          mempool: (account.mempool || []).map((tx) => String(tx?.type || '')),
+          deltaTokenIds: account.deltas instanceof Map ? Array.from(account.deltas.keys()).map(Number) : [],
+        } : null,
+      };
+    });
+    return {
+      height: Number(env?.height || 0),
+      timestamp: Number(env?.timestamp || 0),
+      runtimeId: env?.runtimeId ?? null,
+      runtimeState: env?.runtimeState ? {
+        halted: Boolean(env.runtimeState.halted),
+        loopActive: Boolean(env.runtimeState.loopActive),
+        fatalDebugPayload: env.runtimeState.fatalDebugPayload ?? null,
+      } : null,
+      runtimeInput: summarizeInputs(env?.runtimeInput?.entityInputs),
+      runtimeMempool: summarizeInputs(env?.runtimeMempool?.entityInputs),
+      replicas,
+    };
+  }, { hubId });
 }
 
 async function waitForRenderedCommittedAccountCard(

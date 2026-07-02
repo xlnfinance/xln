@@ -1,8 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { RuntimeAdapterEntitySummary } from '@xln/runtime/xln-api';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
+  import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
 
-  type DebugEntity = {
+  type AddressEntity = {
     entityId: string;
     runtimeId?: string;
     name: string;
@@ -14,10 +18,26 @@
 
   let loading = true;
   let error: string | null = null;
-  let entities: DebugEntity[] = [];
+  let entities: AddressEntity[] = [];
   let search = '';
 
-  function sortedEntities(input: DebugEntity[]): DebugEntity[] {
+  function entityFromSummary(summary: RuntimeAdapterEntitySummary): AddressEntity {
+    const handle = $runtimeControllerHandle;
+    const entityId = String(summary.entityId || '').trim().toLowerCase();
+    const runtimeId = String(summary.runtimeId || handle.runtimeId || handle.id || '').trim().toLowerCase();
+    const name = String(summary.label || entityId || 'Unknown').trim();
+    return {
+      entityId,
+      runtimeId,
+      name,
+      isHub: summary.isHub === true,
+      online: handle.status === 'connected',
+      lastUpdated: Math.max(0, Math.floor(Number(summary.height || handle.height || 0))),
+      capabilities: summary.isHub === true ? ['hub', 'routing'] : ['entity'],
+    };
+  }
+
+  function sortedEntities(input: AddressEntity[]): AddressEntity[] {
     return [...input].sort((a, b) => {
       if (a.isHub !== b.isHub) return a.isHub ? -1 : 1;
       if (a.online !== b.online) return a.online ? -1 : 1;
@@ -38,12 +58,13 @@
       error = null;
     }
     try {
-      const res = await fetch('/api/debug/entities?limit=5000');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = await res.json() as { entities?: DebugEntity[] };
-      entities = Array.isArray(body.entities) ? body.entities : [];
+      await ensureProjectionRuntimeConnected();
+      const summaries = await runtimeQueryClient.readEntities({ limit: 5000 });
+      entities = summaries.map(entityFromSummary);
     } catch (err) {
+      console.error('[AddressDirectory] projection read failed', err);
       error = err instanceof Error ? err.message : 'Failed to load address directory';
+      entities = [];
     } finally {
       if (!silent) {
         loading = false;
@@ -52,12 +73,17 @@
   }
 
   onMount(() => {
+    let seenInitialHeight = false;
     void loadDirectory();
-    const refreshTimer = setInterval(() => {
+    const unsubscribeHeight = runtimeAdapterHeight.subscribe(() => {
+      if (!seenInitialHeight) {
+        seenInitialHeight = true;
+        return;
+      }
       void loadDirectory(true);
-    }, 1000);
+    });
     return () => {
-      clearInterval(refreshTimer);
+      unsubscribeHeight();
     };
   });
 </script>
@@ -98,6 +124,7 @@
               {#if entity.capabilities?.length}
                 <span class="chip">{entity.capabilities[0]}</span>
               {/if}
+              <span class="chip">h{entity.lastUpdated}</span>
             </div>
           </article>
         {/each}

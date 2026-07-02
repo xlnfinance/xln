@@ -1,7 +1,7 @@
 <script lang="ts">
+  import { replaceState } from '$app/navigation';
   import { createEventDispatcher } from 'svelte';
   import { onDestroy, onMount } from 'svelte';
-  import type { Writable } from 'svelte/store';
   import type { ComponentType } from 'svelte';
   import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress } from 'ethers';
   import type {
@@ -13,19 +13,26 @@
     XLNModule,
     Profile as GossipProfile,
     RoutedEntityInput,
+    RuntimeInput,
     EntityTx,
+    RuntimeAdapterViewFrame,
   } from '@xln/runtime/xln-api';
+  import { buildDebtEnforcementRuntimeInputFromProjection } from '@xln/runtime/debt-enforcement-command';
   import { getDraftBatchReserveDelta } from '@xln/runtime/j-batch';
   import type { Tab, EntityReplica } from '$lib/types/ui';
-  import { getXLN, resolveConfiguredApiBase, setXlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN, resolveConfiguredApiBase } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
+  import { runtimes as runtimeHandles } from '../../stores/runtimeStore';
   import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
-  import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
-  import { toasts } from '../../stores/toastStore';
-  import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
-  import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
-  import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-  import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
+  import { xlnFunctions, entityPositions, submitEntityInputs, submitRuntimeInput as submitRuntimeCommandInput } from '../../stores/xlnStore';
+import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
+import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
+import { toasts } from '../../stores/toastStore';
+import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
+import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+import { registerDebugSurface } from '$lib/utils/debugSurface';
+import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import { getJurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
   import { formatEntityId } from '$lib/utils/format';
@@ -37,11 +44,16 @@
   import EntityPanelChrome from './EntityPanelChrome.svelte';
   import EntityPanelHeroTabs from './EntityPanelHeroTabs.svelte';
   import EntitySelectionEmptyState from './EntitySelectionEmptyState.svelte';
-  import EntitySettingsPanel from '$lib/components/Settings/EntitySettingsPanel.svelte';
+  import EntitySettingsProjectionPanel from './EntitySettingsProjectionPanel.svelte';
+  import {
+    importJMachineViaRuntime,
+    type JMachineCreateDetail,
+  } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import ContextSwitcher from './ContextSwitcher.svelte';
   import {
-    attachOffchainFaucetRequestId,
+    OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS,
+    attachOffchainFaucetReceipt,
     faucetPendingKey,
     type FaucetApiResult,
     type PendingOffchainFaucet,
@@ -82,19 +94,17 @@
   import { createMoveVisualController } from './move-visual-controller';
   import type { AssetLedgerRow, AssetLedgerTotals } from './asset-ledger';
   import {
+    buildEntityPanelView,
     findLocalAccountByCounterparty,
     getActiveJurisdictionName,
     getCurrentEntityJurisdictionName,
-    getEnvReplicaMap,
-    getGossipProfiles,
     getRuntimeEnv,
     getRuntimeId,
     isSameJurisdictionEntity,
+    isSameJurisdictionEntityInReplicas,
     isAccountLeftPerspective,
     isHubProfile,
     materializeAccountView,
-    materializeReplicaMap,
-    materializeReplicaView,
     requireRuntimeEnv,
   } from './entity-panel-model';
   import {
@@ -148,6 +158,33 @@
     filterEntityActivityRows,
   } from './entity-activity';
   import {
+    entityWorkspaceTabForLens,
+    type EntityWorkspaceLensId,
+  } from './entity-workspace';
+  import {
+    emptyEntityWorkspaceRuntimeFrameContext,
+    type EntityWorkspaceRuntimeFrameContext,
+  } from './runtime-frame-context';
+  import {
+    buildHubDiscoveryProjection,
+    buildHubDiscoveryRemoteHubsFromRuntimes,
+    buildDirectOpenAccountRuntimeInput,
+    canSubmitHubOpenAccount,
+    emptyHubDiscoveryProjection,
+    getHubOpenAccountPermissionError,
+    type HubDiscoveryProjection,
+  } from './hub-discovery-profile';
+  import {
+    buildPaymentPanelView,
+    buildPaymentPanelViewFromRuntimeView,
+    emptyPaymentPanelView,
+    type PaymentPanelView,
+  } from './payment-panel-view';
+  import {
+    buildSwapPanelRuntimeView,
+    type SwapPanelRuntimeView,
+  } from './swap-panel-helpers';
+  import {
     buildAccountPortfolioData,
     createEntityAssetValueFormatters,
     formatTokenInputAmount,
@@ -188,7 +225,6 @@
     buildDisputeStartTx,
     buildExternalToReserveTx,
     buildMovePostSettleTxs,
-    buildOpenAccountTx,
     buildPrepareDisputeTx,
     buildReopenDisputedAccountTx,
     buildReserveToCollateralTx,
@@ -215,16 +251,27 @@
   export let allowHeaderDeleteRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
-  export let env: Env | EnvSnapshot;
-  export let liveEnv: Env | null = null;
-  export let liveEnvResolver: (() => Env | null) | null = null;
-  export let liveEnvStore: Writable<Env | null> | null = null;
-  export let envRevision: string = '';
-  export let history: EnvSnapshot[];
-  export let timeIndex: number;
-  export let isLive: boolean;
-  export let onGoToLive: () => void;
+  export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
+  export let workspaceLens: EntityWorkspaceLensId = 'wallet';
+  export let workspaceLensNavigationVersion = 0;
+  export let runtimeProjectionFrame: RuntimeAdapterViewFrame | null = null;
   const dispatch = createEventDispatcher();
+  let env: Env | EnvSnapshot | null = null;
+  let liveEnv: Env | null = null;
+  let liveEnvResolver: (() => Env | null) | null = null;
+  let envRevision = '';
+  let history: EnvSnapshot[] = [];
+  let timeIndex = -1;
+  let isLive = true;
+  let onGoToLive: () => void = () => {};
+  $: env = runtimeFrameContext.env;
+  $: liveEnv = runtimeFrameContext.liveEnv;
+  $: liveEnvResolver = runtimeFrameContext.liveEnvResolver;
+  $: envRevision = runtimeFrameContext.envRevision;
+  $: history = runtimeFrameContext.history;
+  $: timeIndex = runtimeFrameContext.timeIndex;
+  $: isLive = runtimeFrameContext.isLive;
+  $: onGoToLive = runtimeFrameContext.onGoToLive;
   type DebtDrainRequest = {
     tokenId: number;
     symbol: string;
@@ -234,6 +281,12 @@
     reserveAmount: bigint;
     payableAmount: bigint;
     nextDebtIndex: number | null;
+  };
+  type EntitySettingsProfileDraft = {
+    name: string;
+    avatar: string;
+    bio: string;
+    website: string;
   };
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -249,12 +302,16 @@
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
   let assetWorkspaceTab: AssetWorkspaceTab = 'move';
   let configureWorkspaceTab: ConfigureWorkspaceTab = 'extend-credit';
+  let lastWorkspaceLens: EntityWorkspaceLensId | null = null;
+  let lastWorkspaceLensNavigationVersion = 0;
   let workspaceAccountId = '';
   let configureTokenId = 1;
   let pendingBatchSubmitting = false;
   let debtEnforcingTokenId: number | null = null;
   let pendingBatchMode: 'draft' | 'sent' | null = null;
   let pendingBatchState = buildPendingBatchState(null);
+  let hubDiscoveryProjection: HubDiscoveryProjection = emptyHubDiscoveryProjection();
+  let paymentView: PaymentPanelView = emptyPaymentPanelView();
   // State
   let replica: EntityReplica | null = null;
   let selectedAccountId: string | null = null;
@@ -296,6 +353,30 @@
     if (next.configureWorkspaceTab) configureWorkspaceTab = next.configureWorkspaceTab;
     if ('selectedJurisdictionName' in next) selectedJurisdictionName = next.selectedJurisdictionName ?? null;
   }
+  function hasExplicitEntityPanelHashRoute(): boolean {
+    if (typeof window === 'undefined') return false;
+    return canonicalizeEntityPanelRoute(getLocationHashRoute(window.location)) !== null;
+  }
+  $: if (
+    workspaceLens
+    && (
+      workspaceLens !== lastWorkspaceLens
+      || workspaceLensNavigationVersion !== lastWorkspaceLensNavigationVersion
+    )
+  ) {
+    const userTriggeredLensNavigation =
+      workspaceLensNavigationVersion > 0
+      && workspaceLensNavigationVersion !== lastWorkspaceLensNavigationVersion;
+    lastWorkspaceLens = workspaceLens;
+    lastWorkspaceLensNavigationVersion = workspaceLensNavigationVersion;
+    const shouldApplyDefaultLensRoute = !hasExplicitEntityPanelHashRoute() && workspaceLens !== 'wallet';
+    if (userTriggeredLensNavigation || shouldApplyDefaultLensRoute) {
+      const lensRoute = entityWorkspaceTabForLens(workspaceLens);
+      activeTab = lensRoute.activeTab;
+      if (lensRoute.accountWorkspaceTab) accountWorkspaceTab = lensRoute.accountWorkspaceTab as AccountWorkspaceTab;
+      if (lensRoute.settingsSubview) settingsSubview = lensRoute.settingsSubview as SettingsSubview;
+    }
+  }
   function syncHashToCurrentView(): void {
     if (typeof window === 'undefined') return;
     const nextRoute = buildHashRouteFromState();
@@ -309,7 +390,7 @@
     const nextHash = preserveParams ? `${nextRoute}?${params.toString()}` : nextRoute;
     const currentHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
     if (currentHash === nextHash) return;
-    window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#${nextHash}`);
+    replaceState(`${window.location.pathname}${window.location.search}#${nextHash}`, window.history.state ?? {});
   }
   type TokenCatalogItem = {
     symbol: string;
@@ -526,7 +607,7 @@
     to: moveToEndpoint,
     assetSymbol: moveAssetSymbol,
     signerId: currentSignerId,
-    runtimeId: getRuntimeId(activeEnv),
+    runtimeId: panelView.runtimeId,
   });
   $: if (moveAllowanceContextSignature !== moveAllowanceContextKey) {
     moveAllowanceContextKey = moveAllowanceContextSignature;
@@ -705,9 +786,29 @@
     if (error instanceof Error && error.message) return error.message;
     return fallback;
   }
+  function recordServerIngressReceipt(result: Pick<FaucetApiResult, 'receipt' | 'statusUrl'> & { runtimeId?: string | null }): void {
+    if (!result.receipt) return;
+    recordRuntimeIngressReceipt({
+      runtimeId: result.runtimeId || $runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id || 'remote',
+      mode: 'remote',
+      receipt: result.receipt,
+      statusUrl: result.statusUrl ?? null,
+    });
+  }
   function notifyUserActionError(context: string, message: string): void {
     console.error(`[EntityPanel] ${context}: ${message}`);
     toasts.error(message);
+  }
+  function formatHubDiscoveryRawProfile(profile: unknown): string {
+    if (activeXlnFunctions?.safeStringify) return activeXlnFunctions.safeStringify(profile, 2);
+    try {
+      return JSON.stringify(profile, null, 2);
+    } catch {
+      return '[unserializable profile]';
+    }
+  }
+  function resolveHubDiscoveryAvatar(entityId: string): string {
+    return resolveEntityAvatar(activeXlnFunctions, entityId);
   }
   async function copyMetaValue(value: string, field: 'entity' | 'external'): Promise<void> {
     const normalizedValue = String(value || '').trim();
@@ -724,27 +825,75 @@
   }
   // Get avatar URL without tripping early boot fail-fast guards.
   $: avatar = resolveEntityAvatar(activeXlnFunctions, tab.entityId);
+  $: activeEnv = env;
+  $: activeLiveEnv = liveEnv;
+  $: activeIsLive = isLive;
+  $: fallbackRuntimeEnv = getRuntimeEnv(activeEnv);
+  $: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === 'function' ? liveEnvResolver() : null) ?? fallbackRuntimeEnv;
+  $: displayEnv = activeIsLive ? (actionRuntimeEnv ?? activeEnv) : activeEnv;
+  $: displayProjectionFrame = activeIsLive && actionRuntimeEnv ? null : runtimeProjectionFrame;
+  $: panelView = buildEntityPanelView(displayEnv, tab.entityId, tab.signerId, envRevision, displayProjectionFrame);
+  $: directoryPanelView = runtimeProjectionFrame
+    ? buildEntityPanelView(activeEnv, tab.entityId, tab.signerId, envRevision, runtimeProjectionFrame)
+    : panelView;
+  $: activeReplicas = panelView.replicas;
+  $: panelProfiles = panelView.profiles;
+  $: replica = panelView.replica;
+  $: remoteHubCandidates = buildHubDiscoveryRemoteHubsFromRuntimes($runtimeHandles.values());
+  $: hubDiscoveryProjection = buildHubDiscoveryProjection({
+    entityId: currentEntityValue || tab.entityId,
+    runtimeId: panelView.runtimeId,
+    replicas: directoryPanelView.replicas ?? activeReplicas,
+    profiles: directoryPanelView.profiles?.length ? directoryPanelView.profiles : panelProfiles,
+    remoteHubs: remoteHubCandidates,
+    formatRawProfile: formatHubDiscoveryRawProfile,
+    avatarForEntity: resolveHubDiscoveryAvatar,
+  });
+  $: registerDebugSurface('hubDiscovery', () => ({
+    entityId: currentEntityValue || tab.entityId,
+    runtimeId: panelView.runtimeId,
+    remoteHubCandidates: remoteHubCandidates.map((hub) => ({
+      entityId: hub.entityId,
+      name: hub.name,
+      runtimeId: hub.runtimeId,
+      jurisdiction: hub.jurisdiction,
+    })),
+    discoveryKey: hubDiscoveryProjection.discoveryKey,
+    entityJurisdictionKey: hubDiscoveryProjection.entityJurisdictionKey,
+    localHubCount: hubDiscoveryProjection.localHubs.length,
+  }));
+  $: paymentView = runtimeProjectionFrame
+    ? buildPaymentPanelViewFromRuntimeView({
+        entityId: currentEntityValue || tab.entityId,
+        frame: runtimeProjectionFrame,
+      })
+    : buildPaymentPanelView({
+        entityId: currentEntityValue || tab.entityId,
+        replicas: activeReplicas,
+        profiles: panelProfiles,
+        networkGraph: actionRuntimeEnv?.gossip?.getNetworkGraph?.() ?? null,
+      });
+  $: swapRuntimeView = buildSwapPanelRuntimeView({
+    profiles: panelProfiles,
+    entityNames: panelView.entityNames,
+    replicas: activeReplicas,
+  }) as SwapPanelRuntimeView;
   $: currentEntityValue = String(replica && replica.state ? (replica.state.entityId || tab.entityId || '') : (tab.entityId || '')).trim();
   $: currentSignerId = (() => {
     const tabSignerId = String(tab.signerId || '').trim();
     if (tabSignerId) return tabSignerId;
-    const entityId = String(replica && replica.state ? (replica.state.entityId || '') : (tab.entityId || '')).trim().toLowerCase();
-    if (!entityId) return tabSignerId;
-    const env = getRuntimeEnv(activeEnv);
-    if (!env) return tabSignerId;
-    try {
-      return requireSignerIdForEntity(env, entityId, 'entity-panel-current-signer');
-    } catch {
-      return tabSignerId;
-    }
+    return String(replica?.signerId || '').trim();
   })();
+  $: currentEntityJurisdictionName = getCurrentEntityJurisdictionName(null, replica)
+    ?? panelView.activeJurisdictionName
+    ?? tab.jurisdiction
+    ?? null;
   $: currentExternalEoaValue = String(currentSignerId || '').trim();
   // Resolve entity name from gossip profiles
   $: gossipName = (() => {
     const entityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
     if (!entityId) return '';
-    const profiles = getGossipProfiles(activeEnv);
-    const profile = profiles.find((p: GossipProfile) => p.entityId.toLowerCase() === entityId);
+    const profile = panelProfiles.find((p: GossipProfile) => p.entityId.toLowerCase() === entityId);
     return profile?.name || '';
   })();
   $: heroDisplayName = (() => {
@@ -756,60 +905,81 @@
     replica?.state?.config?.jurisdiction?.name || selectedJurisdictionName || tab.jurisdiction || null,
     replica?.state?.config?.jurisdiction?.chainId ?? null,
   );
-  $: activeReplicas = getEnvReplicaMap(activeEnv, envRevision);
   $: activeXlnFunctions = $xlnFunctions;
   $: activeHistory = history;
   $: activeTimeIndex = timeIndex;
-  $: activeEnv = env;
-  $: activeLiveEnv = liveEnv;
-  $: activeIsLive = isLive;
-  $: liveRuntimeEnv = getRuntimeEnv(activeEnv);
-  $: actionRuntimeEnv = activeLiveEnv ?? (typeof liveEnvResolver === 'function' ? liveEnvResolver() : null) ?? liveRuntimeEnv;
+  $: liveRuntimeEnv = getRuntimeEnv(actionRuntimeEnv);
+  $: canOpenAccounts = canSubmitHubOpenAccount({
+    adapterMode: $runtimeControllerHandle.mode,
+    authLevel: $runtimeControllerHandle.authLevel,
+  });
+  $: openAccountPermissionError = getHubOpenAccountPermissionError({
+    adapterMode: $runtimeControllerHandle.mode,
+    authLevel: $runtimeControllerHandle.authLevel,
+  });
+  async function submitRuntimeInput(input: RuntimeInput): Promise<Env | null> {
+    if (!getRuntimeEnv(actionRuntimeEnv) && $runtimeControllerHandle.mode !== 'remote') {
+      requireRuntimeEnv(actionRuntimeEnv, 'runtime-input-submit');
+    }
+    return submitRuntimeCommandInput(input);
+  }
   function resolveEntitySigner(entityId: string, reason: string): string {
     const env = getRuntimeEnv(actionRuntimeEnv);
     if (env && activeXlnFunctions?.resolveEntityProposerId) {
       return activeXlnFunctions.resolveEntityProposerId(env, entityId, reason);
     }
+    const normalizedEntityId = String(entityId || '').trim().toLowerCase();
+    const projectionEntityId = String(replica?.state?.entityId || replica?.entityId || tab.entityId || '').trim().toLowerCase();
+    const projectionSignerId = String(replica?.signerId || tab.signerId || '').trim();
+    if (!env && normalizedEntityId && normalizedEntityId === projectionEntityId && projectionSignerId) {
+      return projectionSignerId;
+    }
     return requireSignerIdForEntity(requireRuntimeEnv(actionRuntimeEnv, reason), entityId, reason);
   }
-  function findReplicaForTab(
-    replicas: Map<string, EntityReplica> | null | undefined,
-    entityId: string,
-    signerId: string,
-  ): EntityReplica | null {
-    if (!replicas || !entityId) return null;
-    const exactKey = signerId ? `${entityId}:${signerId}` : '';
-    const exact = exactKey ? materializeReplicaView(replicas.get(exactKey) ?? null) : null;
-    if (exact) return exact;
-    const normalizedEntityId = String(entityId || '').trim().toLowerCase();
-    for (const [replicaKey, candidate] of replicas.entries()) {
-      const [replicaEntityId] = String(replicaKey).split(':');
-      if (String(replicaEntityId || '').trim().toLowerCase() === normalizedEntityId) {
-        return materializeReplicaView(candidate);
-      }
-    }
-    return null;
+  async function saveSettingsProjectionProfile(draft: EntitySettingsProfileDraft): Promise<void> {
+    const entityId = String(currentEntityValue || replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    if (!entityId) throw new Error('Entity is required for profile update');
+    if (!activeIsLive) throw new Error('Profile updates require LIVE mode');
+    const signerId = resolveEntitySigner(entityId, 'settings-profile-update');
+    if (!signerId) throw new Error('Signer is required for profile update');
+    await submitEntityInputs([buildEntityInput(entityId, signerId, [{
+      type: 'profile-update' as const,
+      data: {
+        profile: {
+          entityId,
+          name: draft.name.trim(),
+          avatar: draft.avatar.trim(),
+          bio: draft.bio.trim(),
+          website: draft.website.trim(),
+        },
+      },
+    }])]);
+    toasts.success('Entity profile update submitted');
   }
+
+  function requirePanelRuntimeTimestamp(context: string): number {
+    const timestamp = Math.floor(Number(panelView.timestamp));
+    if (!Number.isFinite(timestamp) || timestamp < 0) {
+      throw new Error(`${context}: runtime timestamp unavailable`);
+    }
+    return timestamp;
+  }
+
+  async function importSettingsJMachine(detail: JMachineCreateDetail): Promise<void> {
+    if (!activeIsLive) throw new Error('Jurisdiction imports require LIVE mode');
+    const env = requireRuntimeEnv(actionRuntimeEnv, 'settings-import-jmachine');
+    await importJMachineViaRuntime(env, detail);
+    toasts.success('Imported into active runtime');
+  }
+
   function findLiveReplicaForEntity(entityId: string, signerId: string): EntityReplica | null {
-    const env = getRuntimeEnv(activeEnv);
-    if (!env?.eReplicas) return null;
-    const replicas = env.eReplicas instanceof Map
-      ? materializeReplicaMap(env.eReplicas as Map<string, EntityReplica>)
-      : materializeReplicaMap(null);
-    return findReplicaForTab(replicas, entityId, signerId);
+    const env = getRuntimeEnv(actionRuntimeEnv);
+    return env ? buildEntityPanelView(env, entityId, signerId).replica : null;
   }
   function getCurrentLiveEntityReplica(): EntityReplica | null {
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
     const signerId = String(currentSignerId || tab.signerId || '').trim();
     return (entityId ? findLiveReplicaForEntity(entityId, signerId) : null) ?? replica;
-  }
-  // Get replica
-  $: {
-    if (tab.entityId && tab.signerId) {
-      replica = findReplicaForTab(activeReplicas, tab.entityId, tab.signerId);
-    } else {
-      replica = null;
-    }
   }
   // Navigation
   $: isAccountFocused = selectedAccountId !== null;
@@ -828,7 +998,7 @@
     const signature = [
       String(tab.entityId || ''),
       String(tab.signerId || ''),
-      String(activeEnv && 'runtimeId' in activeEnv ? activeEnv.runtimeId || '' : ''),
+      String(panelView.runtimeId || ''),
       String(replica?.state?.entityId || ''),
       String(accountIds.length),
       String(workspaceAccountIds.length),
@@ -864,7 +1034,7 @@
     targetEntityId: moveTargetEntityId,
     selfEntityId: resolveSelfEntityId(),
     workspaceAccountIds,
-    profiles: getGossipProfiles(activeEnv),
+    profiles: panelProfiles,
   });
   $: if (assetWorkspaceTab === 'move' && moveToEndpoint === 'account') {
     moveTargetHubEntityId = resolveMoveTargetHubEntityId({
@@ -881,14 +1051,10 @@
   });
   $: configureTokenId = resolveConfigureTokenId(configureTokenId, configureTokenOptions);
   // Jurisdictions
-  $: availableJurisdictions = (() => {
-    const env = activeEnv;
-    if (!env?.jReplicas) return [];
-    return Array.from(env.jReplicas.values());
-  })() as Array<{ name?: string }>;
+  $: availableJurisdictions = panelView.jurisdictions;
   $: {
     if (showJurisdiction && availableJurisdictions.length > 0 && !selectedJurisdictionName) {
-      selectedJurisdictionName = getCurrentEntityJurisdictionName(activeEnv, replica) ?? availableJurisdictions[0]?.name ?? null;
+      selectedJurisdictionName = currentEntityJurisdictionName ?? availableJurisdictions[0]?.name ?? null;
     }
   }
   let openAccountEntityOptions: string[] = [];
@@ -906,7 +1072,7 @@
       tabEntityId: tab.entityId,
       accountIds,
       activeReplicas,
-      profiles: getGossipProfiles(activeEnv),
+      profiles: panelProfiles,
     });
   })();
   $: moveEntityOptions = (() => {
@@ -916,7 +1082,7 @@
       accountIds,
       openAccountEntityOptions,
       activeReplicas,
-      profiles: getGossipProfiles(activeEnv),
+      profiles: panelProfiles,
     });
   })();
   $: moveSourceAccountOptions = (() => {
@@ -1068,7 +1234,7 @@
     owner: string;
     spender: string;
   }> {
-    const env = requireRuntimeEnv(activeEnv, context);
+    const env = requireRuntimeEnv(actionRuntimeEnv, context);
     const xln = await getXLN();
     const jadapter = getCurrentEntityJAdapter(xln, env, context);
     const owner = resolveSelfEoaAddress();
@@ -1144,10 +1310,14 @@
         tokenId: token.tokenId,
       });
       await applyCanonicalJEventsToActiveEnv(approvalEvents, `move-allowance-${token.symbol}`);
-      if (approvalEvents.length === 0 && readObservedExternalAllowance(owner, token.address, spender) === null) {
+      await fetchExternalTokens(true);
+      let confirmedAllowance = readObservedExternalAllowance(owner, token.address, spender) ?? moveAllowanceRaw;
+      const confirmationDeadline = Date.now() + 5_000;
+      while ((confirmedAllowance === null || confirmedAllowance < approvalAmount) && Date.now() < confirmationDeadline) {
+        await sleep(200);
         await fetchExternalTokens(true);
+        confirmedAllowance = readObservedExternalAllowance(owner, token.address, spender) ?? moveAllowanceRaw;
       }
-      const confirmedAllowance = readObservedExternalAllowance(owner, token.address, spender);
       if (confirmedAllowance === null) {
         throw new Error(
           `approveErc20 postcondition missing observed allowance owner=${owner} token=${token.address} spender=${spender}`,
@@ -1235,15 +1405,14 @@
     const info = resolveReserveTokenMeta(tokenId);
     withdrawingExternalToken = info.symbol;
     try {
-      const env = requireRuntimeEnv(activeEnv, 'reserve-to-external');
-      const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-external');
+      const signerId = resolveEntitySigner(entityId, 'reserve-to-external');
       const amount = amountOverride ?? parsePositiveAssetAmount(
         reserveToExternalAmount,
         info,
         onchainReserves.get(tokenId) ?? 0n,
       );
       const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
-      await enqueueEntityInputs(env, [{
+      await submitEntityInputs([{
         entityId,
         signerId,
         entityTxs: [
@@ -1272,9 +1441,8 @@
     const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
     if (!recipientEntityId) throw new Error('Select recipient entity');
     if (recipientEntityId === entityId) throw new Error('Recipient entity must be different from self');
-    const env = requireRuntimeEnv(activeEnv, 'reserve-to-reserve');
-    const signerId = requireSignerIdForEntity(env, entityId, 'reserve-to-reserve');
-    await enqueueEntityInputs(env, [{
+    const signerId = resolveEntitySigner(entityId, 'reserve-to-reserve');
+    await submitEntityInputs([{
       entityId,
       signerId,
       entityTxs: [
@@ -1315,6 +1483,7 @@
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
+      recordServerIngressReceipt(result);
       await applyCanonicalJEventsToActiveEnv(result.events ?? [], `reserve-faucet-${tokenMeta.symbol}`);
       pendingReserveFaucets = [...pendingReserveFaucets, {
         tokenId: tokenMeta.tokenId,
@@ -1335,7 +1504,7 @@
 	      notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
 	      return;
 	    }
-	    if (!isSameJurisdictionEntity(activeEnv, replica, tab.entityId, entityId, hubEntityId)) {
+	    if (!isSameJurisdictionEntityInReplicas(activeReplicas, replica, tab.entityId, entityId, hubEntityId)) {
 	      toasts.error('Switch to the matching jurisdiction entity before funding that account.');
 	      return;
 	    }
@@ -1343,7 +1512,7 @@
       const requestApiBase = resolveApiBase();
       const tokenMeta = resolveReserveTokenMeta(tokenId);
       const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.2' : '100';
-      const runtimeId = getRuntimeId(activeEnv);
+      const runtimeId = getRuntimeId(actionRuntimeEnv);
       if (!runtimeId) {
         throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
       }
@@ -1364,7 +1533,7 @@
       };
       pendingOffchainFaucets = [...pendingOffchainFaucets, pendingRequest];
       toasts.info(`Funding ${tokenMeta.symbol} account...`);
-      const requestTimeoutMs = 12000;
+      const requestTimeoutMs = OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS;
       let response: Response | null = null;
       let result: FaucetApiResult | null = null;
       let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -1404,11 +1573,16 @@
         });
         throw new Error(result?.error || `Faucet failed (${status})`);
       }
-      pendingOffchainFaucets = attachOffchainFaucetRequestId(
+      pendingOffchainFaucets = attachOffchainFaucetReceipt(
         pendingOffchainFaucets,
         pendingKey,
-        result?.requestId,
+        result,
       );
+      recordServerIngressReceipt(result);
+      const queueLabel = result?.accountReady === false
+        ? 'Account setup is settling; faucet payment is queued.'
+        : 'Faucet payment queued.';
+      toasts.info(`${queueLabel} ${result?.requestId ? `Receipt ${result.requestId}` : ''}`.trim());
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       pendingOffchainFaucets = removeOffchainFaucet(pendingOffchainFaucets, hubEntityId, tokenId);
@@ -1429,10 +1603,9 @@
       return;
     }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'quick-settle-approve');
       const signerId = resolveEntitySigner(entityId, 'quick-settle-approve');
       if (!signerId) throw new Error('No signer available');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
         buildSettlementApproveTx(event.detail.counterpartyId),
       ])]);
       toasts.info('Withdrawal signature sent');
@@ -1543,11 +1716,10 @@
         resolvingAssetAutoC2R = true;
         void (async () => {
           try {
-            const env = requireRuntimeEnv(actionRuntimeEnv, 'asset-c2r-auto-execute');
             const entityId = replica?.state?.entityId || tab.entityId;
-            if (!entityId) throw new Error('Environment not ready');
+            if (!entityId) throw new Error('Active entity missing for collateral-to-reserve auto execution');
             const signerId = resolveEntitySigner(entityId, 'asset-c2r-auto-execute');
-            await enqueueEntityInputs(env, [
+            await submitEntityInputs([
               buildEntityInput(entityId, signerId, buildMovePostSettleTxs(entityId, pending)),
             ]);
             collateralToReserveAmount = '';
@@ -1893,13 +2065,12 @@
     label: string,
   ): Promise<void> {
     if (!events || events.length === 0) return;
-    const env = getRuntimeEnv(activeEnv);
+    const env = getRuntimeEnv(actionRuntimeEnv);
     if (!env) return;
     const xln = await getXLN();
-    xln.applyJEventsToEnv?.(env, events, label);
-    xln.startRuntimeLoop?.(env);
-    await xln.process(env, undefined, 0);
-    setXlnEnvironment(env);
+    const runtimeInput = xln.buildJEventsRuntimeInput?.(env, events, label);
+    if (!runtimeInput) return;
+    await submitRuntimeCommandInput(runtimeInput);
   }
   async function requestExternalWalletSnapshot(
     entityId: string,
@@ -1963,10 +2134,9 @@
         entityId,
         String(owner || '').trim().toLowerCase(),
       ].join(':');
-      const env = getRuntimeEnv(activeEnv);
+      const env = getRuntimeEnv(actionRuntimeEnv);
       if (env) {
-        const xln = await getXLN();
-        xln.applyJEventsToEnv?.(env, [{
+        await applyCanonicalJEventsToActiveEnv([{
           name: 'ExternalWalletSnapshot',
           args: {
             entityId,
@@ -1982,9 +2152,6 @@
           blockHash: source.sourceHash,
           transactionHash,
         }], 'external-wallet-snapshot-ui-local');
-        xln.startRuntimeLoop?.(env);
-        await xln.process(env, undefined, 0);
-        setXlnEnvironment(env);
       }
       const balanceByToken = new Map(tokenBalances.map((entry) => [entry.tokenAddress, BigInt(entry.balance)]));
       const allowanceByKey = new Map(allowances.map((entry) => [
@@ -2017,10 +2184,9 @@
     if (!response.ok || !data?.success) {
       throw new Error(data?.error || `External wallet snapshot failed (${response.status})`);
     }
-    const env = getRuntimeEnv(activeEnv);
+    const env = getRuntimeEnv(actionRuntimeEnv);
     if (env && data.blockNumber !== undefined && data.blockHash && data.transactionHash) {
-      const xln = await getXLN();
-      xln.applyJEventsToEnv?.(env, [{
+      await applyCanonicalJEventsToActiveEnv([{
         name: 'ExternalWalletSnapshot',
         args: {
           entityId: data.entityId ?? entityId,
@@ -2036,9 +2202,6 @@
         blockHash: data.blockHash,
         transactionHash: data.transactionHash,
       }], 'external-wallet-snapshot-ui');
-      xln.startRuntimeLoop?.(env);
-      await xln.process(env, undefined, 0);
-      setXlnEnvironment(env);
     }
     const balanceByToken = new Map(
       (data.tokenBalances ?? []).filter((entry) => !entry.error).map((entry) => [
@@ -2108,8 +2271,8 @@
     externalFetchInFlight = (async () => {
       const signerId = String(currentSignerId || '').trim();
       const owner = resolveSelfEoaAddress();
-      const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
-      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv, replica) || '').trim();
+      const runtimeId = String(panelView.runtimeId || '').trim();
+      const jurisdiction = String(currentEntityJurisdictionName || '').trim();
       const fetchKey = `${owner}|${runtimeId}|${jurisdiction}`;
       externalTokensLoading = true;
       if (!signerId || !isAddress(owner)) {
@@ -2125,7 +2288,18 @@
       }
       try {
         const xln = await getXLN();
-        const envAtStart = getRuntimeEnv(activeEnv);
+        const envAtStart = getRuntimeEnv(actionRuntimeEnv);
+        if ($runtimeControllerHandle.mode === 'remote' && !envAtStart) {
+          externalTokens = [];
+          externalWalletSnapshotSource = null;
+          if (moveAllowanceRouteEnabled) {
+            moveAllowanceRaw = null;
+            moveAllowanceError = null;
+            moveAllowanceLoading = false;
+          }
+          externalTokensLoading = false;
+          return;
+        }
         const jadapter = envAtStart ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;
         const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);
         const entityId = resolveSelfEntityId();
@@ -2206,8 +2380,8 @@
             delete token.readError;
           }
         });
-        const runtimeIdNow = getRuntimeId(activeEnv);
-        const jurisdictionNow = String(getCurrentEntityJurisdictionName(activeEnv, replica) || '');
+        const runtimeIdNow = panelView.runtimeId;
+        const jurisdictionNow = String(currentEntityJurisdictionName || '');
         const currentKey = `${resolveSelfEoaAddress()}|${String(runtimeIdNow || '').trim()}|${jurisdictionNow.trim()}`;
         if (currentKey === fetchKey) {
           externalWalletSnapshotSource = snapshotSource;
@@ -2229,7 +2403,12 @@
           externalTokensLoading = false;
         }
       } catch (err) {
-        if (toErrorMessage(err, '').includes('ENTITY_JURISDICTION_MISSING')) {
+        const message = toErrorMessage(err, '');
+        if (
+          message.includes('ENTITY_JURISDICTION_MISSING') ||
+          message.includes('ENTITY_JURISDICTION_UNAVAILABLE') ||
+          message.includes('J-adapter not available')
+        ) {
           externalTokens = [];
           externalWalletSnapshotSource = null;
           if (moveAllowanceRouteEnabled) {
@@ -2270,7 +2449,7 @@
     if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
     const amount = parsePositiveAssetAmount(sendAssetAmount, token, token.balance);
     const xln = await getXLN();
-    const jadapter = getCurrentEntityJAdapter(xln, requireRuntimeEnv(activeEnv, 'send-external-asset'), 'send-external-asset');
+    const jadapter = getCurrentEntityJAdapter(xln, requireRuntimeEnv(actionRuntimeEnv, 'send-external-asset'), 'send-external-asset');
     const privKey = await getActiveSignerPrivateKey();
     sendingExternalToken = token.symbol;
     try {
@@ -2310,10 +2489,9 @@
       return;
     }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'collateral-to-reserve');
       const signerId = resolveEntitySigner(entityId, 'collateral-to-reserve');
       const info = getTokenInfo(tokenId);
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
         {
           type: 'settle_propose' as const,
           data: {
@@ -2411,9 +2589,8 @@
     const recipientEntityId = String(recipientEntityIdOverride || moveReserveRecipientEntityId || '').trim().toLowerCase();
     if (!recipientEntityId) throw new Error('Select recipient entity');
     if (recipientEntityId === entityId) throw new Error('Recipient entity must be different from self');
-    const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-reserve-draft');
-    const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-reserve-draft');
-    await enqueueEntityInputs(env, [{
+    const signerId = resolveEntitySigner(entityId, 'move-reserve-to-reserve-draft');
+    await submitEntityInputs([{
       entityId,
       signerId,
       entityTxs: [buildReserveToReserveTx(recipientEntityId, tokenId, amount)],
@@ -2427,28 +2604,29 @@
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
     if (!entityId) throw new Error('Active entity missing for reserve withdrawal');
     if (!activeIsLive) throw new Error('Add to batch requires LIVE mode');
-    const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-external-draft');
-    const signerId = requireSignerIdForEntity(env, entityId, 'move-reserve-to-external-draft');
+    const signerId = resolveEntitySigner(entityId, 'move-reserve-to-external-draft');
     const externalAddress = recipientEoaOverride || await resolveCurrentExternalAddress();
     if (!isAddress(externalAddress)) throw new Error('Recipient must be a valid EOA address');
     const receivingEntity = encodeExternalEoaAsEntity(externalAddress);
-    await enqueueEntityInputs(env, [{
+    await submitEntityInputs([{
       entityId,
       signerId,
       entityTxs: [buildReserveToExternalEoaTx(externalAddress, tokenId, amount)],
     }]);
-    await waitForMoveCondition(
-      () => {
-        const batch = findLiveReplicaForEntity(entityId, signerId)?.state?.jBatchState?.batch;
-        return Array.isArray(batch?.reserveToExternalToken)
-          && batch.reserveToExternalToken.some((op) =>
-            Number(op?.tokenId) === tokenId
-            && BigInt(op?.amount || 0n) === amount
-            && String(op?.receivingEntity || '').toLowerCase() === receivingEntity,
-          );
-      },
-      'Waiting for reserve withdrawal to appear in draft batch',
-    );
+    if (getRuntimeEnv(actionRuntimeEnv)) {
+      await waitForMoveCondition(
+        () => {
+          const batch = findLiveReplicaForEntity(entityId, signerId)?.state?.jBatchState?.batch;
+          return Array.isArray(batch?.reserveToExternalToken)
+            && batch.reserveToExternalToken.some((op) =>
+              Number(op?.tokenId) === tokenId
+              && BigInt(op?.amount || 0n) === amount
+              && String(op?.receivingEntity || '').toLowerCase() === receivingEntity,
+            );
+        },
+        'Waiting for reserve withdrawal to appear in draft batch',
+      );
+    }
   }
   async function queueReserveToCollateralDraft(
     tokenId: number,
@@ -2468,8 +2646,7 @@
     if (receivingEntityId === String(entityId).trim().toLowerCase() && (!accounts || !findLocalAccountByCounterparty(entityId, accounts, counterpartyEntityId))) {
       throw new Error('No account found for selected counterparty');
     }
-    const env = requireRuntimeEnv(activeEnv, 'move-reserve-to-account-draft');
-    await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+    await submitEntityInputs([buildEntityInput(entityId, signerId, [
       buildReserveToCollateralTx({
         counterpartyEntityId,
         selfEntityId: entityId,
@@ -2491,9 +2668,8 @@
       throw new Error('Select ERC20 asset first');
     }
     setMoveProgress('Queuing external deposit into draft batch');
-    const env = requireRuntimeEnv(activeEnv, 'move-external-to-reserve-draft');
-    const signerId = requireSignerIdForEntity(env, entityId, 'move-external-to-reserve-draft');
-    await enqueueEntityInputs(env, [{
+    const signerId = resolveEntitySigner(entityId, 'move-external-to-reserve-draft');
+    await submitEntityInputs([{
       entityId,
       signerId,
       entityTxs: [buildExternalToReserveTx({
@@ -2761,8 +2937,7 @@
     const info = getTokenInfo(tokenId);
     collateralFundingToken = info.symbol;
     try {
-      const env = requireRuntimeEnv(activeEnv, 'reserve-to-collateral');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
           buildReserveToCollateralTx({
             counterpartyEntityId,
             selfEntityId: entityId,
@@ -2784,6 +2959,10 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'open-account');
     const trimmed = targetEntityId.trim().toLowerCase();
+    if (!canOpenAccounts) {
+      toasts.error(openAccountPermissionError || 'Open account requires admin runtime access');
+      return;
+    }
     if (!entityId) {
       notifyUserActionError('open-account', 'Active entity missing for open-account');
       return;
@@ -2800,7 +2979,7 @@
 	      toasts.error('Cannot open account with yourself');
 	      return;
 	    }
-    if (!isSameJurisdictionEntity(activeEnv, replica, tab.entityId, entityId, trimmed)) {
+    if (!isSameJurisdictionEntityInReplicas(activeReplicas, replica, tab.entityId, entityId, trimmed)) {
       toasts.error('Accounts can only be opened inside the same jurisdiction');
       return;
     }
@@ -2813,12 +2992,15 @@
       return;
     }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'open-account');
+      const env = getRuntimeEnv(actionRuntimeEnv);
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
-      await prewarmCounterpartyProfiles(env, [trimmed]);
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
-        buildOpenAccountTx(trimmed, rebalancePolicy),
-      ])]);
+      if (env) await prewarmCounterpartyProfiles(env, [trimmed]);
+      await submitRuntimeInput(buildDirectOpenAccountRuntimeInput({
+        sourceEntityId: entityId,
+        signerId,
+        targetEntityId: trimmed,
+        rebalancePolicy,
+      }));
       openAccountEntityId = '';
       toasts.success('Account request sent');
     } catch (err) {
@@ -2896,8 +3078,7 @@
     }
     if (!activeIsLive) { toasts.error('Dispute prepare requires LIVE mode'); return; }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'dispute-prepare');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
         buildPrepareDisputeTx(counterpartyEntityId, description),
       ])]);
       toasts.success('Dispute prepared — orderbook exposure removed');
@@ -2923,8 +3104,7 @@
     }
     if (!activeIsLive) { toasts.error('Dispute requires LIVE mode'); return; }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'dispute-start');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
         buildDisputeStartTx(counterpartyEntityId, description, options),
       ])]);
       toasts.success('Dispute queued — will be submitted on next batch broadcast');
@@ -2949,8 +3129,7 @@
       return;
     }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'dispute-finalize');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
         buildDisputeFinalizeTx(counterpartyEntityId, description),
       ])]);
       toasts.success('Dispute finalize queued — will be submitted on next batch broadcast');
@@ -2975,8 +3154,7 @@
       return;
     }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'reopen-disputed-account');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
         buildReopenDisputedAccountTx(counterpartyEntityId),
       ])]);
       toasts.success('Reopen disputed account queued');
@@ -2998,14 +3176,21 @@
     }
     debtEnforcingTokenId = tokenId;
     try {
-      const xln = await getXLN();
-      await xln.submitDebtEnforcement(
-        requireRuntimeEnv(activeEnv, 'debt-enforcement'),
+      const signerId = resolveEntitySigner(entityId, 'debt-enforcement');
+      const jurisdictionName = String(
+        replica?.state?.config?.jurisdiction?.name ||
+        selectedJurisdictionName ||
+        '',
+      ).trim();
+      const input = buildDebtEnforcementRuntimeInputFromProjection({
         entityId,
+        jurisdictionName,
         tokenId,
         maxIterations,
-        currentSignerId || tab.signerId || undefined,
-      );
+        ...(signerId ? { signerId } : {}),
+        timestamp: requirePanelRuntimeTimestamp('debt-enforcement'),
+      });
+      await submitRuntimeCommandInput(input);
       const token = getTokenInfo(tokenId);
       const tokenLabel = symbol || token.symbol || `Token #${tokenId}`;
       const amountLabel = `${formatAmount(payableAmount, token.decimals)} ${tokenLabel}`;
@@ -3046,8 +3231,7 @@
       return;
     }
     try {
-      const env = requireRuntimeEnv(activeEnv, 'add-token-to-account');
-      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [
+      await submitEntityInputs([buildEntityInput(entityId, signerId, [
         buildAddTokenToAccountTx(counterpartyEntityId, configureTokenId),
       ])]);
       const symbol = getTokenInfo(configureTokenId).symbol || `TKN${configureTokenId}`;
@@ -3150,8 +3334,8 @@
       externalBalancePollKey = '';
     } else {
       const signerId = String(currentSignerId || '').trim();
-      const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
-      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv, replica) || getActiveJurisdictionName(activeEnv) || '').trim();
+      const runtimeId = String(panelView.runtimeId || '').trim();
+      const jurisdiction = String(currentEntityJurisdictionName || panelView.activeJurisdictionName || '').trim();
       const refreshMs = 5_000;
       const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
       if (nextKey !== externalBalancePollKey) {
@@ -3336,13 +3520,12 @@
   $: canBroadcastPendingBatch = canBroadcastPendingBatchState(pendingBatchState, pendingBatchReserveIssue);
   function enqueueCurrentPendingBatchAction(action: 'clear' | 'broadcast' | 'rebroadcast', context: string): Promise<void> {
     return enqueuePendingBatchAction({
-      activeEnv,
       activeIsLive,
       action,
       context,
       entityId: replica?.state?.entityId || tab.entityId,
       resolveEntitySigner,
-      enqueueEntityInputs,
+      submitEntityInputs,
     });
   }
   const runPendingBatchAction = createPendingBatchActionRunner({
@@ -3387,16 +3570,22 @@
   $: hasAnyAccounts = accountIds.length > 0;
   $: faucetSupportsReserve = !!getFaucetReserveTokenMeta(faucetAssetSymbol);
   $: canShowAccountFaucet = faucetSupportsReserve && hasAnyAccounts;
-  let lastDeepLinkWorkspaceSignature = '';
+  let lastAppliedHashRoute: string | null = null;
+  $: routeSyncSignature = [
+    activeTab,
+    assetWorkspaceTab,
+    settingsSubview,
+    accountWorkspaceTab,
+  ].join(':');
   $: {
     const hashRoute = typeof window === 'undefined' ? '' : getLocationHashRoute(window.location) || '';
-    const signature = `${hashRoute}|${workspaceAccountIds.length}|${accountIds.length}`;
-    if (signature !== lastDeepLinkWorkspaceSignature) {
-      lastDeepLinkWorkspaceSignature = signature;
+    if (hashRoute !== lastAppliedHashRoute) {
+      lastAppliedHashRoute = hashRoute;
       applyDeepLinkViewFromUrl();
     }
   }
   $: if (typeof window !== 'undefined') {
+    routeSyncSignature;
     syncHashToCurrentView();
   }
 </script>
@@ -3409,7 +3598,8 @@
     {userModeHeader}
     bind:selectedJurisdictionName
     {activeReplicas}
-    {activeEnv}
+    entityNames={panelView.entityNames}
+    jurisdictions={panelView.jurisdictions}
     {activeIsLive}
     {handleJurisdictionSelect}
     {handleEntitySelect}
@@ -3419,25 +3609,34 @@
   <main class="main-scroll">
     {#if !tab.entityId || !tab.signerId}
       <EntitySelectionEmptyState
+        {tab}
         {userModeHeader}
         {resettingEverything}
+        {allowHeaderAddRuntime}
+        {allowHeaderDeleteRuntime}
+        {headerRuntimeAddLabel}
         {handleResetEverything}
+        {handleHeaderAddRuntime}
+        {handleHeaderDeleteRuntime}
+        {handleHeaderAddJurisdiction}
+        {handleHeaderAddEntity}
+        {handleEntitySelect}
       />
 
-    {:else if activeEnv && isAccountFocused && selectedAccount && selectedAccountId}
+    {:else if isAccountFocused && selectedAccount && selectedAccountId}
       <EntityFocusedAccountView
         {selectedAccount}
         {selectedAccountId}
         {tab}
         {replica}
-        {activeEnv}
+        entityNames={panelView.entityNames}
         {pendingOffchainFaucetKeys}
         {handleBackToAccounts}
         {handleAccountFaucet}
         {handleAccountPanelGoToOpenAccounts}
       />
 
-    {:else if activeEnv && replica}
+    {:else if replica}
       <EntityPanelHeroTabs
         {tab}
         {userModeHeader}
@@ -3469,13 +3668,9 @@
           <EntityAssetsTab
             {replica}
             {tab}
-            {activeEnv}
-            {activeLiveEnv}
             {activeIsLive}
-            {envRevision}
-            {liveEnvResolver}
-            {liveEnvStore}
-            {currentSignerId}
+            profileByEntityId={panelView.profileByEntityId}
+            entityNames={panelView.entityNames}
             {currentExternalEoaValue}
             {copiedMetaField}
             {externalWalletSnapshotSource}
@@ -3572,6 +3767,15 @@
             {liveRuntimeEnv}
             {activeIsLive}
             {actionRuntimeEnv}
+            {canOpenAccounts}
+            {submitRuntimeInput}
+            runtimeHeight={panelView.height}
+            entityNames={panelView.entityNames}
+            profileByEntityId={panelView.profileByEntityId}
+            isDevnet={panelView.isDevnet}
+            {hubDiscoveryProjection}
+            {paymentView}
+            {swapRuntimeView}
             {accountIds}
             {workspaceAccountIds}
             {workspaceAccountId}
@@ -3676,14 +3880,23 @@
           />
 
         {:else if activeTab === 'settings'}
-          <EntitySettingsPanel
-            embedded={true}
-            {replica}
-            {activeIsLive}
-            currentTimeIndex={activeTimeIndex}
+          <EntitySettingsProjectionPanel
+            entityId={currentEntityValue || tab.entityId}
+            signerId={currentSignerId || tab.signerId}
+            runtimeId={panelView.runtimeId}
+            runtimeHeight={panelView.height}
             jurisdictionLabel={selectedJurisdictionName || ''}
-            requestedTab={settingsSubview}
-            tab={tab}
+            profile={replica.state?.profile ?? null}
+            hubPolicy={replica.state?.hubRebalanceConfig ?? null}
+            accountCount={accountIds.length}
+            reserveCount={replica.state?.reserves?.size ?? 0}
+            proposalCount={replica.state?.proposals?.size ?? 0}
+            isHub={replica.state?.profile?.isHub === true || Boolean((replica.state as { orderbookHubProfile?: unknown })?.orderbookHubProfile)}
+            {activeIsLive}
+            runtimeEnv={getRuntimeEnv(actionRuntimeEnv)}
+            {settingsSubview}
+            onSaveProfile={saveSettingsProjectionProfile}
+            onImportJMachine={importSettingsJMachine}
           />
         {/if}
       </section>

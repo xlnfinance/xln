@@ -1499,6 +1499,24 @@ export async function createRpcAdapter(
 
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 
+      if (jTx.type === 'debtEnforcement') {
+        const entityId = String(jTx.entityId || '').toLowerCase();
+        const tokenId = Number(jTx.data.tokenId);
+        const maxIterations = BigInt(jTx.data.maxIterations);
+        if (!entityId || !Number.isInteger(tokenId) || tokenId < 0 || maxIterations <= 0n) {
+          return { success: false, error: 'Invalid debt enforcement payload' };
+        }
+        try {
+          await adapter.enforceDebts(entityId, tokenId, maxIterations);
+          console.log(`✅ [JAdapter:rpc] Debt enforcement submitted token=${tokenId} entity=${entityId.slice(-4)}`);
+          return { success: true };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`❌ [JAdapter:rpc] Debt enforcement failed: ${msg}`);
+          return { success: false, error: msg };
+        }
+      }
+
       if (jTx.type === 'batch') {
         const { isBatchEmpty, getBatchSize } = await import('../j-batch');
         const { normalizeEntityId } = await import('../entity-id-utils');
@@ -2447,7 +2465,14 @@ export async function createRpcAdapter(
     },
 
     async close(): Promise<void> {
+      const inFlightWatcherPoll = pollInFlight;
       adapter.stopWatching();
+      if (inFlightWatcherPoll) {
+        await Promise.race([
+          inFlightWatcherPoll.catch(() => undefined),
+          new Promise<void>((resolve) => setTimeout(resolve, 2_500)),
+        ]);
+      }
       depository?.removeAllListeners();
       entityProvider?.removeAllListeners();
     },

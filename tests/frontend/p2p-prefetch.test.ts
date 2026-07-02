@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import {
   hasUsableOpenAccountCounterpartyProfile,
@@ -58,6 +59,18 @@ test('prewarmCounterpartyProfiles forwards unique normalized entity ids to runti
 test('prewarmCounterpartyProfiles degrades cleanly when runtime p2p is unavailable', async () => {
   await expect(prewarmCounterpartyProfiles(null, ['0xabc'])).resolves.toBe(false);
   await expect(prewarmCounterpartyProfiles({ runtimeState: {} } as never, ['0xabc'])).resolves.toBe(false);
+});
+
+test('open-account profile waits stay fail-fast for cockpit commands', () => {
+  const source = readFileSync('frontend/src/lib/utils/p2pPrefetch.ts', 'utf8');
+  const openAccountSlice = source.slice(
+    source.indexOf('export async function waitForOpenAccountCounterpartyProfiles'),
+    source.indexOf('export async function waitForCounterpartyRuntimeRoutes'),
+  );
+  expect(source).toContain('const DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS = 1_200');
+  expect(openAccountSlice).toContain('timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS');
+  expect(openAccountSlice).not.toContain('timeoutMs = 5_000');
+  expect(openAccountSlice).not.toContain('Math.min(boundedTimeoutMs, 5_000)');
 });
 
 test('waitForCounterpartyRuntimeRoutes requires a gossip runtime id', async () => {

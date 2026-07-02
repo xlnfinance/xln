@@ -1,15 +1,13 @@
-import type { Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
-import { requireRuntimeEnv } from './entity-panel-model';
+import type { Env, RoutedEntityInput } from '@xln/runtime/xln-api';
 import { buildPendingBatchActionTxs, type PendingBatchAction } from './pending-batch-preview';
 
 type PendingBatchActionRequest = {
-  activeEnv: Env | EnvSnapshot | null | undefined;
   activeIsLive: boolean;
   entityId: string;
   action: PendingBatchAction;
   context: string;
   resolveEntitySigner: (entityId: string, context: string) => string;
-  enqueueEntityInputs: (env: Env, inputs: RoutedEntityInput[]) => Promise<Env>;
+  submitEntityInputs: (inputs: RoutedEntityInput[]) => Promise<Env | null>;
 };
 
 type PendingBatchRunnerState = {
@@ -49,10 +47,9 @@ export function buildPendingBatchEntityInput(
 export async function enqueuePendingBatchAction(request: PendingBatchActionRequest): Promise<void> {
   const entityId = String(request.entityId || '').trim();
   if (!entityId) throw new Error('Active entity missing for pending batch action');
-  const env = requireRuntimeEnv(request.activeEnv, request.context);
   if (!request.activeIsLive) throw new Error('Batch actions require LIVE mode');
   const signerId = request.resolveEntitySigner(entityId, request.context);
-  await request.enqueueEntityInputs(env, [buildPendingBatchEntityInput(entityId, signerId, request.action)]);
+  await request.submitEntityInputs([buildPendingBatchEntityInput(entityId, signerId, request.action)]);
 }
 
 export function createPendingBatchActionRunner(options: PendingBatchActionRunnerOptions) {

@@ -11,6 +11,7 @@ DEV_J_PATH="$ROOT_DIR/db/dev/jurisdictions.json"
 RPC_PORT="$(xln_rpc_port)"
 API_PORT="$(xln_api_port)"
 WEB_PORT="$(xln_web_port)"
+WEB_HTTP_PORT="$(xln_web_http_port)"
 CUSTODY_PORT="$(xln_custody_port)"
 CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 WATCHTOWER_PORT="$(xln_watchtower_port)"
@@ -64,6 +65,7 @@ pkill -9 -f "concurrently .*ANVIL" 2>/dev/null || true
 
 kill_by_port "$RPC_PORT"
 kill_by_port "$WEB_PORT"
+kill_by_port "$WEB_HTTP_PORT"
 kill_by_port "$API_PORT"
 kill_by_port "$CUSTODY_PORT"
 kill_by_port "$CUSTODY_DAEMON_PORT"
@@ -75,6 +77,7 @@ kill_by_port 8787
 
 wait_for_port_clear "$RPC_PORT"
 wait_for_port_clear "$WEB_PORT"
+wait_for_port_clear "$WEB_HTTP_PORT"
 wait_for_port_clear "$API_PORT"
 wait_for_port_clear "$CUSTODY_PORT"
 wait_for_port_clear "$CUSTODY_DAEMON_PORT"

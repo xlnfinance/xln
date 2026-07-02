@@ -1,20 +1,25 @@
 <script lang="ts">
-  import type { Env } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, xlnFunctions, error } from '../../stores/xlnStore';
+  import { get } from 'svelte/store';
+  import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
+  import { xlnFunctions, error } from '../../stores/xlnStore';
+  import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
+  import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
 
   export let entityId: string;
-  export let env: Env;
+  export let actionRuntimeEnv: Env | null = null;
   export let isLive: boolean;
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
+  export let entityNames: Map<string, string> = new Map();
   export let mode: 'extend' | 'request' = 'extend';
+  export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = env;
+  $: activeEnv = actionRuntimeEnv;
   $: activeIsLive = isLive;
 
   let selectedCounterparty = counterpartyId || '';
@@ -47,19 +52,38 @@
 
   type CreditRequestResponse = {
     success?: boolean;
+    status?: 'queued' | 'already_satisfied' | string;
     error?: string;
     approvedAmount?: string;
+    requestId?: string;
+    statusUrl?: string;
+    runtimeId?: string | null;
+    receipt?: {
+      id?: string | null;
+      status?: string;
+      counts?: {
+        runtimeTxs?: number;
+        entityInputs?: number;
+        jInputs?: number;
+      };
+      enqueuedHeight?: number | null;
+      observedHeight?: number | null;
+      note?: string | null;
+    };
   };
 
   async function submitExtendCredit(successMessage: string) {
     if (!effectiveCounterparty) return;
     try {
       const env = activeEnv;
-      if (!env) throw new Error('XLN environment not ready');
+      const handle = get(runtimeControllerHandle);
+      const remoteWritable = handle.mode === 'remote' && handle.authLevel === 'admin';
+      if (!env && !remoteWritable) throw new Error('Credit command requires live embedded Env or admin remote runtime');
       if (!activeIsLive) throw new Error('Credit updates are only available in LIVE mode');
-      const resolvedSigner = activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'credit-form')
+      const resolvedSigner = (env && activeXlnFunctions?.resolveEntityProposerId?.(env, entityId, 'credit-form'))
         || signerId
-        || requireSignerIdForEntity(env, entityId, 'credit-form');
+        || (env ? requireSignerIdForEntity(env, entityId, 'credit-form') : '');
+      if (!resolvedSigner) throw new Error('Signer is required for credit command');
 
       const input: CreditEntityInput = {
         entityId,
@@ -74,7 +98,8 @@
         }],
       };
 
-      await enqueueEntityInputs(env, [input]);
+      if (!submitRuntimeInput) throw new Error('Credit command path is not connected');
+      await submitRuntimeInput({ runtimeTxs: [], entityInputs: [input], jInputs: [] });
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -106,6 +131,15 @@
       if (!response.ok || result.success !== true) {
         throw new Error(result.error || `Credit request failed (${response.status})`);
       }
+      if (result.receipt) {
+        const handle = get(runtimeControllerHandle);
+        recordRuntimeIngressReceipt({
+          runtimeId: result.runtimeId || handle.runtimeId || handle.id || 'remote',
+          mode: 'remote',
+          receipt: result.receipt,
+          statusUrl: result.statusUrl ?? null,
+        });
+      }
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -119,7 +153,7 @@
   <h4>{mode === 'request' ? 'Request Credit' : 'Extend Credit'}</h4>
   <div class="action-form">
     {#if counterpartyId === null}
-      <EntitySelect bind:value={selectedCounterparty} options={accountIds} placeholder="Select account" />
+      <EntitySelect bind:value={selectedCounterparty} options={accountIds} {entityNames} placeholder="Select account" />
     {/if}
     <select bind:value={selectedTokenId} class="form-select">
       {#each tokenList as token}

@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * EntityPanelWrapper - Dockview adapter for EntityPanelTabs
+   * EntityPanelWrapper - Dockview adapter for EntityWorkspace
    *
    * Wraps the existing EntityPanel component for use in /view Dockview workspace.
    * Child components read canonical state from xlnStore.
@@ -12,28 +12,30 @@
    */
 
   import type { Writable } from 'svelte/store';
-  import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
+  import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
+  import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
   import type { Tab } from '$lib/types/ui';
   import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
 
   // Props from Dockview panel params (Svelte 5 runes syntax)
   let {
     entityId = '',
     entityName = '',
     signerId = '',
-    isolatedEnv = undefined,
-    isolatedHistory = undefined,
-    isolatedTimeIndex = undefined,
-    isolatedIsLive = undefined,
+    runtimeFrameEnv = undefined,
+    runtimeFrameHistory = undefined,
+    runtimeFrameTimeIndex = undefined,
+    runtimeFrameIsLive = undefined,
     initialAction = undefined,
   }: {
     entityId?: string;
     entityName?: string;
     signerId?: string;
-    isolatedEnv?: Writable<Env | null>;
-    isolatedHistory?: Writable<EnvSnapshot[]>;
-    isolatedTimeIndex?: Writable<number>;
-    isolatedIsLive?: Writable<boolean>;
+    runtimeFrameEnv?: Writable<Env | null>;
+    runtimeFrameHistory?: Writable<EnvSnapshot[]>;
+    runtimeFrameTimeIndex?: Writable<number>;
+    runtimeFrameIsLive?: Writable<boolean>;
     initialAction?: 'r2r' | 'r2c';
   } = $props();
 
@@ -46,32 +48,47 @@
     isActive: true,
   });
 
-  const activeEnv = $derived.by<Env | null>(() => isolatedEnv ? ($isolatedEnv ?? null) : null);
-  const activeHistory = $derived.by<EnvSnapshot[]>(() => isolatedHistory ? ($isolatedHistory ?? []) : []);
-  const activeTimeIndex = $derived.by<number>(() => isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1);
-  const activeIsLive = $derived.by<boolean>(() => isolatedIsLive ? ($isolatedIsLive ?? true) : true);
+  const isRemoteRuntime = $derived.by<boolean>(() => $runtimeControllerHandle.mode === 'remote');
+  const activeEnv = $derived.by<Env | null>(() => {
+    if (isRemoteRuntime) return null;
+    return runtimeFrameEnv ? ($runtimeFrameEnv ?? null) : null;
+  });
+  const activeHistory = $derived.by<EnvSnapshot[]>(() => runtimeFrameHistory ? ($runtimeFrameHistory ?? []) : []);
+  const activeTimeIndex = $derived.by<number>(() => runtimeFrameTimeIndex ? ($runtimeFrameTimeIndex ?? -1) : -1);
+  const activeIsLive = $derived.by<boolean>(() => runtimeFrameIsLive ? ($runtimeFrameIsLive ?? true) : true);
+  const canMountWorkspace = $derived.by<boolean>(() =>
+    Boolean(activeEnv || (isRemoteRuntime && $runtimeControllerHandle.status === 'connected')),
+  );
 
   function goToLive(): void {
-    isolatedTimeIndex?.set(-1);
-    isolatedIsLive?.set(true);
+    runtimeFrameTimeIndex?.set(-1);
+    runtimeFrameIsLive?.set(true);
   }
+
+  function resolveLiveEnv(): Env | null {
+    return isRemoteRuntime ? null : activeEnv;
+  }
+
+  const runtimeFrameContext = $derived.by<EntityWorkspaceRuntimeFrameContext>(() => ({
+    env: activeEnv,
+    liveEnv: activeEnv,
+    liveEnvResolver: resolveLiveEnv,
+    envRevision: '',
+    history: activeHistory,
+    timeIndex: activeTimeIndex,
+    isLive: activeIsLive,
+    onGoToLive: goToLive,
+  }));
 
 </script>
 
 <div class="entity-panel-wrapper">
-  <!-- Entity panel content only - time machine is in global TimeMachine bar -->
-  {#if activeEnv}
-    <EntityPanelTabs
+  <!-- Entity workspace content only - time machine is in global TimeMachine bar -->
+  {#if canMountWorkspace}
+    <EntityWorkspace
       tab={localTab}
       {initialAction}
-      env={activeEnv}
-      liveEnv={activeEnv}
-      liveEnvResolver={() => isolatedEnv ? ($isolatedEnv ?? null) : null}
-      liveEnvStore={isolatedEnv ?? null}
-      history={activeHistory}
-      timeIndex={activeTimeIndex}
-      isLive={activeIsLive}
-      onGoToLive={goToLive}
+      {runtimeFrameContext}
     />
   {/if}
 </div>
@@ -86,8 +103,8 @@
     background: #1e1e1e;
   }
 
-  /* Override EntityPanelTabs styles for Dockview context */
-  .entity-panel-wrapper :global(.entity-panel-tabs) {
+  /* Override EntityWorkspace styles for Dockview context */
+  .entity-panel-wrapper :global(.entity-workspace) {
     flex: 1;
     border: none;
     border-radius: 0;

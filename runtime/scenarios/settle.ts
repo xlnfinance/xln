@@ -10,9 +10,9 @@
  * Also tests auto-approve logic and conservation law validation.
  */
 
-import type { Env, EntityReplica, SettlementDiff, SettlementOp } from '../types';
+import type { Env, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../settlement-ops';
-import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper } from './helpers';
+import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica } from './helpers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
@@ -27,16 +27,6 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 
 const JURISDICTION = 'Settle Test';
 const ENTITY_NAME_MAP = new Map<string, string>();
-
-type ReplicaEntry = [string, EntityReplica];
-
-function findReplica(env: Env, entityId: string): ReplicaEntry {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-  if (!entry) {
-    throw new Error(`SETTLE: Replica for entity ${entityId} not found`);
-  }
-  return entry as ReplicaEntry;
-}
 
 function assert(condition: unknown, message: string, env?: Env): asserts condition {
   if (!condition) {

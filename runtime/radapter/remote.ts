@@ -4,15 +4,19 @@ import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
   RuntimeAdapterConfig,
-  RuntimeAdapterReadQuery,
-  RuntimeAdapterRequest,
-  RuntimeAdapterResponse,
-  RuntimeAdapterStatus,
-  RuntimeAdapterPush,
-} from './types';
+	  RuntimeAdapterReadQuery,
+	  RuntimeAdapterRequest,
+	  RuntimeAdapterResponse,
+	  RuntimeAdapterSendResult,
+	  RuntimeAdapterStatus,
+	  RuntimeAdapterPush,
+	} from './types';
 import { RuntimeAdapterError } from './errors';
 
 type PendingRequest = {
+  op: RuntimeAdapterRequestBody['op'];
+  path?: string;
+  query?: RuntimeAdapterReadQuery;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -63,9 +67,14 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private currentStatus: RuntimeAdapterStatus = 'disconnected';
   private height = 0;
   private level: RuntimeAdapterAuthLevel | null = null;
+  private id = '';
 
   get status(): RuntimeAdapterStatus {
     return this.currentStatus;
+  }
+
+  get runtimeId(): string {
+    return this.id || String(this.config?.runtimeId || '').trim().toLowerCase();
   }
 
   get currentHeight(): number {
@@ -80,11 +89,13 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (config.mode !== 'remote') throw new RuntimeAdapterError('E_BAD_QUERY', 'RemoteRuntimeAdapter requires mode=remote');
     if (!config.wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
     this.config = config;
+    this.id = String(config.runtimeId || '').trim().toLowerCase();
     this.intentionalClose = false;
     this.terminalAuthFailure = false;
     try {
       await this.openSocket();
       await this.authenticateIfNeeded();
+      this.setStatus('connected');
     } catch (error) {
       this.handleConnectionFailure(error);
     }
@@ -107,9 +118,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     return this.request<T>({ op: 'read', path, ...(query ? { query } : {}) });
   }
 
-  send(input: RuntimeInput): Promise<{ height: number }> {
-    return this.request<{ height: number }>({ op: 'send', input });
-  }
+	  send(input: RuntimeInput): Promise<RuntimeAdapterSendResult> {
+	    return this.request<RuntimeAdapterSendResult>({ op: 'send', input });
+	  }
 
   onChange(cb: (height: number) => void): () => void {
     this.changeCbs.add(cb);
@@ -127,13 +138,11 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     for (const cb of this.statusCbs) cb(status);
   }
 
-  private noteHeight(height: unknown, options: { notifyWhenUnchanged?: boolean } = {}): void {
+  private noteHeight(height: unknown, options: { allowDecrease?: boolean } = {}): void {
     const next = Math.max(0, Math.floor(Number(height || 0)));
-    const changed = next > this.height;
-    if (changed) this.height = next;
-    if (changed || options.notifyWhenUnchanged === true) {
-      for (const cb of this.changeCbs) cb(this.height);
-    }
+    if (options.allowDecrease === true ? next === this.height : next <= this.height) return;
+    this.height = next;
+    for (const cb of this.changeCbs) cb(this.height);
   }
 
   private async openSocket(): Promise<void> {
@@ -148,7 +157,6 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
         settled = true;
         this.ws = ws;
         this.reconnectAttempt = 0;
-        this.setStatus('connected');
         resolve();
       };
       ws.onerror = () => {
@@ -175,6 +183,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       this.reconnectTimer = null;
       this.openSocket()
         .then(() => this.authenticateIfNeeded())
+        .then(() => this.setStatus('connected'))
         .catch((error) => this.handleConnectionFailure(error));
     }, delay);
   }
@@ -201,9 +210,10 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
 
   private async authenticateIfNeeded(): Promise<void> {
     if (!this.config?.authKey) return;
-    const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number }>({ op: 'auth', key: this.config.authKey });
+    const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number; runtimeId?: string }>({ op: 'auth', key: this.config.authKey });
     this.level = response.authLevel;
-    this.noteHeight(response.currentHeight);
+    this.id = String(response.runtimeId || this.id || this.config.runtimeId || '').trim().toLowerCase();
+    this.noteHeight(response.currentHeight, { allowDecrease: true });
   }
 
   private handleMessage(raw: unknown): void {
@@ -218,7 +228,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     }
 
     if ('op' in message && message.op === 'tick') {
-      this.noteHeight(message.height, { notifyWhenUnchanged: true });
+      this.noteHeight(message.height, { allowDecrease: true });
       return;
     }
 
@@ -227,7 +237,13 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!pending) return;
     this.pending.delete(message.inReplyTo);
     if (message.ok) {
-      this.noteHeight(heightFromPayload(message.payload));
+      const allowDecrease =
+        pending.op === 'auth' ||
+        (pending.op === 'read' && (
+          pending.path === 'head' ||
+          (pending.path === 'view-frame' && pending.query?.atHeight === undefined)
+        ));
+      this.noteHeight(heightFromPayload(message.payload), { allowDecrease });
       pending.resolve(message.payload);
     } else {
       pending.reject(new RuntimeAdapterError(message.error.code, message.error.message, message.error.retryable));
@@ -247,6 +263,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
         reject(new RuntimeAdapterError('E_INTERNAL', `runtime adapter request timed out: ${body.op}`, true));
       }, timeoutMs);
       const pending: PendingRequest = {
+        op: body.op,
+        ...('path' in body ? { path: body.path } : {}),
+        ...('query' in body ? { query: body.query } : {}),
         timer,
         resolve: (value) => {
           clearTimeout(timer);

@@ -1,25 +1,31 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
-  import type { Env, EnvSnapshot, JReplica, XLNModule } from '@xln/runtime/xln-api';
+  import type { Env, EnvSnapshot, JReplica, RuntimeAdapterViewFrame, XLNModule } from '@xln/runtime/xln-api';
   import type { JAdapter } from '@xln/runtime/jadapter';
   import { DISPLAY, TIME_MACHINE } from '@xln/runtime/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
+  import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
   import {
-    appRuntimeAdapterActiveEntityId,
-    appRuntimeAdapterEndpoint,
-    appRuntimeAdapterHistoryScan,
-    appRuntimeAdapterMode,
+    runtimeView,
+    runtimeViewActiveEntityId,
+    runtimeViewHistoryScan,
+    setRuntimeViewActiveEntityId,
+    type RuntimeViewHistoryScanState,
+  } from '$lib/stores/runtimeViewStore';
+  import {
     getXLN,
-    refreshRuntimeAdapterEnvironment,
-    REMOTE_HISTORY_SCAN_CACHE_LIMIT,
-    scanRuntimeAdapterHistoryAtHeight,
-    setRuntimeAdapterActiveEntityId,
-    type RuntimeAdapterHistoryScanState,
+    refreshCurrentRuntimeProjection,
   } from '$lib/stores/xlnStore';
+  import {
+    REMOTE_HISTORY_SCAN_CACHE_LIMIT,
+    runtimeHistoryFrames,
+    scanRuntimeAdapterHistoryAtHeight,
+    type RuntimeHistoryFrame,
+  } from '$lib/stores/runtimeHistoryStore';
   // BrowserVM resolved via JAdapter
 
   // Props: Accept both Writable and Readable stores (for global vs isolated usage)
@@ -44,7 +50,8 @@
   const LIVE_TIME_INDEX = -1;
 
   // Direct store usage - no fallback logic
-  $: maxTimeIndex = Math.max(0, $history.length - 1);
+  $: isRemoteRuntime = $runtimeControllerHandle.mode === 'remote';
+  $: maxTimeIndex = Math.max(0, (isRemoteRuntime ? $runtimeHistoryFrames.length : $history.length) - 1);
   $: selectedFrameIndex = $isLive || $timeIndex < 0
     ? maxTimeIndex
     : Math.max(0, Math.min($timeIndex, maxTimeIndex));
@@ -137,7 +144,7 @@
       }
     },
     stepBackward: () => {
-      if ($history.length === 0) {
+      if ((isRemoteRuntime ? $runtimeHistoryFrames.length : $history.length) === 0) {
         localTimeOperations.goToLive();
         return;
       }
@@ -360,80 +367,74 @@
     targetBooks: number;
   };
 
-  function replicaEntityId(replica: unknown): string {
-    const value = replica as { entityId?: unknown; state?: { entityId?: unknown } } | null;
-    return String(value?.entityId || value?.state?.entityId || '').trim().toLowerCase();
+  function normalizeRemoteEntityId(value: unknown): string {
+    return String(value || '').trim().toLowerCase();
   }
 
-  function replicaProfileName(replica: unknown): string {
-    const value = replica as { state?: { profile?: { name?: unknown; isHub?: boolean } } } | null;
-    return String(value?.state?.profile?.name || '').trim();
+  function projectionFrameEntityId(frame: RuntimeAdapterViewFrame | null | undefined): string {
+    return normalizeRemoteEntityId(frame?.activeEntityId || frame?.activeEntity?.summary?.entityId || frame?.activeEntity?.core?.entityId);
   }
 
-  function replicaAccountCount(replica: unknown): number {
-    const value = replica as { state?: { accounts?: Map<unknown, unknown> } } | null;
-    return Math.max(0, Number(value?.state?.accounts?.size || 0));
+  function projectionFrameAccountCount(frame: RuntimeAdapterViewFrame | null | undefined): number {
+    const page = frame?.activeEntity?.accounts;
+    return Math.max(0, Number(page?.totalItems ?? page?.items?.length ?? 0));
   }
 
-  function replicaBookCount(replica: unknown): number {
-    const value = replica as { state?: { orderbookExt?: { books?: Map<unknown, unknown> } } } | null;
-    return Math.max(0, Number(value?.state?.orderbookExt?.books?.size || 0));
+  function projectionFrameBookCount(frame: RuntimeAdapterViewFrame | null | undefined): number {
+    const page = frame?.activeEntity?.books;
+    return Math.max(0, Number(page?.totalItems ?? page?.items?.length ?? 0));
   }
 
-  function isHubReplica(replica: unknown): boolean {
-    const value = replica as { state?: { profile?: { isHub?: boolean }; orderbookHubProfile?: unknown } } | null;
-    return value?.state?.profile?.isHub === true || Boolean(value?.state?.orderbookHubProfile);
-  }
-
-  function frameReplicas(frame: Env | EnvSnapshot | null | undefined): unknown[] {
-    return Array.from(frame?.eReplicas?.values?.() ?? []);
-  }
-
-  function buildRemoteTargetOptions(frame: Env | EnvSnapshot | null | undefined): RemoteTargetOption[] {
-    return frameReplicas(frame)
-      .map((replica): RemoteTargetOption | null => {
-        const id = replicaEntityId(replica);
-        if (!id) return null;
-        const label = replicaProfileName(replica) || `${id.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS)}...`;
-        return {
-          id,
-          label,
-          accounts: replicaAccountCount(replica),
-          books: replicaBookCount(replica),
-          isHub: isHubReplica(replica),
-        };
-      })
-      .filter((item): item is RemoteTargetOption => item !== null)
-      .sort((left, right) => {
-        if (left.isHub !== right.isHub) return left.isHub ? -1 : 1;
-        return left.label.localeCompare(right.label);
+  function buildRemoteTargetOptions(frame: RuntimeAdapterViewFrame | null | undefined): RemoteTargetOption[] {
+    const options = new Map<string, RemoteTargetOption>();
+    for (const summary of frame?.entities ?? []) {
+      const id = normalizeRemoteEntityId(summary.entityId);
+      if (!id) continue;
+      options.set(id, {
+        id,
+        label: String(summary.label || `${id.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS)}...`),
+        accounts: 0,
+        books: 0,
+        isHub: summary.isHub === true,
       });
+    }
+    const activeId = projectionFrameEntityId(frame);
+    if (activeId) {
+      const active = frame?.activeEntity;
+      const existing = options.get(activeId);
+      options.set(activeId, {
+        id: activeId,
+        label: String(active?.core?.profile?.name || active?.summary?.label || existing?.label || `${activeId.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS)}...`),
+        accounts: projectionFrameAccountCount(frame),
+        books: projectionFrameBookCount(frame),
+        isHub: active?.summary?.isHub === true || active?.core?.profile?.isHub === true || Boolean(active?.core?.orderbookHubProfile),
+      });
+    }
+    return Array.from(options.values()).sort((left, right) => {
+      if (left.isHub !== right.isHub) return left.isHub ? -1 : 1;
+      return left.label.localeCompare(right.label);
+    });
   }
 
-  function summarizeFrame(frame: Env | EnvSnapshot | null | undefined, targetEntityId: string): FrameSummary {
-    const replicas = frameReplicas(frame);
+  function findRuntimeHistoryFrame(frames: RuntimeHistoryFrame[], height: number): RuntimeAdapterViewFrame | null {
+    const normalizedHeight = Math.max(0, Math.floor(Number(height || 0)));
+    if (!normalizedHeight) return null;
+    return frames.find((item) => item.height === normalizedHeight)?.frame ?? null;
+  }
+
+  function summarizeFrame(frame: RuntimeAdapterViewFrame | null | undefined, targetEntityId: string): FrameSummary {
+    const activeEntityId = projectionFrameEntityId(frame);
+    const activeAccounts = projectionFrameAccountCount(frame);
+    const activeBooks = projectionFrameBookCount(frame);
     const normalizedTarget = targetEntityId.trim().toLowerCase();
-    let accounts = 0;
-    let books = 0;
-    let targetAccounts = 0;
-    let targetBooks = 0;
-    for (const replica of replicas) {
-      const replicaAccounts = replicaAccountCount(replica);
-      const replicaBooks = replicaBookCount(replica);
-      accounts += replicaAccounts;
-      books += replicaBooks;
-      if (normalizedTarget && replicaEntityId(replica) === normalizedTarget) {
-        targetAccounts = replicaAccounts;
-        targetBooks = replicaBooks;
-      }
-    }
+    const targetMatchesActive = !!normalizedTarget && activeEntityId === normalizedTarget;
     return {
       height: Math.max(0, Math.floor(Number(frame?.height || 0))),
-      entities: replicas.length,
-      accounts,
-      books,
-      targetAccounts,
-      targetBooks,
+      entities: frame?.entities?.length ?? 0,
+      accounts: activeAccounts,
+      books: activeBooks,
+      targetAccounts: targetMatchesActive ? activeAccounts : 0,
+      targetBooks: targetMatchesActive ? activeBooks : 0,
     };
   }
 
@@ -486,7 +487,7 @@
     const normalizedEntity = entityId.trim().toLowerCase();
     if (normalizedEntity) params.set(TIME_MACHINE.HASH_ENTITY_PARAM, normalizedEntity);
     else params.delete(TIME_MACHINE.HASH_ENTITY_PARAM);
-    const runtimeId = String($activeRuntimeId || $env?.runtimeId || '').trim().toLowerCase();
+    const runtimeId = String($activeRuntimeId || $runtimeControllerHandle.id || '').trim().toLowerCase();
     if (runtimeId) params.set(TIME_MACHINE.HASH_RUNTIME_PARAM, runtimeId);
     const query = params.toString();
     const nextHash = route ? `${route}?${query}` : `?${query}`;
@@ -501,7 +502,7 @@
   }
 
   function buildRemoteScanStatusLabel(
-    state: RuntimeAdapterHistoryScanState,
+    state: RuntimeViewHistoryScanState,
     historyLength: number,
     localError: string,
   ): string {
@@ -515,7 +516,7 @@
   }
 
   async function scanRemoteHeight() {
-    const fallbackHeight = Number($history[selectedFrameIndex]?.height || $env?.height || 0);
+    const fallbackHeight = Number($history[selectedFrameIndex]?.height || $runtimeControllerHandle.height || 0);
     const raw = remoteScanHeightDraft.trim() || String(Math.max(1, Math.floor(fallbackHeight || 1)));
     const requestedHeight = Math.max(1, Math.floor(Number(raw)));
     if (!Number.isFinite(requestedHeight) || requestedHeight < 1) {
@@ -528,7 +529,7 @@
       remoteScanHeightDraft = String(result.snapshot.height || requestedHeight);
       safeSet(timeIndex, result.frameIndex);
       safeSet(isLive, false);
-      writeTimeMachineDeepLink(Number(result.snapshot.height || requestedHeight), $appRuntimeAdapterActiveEntityId);
+      writeTimeMachineDeepLink(Number(result.snapshot.height || requestedHeight), $runtimeViewActiveEntityId);
     } catch (error) {
       remoteScanError = error instanceof Error ? error.message : String(error || 'scan failed');
     }
@@ -536,20 +537,20 @@
 
   async function selectRemoteEntity(entityId: string): Promise<void> {
     const normalized = String(entityId || '').trim().toLowerCase();
-    if (!normalized || normalized === $appRuntimeAdapterActiveEntityId) return;
+    if (!normalized || normalized === $runtimeViewActiveEntityId) return;
     remoteEntityChanging = true;
     remoteScanError = '';
     try {
-      setRuntimeAdapterActiveEntityId(normalized);
-      await refreshRuntimeAdapterEnvironment();
-      if (!$isLive && $history[selectedFrameIndex]?.height) {
-        const height = Number($history[selectedFrameIndex]?.height || 0);
+      setRuntimeViewActiveEntityId(normalized);
+      await refreshCurrentRuntimeProjection();
+      if (!$isLive && selectedRuntimeHistoryHeight) {
+        const height = Number(selectedRuntimeHistoryHeight || 0);
         remoteScanHeightDraft = String(height);
         const result = await scanRuntimeAdapterHistoryAtHeight(height);
         safeSet(timeIndex, result.frameIndex);
         safeSet(isLive, false);
       }
-      writeTimeMachineDeepLink(Number($history[selectedFrameIndex]?.height || $env?.height || 1), normalized);
+      writeTimeMachineDeepLink(Number(selectedRuntimeHistoryHeight || $runtimeControllerHandle.height || 1), normalized);
     } catch (error) {
       remoteScanError = error instanceof Error ? error.message : String(error || 'target switch failed');
     } finally {
@@ -557,10 +558,10 @@
     }
   }
 
-  function selectRemoteRuntime(runtimeId: string): void {
+  async function selectRemoteRuntime(runtimeId: string): Promise<void> {
     const normalized = String(runtimeId || '').trim().toLowerCase();
     if (!normalized || normalized === $activeRuntimeId) return;
-    runtimeOperations.activateRemoteRuntime(normalized);
+    await runtimeOperations.activateRemoteRuntime(normalized);
   }
 
   // Handle slider drag/input
@@ -620,37 +621,42 @@
   $: currentTime = formatTime(selectedFrameIndex);
   $: totalTime = formatTime(maxTimeIndex);
   $: progressPercent = maxTimeIndex > 0 ? (selectedFrameIndex / maxTimeIndex) * 100 : 0;
-  $: remoteScanPlaceholder = String(Math.max(1, Math.floor(Number($history[selectedFrameIndex]?.height || $env?.height || 1))));
-  $: remoteScanStatusText = buildRemoteScanStatusLabel($appRuntimeAdapterHistoryScan, $history.length, remoteScanError);
-  $: remoteTargetOptions = buildRemoteTargetOptions($env);
-  $: selectedRemoteEntityId = $appRuntimeAdapterActiveEntityId || remoteTargetOptions[0]?.id || '';
-  $: selectedFrameSummary = summarizeFrame($history[selectedFrameIndex] ?? null, selectedRemoteEntityId);
-  $: liveFrameSummary = summarizeFrame($env, selectedRemoteEntityId);
+  $: selectedRuntimeHistoryHeight = isRemoteRuntime
+    ? Number($runtimeHistoryFrames[selectedFrameIndex]?.height || 0)
+    : Number($history[selectedFrameIndex]?.height || 0);
+  $: selectedRuntimeHistoryFrame = findRuntimeHistoryFrame($runtimeHistoryFrames, selectedRuntimeHistoryHeight);
+  $: remoteHistoryFrameCount = Math.max($runtimeHistoryFrames.length, $history.length);
+  $: remoteScanPlaceholder = String(Math.max(1, Math.floor(Number(selectedRuntimeHistoryFrame?.height || selectedRuntimeHistoryHeight || $runtimeControllerHandle.height || 1))));
+  $: remoteScanStatusText = buildRemoteScanStatusLabel($runtimeViewHistoryScan, remoteHistoryFrameCount, remoteScanError);
+  $: remoteTargetOptions = buildRemoteTargetOptions($runtimeView.frame);
+  $: selectedRemoteEntityId = $runtimeViewActiveEntityId || remoteTargetOptions[0]?.id || '';
+  $: selectedFrameSummary = summarizeFrame(selectedRuntimeHistoryFrame, selectedRemoteEntityId);
+  $: liveFrameSummary = summarizeFrame($runtimeView.frame, selectedRemoteEntityId);
   $: remoteDiffText = formatRemoteDiff(liveFrameSummary, selectedFrameSummary, selectedRemoteEntityId, $isLive);
   $: remoteRuntimeOptions = Array.from($runtimes.values()).filter((runtime) => runtime.type === 'remote');
   $: if (
     pendingDeepLink &&
     !deepLinkApplied &&
-    $appRuntimeAdapterMode === 'remote' &&
-    $appRuntimeAdapterEndpoint &&
-    $history.length > 0 &&
-    !$appRuntimeAdapterHistoryScan.loading
+    $runtimeControllerHandle.mode === 'remote' &&
+    $runtimeControllerHandle.endpoint &&
+    remoteHistoryFrameCount > 0 &&
+    !$runtimeViewHistoryScan.loading
   ) {
     deepLinkApplied = true;
     const request = pendingDeepLink;
     pendingDeepLink = null;
     (async () => {
-      const activeRuntimeKey = String($activeRuntimeId || $env?.runtimeId || '').trim().toLowerCase();
+      const activeRuntimeKey = String($activeRuntimeId || $runtimeControllerHandle.id || '').trim().toLowerCase();
       if (request.runtimeId && request.runtimeId !== activeRuntimeKey) {
         if ($runtimes.has(request.runtimeId)) {
-          runtimeOperations.activateRemoteRuntime(request.runtimeId, { href: window.location.href });
+          await runtimeOperations.activateRemoteRuntime(request.runtimeId, { href: window.location.href });
           return;
         }
         throw new Error(`Time Machine runtime is not imported: ${request.runtimeId.slice(0, DISPLAY.SHORT_HASH_HEX_CHARS)}`);
       }
       if (request.entityId) {
-        setRuntimeAdapterActiveEntityId(request.entityId);
-        await refreshRuntimeAdapterEnvironment();
+        setRuntimeViewActiveEntityId(request.entityId);
+        await refreshCurrentRuntimeProjection();
       }
       remoteScanHeightDraft = String(request.height);
       await scanRemoteHeight();
@@ -747,7 +753,7 @@
       </div>
       <span class="time-label">{currentTime}</span>
     </div>
-    {#if $appRuntimeAdapterMode === 'remote'}
+    {#if $runtimeControllerHandle.mode === 'remote'}
       <div class="remote-scan" data-testid="time-machine-remote-scan">
         {#if remoteRuntimeOptions.length > 1}
           <select
@@ -755,15 +761,15 @@
             data-testid="time-machine-remote-runtime"
             aria-label="Remote runtime"
             value={$activeRuntimeId}
-            on:change={(event) => selectRemoteRuntime((event.currentTarget as HTMLSelectElement).value)}
+            on:change={(event) => void selectRemoteRuntime((event.currentTarget as HTMLSelectElement).value)}
           >
             {#each remoteRuntimeOptions as runtime (runtime.id)}
               <option value={runtime.id}>{runtime.label}</option>
             {/each}
           </select>
         {/if}
-        <span class="remote-endpoint" title={$appRuntimeAdapterEndpoint}>
-          {formatShortEndpoint($appRuntimeAdapterEndpoint)}
+        <span class="remote-endpoint" title={$runtimeControllerHandle.endpoint}>
+          {formatShortEndpoint($runtimeControllerHandle.endpoint)}
         </span>
         {#if remoteTargetOptions.length > 0}
           <select
@@ -771,7 +777,7 @@
             data-testid="time-machine-remote-target"
             aria-label="Remote entity target"
             value={selectedRemoteEntityId}
-            disabled={remoteEntityChanging || $appRuntimeAdapterHistoryScan.loading}
+            disabled={remoteEntityChanging || $runtimeViewHistoryScan.loading}
             on:change={(event) => void selectRemoteEntity((event.currentTarget as HTMLSelectElement).value)}
           >
             {#each remoteTargetOptions as target (target.id)}
@@ -792,10 +798,10 @@
         <button
           type="button"
           data-testid="time-machine-remote-scan-button"
-          disabled={$appRuntimeAdapterHistoryScan.loading}
+          disabled={$runtimeViewHistoryScan.loading}
           on:click={() => void scanRemoteHeight()}
         >
-          {$appRuntimeAdapterHistoryScan.loading ? 'Scan...' : 'Scan'}
+          {$runtimeViewHistoryScan.loading ? 'Scan...' : 'Scan'}
         </button>
         <span class="remote-scan-status" data-testid="time-machine-remote-scan-status">
           {remoteScanStatusText}
@@ -807,14 +813,14 @@
           type="button"
           class="remote-link-button"
           data-testid="time-machine-remote-deeplink"
-          disabled={$history.length === 0}
-          on:click={() => writeTimeMachineDeepLink(Number($history[selectedFrameIndex]?.height || $env?.height || 1), selectedRemoteEntityId)}
+          disabled={remoteHistoryFrameCount === 0}
+          on:click={() => writeTimeMachineDeepLink(Number(selectedRuntimeHistoryHeight || $runtimeControllerHandle.height || 1), selectedRemoteEntityId)}
         >
           Link
         </button>
-        {#if $appRuntimeAdapterHistoryScan.accountsTotal !== null}
+        {#if $runtimeViewHistoryScan.accountsTotal !== null}
           <span class="remote-scan-meta" data-testid="time-machine-remote-scan-meta">
-            {formatCount($appRuntimeAdapterHistoryScan.accountsShown)}/{formatCount($appRuntimeAdapterHistoryScan.accountsTotal)} accounts
+            {formatCount($runtimeViewHistoryScan.accountsShown)}/{formatCount($runtimeViewHistoryScan.accountsTotal)} accounts
           </span>
         {/if}
       </div>

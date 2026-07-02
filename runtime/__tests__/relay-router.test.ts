@@ -247,6 +247,7 @@ describe('relay-router gossip fanout', () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     let closeCount = 0;
+    let duplicateClose: { code?: number; reason?: string } | null = null;
     const config = {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
@@ -258,14 +259,28 @@ describe('relay-router gossip fanout', () => {
       },
     };
     const wsA: FakeWs & { close: () => void } = { label: 'A', close: () => { closeCount += 1; } };
-    const attacker: FakeWs = { label: 'attacker' };
+    const attacker: FakeWs & { close: (code?: number, reason?: string) => void } = {
+      label: 'attacker',
+      close: (code?: number, reason?: string) => {
+        duplicateClose = { code, reason };
+      },
+    };
 
     await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     await relayRoute(config, attacker, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, attacker, {
+      type: 'gossip_announce',
+      id: 'duplicate-followup',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: SERVER_RUNTIME_ID,
+      payload: { profiles: [] },
+    });
 
     expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
     expect(closeCount).toBe(0);
-    expect((sentBySocket.get(attacker)?.at(-1) as { type?: string; error?: string })?.type).toBe('error');
+    expect(duplicateClose).toEqual({ code: 4009, reason: 'duplicate-runtime' });
+    expect(sentBySocket.get(attacker) ?? []).toEqual([]);
   });
 
   test('allows signed reconnect after the previous runtime socket is closed', async () => {

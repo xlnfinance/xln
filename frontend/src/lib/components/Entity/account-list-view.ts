@@ -23,6 +23,19 @@ export type AccountPageView = {
   isSearching: boolean;
 };
 
+export function resolveAccountListEntityName(
+  entityId: string,
+  selfEntityId: string,
+  entityNames: Map<string, string>,
+  selfLabel = 'You',
+): string {
+  const normalizedEntityId = String(entityId || '').trim().toLowerCase();
+  const normalizedSelfEntityId = String(selfEntityId || '').trim().toLowerCase();
+  if (!normalizedEntityId) return '';
+  if (normalizedSelfEntityId && normalizedEntityId === normalizedSelfEntityId) return selfLabel;
+  return entityNames.get(normalizedEntityId) || entityId;
+}
+
 function isFinalizedDisputed(account: AccountView): boolean {
   const status = String(account.status || '');
   const activeDispute = !!account.activeDispute;

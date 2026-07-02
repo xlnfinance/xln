@@ -1463,7 +1463,9 @@ test('qa restart cooldown rejects rapid sequential runs without spawning', async
 });
 
 test('qa run report preserves timeline order and derives slow steps', async () => {
-  const runId = '20000101-000000-123';
+  const createdAt = Date.now() - 2_000;
+  const completedAt = createdAt + 1_000;
+  const runId = formatQaRunIdUtc(createdAt);
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
   await rm(runDir, { recursive: true, force: true });
   deleteQaHistoryRows([runId]);
@@ -1474,8 +1476,8 @@ test('qa run report preserves timeline order and derives slow steps', async () =
       `${JSON.stringify({
         manifestVersion: 2,
         runId,
-        createdAt: Date.UTC(2000, 0, 1),
-        completedAt: Date.UTC(2000, 0, 1, 0, 0, 1),
+        createdAt,
+        completedAt,
         status: 'passed',
         totalMs: 1000,
         totalShards: 1,
@@ -1505,7 +1507,7 @@ test('qa run report preserves timeline order and derives slow steps', async () =
                 method: null,
                 status: null,
                 testId: 'chromium :: qa run report fixture',
-                timestamp: Date.UTC(2000, 0, 1, 0, 0, 0, 500),
+                timestamp: createdAt + 500,
               },
               {
                 type: 'http',
@@ -1515,7 +1517,7 @@ test('qa run report preserves timeline order and derives slow steps', async () =
                 method: 'GET',
                 status: 404,
                 testId: 'chromium :: qa run report fixture',
-                timestamp: Date.UTC(2000, 0, 1, 0, 0, 0, 600),
+                timestamp: createdAt + 600,
               },
             ],
             slowSteps: [],
@@ -1945,7 +1947,8 @@ test('qa run endpoint strips perf samples and exposes raw timeseries separately'
 });
 
 test('qa history endpoint reads only sqlite and does not backfill manifests on poll', async () => {
-  const runId = '20260623-000123-777';
+  const createdAt = Date.now() - 3_000;
+  const runId = formatQaRunIdUtc(createdAt);
   const runDir = resolve(process.cwd(), '.logs', 'e2e-parallel', runId);
   await rm(runDir, { recursive: true, force: true });
   deleteQaHistoryRows([runId]);
@@ -1955,8 +1958,8 @@ test('qa history endpoint reads only sqlite and does not backfill manifests on p
       join(runDir, 'manifest.json'),
       `${JSON.stringify({
         ...benchmarkRun(runId, 900, 700, 'history-hot-path-code', 'history-hot-path-head'),
-        createdAt: Date.UTC(2026, 5, 23, 0, 1, 23),
-        completedAt: Date.UTC(2026, 5, 23, 0, 1, 24),
+        createdAt,
+        completedAt: createdAt + 1_000,
       })}\n`,
     );
 

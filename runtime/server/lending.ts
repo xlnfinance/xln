@@ -10,6 +10,7 @@ import { safeStringify } from '../serialization-utils';
 import { resolveEntityProposerId } from '../state-helpers';
 import { isEntityId32 } from '../server-utils';
 import { getAccountMachine, getEntityReplicaById } from './entity-lookup';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 
 type LendingApiInput = {
   req: Request;
@@ -17,6 +18,10 @@ type LendingApiInput = {
   headers: HeadersInit;
   activeHubEntityIds: string[];
   enqueueRuntimeInput: (env: Env, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: Env, runtimeInput: RuntimeInput) => void;
+  registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
+  getCurrentRuntimeHeight: (env: Env | null) => number;
+  buildRuntimeInputStatusUrl: (id: string) => string;
 };
 
 const parseJsonBody = async (req: Request): Promise<Record<string, unknown>> => {
@@ -75,6 +80,60 @@ const resolveHub = (
 
 const responseWithHeaders = (response: Response, headers: HeadersInit): Response =>
   new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+
+const createLendingRequestId = (kind: string): string =>
+  `${kind}_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`}`;
+
+const admitLendingRuntimeInput = (
+  input: LendingApiInput,
+  env: Env,
+  runtimeInput: RuntimeInput,
+  kind: 'lending-offer' | 'lending-borrow' | 'lending-repay',
+): { requestId: string; receipt: RuntimeIngressReceipt; statusUrl: string } => {
+  const requestId = createLendingRequestId(kind);
+  input.validateRuntimeInputAdmission(env, runtimeInput);
+  input.enqueueRuntimeInput(env, runtimeInput);
+  const receipt = input.registerReceipt({
+    id: requestId,
+    kind,
+    counts: { runtimeTxs: 0, entityInputs: runtimeInput.entityInputs?.length ?? 0, jInputs: 0 },
+    enqueuedHeight: input.getCurrentRuntimeHeight(env),
+    runtimeInput,
+    note: 'Lending request was accepted into the hub runtime queue; poll statusUrl and lending state for settlement.',
+  });
+  return {
+    requestId,
+    receipt,
+    statusUrl: input.buildRuntimeInputStatusUrl(receipt.id),
+  };
+};
+
+const lendingAdmissionFailedResponse = (error: unknown, headers: HeadersInit): Response =>
+  new Response(
+    safeStringify({
+      success: false,
+      error: 'Failed to admit lending request into runtime',
+      code: 'LENDING_ADMISSION_FAILED',
+      details: error instanceof Error ? error.message : String(error),
+    }),
+    { status: 503, headers },
+  );
+
+const lendingAcceptedBody = (
+  env: Env,
+  input: LendingApiInput,
+  accepted: { requestId: string; receipt: RuntimeIngressReceipt; statusUrl: string },
+  body: Record<string, unknown>,
+): Record<string, unknown> => ({
+  success: true,
+  status: 'queued',
+  requestId: accepted.requestId,
+  receipt: accepted.receipt,
+  statusUrl: accepted.statusUrl,
+  runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
+  currentHeight: input.getCurrentRuntimeHeight(env),
+  ...body,
+});
 
 export const handleLendingStateRequest = async (input: {
   req: Request;
@@ -141,7 +200,7 @@ export const handleLendingOfferRequest = async (input: LendingApiInput): Promise
     return new Response(safeStringify({ success: false, error: error instanceof Error ? error.message : String(error) }), { status: 400, headers });
   }
   const signerId = resolveEntityProposerId(env, hub.hubEntityId, 'lending-offer');
-  input.enqueueRuntimeInput(env, {
+  const runtimeInput: RuntimeInput = {
     runtimeTxs: [],
     entityInputs: [{
       entityId: hub.hubEntityId,
@@ -151,8 +210,21 @@ export const handleLendingOfferRequest = async (input: LendingApiInput): Promise
         data: { lenderEntityId, tokenId, amount, termId, interestBps },
       }],
     }],
-  });
-  return new Response(safeStringify({ success: true, hubEntityId: hub.hubEntityId, lenderEntityId, tokenId, amount: amount.toString(), termId, interestBps }), { headers });
+  };
+  let accepted;
+  try {
+    accepted = admitLendingRuntimeInput(input, env, runtimeInput, 'lending-offer');
+  } catch (error) {
+    return lendingAdmissionFailedResponse(error, headers);
+  }
+  return new Response(safeStringify(lendingAcceptedBody(env, input, accepted, {
+    hubEntityId: hub.hubEntityId,
+    lenderEntityId,
+    tokenId,
+    amount: amount.toString(),
+    termId,
+    interestBps,
+  })), { headers });
 };
 
 export const handleLendingBorrowRequest = async (input: LendingApiInput): Promise<Response> => {
@@ -192,7 +264,7 @@ export const handleLendingBorrowRequest = async (input: LendingApiInput): Promis
     return new Response(safeStringify({ success: false, error: 'No lending liquidity for requested term/token' }), { status: 409, headers });
   }
   const signerId = resolveEntityProposerId(env, hub.hubEntityId, 'lending-borrow');
-  input.enqueueRuntimeInput(env, {
+  const runtimeInput: RuntimeInput = {
     runtimeTxs: [],
     entityInputs: [{
       entityId: hub.hubEntityId,
@@ -202,8 +274,21 @@ export const handleLendingBorrowRequest = async (input: LendingApiInput): Promis
         data: { borrowerEntityId, tokenId, amount, termId, maxInterestBps },
       }],
     }],
-  });
-  return new Response(safeStringify({ success: true, hubEntityId: hub.hubEntityId, borrowerEntityId, tokenId, amount: amount.toString(), termId, maxInterestBps }), { headers });
+  };
+  let accepted;
+  try {
+    accepted = admitLendingRuntimeInput(input, env, runtimeInput, 'lending-borrow');
+  } catch (error) {
+    return lendingAdmissionFailedResponse(error, headers);
+  }
+  return new Response(safeStringify(lendingAcceptedBody(env, input, accepted, {
+    hubEntityId: hub.hubEntityId,
+    borrowerEntityId,
+    tokenId,
+    amount: amount.toString(),
+    termId,
+    maxInterestBps,
+  })), { headers });
 };
 
 export const handleLendingRepayRequest = async (input: LendingApiInput): Promise<Response> => {
@@ -238,7 +323,7 @@ export const handleLendingRepayRequest = async (input: LendingApiInput): Promise
     return new Response(safeStringify({ success: false, error: 'Insufficient account capacity to repay loan' }), { status: 409, headers });
   }
   const signerId = resolveEntityProposerId(env, hub.hubEntityId, 'lending-repay');
-  input.enqueueRuntimeInput(env, {
+  const runtimeInput: RuntimeInput = {
     runtimeTxs: [],
     entityInputs: [{
       entityId: hub.hubEntityId,
@@ -248,6 +333,16 @@ export const handleLendingRepayRequest = async (input: LendingApiInput): Promise
         data: { borrowerEntityId, loanId, ...(amount !== undefined && amount !== null ? { amount } : {}) },
       }],
     }],
-  });
-  return new Response(safeStringify({ success: true, hubEntityId: hub.hubEntityId, borrowerEntityId, loanId }), { headers });
+  };
+  let accepted;
+  try {
+    accepted = admitLendingRuntimeInput(input, env, runtimeInput, 'lending-repay');
+  } catch (error) {
+    return lendingAdmissionFailedResponse(error, headers);
+  }
+  return new Response(safeStringify(lendingAcceptedBody(env, input, accepted, {
+    hubEntityId: hub.hubEntityId,
+    borrowerEntityId,
+    loanId,
+  })), { headers });
 };

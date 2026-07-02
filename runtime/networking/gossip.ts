@@ -26,6 +26,7 @@ export type BoardMetadata = {
 export type ProfileMetadata = {
   entityEncPubKey: string;
   isHub: boolean;
+  hubName?: string;
   routingFeePPM: number;
   baseFee: bigint;
   swapTakerFeeBps?: number;
@@ -150,6 +151,7 @@ const ALLOWED_PROFILE_KEYS = [
 const ALLOWED_PROFILE_METADATA_KEYS = [
   'entityEncPubKey',
   'isHub',
+  'hubName',
   'routingFeePPM',
   'baseFee',
   'swapTakerFeeBps',
@@ -509,9 +511,11 @@ export const parseProfile = (raw: unknown): Profile => {
   getBoardPrimaryPublicKey(board, entityId);
   const jurisdiction = parseProfileJurisdiction(metadataRaw['jurisdiction'], entityId, 'GOSSIP_PROFILE_JURISDICTION');
   const mirrors = parseProfileMirrors(metadataRaw['mirrors'], entityId);
+  const hubName = typeof metadataRaw['hubName'] === 'string' ? metadataRaw['hubName'].trim() : '';
   const metadata: ProfileMetadata = {
     entityEncPubKey,
     isHub: metadataRaw['isHub'] === true,
+    ...(hubName ? { hubName } : {}),
     routingFeePPM: Math.max(
       0,
       Number.isFinite(Number(metadataRaw['routingFeePPM'])) ? Math.floor(Number(metadataRaw['routingFeePPM'])) : 1,
@@ -611,6 +615,7 @@ export const canonicalizeProfile = (
   getBoardPrimaryPublicKey(board, entityId);
   const jurisdiction = parseProfileJurisdiction(metadata['jurisdiction'], entityId, 'GOSSIP_PROFILE_JURISDICTION');
   const mirrors = parseProfileMirrors(metadata['mirrors'], entityId);
+  const hubName = typeof metadata['hubName'] === 'string' ? metadata['hubName'].trim() : '';
   const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata['routingFeePPM'])) ? Math.floor(Number(metadata['routingFeePPM'])) : 1);
   const baseFee = parseBigIntValue(metadata['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
   const swapTakerFeeBps = metadata['swapTakerFeeBps'] !== undefined
@@ -636,6 +641,7 @@ export const canonicalizeProfile = (
     metadata: {
       entityEncPubKey: normalizedEntityEncPubKey,
       board,
+      ...(hubName ? { hubName } : {}),
       routingFeePPM,
       baseFee,
       ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),

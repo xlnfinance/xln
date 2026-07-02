@@ -44,7 +44,7 @@ test.describe('Active tab lock handoff', () => {
     }
   });
 
-  test('inactive tab stays inert until explicit reload', async ({ browser }) => {
+  test('inactive tab stays inert until explicit active-lock claim', async ({ browser }) => {
     const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const first = await context.newPage();
     const second = await context.newPage();
@@ -64,7 +64,7 @@ test.describe('Active tab lock handoff', () => {
       await expect(inactiveTabScreen(first)).toBeVisible();
       await expect(inactiveTabScreen(second)).toHaveCount(0);
 
-      await first.getByTestId('inactive-tab-reload').click();
+      await first.getByTestId('inactive-tab-acquire').click();
       await expect(inactiveTabScreen(second)).toBeVisible({ timeout: 30_000 });
       await expect(inactiveTabScreen(first)).toHaveCount(0);
     } finally {

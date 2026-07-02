@@ -2,9 +2,9 @@
   import type { Writable } from 'svelte/store';
 
   // Props for isolated mode (passed from View.svelte)
-  export let isolatedEnv: Writable<any>;
-  export let isolatedHistory: Writable<any[]> | undefined = undefined;
-  export let isolatedTimeIndex: Writable<number> | undefined = undefined;
+  export let runtimeFrameEnv: Writable<any>;
+  export let runtimeFrameHistory: Writable<any[]> | undefined = undefined;
+  export let runtimeFrameTimeIndex: Writable<number> | undefined = undefined;
 
   interface ConsoleEntry {
     id: number;
@@ -26,9 +26,9 @@
 
   // Load frame logs from history when timeIndex changes
   function loadFrameLogs() {
-    if (!isolatedHistory || !isolatedTimeIndex) return;
-    const history = $isolatedHistory;
-    const idx = $isolatedTimeIndex;
+    if (!runtimeFrameHistory || !runtimeFrameTimeIndex) return;
+    const history = $runtimeFrameHistory;
+    const idx = $runtimeFrameTimeIndex;
     if (!history || history.length === 0 || idx === undefined) return;
 
     // Get all frame logs up to current index
@@ -60,7 +60,7 @@
   }
 
   // React to history changes
-  $: if (isolatedHistory && isolatedTimeIndex && ($isolatedHistory || $isolatedTimeIndex !== undefined)) {
+  $: if (runtimeFrameHistory && runtimeFrameTimeIndex && ($runtimeFrameHistory || $runtimeFrameTimeIndex !== undefined)) {
     loadFrameLogs();
   }
 
@@ -119,7 +119,7 @@
 
     // Runtime inspection
     state: () => {
-      const env = $isolatedEnv;
+      const env = $runtimeFrameEnv;
       return {
         entities: Object.keys(env.eReplicas || {}).length,
         height: env.height,
@@ -128,12 +128,12 @@
     },
 
     entities: () => {
-      const env = $isolatedEnv;
+      const env = $runtimeFrameEnv;
       return Object.keys(env.eReplicas || {});
     },
 
     inspect: (entityId: string) => {
-      const env = $isolatedEnv;
+      const env = $runtimeFrameEnv;
       const replica = env.eReplicas?.[entityId];
       if (!replica) return `Entity ${entityId} not found`;
       return replica;

@@ -19,12 +19,16 @@ export function attachLiveRuntimeEnv<T extends object>(viewEnv: T, liveEnv: Env)
   return viewEnv;
 }
 
-export function createRuntimeViewEnv(liveEnv: Env): Env {
-  return attachLiveRuntimeEnv({
+export function createDetachedRuntimeViewEnv(liveEnv: Env): Env {
+  return {
     ...liveEnv,
     eReplicas: new Map(liveEnv.eReplicas),
     jReplicas: new Map(liveEnv.jReplicas),
-  }, liveEnv);
+  };
+}
+
+export function createRuntimeViewEnv(liveEnv: Env): Env {
+  return attachLiveRuntimeEnv(createDetachedRuntimeViewEnv(liveEnv), liveEnv);
 }
 
 export function unwrapLiveRuntimeEnv(env: Env | EnvSnapshot | null | undefined): Env | null {

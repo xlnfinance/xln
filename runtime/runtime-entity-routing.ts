@@ -26,6 +26,11 @@ export type RuntimeEntityRoutingDeps = {
 const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
 const RUNTIME_HINT_TTL_MS = 60_000;
 
+const runtimeRoutingTimestamp = (env: Env): number => {
+  const timestamp = Math.floor(Number(env.timestamp ?? 0));
+  return Number.isFinite(timestamp) && timestamp >= 0 ? timestamp : 0;
+};
+
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   const runtimeId = normalizeRuntimeId(String(profile?.runtimeId || ''));
   return runtimeId || null;
@@ -38,16 +43,21 @@ export const resolveRuntimeIdForEntity = (
 ): string | null => {
   const target = normalizeEntityKey(entityId);
   const state = deps.ensureRuntimeState(env);
+  if (!state.entityRuntimeHints) {
+    state.entityRuntimeHints = new Map();
+  }
   const hints = state.entityRuntimeHints;
-  const now = Date.now();
+  const now = runtimeRoutingTimestamp(env);
 
   const hinted = hints?.get(target);
+  const hintAge = Number.isFinite(hinted?.seenAt)
+    ? (now >= Number(hinted?.seenAt) ? now - Number(hinted?.seenAt) : Number.POSITIVE_INFINITY)
+    : Number.POSITIVE_INFINITY;
   if (
     hinted &&
     typeof hinted.runtimeId === 'string' &&
     hinted.runtimeId.length > 0 &&
-    Number.isFinite(hinted.seenAt) &&
-    now - hinted.seenAt <= RUNTIME_HINT_TTL_MS
+    hintAge <= RUNTIME_HINT_TTL_MS
   ) {
     const normalizedHint = normalizeRuntimeId(hinted.runtimeId);
     if (normalizedHint) return normalizedHint;
@@ -106,7 +116,7 @@ export const registerEntityRuntimeHint = (
   const hints = state.entityRuntimeHints!;
   hints.set(normalizeEntityKey(entityId), {
     runtimeId: normalizedRuntimeId,
-    seenAt: Date.now(),
+    seenAt: runtimeRoutingTimestamp(env),
   });
 };
 

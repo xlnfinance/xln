@@ -9,6 +9,7 @@ import {
 } from '../jadapter/rpc';
 import {
   applyJEventsToEnv,
+  buildJEventsRuntimeInput,
   collectRelevantJEventReplicaKeys,
   getWatcherStartBlock,
   getMinimumCommittedSignerJHeight,
@@ -396,6 +397,40 @@ describe('jadapter helper cursors', () => {
     expect(queuedInputs.map((input) => input.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
     expect(queuedInputs.every((input) => input.entityTxs[0]?.type === 'j_event')).toBe(true);
     expect(env.runtimeState?.wakeRequested).toBe(true);
+  });
+
+  test('buildJEventsRuntimeInput returns j_event input without enqueueing into runtime mempool', () => {
+    const env = createEmptyEnv('jadapter-helper-build-input-seed');
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+
+    const entityId = `0x${'45'.repeat(32)}`;
+    const proposerSignerId = '1';
+    const validatorSignerId = '2';
+    env.eReplicas.set(`${entityId}:${proposerSignerId}`, makeReplica(entityId, proposerSignerId, true));
+    env.eReplicas.set(`${entityId}:${validatorSignerId}`, makeReplica(entityId, validatorSignerId, false));
+
+    const input = buildJEventsRuntimeInput(env, [{
+      name: 'ReserveUpdated',
+      args: {
+        entity: entityId,
+        tokenId: 2,
+        newBalance: 456n,
+      },
+      blockNumber: 8,
+      blockHash: `0x${'67'.repeat(32)}`,
+      transactionHash: `0x${'78'.repeat(32)}`,
+      logIndex: 0,
+    }], 'test-build');
+
+    expect(input?.timestamp).toBe(1_000);
+    expect(input?.runtimeTxs).toEqual([]);
+    expect(input?.entityInputs).toHaveLength(2);
+    expect(input?.entityInputs?.every((entry) => entry.entityId === entityId.toLowerCase())).toBe(true);
+    expect(input?.entityInputs?.map((entry) => entry.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
+    expect(input?.entityInputs?.every((entry) => entry.entityTxs[0]?.type === 'j_event')).toBe(true);
+    expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
+    expect(env.runtimeState?.wakeRequested).not.toBe(true);
   });
 
   test('watcher reserve evidence survives unrelated two-jurisdiction traffic', () => {

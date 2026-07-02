@@ -43,6 +43,10 @@ xln_web_port() {
   xln_derived_port 8080 4
 }
 
+xln_web_http_port() {
+  xln_derived_port 8081 5
+}
+
 xln_custody_port() {
   xln_derived_port 8087 7
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import EntityInput from '../shared/EntityInput.svelte';
   import type { MoveEndpoint } from './move-routes';
 
@@ -66,6 +67,7 @@
   export let moveEntityOptions: string[] = [];
   export let moveHubEntityOptions: string[] = [];
   export let moveSourceAccountOptions: string[] = [];
+  export let profiles: GossipProfile[] = [];
   export let reserveRecipientPreferredId = '';
   export let targetEntityPreferredId = '';
   export let entityId = '';
@@ -196,6 +198,7 @@
                 label="From account"
                 value={moveSourceAccountId}
                 entities={moveSourceAccountOptions}
+                {profiles}
                 excludeId={entityId}
                 placeholder="Select source account..."
                 disabled={moveSourceAccountOptions.length === 0}
@@ -212,6 +215,7 @@
                 label="To reserve entity"
                 value={moveReserveRecipientEntityId}
                 entities={moveEntityOptions}
+                {profiles}
                 placeholder="Recipient entity..."
                 preferredId={reserveRecipientPreferredId}
                 on:change={handleMoveReserveRecipientChange}
@@ -227,6 +231,7 @@
                 label="Recipient"
                 value={moveTargetEntityId}
                 entities={moveEntityOptions}
+                {profiles}
                 placeholder="Recipient entity..."
                 preferredId={targetEntityPreferredId}
                 on:change={handleMoveTargetEntityChange}
@@ -240,6 +245,7 @@
                 label="Counterparty"
                 value={moveTargetHubEntityId}
                 entities={moveHubEntityOptions}
+                {profiles}
                 placeholder="Counterparty entity..."
                 on:change={handleMoveTargetHubChange}
               />

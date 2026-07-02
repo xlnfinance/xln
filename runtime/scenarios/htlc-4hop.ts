@@ -6,7 +6,7 @@
 
 import type { Env } from '../types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
-import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica } from './helpers';
 import { ensureJAdapter, createJReplica, getScenarioJAdapter } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { createRngFromEnv } from './seeded-rng';
@@ -22,12 +22,6 @@ function assert(condition: boolean, message: string): void {
 
 function abs(value: bigint): bigint {
   return value < 0n ? -value : value;
-}
-
-function findReplica(env: Env, entityId: string) {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-  if (!entry) throw new Error(`Replica for ${entityId} not found`);
-  return entry;
 }
 
 function requireEconomyEntity(entity: EconomyEntity | undefined, label: string): EconomyEntity {

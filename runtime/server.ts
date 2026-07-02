@@ -317,6 +317,10 @@ const cleanupRpcMarketSubscription = (ws: RelaySocket): void => marketSubscripti
 
 const handleRpcMessage = createServerRpcMessageHandler({
   getRelayStore: () => relayStore,
+  validateRuntimeInputAdmission,
+  registerRuntimeInputReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+  readRuntimeInputReceipt: (id) => runtimeIngressReceipts.get(id),
+  buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
 });
 
 const handleApi = async (req: Request, pathname: string, env: Env | null): Promise<Response> => {
@@ -693,6 +697,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       headers,
       activeHubEntityIds: relayStore.activeHubEntityIds,
       enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
+      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+      getCurrentRuntimeHeight: currentRuntimeHeight,
+      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
   }
   if (pathname === '/api/lending/state' && req.method === 'GET') {
@@ -710,6 +718,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       headers,
       activeHubEntityIds: relayStore.activeHubEntityIds,
       enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
+      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+      getCurrentRuntimeHeight: currentRuntimeHeight,
+      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
   }
   if (pathname === '/api/lending/borrow' && req.method === 'POST') {
@@ -719,6 +731,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       headers,
       activeHubEntityIds: relayStore.activeHubEntityIds,
       enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
+      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+      getCurrentRuntimeHeight: currentRuntimeHeight,
+      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
   }
   if (pathname === '/api/lending/repay' && req.method === 'POST') {
@@ -728,6 +744,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       headers,
       activeHubEntityIds: relayStore.activeHubEntityIds,
       enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
+      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+      getCurrentRuntimeHeight: currentRuntimeHeight,
+      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
     });
   }
 
@@ -960,7 +980,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env = await main(SERVER_RUNTIME_SEED);
     serverEnv = env;
     registerEnvChangeCallback(env, (nextEnv) => {
-      runtimeIngressReceipts.observeHeight(currentRuntimeHeight(nextEnv));
+      runtimeIngressReceipts.observeLatestRuntimeFrame(nextEnv);
     });
     serverLog.info('runtime.init.ready', { runtimeId: shortId(env.runtimeId, 10) });
     const runtimeEnv = env;

@@ -1,11 +1,13 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import EntityInput from '../shared/EntityInput.svelte';
 
   export let value = '';
   export let accountIds: string[] = [];
   export let excludeId = '';
   export let disabled = false;
+  export let profiles: GossipProfile[] = [];
 
   const dispatch = createEventDispatcher<{
     change: { value?: string };
@@ -17,6 +19,7 @@
     label="Manage Account"
     {value}
     entities={accountIds}
+    {profiles}
     testId="configure-account-selector"
     {excludeId}
     placeholder="Select account for manage..."

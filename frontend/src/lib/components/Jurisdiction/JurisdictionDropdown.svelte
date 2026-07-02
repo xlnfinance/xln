@@ -4,24 +4,22 @@
    * Uses unified Dropdown base component.
    */
   import { createEventDispatcher } from 'svelte';
-  import { xlnEnvironment } from '$lib/stores/xlnStore';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
+
+  type JurisdictionDropdownItem = {
+    name?: string;
+    blockNumber?: string | number | bigint;
+  };
 
   export let selected: string | null = null;
   export let allowAll: boolean = true;
   export let allLabel: string = 'All Jurisdictions';
   export let allowAdd: boolean = false;
+  export let canAddJurisdiction: boolean = false;
+  export let jurisdictions: JurisdictionDropdownItem[] = [];
 
   let isOpen = false;
   const dispatch = createEventDispatcher();
-  $: activeEnv = $xlnEnvironment;
-
-  // Derive jurisdictions from current env
-  $: jurisdictions = (() => {
-    const env = activeEnv;
-    if (!env?.jReplicas) return [];
-    return Array.from(env.jReplicas.values());
-  })();
 
   function handleSelect(name: string | null) {
     selected = name;
@@ -39,7 +37,7 @@
     ? selected
     : (allowAll ? allLabel : (jurisdictions[0]?.name || 'Select Jurisdiction'));
 
-  $: canAdd = allowAdd && !!activeEnv;
+  $: canAdd = allowAdd && canAddJurisdiction;
 </script>
 
 <Dropdown bind:open={isOpen} minWidth={280} maxWidth={560}>
@@ -68,9 +66,9 @@
         <button
           class="menu-item"
           class:selected={selected === j.name}
-          on:click={() => handleSelect(j.name)}
+          on:click={() => handleSelect(String(j.name || '').trim())}
         >
-          <span class="menu-label">{j.name}</span>
+          <span class="menu-label">{String(j.name || '').trim()}</span>
           {#if j.blockNumber !== undefined}
             <span class="menu-meta">#{j.blockNumber.toString()}</span>
           {/if}

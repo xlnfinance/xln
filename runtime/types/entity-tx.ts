@@ -485,6 +485,7 @@ export type EntityTx =
       // Declare entity as hub: sets rebalance config + routing fees, announces to gossip
       type: 'setHubConfig';
       data: {
+        hubName?: string;                   // Stable mesh hub identity; display profile name can change
         matchingStrategy?: 'amount' | 'time' | 'fee'; // Default: 'amount'
         policyVersion?: number;             // Fee-policy version (auto-incremented if omitted)
         routingFeePPM?: number;             // Default: 1 (0.0001%)

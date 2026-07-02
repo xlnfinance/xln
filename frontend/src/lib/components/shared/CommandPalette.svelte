@@ -13,11 +13,15 @@
 -->
 <script lang="ts">
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
-  import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { fly, fade } from 'svelte/transition';
-  import { compareStableText } from '$lib/utils/stableSort';
+  import {
+    emptyCommandPaletteView,
+    findCommandPaletteEntities,
+    type CommandPaletteView,
+  } from './command-palette-view';
 
   export let isOpen = false;
+  export let commandPaletteView: CommandPaletteView = emptyCommandPaletteView();
 
   const dispatch = createEventDispatcher<{
     close: void;
@@ -36,10 +40,10 @@
     action: () => void;
   };
 
-  $: suggestions = buildSuggestions(inputValue, $xlnEnvironment, $xlnFunctions);
+  $: suggestions = buildSuggestions(inputValue, commandPaletteView);
 
-  function buildSuggestions(query: string, env: any, fns: any): Suggestion[] {
-    if (!query.trim()) return defaultSuggestions(env, fns);
+  function buildSuggestions(query: string, view: CommandPaletteView): Suggestion[] {
+    if (!query.trim()) return defaultSuggestions();
     const q = query.trim().toLowerCase();
     const results: Suggestion[] = [];
 
@@ -50,7 +54,7 @@
       const token = (payMatch[2] || 'usdc').toUpperCase();
       const recipient = payMatch[3]?.trim() || '';
       if (recipient) {
-        const matches = findEntities(recipient, env);
+        const matches = findCommandPaletteEntities(recipient, view);
         for (const m of matches.slice(0, 3)) {
           results.push({
             id: `pay-${m.id}`,
@@ -91,7 +95,7 @@
     const openMatch = q.match(/^open\s+(.+)/i);
     if (openMatch) {
       const hubQuery = openMatch[1]?.trim() ?? '';
-      const matches = findEntities(hubQuery, env);
+      const matches = findCommandPaletteEntities(hubQuery, view);
       for (const m of matches.slice(0, 3)) {
         results.push({
           id: `open-${m.id}`,
@@ -127,7 +131,7 @@
 
     // Fallback: search entities by name
     if (results.length === 0 && q.length >= 2) {
-      const matches = findEntities(q, env);
+      const matches = findCommandPaletteEntities(q, view);
       for (const m of matches.slice(0, 5)) {
         results.push({
           id: `entity-${m.id}`,
@@ -142,70 +146,13 @@
     return results;
   }
 
-  function defaultSuggestions(env: any, fns: any): Suggestion[] {
+  function defaultSuggestions(): Suggestion[] {
     return [
       { id: 'pay', icon: '↗', label: 'Pay', sublabel: 'pay 100 usdc to @name', action: () => { inputValue = 'pay '; } },
       { id: 'swap', icon: '⇄', label: 'Swap', sublabel: 'swap 0.5 weth for usdc', action: () => { inputValue = 'swap '; } },
       { id: 'balance', icon: '$', label: 'Balances', sublabel: 'View your assets', action: () => dispatch('command', { type: 'navigate', args: { tab: 'assets' } }) },
       { id: 'settings', icon: '⚙', label: 'Settings', sublabel: 'Wallet & appearance', action: () => dispatch('command', { type: 'navigate', args: { tab: 'settings' } }) },
     ];
-  }
-
-  function findEntities(query: string, env: any): Array<{ id: string; name: string; isHub: boolean }> {
-    const results: Array<{ id: string; name: string; isHub: boolean }> = [];
-    if (!env) return results;
-    const q = query.toLowerCase();
-    const seen = new Set<string>();
-
-    // Search gossip profiles (validated entries in gossip layer)
-    const gossipLayer = env.gossip;
-    const profiles = gossipLayer?.validatedProfiles ?? gossipLayer?.profiles;
-    if (profiles instanceof Map) {
-      for (const [, profile] of profiles) {
-        const name = String(profile?.name || profile?.metadata?.name || '').trim();
-        const entityId = String(profile?.entityId || '').trim().toLowerCase();
-        if (!name || !entityId || seen.has(entityId)) continue;
-        if (name.toLowerCase().includes(q) || entityId.includes(q)) {
-          seen.add(entityId);
-          results.push({ id: entityId, name, isHub: profile?.metadata?.isHub === true });
-        }
-      }
-    } else if (Array.isArray(profiles)) {
-      for (const profile of profiles) {
-        const name = String(profile?.name || profile?.metadata?.name || '').trim();
-        const entityId = String(profile?.entityId || '').trim().toLowerCase();
-        if (!name || !entityId || seen.has(entityId)) continue;
-        if (name.toLowerCase().includes(q) || entityId.includes(q)) {
-          seen.add(entityId);
-          results.push({ id: entityId, name, isHub: profile?.metadata?.isHub === true });
-        }
-      }
-    }
-
-    // Search local replicas (always available)
-    if (env.eReplicas instanceof Map) {
-      for (const [key, replica] of env.eReplicas) {
-        const entityId = String(key).split(':')[0]?.trim().toLowerCase() || '';
-        if (!entityId || seen.has(entityId)) continue;
-        const state = (replica as any)?.state;
-        const profile = state?.profile;
-        const name = String(profile?.name || profile?.metadata?.name || state?.entityId?.slice(0, 8) || entityId.slice(0, 8));
-        if (name.toLowerCase().includes(q) || entityId.includes(q)) {
-          seen.add(entityId);
-          results.push({ id: entityId, name, isHub: false });
-        }
-      }
-    }
-
-    // Sort: exact prefix match first, then includes
-    results.sort((a, b) => {
-      const aPrefix = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-      const bPrefix = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
-      return compareStableText(a.name, b.name);
-    });
-
-    return results;
   }
 
   function handleKeydown(event: KeyboardEvent) {

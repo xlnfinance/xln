@@ -4,18 +4,16 @@
    * Uses unified Dropdown base component
    */
   import { createEventDispatcher } from 'svelte';
-  import { xlnEnvironment, xlnFunctions, xlnInstance } from '../../stores/xlnStore';
-  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
+  import { xlnFunctions, xlnInstance } from '../../stores/xlnStore';
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { entityAvatar } from '$lib/utils/avatar';
-  import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusLabel, type AccountUiStatus } from '$lib/utils/accountStatus';
 
   export let replica: EntityReplica | null = null;
   export let selectedAccountId: string | null = null;
   export let allowAdd: boolean = false;
-  export let envOverride: { gossip?: { getProfiles?: () => GossipProfile[] } } | null = null;
+  export let entityNames: Map<string, string> = new Map();
 
   const dispatch = createEventDispatcher();
 
@@ -33,14 +31,12 @@
   }
 
   $: xlnReady = !!$xlnInstance;
-  $: activeEnv = envOverride || $xlnEnvironment;
-  $: gossipProfiles = activeEnv?.gossip?.getProfiles?.() || [];
-  $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null, gossipProfiles);
+  $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null, entityNames);
 
   function buildAccountList(
     currentReplica: EntityReplica | null,
     xlnFuncs: typeof $xlnFunctions | null,
-    profiles: GossipProfile[],
+    names: Map<string, string>,
   ): AccountItem[] {
     if (!currentReplica?.state?.accounts) return [];
 
@@ -49,7 +45,8 @@
 
     for (const [counterpartyId, account] of accountsMap.entries()) {
       const acc = account as AccountMachine;
-      const profileName = resolveEntityName(counterpartyId, profiles);
+      const normalizedCounterpartyId = String(counterpartyId || '').trim().toLowerCase();
+      const profileName = names.get(normalizedCounterpartyId) || '';
       const status = getAccountUiStatus(acc);
       items.push({
         id: counterpartyId,
@@ -66,9 +63,6 @@
   }
 
   $: selectedAccount = accounts.find(acc => acc.id === selectedAccountId);
-  $: if (isOpen && accounts.length > 0) {
-    scheduleGossipProfileFetch(accounts.map((account) => account.id));
-  }
 
   $: displayText = selectedAccount
     ? `${selectedAccount.name}`

@@ -144,19 +144,19 @@ function collectOpenAccountCounterparties(entityInputs: readonly RoutedEntityInp
 export async function waitForOpenAccountCounterpartyProfiles(
   env: Env | null | undefined,
   entityInputs: readonly RoutedEntityInput[],
-  timeoutMs = 5_000,
+  timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS,
 ): Promise<boolean> {
   const pairs = collectOpenAccountCounterparties(entityInputs);
   if (pairs.length === 0) return true;
   if (!env) return false;
 
-  const boundedTimeoutMs = Math.max(100, Math.floor(Number(timeoutMs) || 5_000));
+  const boundedTimeoutMs = Math.max(100, Math.floor(Number(timeoutMs) || DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
   const deadline = Date.now() + boundedTimeoutMs;
 
   await prewarmCounterpartyProfiles(
     env,
     pairs.map((pair) => pair.counterpartyEntityId),
-    Math.min(boundedTimeoutMs, 5_000),
+    Math.min(boundedTimeoutMs, DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS),
   );
   while (Date.now() < deadline) {
     const missing = pairs.filter((pair) =>
@@ -179,15 +179,15 @@ export async function waitForOpenAccountCounterpartyProfiles(
 export async function waitForCounterpartyRuntimeRoutes(
   env: Env | null | undefined,
   entityIds: readonly string[],
-  timeoutMs = 5_000,
+  timeoutMs = DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS,
 ): Promise<boolean> {
   const targets = Array.from(new Set(entityIds.map(normalizeEntityId).filter(Boolean)));
   if (!env || targets.length === 0) return false;
 
-  const boundedTimeoutMs = Math.max(100, Math.floor(Number(timeoutMs) || 5_000));
+  const boundedTimeoutMs = Math.max(100, Math.floor(Number(timeoutMs) || DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
   const deadline = Date.now() + boundedTimeoutMs;
 
-  await prewarmCounterpartyProfiles(env, targets, Math.min(boundedTimeoutMs, 5_000));
+  await prewarmCounterpartyProfiles(env, targets, Math.min(boundedTimeoutMs, DEFAULT_PROFILE_PREFETCH_TIMEOUT_MS));
   while (Date.now() < deadline) {
     const missing = targets.filter((entityId) => !hasCounterpartyRuntimeRoute(env, entityId));
     if (missing.length === 0) return true;

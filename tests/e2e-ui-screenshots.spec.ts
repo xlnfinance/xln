@@ -355,13 +355,11 @@ async function captureOnboardingScreens(page: Page, output: Parameters<typeof ca
 
   const seed = selectDemoMnemonic('dave');
   await page.evaluate(async ({ label, mnemonic }) => {
-    const operations = (window as typeof window & {
-      __xlnVaultOperations?: {
-        createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
-      };
-    }).__xlnVaultOperations;
+    const operations = (window as any).__xln?.vault as {
+      createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+    } | undefined;
     if (typeof operations?.createRuntime !== 'function') {
-      throw new Error('__xlnVaultOperations.createRuntime unavailable for onboarding screenshot');
+      throw new Error('__xln.vault.createRuntime unavailable for onboarding screenshot');
     }
     await operations.createRuntime(label, mnemonic, {
       loginType: 'manual',

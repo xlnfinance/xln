@@ -29,6 +29,7 @@ import { toPublicRpcUrl } from '../loopback-url';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { applyJEventsToEnv } from '../jadapter/watcher';
+import { createRelayStore } from '../relay-store';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
@@ -57,6 +58,9 @@ import {
 } from '../server/lending';
 import { handleRuntimeActivityRequest } from '../server/activity-api';
 import { handleReserveFaucet } from '../server/reserve-faucet';
+import { handleOffchainFaucet } from '../server/offchain-faucet';
+import { createRuntimeIngressReceiptStore } from '../server/ingress-receipts';
+import { handleRuntimeInputStatus } from '../server/runtime-input-control';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -66,7 +70,6 @@ import {
   process as runtimeProcess,
   enqueueRuntimeInput,
   handleInboundP2PEntityInput,
-  resolveEntityProposerId,
   startP2P,
   stopP2P,
   startRuntimeLoop,
@@ -76,12 +79,14 @@ import {
   getEntityJAdapter,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
+  readPersistedRuntimeActivityPage,
   listPersistedCheckpointHeights,
   loadEntityAccountDocFromStorageDb,
   loadEntityStateFromStorageDb,
   loadEntityViewPageFromStorageDb,
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
+  validateRuntimeInputAdmission,
 } from '../runtime.ts';
 import type { EntityInput, Env, JReplica } from '../types';
 import {
@@ -152,6 +157,7 @@ type HubPairHealth = {
 
 type VisibleHubProfile = {
   name: string;
+  hubName?: string;
   entityId: string;
   runtimeId: string;
   jurisdictionName: string;
@@ -1226,6 +1232,7 @@ const readVisibleHubProfiles = (env: Env, jurisdictionName: string): VisibleHubP
     })
     .map(profile => ({
       name: String(profile.name || '').trim(),
+      hubName: typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName.trim() : '',
       entityId: String(profile.entityId || '').toLowerCase(),
       runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
       jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
@@ -1350,6 +1357,15 @@ const run = async (): Promise<void> => {
 
   const runtimeBootStartedAt = startTiming('runtime_boot');
   const env = await main(resolvedArgs.seed);
+  const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
+  const faucetRelayStore = createRelayStore(`${resolvedArgs.name}-faucet`);
+  const currentRuntimeHeight = (targetEnv: Env | null): number =>
+    Math.max(0, Math.floor(Number(targetEnv?.height ?? 0)));
+  const runtimeInputStatusUrl = (id: string): string =>
+    `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
+  registerEnvChangeCallback(env, (changedEnv) => {
+    runtimeIngressReceipts.observeLatestRuntimeFrame(changedEnv);
+  });
   configureHubRuntimeLogging(env);
   configureHubBootstrapStorage(env);
   prewarmLocalHubSignerKeys();
@@ -1470,15 +1486,20 @@ const run = async (): Promise<void> => {
       closeInvalidRuntimeAdapterMessage(ws, error);
       return;
     }
-    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
-      enqueueRuntimeInput,
-      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
+	    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
+	      enqueueRuntimeInput,
+	      validateRuntimeInputAdmission,
+	      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+	      readReceipt: (id) => runtimeIngressReceipts.get(id),
+	      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
+	      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
       loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
       loadEntityAccountDoc: (targetEnv, entityId, counterpartyId, height) => loadEntityAccountDocFromStorageDb(targetEnv, entityId, counterpartyId, height),
       loadEntityViewPage: (targetEnv, entityId, height, query) => loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
       listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
+      readActivityPage: (targetEnv, opts) => readPersistedRuntimeActivityPage(targetEnv, opts),
     })).catch(error => {
       ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${(error as Error).message}` }));
     });
@@ -1752,6 +1773,10 @@ const run = async (): Promise<void> => {
           headers,
           activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
           enqueueRuntimeInput,
+          validateRuntimeInputAdmission,
+          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+          getCurrentRuntimeHeight: currentRuntimeHeight,
+          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
         });
       }
       if (pathname === '/api/lending/borrow' && request.method === 'POST') {
@@ -1761,6 +1786,10 @@ const run = async (): Promise<void> => {
           headers,
           activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
           enqueueRuntimeInput,
+          validateRuntimeInputAdmission,
+          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+          getCurrentRuntimeHeight: currentRuntimeHeight,
+          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
         });
       }
       if (pathname === '/api/lending/repay' && request.method === 'POST') {
@@ -1770,6 +1799,10 @@ const run = async (): Promise<void> => {
           headers,
           activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
           enqueueRuntimeInput,
+          validateRuntimeInputAdmission,
+          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+          getCurrentRuntimeHeight: currentRuntimeHeight,
+          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
         });
       }
 
@@ -1806,105 +1839,27 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
-        const requestStartedAt = Date.now();
-        const body = await request.json() as {
-          userEntityId?: string;
-          hubEntityId?: string;
-          tokenId?: number;
-          amount?: string;
-        };
-        const userEntityId = String(body.userEntityId || '').toLowerCase();
-        const requestedHubEntityId = String(body.hubEntityId || '').toLowerCase();
-        const faucetHubEntityId = requestedHubEntityId || String(readyBootstrap.entityId || '').toLowerCase();
-        if (!userEntityId) {
-          return new Response(safeStringify({ success: false, error: 'Missing userEntityId' }), {
-            status: 400,
-            headers,
-          });
-        }
-        if (!getEntityReplicaById(env, faucetHubEntityId)) {
-          return new Response(safeStringify({
-            success: false,
-            code: 'FAUCET_HUB_NOT_FOUND',
-            error: 'Requested hub entity is not available on this hub runtime.',
-          }), {
-            status: 404,
-            headers,
-          });
-        }
-        if (!hasAccount(env, faucetHubEntityId, userEntityId)) {
-          return new Response(safeStringify({
-            success: false,
-            code: 'FAUCET_ACCOUNT_NOT_OPEN',
-            error: 'No bilateral account with this hub. Open account first, then retry faucet.',
-          }), {
-            status: 409,
-            headers,
-          });
-        }
-
-        const amount = String(body.amount || '100');
-        const tokenId = Number(body.tokenId ?? 1);
-        const accountMachine = getAccountMachine(env, faucetHubEntityId, userEntityId);
-        const accountReady = Boolean(
-          accountMachine?.currentFrame &&
-          Number(accountMachine.currentHeight ?? 0) > 0 &&
-          !accountMachine.pendingFrame &&
-          Number(accountMachine.mempool?.length ?? 0) === 0,
-        );
-        if (!accountReady) {
-          return new Response(safeStringify({
-            success: false,
-            code: 'FAUCET_ACCOUNT_NOT_READY',
-            error: 'Bilateral account is still settling setup frames. Retry after commit.',
-            accountState: {
-              currentHeight: Number(accountMachine?.currentHeight ?? 0),
-              pendingFrameHeight: accountMachine?.pendingFrame ? Number(accountMachine.pendingFrame.height ?? 0) : null,
-              mempool: Number(accountMachine?.mempool?.length ?? 0),
-            },
-          }), {
-            status: 409,
-            headers,
-          });
-        }
-        const amountWei = ethers.parseUnits(amount, 18);
-        const outCapacity = getEntityOutCapacity(accountMachine, faucetHubEntityId, tokenId);
-        if (outCapacity < amountWei) {
-          return new Response(safeStringify({
-            success: false,
-            code: 'FAUCET_INSUFFICIENT_OUT_CAPACITY',
-            error: 'Selected hub does not have enough outbound capacity for offchain faucet.',
-            tokenId,
-            requiredAmount: amountWei.toString(),
-            senderOutCapacity: outCapacity.toString(),
-          }), {
-            status: 409,
-            headers,
-          });
-        }
-        enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId: faucetHubEntityId,
-            signerId: resolveEntityProposerId(env, faucetHubEntityId, 'hub-offchain-faucet'),
-            entityTxs: [{
-              type: 'directPayment',
-              data: {
-                targetEntityId: userEntityId,
-                tokenId,
-                amount: amountWei,
-                route: [faucetHubEntityId, userEntityId],
-                description: 'faucet-offchain',
-              },
-            }],
-          }],
+        faucetRelayStore.activeHubEntityIds = hubBootstraps.map(entry => entry.entityId);
+        return handleOffchainFaucet({
+          req: request,
+          env,
+          headers,
+          relayStore: faucetRelayStore,
+          enqueueRuntimeInput,
+          validateRuntimeInputAdmission,
+          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
+          getCurrentRuntimeHeight: currentRuntimeHeight,
+          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
         });
-        return new Response(safeStringify({
-          success: true,
-          accepted: true,
-          hubEntityId: faucetHubEntityId,
-          serverDurationMs: Date.now() - requestStartedAt,
-        }), { headers });
+      }
+
+      const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
+      if (runtimeInputStatusMatch && request.method === 'GET') {
+        const receiptId = decodeURIComponent(runtimeInputStatusMatch[1] || '');
+        return handleRuntimeInputStatus(receiptId, headers, env, {
+          receipts: runtimeIngressReceipts,
+          getCurrentRuntimeHeight: currentRuntimeHeight,
+        });
       }
 
       if (pathname === '/api/debug/reserve' && request.method === 'GET') {
@@ -2126,9 +2081,11 @@ const run = async (): Promise<void> => {
     meshLoopInFlight = true;
     try {
       const visibleHubProfiles = readVisibleHubProfiles(env, primaryJurisdictionName);
-      const requiredHubProfiles = resolvedArgs.meshHubNames
-        .map(name => visibleHubProfiles.find(profile => profile.name === name) || null)
-        .filter((profile): profile is VisibleHubProfile => profile !== null);
+      const requiredHubNames = new Set(resolvedArgs.meshHubNames.map(name => name.trim().toLowerCase()).filter(Boolean));
+      const requiredHubProfiles = visibleHubProfiles.filter(profile => {
+        const hubName = String(profile.hubName || profile.name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
+        return requiredHubNames.has(hubName);
+      });
 
       if (!gossipReadyMarked && requiredHubProfiles.length === resolvedArgs.meshHubNames.length) {
         finishTiming('gossip_ready', startedAtFor('gossip_ready') ?? startTiming('gossip_ready'));

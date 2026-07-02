@@ -28,6 +28,7 @@ type DirectWsSession = {
   runtimeId: string | null;
   ws: DirectWebSocket;
   handshakeDone: boolean;
+  duplicateClosing: boolean;
   peerEncryptionPubKey: string | null;
   lastSeen: number;
 };
@@ -89,6 +90,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
       runtimeId: null,
       ws,
       handshakeDone: false,
+      duplicateClosing: false,
       peerEncryptionPubKey: null,
       lastSeen: Date.now(),
     };
@@ -181,6 +183,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
       },
       async message(ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer) {
         const session = ensureSession(ws);
+        if (session.duplicateClosing) return;
         let msg: RuntimeWsMessage;
         try {
           msg = deserializeWsMessage(raw);
@@ -222,8 +225,8 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           }
           session.peerEncryptionPubKey = peerKey;
           if (!rememberRuntimeSession(session, normalizedFrom)) {
-            send(ws, { type: 'error', error: 'Runtime already connected' });
-            ws.close();
+            session.duplicateClosing = true;
+            ws.close(4009, 'duplicate-runtime');
             return;
           }
           send(ws, {

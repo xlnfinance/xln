@@ -21,6 +21,14 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
+    title: 'context dropdown switches across H1 H2 H3 remote runtimes',
+  },
+  {
+    file: 'tests/e2e-radapter-remote.spec.ts',
+    title: 'inspect remote runtime rejects RuntimeInput send over websocket and keeps account projection readable',
+  },
+  {
+    file: 'tests/e2e-radapter-remote.spec.ts',
     title: 'runtime dropdown manager attaches a remote radapter by token',
   },
   {
@@ -62,6 +70,10 @@ const FAST_E2E_TARGETS = [
   {
     file: 'tests/e2e-cross-j-swap.spec.ts',
     title: 'two users can place full, partial, and disputed cross-j swaps through the shared swap builder',
+  },
+  {
+    file: 'tests/e2e-cross-j-swap.spec.ts',
+    title: 'cross swap one-click prepares missing target account and inbound credit',
   },
 ];
 

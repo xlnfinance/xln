@@ -1257,6 +1257,10 @@ export async function handleAccountInput(
   // ACK inputs must never be silently ignored; this causes replay divergence.
   if (input.prevHanko && !ackProcessed && !input.newAccountFrame) {
     const pending = accountMachine.pendingFrame?.height ?? 'none';
+    const nextHeightAckWithoutPending =
+      normalizedInputHeight !== undefined &&
+      Number(normalizedInputHeight) === Number(accountMachine.currentHeight ?? 0) + 1 &&
+      !accountMachine.pendingFrame;
     const staleAck =
       normalizedInputHeight !== undefined &&
       Number(normalizedInputHeight) > 0 &&
@@ -1264,6 +1268,16 @@ export async function handleAccountInput(
     if (staleAck) {
       events.push(
         `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
+      );
+      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
+    }
+    if (nextHeightAckWithoutPending) {
+      // Remote delivery is only ordered per transport, not across the local
+      // frame-install tick. A pure ACK for the next frame cannot advance state
+      // without the matching pending frame, so keep it non-mutating and rely on
+      // the account pending resend path to recover the ACK deterministically.
+      events.push(
+        `Ignored early ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=none)`,
       );
       return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
     }

@@ -117,3 +117,39 @@ test('dev radapter keys can run quietly when bun run dev waits for the real mani
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('dev radapter keys can point manager links at the browser QA origin', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xln-dev-radapter-'));
+  const outPath = join(dir, 'radapter-keys.json');
+  const envOutPath = join(dir, 'radapter-keys.env');
+  try {
+    const result = spawnSync('bun', [
+      'runtime/scripts/dev-radapter-keys.ts',
+      '--web-port',
+      '8084',
+      '--manager-origin',
+      'http://localhost:8085',
+      '--api-port',
+      '8082',
+      '--out',
+      outPath,
+      '--env-out',
+      envOutPath,
+      '--suppress-url-log',
+      '--quiet',
+    ], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
+    expect(payload.importUrl.startsWith('http://localhost:8085/radapter/manage#runtime-import-src=')).toBe(true);
+    expect(payload.adminImportUrl.startsWith('http://localhost:8085/radapter/manage#runtime-import-src=')).toBe(true);
+    expect(payload.importUrl).toContain('access%3Dread');
+    expect(payload.adminImportUrl).toContain('access%3Dadmin');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

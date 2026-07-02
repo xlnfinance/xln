@@ -3,7 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
 import { handleJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
-import { createEmptyEnv, generateLazyEntityId } from '../runtime';
+import { buildJEventsRuntimeInput } from '../jadapter/watcher';
+import {
+  applyRuntimeInput,
+  createEmptyEnv,
+  generateLazyEntityId,
+} from '../runtime';
 import { cloneEntityState } from '../state-helpers';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityState, JurisdictionEvent } from '../types';
@@ -139,6 +144,45 @@ describe('external wallet observed state', () => {
       books: new Map(),
     });
     expect(hydrated.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_500n);
+  });
+
+  test('applies wallet snapshot to a projection-shaped replica through canonical runtime input', async () => {
+    const seed = 'external-wallet-runtime-input';
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.eReplicas.set(`${entityId}:${signerId}`, {
+      entityId,
+      signerId,
+      isProposer: true,
+      state: makeState(entityId, signerId),
+      hankoWitness: new Map(),
+    } as any);
+
+    const input = buildJEventsRuntimeInput(env, [{
+      name: 'ExternalWalletSnapshot',
+      args: {
+        entityId,
+        owner: signerId,
+        nativeBalance: '1000000000000000000',
+        tokenBalances: [{ tokenAddress: TOKEN, tokenId: 7, balance: '2500' }],
+        allowances: [{ tokenAddress: TOKEN, spender: SPENDER, allowance: '900' }],
+      },
+      blockNumber: 42,
+      blockHash: `0x${'42'.repeat(32)}`,
+      transactionHash: 'external-wallet-snapshot:42:runtime-input',
+    }], 'external-wallet-runtime-input');
+
+    expect(input).not.toBeNull();
+    await applyRuntimeInput(env, input!);
+
+    const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+    expect(replica?.mempool).toEqual([]);
+    expect(replica?.state.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_500n);
+    expect(replica?.state.externalWallet?.allowances.get(signerId)?.get(`${TOKEN}:${SPENDER}`)?.allowance).toBe(900n);
   });
 
   test('applies ERC20 transfer and approval deltas only on top of a snapshot baseline', async () => {

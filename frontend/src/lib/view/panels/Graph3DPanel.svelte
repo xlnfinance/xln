@@ -8,7 +8,7 @@
   import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
   import { panelBridge } from '../utils/panelBridge';
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
-  import { entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
+  import { submitRuntimeInput, entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
   import Graph3DViewport from '../components/Graph3DViewport.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
   import { compareStableText } from '$lib/utils/stableSort';
@@ -55,20 +55,20 @@
   let miniPanelEntityId = '';
   let miniPanelEntityName = '';
   let miniPanelPosition = { x: 0, y: 0 };
-  export let isolatedEnv: Writable<any>;
-  export let isolatedHistory: Writable<any[]>;
-  export let isolatedTimeIndex: Writable<number>;
-  export let isolatedIsLive: Writable<boolean>;
+  export let runtimeFrameEnv: Writable<any>;
+  export let runtimeFrameHistory: Writable<any[]>;
+  export let runtimeFrameTimeIndex: Writable<number>;
+  export let runtimeFrameIsLive: Writable<boolean>;
   export let graphInitSignal: Writable<boolean> | undefined = undefined;
   $: initEnabled = graphInitSignal ? $graphInitSignal : true;
   $: env = (() => {
-    const timeIdx = $isolatedTimeIndex;
-    const historyFrames = $isolatedHistory;
+    const timeIdx = $runtimeFrameTimeIndex;
+    const historyFrames = $runtimeFrameHistory;
     if (timeIdx >= 0 && historyFrames && historyFrames.length > 0) {
       const idx = Math.min(timeIdx, historyFrames.length - 1);
       return historyFrames[idx];  // Historical frame
     }
-    return $isolatedEnv;  // Live state
+    return $runtimeFrameEnv;  // Live state
   })();
   $: replicas = env?.eReplicas || new Map();
   $: activeJurisdictionName = env?.activeJurisdiction
@@ -88,19 +88,19 @@
     }));
   })();
   function getTimeAwareReplicas(): Map<string, any> {
-    const timeIndex = get(isolatedTimeIndex);
-    const hist = get(isolatedHistory);
+    const timeIndex = get(runtimeFrameTimeIndex);
+    const hist = get(runtimeFrameHistory);
     if (timeIndex >= 0 && hist && hist.length > 0) {
       const idx = Math.min(timeIndex, hist.length - 1);
       return hist[idx]?.eReplicas || new Map();
     }
-    return get(isolatedEnv)?.eReplicas || new Map();
+    return env?.eReplicas || new Map();
   }
   function getLiveEnvForAction(action: string): any {
-    if (get(isolatedTimeIndex) !== -1 || !get(isolatedIsLive)) {
+    if (get(runtimeFrameTimeIndex) !== -1 || !get(runtimeFrameIsLive)) {
       throw new Error(`${action} requires LIVE mode. Switch to the current runtime state before acting.`);
     }
-    const currentEnv = get(isolatedEnv);
+    const currentEnv = get(runtimeFrameEnv);
     const liveEnv = unwrapLiveRuntimeEnv(currentEnv) ?? currentEnv;
     if (!liveEnv?.eReplicas || !(liveEnv.eReplicas instanceof Map)) {
       throw new Error(`${action} requires live runtime environment`);
@@ -318,8 +318,8 @@
     const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
     const activeJMachine = activeJurisdiction ? jMachines.get(activeJurisdiction.name) : undefined;
     if (activeJurisdiction && activeJMachine) {
-      const timeIdx = $isolatedTimeIndex;
-      const historyFrames = $isolatedHistory;
+      const timeIdx = $runtimeFrameTimeIndex;
+      const historyFrames = $runtimeFrameHistory;
       let prevMempoolSize = 0;
       let prevFrame = null;
       if (historyFrames && historyFrames.length > 0) {
@@ -387,11 +387,11 @@
         }
       }
       const currentHeightNum = Number(currentJHeight);
-      const runtimeHistory = $isolatedHistory || [];
+      const runtimeHistory = $runtimeFrameHistory || [];
       if (runtimeHistory.length > 0 && currentHeightNum > 0) {
         const blockBoundaries: Array<{ blockNum: number; txs: any[] }> = [];
         for (let targetHeight = currentHeightNum - 1; targetHeight >= Math.max(0, currentHeightNum - 3); targetHeight--) {
-          const maxFrameIdx = $isolatedTimeIndex >= 0 ? Math.min($isolatedTimeIndex, runtimeHistory.length - 1) : runtimeHistory.length - 1;
+          const maxFrameIdx = $runtimeFrameTimeIndex >= 0 ? Math.min($runtimeFrameTimeIndex, runtimeHistory.length - 1) : runtimeHistory.length - 1;
           let foundFrame = null;
           let foundIdx = -1;
           let foundHeight = -1;
@@ -595,8 +595,8 @@
     rafId = requestAnimationFrame(animateExpand);
     activeBroadcastSpheres.push({ sphere, animationId: rafId });
   }
-  $: if (jMachine && $isolatedTimeIndex === -1) {
-    const historyFrames = $isolatedHistory;
+  $: if (jMachine && $runtimeFrameTimeIndex === -1) {
+    const historyFrames = $runtimeFrameHistory;
     const currentLen = historyFrames?.length || 0;
     if (currentLen > lastAnimatedFrameIndex + 1) {
       for (let i = lastAnimatedFrameIndex + 1; i < currentLen; i++) {
@@ -755,9 +755,9 @@
         updateTimeout = null;
       }, 16); // ~60fps max update rate
     };
-    const unsubscribe1 = isolatedEnv.subscribe(debouncedUpdate);
-    const unsubscribe2 = isolatedTimeIndex.subscribe(debouncedUpdate);
-    const unsubscribe3 = isolatedHistory.subscribe(debouncedUpdate);
+    const unsubscribe1 = runtimeFrameEnv.subscribe(debouncedUpdate);
+    const unsubscribe2 = runtimeFrameTimeIndex.subscribe(debouncedUpdate);
+    const unsubscribe3 = runtimeFrameHistory.subscribe(debouncedUpdate);
     const handleScenarioLoaded = () => {
       if (scene) updateNetworkData();
     };
@@ -1297,15 +1297,15 @@
   }
   function updateNetworkData() {
     if (!scene) return;
-    const timeIndex = $isolatedTimeIndex;
+    const timeIndex = $runtimeFrameTimeIndex;
     updateAvailableTokens();
     const computedEnv = (() => {
-      const hist = get(isolatedHistory);
+      const hist = get(runtimeFrameHistory);
       if (timeIndex >= 0 && hist && hist.length > 0) {
         const idx = Math.min(timeIndex, hist.length - 1);
         return hist[idx];  // Historical frame
       }
-      return get(isolatedEnv);  // Live state
+      return get(runtimeFrameEnv);  // Live state
     })();
     let entityData: any[] = [];
     let currentReplicas = computedEnv?.eReplicas || new Map();
@@ -1841,9 +1841,9 @@
       }
     });
     particles = [];
-    const timeIndex = $isolatedTimeIndex;
-    if (!($isolatedTimeIndex === -1) && $isolatedHistory && timeIndex >= 0) {
-      const currentFrame = $isolatedHistory[timeIndex];
+    const timeIndex = $runtimeFrameTimeIndex;
+    if (!($runtimeFrameTimeIndex === -1) && $runtimeFrameHistory && timeIndex >= 0) {
+      const currentFrame = $runtimeFrameHistory[timeIndex];
       const entityInputs = currentFrame?.serverInput?.entityInputs || currentFrame?.runtimeInput?.entityInputs || [];
       if (entityInputs.length > 0) {
         entityInputs.forEach((entityInput: any) => {
@@ -1882,41 +1882,6 @@
           }
         });
       }
-    } else if (($isolatedTimeIndex === -1) && $isolatedEnv?.runtimeInput?.entityInputs) {
-      $isolatedEnv.runtimeInput.entityInputs.forEach((entityInput: any) => {
-        const processingEntityId = entityInput.entityId;
-        currentFrameActivity.activeEntities.add(processingEntityId);
-        if (entityInput.entityTxs) {
-          entityInput.entityTxs.forEach((tx: any) => {
-            if (tx.type === 'accountInput' && tx.data) {
-              const fromEntityId = tx.data.fromEntityId;
-              const toEntityId = tx.data.toEntityId;
-              triggerEntityInputStrike(fromEntityId, toEntityId);
-              if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
-                currentFrameActivity.outgoingFlows.set(fromEntityId, []);
-              }
-              currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
-              createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
-              if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
-                currentFrameActivity.incomingFlows.set(toEntityId, []);
-              }
-              currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
-              triggerEntityActivity(fromEntityId);
-              triggerEntityActivity(toEntityId);
-            } else if (['r2c', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
-              createBroadcastRipple(processingEntityId, tx.type);
-            } else if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
-              const fromEntityId = processingEntityId;
-              const toEntityId = tx.targetEntityId;
-              if (toEntityId) {
-                addTxToJMachine(fromEntityId);
-                triggerEntityActivity(fromEntityId);
-                triggerEntityActivity(toEntityId);
-              }
-            }
-          });
-        }
-      });
     }
   }
   function createDirectionalLightning(
@@ -2503,7 +2468,7 @@
   function updateEntityLabels() {
     if (!camera) return;
     const currentReplicas = getTimeAwareReplicas();
-    const currentTimeIndex = get(isolatedTimeIndex);
+    const currentTimeIndex = get(runtimeFrameTimeIndex);
     const forceRecreateLabels = currentTimeIndex !== lastLabelUpdateTimeIndex;
     if (forceRecreateLabels) {
       lastLabelUpdateTimeIndex = currentTimeIndex;
@@ -3426,7 +3391,7 @@
     if (availableTokens.length === 0) {
       availableTokens = [1];
       selectedTokenId = 1;
-    } else if (!availableTokens.includes(selectedTokenId) && ($isolatedTimeIndex === -1)) {
+    } else if (!availableTokens.includes(selectedTokenId) && ($runtimeFrameTimeIndex === -1)) {
       selectedTokenId = availableTokens.includes(1) ? 1 : availableTokens[0]!;
       saveBirdViewSettings();
     }
@@ -3576,7 +3541,11 @@
       };
       triggerEntityActivity(job.from);
       triggerEntityActivity(job.to);
-      (XLN as any).enqueueRuntimeInput(actionEnv, { runtimeTxs: [], entityInputs: [paymentInput] });
+      const nextEnv = await submitRuntimeInput({ runtimeTxs: [], entityInputs: [paymentInput] });
+      if (nextEnv) {
+        runtimeFrameEnv.set(nextEnv);
+        runtimeFrameHistory.set(nextEnv.history || []);
+      }
       recentActivity = [{
         id: `tx-${Date.now()}`,
         message: `${getEntityShortName(job.from)} → ${getEntityShortName(job.to)}: ${job.amount}`,
@@ -3678,8 +3647,8 @@
       }
       const actionEnv = getLiveEnvForAction('Graph scenario');
       const result = await XLN?.executeScenario(actionEnv, parsed.scenario);
-      isolatedHistory.set(actionEnv.history || []);
-      isolatedEnv.set(createRuntimeViewEnv(actionEnv));
+      runtimeFrameHistory.set(actionEnv.history || []);
+      runtimeFrameEnv.set(createRuntimeViewEnv(actionEnv));
       if (!result.success) {
         console.error('Scenario execution errors:', result.errors);
         debug.error('Scenario execution failed - check console');
@@ -3751,9 +3720,9 @@
   {miniPanelEntityId}
   {miniPanelEntityName}
   {miniPanelPosition}
-  {isolatedEnv}
-  {isolatedHistory}
-  {isolatedTimeIndex}
+  {runtimeFrameEnv}
+  {runtimeFrameHistory}
+  {runtimeFrameTimeIndex}
   {showFpsOverlay}
   {renderFps}
   {frameTime}

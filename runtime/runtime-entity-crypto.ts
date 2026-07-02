@@ -43,16 +43,27 @@ export const resolveReplicaEntityCryptoKeys = (
   };
 };
 
+export const canonicalizeLocalEntityCryptoKeys = (
+  env: Env,
+  entityId: string,
+  signerId: string,
+  state: { entityEncPubKey?: string; entityEncPrivKey?: string },
+): void => {
+  if (!hasLocalSignerKey(env, signerId)) return;
+  const { publicKey, privateKey } = deriveLocalEntityCryptoKeys(env, entityId, signerId);
+  if (state.entityEncPubKey && state.entityEncPubKey !== publicKey) {
+    throw new Error(
+      `ENTITY_CRYPTO_KEY_MISMATCH: entity=${entityId} signer=${signerId} ` +
+        `expectedPub=${publicKey} actualPub=${String(state.entityEncPubKey || '')}`,
+    );
+  }
+  state.entityEncPubKey = publicKey;
+  state.entityEncPrivKey = privateKey;
+};
+
 export const assertLocalEntityCryptoKeys = (env: Env): void => {
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const signerId = extractSignerId(replicaKey);
-    if (!hasLocalSignerKey(env, signerId)) continue;
-    const { publicKey, privateKey } = deriveLocalEntityCryptoKeys(env, replica.entityId, signerId);
-    if (replica.state.entityEncPubKey !== publicKey || replica.state.entityEncPrivKey !== privateKey) {
-      throw new Error(
-        `ENTITY_CRYPTO_KEY_MISMATCH: entity=${replica.entityId} signer=${signerId} ` +
-          `expectedPub=${publicKey} actualPub=${String(replica.state.entityEncPubKey || '')}`,
-      );
-    }
+    canonicalizeLocalEntityCryptoKeys(env, replica.entityId, signerId, replica.state);
   }
 };

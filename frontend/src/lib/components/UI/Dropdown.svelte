@@ -21,6 +21,13 @@
   export let disabled = false;
   export let allowMultiple = false; // Allow multiple dropdowns open simultaneously
   export let local = false;
+  export let ariaLabel: string | null = null;
+  export let triggerTestId: string | null = null;
+  export let triggerRuntimeId: string | null = null;
+  export let triggerEntityId: string | null = null;
+  export let triggerSignerId: string | null = null;
+  export let triggerJurisdiction: string | null = null;
+  export let triggerText: string | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -132,10 +139,19 @@
     on:click={handleTriggerClick}
     aria-expanded={open}
     aria-haspopup="true"
+    aria-label={ariaLabel || undefined}
+    data-testid={triggerTestId || undefined}
+    data-runtime-id={triggerRuntimeId || undefined}
+    data-entity-id={triggerEntityId || undefined}
+    data-signer-id={triggerSignerId || undefined}
+    data-jurisdiction={triggerJurisdiction || undefined}
     disabled={disabled}
     aria-disabled={disabled}
   >
     <slot name="trigger" />
+    {#if triggerText}
+      <span class="trigger-text-sentinel" aria-hidden="true">{triggerText}</span>
+    {/if}
   </button>
 
   <!-- Menu (fixed position) -->
@@ -194,6 +210,15 @@
   .dropdown-trigger :global(.trigger-content),
   .dropdown-trigger :global(.trigger-text) {
     min-width: 0;
+  }
+
+  .trigger-text-sentinel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .dropdown-menu {

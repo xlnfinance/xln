@@ -9,6 +9,7 @@ PUSH=0
 FRESH=0
 BUILD_FRONTEND=1
 PRODUCTION=0
+RESET_PRODUCTION_MESH=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -36,9 +37,17 @@ while [ $# -gt 0 ]; do
       PRODUCTION=1
       shift
       ;;
+    --reset-mesh)
+      RESET_PRODUCTION_MESH=1
+      shift
+      ;;
+    --code-only)
+      RESET_PRODUCTION_MESH=0
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend] [--runtime-only] [--production]" >&2
+      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend] [--runtime-only] [--production] [--code-only|--reset-mesh]" >&2
       exit 1
       ;;
   esac
@@ -870,15 +879,27 @@ run_local_deploy() {
       pkill -KILL -f 'runtime/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
       pkill -KILL -f 'runtime/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
 
-      echo "[deploy] resetting production anvil + runtime state"
-      rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
-      rm -f data/anvil-state.json data/anvil2-state.json
-      lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
-      lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
-      pm2 delete anvil >/dev/null 2>&1 || true
-      pm2 delete anvil2 >/dev/null 2>&1 || true
-      run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
-      run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset
+      if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
+        echo "[deploy] resetting production anvil + runtime state"
+        rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
+        rm -f data/anvil-state.json data/anvil2-state.json
+        lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+        lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+        pm2 delete anvil >/dev/null 2>&1 || true
+        pm2 delete anvil2 >/dev/null 2>&1 || true
+        run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
+        run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset
+      else
+        echo "[deploy] restarting production services without resetting anvil/runtime state"
+        if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
+          pm2 delete anvil >/dev/null 2>&1 || true
+          run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M
+        fi
+        if ! wait_for_rpc_chain "http://127.0.0.1:8546" "0x7a6a"; then
+          pm2 delete anvil2 >/dev/null 2>&1 || true
+          run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M
+        fi
+      fi
       if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
         fail_deploy_with_debug "anvil did not become ready on :8545"
       fi
@@ -947,6 +968,11 @@ if [ -n "$REMOTE_HOST" ]; then
   fi
   if [ "$PRODUCTION" = "1" ]; then
     remote_cmd="$remote_cmd --production"
+  fi
+  if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
+    remote_cmd="$remote_cmd --reset-mesh"
+  else
+    remote_cmd="$remote_cmd --code-only"
   fi
 
   echo "[deploy] running remote deploy on $REMOTE_HOST"

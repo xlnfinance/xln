@@ -21,17 +21,19 @@ const makeAuthedHello = (seed: string, runtimeId: string, signerId = '1'): Runti
 
 const makeFakeWs = () => {
   const sent: RuntimeWsMessage[] = [];
+  const closed: Array<{ code?: number; reason?: string }> = [];
   const ws = {
     readyState: 1,
     send(raw: string) {
       sent.push(deserializeWsMessage(raw));
       return true;
     },
-    close() {
+    close(code?: number, reason?: string) {
+      closed.push({ code, reason });
       this.readyState = 3;
     },
   };
-  return { ws, sent };
+  return { ws, sent, closed };
 };
 
 describe('direct runtime websocket route', () => {
@@ -195,10 +197,8 @@ describe('direct runtime websocket route', () => {
 
     expect(first.ws.readyState).toBe(1);
     expect(second.ws.readyState).toBe(3);
-    expect(second.sent.at(-1)).toMatchObject({
-      type: 'error',
-      error: 'Runtime already connected',
-    });
+    expect(second.closed.at(-1)).toEqual({ code: 4009, reason: 'duplicate-runtime' });
+    expect(second.sent).toEqual([]);
     expect(route.getSessionState()).toEqual([
       expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
     ]);
@@ -211,6 +211,6 @@ describe('direct runtime websocket route', () => {
     };
     expect(route.sendEntityInput(clientRuntimeId, outboundInput)).toBe(true);
     expect(first.sent.at(-1)?.type).toBe('entity_input');
-    expect(second.sent.at(-1)?.type).toBe('error');
+    expect(second.sent).toEqual([]);
   });
 });

@@ -5,6 +5,7 @@ import { getAccountMachine, getEntityOutCapacity, hasAccount } from './entity-lo
 import { getFaucetHubProfiles } from './faucet-hubs';
 import { getRequestCreditCap } from './hub-health';
 import { isEntityId32 } from '../server-utils';
+import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
 
 export const handleCreditRequest = async (input: {
   req: Request;
@@ -12,6 +13,10 @@ export const handleCreditRequest = async (input: {
   headers: HeadersInit;
   activeHubEntityIds: string[];
   enqueueRuntimeInput: (env: Env, runtimeInput: RuntimeInput) => void;
+  validateRuntimeInputAdmission: (env: Env, runtimeInput: RuntimeInput) => void;
+  registerReceipt: (receipt: RegisterReceiptOptions) => RuntimeIngressReceipt;
+  getCurrentRuntimeHeight: (env: Env | null) => number;
+  buildRuntimeInputStatusUrl: (id: string) => string;
 }): Promise<Response> => {
   const { req, env, headers } = input;
   try {
@@ -76,6 +81,9 @@ export const handleCreditRequest = async (input: {
       return new Response(
         JSON.stringify({
           success: true,
+          status: 'already_satisfied',
+          runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
+          currentHeight: input.getCurrentRuntimeHeight(env),
           hubEntityId,
           userEntityId,
           tokenId,
@@ -95,7 +103,7 @@ export const handleCreditRequest = async (input: {
       );
     }
 
-    input.enqueueRuntimeInput(env, {
+    const runtimeInput: RuntimeInput = {
       runtimeTxs: [],
       entityInputs: [
         {
@@ -113,11 +121,41 @@ export const handleCreditRequest = async (input: {
           ],
         },
       ],
-    });
+    };
+
+    const requestId = `credit_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`}`;
+    let receipt: RuntimeIngressReceipt;
+    try {
+      input.validateRuntimeInputAdmission(env, runtimeInput);
+      input.enqueueRuntimeInput(env, runtimeInput);
+      receipt = input.registerReceipt({
+        id: requestId,
+        kind: 'credit-request',
+        counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
+        enqueuedHeight: input.getCurrentRuntimeHeight(env),
+        runtimeInput,
+        note: 'Credit request was accepted into the hub runtime queue; poll statusUrl and account state for settlement.',
+      });
+    } catch (error) {
+      return new Response(
+        JSON.stringify({
+          error: 'Failed to admit credit request into runtime',
+          code: 'CREDIT_REQUEST_ADMISSION_FAILED',
+          details: error instanceof Error ? error.message : String(error),
+        }),
+        { status: 503, headers },
+      );
+    }
 
     return new Response(
       JSON.stringify({
         success: true,
+        status: 'queued',
+        requestId,
+        receipt,
+        statusUrl: input.buildRuntimeInputStatusUrl(receipt.id),
+        runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
+        currentHeight: input.getCurrentRuntimeHeight(env),
         hubEntityId,
         userEntityId,
         tokenId,

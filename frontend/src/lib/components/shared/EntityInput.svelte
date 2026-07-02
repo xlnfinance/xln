@@ -4,15 +4,14 @@
   Features:
   - Dropdown with known entities from gossip profiles
   - Universal entity ID parsing (numbered, named, short ID, provider-scoped)
-  - Auto profile lookup from gossip cache
+  - Profile names come from injected runtime projections
 -->
 <script lang="ts">
   import { tick } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
-  import { xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
+  import { xlnFunctions } from '../../stores/xlnStore';
   import { entityAvatar } from '../../utils/avatar';
-  import { getGossipProfile, getGossipProfiles as getProfilesFromSource, scheduleGossipProfileFetch } from '../../utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
 
   export let value: string = '';
@@ -29,10 +28,11 @@
   export let alwaysShowInput: boolean = false;
   export let hideDropdownHint: boolean = false;
   export let strictValueInput: boolean = false;
+  export let profiles: GossipProfile[] = [];
 
   const dispatch = createEventDispatcher();
   $: activeFunctions = $xlnFunctions;
-  $: activeEnv = $xlnEnvironment;
+  $: activeProfiles = Array.isArray(profiles) ? profiles : [];
 
   function normalizeEntityId(id: string | null | undefined): string {
     return String(id || '').trim().toLowerCase();
@@ -46,17 +46,14 @@
   }
 
   function getGossipProfiles(): GossipProfile[] {
-    return getProfilesFromSource(activeEnv);
+    return activeProfiles;
   }
 
   function getKnownEntityName(id: string): string {
     const norm = normalizeEntityId(id);
     if (!norm) return '';
-    const profile = getGossipProfile(norm, activeEnv);
-    if (!profile) {
-      scheduleGossipProfileFetch([norm]);
-      return '';
-    }
+    const profile = activeProfiles.find((candidate) => normalizeEntityId(candidate.entityId) === norm) ?? null;
+    if (!profile) return '';
     return profile.name.trim();
   }
 
@@ -89,7 +86,6 @@
     const invoiceMatch = trimmed.match(/^(0x[0-9a-fA-F]{64})\?.+$/);
     if (invoiceMatch?.[1]) {
       const entityId = invoiceMatch[1].toLowerCase();
-      scheduleGossipProfileFetch([entityId]);
       return {
         entityId,
         shortId: getShortIdFromHex(entityId),
@@ -99,7 +95,6 @@
 
     // Full 32-byte hex
     if (/^0x[0-9a-fA-F]{64}$/.test(trimmed)) {
-      scheduleGossipProfileFetch([trimmed.toLowerCase()]);
       return {
         entityId: trimmed.toLowerCase(),
         shortId: getShortIdFromHex(trimmed),
@@ -212,14 +207,6 @@
       displayName: getKnownEntityName(id) || formatShortId(id),
       avatar: entityAvatar(activeFunctions, id)
     }));
-
-  $: missingEntityProfiles = entities.filter((id) => {
-    const norm = normalizeEntityId(id);
-    return norm.length > 0 && !getGossipProfiles().some((profile) => normalizeEntityId(profile.entityId) === norm);
-  });
-  $: if (missingEntityProfiles.length > 0) {
-    scheduleGossipProfileFetch(missingEntityProfiles);
-  }
 
   function compareOptionPriority(
     left: { id: string; displayName: string },

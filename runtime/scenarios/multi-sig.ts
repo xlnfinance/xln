@@ -183,13 +183,18 @@ export async function multiSig(env: Env): Promise<void> {
     shares: { '5': 1n, '6': 1n, '7': 1n },
   };
 
-  // Only create proposer replica (validators 6, 7 don't exist in network)
+  // Create every validator replica, then take 6/7 offline. Missing replicas are
+  // a topology error; this negative test is only about threshold enforcement.
   await commitRuntimeInput(env, {
     runtimeTxs: [
       { type: 'importReplica', entityId: testEntity.id, signerId: '5', data: { isProposer: true, position: { x: 200, y: 0, z: 0 }, config: testConfig }},
+      { type: 'importReplica', entityId: testEntity.id, signerId: '6', data: { isProposer: false, position: { x: 240, y: 0, z: 0 }, config: testConfig }},
+      { type: 'importReplica', entityId: testEntity.id, signerId: '7', data: { isProposer: false, position: { x: 280, y: 0, z: 0 }, config: testConfig }},
     ],
     entityInputs: [],
   });
+  offlineSigners.add('6');
+  offlineSigners.add('7');
 
   // Proposer creates a proposal (entity-level operation)
   await processWithOffline(env, [{
@@ -198,7 +203,7 @@ export async function multiSig(env: Env): Promise<void> {
     entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC, amount: usd(10) }}],
   }], offlineSigners);
 
-  await processWithOffline(env, undefined, offlineSigners); // Propagate proposal (but no validators exist to sign)
+  await processWithOffline(env, undefined, offlineSigners); // Propagate proposal while validators 6/7 are offline
 
   const [, t1Rep] = findReplica(env, testEntity.id);
   assert(t1Rep.proposal, 'Proposer should have proposal');
@@ -236,6 +241,8 @@ export async function multiSig(env: Env): Promise<void> {
   if (env.runtimeInput?.entityInputs) {
     env.runtimeInput.entityInputs = env.runtimeInput.entityInputs.filter(input => input.entityId !== testEntity.id);
   }
+  offlineSigners.delete('6');
+  offlineSigners.delete('7');
   // ============================================================================
   // TEST 1: Byzantine tolerance (3 offline, 1+2 reach threshold on Alice entity)
   // ============================================================================

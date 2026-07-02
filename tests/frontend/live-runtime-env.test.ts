@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import {
+  createDetachedRuntimeViewEnv,
   createRuntimeViewEnv,
   isRuntimeLikeEnv,
   unwrapLiveRuntimeEnv,
@@ -45,5 +46,16 @@ describe('live runtime env helpers', () => {
     expect(isRuntimeLikeEnv(liveEnv)).toBe(true);
     expect(isRuntimeLikeEnv(viewEnv)).toBe(true);
     expect(unwrapLiveRuntimeEnv(viewEnv)).toBe(liveEnv);
+  });
+
+  test('detached runtime view env does not expose the live env handle', () => {
+    const liveEnv = makeLiveEnv();
+    const detached = createDetachedRuntimeViewEnv(liveEnv as never);
+
+    expect(isRuntimeLikeEnv(detached)).toBe(true);
+    expect(detached).not.toBe(liveEnv);
+    expect(detached.eReplicas).not.toBe(liveEnv.eReplicas);
+    expect(detached.jReplicas).not.toBe(liveEnv.jReplicas);
+    expect(unwrapLiveRuntimeEnv(detached)).toBe(detached);
   });
 });

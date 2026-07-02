@@ -1526,12 +1526,13 @@ test.describe('Rebalance E2E', () => {
     expect(snapshot.lastFinalizedJHeight, `jHeight must finalize (>0)\n${debugDump}`).toBeGreaterThan(0);
 
     // UI assertion + final screenshot artifact
-    const readyIndicator = page.locator('.account-preview .status-indicator.green').first();
+    const accountCard = page.getByTestId('account-preview').first();
+    const readyIndicator = accountCard.getByTestId('account-status-coverage').filter({ hasText: '100%' }).first();
     await timedStep('rebalance.wait_ready_indicator', async () => {
       await expect(readyIndicator).toBeVisible({ timeout: 30_000 });
+      await expect(readyIndicator).toHaveClass(/cov-good/);
     });
 
-    const accountCard = page.locator('.account-preview').first();
     await expect(accountCard).toBeVisible();
     await accountCard.screenshot({ path: 'test-results/rebalance-green-final.png' });
     await page.screenshot({ path: 'test-results/rebalance-green-fullpage.png', fullPage: true });

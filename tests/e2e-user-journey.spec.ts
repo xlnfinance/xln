@@ -270,7 +270,7 @@ test.describe('E2E User Journey', () => {
     const persistedBefore = await getPersistedReceiptCursor(page);
 
     // User flow action: request one offchain faucet payment through the opened account.
-    await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
+    const faucetResult = await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
       const env = (window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv;
       if (!env) return;
       const runtimeId = String(env.runtimeId || '').toLowerCase();
@@ -290,18 +290,30 @@ test.describe('E2E User Journey', () => {
       if (!res.ok || !body?.success) {
         throw new Error(body?.error || `offchain faucet failed (${res.status})`);
       }
+      return {
+        status: String(body?.status || ''),
+        requestId: String(body?.requestId || ''),
+        statusUrl: String(body?.statusUrl || ''),
+        accountReady: Boolean(body?.accountReady),
+      };
     }, {
       entityId: initial.entityId,
       signerId: initial.signerId,
       counterpartyId: initial.counterpartyId,
     });
+    expect(faucetResult, 'offchain faucet should queue a runtime input from the browser path').toMatchObject({
+      status: 'queued',
+      accountReady: true,
+    });
+    expect(faucetResult?.requestId, 'queued faucet must expose a receipt id').toMatch(/^offchain_/);
+    expect(faucetResult?.statusUrl, 'queued faucet must expose receipt polling URL').toContain(faucetResult!.requestId);
 
     await expect.poll(
       async () => (await getPersistedReceiptCursor(page)).nextHeight,
-      { timeout: 60_000, intervals: [500, 1000, 2000] },
+      { timeout: 20_000, intervals: [100, 250, 500] },
     ).toBeGreaterThan(persistedBefore.nextHeight);
 
-    await waitForRenderedPrimaryOutboundDelta(page, renderedBefore, 100, { timeoutMs: 60_000, tolerance: 0.001 });
+    await waitForRenderedPrimaryOutboundDelta(page, renderedBefore, 100, { timeoutMs: 20_000, tolerance: 0.001 });
 
     const finalState = (await readPrimaryAccountProgress(page))!;
     expect(finalState.frameHeight, 'account frame must stay live after offchain faucet').toBeGreaterThanOrEqual(initial.frameHeight);

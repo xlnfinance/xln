@@ -24,6 +24,56 @@ const TOKEN_SYMBOL_BY_ID: Record<number, string> = {
   [USDT]: 'USDT',
 };
 
+const CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES = new Set([
+  'resting',
+  'partially_filled',
+  'clear_requested',
+  'clearing',
+  'source_claimed',
+  'target_claimed',
+  'settled',
+]);
+
+type BrowserConsoleGuard = {
+  errors: string[];
+  warnings: string[];
+};
+
+function isIgnoredBrowserConsoleMessage(text: string): boolean {
+  return /chrome-extension:|moz-extension:|safari-web-extension:|inpageBootstrap\.js|Ignoring Event: localhost/i.test(text);
+}
+
+function attachBrowserConsoleGuard(page: Page): BrowserConsoleGuard {
+  const guard: BrowserConsoleGuard = {
+    errors: [],
+    warnings: [],
+  };
+  page.on('console', (message) => {
+    const location = message.location();
+    const suffix = location.url ? ` @ ${location.url}:${location.lineNumber}:${location.columnNumber}` : '';
+    const text = `${message.text()}${suffix}`;
+    if (isIgnoredBrowserConsoleMessage(text)) return;
+    if (message.type() === 'error') guard.errors.push(text);
+    if (message.type() === 'warning') guard.warnings.push(text);
+  });
+  page.on('pageerror', (error) => {
+    const text = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    if (!isIgnoredBrowserConsoleMessage(text)) guard.errors.push(text);
+  });
+  return guard;
+}
+
+function expectBrowserConsoleClean(guard: BrowserConsoleGuard, label: string): void {
+  expect(
+    guard.errors,
+    `${label} browser console errors:\n${guard.errors.join('\n')}`,
+  ).toHaveLength(0);
+  expect(
+    guard.warnings,
+    `${label} browser console warnings:\n${guard.warnings.join('\n')}`,
+  ).toHaveLength(0);
+}
+
 type RuntimeIdentity = {
   entityId: string;
   signerId: string;
@@ -55,8 +105,9 @@ type CrossRuntimeWindow = Window & {
     eReplicas?: Map<string, any>;
     jReplicas?: Map<string, any>;
   };
-  XLN?: any;
-  __xln_instance?: any;
+  __xln?: {
+    instance?: any;
+  };
 };
 
 type CrossResolveSnapshot = {
@@ -233,11 +284,8 @@ async function signSyntheticJEventObservation(
     const view = window as CrossRuntimeWindow;
     const env = view.isolatedEnv;
     if (!env) throw new Error('isolatedEnv missing');
-    const runtimeModule = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as any;
-    view.XLN = runtimeModule;
-    view.__xln_instance = runtimeModule;
+    const runtimeModule = view.__xln?.instance;
+    if (!runtimeModule) throw new Error('__xln.instance missing');
     if (typeof runtimeModule.canonicalJurisdictionEventsHash !== 'function') {
       throw new Error('canonicalJurisdictionEventsHash missing from runtime bundle');
     }
@@ -293,11 +341,8 @@ async function importRpc2SiblingEntity(
       throw new Error(`rpc2 jurisdiction incomplete: ${JSON.stringify(jurisdictionRaw)}`);
     }
 
-    const runtimeModule = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as any;
-    view.XLN = runtimeModule;
-    view.__xln_instance = runtimeModule;
+    const runtimeModule = view.__xln?.instance;
+    if (!runtimeModule) throw new Error('__xln.instance missing');
 
     const hasConnectedAdapter = (replica: any): boolean => Boolean(
       replica?.jadapter?.addresses?.depository &&
@@ -364,11 +409,8 @@ async function importRpc2SiblingEntity(
     const view = window as CrossRuntimeWindow;
     const env = view.isolatedEnv;
     if (!env) throw new Error('isolatedEnv missing');
-    const runtimeModule = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as any;
-    view.XLN = runtimeModule;
-    view.__xln_instance = runtimeModule;
+    const runtimeModule = view.__xln?.instance;
+    if (!runtimeModule) throw new Error('__xln.instance missing');
     const privateKeyBytes = new Uint8Array(
       signer.privateKey.slice(2).match(/.{2}/g).map((byte: string) => Number.parseInt(byte, 16)),
     );
@@ -469,11 +511,10 @@ async function waitForHubProfile(page: Page, hubId: string): Promise<void> {
   await expect.poll(
     async () => page.evaluate((targetHubId) => {
       const view = window as CrossRuntimeWindow & {
-        XLN?: { refreshGossip?: (env: unknown) => void };
         p2p?: { refreshGossip?: () => void };
       };
       const env = view.isolatedEnv;
-      view.XLN?.refreshGossip?.(env);
+      view.__xln?.instance?.refreshGossip?.(env);
       view.p2p?.refreshGossip?.();
       const target = String(targetHubId || '').toLowerCase();
       const profiles = env?.gossip?.getProfiles?.() || [];
@@ -497,16 +538,27 @@ async function flushRuntime(page: Page, rounds = 3): Promise<void> {
     const view = window as CrossRuntimeWindow;
     const env = view.isolatedEnv;
     if (!env) throw new Error('isolatedEnv missing');
-    const runtimeModule = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as {
-        process?: (env: unknown, inputs?: unknown[], runtimeDelay?: number) => Promise<unknown>;
-      };
-    view.XLN = runtimeModule;
-    view.__xln_instance = runtimeModule;
-    if (typeof runtimeModule.process !== 'function') return;
-    for (let index = 0; index < Math.max(1, Number(roundsToRun) || 1); index += 1) {
-      await runtimeModule.process(env, [], 0);
+    const runtimeModule = view.__xln?.instance as {
+      startRuntimeLoop?: (env: unknown) => unknown;
+      waitForRuntimeProcessingIdle?: (env: unknown, timeoutMs?: number) => Promise<boolean>;
+    } | undefined;
+    if (!runtimeModule) throw new Error('__xln.instance missing');
+    if (env.runtimeState?.halted) {
+      throw new Error(`runtime halted before flush: ${JSON.stringify(env.runtimeState.fatalDebugPayload || {})}`);
+    }
+    runtimeModule.startRuntimeLoop?.(env);
+    if (typeof runtimeModule.waitForRuntimeProcessingIdle !== 'function') {
+      throw new Error('__xln.instance.waitForRuntimeProcessingIdle missing');
+    }
+    const waitRounds = Math.max(1, Number(roundsToRun) || 1);
+    for (let round = 0; round < waitRounds; round += 1) {
+      const idle = await runtimeModule.waitForRuntimeProcessingIdle(env, 1_000);
+      if (!idle) {
+        throw new Error('runtime processing did not become idle before flush timeout');
+      }
+      if (env.runtimeState?.halted) {
+        throw new Error(`runtime halted during flush: ${JSON.stringify(env.runtimeState.fatalDebugPayload || {})}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     view.isolatedEnv = env as NonNullable<CrossRuntimeWindow['isolatedEnv']>;
@@ -690,14 +742,11 @@ async function createRuntimeIdentityViaStore(
 ): Promise<RuntimeIdentity> {
   const normalizedMnemonic = mnemonic.trim().split(/\s+/).join(' ');
   const createOnce = async (): Promise<string> => page.evaluate(async ({ label, mnemonic }) => {
-    const view = window as typeof window & {
-      __xlnVaultOperations?: {
-        createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<{ id?: string }>;
-      };
-    };
-    const ops = view.__xlnVaultOperations;
+    const ops = (window as any).__xln?.vault as {
+      createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<{ id?: string }>;
+    } | undefined;
     if (typeof ops?.createRuntime !== 'function') {
-      throw new Error('__xlnVaultOperations.createRuntime unavailable');
+      throw new Error('__xln.vault.createRuntime unavailable');
     }
     const runtime = await ops.createRuntime(label, mnemonic, {
       loginType: 'manual',
@@ -811,7 +860,13 @@ async function faucetOffchain(
   ).toBe(true);
 }
 
-async function outCap(page: Page, entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
+async function accountCapacity(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  tokenId: number,
+  direction: 'in' | 'out',
+): Promise<bigint> {
   const delta = await page.evaluate(({ entityId, counterpartyId, tokenId }) => {
     const env = (window as CrossRuntimeWindow).isolatedEnv;
     if (!env?.eReplicas) return null;
@@ -842,7 +897,7 @@ async function outCap(page: Page, entityId: string, counterpartyId: string, toke
     return null;
   }, { entityId, counterpartyId, tokenId });
   if (!delta) return 0n;
-  return deriveDelta({
+  const derived = deriveDelta({
     tokenId,
     ondelta: BigInt(delta.ondelta),
     offdelta: BigInt(delta.offdelta),
@@ -853,7 +908,16 @@ async function outCap(page: Page, entityId: string, counterpartyId: string, toke
     rightAllowance: BigInt(delta.rightAllowance),
     leftHold: BigInt(delta.leftHold),
     rightHold: BigInt(delta.rightHold),
-  }, normalizeId(entityId) < normalizeId(counterpartyId)).outCapacity;
+  }, normalizeId(entityId) < normalizeId(counterpartyId));
+  return direction === 'in' ? derived.inCapacity : derived.outCapacity;
+}
+
+async function outCap(page: Page, entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
+  return accountCapacity(page, entityId, counterpartyId, tokenId, 'out');
+}
+
+async function inCap(page: Page, entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
+  return accountCapacity(page, entityId, counterpartyId, tokenId, 'in');
 }
 
 async function waitForOutCapAtLeast(
@@ -1624,6 +1688,7 @@ async function placeCrossOrder(
     expectedClickFromTokenId?: number;
     expectedClickToTokenId?: number;
     checkMultihopDeferred?: boolean;
+    expectSetupConsent?: boolean;
   },
 ): Promise<string> {
   await openSwapWorkspace(page);
@@ -1665,6 +1730,16 @@ async function placeCrossOrder(
   const beforeMessageCount = beforeSubmit.messages.length;
   await amountInput.fill(params.amount);
   await priceInput.fill(params.price);
+  if (params.expectSetupConsent) {
+    const consent = page.getByTestId('swap-setup-consent').first();
+    await expect(consent, 'one-click cross swap must disclose automatic target setup').toBeVisible({ timeout: 10_000 });
+    await expect(consent.getByTestId('swap-setup-step'), 'target setup disclosure must include account + credit steps').toHaveCount(2, { timeout: 10_000 });
+    await expect(consent.locator('[data-step-id="target-account"]'), 'target account setup step must be visible').toContainText('Create target account');
+    await expect(consent.locator('[data-step-id="target-credit"]'), 'target credit setup step must be visible').toContainText('Set inbound credit limit');
+    const errorText = (await page.getByTestId('swap-form-error').allTextContents()).join('\n');
+    expect(errorText, 'auto-setup must replace the old manual create-account blocker')
+      .not.toMatch(/create target account|account setup required/i);
+  }
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   await submit.click();
   let lastSubmitState: unknown = null;
@@ -1746,6 +1821,9 @@ async function placeCrossOrder(
           mempoolTxs: state.mempoolTxs,
           offers: state.offers,
           route: state.routeSummaries.find((route) => route.orderId === createdOrderId) || null,
+          sourceCommittedMessage: state.messages.some((message) =>
+            message.includes(`Cross-j swap ${createdOrderId} committed by source`),
+          ),
           pendingOutputs: state.pendingOutputs,
           pendingNetworkOutputs: state.pendingNetworkOutputs,
           runtimeMempoolInputs: state.runtimeMempoolInputs,
@@ -1753,14 +1831,29 @@ async function placeCrossOrder(
           recoveryBarrier: state.recoveryBarrier,
           messages: state.messages.slice(-10),
         };
+        const route = state.routeSummaries.find((candidate) => candidate.orderId === createdOrderId);
+        const sourceCommittedOrAdvanced =
+          Boolean(route?.sourcePull && route?.targetPull) &&
+          CROSS_J_SOURCE_COMMITTED_OR_ADVANCED_STATUSES.has(String(route?.status || '')) &&
+          state.messages.some((message) =>
+            message.includes(`Cross-j swap ${createdOrderId} committed by source`),
+          );
+        const sourceQueuesDrained =
+          !state.hasPendingFrame &&
+          state.pendingTxs.length === 0 &&
+          state.mempoolTxs.length === 0 &&
+          state.runtimeMempoolInputs.length === 0;
         return {
-          committed: state.currentHeight > beforeHeight && !state.hasPendingFrame,
+          committed: state.currentHeight >= beforeHeight && sourceCommittedOrAdvanced && sourceQueuesDrained,
           currentHeight: state.currentHeight,
           hasPendingFrame: state.hasPendingFrame,
+          routeStatus: route?.status || '',
+          sourcePull: Boolean(route?.sourcePull),
+          targetPull: Boolean(route?.targetPull),
         };
       },
       {
-        message: `cross-j order ${createdOrderId} must commit source account frame before matching`,
+        message: `cross-j order ${createdOrderId} must reach source-committed state before matching or advance through a valid fill path`,
         timeout: 75_000,
         intervals: [250, 500, 1000],
       },
@@ -2491,11 +2584,8 @@ async function triggerSourceDisputeArguments(
     const view = window as CrossRuntimeWindow;
     const env = view.isolatedEnv;
     if (!env) throw new Error('isolatedEnv missing');
-    const runtimeModule = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href);
-    view.XLN = runtimeModule;
-    view.__xln_instance = runtimeModule;
+    const runtimeModule = view.__xln?.instance;
+    if (!runtimeModule) throw new Error('__xln.instance missing');
     const sourceEntityId = String(source.entityId || '').toLowerCase();
     let sourceState: any = null;
     for (const replica of env.eReplicas?.values?.() || []) {
@@ -2789,6 +2879,79 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
     expect(BigInt(secured.collateral), `Tron USDC collateral must be positive: ${JSON.stringify(secured)}`).toBeGreaterThan(0n);
     expect(BigInt(secured.uncollateralized), `Tron USDC debt must be secured: ${JSON.stringify(secured)}`).toBe(0n);
     expect(secured.lastFinalizedJHeight, `Tron jwatch must finalize AccountSettled: ${JSON.stringify(secured)}`).toBeGreaterThan(0);
+  });
+
+  test('cross swap one-click prepares missing target account and inbound credit', async ({ page }) => {
+    const browserConsole = attachBrowserConsoleGuard(page);
+    const baseline = await timedStep('cross_j_auto_setup.ensure_baseline', () => ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: false,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+    const hubId = getPrimaryHubId(baseline);
+    const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
+    const primaryHubName = getPrimaryHubName(baseline, hubId);
+    const targetHub = await timedStep('cross_j_auto_setup.resolve_rpc2_hub', () =>
+      getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl),
+    );
+
+    await timedStep('cross_j_auto_setup.goto', () =>
+      gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+    );
+    const mnemonic = Wallet.createRandom().mnemonic!.phrase;
+    const source = await timedStep('cross_j_auto_setup.create_runtime', () =>
+      createRuntimeIdentityViaStore(page, 'cross-auto-setup', mnemonic),
+    );
+    await timedStep('cross_j_auto_setup.default_jurisdictions', () =>
+      waitForDefaultJurisdictionReplicas(page, 'cross-auto-setup'),
+    );
+    const target = await timedStep('cross_j_auto_setup.import_rpc2_sibling', () =>
+      importRpc2SiblingEntity(page, mnemonic, 'cross-auto-setup'),
+    );
+    await timedStep('cross_j_auto_setup.connect_primary', () =>
+      connectRuntimeToHubWithCredit(page, source, hubId, '10000', SWAP_TOKENS),
+    );
+    await timedStep('cross_j_auto_setup.faucet_source_weth', () =>
+      faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, WETH, '1'),
+    );
+    await timedStep('cross_j_auto_setup.wait_source_weth', () =>
+      waitForOutCapAtLeast(page, source.entityId, hubId, WETH, 1n * 10n ** 16n),
+    );
+    await timedStep('cross_j_auto_setup.install_synthetic_relay', () =>
+      installSilentRelayWebSocket(page, {
+        currentPage: true,
+        marketSnapshots: [{
+          bids: [{ price: '24900000', size: 1000 }],
+          asks: [{ price: '25100000', size: 1000 }],
+        }],
+      }),
+    );
+
+    await timedStep('cross_j_auto_setup.submit_one_click_swap', () => placeCrossOrder(page, {
+      source,
+      hubId,
+      targetEntityId: target.entityId,
+      side: 'sell',
+      amount: '0.01',
+      price: '2490.0000',
+      clickBookSide: 'bid',
+      expectedClickFromTokenId: WETH,
+      expectedClickToTokenId: USDC,
+      expectSetupConsent: true,
+    }));
+
+    await timedStep('cross_j_auto_setup.wait_target_account', () =>
+      waitForAccountReady(page, target, targetHub.entityId, [USDC], 90_000),
+    );
+    await expect
+      .poll(async () => (await inCap(page, target.entityId, targetHub.entityId, USDC)) > 0n, {
+        timeout: 30_000,
+        intervals: [250, 500, 1000],
+        message: 'one-click cross swap must leave target inbound USDC capacity available',
+      })
+      .toBe(true);
+    expectBrowserConsoleClean(browserConsole, 'cross_j_auto_setup');
   });
 
   test('cross WETH/USDC ignores non-takeable orderbook side before filling the takeable side', async ({ page }) => {

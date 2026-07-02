@@ -10,24 +10,12 @@ import { getErrorMessage, isEntityId32 } from '../server-utils';
 import { getAccountMachine, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from './ingress-receipts';
+import {
+  describeOffchainFaucetAccountState,
+  shouldRejectOffchainFaucetForSettledCapacity,
+} from './offchain-faucet-admission';
 
 const faucetLog = createStructuredLogger('server.faucet');
-
-const isAccountConsensusReadyForFaucet = (account: ReturnType<typeof getAccountMachine>): boolean => {
-  if (!account) return false;
-  if (!account.currentFrame) return false;
-  if (Number(account.currentHeight ?? 0) <= 0) return false;
-  if (account.pendingFrame) return false;
-  if ((account.mempool?.length ?? 0) > 0) return false;
-  return true;
-};
-
-const describeAccountConsensusState = (account: ReturnType<typeof getAccountMachine>) => ({
-  exists: !!account,
-  currentHeight: Number(account?.currentHeight ?? 0),
-  pendingFrameHeight: account?.pendingFrame ? Number(account.pendingFrame.height ?? 0) : null,
-  mempool: Number(account?.mempool?.length ?? 0),
-});
 
 export const handleOffchainFaucet = async (input: {
   req: Request;
@@ -285,12 +273,12 @@ export const handleOffchainFaucet = async (input: {
           { status: 409, headers },
         );
       }
-      if (!isAccountConsensusReadyForFaucet(accountMachine)) {
-        const accountState = describeAccountConsensusState(accountMachine);
+      const accountState = describeOffchainFaucetAccountState(accountMachine);
+      if (!accountState.settledCapacitySnapshot) {
         pushDebugEvent(relayStore, {
           event: 'debug_event',
-          status: 'rejected',
-          reason: 'FAUCET_ACCOUNT_NOT_READY',
+          status: 'queued',
+          reason: 'FAUCET_ACCOUNT_HAS_PENDING_SETUP',
           details: {
             requestId,
             hubEntityId,
@@ -299,22 +287,13 @@ export const handleOffchainFaucet = async (input: {
             accountState,
           },
         });
-        return new Response(
-          JSON.stringify({
-            success: false,
-            error: 'Selected hub account is still settling off-chain setup. Retry after the account frame commits.',
-            code: 'FAUCET_ACCOUNT_NOT_READY',
-            requestId,
-            hubEntityId,
-            userEntityId: normalizedUserEntityId,
-            requestedHubEntityId: requestedHubId || null,
-            accountState,
-          }),
-          { status: 409, headers },
-        );
       }
       const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
-      if (currentOutCapacity < amountWei) {
+      if (shouldRejectOffchainFaucetForSettledCapacity({
+        account: accountMachine,
+        senderOutCapacity: currentOutCapacity,
+        amount: amountWei,
+      })) {
         return new Response(
           JSON.stringify({
             success: false,
@@ -326,6 +305,7 @@ export const handleOffchainFaucet = async (input: {
             tokenId,
             requiredAmount: amountWei.toString(),
             senderOutCapacity: currentOutCapacity.toString(),
+            accountState,
           }),
           { status: 409, headers },
         );
@@ -371,6 +351,7 @@ export const handleOffchainFaucet = async (input: {
           kind: 'faucet-offchain',
           counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
           enqueuedHeight: getCurrentRuntimeHeight(env),
+          runtimeInput,
           note: 'Faucet payment was accepted into the runtime queue; poll statusUrl and account state for settlement.',
         });
       } catch (error) {
@@ -407,7 +388,8 @@ export const handleOffchainFaucet = async (input: {
           tokenId,
           from: hubEntityId.slice(0, 16) + '...',
           to: normalizedUserEntityId.slice(0, 16) + '...',
-          accountReady: true,
+          accountReady: accountState.settledCapacitySnapshot,
+          accountState,
           senderOutCapacity: currentOutCapacity.toString(),
           serverDurationMs,
         }),
