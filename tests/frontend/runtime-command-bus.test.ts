@@ -205,17 +205,11 @@ test('xlnStore routes RuntimeInput mutations through RuntimeCommandBus', () => {
   expect(routeSource).toContain('embeddedAdapterTargetsRuntimeEnv(runtimeEnv)');
   expect(routeSource).toContain('xln.enqueueRuntimeInput(runtimeEnv, input)');
 	  expect(source).not.toContain('commitAcceptedRuntimeCommands');
-		  expect(source).toContain("registerDebugSurface('submit'");
+		  expect(source).not.toContain("registerDebugSurface('submit'");
 		  expect(source).not.toContain('__xlnRuntimeSubmit');
 	  expect(source).toContain("import { activeEnv, activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';");
 	  expect(source).toContain('export async function submitActiveRuntimeInput');
 	  expect(source).toContain('export async function submitActiveEntityInputs');
-	  const submitSurfaceIndex = source.indexOf('const exposeRuntimeCommandSubmitDebugSurface');
-	  expect(submitSurfaceIndex).toBeGreaterThan(0);
-	  const submitSurfaceSource = source.slice(submitSurfaceIndex, source.indexOf('exposeRuntimeCommandSubmitDebugSurface();', submitSurfaceIndex));
-	  expect(submitSurfaceSource).toContain('return submitActiveRuntimeInput(input);');
-	  expect(submitSurfaceSource).not.toContain('get(activeEnv)');
-	  expect(submitSurfaceSource).not.toContain('getEnv()');
 	  expect(source).toContain('export async function submitRuntimeInput');
 	  expect(source).toContain('export async function submitEntityInputs');
 	});
@@ -226,10 +220,10 @@ test('public mutation exports no longer accept caller-owned Env', () => {
 
   const submitRuntimeIndex = source.indexOf('export async function submitRuntimeInput');
   const submitEntityIndex = source.indexOf('export async function submitEntityInputs');
-  const debugSurfaceIndex = source.indexOf('const exposeRuntimeCommandSubmitDebugSurface');
+  const utilityFunctionsIndex = source.indexOf('// === FRONTEND UTILITY FUNCTIONS ===');
   expect(submitRuntimeIndex).toBeGreaterThan(0);
   expect(submitEntityIndex).toBeGreaterThan(submitRuntimeIndex);
-  expect(debugSurfaceIndex).toBeGreaterThan(submitEntityIndex);
+  expect(utilityFunctionsIndex).toBeGreaterThan(submitEntityIndex);
 
   const submitRuntimeSource = source.slice(submitRuntimeIndex, submitEntityIndex);
   expect(submitRuntimeSource).toContain('export async function submitRuntimeInput(input: RuntimeInput)');
@@ -238,7 +232,7 @@ test('public mutation exports no longer accept caller-owned Env', () => {
   expect(submitRuntimeSource).not.toContain('assertSubmittedEnvMatchesActiveRuntime');
   expect(submitRuntimeSource).not.toContain('routeRuntimeInput(');
 
-  const submitEntitySource = source.slice(submitEntityIndex, debugSurfaceIndex);
+  const submitEntitySource = source.slice(submitEntityIndex, utilityFunctionsIndex);
   expect(submitEntitySource).toContain('export async function submitEntityInputs(inputs: RoutedEntityInput[] = [])');
   expect(submitEntitySource).toContain('return submitActiveEntityInputs(inputs);');
   expect(submitEntitySource).not.toContain('env: Env');

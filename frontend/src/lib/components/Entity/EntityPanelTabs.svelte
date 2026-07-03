@@ -166,6 +166,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     type EntityWorkspaceRuntimeFrameContext,
   } from './runtime-frame-context';
   import {
+    emptyEntityWorkspaceEmbeddedRuntimeContext,
+    type EntityWorkspaceEmbeddedRuntimeContext,
+  } from './embedded-runtime-context';
+  import {
     buildHubDiscoveryProjection,
     buildHubDiscoveryRemoteHubsFromRuntimes,
     buildDirectOpenAccountRuntimeInput,
@@ -252,6 +256,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
   export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
+  export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
   export let workspaceLens: EntityWorkspaceLensId = 'wallet';
   export let workspaceLensNavigationVersion = 0;
   export let runtimeProjectionFrame: RuntimeAdapterViewFrame | null = null;
@@ -264,11 +269,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   let timeIndex = -1;
   let isLive = true;
   let onGoToLive: () => void = () => {};
-  $: env = runtimeFrameContext.env;
-  $: liveEnv = runtimeFrameContext.liveEnv;
-  $: liveEnvResolver = runtimeFrameContext.liveEnvResolver;
+  $: env = embeddedRuntimeContext.env;
+  $: liveEnv = embeddedRuntimeContext.liveEnv;
+  $: liveEnvResolver = embeddedRuntimeContext.liveEnvResolver;
   $: envRevision = runtimeFrameContext.envRevision;
-  $: history = runtimeFrameContext.history;
+  $: history = embeddedRuntimeContext.history;
   $: timeIndex = runtimeFrameContext.timeIndex;
   $: isLive = runtimeFrameContext.isLive;
   $: onGoToLive = runtimeFrameContext.onGoToLive;
@@ -1644,6 +1649,21 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     externalTokenCatalogCache = tokens.map((token) => ({ ...token, balance: 0n }));
     return cloneExternalTokenCatalog(externalTokenCatalogCache);
   }
+  function resolveExternalWalletSpender(
+    jadapter: JAdapter | null | undefined,
+    jurisdictionName: string,
+  ): string {
+    const adapterDepository = String(jadapter?.addresses?.depository || '').trim();
+    if (isAddress(adapterDepository) && adapterDepository !== ZeroAddress) return adapterDepository;
+    const normalizedName = String(jurisdictionName || '').trim().toLowerCase();
+    for (const jurisdiction of panelView.jurisdictions ?? []) {
+      const name = String((jurisdiction as { name?: unknown })?.name || '').trim().toLowerCase();
+      if (normalizedName && name && name !== normalizedName) continue;
+      const depository = String((jurisdiction as { depositoryAddress?: unknown })?.depositoryAddress || '').trim();
+      if (isAddress(depository) && depository !== ZeroAddress) return depository;
+    }
+    return '';
+  }
   function buildOnchainReserves(
     reserves: Map<number | string, bigint> | undefined,
     tokens: ExternalToken[],
@@ -2287,23 +2307,12 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         return;
       }
       try {
-        const xln = await getXLN();
         const envAtStart = getRuntimeEnv(actionRuntimeEnv);
-        if ($runtimeControllerHandle.mode === 'remote' && !envAtStart) {
-          externalTokens = [];
-          externalWalletSnapshotSource = null;
-          if (moveAllowanceRouteEnabled) {
-            moveAllowanceRaw = null;
-            moveAllowanceError = null;
-            moveAllowanceLoading = false;
-          }
-          externalTokensLoading = false;
-          return;
-        }
-        const jadapter = envAtStart ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;
+        const xln = envAtStart ? await getXLN() : null;
+        const jadapter = envAtStart && xln ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;
         const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);
         const entityId = resolveSelfEntityId();
-        const spender = String(jadapter?.addresses?.depository || '').trim();
+        const spender = resolveExternalWalletSpender(jadapter, jurisdiction);
         const allowanceReads = moveAllowanceRouteEnabled && isAddress(spender) && spender !== ZeroAddress
           ? tokenList
               .filter((token) => isAddress(token.address) && token.address !== ZeroAddress)

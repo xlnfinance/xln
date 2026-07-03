@@ -101,6 +101,7 @@ export interface EntityProviderSupplyHarnessInterface extends Interface {
       | "BoardProposed"
       | "ControlSharesReleased"
       | "EntityRegistered"
+      | "FoundationBootstrapped"
       | "GovernanceEnabled"
       | "NameAssigned"
       | "NameTransferred"
@@ -566,6 +567,31 @@ export namespace EntityRegisteredEvent {
     entityId: string;
     entityNumber: bigint;
     boardHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace FoundationBootstrappedEvent {
+  export type InputTuple = [
+    recipient: AddressLike,
+    boardHash: BytesLike,
+    controlTokenId: BigNumberish,
+    dividendTokenId: BigNumberish
+  ];
+  export type OutputTuple = [
+    recipient: string,
+    boardHash: string,
+    controlTokenId: bigint,
+    dividendTokenId: bigint
+  ];
+  export interface OutputObject {
+    recipient: string;
+    boardHash: string;
+    controlTokenId: bigint;
+    dividendTokenId: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1381,6 +1407,13 @@ export interface EntityProviderSupplyHarness extends BaseContract {
     EntityRegisteredEvent.OutputObject
   >;
   getEvent(
+    key: "FoundationBootstrapped"
+  ): TypedContractEvent<
+    FoundationBootstrappedEvent.InputTuple,
+    FoundationBootstrappedEvent.OutputTuple,
+    FoundationBootstrappedEvent.OutputObject
+  >;
+  getEvent(
     key: "GovernanceEnabled"
   ): TypedContractEvent<
     GovernanceEnabledEvent.InputTuple,
@@ -1484,6 +1517,17 @@ export interface EntityProviderSupplyHarness extends BaseContract {
       EntityRegisteredEvent.InputTuple,
       EntityRegisteredEvent.OutputTuple,
       EntityRegisteredEvent.OutputObject
+    >;
+
+    "FoundationBootstrapped(address,bytes32,uint256,uint256)": TypedContractEvent<
+      FoundationBootstrappedEvent.InputTuple,
+      FoundationBootstrappedEvent.OutputTuple,
+      FoundationBootstrappedEvent.OutputObject
+    >;
+    FoundationBootstrapped: TypedContractEvent<
+      FoundationBootstrappedEvent.InputTuple,
+      FoundationBootstrappedEvent.OutputTuple,
+      FoundationBootstrappedEvent.OutputObject
     >;
 
     "GovernanceEnabled(bytes32,uint256,uint256)": TypedContractEvent<

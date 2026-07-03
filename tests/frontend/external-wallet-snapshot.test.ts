@@ -65,17 +65,19 @@ describe('external wallet snapshot helpers', () => {
       .rejects.toThrow('EXTERNAL_WALLET_SNAPSHOT_BLOCK_HASH_MISSING:2');
   });
 
-  test('remote projection sessions do not call external wallet snapshot API without live Env', () => {
+  test('remote projection sessions read external wallet snapshots through API without live Env', () => {
     const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
     const fetchStart = source.indexOf('async function fetchExternalTokens');
-    const fetchEnd = source.indexOf('const jadapter = envAtStart', fetchStart);
+    const fetchEnd = source.indexOf('const allowanceReads = moveAllowanceRouteEnabled', fetchStart);
     expect(fetchStart).toBeGreaterThan(0);
     expect(fetchEnd).toBeGreaterThan(fetchStart);
-    const guardSource = source.slice(fetchStart, fetchEnd);
-    expect(guardSource).toContain("$runtimeControllerHandle.mode === 'remote'");
-    expect(guardSource).toContain('!envAtStart');
-    expect(guardSource).toContain('externalTokens = []');
-    expect(guardSource).toContain('externalWalletSnapshotSource = null');
-    expect(guardSource).toContain('return;');
+    const fetchSource = source.slice(fetchStart, fetchEnd);
+    expect(fetchSource).not.toContain("$runtimeControllerHandle.mode === 'remote' && !envAtStart");
+    expect(fetchSource).not.toContain('!envAtStart) {');
+    expect(fetchSource).toContain('const xln = envAtStart ? await getXLN() : null;');
+    expect(fetchSource).toContain("const jadapter = envAtStart && xln ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;");
+    expect(fetchSource).toContain('const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);');
+    expect(fetchSource).toContain('const spender = resolveExternalWalletSpender(jadapter, jurisdiction);');
+    expect(source).toContain('const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads, jadapter);');
   });
 });

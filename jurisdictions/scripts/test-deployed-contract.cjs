@@ -1,33 +1,53 @@
 const hre = require("hardhat");
+const fs = require("node:fs");
+
+function readDeployOutput() {
+    const outputPath = process.env.XLN_DEPLOY_OUTPUT;
+    if (!outputPath) return {};
+    if (!fs.existsSync(outputPath)) {
+        throw new Error(`XLN_DEPLOY_OUTPUT does not exist: ${outputPath}`);
+    }
+    return JSON.parse(fs.readFileSync(outputPath, "utf8"));
+}
 
 async function main() {
-    const contractAddress = "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512";
+    const deployOutput = readDeployOutput();
+    const contractAddress = process.env.DEPOSITORY_ADDRESS || deployOutput.contracts?.depository;
+    if (!contractAddress) {
+        throw new Error("DEPOSITORY_ADDRESS or XLN_DEPLOY_OUTPUT.contracts.depository is required");
+    }
     console.log("🔍 Testing deployed contract at:", contractAddress);
 
     try {
+        const code = await hre.ethers.provider.getCode(contractAddress);
+        if (code === "0x") {
+            throw new Error(`No deployed bytecode at ${contractAddress}`);
+        }
+        console.log(`✅ Bytecode present (${code.length} chars)`);
+
         const contract = await hre.ethers.getContractAt('Depository', contractAddress);
         console.log("✅ Contract attached successfully");
 
-        // Test debugBulkFundEntities
-        console.log("🔍 Testing debugBulkFundEntities...");
-        await contract.debugBulkFundEntities();
-        console.log("✅ debugBulkFundEntities works");
+        const functions = contract.interface.fragments
+            .filter(fragment => fragment.type === "function")
+            .map(fragment => fragment.name);
 
-        // Test _reserves
-        console.log("🔍 Testing _reserves...");
-        const balance = await contract._reserves("0x0000000000000000000000000000000000000000000000000000000000000001", 1);
-        console.log("✅ _reserves works, balance:", balance.toString());
+        const required = ["processBatch", "watchtowerCounterDispute", "_reserves"];
+        const forbidden = ["debugBulkFundEntities"];
 
-        // Check interface
-        console.log("🔍 Contract interface functions:");
-        const functions = Object.keys(contract.interface.functions);
-        console.log("Available functions:", functions);
+        for (const name of required) {
+            if (!functions.includes(name)) throw new Error(`Missing required function: ${name}`);
+            console.log(`✅ ${name} present`);
+        }
 
-        const hasProcessBatch = functions.some(f => f.includes('processBatch'));
-        console.log("Has processBatch:", hasProcessBatch ? "✅ YES" : "❌ NO");
+        for (const name of forbidden) {
+            if (functions.includes(name)) throw new Error(`Forbidden stale function present: ${name}`);
+            console.log(`✅ ${name} absent`);
+        }
 
     } catch (error) {
-        console.log("❌ Contract test failed:", error.message);
+        console.error("❌ Contract test failed:", error);
+        process.exit(1);
     }
 }
 

@@ -160,6 +160,7 @@ test('runtime controller exposes only typed debug projection queries', () => {
   expect(controllerSource).not.toContain('createRuntimeReadStore');
   expect(controllerSource).not.toContain('runtimeQueryRead');
   expect(controllerSource).not.toContain('read:');
+  expect(controllerSource).not.toContain('send: runtimeAdapterSend');
   expect(controllerSource).toContain("registerDebugSurface('adapter'");
   expect(appTypes).not.toContain('__xlnRuntimeAdapter');
   expect(appTypes).not.toContain('read: <T = unknown>');
@@ -174,6 +175,22 @@ test('runtime controller exposes only typed debug projection queries', () => {
   expect(remoteE2ESource).toContain('adapter.query.viewFrame');
   expect(remoteE2ESource).not.toContain('adapter.read');
   expect(remoteE2ESource).not.toContain('read: <T = unknown>');
+});
+
+test('fast e2e target titles stay in sync with specs', () => {
+  const fastRunnerSource = readFileSync('runtime/scripts/run-e2e-fast.ts', 'utf8');
+  const targetMatches = [...fastRunnerSource.matchAll(/file: '([^']+)'[\s\S]*?title: '([^']+)'/g)];
+  expect(targetMatches.length).toBeGreaterThan(0);
+
+  for (const match of targetMatches) {
+    const [, file, title] = match;
+    const specSource = readFileSync(file, 'utf8');
+    const testTitles = [...specSource.matchAll(/test\('([^']+)'/g)].map(([, testTitle]) => testTitle);
+    expect(
+      testTitles.some((testTitle) => testTitle.includes(title)),
+      `${file} must contain fast e2e target "${title}"`,
+    ).toBe(true);
+  }
 });
 
 test('runtime view-frame live reads do not force historical atHeight queries', async () => {

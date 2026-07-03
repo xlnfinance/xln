@@ -9,6 +9,10 @@ const { dirname } = require("node:path");
 async function main() {
   console.log("🚀 Deploying XLN Contract Stack...\n");
   const network = await hre.ethers.provider.getNetwork();
+  const [deployer] = await hre.ethers.getSigners();
+  const foundationRecipient = hre.ethers.getAddress(
+    process.env.XLN_FOUNDATION_ADDRESS || deployer.address
+  );
 
   // 1. Deploy Account library
   console.log("1️⃣ Deploying Account library...");
@@ -21,10 +25,11 @@ async function main() {
   // 2. Deploy EntityProvider
   console.log("2️⃣ Deploying EntityProvider...");
   const EntityProvider = await hre.ethers.getContractFactory("EntityProvider");
-  const entityProvider = await EntityProvider.deploy();
+  const entityProvider = await EntityProvider.deploy(foundationRecipient);
   await entityProvider.waitForDeployment();
   const entityProviderAddr = await entityProvider.getAddress();
   console.log(`   EntityProvider: ${entityProviderAddr}`);
+  console.log(`   Foundation recipient: ${foundationRecipient}`);
 
   // 3. Deploy Depository (needs Account library linked)
   console.log("3️⃣ Deploying Depository...");
@@ -49,6 +54,8 @@ async function main() {
   const result = {
     network: hre.network.name,
     chainId: Number(network.chainId),
+    deployer: deployer.address,
+    foundationRecipient,
     contracts: {
       account: accountAddr,
       entityProvider: entityProviderAddr,

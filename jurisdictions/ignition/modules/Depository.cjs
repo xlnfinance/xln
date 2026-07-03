@@ -2,9 +2,10 @@ const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 
 const DepositoryModule = buildModule("DepositoryModule", (m) => {
   console.log("🔍 IGNITION: Starting deployment...");
+  const foundationRecipient = m.getParameter("foundationRecipient", m.getAccount(0));
 
   // 1. Deploy EntityProvider FIRST
-  const entityProvider = m.contract('EntityProvider');
+  const entityProvider = m.contract('EntityProvider', [foundationRecipient]);
   console.log("🔍 IGNITION: EntityProvider deployed");
 
   // 2. Deploy Account library

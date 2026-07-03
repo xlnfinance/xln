@@ -14,9 +14,12 @@ NETWORK_8546="Polygon"
 NETWORK_8547="Arbitrum"
 
 # Store contract addresses in files
-CONTRACT_8545=""
-CONTRACT_8546=""
-CONTRACT_8547=""
+CONTRACT_8545_EP=""
+CONTRACT_8545_DEP=""
+CONTRACT_8546_EP=""
+CONTRACT_8546_DEP=""
+CONTRACT_8547_EP=""
+CONTRACT_8547_DEP=""
 
 deploy_to_network() {
     local port=$1
@@ -95,10 +98,10 @@ deploy_to_network() {
     required_typechain_files=(
       "typechain-types/index.ts"
       "typechain-types/factories/index.ts"
-      "typechain-types/factories/EntityProvider__factory.ts"
-      "typechain-types/factories/DeltaTransformer__factory.ts"
-      "typechain-types/factories/Account__factory.ts"
-      "typechain-types/factories/ERC20Mock__factory.ts"
+      "typechain-types/factories/contracts/EntityProvider__factory.ts"
+      "typechain-types/factories/contracts/DeltaTransformer__factory.ts"
+      "typechain-types/factories/contracts/Account__factory.ts"
+      "typechain-types/factories/contracts/ERC20Mock__factory.ts"
     )
     for file in "${required_typechain_files[@]}"; do
       if [ ! -f "$file" ]; then
@@ -112,8 +115,8 @@ deploy_to_network() {
       cd ..
       return 1
     fi
-    if ! grep -q "settle" "$depository_factory_file"; then
-      echo "   ❌ TypeChain stale/broken: Depository__factory missing settle"
+    if ! grep -q "watchtowerCounterDispute" "$depository_factory_file"; then
+      echo "   ❌ TypeChain stale/broken: Depository__factory missing watchtowerCounterDispute"
       cd ..
       return 1
     fi
@@ -147,10 +150,10 @@ deploy_to_network() {
         return 1
     fi
 
-    if grep -q "settle" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
-        echo "   ✅ settle function found in compiled ABI"
+    if grep -q "watchtowerCounterDispute" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
+        echo "   ✅ watchtowerCounterDispute function found in compiled ABI"
     else
-        echo "   ❌ settle function missing from compiled ABI"
+        echo "   ❌ watchtowerCounterDispute function missing from compiled ABI"
         cd ..
         return 1
     fi

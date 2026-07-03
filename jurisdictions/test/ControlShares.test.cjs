@@ -29,7 +29,7 @@ describe("Entity Control-Shares System", function () {
 
     // Deploy EntityProvider
     const EntityProviderFactory = await ethers.getContractFactory("EntityProvider");
-    entityProvider = await EntityProviderFactory.deploy();
+    entityProvider = await EntityProviderFactory.deploy(owner.address);
     await entityProvider.waitForDeployment();
 
     // Deploy Account library first

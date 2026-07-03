@@ -25,7 +25,7 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
-    title: 'inspect remote runtime rejects RuntimeInput send over websocket and keeps account projection readable',
+    title: 'inspect remote runtime does not expose RuntimeInput send and keeps account projection readable',
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',

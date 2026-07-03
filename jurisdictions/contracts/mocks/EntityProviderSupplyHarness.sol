@@ -4,6 +4,8 @@ pragma solidity ^0.8.24;
 import "../EntityProvider.sol";
 
 contract EntityProviderSupplyHarness is EntityProvider {
+  constructor(address foundationRecipient) EntityProvider(foundationRecipient) {}
+
   function harnessMint(address to, uint256 id, uint256 amount) external {
     _mint(to, id, amount, "");
   }

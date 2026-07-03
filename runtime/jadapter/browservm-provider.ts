@@ -284,11 +284,16 @@ export class BrowserVMProvider {
   private async deployEntityProvider(): Promise<void> {
     console.log('[BrowserVM] Deploying EntityProvider...');
     const currentNonce = await this.getCurrentNonce();
+    const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
+      ['address'],
+      [this.deployerAddress.toString()]
+    );
+    const deployData = `${this.entityProviderArtifact!.bytecode}${constructorArgs.slice(2)}`;
 
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: this.entityProviderArtifact!.bytecode as `0x${string}`,
+      data: deployData as `0x${string}`,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 

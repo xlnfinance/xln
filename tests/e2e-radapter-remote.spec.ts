@@ -57,7 +57,6 @@ type RuntimeAdapterDebugSurface = {
     checkpoints: <T = unknown>() => Promise<T>;
     receiptStatus: <T = unknown>(receiptId: string) => Promise<T>;
   };
-  send: (input: unknown) => Promise<unknown>;
   status: () => {
     connected?: boolean;
     authLevel?: string | null;
@@ -1369,7 +1368,7 @@ test('inspect remote runtime opens audit projection without settings Env surface
   ).toEqual([]);
 });
 
-test('inspect remote runtime rejects RuntimeInput send over websocket and keeps account projection readable', async ({ page }) => {
+test('inspect remote runtime does not expose RuntimeInput send and keeps account projection readable', async ({ page }) => {
   const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
   const hubs = await waitForNamedHubs(page, ['h1'], { apiBaseUrl: API_BASE_URL });
   const h1 = String(hubs.h1 || '').toLowerCase();
@@ -1436,18 +1435,7 @@ test('inspect remote runtime rejects RuntimeInput send over websocket and keeps 
       booksLimit: 1,
     });
 
-    let sendError = '';
-    let sendResolved = false;
-    try {
-      await adapter.send({
-        runtimeTxs: [],
-        entityInputs: [],
-        timestamp: 1_700_000_000_000 + Number(headBefore.latestHeight || 0),
-      });
-      sendResolved = true;
-    } catch (error) {
-      sendError = error instanceof Error ? error.message : String(error);
-    }
+    const sendPresent = typeof adapter.send === 'function';
 
     const statusAfter = adapter.status();
     const headAfter = await adapter.query.head<Head>();
@@ -1461,8 +1449,7 @@ test('inspect remote runtime rejects RuntimeInput send over websocket and keeps 
       authLevelAfter: String(statusAfter.authLevel || ''),
       permissionsBefore: String(statusBefore.permissions || ''),
       permissionsAfter: String(statusAfter.permissions || ''),
-      sendResolved,
-      sendError,
+      sendPresent,
       beforeHeight: Number(headBefore.latestHeight || statusBefore.height || 0),
       afterHeight: Number(headAfter.latestHeight || statusAfter.height || 0),
       beforeFrameHeight: Number(frameBefore.height || 0),
@@ -1478,8 +1465,7 @@ test('inspect remote runtime rejects RuntimeInput send over websocket and keeps 
   expect(result.authLevelAfter).toBe('inspect');
   expect(result.permissionsBefore).toBe('read');
   expect(result.permissionsAfter).toBe('read');
-  expect(result.sendResolved).toBe(false);
-  expect(result.sendError).toContain('admin auth required');
+  expect(result.sendPresent).toBe(false);
   expect(result.beforeHeight).toBeGreaterThan(0);
   expect(result.afterHeight).toBeGreaterThanOrEqual(result.beforeHeight);
   expect(result.beforeFrameHeight).toBeGreaterThan(0);
@@ -2111,62 +2097,69 @@ test('admin remote runtime control advances live state and exposes past frames',
 
   const baseName = `H1 Admin E2E ${activeH1Before.height + 1}`;
   const nextProfileName = activeH1Before.profileName === baseName ? `${baseName}b` : baseName;
-  const controlResult = await page.evaluate(async ({ entityId, signerId, name, timestamp }) => {
+  const beforeControlHeight = await page.evaluate(async () => {
+    const adapter = (window as any).__xln?.adapter as RuntimeAdapterDebugSurface | undefined;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    const head = await adapter.query.head<{ latestHeight?: number }>();
+    return Number(head.latestHeight || 0);
+  });
+  await page.evaluate(() => {
+    (window as any).__xln?.commands?.clear?.();
+  });
+  await page.getByTestId('tab-settings').click();
+  const settingsPanel = page.getByTestId('entity-settings-projection-panel');
+  await expect(settingsPanel).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await settingsPanel.getByLabel('Name').fill(nextProfileName);
+  await settingsPanel.getByLabel('Bio').fill('admin-e2e-control');
+  await settingsPanel.getByRole('button', { name: /Save Profile/i }).click();
+  await expect(page.getByTestId('runtime-command-receipt')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect.poll(async () => page.evaluate(() => {
+    const receipt = (window as any).__xln?.commands?.latest as {
+      status?: string;
+      upstreamReceiptId?: string | null;
+      statusUrl?: string | null;
+      acceptedAtHeight?: number | null;
+      inputSummary?: { entityInputs?: number; entityTxs?: number };
+      error?: string | null;
+    } | null | undefined;
+    return {
+      status: String(receipt?.status || ''),
+      entityInputs: Number(receipt?.inputSummary?.entityInputs || 0),
+      entityTxs: Number(receipt?.inputSummary?.entityTxs || 0),
+      error: String(receipt?.error || ''),
+    };
+  }), {
+    timeout: REMOTE_E2E_WAIT_MS,
+    intervals: [250, 500, 1000],
+  }).toMatchObject({
+    status: 'observed',
+    entityInputs: 1,
+    entityTxs: 1,
+    error: '',
+  });
+  const controlResult = await page.evaluate(async (beforeHeight) => {
     const view = window as typeof window & {
-      __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
-      __xlnRuntimeSubmit?: {
-        submit: (input: unknown) => Promise<{ height?: number }>;
-      };
       __xlnRuntimeCommands?: {
-	        latest?: {
-	          receiptId?: string;
-	          upstreamReceiptId?: string | null;
-	          statusUrl?: string | null;
-	          status?: string;
-	          acceptedAtHeight?: number | null;
+        latest?: {
+          receiptId?: string;
+          upstreamReceiptId?: string | null;
+          statusUrl?: string | null;
+          status?: string;
+          acceptedAtHeight?: number | null;
           committedAtHeight?: number | null;
           error?: string | null;
         } | null;
       };
     };
     const adapter = (view as any).__xln?.adapter;
-    const submit = (view as any).__xln?.submit;
     if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-    if (!submit) throw new Error('XLN_RUNTIME_SUBMIT_DEBUG_SURFACE_MISSING');
-    const head = await adapter.query.head<{ latestHeight?: number }>();
-    const submittedEnv = await submit.submit({
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId,
-        timestamp,
-        entityTxs: [{
-          type: 'profile-update',
-          data: {
-            profile: {
-              entityId,
-              name,
-              avatar: '',
-              bio: 'admin-e2e-control',
-              website: '',
-            },
-          },
-        }],
-      }],
-      timestamp,
-    });
     const receipt = (view as any).__xln?.commands?.latest ?? null;
     return {
-      beforeHeight: Number(head.latestHeight || 0),
-      sendHeight: Number(receipt?.acceptedAtHeight ?? submittedEnv.height ?? 0),
+      beforeHeight,
+      sendHeight: Number(receipt?.acceptedAtHeight ?? 0),
       receipt,
     };
-  }, {
-    entityId: h1,
-    signerId: activeH1Before.signerId,
-    name: nextProfileName,
-    timestamp: 1_700_000_000_000 + activeH1Before.height,
-  });
+  }, beforeControlHeight);
 
   expect(controlResult.beforeHeight).toBeGreaterThanOrEqual(activeH1Before.height);
   expect(controlResult.sendHeight).toBeGreaterThanOrEqual(controlResult.beforeHeight);
@@ -2452,9 +2445,6 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   const inspectMutationProbe = await page.evaluate(async () => {
     const view = window as typeof window & {
       __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
-      __xlnRuntimeSubmit?: {
-        submit: (input: unknown) => Promise<{ height?: number }>;
-      };
       __xlnRuntimeCommands?: {
         clear?: () => void;
         latest?: {
@@ -2467,7 +2457,6 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
     const adapter = (view as any).__xln?.adapter;
     const submit = (view as any).__xln?.submit;
     if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
-    if (!submit) throw new Error('XLN_RUNTIME_SUBMIT_DEBUG_SURFACE_MISSING');
     (view as any).__xln?.commands?.clear?.();
 
     type ViewFrame = {
@@ -2489,35 +2478,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
     const entityId = String(beforeFrame.activeEntity?.core?.entityId || beforeFrame.activeEntity?.summary?.entityId || '').toLowerCase();
     const signerId = String(beforeFrame.activeEntity?.core?.signerId || '').toLowerCase();
     const beforeName = String(beforeFrame.activeEntity?.core?.profile?.name || '');
-    const attemptedName = `${beforeName || 'inspect'} denied mutation`;
     const beforeHead = await adapter.query.head<{ latestHeight?: number }>();
-
-    let error = '';
-    try {
-      await submit.submit({
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId,
-          signerId,
-          timestamp: 1_700_000_000_123,
-          entityTxs: [{
-            type: 'profile-update',
-            data: {
-              profile: {
-                entityId,
-                name: attemptedName,
-                avatar: '',
-                bio: 'inspect-should-not-mutate',
-                website: '',
-              },
-            },
-          }],
-        }],
-        timestamp: 1_700_000_000_123,
-      });
-    } catch (err) {
-      error = err instanceof Error ? err.message : String(err);
-    }
 
     const afterFrame = await adapter.query.viewFrame<ViewFrame>( {
       entityId,
@@ -2533,10 +2494,9 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
       signerId,
       beforeName,
       afterName: String(afterFrame.activeEntity?.core?.profile?.name || ''),
-      attemptedName,
       beforeHeight: Number(beforeHead.latestHeight || 0),
       afterHeight: Number(afterHead.latestHeight || 0),
-      error,
+      submitPresent: Boolean(submit),
       receiptStatus: String(receipt?.status || ''),
       receiptError: String(receipt?.error || ''),
       receiptEntityInputs: Number(receipt?.inputSummary?.entityInputs || 0),
@@ -2546,13 +2506,13 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   expect(inspectMutationProbe.authLevel).toBe('inspect');
   expect(inspectMutationProbe.entityId).toMatch(/^0x[0-9a-f]{64}$/);
   expect(inspectMutationProbe.signerId).toMatch(/^0x[0-9a-f]{40}$/);
-  expect(inspectMutationProbe.error).toContain('admin auth required');
-  expect(inspectMutationProbe.receiptStatus).toBe('error');
-  expect(inspectMutationProbe.receiptError).toContain('admin auth required');
-  expect(inspectMutationProbe.receiptEntityInputs).toBe(1);
-  expect(inspectMutationProbe.receiptEntityTxs).toBe(1);
+  expect(inspectMutationProbe.submitPresent).toBe(false);
+  expect(inspectMutationProbe.receiptStatus).toBe('');
+  expect(inspectMutationProbe.receiptError).toBe('');
+  expect(inspectMutationProbe.receiptEntityInputs).toBe(0);
+  expect(inspectMutationProbe.receiptEntityTxs).toBe(0);
   expect(inspectMutationProbe.afterName).toBe(inspectMutationProbe.beforeName);
-  expect(inspectMutationProbe.afterName).not.toBe(inspectMutationProbe.attemptedName);
+  expect(inspectMutationProbe.afterHeight).toBeGreaterThanOrEqual(inspectMutationProbe.beforeHeight);
 });
 
 test('bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser', async ({ browser }) => {

@@ -80,6 +80,12 @@ contract EntityProvider is ERC1155 {
   event BoardProposed(bytes32 indexed entityId, bytes32 proposedBoardHash);
   event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
   event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
+  event FoundationBootstrapped(
+    address indexed recipient,
+    bytes32 indexed boardHash,
+    uint256 controlTokenId,
+    uint256 dividendTokenId
+  );
 
   event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
 
@@ -93,7 +99,24 @@ contract EntityProvider is ERC1155 {
     return uint16(value);
   }
 
-  constructor() ERC1155("https://xln.com/entity/{id}.json") {
+  function _singleSignerBoardHash(address signer) internal pure returns (bytes32) {
+    bytes32[] memory entityIds = new bytes32[](1);
+    entityIds[0] = bytes32(uint256(uint160(signer)));
+    uint16[] memory votingPowers = new uint16[](1);
+    votingPowers[0] = 1;
+    return keccak256(abi.encode(Board({
+      votingThreshold: 1,
+      entityIds: entityIds,
+      votingPowers: votingPowers,
+      boardChangeDelay: 0,
+      controlChangeDelay: 0,
+      dividendChangeDelay: 0
+    })));
+  }
+
+  constructor(address foundationRecipient) ERC1155("https://xln.com/entity/{id}.json") {
+    require(foundationRecipient != address(0), "Invalid foundation recipient");
+
     // Reserve some premium names
     reservedNames["coinbase"] = true;
     reservedNames["ethereum"] = true;
@@ -101,7 +124,7 @@ contract EntityProvider is ERC1155 {
     reservedNames["uniswap"] = true;
     
     // Create foundation entity #1 with governance
-    bytes32 foundationQuorum = keccak256("FOUNDATION_INITIAL_QUORUM");
+    bytes32 foundationQuorum = _singleSignerBoardHash(foundationRecipient);
     bytes32 foundationId = bytes32(FOUNDATION_ENTITY);
     
     entities[foundationId] = Entity({
@@ -122,12 +145,12 @@ contract EntityProvider is ERC1155 {
     
     // Setup governance for foundation entity
     (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(FOUNDATION_ENTITY);
-    address foundationAddress = address(uint160(uint256(foundationId)));
     
-    _mint(foundationAddress, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
-    _mint(foundationAddress, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
+    _mint(foundationRecipient, controlTokenId, TOTAL_CONTROL_SUPPLY, "");
+    _mint(foundationRecipient, dividendTokenId, TOTAL_DIVIDEND_SUPPLY, "");
 
     emit GovernanceEnabled(foundationId, controlTokenId, dividendTokenId);
+    emit FoundationBootstrapped(foundationRecipient, foundationQuorum, controlTokenId, dividendTokenId);
     
     nextNumber = 2; // Foundation takes #1, next entity will be #2
   }

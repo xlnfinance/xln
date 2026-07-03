@@ -29,8 +29,12 @@ async function main() {
   // Get deployer
   const [deployer] = await hre.ethers.getSigners();
   const balance = await hre.ethers.provider.getBalance(deployer.address);
+  const foundationRecipient = hre.ethers.getAddress(
+    process.env.XLN_FOUNDATION_ADDRESS || deployer.address
+  );
 
   console.log(`\n📍 Deployer: ${deployer.address}`);
+  console.log(`   Foundation recipient: ${foundationRecipient}`);
   console.log(`   Balance: ${hre.ethers.formatEther(balance)} ETH`);
 
   if (balance === 0n) {
@@ -41,15 +45,29 @@ async function main() {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // Step 1: Deploy Token (mock USDC for testing)
+  // Step 1: Resolve USDC token
   // ═══════════════════════════════════════════════════════════════════
-  console.log("\n─── Step 1: Deploying Token (mock USDC) ───");
+  console.log("\n─── Step 1: Resolving USDC token ───");
 
-  const Token = await hre.ethers.getContractFactory("Token");
-  const token = await Token.deploy("USD Coin", "USDC", 18);
-  await token.waitForDeployment();
-  const tokenAddress = await token.getAddress();
-  console.log(`   ✅ Token deployed: ${tokenAddress}`);
+  const configuredUsdc = String(process.env.XLN_USDC_ADDRESS || '').trim();
+  const isBaseMainnet = network === 'base-mainnet' || Number(chainId) === 8453;
+  let tokenAddress;
+  let tokenSource;
+  if (configuredUsdc) {
+    tokenAddress = hre.ethers.getAddress(configuredUsdc);
+    tokenSource = "configured";
+    console.log(`   ✅ Using configured USDC: ${tokenAddress}`);
+  } else {
+    if (isBaseMainnet) {
+      throw new Error("XLN_USDC_ADDRESS is required for Base mainnet deploy");
+    }
+    const ERC20Mock = await hre.ethers.getContractFactory("ERC20Mock");
+    const token = await ERC20Mock.deploy("USD Coin", "USDC", hre.ethers.parseUnits("1000000", 18));
+    await token.waitForDeployment();
+    tokenAddress = await token.getAddress();
+    tokenSource = "mock";
+    console.log(`   ✅ Mock USDC deployed: ${tokenAddress}`);
+  }
 
   // ═══════════════════════════════════════════════════════════════════
   // Step 2: Deploy EntityProvider
@@ -57,17 +75,27 @@ async function main() {
   console.log("\n─── Step 2: Deploying EntityProvider ───");
 
   const EntityProvider = await hre.ethers.getContractFactory("EntityProvider");
-  const entityProvider = await EntityProvider.deploy();
+  const entityProvider = await EntityProvider.deploy(foundationRecipient);
   await entityProvider.waitForDeployment();
   const entityProviderAddress = await entityProvider.getAddress();
   console.log(`   ✅ EntityProvider deployed: ${entityProviderAddress}`);
 
   // ═══════════════════════════════════════════════════════════════════
-  // Step 3: Deploy Depository
+  // Step 3: Deploy Account library and Depository
   // ═══════════════════════════════════════════════════════════════════
-  console.log("\n─── Step 3: Deploying Depository ───");
+  console.log("\n─── Step 3: Deploying Account library and Depository ───");
 
-  const Depository = await hre.ethers.getContractFactory("Depository");
+  const Account = await hre.ethers.getContractFactory("Account");
+  const account = await Account.deploy();
+  await account.waitForDeployment();
+  const accountAddress = await account.getAddress();
+  console.log(`   ✅ Account library deployed: ${accountAddress}`);
+
+  const Depository = await hre.ethers.getContractFactory("Depository", {
+    libraries: {
+      Account: accountAddress,
+    },
+  });
   const depository = await Depository.deploy(entityProviderAddress);
   await depository.waitForDeployment();
   const depositoryAddress = await depository.getAddress();
@@ -91,7 +119,7 @@ async function main() {
   console.log("\n─── Step 5: Deploying DeltaTransformer ───");
 
   const DeltaTransformer = await hre.ethers.getContractFactory("DeltaTransformer");
-  const deltaTransformer = await DeltaTransformer.deploy(depositoryAddress);
+  const deltaTransformer = await DeltaTransformer.deploy();
   await deltaTransformer.waitForDeployment();
   const deltaTransformerAddress = await deltaTransformer.getAddress();
   console.log(`   ✅ DeltaTransformer deployed: ${deltaTransformerAddress}`);
@@ -108,6 +136,7 @@ Network: ${network} (chainId: ${chainId})
 Contract Addresses:
   Token (USDC):      ${tokenAddress}
   EntityProvider:    ${entityProviderAddress}
+  Account Library:   ${accountAddress}
   Depository:        ${depositoryAddress}
   DeltaTransformer:  ${deltaTransformerAddress}
 
@@ -129,9 +158,12 @@ Explorer Links:`);
     network,
     chainId,
     deployer: deployer.address,
+    foundationRecipient,
+    tokenSource,
     deployedAt: new Date().toISOString(),
     contracts: {
       token: tokenAddress,
+      account: accountAddress,
       entityProvider: entityProviderAddress,
       depository: depositoryAddress,
       deltaTransformer: deltaTransformerAddress,
@@ -154,6 +186,7 @@ Explorer Links:`);
 
    BASE_SEPOLIA_DEPOSITORY=${depositoryAddress}
    BASE_SEPOLIA_ENTITY_PROVIDER=${entityProviderAddress}
+   BASE_SEPOLIA_ACCOUNT_LIBRARY=${accountAddress}
 
 2. Use in code:
 
@@ -173,6 +206,7 @@ Explorer Links:`);
 
    npx hardhat verify --network ${network} ${depositoryAddress}
    npx hardhat verify --network ${network} ${entityProviderAddress}
+   npx hardhat verify --network ${network} ${deltaTransformerAddress}
 `);
 }
 

@@ -35,7 +35,6 @@ import {
 } from './runtimeViewStore';
 import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/debugSurface';
 import { readRemoteRuntimeTokenAccess, readRemoteRuntimeTokenAudience, resolveStoredRemoteRuntimeAuthKey } from '$lib/utils/remoteRuntimeImport';
 import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
@@ -654,7 +653,14 @@ const refreshRemoteRuntimeProjection = async (
   };
   const refreshView = async (entityId: string): Promise<RuntimeAdapterViewFrame> => {
     const view = await refreshRuntimeView(entityId ? { ...viewQuery, entityId } : viewQuery);
-    if (!view.frame) throw new Error('REMOTE_RUNTIME_VIEW_FRAME_MISSING');
+    if (!view.frame) {
+      if (entityId) {
+        const staleEntityError = new Error(`Remote entity summary not found: ${entityId}`);
+        (staleEntityError as Error & { code?: string }).code = 'E_NOT_FOUND';
+        throw staleEntityError;
+      }
+      throw new Error('REMOTE_RUNTIME_VIEW_FRAME_MISSING');
+    }
     return view.frame;
   };
 
@@ -1400,16 +1406,6 @@ export async function submitEntityInputs(inputs: RoutedEntityInput[] = []): Prom
   logInterestingEntityInputs(inputs);
   return submitActiveEntityInputs(inputs);
 }
-
-const exposeRuntimeCommandSubmitDebugSurface = (): void => {
-	registerDebugSurface('submit', () => ({
-	  submit: async (input: RuntimeInput): Promise<Env | null> => {
-	    return submitActiveRuntimeInput(input);
-	  },
-		}));
-	};
-
-exposeRuntimeCommandSubmitDebugSurface();
 
 // === FRONTEND UTILITY FUNCTIONS ===
 // Derived store that provides utility functions for components

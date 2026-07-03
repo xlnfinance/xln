@@ -20,6 +20,10 @@
     emptyEntityWorkspaceRuntimeFrameContext,
     type EntityWorkspaceRuntimeFrameContext,
   } from './runtime-frame-context';
+  import {
+    emptyEntityWorkspaceEmbeddedRuntimeContext,
+    type EntityWorkspaceEmbeddedRuntimeContext,
+  } from './embedded-runtime-context';
   import ContextSwitcher from './ContextSwitcher.svelte';
 
   export let tab: Tab;
@@ -33,6 +37,7 @@
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
   export let workspaceView: EntityWorkspaceView | null = null;
   export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
+  export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
 
   type LensView = {
     id: EntityWorkspaceLensId;
@@ -130,7 +135,8 @@
     title: lens.reason || (lens.canWrite ? 'Read/write' : 'Read only'),
   }));
   $: frameContext = runtimeFrameContext ?? emptyEntityWorkspaceRuntimeFrameContext;
-  $: runtimeFrameEnv = frameContext.env;
+  $: embeddedFrameContext = embeddedRuntimeContext ?? emptyEntityWorkspaceEmbeddedRuntimeContext;
+  $: runtimeFrameEnv = embeddedFrameContext.env;
 </script>
 
 <div class="entity-workspace" data-testid="entity-workspace" data-lens={selectedLens}>
@@ -213,6 +219,7 @@
       {headerRuntimeAddLabel}
       {initialAction}
       runtimeFrameContext={frameContext}
+      embeddedRuntimeContext={embeddedFrameContext}
       workspaceLens={selectedLens || 'wallet'}
       workspaceLensNavigationVersion={lensNavigationVersion}
       runtimeProjectionFrame={workspaceProjectionFrame}

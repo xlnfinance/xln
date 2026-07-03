@@ -37,6 +37,7 @@
 
   import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
+  import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';
   import OnboardingPanel from '$lib/components/Entity/OnboardingPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
@@ -752,14 +753,17 @@
   }
 
   const workspaceRuntimeFrameContext = $derived.by<EntityWorkspaceRuntimeFrameContext>(() => ({
-    env: workspaceEnv,
-    liveEnv: workspaceLiveEnv,
-    liveEnvResolver: resolveWorkspaceLiveEnv,
     envRevision: currentFrameRevision,
-    history: $runtimeFrameHistory,
     timeIndex: $runtimeFrameTimeIndex,
     isLive: $runtimeFrameIsLive,
     onGoToLive: handleGoToLiveOverride,
+  }));
+
+  const workspaceEmbeddedRuntimeContext = $derived.by<EntityWorkspaceEmbeddedRuntimeContext>(() => ({
+    env: workspaceEnv,
+    liveEnv: workspaceLiveEnv,
+    liveEnvResolver: resolveWorkspaceLiveEnv,
+    history: $runtimeFrameHistory,
   }));
 
   function getRuntimeOnboardingEntityIds(): string[] {
@@ -997,6 +1001,7 @@
     allowHeaderDeleteRuntime={true}
     headerRuntimeAddLabel="+ Add Runtime"
     runtimeFrameContext={workspaceRuntimeFrameContext}
+    embeddedRuntimeContext={workspaceEmbeddedRuntimeContext}
     on:signerSelect={handleSignerSelect}
     on:addSigner={handleAddSigner}
     on:entitySelect={handleEntitySelect}

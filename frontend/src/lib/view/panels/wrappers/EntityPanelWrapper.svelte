@@ -14,6 +14,7 @@
   import type { Writable } from 'svelte/store';
   import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
+  import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';
   import type { Tab } from '$lib/types/ui';
   import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
@@ -70,14 +71,17 @@
   }
 
   const runtimeFrameContext = $derived.by<EntityWorkspaceRuntimeFrameContext>(() => ({
-    env: activeEnv,
-    liveEnv: activeEnv,
-    liveEnvResolver: resolveLiveEnv,
     envRevision: '',
-    history: activeHistory,
     timeIndex: activeTimeIndex,
     isLive: activeIsLive,
     onGoToLive: goToLive,
+  }));
+
+  const embeddedRuntimeContext = $derived.by<EntityWorkspaceEmbeddedRuntimeContext>(() => ({
+    env: activeEnv,
+    liveEnv: activeEnv,
+    liveEnvResolver: resolveLiveEnv,
+    history: activeHistory,
   }));
 
 </script>
@@ -89,6 +93,7 @@
       tab={localTab}
       {initialAction}
       {runtimeFrameContext}
+      {embeddedRuntimeContext}
     />
   {/if}
 </div>

@@ -729,11 +729,12 @@ export async function createRpcAdapter(
 
       // Deploy EntityProvider
       const entityProviderFactory = makeEntityProviderFactory(signer);
-      const entityProviderContract = await entityProviderFactory.deploy();
+      const foundationRecipient = await signer.getAddress();
+      const entityProviderContract = await entityProviderFactory.deploy(foundationRecipient);
       await entityProviderContract.waitForDeployment();
       addresses.entityProvider = await entityProviderContract.getAddress();
       entityProvider = entityProviderContract;
-      console.log(`  EntityProvider: ${addresses.entityProvider}`);
+      console.log(`  EntityProvider: ${addresses.entityProvider} (foundation recipient ${foundationRecipient})`);
 
       // Deploy Depository (needs Account library linked)
       const linkedDepositoryBytecode = linkArtifactBytecode(

@@ -218,7 +218,7 @@ describe("Depository", function () {
 
     // Deploy EntityProvider
     const EntityProviderFactory = await hre.ethers.getContractFactory("EntityProvider");
-    const entityProvider = await EntityProviderFactory.deploy();
+    const entityProvider = await EntityProviderFactory.deploy(user0.address);
     await entityProvider.waitForDeployment();
 
     // Deploy Account library first

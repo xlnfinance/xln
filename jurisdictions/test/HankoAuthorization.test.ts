@@ -91,7 +91,7 @@ describe("Hanko Authorization", function () {
 
     // Deploy EntityProvider
     const EntityProviderFactory = await hre.ethers.getContractFactory("EntityProvider");
-    entityProvider = await EntityProviderFactory.deploy();
+    entityProvider = await EntityProviderFactory.deploy(admin.address);
     await entityProvider.waitForDeployment();
 
     // Deploy Account library first

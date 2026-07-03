@@ -185,7 +185,7 @@ describe('watchtower rpc last-resort integration', () => {
     await account.waitForDeployment();
 
     const entityProviderFactory = new ContractFactory(entityProviderArtifact.abi, entityProviderArtifact.bytecode, left);
-    const entityProvider = await entityProviderFactory.deploy({ nonce: await nextNonce(left) });
+    const entityProvider = await entityProviderFactory.deploy(left.address, { nonce: await nextNonce(left) });
     await entityProvider.waitForDeployment();
 
     const linkedDepositoryBytecode = linkArtifactBytecode(depositoryArtifact.bytecode, {
@@ -472,7 +472,7 @@ describe('watchtower rpc last-resort integration', () => {
     await account.waitForDeployment();
 
     const entityProviderFactory = new ContractFactory(entityProviderArtifact.abi, entityProviderArtifact.bytecode, left);
-    const entityProvider = await entityProviderFactory.deploy({ nonce: await nextNonce(left) });
+    const entityProvider = await entityProviderFactory.deploy(left.address, { nonce: await nextNonce(left) });
     await entityProvider.waitForDeployment();
 
     const linkedDepositoryBytecode = linkArtifactBytecode(depositoryArtifact.bytecode, {

@@ -6,64 +6,57 @@ describe("EntityProvider with Automatic Governance", function () {
   let owner, alice, bob, carol;
   let foundationEntityId;
 
+  function singleSignerBoardHash(address) {
+    return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+      ["tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)"],
+      [[
+        1,
+        [ethers.zeroPadValue(address, 32)],
+        [1],
+        0,
+        0,
+        0
+      ]]
+    ));
+  }
+
   beforeEach(async function () {
     [owner, alice, bob, carol] = await ethers.getSigners();
     
     // Deploy EntityProvider
     const EntityProvider = await ethers.getContractFactory("EntityProvider");
-    entityProvider = await EntityProvider.deploy();
+    entityProvider = await EntityProvider.deploy(owner.address);
     await entityProvider.waitForDeployment();
     
     foundationEntityId = await entityProvider.FOUNDATION_ENTITY();
-    
-    // Transfer foundation tokens to owner for testing foundation functions
-    const foundationAddress = ethers.getAddress(`0x${foundationEntityId.toString(16).padStart(40, '0')}`);
-    const [foundationControlTokenId] = await entityProvider.getTokenIds(foundationEntityId);
-    
-    // Need to use impersonation since foundation address doesn't have a private key
-    await ethers.provider.send("hardhat_impersonateAccount", [foundationAddress]);
-    const foundationSigner = await ethers.getSigner(foundationAddress);
-    
-    // Send some ETH to foundation address for gas
-    await owner.sendTransaction({
-      to: foundationAddress,
-      value: ethers.parseEther("1.0")
-    });
-    
-    // Transfer some foundation tokens to owner
-    await entityProvider.connect(foundationSigner).safeTransferFrom(
-      foundationAddress, 
-      owner.address, 
-      foundationControlTokenId, 
-      1000, 
-      "0x"
-    );
-    
-    await ethers.provider.send("hardhat_stopImpersonatingAccount", [foundationAddress]);
   });
 
   describe("Foundation Setup", function () {
+    it("rejects a zero foundation recipient", async function () {
+      const EntityProvider = await ethers.getContractFactory("EntityProvider");
+      await expect(EntityProvider.deploy(ethers.ZeroAddress)).to.be.revertedWith("Invalid foundation recipient");
+    });
+
     it("Should deploy with foundation entity #1 with governance", async function () {
       expect(foundationEntityId).to.equal(1);
       
       const entity = await entityProvider.entities(ethers.zeroPadValue(ethers.toBeHex(1), 32));
-      expect(entity.currentBoardHash).to.not.equal(ethers.ZeroHash);
+      expect(entity.currentBoardHash).to.equal(singleSignerBoardHash(owner.address));
       expect(entity.registrationBlock).to.be.gt(0);
       expect(entity.articlesHash).to.not.equal(ethers.ZeroHash);
       
-      // Check foundation has governance tokens (minus 1000 transferred to owner)
+      // Check foundation governance tokens are controlled by a real deploy-time recipient.
       const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(1);
-      const foundationAddress = ethers.getAddress(`0x${(1).toString(16).padStart(40, '0')}`);
       const expectedSupply = 10n**15n; // 1 quadrillion
       
-      expect(await entityProvider.balanceOf(foundationAddress, controlTokenId)).to.equal(expectedSupply - BigInt(1000));
-      expect(await entityProvider.balanceOf(foundationAddress, dividendTokenId)).to.equal(expectedSupply);
+      expect(await entityProvider.balanceOf(owner.address, controlTokenId)).to.equal(expectedSupply);
+      expect(await entityProvider.balanceOf(owner.address, dividendTokenId)).to.equal(expectedSupply);
     });
 
     it("Should allow foundation token holders to use foundation functions", async function () {
-      // Owner now has foundation tokens and can call foundation functions
+      // Owner has foundation tokens directly from constructor bootstrap.
       const [foundationControlTokenId] = await entityProvider.getTokenIds(1);
-      expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(1000);
+      expect(await entityProvider.balanceOf(owner.address, foundationControlTokenId)).to.equal(10n ** 15n);
       
       // Should be able to assign names
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
@@ -240,7 +233,7 @@ describe("EntityProvider with Automatic Governance", function () {
 
     it("tracks governance supply through the ERC1155 update hook", async function () {
       const EntityProviderSupplyHarness = await ethers.getContractFactory("EntityProviderSupplyHarness");
-      const harness = await EntityProviderSupplyHarness.deploy();
+      const harness = await EntityProviderSupplyHarness.deploy(owner.address);
       await harness.waitForDeployment();
 
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("supply_hook_board"));

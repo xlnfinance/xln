@@ -1,29 +1,45 @@
 const { ethers } = require("hardhat");
 const fs = require('fs');
 
+function loadDeploymentData() {
+    const outputPath = process.env.XLN_DEPLOY_OUTPUT;
+    if (outputPath) {
+        if (!fs.existsSync(outputPath)) {
+            throw new Error(`XLN_DEPLOY_OUTPUT does not exist: ${outputPath}`);
+        }
+        const output = JSON.parse(fs.readFileSync(outputPath, 'utf8'));
+        return {
+            depository: output.contracts?.depository,
+            account: output.contracts?.account,
+        };
+    }
+
+    const deploymentFile = "ignition/deployments/chain-31337/deployed_addresses.json";
+    if (!fs.existsSync(deploymentFile)) {
+        throw new Error(`Deployment file not found: ${deploymentFile}`);
+    }
+    const deploymentData = JSON.parse(fs.readFileSync(deploymentFile, 'utf8'));
+    return {
+        depository: deploymentData['DepositoryModule#Depository'],
+        account: deploymentData['DepositoryModule#Account'],
+    };
+}
+
 async function main() {
     console.log("🔍 Verifying deployed contract functions...");
 
-    // Read deployment file
-    const deploymentFile = "ignition/deployments/chain-31337/deployed_addresses.json";
-    if (!fs.existsSync(deploymentFile)) {
-        console.log("❌ Deployment file not found:", deploymentFile);
-        process.exit(1);
-    }
-    const deploymentData = JSON.parse(fs.readFileSync(deploymentFile, 'utf8'));
-
-    // Use address from environment variable if provided (fresh from deployment)
-    let depositoryAddress = process.env.DEPOSITORY_ADDRESS || deploymentData['DepositoryModule#Depository'];
+    const deploymentData = loadDeploymentData();
+    const depositoryAddress = process.env.DEPOSITORY_ADDRESS || deploymentData.depository;
 
     if (!depositoryAddress) {
-        console.log("❌ Depository address not found in deployment file");
+        console.log("❌ Depository address not found");
         process.exit(1);
     }
 
     console.log("📍 Verifying Depository at:", depositoryAddress);
 
     // Get Account library address for linking
-    const accountLibraryAddress = deploymentData['DepositoryModule#Account'];
+    const accountLibraryAddress = process.env.ACCOUNT_ADDRESS || deploymentData.account;
 
     if (!accountLibraryAddress) {
         console.log("❌ Account library address not found - needed for Depository linking");
@@ -43,6 +59,9 @@ async function main() {
     const provider = depository.runner.provider;
     const deployedBytecode = await provider.getCode(depositoryAddress);
     console.log("🔍 Contract bytecode length:", deployedBytecode.length, "characters");
+    if (deployedBytecode === "0x") {
+        throw new Error(`No deployed bytecode at ${depositoryAddress}`);
+    }
 
     // Get actual function selectors from contract interface
     console.log("🔍 Getting contract factory...");
@@ -92,33 +111,39 @@ async function main() {
 
     // Check if critical functions exist
     const hasProcessBatch = functionNames.includes('processBatch');
-    const hasSettle = functionNames.includes('settle');
+    const hasWatchtowerCounterDispute = functionNames.includes('watchtowerCounterDispute');
 
     console.log("🔍 Critical function availability:");
     console.log("   processBatch:", hasProcessBatch ? "✅ FOUND" : "❌ MISSING");
-    console.log("   settle:", hasSettle ? "✅ FOUND" : "❌ MISSING");
-    if (!hasProcessBatch || !hasSettle) {
+    console.log(
+        "   watchtowerCounterDispute:",
+        hasWatchtowerCounterDispute ? "✅ FOUND" : "❌ MISSING",
+    );
+    if (!hasProcessBatch || !hasWatchtowerCounterDispute) {
         console.log("❌ CRITICAL: Essential functions missing from contract interface!");
         process.exit(1);
     }
 
     // Calculate correct selectors
     const processBatchFrag = contractInterface.getFunction("processBatch");
-    const settleFrag = contractInterface.getFunction("settle");
+    const watchtowerCounterDisputeFrag = contractInterface.getFunction("watchtowerCounterDispute");
     const actualProcessBatchSelector = processBatchFrag.selector;
-    const actualSettleSelector = settleFrag.selector;
+    const actualWatchtowerCounterDisputeSelector = watchtowerCounterDisputeFrag.selector;
 
     console.log("🔍 ACTUAL function selectors:");
     console.log("   processBatch:", actualProcessBatchSelector);
-    console.log("   settle:", actualSettleSelector);
+    console.log("   watchtowerCounterDispute:", actualWatchtowerCounterDisputeSelector);
     console.log("🔍 Checking ACTUAL selectors in deployed bytecode...");
     const processBatchFound = deployedBytecode.includes(actualProcessBatchSelector.slice(2));
-    const settleFound = deployedBytecode.includes(actualSettleSelector.slice(2));
+    const watchtowerCounterDisputeFound = deployedBytecode.includes(actualWatchtowerCounterDisputeSelector.slice(2));
     console.log("   processBatch:", processBatchFound ? "✅ FOUND" : "❌ MISSING");
-    console.log("   settle:", settleFound ? "✅ FOUND" : "❌ MISSING");
+    console.log(
+        "   watchtowerCounterDispute:",
+        watchtowerCounterDisputeFound ? "✅ FOUND" : "❌ MISSING",
+    );
 
     // FAIL if any critical function is missing
-    if (!processBatchFound || !settleFound) {
+    if (!processBatchFound || !watchtowerCounterDisputeFound) {
         console.log("❌ CRITICAL: Essential functions missing from deployed contract!");
         process.exit(1);
     }

@@ -208,7 +208,6 @@ const exposeRuntimeAdapterDebugSurface = (): void => {
       checkpoints: async () => (await getRuntimeQueryClient()).readCheckpoints(),
       receiptStatus: async (receiptId: string) => (await getRuntimeQueryClient()).readReceiptStatus(receiptId),
     },
-    send: runtimeAdapterSend,
     status: () => {
       const adapter = activeAdapter;
       const handle = get(runtimeControllerHandle);

@@ -25,7 +25,7 @@ if (processBatchAbi) {
 }
 
 // Also extract other key functions
-const keyFunctions = ['debugFundReserves', 'debugBulkFundEntities', '_reserves'];
+const keyFunctions = ['debugFundReserves', 'processBatch', 'watchtowerCounterDispute', '_reserves'];
 console.log('\n🔍 Other key functions:');
 
 keyFunctions.forEach(name => {
