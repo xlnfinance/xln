@@ -24,6 +24,7 @@ import {
 
 import type { BrowserVMState, DisputeFinalizationEvidence, JTx, Env } from '../types';
 import { normalizeEntityId } from '../entity-id-utils';
+import { compareStableText } from '../serialization-utils';
 import type {
   JAdapter,
   JAdapterAddresses,
@@ -1993,7 +1994,7 @@ export async function createRpcAdapter(
         }
         return new Map([...owners.entries()].map(([owner, entityBlocks]) => [
           owner,
-          [...entityBlocks.values()].sort((left, right) => left.entityId.localeCompare(right.entityId)),
+          [...entityBlocks.values()].sort((left, right) => compareStableText(left.entityId, right.entityId)),
         ]));
       };
       type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;

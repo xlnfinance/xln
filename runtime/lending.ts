@@ -9,6 +9,7 @@ import type {
   LendingTermId,
 } from './types';
 import { deriveDelta } from './account-utils';
+import { compareStableText } from './serialization-utils';
 
 export const LENDING_TERM_MS: Record<LendingTermId, number> = {
   '1h': 60 * 60 * 1000,
@@ -157,7 +158,7 @@ export const selectBestLendingPool = (
     .sort((left, right) => (
       left.interestBps - right.interestBps ||
       left.createdAt - right.createdAt ||
-      left.positionId.localeCompare(right.positionId)
+      compareStableText(left.positionId, right.positionId)
     ));
   return candidates[0] ?? null;
 };
@@ -180,11 +181,11 @@ export const summarizeLendingState = (
   const pools = Array.from(lending.pools.values())
     .filter(position => tokenId === undefined || position.tokenId === tokenId)
     .filter(position => !userEntityId || position.lenderEntityId.toLowerCase() === userEntityId)
-    .sort((left, right) => right.updatedAt - left.updatedAt || left.positionId.localeCompare(right.positionId));
+    .sort((left, right) => right.updatedAt - left.updatedAt || compareStableText(left.positionId, right.positionId));
   const loans = Array.from(lending.loans.values())
     .filter(loan => tokenId === undefined || loan.tokenId === tokenId)
     .filter(loan => !userEntityId || loan.borrowerEntityId.toLowerCase() === userEntityId || loan.lenderEntityId.toLowerCase() === userEntityId)
-    .sort((left, right) => right.updatedAt - left.updatedAt || left.loanId.localeCompare(right.loanId));
+    .sort((left, right) => right.updatedAt - left.updatedAt || compareStableText(left.loanId, right.loanId));
   const allPools = Array.from(lending.pools.values()).filter(position => tokenId === undefined || position.tokenId === tokenId);
   const allLoans = Array.from(lending.loans.values()).filter(loan => tokenId === undefined || loan.tokenId === tokenId);
   const availableAmount = allPools.reduce((sum, position) => sum + position.availableAmount, 0n);

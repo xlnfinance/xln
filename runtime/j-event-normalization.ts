@@ -1,5 +1,5 @@
 import type { JurisdictionEvent } from './types';
-import { safeStringify } from './serialization-utils';
+import { compareStableText, safeStringify } from './serialization-utils';
 
 const BIGINT_WRAPPER_RE = /^BigInt\((-?\d+)\)$/;
 
@@ -112,14 +112,14 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
       allowances.push({ tokenAddress, spender, allowance });
     }
     tokenBalances.sort((left, right) =>
-      left.tokenAddress.localeCompare(right.tokenAddress) ||
+      compareStableText(left.tokenAddress, right.tokenAddress) ||
       (left.tokenId ?? -1) - (right.tokenId ?? -1) ||
-      left.balance.localeCompare(right.balance)
+      compareStableText(left.balance, right.balance)
     );
     allowances.sort((left, right) =>
-      left.tokenAddress.localeCompare(right.tokenAddress) ||
-      left.spender.localeCompare(right.spender) ||
-      left.allowance.localeCompare(right.allowance)
+      compareStableText(left.tokenAddress, right.tokenAddress) ||
+      compareStableText(left.spender, right.spender) ||
+      compareStableText(left.allowance, right.allowance)
     );
     return {
       ...meta,

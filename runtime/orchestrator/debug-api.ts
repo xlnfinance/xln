@@ -1,4 +1,4 @@
-import { safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../serialization-utils';
 import { pushDebugEvent, type RelayStore } from '../relay-store';
 import { buildKnownProfileBundle } from '../server/gossip-profiles';
 import { getDebugEntityEntries } from './public-discovery';
@@ -222,7 +222,7 @@ const handleDebugActivity = async (deps: OrchestratorDebugApiDeps): Promise<Resp
       if (byTime !== 0) return byTime;
       const byHeight = Number(right['height'] || 0) - Number(left['height'] || 0);
       if (byHeight !== 0) return byHeight;
-      return String(right['id'] || '').localeCompare(String(left['id'] || ''));
+      return compareStableText(String(right['id'] || ''), String(left['id'] || ''));
     })
     .slice(0, limit);
   const nextBeforeHeights = hubPages

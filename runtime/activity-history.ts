@@ -1,4 +1,5 @@
 import type { FrameLogEntry, RuntimeInput } from './types';
+import { compareStableText } from './serialization-utils';
 
 export type ActivityKind = 'onchain' | 'offchain';
 export type ActivityType =
@@ -210,7 +211,7 @@ export const dedupeRuntimeActivityEvents = (input: RuntimeActivityEvent[]): Runt
   return Array.from(byKey.values()).sort((left, right) =>
     right.timestamp - left.timestamp ||
     right.height - left.height ||
-    right.id.localeCompare(left.id)
+    compareStableText(right.id, left.id)
   );
 };
 
@@ -701,5 +702,5 @@ export const buildRuntimeActivityEvents = (
     const event = eventFromLog(journal, index++, log, viewedEntityId);
     if (event && eventMatchesFilters(event, filters)) events.push(event);
   }
-  return events.sort((left, right) => right.timestamp - left.timestamp || right.height - left.height || right.id.localeCompare(left.id));
+  return events.sort((left, right) => right.timestamp - left.timestamp || right.height - left.height || compareStableText(right.id, left.id));
 };

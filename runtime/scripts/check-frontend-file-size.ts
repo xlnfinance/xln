@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { compareStableText } from '../serialization-utils';
 
 type FileSizeViolation = {
   file: string;
@@ -52,7 +53,7 @@ async function main(): Promise<void> {
     }
   }
 
-  violations.sort((a, b) => b.lines - a.lines || a.file.localeCompare(b.file));
+  violations.sort((a, b) => b.lines - a.lines || compareStableText(a.file, b.file));
 
   if (violations.length > 0) {
     console.error(`Frontend file-size invariant failed: max ${MAX_FRONTEND_FILE_LINES} lines per source file.\n`);

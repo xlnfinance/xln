@@ -637,7 +637,7 @@ const pruneSuccessfulE2eRuns = (keepRuns: number, minFreeBytes: number, minKeepR
     .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
     .map(entry => readPassedE2eRunForPrune(join(root, entry.name), entry.name))
     .filter((entry): entry is E2eRunForPrune => entry !== null)
-    .sort((a, b) => b.completedAtMs - a.completedAtMs || b.runId.localeCompare(a.runId));
+    .sort((a, b) => b.completedAtMs - a.completedAtMs || compareStableText(b.runId, a.runId));
 
   const protectedRunCount = Math.max(0, Math.min(minKeepRuns, passedRuns.length));
   const effectiveKeepRuns = Math.max(keepRuns, protectedRunCount);

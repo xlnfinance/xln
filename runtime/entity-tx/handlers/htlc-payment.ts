@@ -20,7 +20,7 @@ import { deriveDelta } from '../../account-utils';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { createOnionEnvelopes, type HtlcEnvelope } from '../../htlc-envelope-types';
 import { getRuntimeJurisdictionHeight } from '../../j-height';
-import { safeStringify } from '../../serialization-utils';
+import { compareStableText, safeStringify } from '../../serialization-utils';
 import { getReplicaByEntityId } from '../../replica-utils';
 
 const formatEntityId = (id: string) => id.slice(-4);
@@ -480,10 +480,10 @@ export async function handleHtlcPayment(
       route,
       startedAtMs: paymentStartedAtMs,
       hopForwardAmounts: Array.from(hopForwardAmounts.entries())
-        .sort(([left], [right]) => left.localeCompare(right))
+        .sort(([left], [right]) => compareStableText(left, right))
         .map(([entityId, forwardAmount]) => [entityId, forwardAmount.toString()]),
       entityPubKeys: Array.from(entityPubKeys.entries())
-        .sort(([left], [right]) => left.localeCompare(right)),
+        .sort(([left], [right]) => compareStableText(left, right)),
     });
     const crypto = new NobleCryptoProvider({ deterministicSeed: deterministicEnvelopeSeed });
 
