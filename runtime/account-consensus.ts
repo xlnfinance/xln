@@ -18,8 +18,7 @@ import {
   getAccountPerspective,
 } from './state-helpers';
 import { isLeft } from './account-utils';
-import { signAccountFrame } from './account-crypto';
-import { cryptoHash as hash, HEAVY_LOGS } from './utils';
+import { HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { applyAccountTx } from './account-tx/apply';
 import { appendAccountFrameHistoryView, getAccountFrameHistoryView, markStorageAccountDirty, recordAccountFrameHistory } from './env-events';
@@ -1687,88 +1686,4 @@ export function getAccountsToProposeFrames(entityState: EntityState): string[] {
   }
 
   return accountsToProposeFrames;
-}
-
-// === PROOF GENERATION (for future J-Machine integration) ===
-
-/**
- * Generate account proof for dispute resolution (like old_src Channel.getSubchannelProofs)
- * Must be ABI-compatible with Depository contract
- *
- * DUAL-TRACK APPROACH:
- * - proofBody: Simple internal representation (tokenIds + deltas)
- * - abiProofBody: ABI-encoded for on-chain disputes (includes transformers)
- */
-export async function generateAccountProof(
-  env: Env,
-  accountMachine: AccountMachine,
-): Promise<{
-  proofHash: string;
-  signature: string;
-  abiEncodedProofBody?: string;
-  abiProofBodyHash?: string;
-}> {
-  // Update simple proofBody with current state (like old_src does before signing)
-  accountMachine.proofBody = {
-    tokenIds: Array.from(accountMachine.deltas.keys()).sort((a, b) => a - b), // Deterministic order
-    deltas: Array.from(accountMachine.deltas.keys())
-      .sort((a, b) => a - b)
-      .map(tokenId => {
-        const delta = accountMachine.deltas.get(tokenId);
-        if (!delta) {
-          console.warn(`Missing delta for token ${tokenId}`);
-          throw new Error(`Critical financial data missing: delta for token ${tokenId}`);
-        }
-        return delta.ondelta + delta.offdelta; // Total delta for each token
-      }),
-  };
-
-  // Build ABI-encoded proofBody for on-chain disputes
-  const abiResult = buildAccountProofBody(accountMachine);
-
-  // Store ABI-encoded proofBody for later dispute submission
-  accountMachine.abiProofBody = {
-    encodedProofBody: abiResult.encodedProofBody,
-    proofBodyHash: abiResult.proofBodyHash,
-    lastUpdatedHeight: accountMachine.currentHeight,
-  };
-
-  // Create proof structure expected by Depository.sol.
-  const proofData = {
-    fromEntity: accountMachine.proofHeader.fromEntity,
-    toEntity: accountMachine.proofHeader.toEntity,
-    nonce: accountMachine.proofHeader.nonce,
-    tokenIds: accountMachine.proofBody.tokenIds,
-    deltas: accountMachine.proofBody.deltas.map(d => d.toString()), // Convert BigInt for JSON
-  };
-
-  // Create deterministic proof hash using browser-compatible crypto
-  const proofContent = safeStringify(proofData);
-  const fullHash = await hash(proofContent);
-  const proofHash = fullHash.slice(2); // Remove 0x prefix for compatibility
-
-  // Generate hanko signature - CRITICAL: Use signerId, not entityId
-  const proofEntityId = accountMachine.proofHeader.fromEntity;
-  const proofReplica = getReplicaByEntityId(env, proofEntityId);
-  const proofSignerId = proofReplica?.state.config.validators[0];
-  if (!proofSignerId) {
-    throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);
-  }
-  const signature = signAccountFrame(env, proofSignerId, `0x${proofHash}`);
-
-  accountMachine.hankoSignature = signature;
-  accountLog.debug('proof.generated', {
-    entity: shortId(proofEntityId),
-    signer: shortId(proofSignerId),
-    tokens: accountMachine.proofBody.tokenIds.length,
-    proof: shortHash(`0x${proofHash}`),
-    abiProof: shortHash(abiResult.proofBodyHash),
-  });
-
-  return {
-    proofHash: `0x${proofHash}`,
-    signature,
-    abiEncodedProofBody: abiResult.encodedProofBody,
-    abiProofBodyHash: abiResult.proofBodyHash,
-  };
 }

@@ -1,3 +1,5 @@
+import { ethers } from 'ethers';
+
 import type { AccountFrame, AccountTx } from './types';
 import { assertAccountFrameDeltaIntegrity } from './account-frame';
 import { safeStringify } from './serialization-utils';
@@ -86,7 +88,6 @@ export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, un
 
 export async function createFrameHash(frame: AccountFrame): Promise<string> {
   assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
-  const { ethers } = await import('ethers');
 
   const frameData = {
     height: frame.height,

@@ -112,11 +112,13 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Root cause: broad split runs exposed a readiness race in the test harness. The adapter head/frame could be updated while `window.isolatedEnv` was still one Svelte view refresh behind, producing `beforeHeight=18` and `after.height=18` in the final assertion.
   - Evidence: focused admin-control e2e passes. Broad `tests/e2e-radapter-remote.spec.ts` now passes `5/5`, including the previously failing shard 2 admin-control test.
 
-- [ ] Fix numeric signer key cache isolation by runtime seed.
+- [x] Fix numeric signer key cache isolation by runtime seed.
   - Impact: high.
   - Current issue: numeric signer private keys are cached by `signerId` only. Two test/runtime envs in one Bun process with different `runtimeSeed` and signer `2` can reuse the wrong private key and trigger `LAZY_HANKO_SELF_MISMATCH`.
   - Constraint: consensus/crypto path; require explicit design approval before changing. Candidate fix is cache numeric derivations by `(seed fingerprint, signerId)` while keeping registered EOA keys keyed by address.
   - Tests: two envs with different seeds and same numeric signer process frames in one Bun process without cache cross-contamination.
+  - Status: done. Numeric signer derivation now uses `seedScopedNumericSignerKeys` keyed by `(sha256(runtimeSeed), signerId)`; registered EOA keys remain keyed by address.
+  - Evidence: `bun test runtime/__tests__/account-crypto-prewarm.test.ts` covers same-process seed A/B signer `2` isolation and rejects reuse of the first seed's private key.
 
 - [x] Scope watcher start-block clamp to the watcher's own jurisdiction/depository.
   - Impact: high.

@@ -9,17 +9,6 @@ import { HTLC } from './constants';
 const DEFAULT_FEE_PPM = Number((HTLC.FEE_RATE_UBP * 1_000_000n) / HTLC.FEE_DENOMINATOR);
 
 /**
- * Calculate HTLC fee (Coasian micro basis points)
- * Returns: amount after fee deduction
- *
- * Fee = base + (amount × rate_ubp / 10,000,000)
- * Example: $10,000 × 100 μbp = $0.10 fee
- */
-export function calculateHtlcFee(amount: bigint): bigint {
-  return calculateHtlcForwardAmount(amount);
-}
-
-/**
  * Calculate forwarded amount after fees.
  * Fee = baseFee + floor(amountIn * feePPM / 1,000,000)
  */
