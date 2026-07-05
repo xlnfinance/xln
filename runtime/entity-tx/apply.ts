@@ -2,13 +2,13 @@ import type { EntityState, EntityTx, Env, EntityInput, JInput, HashType } from '
 import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
-  handleAccountInput,
+  applyAccountInput,
   type MempoolOp,
   type SwapOfferEvent,
   type SwapCancelEvent,
   type SwapCancelRequestEvent,
 } from './handlers/account';
-import { handleJEvent } from './j-events';
+import { applyJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
 import { createStructuredLogger, logError } from '../logger';
 import { handleR2E } from './handlers/r2e';
@@ -135,13 +135,13 @@ const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entity
     blockNumber: jEventData.blockNumber,
     txHash: jEventData.transactionHash,
   });
-  const { newState, mempoolOps, outputs, dirtyAccounts } = await handleJEvent(entityState, entityTx.data, env);
+  const { newState, mempoolOps, outputs, dirtyAccounts } = await applyJEvent(entityState, entityTx.data, env);
   return { newState, outputs: outputs || [], mempoolOps: mempoolOps || [], dirtyAccounts };
 };
 
 const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
   if (entityTx.type !== 'accountInput') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
-  const result = await handleAccountInput(entityState, entityTx.data, env);
+  const result = await applyAccountInput(entityState, entityTx.data, env);
   markStorageAccountDirty(env, result.newState.entityId, entityTx.data.fromEntityId);
   return {
     newState: result.newState,

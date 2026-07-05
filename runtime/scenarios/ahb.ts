@@ -1982,6 +1982,42 @@ export async function ahb(env: Env): Promise<void> {
   if (typeof providerAny.send !== 'function') {
     throw new Error('AHB dispute timeout mining requires RPC provider with evm_mine support');
   }
+  const waitForRuntimeVisibleJBlock = async (
+    target: bigint | number | (() => bigint | number | undefined | Promise<bigint | number | undefined>),
+    label: string,
+  ): Promise<void> => {
+    const readTarget = async (): Promise<bigint | undefined> => {
+      const rawTarget = typeof target === 'function' ? await target() : target;
+      return rawTarget === undefined ? undefined : typeof rawTarget === 'bigint' ? rawTarget : BigInt(rawTarget);
+    };
+    let targetBlockNumber = await readTarget();
+    if (targetBlockNumber === undefined) {
+      throw new Error(`AHB ${label}: missing dispute timeout target`);
+    }
+    for (let i = 0; i < 40; i++) {
+      await syncChain(env, 1);
+      targetBlockNumber = await readTarget() ?? targetBlockNumber;
+      const visibleBlock = BigInt(env.jReplicas?.get(AHB_JURISDICTION)?.blockNumber ?? 0n);
+      const providerBlock = BigInt(await jadapter.provider.getBlockNumber());
+      if (visibleBlock >= targetBlockNumber && providerBlock >= targetBlockNumber) return;
+      const blocksBehind = targetBlockNumber > providerBlock ? targetBlockNumber - providerBlock : 1n;
+      if (blocksBehind > 8n && blocksBehind <= BigInt(Number.MAX_SAFE_INTEGER)) {
+        try {
+          await providerAny.send!('anvil_mine', [Number(blocksBehind)]);
+        } catch {
+          await providerAny.send!('evm_mine', []);
+        }
+      } else {
+        await providerAny.send!('evm_mine', []);
+      }
+      await process(env);
+    }
+    const visibleBlock = BigInt(env.jReplicas?.get(AHB_JURISDICTION)?.blockNumber ?? 0n);
+    const providerBlock = BigInt(await jadapter.provider.getBlockNumber());
+    throw new Error(
+      `AHB ${label}: runtime/provider J-height ${visibleBlock}/${providerBlock} < timeout ${targetBlockNumber}`,
+    );
+  };
 
   while (true) {
     const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
@@ -1995,6 +2031,14 @@ export async function ahb(env: Env): Promise<void> {
     await providerAny.send('evm_mine', []);
     await process(env);
   }
+  await waitForRuntimeVisibleJBlock(
+    async () => {
+      const runtimeTimeout = findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.disputeTimeout ?? targetBlock;
+      const onChainTimeout = (await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout;
+      return onChainTimeout > 0n ? onChainTimeout : runtimeTimeout;
+    },
+    'phase7 dispute timeout',
+  );
 
   // 6) Bob finalizes dispute (unilateral after timeout)
   console.log('\n⚖️ STEP 6: Bob finalizes dispute (unilateral)...');
@@ -2012,6 +2056,25 @@ export async function ahb(env: Env): Promise<void> {
       }
     }]
   }]);
+
+  if (AHB_DEBUG) {
+    const [, bobBeforeFinalizeBroadcast] = findReplica(env, bob.id);
+    const bobRuntimeDispute = bobBeforeFinalizeBroadcast.state.accounts.get(hub.id)?.activeDispute;
+    const bobQueuedFinalizations =
+      bobBeforeFinalizeBroadcast.state.jBatchState?.batch?.disputeFinalizations?.length ?? 0;
+    const onChainAccountInfo = await jadapter.getAccountInfo(bob.id, hub.id);
+    const providerBlock = await jadapter.provider.getBlockNumber();
+    const visibleBlock = env.jReplicas?.get(AHB_JURISDICTION)?.blockNumber ?? 0n;
+    console.log(
+      `   AHB_DEBUG phase7 pre-broadcast: providerBlock=${providerBlock}` +
+      ` visibleBlock=${visibleBlock}` +
+      ` runtimeTimeout=${bobRuntimeDispute?.disputeTimeout ?? 'none'}` +
+      ` onchainTimeout=${onChainAccountInfo.disputeTimeout}` +
+      ` onchainNonce=${onChainAccountInfo.nonce}` +
+      ` disputeHash=${onChainAccountInfo.disputeHash.slice(0, 10)}...` +
+      ` queuedFinalizations=${bobQueuedFinalizations}`,
+    );
+  }
 
   await process(env, [{
     entityId: bob.id,
@@ -2087,11 +2150,9 @@ export async function ahb(env: Env): Promise<void> {
   );
   console.log(`   DebtCreated event verified: Hub owes Bob $${debtAmount} USDC ✅`);
 
-  // H10 AUDIT FIX: Verify solvency AFTER dispute finalized
-  // NOTE: This check is OPTIONAL because dispute finalization doesn't emit AccountSettled
-  // events to sync collateral changes to runtime state. This is a known gap (see H10-BUG).
-  // The on-chain state is correct (verified above), but runtime deltas aren't updated.
-  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 7 POST-DISPUTE', true /* optional - known sync gap */);
+  // H10 AUDIT FIX: Verify solvency AFTER dispute finalized. DisputeFinalized now
+  // clears finalized collateral/ondelta in runtime state, matching Depository.sol.
+  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 7 POST-DISPUTE');
 
   console.log('\n✅ PHASE 7 COMPLETE: Full E→J dispute flow verified!');
   console.log('   - Bob disputeStart entity tx → jBatch → J-machine');
@@ -2264,9 +2325,8 @@ export async function ahb(env: Env): Promise<void> {
   console.log(`   H13: Dispute finalization nonce check: ${initialNonce} → ${currentNonce} (same or higher ✅)`);
   assert(bobAccountAfterBump.counterpartyDisputeProofHanko, 'PHASE 8: missing counterparty dispute hanko for counter-dispute');
 
-  // H10 AUDIT FIX: Verify solvency after counter-dispute bump (state changed during dispute)
-  // NOTE: Optional because we inherit the sync gap from PHASE 7 dispute (collateral not synced)
-  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 COUNTER-DISPUTE-BUMP', true /* optional - inherited sync gap */);
+  // H10 AUDIT FIX: Verify solvency after counter-dispute bump (state changed during dispute).
+  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 COUNTER-DISPUTE-BUMP');
 
   // Non-starter finalizes unilaterally only AFTER timeout (protocol invariant).
   const [, hubReplicaAfterBump] = findReplica(env, hub.id);
@@ -2287,6 +2347,17 @@ export async function ahb(env: Env): Promise<void> {
     await providerAny.send('evm_mine', []);
     await process(env);
   }
+  await waitForRuntimeVisibleJBlock(
+    async () => {
+      const runtimeTimeout =
+        findReplica(env, hub.id)[1].state.accounts.get(bob.id)?.activeDispute?.disputeTimeout ??
+        findReplica(env, bob.id)[1].state.accounts.get(hub.id)?.activeDispute?.disputeTimeout ??
+        targetCounterTimeout;
+      const onChainTimeout = (await jadapter.getAccountInfo(bob.id, hub.id)).disputeTimeout;
+      return onChainTimeout > 0n ? onChainTimeout : runtimeTimeout;
+    },
+    'phase8 counter-dispute timeout',
+  );
 
   console.log('⚖️ STEP 8c: Hub counter-dispute finalize (post-timeout)...');
   await process(env, [{
@@ -2326,9 +2397,8 @@ export async function ahb(env: Env): Promise<void> {
   assert(!bobEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after counter-dispute');
   console.log('✅ Counter-dispute finalized after timeout (non-starter path)');
 
-  // H10 AUDIT FIX: Verify solvency AFTER counter-dispute finalized
-  // NOTE: Optional because we inherit the sync gap from PHASE 7 dispute (collateral not synced)
-  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-COUNTER-DISPUTE', true /* optional - inherited sync gap */);
+  // H10 AUDIT FIX: Verify solvency AFTER counter-dispute finalized.
+  checkSolvency(env, TOTAL_SOLVENCY, 'PHASE 8 POST-COUNTER-DISPUTE');
 
   console.log('ℹ️ PHASE 8d skipped: no cooperative disputeFinalize path in unilateral-only protocol.');
 

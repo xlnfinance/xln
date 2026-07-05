@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 
-import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
+import { applyAccountInput, proposeAccountFrame } from '../account-consensus';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { deriveAccountWatchSeed } from '../account-watch-seed';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
@@ -45,11 +45,12 @@ import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from 
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { processSettleAction } from '../entity-tx/handlers/settle';
-import { handleJEvent } from '../entity-tx/j-events';
+import { applyJEvent } from '../entity-tx/j-events';
 import { tryFinalizeAccountJEvents } from '../entity-tx/j-events-account';
 import { queueCrossJurisdictionSalvageFromArgumentList } from '../entity-tx/j-events-htlc';
 import {
   buildJEventObservationDigest,
+  canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
 import { getRuntimeJurisdictionHeight } from '../j-height';
@@ -68,7 +69,7 @@ import { NobleCryptoProvider } from '../crypto-noble';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 import { resolveEntityProposerId } from '../state-helpers';
-import type { AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
+import type { AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
 import { ethers } from 'ethers';
 
 const makeSingleSignerConfig = (): ConsensusConfig => ({
@@ -205,28 +206,37 @@ const signJEventObservation = (
   env: ReturnType<typeof createEmptyEnv>,
   entityId: string,
   signerId: string,
-  input: {
-    blockNumber: number;
-    blockHash: string;
-    transactionHash: string;
-    events: JurisdictionEvent[];
-  },
-): { eventsHash: string; signature: string } => {
-  const eventsHash = canonicalJurisdictionEventsHash(input.events);
-  const signature = signAccountFrame(
-    env,
-    signerId,
-    buildJEventObservationDigest({
-      entityId,
+	  input: {
+	    blockNumber: number;
+	    blockHash: string;
+	    transactionHash: string;
+	    events: JurisdictionEvent[];
+	    disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+	  },
+	): { eventsHash: string; signature: string; disputeFinalizationEvidenceHash?: string } => {
+	  const eventsHash = canonicalJurisdictionEventsHash(input.events);
+	  const disputeFinalizationEvidenceHash = input.disputeFinalizationEvidence?.length
+	    ? canonicalDisputeFinalizationEvidenceHash(input.disputeFinalizationEvidence)
+	    : undefined;
+	  const signature = signAccountFrame(
+	    env,
+	    signerId,
+	    buildJEventObservationDigest({
+	      entityId,
       signerId,
       blockNumber: input.blockNumber,
-      blockHash: input.blockHash,
-      transactionHash: input.transactionHash,
-      eventsHash,
-    }),
-  );
-  return { eventsHash, signature };
-};
+	      blockHash: input.blockHash,
+	      transactionHash: input.transactionHash,
+	      eventsHash,
+	      ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
+	    }),
+	  );
+	  return {
+	    eventsHash,
+	    signature,
+	    ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
+	  };
+	};
 
 const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
   entityId: `0x${'11'.repeat(32)}`,
@@ -888,7 +898,7 @@ describe('audit fail-fast regressions', () => {
     const state = makeEntityState(`0x${'11'.repeat(32)}`);
     const env = createEmptyEnv('j-event-non-validator');
 
-    await expect(handleJEvent(state, {
+    await expect(applyJEvent(state, {
       from: 'not-a-validator',
       observedAt: 1_000,
       blockNumber: 1,
@@ -930,14 +940,14 @@ describe('audit fail-fast regressions', () => {
       events: [event],
     });
 
-    await expect(handleJEvent(state, { ...common } as any, env)).rejects.toThrow(
+    await expect(applyJEvent(state, { ...common } as any, env)).rejects.toThrow(
       'missing eventsHash',
     );
-    await expect(handleJEvent(state, { ...common, eventsHash: signed.eventsHash } as any, env)).rejects.toThrow(
+    await expect(applyJEvent(state, { ...common, eventsHash: signed.eventsHash } as any, env)).rejects.toThrow(
       'missing observation signature',
     );
 
-    const result = await handleJEvent(state, { ...common, ...signed }, env);
+    const result = await applyJEvent(state, { ...common, ...signed }, env);
     expect(result.newState.jBlockChain.length).toBe(1);
     expect(result.newState.reserves.get(1)).toBe(100n);
   });
@@ -978,7 +988,7 @@ describe('audit fail-fast regressions', () => {
       events: [event],
     });
 
-    const result = await handleJEvent(state, { ...common, ...signed }, env);
+    const result = await applyJEvent(state, { ...common, ...signed }, env);
 
     expect(result.newState.reserves.get(1)).toBe(0n);
   });
@@ -1682,12 +1692,12 @@ describe('audit fail-fast regressions', () => {
       events: [honestEvent],
     });
 
-    state = (await handleJEvent(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
-    state = (await handleJEvent(state, { ...common, from: '2', event: fakeEvent, ...signedFake }, env)).newState;
+    state = (await applyJEvent(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
+    state = (await applyJEvent(state, { ...common, from: '2', event: fakeEvent, ...signedFake }, env)).newState;
     expect(state.jBlockChain.length).toBe(0);
     expect(state.reserves.get(1)).toBeUndefined();
 
-    state = (await handleJEvent(state, { ...common, from: '3', event: honestEvent, ...signedHonest3 }, env)).newState;
+    state = (await applyJEvent(state, { ...common, from: '3', event: honestEvent, ...signedHonest3 }, env)).newState;
     expect(state.jBlockChain.length).toBe(1);
     expect(state.reserves.get(1)).toBe(100n);
   });
@@ -1720,10 +1730,10 @@ describe('audit fail-fast regressions', () => {
       events: [event],
     });
 
-    await expect(handleJEvent(state, { ...common, from: '1', eventsHash: signerOne.eventsHash }, env)).rejects.toThrow(
+    await expect(applyJEvent(state, { ...common, from: '1', eventsHash: signerOne.eventsHash }, env)).rejects.toThrow(
       'missing observation signature',
     );
-    await expect(handleJEvent(state, { ...common, from: '2', ...signerOne }, env)).rejects.toThrow(
+    await expect(applyJEvent(state, { ...common, from: '2', ...signerOne }, env)).rejects.toThrow(
       'invalid observation signature',
     );
   });
@@ -3277,7 +3287,7 @@ describe('audit fail-fast regressions', () => {
     ]);
   });
 
-  test('handleAccountInput re-acks duplicate committed frames when the original ACK was lost', async () => {
+  test('applyAccountInput re-acks duplicate committed frames when the original ACK was lost', async () => {
     const seed = 'account-frame-duplicate-reack';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -3297,7 +3307,7 @@ describe('audit fail-fast regressions', () => {
       prevHanko: `0x${'12'.repeat(65)}`,
     };
 
-    const result = await handleAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(env, accountMachine, {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -3316,7 +3326,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.response?.prevHanko).toBe(accountMachine.lastOutboundFrameAck.prevHanko);
   });
 
-  test('handleAccountInput rebuilds duplicate committed ACK when ACK cache was lost', async () => {
+  test('applyAccountInput rebuilds duplicate committed ACK when ACK cache was lost', async () => {
     const seed = 'account-frame-duplicate-reack-cache-miss';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -3333,7 +3343,7 @@ describe('audit fail-fast regressions', () => {
     };
     delete accountMachine.lastOutboundFrameAck;
 
-    const result = await handleAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(env, accountMachine, {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -3360,7 +3370,7 @@ describe('audit fail-fast regressions', () => {
     expect(verified.valid).toBe(true);
   });
 
-  test('handleAccountInput ignores obsolete ACK after dispute freeze clears pending frame', async () => {
+  test('applyAccountInput ignores obsolete ACK after dispute freeze clears pending frame', async () => {
     const seed = 'account-frame-frozen-obsolete-ack';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -3378,7 +3388,7 @@ describe('audit fail-fast regressions', () => {
     delete accountMachine.pendingFrame;
     delete accountMachine.pendingAccountInput;
 
-    const result = await handleAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(env, accountMachine, {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -3392,7 +3402,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.events.some((event) => event.includes('Ignored obsolete ACK for frozen account frame 9'))).toBe(true);
   });
 
-  test('handleAccountInput tolerates reordered next ACK before local pending frame install', async () => {
+  test('applyAccountInput tolerates reordered next ACK before local pending frame install', async () => {
     const seed = 'account-frame-early-next-ack';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -3409,7 +3419,7 @@ describe('audit fail-fast regressions', () => {
     delete accountMachine.pendingFrame;
     delete accountMachine.pendingAccountInput;
 
-    const result = await handleAccountInput(env, accountMachine, {
+    const result = await applyAccountInput(env, accountMachine, {
       kind: 'ack',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
@@ -3424,7 +3434,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.events).toContain('Ignored early ACK for frame 20 (current=19, pending=none)');
   });
 
-  test('handleAccountInput rejects frames whose byLeft does not match the signed proposer', async () => {
+  test('applyAccountInput rejects frames whose byLeft does not match the signed proposer', async () => {
     const seed = 'account-frame-by-left-binding';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -3471,7 +3481,7 @@ describe('audit fail-fast regressions', () => {
     maliciousFrame.stateHash = await createFrameHash(maliciousFrame);
     const [newHanko] = await signEntityHashes(env, left.entityId, left.signerId, [maliciousFrame.stateHash]);
 
-    const result = await handleAccountInput(env, receiverAccount, {
+    const result = await applyAccountInput(env, receiverAccount, {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
@@ -3485,7 +3495,7 @@ describe('audit fail-fast regressions', () => {
     expect(receiverAccount.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
   });
 
-  test('handleAccountInput rejects dispute seal hash mismatch before committing frame', async () => {
+  test('applyAccountInput rejects dispute seal hash mismatch before committing frame', async () => {
     const seed = 'account-frame-poisoned-dispute-seal';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -3533,7 +3543,7 @@ describe('audit fail-fast regressions', () => {
     const poisonedHash = `0x${'ab'.repeat(32)}`;
     const [newDisputeHanko] = await signEntityHashes(env, left.entityId, left.signerId, [poisonedHash]);
 
-    const result = await handleAccountInput(env, receiverAccount, {
+    const result = await applyAccountInput(env, receiverAccount, {
       kind: 'frame',
       fromEntityId: left.entityId,
       toEntityId: right.entityId,
@@ -3613,6 +3623,27 @@ describe('audit fail-fast regressions', () => {
     const counterpartyId = `0x${'34'.repeat(32)}`;
     const state = makeEntityState(entityId);
     const account = makeProposalAccount([], entityId, counterpartyId);
+    const finalProofbodyHash = `0x${'57'.repeat(32)}`;
+    account.deltas.set(1, {
+      tokenId: 1,
+      collateral: 100n,
+      ondelta: 25n,
+      offdelta: 50n,
+      leftCreditLimit: 0n,
+      rightCreditLimit: 0n,
+      leftAllowance: 5n,
+      rightAllowance: 7n,
+      leftHold: 11n,
+      rightHold: 13n,
+    });
+    account.disputeProofBodiesByHash = {
+      [finalProofbodyHash]: {
+        watchSeed: account.watchSeed,
+        offdeltas: [50n],
+        tokenIds: [1n],
+        transformers: [],
+      },
+    };
     account.activeDispute = {
       startedByLeft: true,
       disputeTimeout: 123,
@@ -3678,20 +3709,34 @@ describe('audit fail-fast regressions', () => {
     const disputeFinalizedEvent: JurisdictionEvent = {
       type: 'DisputeFinalized',
       data: {
-        sender: entityId,
-        counterentity: counterpartyId,
-        initialNonce: 7,
-        initialProofbodyHash: `0x${'56'.repeat(32)}`,
-        finalProofbodyHash: `0x${'57'.repeat(32)}`,
+          sender: entityId,
+          counterentity: counterpartyId,
+          initialNonce: 7,
+          initialProofbodyHash: `0x${'56'.repeat(32)}`,
+        finalProofbodyHash,
       },
     };
+    const disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [{
+      sender: entityId,
+      counterentity: counterpartyId,
+      initialNonce: '7',
+      finalNonce: '7',
+      initialProofbodyHash: `0x${'56'.repeat(32)}`,
+      finalProofbodyHash,
+      leftArguments: '0x',
+      rightArguments: '0x',
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+      sig: '0x',
+    }];
     const signedDisputeFinalized = signJEventObservation(env, entityId, '1', {
       blockNumber: 22,
       blockHash: `0x${'99'.repeat(32)}`,
       transactionHash: `0x${'88'.repeat(32)}`,
       events: [disputeFinalizedEvent],
+      disputeFinalizationEvidence,
     });
-    const finalized = await handleJEvent(state, {
+    const finalized = await applyJEvent(state, {
       from: '1',
       observedAt: 2000,
       blockNumber: 22,
@@ -3699,11 +3744,19 @@ describe('audit fail-fast regressions', () => {
       transactionHash: `0x${'88'.repeat(32)}`,
       ...signedDisputeFinalized,
       event: disputeFinalizedEvent,
+      disputeFinalizationEvidence,
     }, env);
 
     expect(finalized.newState.accounts.get(counterpartyId)?.activeDispute).toBeUndefined();
     expect(finalized.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
     expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
+    const finalizedDelta = finalized.newState.accounts.get(counterpartyId)?.deltas.get(1);
+    expect(finalizedDelta?.collateral).toBe(0n);
+    expect(finalizedDelta?.ondelta).toBe(0n);
+    expect(finalizedDelta?.offdelta).toBe(0n);
+    expect(finalizedDelta?.leftAllowance).toBe(0n);
+    expect(finalizedDelta?.rightAllowance).toBe(0n);
+    expect(finalized.newState.accounts.get(counterpartyId)?.onChainSettlementNonce).toBe(8);
 
     const failedBatchEvent: JurisdictionEvent = {
       type: 'HankoBatchProcessed',
@@ -3720,7 +3773,7 @@ describe('audit fail-fast regressions', () => {
       transactionHash: `0x${'66'.repeat(32)}`,
       events: [failedBatchEvent],
     });
-    const failed = await handleJEvent(finalized.newState, {
+    const failed = await applyJEvent(finalized.newState, {
       from: '1',
       observedAt: 3000,
       blockNumber: 23,
@@ -4194,7 +4247,7 @@ describe('audit fail-fast regressions', () => {
       transactionHash: `0x${'97'.repeat(32)}`,
       events: [failedBatchEvent],
     });
-    const failed = await handleJEvent(state, {
+    const failed = await applyJEvent(state, {
       from: '1',
       observedAt: 3000,
       blockNumber: 23,

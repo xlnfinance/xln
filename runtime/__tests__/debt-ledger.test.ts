@@ -4,7 +4,7 @@ import { signAccountFrame } from '../account-crypto';
 import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
 import { decode, encode } from '../snapshot-coder';
 import { cloneEntityState } from '../state-helpers';
-import { handleJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
+import { applyJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
 import { createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityState, JurisdictionEvent } from '../types';
 
@@ -106,8 +106,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await handleJEvent(aliceState, makeJEventInput(env, ALICE, created, 12, String(created.transactionHash)), env)).newState;
-    bobState = (await handleJEvent(bobState, makeJEventInput(env, BOB, created, 12, String(created.transactionHash)), env)).newState;
+    aliceState = (await applyJEvent(aliceState, makeJEventInput(env, ALICE, created, 12, String(created.transactionHash)), env)).newState;
+    bobState = (await applyJEvent(bobState, makeJEventInput(env, BOB, created, 12, String(created.transactionHash)), env)).newState;
 
     const aliceOpen = findOnlyDebt(aliceState, 'out');
     const bobIncoming = findOnlyDebt(bobState, 'in');
@@ -135,8 +135,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await handleJEvent(aliceState, makeJEventInput(env, ALICE, enforced, 13, String(enforced.transactionHash)), env)).newState;
-    bobState = (await handleJEvent(bobState, makeJEventInput(env, BOB, enforced, 13, String(enforced.transactionHash)), env)).newState;
+    aliceState = (await applyJEvent(aliceState, makeJEventInput(env, ALICE, enforced, 13, String(enforced.transactionHash)), env)).newState;
+    bobState = (await applyJEvent(bobState, makeJEventInput(env, BOB, enforced, 13, String(enforced.transactionHash)), env)).newState;
 
     const alicePartial = findOnlyDebt(aliceState, 'out');
     const bobPartial = findOnlyDebt(bobState, 'in');
@@ -161,8 +161,8 @@ describe('debt ledger', () => {
       },
     };
 
-    aliceState = (await handleJEvent(aliceState, makeJEventInput(env, ALICE, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
-    bobState = (await handleJEvent(bobState, makeJEventInput(env, BOB, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
+    aliceState = (await applyJEvent(aliceState, makeJEventInput(env, ALICE, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
+    bobState = (await applyJEvent(bobState, makeJEventInput(env, BOB, forgiven, 14, String(forgiven.transactionHash)), env)).newState;
 
     const aliceSettled = findOnlyDebt(aliceState, 'out');
     const bobSettled = findOnlyDebt(bobState, 'in');

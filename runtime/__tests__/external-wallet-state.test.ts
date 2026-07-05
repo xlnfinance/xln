@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
-import { handleJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
+import { applyJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
 import { buildJEventsRuntimeInput } from '../jadapter/watcher';
 import {
   applyRuntimeInput,
@@ -128,7 +128,7 @@ describe('external wallet observed state', () => {
     };
     const input = buildSignedInput(env, entityId, signerId, event);
 
-    const result = await handleJEvent(makeState(entityId, signerId), input, env);
+    const result = await applyJEvent(makeState(entityId, signerId), input, env);
     const ownerState = result.newState.externalWallet?.balances.get(signerId);
     expect(ownerState?.get(NATIVE)?.balance).toBe(1_000_000_000_000_000_000n);
     expect(ownerState?.get(TOKEN)?.balance).toBe(2_500n);
@@ -205,7 +205,7 @@ describe('external wallet observed state', () => {
         allowances: [{ tokenAddress: TOKEN, spender: SPENDER, allowance: '900' }],
       },
     };
-    const afterSnapshot = await handleJEvent(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, snapshot), env);
+    const afterSnapshot = await applyJEvent(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, snapshot), env);
     const delta: JurisdictionEvent = {
       type: 'ExternalWalletDelta',
       blockNumber: 43,
@@ -222,7 +222,7 @@ describe('external wallet observed state', () => {
       },
     };
 
-    const result = await handleJEvent(afterSnapshot.newState, buildSignedInput(env, entityId, signerId, delta), env);
+    const result = await applyJEvent(afterSnapshot.newState, buildSignedInput(env, entityId, signerId, delta), env);
     expect(result.newState.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_100n);
     expect(result.newState.externalWallet?.allowances.get(signerId)?.get(`${TOKEN}:${SPENDER}`)?.allowance).toBe(700n);
   });
@@ -249,7 +249,7 @@ describe('external wallet observed state', () => {
     };
 
     await expect(
-      handleJEvent(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, delta), env),
+      applyJEvent(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, delta), env),
     ).rejects.toThrow('EXTERNAL_WALLET_BASELINE_MISSING:balance');
   });
 });

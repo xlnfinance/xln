@@ -15,6 +15,7 @@ import { ethers } from 'ethers';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
 import type { JurisdictionConfig } from './types';
 import { normalizeEntityId, compareEntityIds } from './entity-id-utils';
+import { PROOF_BODY_ABI } from './proof-body-types';
 
 /**
  * Batch structure matching Depository.sol (lines 203-231)
@@ -353,6 +354,7 @@ const DEPOSITORY_BATCH_ABI =
 const DEPOSITORY_BATCH_PARAM = ethers.ParamType.from(DEPOSITORY_BATCH_ABI);
 
 const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));
+const PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
 
 export function encodeJBatch(batch: JBatch): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
@@ -429,6 +431,10 @@ export function preflightBatchForE2(
   }
 
   for (const f of batch.disputeFinalizations) {
+    const finalProofbodyHash = ethers.keccak256(
+      ethers.AbiCoder.defaultAbiCoder().encode([PROOF_BODY_PARAM], [f.finalProofbody]),
+    ).toLowerCase();
+    const initialProofbodyHash = String(f.initialProofbodyHash || '').toLowerCase();
     if (f.cooperative && (!f.sig || f.sig === '0x')) {
       issues.push(`cooperative dispute finalize missing sig (${f.counterentity.slice(-4)})`);
     }
@@ -438,6 +444,12 @@ export function preflightBatchForE2(
       if (initialNonce >= finalNonce) {
         issues.push(`dispute finalization nonce order (${f.counterentity.slice(-4)})`);
       }
+    }
+    if (!f.cooperative && (!f.sig || f.sig === '0x') && finalProofbodyHash !== initialProofbodyHash) {
+      issues.push(
+        `unilateral dispute finalization proof hash mismatch (${f.counterentity.slice(-4)}): ` +
+        `initial=${initialProofbodyHash.slice(0, 10)} final=${finalProofbodyHash.slice(0, 10)}`,
+      );
     }
   }
 

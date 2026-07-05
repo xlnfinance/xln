@@ -1,39 +1,18 @@
 /**
- * 🎯 XLN Hanko Bytes - REAL Ethereum Implementation
+ * XLN Hanko Bytes - Ethereum-compatible recursive signatures.
  *
- * 🚨 CRITICAL DESIGN PHILOSOPHY: "ASSUME YES" FLASHLOAN GOVERNANCE 🚨
+ * Hanko supports nested entity claims, but this runtime verifier deliberately
+ * rejects pure circular "assume yes" proofs. The target claim must reach its
+ * threshold with recovered EOA signer power, and nested claims may only add
+ * structural evidence after that EOA threshold is satisfied.
  *
- * This implementation INTENTIONALLY allows entities to mutually validate without EOA signatures.
- * This is NOT a bug - it's a feature for flexible governance structures.
+ * This keeps off-chain verification aligned with the dispute/account security
+ * model: no proof is accepted unless at least one real secp256k1 signature is
+ * recovered for the exact signed hash and the target board threshold is met by
+ * EOA voting power. Circular entity references without EOA signatures are not
+ * valid runtime proofs.
  *
- * KEY DESIGN PRINCIPLES:
- * 1. ✅ Protocol flexibility: Allow exotic governance structures
- * 2. ✅ UI enforcement: Policy decisions belong in application layer
- * 3. ✅ Gas efficiency: Avoid complex graph traversal on-chain
- * 4. ✅ Atomic validation: All-or-nothing verification like flashloans
- *
- * EXAMPLE "LOOPHOLE" THAT IS INTENDED:
- * ```
- * EntityA: { threshold: 1, delegates: [EntityB] }
- * EntityB: { threshold: 1, delegates: [EntityA] }
- * Hanko: {
- *   placeholders: [],
- *   packedSignatures: "0x", // ZERO EOA signatures!
- *   claims: [
- *     { entityId: EntityA, entityIndexes: [1], weights: [100], threshold: 100 },
- *     { entityId: EntityB, entityIndexes: [0], weights: [100], threshold: 100 }
- *   ]
- * }
- * ```
- * Result: ✅ Both entities validate each other → Hanko succeeds!
- *
- * WHY THIS IS INTENDED:
- * - Real entities will include EOAs for practical control
- * - UI can enforce "at least 1 EOA" policies if desired
- * - Enables sophisticated delegation chains
- * - Alternative solutions are expensive and still gameable
- *
- * Uses actual secp256k1 signatures compatible with Solidity ecrecover
+ * Uses actual secp256k1 signatures compatible with Solidity ecrecover.
  */
 
 import { ethers } from 'ethers';

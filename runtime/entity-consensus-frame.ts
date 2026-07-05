@@ -82,7 +82,7 @@ const canonicalJEventDataForFrameHash = (value: unknown): Record<string, unknown
       : '';
 
   // J block hash, tx hash, and observation signature are external evidence.
-  // They are fail-fast verified by handleJEvent before a validator signs this
+  // They are fail-fast verified by applyJEvent before a validator signs this
   // frame. The RJEA frame hash commits to the semantic event set instead:
   // block height + eventsHash + canonical event bodies (+ evidence hash).
   // This avoids honest replay divergence when the same event bodies are carried

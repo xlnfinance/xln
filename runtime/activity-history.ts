@@ -603,12 +603,14 @@ const eventFromLog = (
   const sourceEntityId = normalizeId(data['fromEntity'] ?? data['entityId'] ?? log.entityId);
   const targetEntityId = normalizeId(data['toEntity'] ?? data['targetEntityId']);
   const direction = inferDirection(sourceEntityId, targetEntityId, viewedEntityId);
-  const type: ActivityType = message === 'HtlcReceived' || message === 'HtlcFinalized' || message === 'HtlcFailed'
+  const type: ActivityType = message === 'HtlcInitiated' || message === 'HtlcReceived' || message === 'HtlcFinalized' || message === 'HtlcFailed'
     ? 'payment'
     : normalizeType(message);
   const kind = normalizeKind(message, log.category);
   const title =
-    message === 'HtlcReceived'
+    message === 'HtlcInitiated'
+      ? 'Payment started'
+      : message === 'HtlcReceived'
       ? 'Payment received'
       : message === 'HtlcFinalized'
         ? 'Payment finalized'
@@ -620,7 +622,9 @@ const eventFromLog = (
               ? 'On-chain event received'
               : message;
   const status =
-    message === 'HtlcReceived'
+    message === 'HtlcInitiated'
+      ? 'started'
+      : message === 'HtlcReceived'
       ? 'received'
       : message === 'HtlcFinalized'
         ? 'finalized'

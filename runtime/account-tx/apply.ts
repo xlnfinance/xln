@@ -1,6 +1,6 @@
 /**
- * Account Transaction Dispatcher
- * Routes AccountTx to appropriate handlers (like entity-tx/apply.ts pattern)
+ * Account Transaction Applicator
+ * Routes AccountTx to the handler that mutates one bilateral account clone/state.
  */
 
 import type { AccountMachine, AccountTx, Env } from '../types';
@@ -23,7 +23,7 @@ import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
 import { canProcessAccountTxForDisputeStatus } from '../account-dispute-policy';
 
-type ProcessAccountTxResult = {
+type ApplyAccountTxResult = {
   success: boolean;
   events: string[];
   error?: string;
@@ -64,7 +64,7 @@ const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
   typeof value.sendDebugEvent === 'function';
 
 /**
- * Process single AccountTx through bilateral consensus
+ * Apply a single AccountTx inside bilateral consensus.
  * @param accountMachine - The account machine state
  * @param accountTx - The transaction to process
  * @param byLeft - Frame-level: is the proposer the LEFT entity? (Channel.ts block.isLeft pattern)
@@ -72,7 +72,7 @@ const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
  * @param currentHeight - Current J-block height (for HTLC revealBeforeHeight validation)
  * @returns Result with success, events, and optional error (may include secret/hashlock for HTLC routing)
  */
-export async function processAccountTx(
+export async function applyAccountTx(
   accountMachine: AccountMachine,
   accountTx: AccountTx,
   byLeft: boolean,
@@ -80,7 +80,7 @@ export async function processAccountTx(
   currentHeight: number = 0,
   isValidation: boolean = false,
   env?: Env,
-): Promise<ProcessAccountTxResult> {
+): Promise<ApplyAccountTxResult> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -207,7 +207,7 @@ export async function processAccountTx(
         currentHeight,
         currentTimestamp,
       );
-      const ret: ProcessAccountTxResult = {
+      const ret: ApplyAccountTxResult = {
         success: resolveResult.success,
         events: resolveResult.events,
       };

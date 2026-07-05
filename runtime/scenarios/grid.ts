@@ -16,9 +16,9 @@
  * - Result: O(1) per node - unlimited horizontal scaling
  */
 
-import type { Env, JTx } from '../types';
+import type { Env } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { createEmptyBatch, batchAddReserveToReserve, getBatchSize } from '../j-batch';
+import { createEmptyBatch, batchAddReserveToReserve } from '../j-batch';
 import {
   ensureJAdapter,
   getScenarioJAdapter,
@@ -27,7 +27,8 @@ import {
   createGridEntities,
   createNumberedEntity,
 } from './boot';
-import { getProcess, enableStrictScenario } from './helpers';
+import { getProcess, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { submitSignedScenarioBatch } from './j-batch-submit';
 
 // Simple snapshot helper for this scenario
 function pushSnapshot(env: Env, tag: string, description: string, metadata: Record<string, unknown> = {}) {
@@ -109,20 +110,7 @@ async function submitReserveToReserveBatch(
     USDC_TOKEN_ID,
     amount,
   );
-  const jTx: JTx = {
-    type: 'batch',
-    entityId: fromEntityId,
-    data: {
-      batch,
-      batchSize: getBatchSize(batch),
-      signerId,
-    },
-    timestamp: env.timestamp,
-  };
-  const result = await jadapter.submitTx(jTx, { env, signerId, timestamp: env.timestamp });
-  if (!result.success) {
-    throw new Error(result.error || 'Grid R2R batch failed');
-  }
+  await submitSignedScenarioBatch(env, jadapter, fromEntityId, signerId, batch, 'Grid R2R batch');
 }
 
 export async function grid(env: Env): Promise<void> {
@@ -132,6 +120,12 @@ export async function grid(env: Env): Promise<void> {
   console.log('Demonstrating: Broadcast bottleneck → Hub-spoke scaling\n');
 
   env.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(env, 'Grid');
+  ensureSignerKeysFromSeed(
+    env,
+    [...Array.from({ length: GRID_DIMS.x * GRID_DIMS.y * GRID_DIMS.z }, (_, i) => String(i + 1)), '1000', '1001'],
+    'Grid',
+  );
 
   // ============================================================================
   // SETUP: JAdapter + J-Machine + Jurisdiction
@@ -334,10 +328,14 @@ export async function grid(env: Env): Promise<void> {
   console.log('\n🔗 Connecting hubs in ring topology...');
 
   let hubConnections = 0;
+  const connectedHubPairs = new Set<string>();
   for (let i = 0; i < hubs.length; i++) {
     const hub1 = hubs[i];
     const hub2 = hubs[(i + 1) % hubs.length]; // Connect to next hub (circular)
     if (!hub1 || !hub2 || hub1 === hub2) continue;
+    const pairKey = [hub1, hub2].sort().join(':');
+    if (connectedHubPairs.has(pairKey)) continue;
+    connectedHubPairs.add(pairKey);
 
     await openGridAccount(env, hub1, hub2);
     hubConnections++;

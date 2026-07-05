@@ -1,6 +1,6 @@
 import type { AccountInput, EntityState, Env, EntityInput, AccountMachine } from '../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
-import { handleAccountInput as processAccountInput } from '../../account-consensus';
+import { applyAccountInput as applyConsensusAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
 import { createStructuredLogger, shortId } from '../../logger';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -66,7 +66,7 @@ export interface AccountHandlerResult {
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'settlement'; context: string }>;
 }
 
-export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
+export async function applyAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
   accountHandlerLog.debug('input.apply', {
     from: shortId(input.fromEntityId),
     to: shortId(input.toEntityId),
@@ -253,7 +253,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     }
   }
 
-  // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
+  // CHANNEL.TS PATTERN: Apply frame-level consensus only.
   if (input.height !== undefined || input.newAccountFrame) {
     const pendingBeforeTxs = accountMachine.pendingFrame?.accountTxs?.map(tx => tx.type) || [];
     const inputFrameTxs = input.newAccountFrame?.accountTxs?.map(tx => tx.type) || [];
@@ -262,7 +262,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       pending: accountMachine.pendingFrame ? accountMachine.pendingFrame.height : null,
     });
 
-    const result = await processAccountInput(env, accountMachine, input);
+    const result = await applyConsensusAccountInput(env, accountMachine, input);
     const touchesCrossFillAck =
       pendingBeforeTxs.includes('cross_swap_fill_ack') ||
       inputFrameTxs.includes('cross_swap_fill_ack') ||

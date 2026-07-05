@@ -639,7 +639,7 @@ const refreshRemoteRuntimeProjection = async (
   if (adapter.mode !== 'remote' || config.mode !== 'remote') {
     throw new Error('Remote projection refresh requires remote runtime adapter');
   }
-  const pinnedHeight = Math.max(0, Math.floor(Number(adapter.currentHeight || 0)));
+  const adapterHeight = Math.max(0, Math.floor(Number(adapter.currentHeight || 0)));
   const requestedEntityId = normalizeEntityIdForView(get(runtimeViewActiveEntityId));
   const accountsPage = Math.max(0, Math.floor(Number(get(runtimeViewAccountsPage) ?? 0)));
   const booksPage = Math.max(0, Math.floor(Number(get(runtimeViewBooksPage) ?? 0)));
@@ -649,7 +649,6 @@ const refreshRemoteRuntimeProjection = async (
     booksLimit: REMOTE_VIEW_PAGE_SIZE,
     accountsPage,
     booksPage,
-    ...(pinnedHeight > 0 ? { atHeight: pinnedHeight } : {}),
   };
   const refreshView = async (entityId: string): Promise<RuntimeAdapterViewFrame> => {
     const view = await refreshRuntimeView(entityId ? { ...viewQuery, entityId } : viewQuery);
@@ -695,7 +694,7 @@ const refreshRemoteRuntimeProjection = async (
   const height = Math.max(
     historyFrame.height,
     Math.max(0, Math.floor(Number(frame.head?.latestHeight || 0))),
-    Math.max(0, Math.floor(Number(adapter.currentHeight || 0))),
+    adapterHeight,
   );
   currentHeight.set(height);
   upsertRemoteRuntimeProjectionMetadata(config, adapter.status, adapter.authLevel, {

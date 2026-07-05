@@ -11,12 +11,14 @@ export interface DisputeFinalizationEvidence {
   sender: string;
   counterentity: string;
   initialNonce: string;
+  finalNonce: string;
   initialProofbodyHash: string;
   finalProofbodyHash: string;
   leftArguments: string;
   rightArguments: string;
   starterInitialArguments: string;
   starterIncrementedArguments: string;
+  sig: string;
 }
 
 /**

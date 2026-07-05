@@ -2330,6 +2330,48 @@ const server = Bun.serve({
       return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '');
     }
 
+    const hubRuntimeInputStatusMatch = pathname.match(/^\/api\/hub\/runtime-input\/([^/]+)\/status$/);
+    if (hubRuntimeInputStatusMatch && request.method === 'GET') {
+      const hubEntityId = String(url.searchParams.get('hubEntityId') || '').toLowerCase();
+      if (!hubEntityId) {
+        return new Response(safeStringify({
+          ok: false,
+          error: 'hubEntityId is required',
+          code: 'HUB_RUNTIME_INPUT_STATUS_HUB_REQUIRED',
+        }), { status: 400, headers });
+      }
+      let child = getHubChildByEntityId(hubEntityId);
+      if (!child) {
+        await pollAllHubHealth();
+        child = getHubChildByEntityId(hubEntityId);
+      }
+      if (!child) {
+        return new Response(safeStringify({
+          ok: false,
+          error: `Hub not found for hubEntityId=${hubEntityId}`,
+          code: 'HUB_RUNTIME_INPUT_STATUS_HUB_NOT_FOUND',
+        }), { status: 404, headers });
+      }
+      const receiptId = encodeURIComponent(decodeURIComponent(hubRuntimeInputStatusMatch[1] || ''));
+      try {
+        const response = await fetch(`http://${args.host}:${child.apiPort}/api/control/runtime-input/${receiptId}/status`);
+        const text = await response.text();
+        return new Response(text, {
+          status: response.status,
+          headers: {
+            ...headers,
+            'content-type': response.headers.get('content-type') || 'application/json',
+          },
+        });
+      } catch (error) {
+        return new Response(safeStringify({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+          code: 'HUB_RUNTIME_INPUT_STATUS_PROXY_FAILED',
+        }), { status: 502, headers });
+      }
+    }
+
     if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
       return await proxyHubApi(request, '/api/faucet/offchain');
     }

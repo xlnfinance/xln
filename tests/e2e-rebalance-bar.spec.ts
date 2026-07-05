@@ -549,7 +549,52 @@ async function setRebalancePolicy(
   await page.waitForTimeout(600);
 }
 
-async function faucet(page: Page, userEntityId: string, hubEntityId: string) {
+type OffchainFaucetResponse = {
+  success?: boolean;
+  status?: string;
+  requestId?: string;
+  statusUrl?: string;
+  receipt?: {
+    id?: string;
+    status?: string;
+    enqueuedHeight?: number;
+    observedHeight?: number;
+    expiresAt?: number;
+  };
+};
+
+async function waitForRuntimeInputObserved(
+  page: Page,
+  statusUrl: string,
+  label: string,
+  timeoutMs = 30_000,
+): Promise<OffchainFaucetResponse['receipt']> {
+  const statusEndpoint = new URL(statusUrl, API_BASE_URL).toString();
+  const deadline = Date.now() + timeoutMs;
+  let lastBody: any = null;
+  let lastStatus = 0;
+  while (Date.now() < deadline) {
+    const response = await page.request.get(statusEndpoint);
+    const body = await response.json().catch(() => ({}));
+    lastBody = body;
+    lastStatus = response.status();
+    if (response.ok()) {
+      const receipt = body?.receipt;
+      const status = String(receipt?.status || '');
+      if (status === 'observed') return receipt;
+      if (status === 'expired') {
+        throw new Error(`${label} receipt expired before observation: ${JSON.stringify(body)}`);
+      }
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(
+    `${label} receipt was not observed within ${timeoutMs}ms: ` +
+      `status=${lastStatus} body=${JSON.stringify(lastBody)}`,
+  );
+}
+
+async function faucet(page: Page, userEntityId: string, hubEntityId: string): Promise<OffchainFaucetResponse> {
   const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
   expect(runtimeId, 'runtimeId must exist before faucet').toBeTruthy();
   const deadline = Date.now() + 20_000;
@@ -560,7 +605,13 @@ async function faucet(page: Page, userEntityId: string, hubEntityId: string) {
       data: { userEntityId, userRuntimeId: runtimeId, hubEntityId, tokenId: 1, amount: '100' },
     });
     const body = await resp.json().catch(() => ({}));
-    if (resp.ok()) return;
+    if (resp.ok()) {
+      if (!body?.requestId || !body?.statusUrl) {
+        throw new Error(`faucet accepted without receipt metadata: ${JSON.stringify(body)}`);
+      }
+      await waitForRuntimeInputObserved(page, body.statusUrl, `faucet ${body.requestId}`);
+      return body as OffchainFaucetResponse;
+    }
     lastBody = body;
     lastStatus = resp.status();
     const code = String(body?.code || '');
@@ -1076,6 +1127,9 @@ async function waitForRebalanceStateProgress(
     currentHeight: number;
     uncollateralized: bigint;
     requested: bigint;
+    collateral: bigint;
+    hubExposure: bigint;
+    outCapacity: bigint;
   },
   timeoutMs = 20_000,
 ) {
@@ -1090,10 +1144,16 @@ async function waitForRebalanceStateProgress(
     const currentHeight = Number(last.currentHeight || 0);
     const uncollateralized = BigInt(last.uncollateralized || '0');
     const requested = BigInt(last.requested || '0');
+    const collateral = BigInt(last.collateral || '0');
+    const hubExposure = BigInt(last.hubExposure || '0');
+    const outCapacity = BigInt(last.outCapacity || '0');
     if (
       currentHeight > baseline.currentHeight ||
       uncollateralized > baseline.uncollateralized ||
-      requested > baseline.requested
+      requested > baseline.requested ||
+      collateral !== baseline.collateral ||
+      hubExposure !== baseline.hubExposure ||
+      outCapacity !== baseline.outCapacity
     ) {
       return last;
     }
@@ -1105,6 +1165,9 @@ async function waitForRebalanceStateProgress(
         currentHeight: baseline.currentHeight,
         uncollateralized: baseline.uncollateralized.toString(),
         requested: baseline.requested.toString(),
+        collateral: baseline.collateral.toString(),
+        hubExposure: baseline.hubExposure.toString(),
+        outCapacity: baseline.outCapacity.toString(),
       })} last=${JSON.stringify(last, null, 2)}`,
   );
 }
@@ -1131,6 +1194,9 @@ async function driveFaucetsUntilRequestCollateralCommitted(
       currentHeight: Number(lastSnapshot?.currentHeight || 0),
       uncollateralized: BigInt(lastSnapshot?.uncollateralized || '0'),
       requested: BigInt(lastSnapshot?.requested || '0'),
+      collateral: BigInt(lastSnapshot?.collateral || '0'),
+      hubExposure: BigInt(lastSnapshot?.hubExposure || '0'),
+      outCapacity: BigInt(lastSnapshot?.outCapacity || '0'),
     };
     await faucet(page, opts.entityId, opts.hubId);
     lastSnapshot = await waitForRebalanceStateProgress(page, opts.hubId, baseline);

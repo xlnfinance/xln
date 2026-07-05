@@ -9,7 +9,7 @@ import { isLeft } from '../account-utils';
 import { formatEntityId, getPerfMs, HEAVY_LOGS } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from '../validation-utils';
-import { processAccountTx } from '../account-tx/apply';
+import { applyAccountTx } from '../account-tx/apply';
 import { markStorageAccountDirty } from '../env-events';
 import { createStructuredLogger, shortHash, shortId } from '../logger';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from '../account-consensus-frame';
@@ -157,7 +157,7 @@ export async function proposeAccountFrame(
 
   const processOnMachine = async (machine: AccountMachine, accountTx: AccountTx) => {
     const beforeSettlement = captureSettlementVector(machine);
-    const result = await processAccountTx(
+    const result = await applyAccountTx(
       machine,
       accountTx,
       proposerByLeft,
@@ -174,7 +174,7 @@ export async function proposeAccountFrame(
 
   const collectSuccessfulTx = (
     accountTx: AccountTx,
-    result: Awaited<ReturnType<typeof processAccountTx>>,
+    result: Awaited<ReturnType<typeof applyAccountTx>>,
   ): void => {
     validTxs.push(accountTx);
     allEvents.push(...result.events);
@@ -207,7 +207,7 @@ export async function proposeAccountFrame(
   let optimisticBatchFailed = false;
   if (canOptimisticallyValidateBatch) {
     const optimisticMachine = cloneAccountMachine(accountMachine);
-    const optimisticResults: Array<{ tx: AccountTx; result: Awaited<ReturnType<typeof processAccountTx>> }> = [];
+    const optimisticResults: Array<{ tx: AccountTx; result: Awaited<ReturnType<typeof applyAccountTx>> }> = [];
     for (const accountTx of proposalWindow) {
       if (HEAVY_LOGS) console.log(`   🔍 Optimistic batch accountTx type=${accountTx.type}`);
       const result = await processOnMachine(optimisticMachine, accountTx);

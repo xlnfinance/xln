@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
-import { processAccountTx } from '../account-tx/apply';
+import { applyAccountTx } from '../account-tx/apply';
 import { applyEntityTx } from '../entity-tx/apply';
 import {
   buildCrossJurisdictionPullBinding,
@@ -109,7 +109,7 @@ describe('cross-jurisdiction security invariants', () => {
       deriveCrossJurisdictionPrivateSeed('cross-source-reveal-no-fill', admittedRoute),
     ).binary;
 
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'pull_resolve',
       data: { pullId: route.sourcePull!.pullId, binary },
     }, route.sourcePull!.signedAmount > 0n, 2_000, 1);

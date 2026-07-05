@@ -20,7 +20,7 @@ import type {
 import type { DisputeArgumentSnapshot } from './dispute-arguments';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { HEAVY_LOGS } from './utils';
-import { validateEntityState } from './validation-utils';
+import { validateEntityReplica, validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
@@ -47,6 +47,11 @@ import type {
   PriceLevelState,
 } from './orderbook';
 
+const cloneAccountTxForState = <T extends AccountTx>(tx: T): T => {
+  const cloned = structuredClone(tx) as T;
+  return cloneCrossJurisdictionAccountTxRoute(cloned) as T;
+};
+
 const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
   if (state.crossJurisdictionSwaps) {
     state.crossJurisdictionSwaps = new Map(
@@ -62,7 +67,7 @@ const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
         id,
         {
           ...pending,
-          tx: cloneCrossJurisdictionAccountTxRoute(pending.tx) as typeof pending.tx,
+          tx: cloneAccountTxForState(pending.tx) as typeof pending.tx,
         },
       ]),
     );
@@ -78,7 +83,7 @@ const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
 };
 
 const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine): void => {
-  account.mempool = account.mempool.map(cloneCrossJurisdictionAccountTxRoute);
+  account.mempool = account.mempool.map(cloneAccountTxForState);
   account.currentFrame = cloneCrossJurisdictionAccountFrameRoute(account.currentFrame);
   if (account.pendingFrame) account.pendingFrame = cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame);
   if (account.pendingAccountInput) account.pendingAccountInput = cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput);
@@ -586,7 +591,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
               id,
               {
                 ...pending,
-                tx: cloneCrossJurisdictionAccountTxRoute(pending.tx) as typeof pending.tx,
+                tx: cloneAccountTxForState(pending.tx) as typeof pending.tx,
               },
             ]),
           ),
@@ -714,7 +719,7 @@ function cloneBookState(book: BookState): BookState {
  * Uses cloneEntityState as the entry point for state cloning
  */
 export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean = false): EntityReplica => {
-  return {
+  return validateEntityReplica({
     entityId: replica.entityId,
     signerId: replica.signerId,
     state: cloneEntityState(replica.state, forSnapshot), // forSnapshot excludes clonedForValidation
@@ -750,7 +755,7 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
     ...(replica.position && { position: { ...replica.position } }),
     // SECURITY: Clone validator's computed state for state injection prevention
     ...(replica.validatorComputedState && { validatorComputedState: cloneEntityState(replica.validatorComputedState) }),
-  };
+  }, 'cloneEntityReplica');
 };
 
 // === ACCOUNT MACHINE HELPERS ===
@@ -794,7 +799,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   const proofBody = account.proofBody ?? { tokenIds: [], deltas: [] };
   const result: AccountMachine = {
     ...account,
-    mempool: Array.isArray(account.mempool) ? [...account.mempool] : [],
+    mempool: Array.isArray(account.mempool) ? account.mempool.map(cloneAccountTxForState) : [],
     currentFrame: cloneAccountFrame(account.currentFrame),
     deltas: new Map(Array.from((account.deltas ?? new Map()).entries()).map(([key, delta]) => [key, { ...delta }])),
     locks: new Map(Array.from((account.locks ?? new Map()).entries()).map(([key, lock]) => [key, { ...lock }])),

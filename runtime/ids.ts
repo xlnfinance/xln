@@ -520,7 +520,7 @@ export const jIdFromChainId = (chainId: number): JId => {
 
 /** Create lazy JId for local/test jurisdictions */
 export const createLazyJId = (name: string): JId => {
-  // Simple hash for now - could use keccak256 for stronger uniqueness
+  // Deterministic non-cryptographic label hash; not a security boundary.
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
@@ -529,12 +529,12 @@ export const createLazyJId = (name: string): JId => {
 };
 
 // =============================================================================
-// MIGRATION HELPERS (temporary - remove after full migration)
+// TOLERANT API BOUNDARY HELPERS
 // =============================================================================
 
 /**
- * Safely parse replica key with fallback for invalid data
- * Prefer parseReplicaKey for validated code paths.
+ * Safely parse a user/API replica key without throwing.
+ * Runtime state-machine code should prefer parseReplicaKey on validated data.
  */
 export const safeParseReplicaKey = (keyString: string): ReplicaKey | null => {
   try {
@@ -546,7 +546,7 @@ export const safeParseReplicaKey = (keyString: string): ReplicaKey | null => {
 };
 
 /**
- * Extract entityId from a replica key string.
+ * Extract entityId from a user/API replica key string without throwing.
  */
 export const safeExtractEntityId = (keyString: string): EntityId | null => {
   const key = safeParseReplicaKey(keyString);

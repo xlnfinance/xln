@@ -105,7 +105,7 @@ export async function handleHtlcLock(
 
   // 9. Add lock to locks Map
   // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
-  // Validation runs on a temporary clone; commit runs on the real machine.
+  // Validation runs on an isolated clone; commit runs on the real machine.
   accountMachine.locks.set(lockId, lock);
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);

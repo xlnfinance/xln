@@ -55,6 +55,27 @@ const DEFAULT_HUB_API_PROXY_TIMEOUT_MS = 5_000;
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
+const rewriteHubRuntimeInputStatusUrl = (value: unknown, hubEntityId: string): string | null => {
+  const statusUrl = String(value || '').trim();
+  const match = statusUrl.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
+  if (!match) return null;
+  const receiptId = match[1] || '';
+  if (!receiptId || !hubEntityId) return null;
+  return `/api/hub/runtime-input/${receiptId}/status?hubEntityId=${encodeURIComponent(hubEntityId)}`;
+};
+
+const rewriteProxiedHubJsonBody = (text: string, hubEntityId: string): string => {
+  if (!text || !hubEntityId) return text;
+  try {
+    const parsed = JSON.parse(text) as { statusUrl?: unknown };
+    const rewrittenStatusUrl = rewriteHubRuntimeInputStatusUrl(parsed?.statusUrl, hubEntityId);
+    if (!rewrittenStatusUrl) return text;
+    return safeStringify({ ...parsed, statusUrl: rewrittenStatusUrl });
+  } catch {
+    return text;
+  }
+};
+
 const readPositiveIntEnv = (name: string, fallback: number): number => {
   const value = Number(process.env[name] || '');
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
@@ -214,7 +235,8 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         },
         body: bodyText,
       }, timeoutMs);
-      return new Response(text, {
+      const responseText = rewriteProxiedHubJsonBody(text, requestedHubId);
+      return new Response(responseText, {
         status: response.status,
         headers: proxyHeaders({
           'content-type': response.headers.get('content-type') || 'application/json',

@@ -2,7 +2,6 @@
   import { browser } from '$app/environment';
   import { onMount } from 'svelte';
   import type {
-    RuntimeAdapterActivityPage,
     RuntimeAdapterReadQuery,
     RuntimeActivityEvent,
   } from '@xln/runtime/xln-api';
@@ -17,6 +16,11 @@
     RefreshCw,
     Search,
   } from 'lucide-svelte';
+  import {
+    buildActivityHistoryReadQuery,
+    normalizeActivityEntityId,
+    normalizeActivityHistoryPage,
+  } from './activity-history-query';
 
   export let entityId: string;
   export let runtimeId: string | undefined = undefined;
@@ -26,10 +30,7 @@
 
   type ActivityEvent = RuntimeActivityEvent;
 
-  type ActivityResponse = RuntimeAdapterActivityPage & {
-    partial?: boolean;
-    failures?: Array<{ hub?: string; apiPort?: number; error?: string }>;
-  };
+  type ActivityResponse = ReturnType<typeof normalizeActivityHistoryPage>;
 
   const typeOptions = [
     { id: 'payment', label: 'Payments' },
@@ -63,8 +64,8 @@
   let lastRuntimeKey = '';
   let mounted = false;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let activityLoadVersion = 0;
 
-  const normalizeEntityId = (value: string): string => value.trim().toLowerCase();
   const normalizeRuntimeId = (value: string | undefined): string => String(value || '').trim().toLowerCase();
 
   function semanticKey(event: ActivityEvent): string {
@@ -110,22 +111,17 @@
   }
 
   function buildActivityQuery(beforeHeight: number | null): RuntimeAdapterReadQuery {
-    const query: RuntimeAdapterReadQuery = {
-      entityId: normalizeEntityId(entityId),
+    return buildActivityHistoryReadQuery({
+      entityId,
       kind,
-      limit: pageSize,
-      scanLimit: 100,
-    };
-    if (selectedTypes.length > 0) query.types = selectedTypes;
-    if (search.trim()) query.q = search.trim();
-    if (beforeHeight !== null) query.beforeHeight = beforeHeight;
-    if (mode === 'timeframe') {
-      const from = localToTimestamp(fromLocal);
-      const to = localToTimestamp(toLocal);
-      if (from !== undefined) query.fromTimestamp = from;
-      if (to !== undefined) query.toTimestamp = to;
-    }
-    return query;
+      pageSize,
+      selectedTypes,
+      search,
+      mode,
+      beforeHeight,
+      fromTimestamp: localToTimestamp(fromLocal),
+      toTimestamp: localToTimestamp(toLocal),
+    });
   }
 
   function activeRuntimeKey(): string {
@@ -143,20 +139,19 @@
 
   async function readActivitySources(beforeHeight: number | null): Promise<ActivityResponse> {
     assertRequestedRuntimeActive();
-    const body = await runtimeQueryClient.readActivity(buildActivityQuery(beforeHeight));
-    return {
-      ...body,
-      failures: [],
-    };
+    const query = buildActivityQuery(beforeHeight);
+    return normalizeActivityHistoryPage(await runtimeQueryClient.readActivity(query), query);
   }
 
   async function loadActivity(options: { append?: boolean; beforeHeight?: number | null } = {}): Promise<void> {
-    const currentEntity = normalizeEntityId(entityId);
+    const currentEntity = normalizeActivityEntityId(entityId);
     if (!/^0x[0-9a-f]{64}$/.test(currentEntity)) return;
+    const loadVersion = ++activityLoadVersion;
     loading = true;
     error = null;
     try {
       const body = await readActivitySources(options.beforeHeight ?? null);
+      if (loadVersion !== activityLoadVersion) return;
       latestHeight = Number(body.latestHeight || 0);
       scannedFrames = Number(body.scannedFrames || 0);
       nextBeforeHeight = body.nextBeforeHeight ?? null;
@@ -164,9 +159,11 @@
       const nextEvents = Array.isArray(body.events) ? body.events : [];
       events = options.append ? dedupe([...events, ...nextEvents]) : dedupe(nextEvents);
     } catch (err) {
+      if (loadVersion !== activityLoadVersion) return;
+      console.error('[ActivityHistoryPanel] activity projection read failed', err);
       error = err instanceof Error ? err.message : 'Failed to load activity history';
     } finally {
-      loading = false;
+      if (loadVersion === activityLoadVersion) loading = false;
     }
   }
 
@@ -382,7 +379,9 @@
   </div>
 
   {#if partialFailures?.length}
-    <div class="notice">Partial history: {partialFailures.length} runtime{partialFailures.length === 1 ? '' : 's'} did not answer.</div>
+    <div class="notice">
+      Partial history: {partialFailures.length} runtime{partialFailures.length === 1 ? '' : 's'} did not answer.{partialFailures[0]?.error ? ` ${partialFailures[0]?.error}` : ''}
+    </div>
   {/if}
   {#if error}
     <div class="notice error">{error}</div>

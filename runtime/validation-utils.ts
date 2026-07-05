@@ -12,12 +12,15 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { assertAccountFrameDeltaIntegrity } from './account-frame';
 import type {
+  ConsensusConfig,
   Delta,
   DeliverableEntityInput,
   RoutedEntityInput,
+  EntityReplica,
   EntityState,
   AccountMachine,
-  AccountFrame
+  AccountFrame,
+  ProposedEntityFrame,
 } from './types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook, ScheduledHookType } from './crontab-types';
 
@@ -394,6 +397,16 @@ function validateRebalanceFeeStateMap(value: unknown, fieldName: string): void {
   }
 }
 
+function validateBigIntRecordValues(value: unknown, fieldName: string): Record<string, bigint> {
+  const obj = validateObject(value, fieldName);
+  for (const [key, entryValue] of Object.entries(obj)) {
+    if (typeof entryValue !== 'bigint') {
+      throw new FinancialDataCorruptionError(`${fieldName}.${key} must be bigint`);
+    }
+  }
+  return obj as Record<string, bigint>;
+}
+
 function isValidCrontabTaskMethod(value: unknown): value is CrontabTaskMethod {
   return value === 'checkAccountTimeouts' || value === 'hubRebalance';
 }
@@ -688,6 +701,8 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     throw new FinancialDataCorruptionError(`${context}.timestamp must be a number`);
   }
 
+  validateConsensusConfig(obj['config'], `${context}.config`);
+
   if (!(obj['reserves'] instanceof Map)) {
     throw new FinancialDataCorruptionError(`${context}.reserves must be a Map`);
   }
@@ -768,9 +783,128 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
   return obj as unknown as EntityState; // Cast after validation boundary
 }
 
-// Config validation removed - ConsensusConfig is more complex than expected
+export function validateConsensusConfig(value: unknown, context = 'ConsensusConfig'): ConsensusConfig {
+  const obj = validateObject(value, context);
+  const mode = obj['mode'];
+  if (mode !== 'proposer-based' && mode !== 'gossip-based') {
+    throw new FinancialDataCorruptionError(`${context}.mode must be proposer-based or gossip-based`);
+  }
+  const threshold = obj['threshold'];
+  if (typeof threshold !== 'bigint' || threshold <= 0n) {
+    throw new FinancialDataCorruptionError(`${context}.threshold must be positive bigint`);
+  }
+  const validators = validateArray<unknown>(obj['validators'], `${context}.validators`);
+  if (validators.length === 0) {
+    throw new FinancialDataCorruptionError(`${context}.validators cannot be empty`);
+  }
+  const seen = new Set<string>();
+  for (let index = 0; index < validators.length; index += 1) {
+    const validator = validators[index];
+    if (typeof validator !== 'string' || validator.trim().length === 0) {
+      throw new FinancialDataCorruptionError(`${context}.validators[${index}] must be a non-empty string`);
+    }
+    if (seen.has(validator)) {
+      throw new FinancialDataCorruptionError(`${context}.validators has duplicate signer`, { validator });
+    }
+    seen.add(validator);
+  }
+  const shares = validateBigIntRecordValues(obj['shares'], `${context}.shares`);
+  let totalPower = 0n;
+  for (const validator of validators) {
+    const power = shares[validator as string];
+    if (typeof power !== 'bigint' || power <= 0n) {
+      throw new FinancialDataCorruptionError(`${context}.shares missing positive power for validator`, { validator });
+    }
+    totalPower += power;
+  }
+  for (const shareSigner of Object.keys(shares)) {
+    if (!seen.has(shareSigner)) {
+      throw new FinancialDataCorruptionError(`${context}.shares contains signer outside validators`, { shareSigner });
+    }
+  }
+  if (totalPower < threshold) {
+    throw new FinancialDataCorruptionError(`${context}.threshold exceeds total validator power`, {
+      threshold,
+      totalPower,
+    });
+  }
+  return obj as unknown as ConsensusConfig;
+}
 
-// EntityReplica validation removed - interface too complex for now
+function validateProposedEntityFrame(value: unknown, context: string): ProposedEntityFrame {
+  const obj = validateObject(value, context);
+  validateNumber(obj['height'], `${context}.height`);
+  validateArray(obj['txs'], `${context}.txs`);
+  validateString(obj['hash'], `${context}.hash`);
+  validateEntityState(obj['newState'], `${context}.newState`);
+  if (obj['outputs'] !== undefined) validateArray(obj['outputs'], `${context}.outputs`);
+  if (obj['jOutputs'] !== undefined) validateArray(obj['jOutputs'], `${context}.jOutputs`);
+  if (obj['hashesToSign'] !== undefined) {
+    const hashes = validateArray<Record<string, unknown>>(obj['hashesToSign'], `${context}.hashesToSign`);
+    for (let index = 0; index < hashes.length; index += 1) {
+      const entry = validateObject(hashes[index], `${context}.hashesToSign[${index}]`);
+      validateString(entry['hash'], `${context}.hashesToSign[${index}].hash`);
+      validateString(entry['type'], `${context}.hashesToSign[${index}].type`);
+      validateString(entry['context'], `${context}.hashesToSign[${index}].context`);
+    }
+  }
+  if (obj['collectedSigs'] !== undefined) {
+    const sigs = validateMapInstance(obj['collectedSigs'], `${context}.collectedSigs`);
+    for (const [signerId, signatures] of sigs.entries()) {
+      if (typeof signerId !== 'string' || signerId.length === 0) {
+        throw new FinancialDataCorruptionError(`${context}.collectedSigs signer must be string`);
+      }
+      validateArray(signatures, `${context}.collectedSigs[${signerId}]`);
+    }
+  }
+  if (obj['hankos'] !== undefined) validateArray(obj['hankos'], `${context}.hankos`);
+  return obj as unknown as ProposedEntityFrame;
+}
+
+export function validateEntityReplica(value: unknown, context = 'EntityReplica'): EntityReplica {
+  const obj = validateObject(value, context);
+  const entityId = validateString(obj['entityId'], `${context}.entityId`);
+  validateString(obj['signerId'], `${context}.signerId`);
+  const state = validateEntityState(obj['state'], `${context}.state`);
+  if (state.entityId !== entityId) {
+    throw new FinancialDataCorruptionError(`${context}.state.entityId must match replica.entityId`, {
+      entityId,
+      stateEntityId: state.entityId,
+    });
+  }
+  validateArray(obj['mempool'], `${context}.mempool`);
+  if (typeof obj['isProposer'] !== 'boolean') {
+    throw new FinancialDataCorruptionError(`${context}.isProposer must be boolean`);
+  }
+  if (obj['proposal'] !== undefined) validateProposedEntityFrame(obj['proposal'], `${context}.proposal`);
+  if (obj['lockedFrame'] !== undefined) validateProposedEntityFrame(obj['lockedFrame'], `${context}.lockedFrame`);
+  if (obj['validatorComputedState'] !== undefined) {
+    const computed = validateEntityState(obj['validatorComputedState'], `${context}.validatorComputedState`);
+    if (computed.entityId !== entityId) {
+      throw new FinancialDataCorruptionError(`${context}.validatorComputedState.entityId must match replica.entityId`);
+    }
+  }
+  if (obj['position'] !== undefined) {
+    const position = validateObject(obj['position'], `${context}.position`);
+    validateNumber(position['x'], `${context}.position.x`);
+    validateNumber(position['y'], `${context}.position.y`);
+    validateNumber(position['z'], `${context}.position.z`);
+  }
+  if (obj['hankoWitness'] !== undefined) {
+    const witness = validateMapInstance(obj['hankoWitness'], `${context}.hankoWitness`);
+    for (const [hash, entryValue] of witness.entries()) {
+      if (typeof hash !== 'string' || hash.length === 0) {
+        throw new FinancialDataCorruptionError(`${context}.hankoWitness key must be a non-empty hash string`);
+      }
+      const entry = validateObject(entryValue, `${context}.hankoWitness[${hash}]`);
+      validateString(entry['hanko'], `${context}.hankoWitness[${hash}].hanko`);
+      validateString(entry['type'], `${context}.hankoWitness[${hash}].type`);
+      validateNumber(entry['entityHeight'], `${context}.hankoWitness[${hash}].entityHeight`);
+      validateNumber(entry['createdAt'], `${context}.hankoWitness[${hash}].createdAt`);
+    }
+  }
+  return obj as unknown as EntityReplica;
+}
 
 // =============================================================================
 // ENHANCED SAFE COLLECTION ACCESS

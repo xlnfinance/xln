@@ -135,6 +135,7 @@
   let marketSeenRefreshNonce = 0;
   let syncAgeTick = 0;
   let mounted = false;
+  const closingMarketSockets = new Set<WebSocket>();
   const STREAM_STALE_MS = 3000;
   const STREAM_FIRST_SNAPSHOT_TIMEOUT_MS = 6000;
   const STREAM_RETRY_MS = 2000;
@@ -935,12 +936,19 @@
     const ws = new WebSocket(url);
     marketWs = ws;
     ws.onopen = () => {
-      if (marketWs !== ws) return;
+      if (closingMarketSockets.has(ws) || marketWs !== ws || !mounted) {
+        try {
+          ws.close();
+        } catch {
+          // Socket is already being torn down.
+        }
+        return;
+      }
       sendMarketSubscribe(true);
       marketWs?.send(JSON.stringify({ type: 'market_snapshot_request', id: wsMessageId('market_req') }));
     };
     ws.onmessage = (event: MessageEvent) => {
-      if (marketWs !== ws) return;
+      if (closingMarketSockets.has(ws) || marketWs !== ws) return;
       let msg: MarketWsMessage;
       try {
         msg = JSON.parse(String(event.data || '{}')) as MarketWsMessage;
@@ -985,6 +993,7 @@
       extractOrderbook();
     };
     ws.onclose = () => {
+      closingMarketSockets.delete(ws);
       if (marketWs !== ws) return;
       marketWs = null;
       marketSubKey = '';
@@ -1008,11 +1017,15 @@
     streamSnapshots.clear();
     if (!marketWs) return;
     marketWsClosing = true;
+    const ws = marketWs;
+    closingMarketSockets.add(ws);
     try {
-      if (marketWs.readyState === 1) {
-        marketWs.send(JSON.stringify({ type: 'market_unsubscribe', id: wsMessageId('market_unsub') }));
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'market_unsubscribe', id: wsMessageId('market_unsub') }));
+        ws.close();
+      } else if (ws.readyState !== 0) {
+        ws.close();
       }
-      marketWs.close();
     } catch {
       // ignore
     }

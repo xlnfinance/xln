@@ -1,9 +1,10 @@
-import type { Env, EntityInput, EntityReplica, Delta, FrameLogEntry, JTx } from '../types';
+import type { Env, EntityInput, EntityReplica, Delta, FrameLogEntry } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { deriveDelta, isLeft } from '../account-utils';
-import { createEmptyBatch, batchAddReserveToReserve, getBatchSize } from '../j-batch';
+import { createEmptyBatch, batchAddReserveToReserve } from '../j-batch';
 import { formatRuntime } from '../runtime-ascii';
 import { advanceScenarioTime } from './helpers';
+import { submitSignedScenarioBatch } from './j-batch-submit';
 
 type ProcessFn = (env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>;
 
@@ -76,20 +77,7 @@ export async function submitReserveToReserveBatch(
     tokenId,
     amount,
   );
-  const jTx: JTx = {
-    type: 'batch',
-    entityId: fromEntityId,
-    data: {
-      batch,
-      batchSize: getBatchSize(batch),
-      signerId,
-    },
-    timestamp: env.timestamp,
-  };
-  const result = await jadapter.submitTx(jTx, { env, signerId, timestamp: env.timestamp });
-  if (!result.success) {
-    throw new Error(result.error || 'AHB R2R batch failed');
-  }
+  await submitSignedScenarioBatch(env, jadapter, fromEntityId, signerId, batch, 'AHB R2R batch');
 }
 
 type ReplicaEntry = [string, EntityReplica];

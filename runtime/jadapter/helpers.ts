@@ -627,6 +627,15 @@ export type JEventsRuntimeInputBuildResult = {
   evidenceEvents: RawJEvent[];
 };
 
+const resolveJEventObservedAt = (blockNumber: number): number => {
+  // This field is part of hashable RuntimeInput/account-frame payloads. It must
+  // be derived from canonical J-chain identity, not watcher delivery time or
+  // chain wall-clock timestamp, which can differ across observers and fresh RPC
+  // scenario runs for the same event sequence.
+  const height = Number(blockNumber);
+  return Number.isFinite(height) && height > 0 ? Math.floor(height) : 0;
+};
+
 export function buildRawJEventsRuntimeInput(
   env: Env,
   rawEvents: RawJEvent[],
@@ -653,6 +662,7 @@ export function buildRawJEventsRuntimeInput(
   if (logBatch) {
     console.log(`📡 [JAdapter:${adapterLabel}] ${rawEvents.length} canonical events from block ${blockNumber}`);
   }
+  const observedAt = resolveJEventObservedAt(blockNumber);
 
   const hankoNonceByTxAndEntity = new Map<string, string>();
   for (const event of rawEvents) {
@@ -761,7 +771,7 @@ export function buildRawJEventsRuntimeInput(
           type: 'j_event',
           data: {
             from: signerId,
-            observedAt: env.timestamp ?? 0,
+            observedAt,
             blockNumber,
             blockHash,
             transactionHash,
@@ -792,7 +802,7 @@ export function buildRawJEventsRuntimeInput(
   if (entityInputs.length === 0) return null;
   return {
     input: {
-      timestamp: env.timestamp ?? 0,
+      timestamp: observedAt,
       runtimeTxs: [],
       entityInputs,
     },
@@ -874,6 +884,7 @@ export function buildJEventsRuntimeInput(env: Env, events: JEvent[], label = 'J-
 
   const txCounter: EventBatchCounter = { value: 0 };
   const entityInputs: EntityInput[] = [];
+  let timestamp = 0;
   for (const [blockNumber, groupedEvents] of blockGroups) {
     const blockHash = groupedEvents[0]?.blockHash ?? '0x';
     const built = buildRawJEventsRuntimeInput(env, groupedEvents.filter(isCanonicalEvent), {
@@ -884,11 +895,14 @@ export function buildJEventsRuntimeInput(env: Env, events: JEvent[], label = 'J-
       logBatch: false,
       emitSettledDebugEvents: false,
     });
-    if (built?.input.entityInputs?.length) entityInputs.push(...built.input.entityInputs);
+    if (built?.input.entityInputs?.length) {
+      entityInputs.push(...built.input.entityInputs);
+      timestamp = Math.max(timestamp, Number(built.input.timestamp ?? 0));
+    }
   }
   if (entityInputs.length === 0) return null;
   return {
-    timestamp: env.timestamp ?? 0,
+    timestamp,
     runtimeTxs: [],
     entityInputs,
   };

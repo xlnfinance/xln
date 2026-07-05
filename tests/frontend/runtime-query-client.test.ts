@@ -55,17 +55,38 @@ test('runtime view store owns the active projected RuntimeView without Env acces
 });
 
 test('activity history panel reads activity through RuntimeQueryClient only', () => {
-  const source = readFileSync('frontend/src/lib/components/Entity/ActivityHistoryPanel.svelte', 'utf8');
+  const panelSource = readFileSync('frontend/src/lib/components/Entity/ActivityHistoryPanel.svelte', 'utf8');
+  const querySource = readFileSync('frontend/src/lib/components/Entity/activity-history-query.ts', 'utf8');
+  const addressRouteSource = readFileSync('frontend/src/routes/address/[entityId]/+page.svelte', 'utf8');
+  const paymentSmokeSource = readFileSync('tests/e2e-payment-smoke.spec.ts', 'utf8');
+  const source = `${panelSource}\n${querySource}`;
+  const activityE2EHelper = paymentSmokeSource.slice(
+    paymentSmokeSource.indexOf('async function countRuntimeActivityEvents'),
+    paymentSmokeSource.indexOf('async function openEntityHistoryPage'),
+  );
 
-  expect(source).toContain('runtimeQueryClient.readActivity');
-  expect(source).toContain("from '$lib/stores/runtimeQueryClient'");
+  expect(panelSource).toContain('runtimeQueryClient.readActivity');
+  expect(panelSource).toContain("from '$lib/stores/runtimeQueryClient'");
+  expect(addressRouteSource).toContain("$page.url.searchParams.get('runtimeId')");
+  expect(addressRouteSource).toContain("runtimeOperations.selectRuntime(targetRuntimeId)");
+  expect(addressRouteSource).toContain('Runtime ${targetRuntimeId} is not imported');
+  expect(paymentSmokeSource).toContain('__xln?.adapter?.query?.activity');
+  expect(paymentSmokeSource).toContain('?runtimeId=${encodeURIComponent(runtimeId)}');
+  expect(paymentSmokeSource).toContain('history page adapter must expose off-chain payment history');
+  expect(paymentSmokeSource).not.toContain('/api/debug/activity');
+  expect(paymentSmokeSource).not.toContain('readPersistedRuntimeActivityPage');
   expect(source).not.toContain('readPersistedRuntimeActivityPage');
   expect(source).not.toContain('runtimeFrameEnv');
   expect(source).not.toContain('window.XLN');
   expect(source).not.toContain('view.XLN');
   expect(source).not.toContain('runtime.js');
   expect(source).not.toContain('/api/debug/activity');
+  expect(source).not.toContain('readDebugActivitySource');
   expect(source).not.toContain("from '$lib/stores/runtimeStore'");
+  expect(activityE2EHelper).not.toContain('isolatedEnv');
+  expect(activityE2EHelper).not.toContain('window.XLN');
+  expect(activityE2EHelper).not.toContain('view.XLN');
+  expect(activityE2EHelper).not.toContain('runtime.js');
 });
 
 test('runtime query cache is live-height aware but keeps historical reads pinned', async () => {
@@ -224,6 +245,7 @@ test('remote runtime refresh reads typed RuntimeView projections without Env bri
 
   expect(refreshSource).toContain('refreshRuntimeView');
   expect(refreshSource).toContain('runtimeHistoryFrameFromViewFrame');
+  expect(refreshSource).not.toContain('atHeight');
   expect(refreshSource).not.toContain("adapter.read<RuntimeAdapterViewFrame>('view-frame'");
   expect(source).not.toContain('export const scanRuntimeAdapterHistoryAtHeight');
   expect(scanSource).toContain('runtimeQueryClient.readHistoryFrameBatch');
@@ -305,6 +327,8 @@ test('address explorer routes read runtime projections instead of debug entity A
   expect(detail).toContain('selectEntityRuntimeFromDirectory');
   expect(detail).toContain('runtimeOperations.selectRuntime(targetRuntimeId)');
   expect(detail).toContain('summaryRuntimeId(summary)');
+  expect(detail).toContain('canReadEntityRuntime(entity.runtimeId)');
+  expect(detail).toContain('entity-history-runtime-mismatch');
   expect(detail).toContain('fetchSummaryExplorerEntity');
   expect(detail).toContain('runtimeQueryClient.readEntities({ limit: 5000 })');
   expect(detail).toContain('buildExplorerEntityFromSummary');

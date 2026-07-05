@@ -1107,7 +1107,12 @@ describe('production startup wiring', () => {
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       upstreamUrl = url instanceof Request ? url.url : String(url);
       upstreamBody = String(init?.body || '');
-      return new Response(JSON.stringify({ success: true, serverDurationMs: 0 }), {
+      return new Response(JSON.stringify({
+        success: true,
+        serverDurationMs: 0,
+        requestId: 'offchain_1',
+        statusUrl: '/api/control/runtime-input/offchain_1/status',
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -1136,6 +1141,8 @@ describe('production startup wiring', () => {
       expect(upstreamUrl).toBe('http://127.0.0.1:19301/api/faucet/offchain');
       expect(upstreamBody).toBe(body);
       expect(response.headers.get('x-xln-proxy-health-polled')).toBe('0');
+      expect((await response.json()).statusUrl)
+        .toBe(`/api/hub/runtime-input/offchain_1/status?hubEntityId=${encodeURIComponent(hubEntityId)}`);
     } finally {
       globalThis.fetch = originalFetch;
     }

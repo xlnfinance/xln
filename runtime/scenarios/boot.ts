@@ -570,8 +570,8 @@ export async function createNumberedEntity(
   jurisdiction: JurisdictionConfig,
   position: { x: number; y: number; z: number }
 ): Promise<string> {
-  const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
   const signer = `${entityNumber}`;
+  const entityId = computeBoardHash(signer);
 
   await commitRuntimeInput(env, {
     runtimeTxs: [{

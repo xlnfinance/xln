@@ -37,6 +37,13 @@ type ActivityApiEvent = {
   counterpartyId?: string;
 };
 
+type RuntimeAdapterDebugSurface = {
+  query?: {
+    activity?: <T = unknown>(query: Record<string, unknown>) => Promise<T>;
+  };
+  status?: () => { runtimeId?: string; connected?: boolean };
+};
+
 function isExpectedUiPaymentActivity(event: ActivityApiEvent): boolean {
   const type = String(event.type || '');
   const rawType = String(event.rawType || '').toLowerCase();
@@ -250,49 +257,58 @@ async function countRuntimeActivityEvents(
   params: Record<string, string>,
   predicate: (event: ActivityApiEvent) => boolean,
 ): Promise<number> {
-  const localEvents = await page.evaluate(async ({ targetEntityId, sourceParams }) => {
+  const events = await page.evaluate(async ({ targetEntityId, sourceParams }) => {
     const view = window as typeof window & {
-      XLN?: {
-        readPersistedRuntimeActivityPage?: (env: unknown, opts: Record<string, unknown>) => Promise<{ events?: ActivityApiEvent[] }>;
+      __xln?: {
+        adapter?: RuntimeAdapterDebugSurface;
       };
-      isolatedEnv?: unknown;
     };
-    if (!view.isolatedEnv) return [];
-    const XLN = view.XLN?.readPersistedRuntimeActivityPage
-      ? view.XLN
-      : await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href)
-        .catch(() => null);
-    if (!XLN?.readPersistedRuntimeActivityPage) return [];
+    const readActivity = view.__xln?.adapter?.query?.activity;
+    if (!readActivity) throw new Error('E2E_ACTIVITY_QUERY_UNAVAILABLE');
     const kind = sourceParams.kind && sourceParams.kind !== 'all' ? sourceParams.kind : undefined;
     const types = sourceParams.types ? String(sourceParams.types).split(',').filter(Boolean) : undefined;
-    const body = await XLN.readPersistedRuntimeActivityPage(view.isolatedEnv, {
+    const body = await readActivity<{ events?: ActivityApiEvent[] }>({
       entityId: targetEntityId,
       ...(kind ? { kind } : {}),
       ...(types ? { types } : {}),
       limit: 80,
-      scanLimit: 100,
+      scanLimit: types?.length ? 1000 : 100,
     });
     return Array.isArray(body.events) ? body.events : [];
-  }, { targetEntityId: entityId, sourceParams: params }).catch(() => [] as ActivityApiEvent[]);
+  }, { targetEntityId: entityId, sourceParams: params });
 
-  const url = new URL('/api/debug/activity', API_BASE_URL);
-  url.searchParams.set('entityId', entityId);
-  url.searchParams.set('limit', '80');
-  url.searchParams.set('scanLimit', '100');
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-
-  const response = await page.request.get(url.toString());
-  const serverEvents = response.ok()
-    ? ((await response.json() as { events?: ActivityApiEvent[] }).events ?? [])
-    : [];
-  return [...localEvents, ...serverEvents].filter(predicate).length;
+  return events.filter(predicate).length;
 }
 
-async function openEntityHistoryPage(page: Page, entityId: string): Promise<Page> {
-  const target = `${APP_BASE_URL}/address/${encodeURIComponent(entityId)}`;
+async function waitForAdapterRuntime(page: Page, runtimeId: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      return await page.evaluate(() => {
+        const view = window as typeof window & {
+          __xln?: {
+            adapter?: RuntimeAdapterDebugSurface;
+          };
+        };
+        const status = view.__xln?.adapter?.status?.();
+        return {
+          connected: status?.connected === true,
+          runtimeId: String(status?.runtimeId || '').trim().toLowerCase(),
+        };
+      }).catch(() => ({ connected: false, runtimeId: '' }));
+    }, {
+      timeout: CONSENSUS_TIMEOUT_MS,
+      intervals: [500, 1000, 1500],
+      message: `history page must bind to runtime ${runtimeId.slice(0, 12)}`,
+    })
+    .toEqual({ connected: true, runtimeId: runtimeId.toLowerCase() });
+}
+
+async function openEntityHistoryPage(page: Page, entityId: string, runtimeId: string): Promise<Page> {
+  const target = `${APP_BASE_URL}/address/${encodeURIComponent(entityId)}?runtimeId=${encodeURIComponent(runtimeId)}`;
   const historyPage = await page.context().newPage();
   await historyPage.goto(target, { waitUntil: 'domcontentloaded' });
   await historyPage.waitForURL(target, { timeout: CONSENSUS_TIMEOUT_MS });
+  await waitForAdapterRuntime(historyPage, runtimeId);
   return historyPage;
 }
 
@@ -313,7 +329,8 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
     )
     .toBeGreaterThan(0);
 
-  const historyPage = await openEntityHistoryPage(page, entityId);
+  const runtimeId = await getActiveRuntimeId(page);
+  const historyPage = await openEntityHistoryPage(page, entityId, runtimeId);
   try {
     await expect(historyPage.getByTestId('entity-history-panel')).toBeVisible({ timeout: CONSENSUS_TIMEOUT_MS });
     await expect
@@ -322,6 +339,22 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
         intervals: [500, 1000, 1500],
         message: 'entity history should render at least one event',
       })
+      .toBeGreaterThan(0);
+
+    await expect
+      .poll(
+        () => countRuntimeActivityEvents(
+          historyPage,
+          entityId,
+          { kind: 'offchain' },
+          isExpectedUiPaymentActivity,
+        ),
+        {
+          timeout: CONSENSUS_TIMEOUT_MS,
+          intervals: [500, 1000, 1500],
+          message: 'history page adapter must expose off-chain payment history',
+        },
+      )
       .toBeGreaterThan(0);
 
     await historyPage.getByTestId('history-kind-offchain').click();

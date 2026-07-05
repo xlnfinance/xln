@@ -134,6 +134,32 @@ describe('runtime activity history', () => {
     expect(htlcAliasEvents).toHaveLength(1);
   });
 
+  test('treats initiated htlc logs as payment activity for sender-side history', () => {
+    const events = buildRuntimeActivityEvents({
+      height: 22,
+      timestamp: 1_700_000_032_000,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      logs: [{
+        id: 3,
+        timestamp: 1_700_000_032_000,
+        level: 'info',
+        category: 'entity',
+        message: 'HtlcInitiated',
+        entityId: alice,
+        data: { entityId: alice, fromEntity: alice, toEntity: hub, amount: 7n * 10n ** 18n, tokenId: 1 },
+      }],
+    }, { entityId: alice, types: ['payment'] });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: 'offchain',
+      type: 'payment',
+      title: 'Payment started',
+      status: 'started',
+      amount: '7000000000000000000',
+    });
+  });
+
   test('expands accountInput frame transactions into payment history', () => {
     const events = buildRuntimeActivityEvents({
       height: 25,

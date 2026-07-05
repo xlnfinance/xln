@@ -39,12 +39,14 @@ export const canonicalDisputeFinalizationEvidenceKey = (evidence: DisputeFinaliz
     normHex(evidence.sender),
     normHex(evidence.counterentity),
     normDecimal(evidence.initialNonce),
+    normDecimal(evidence.finalNonce),
     normHex(evidence.initialProofbodyHash),
     normHex(evidence.finalProofbodyHash),
     normHex(evidence.leftArguments),
     normHex(evidence.rightArguments),
     normHex(evidence.starterInitialArguments),
     normHex(evidence.starterIncrementedArguments),
+    normHex(evidence.sig),
   ]);
 };
 

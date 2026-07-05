@@ -5,6 +5,7 @@
   import HealthQaLinkPanel from '$lib/components/Health/HealthQaLinkPanel.svelte';
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { probeRpcHealth } from '$lib/health/rpcHealth';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
@@ -480,55 +481,21 @@
   }
 
   async function checkRpc(): Promise<void> {
-    const started = performance.now();
-    try {
-      const resp = await fetch('/rpc', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'eth_chainId',
-          params: [],
-        }),
-      });
-      const ms = Math.round(performance.now() - started);
-      rpcLatencyMs = ms;
-
-      if (!resp.ok) {
-        rpcOk = false;
-        rpcError = `HTTP ${resp.status}`;
-        console.error(
-          '%c[RPC FAIL-FAST] /rpc health check failed',
-          'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
-          { status: resp.status }
-        );
-        return;
-      }
-
-      const body = (await resp.json()) as { result?: string; error?: unknown };
-      if (!body.result) {
-        rpcOk = false;
-        rpcError = body.error ? JSON.stringify(body.error) : 'No chainId result';
-        console.error(
-          '%c[RPC FAIL-FAST] /rpc malformed health response',
-          'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
-          { body }
-        );
-        return;
-      }
+    const result = await probeRpcHealth();
+    rpcLatencyMs = result.latencyMs;
+    if (result.ok) {
       rpcOk = true;
       rpcError = null;
-    } catch (err) {
-      rpcOk = false;
-      rpcLatencyMs = null;
-      rpcError = err instanceof Error ? err.message : String(err);
-      console.error(
-        '%c[RPC FAIL-FAST] /rpc health request threw',
-        'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
-        { error: rpcError }
-      );
+      return;
     }
+
+    rpcOk = false;
+    rpcError = result.error || 'Unknown /rpc failure';
+    console.error(
+      '%c[RPC FAIL-FAST] /rpc health check failed after retries',
+      'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
+      result
+    );
   }
 
   function formatBytes(bytes: number | null | undefined): string {

@@ -396,6 +396,7 @@ describe('jadapter helper cursors', () => {
     expect(queuedInputs.every((input) => input.entityId === entityId.toLowerCase())).toBe(true);
     expect(queuedInputs.map((input) => input.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
     expect(queuedInputs.every((input) => input.entityTxs[0]?.type === 'j_event')).toBe(true);
+    expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.observedAt)).toEqual([7, 7]);
     expect(env.runtimeState?.wakeRequested).toBe(true);
   });
 
@@ -410,7 +411,7 @@ describe('jadapter helper cursors', () => {
     env.eReplicas.set(`${entityId}:${proposerSignerId}`, makeReplica(entityId, proposerSignerId, true));
     env.eReplicas.set(`${entityId}:${validatorSignerId}`, makeReplica(entityId, validatorSignerId, false));
 
-    const input = buildJEventsRuntimeInput(env, [{
+    const event = {
       name: 'ReserveUpdated',
       args: {
         entity: entityId,
@@ -421,14 +422,20 @@ describe('jadapter helper cursors', () => {
       blockHash: `0x${'67'.repeat(32)}`,
       transactionHash: `0x${'78'.repeat(32)}`,
       logIndex: 0,
-    }], 'test-build');
+    };
+    const input = buildJEventsRuntimeInput(env, [event], 'test-build');
+    env.timestamp = 9_999;
+    const rebuiltInput = buildJEventsRuntimeInput(env, [event], 'test-build');
 
-    expect(input?.timestamp).toBe(1_000);
+    expect(input?.timestamp).toBe(8);
+    expect(rebuiltInput?.timestamp).toBe(8);
     expect(input?.runtimeTxs).toEqual([]);
     expect(input?.entityInputs).toHaveLength(2);
     expect(input?.entityInputs?.every((entry) => entry.entityId === entityId.toLowerCase())).toBe(true);
     expect(input?.entityInputs?.map((entry) => entry.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
     expect(input?.entityInputs?.every((entry) => entry.entityTxs[0]?.type === 'j_event')).toBe(true);
+    expect(input?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8, 8]);
+    expect(rebuiltInput?.entityInputs?.map((entry) => entry.entityTxs[0]?.data?.observedAt)).toEqual([8, 8]);
     expect(env.runtimeMempool?.entityInputs ?? []).toEqual([]);
     expect(env.runtimeState?.wakeRequested).not.toBe(true);
   });

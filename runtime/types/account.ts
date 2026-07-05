@@ -297,7 +297,7 @@ export interface AccountMachine {
 
   hankoSignature?: string; // Latest generated account proof hanko.
 
-  // Payment routing: temporary storage for multi-hop payments
+  // Payment routing: pending state for multi-hop payments.
   pendingForward?: {
     tokenId: number;
     amount: bigint;

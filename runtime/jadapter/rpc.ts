@@ -2030,11 +2030,13 @@ export async function createRpcAdapter(
             return (batch.disputeFinalizations ?? []).map((finalization) => ({
               counterentity: toHexString(finalization.counterentity),
               initialNonce: toDecimalString(finalization.initialNonce),
+              finalNonce: toDecimalString(finalization.finalNonce),
               initialProofbodyHash: toHexString(finalization.initialProofbodyHash),
               leftArguments: toHexString(finalization.leftArguments),
               rightArguments: toHexString(finalization.rightArguments),
               starterInitialArguments: toHexString(finalization.starterInitialArguments),
               starterIncrementedArguments: toHexString(finalization.starterIncrementedArguments),
+              sig: toHexString(finalization.sig),
             }));
           } catch {
             return [];
@@ -2066,12 +2068,14 @@ export async function createRpcAdapter(
           sender: toHexString(args['sender']),
           counterentity: matched.counterentity,
           initialNonce: matched.initialNonce,
+          finalNonce: matched.finalNonce,
           initialProofbodyHash: matched.initialProofbodyHash,
           finalProofbodyHash: toHexString(args['finalProofbodyHash']),
           leftArguments: matched.leftArguments,
           rightArguments: matched.rightArguments,
           starterInitialArguments: matched.starterInitialArguments,
           starterIncrementedArguments: matched.starterIncrementedArguments,
+          sig: matched.sig,
         };
       };
 

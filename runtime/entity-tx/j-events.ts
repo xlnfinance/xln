@@ -1,4 +1,5 @@
 import type {
+  AccountMachine,
   EntityInput,
   EntityState,
   JBlockObservation,
@@ -154,7 +155,7 @@ const syncJBatchEntityNonceFromEvent = (
   }
 };
 
-export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<JEventApplyResult> => {
+export const applyJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<JEventApplyResult> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
   if (!isValidatorSigner(entityState, signerId)) {
     throw new Error(`j_event rejected: non-validator signer ${String(signerId)}`);
@@ -467,6 +468,416 @@ function mergeThresholdDisputeFinalizationEvidence(
     .map((vote) => vote.evidence);
 }
 
+type FinalizedJEventContext = {
+  entityState: EntityState;
+  newState: EntityState;
+  event: JurisdictionEvent;
+  env: Env;
+  blockNumber: number;
+  transactionHash: string;
+  mempoolOps: JEventMempoolOp[];
+  outputs: EntityInput[];
+  dirtyAccounts: Set<string>;
+};
+
+type DisputeAccountContext = {
+  senderStr: string;
+  counterentityStr: string;
+  entityIdNorm: string;
+  candidateCounterpartyId: string;
+  counterpartyId: string;
+  account: AccountMachine | undefined;
+};
+
+const normalizeEntityId = (id: unknown): string => String(id).toLowerCase();
+
+function resolveDisputeAccountContext(
+  state: EntityState,
+  sender: string,
+  counterentity: string,
+): DisputeAccountContext {
+  const senderStr = normalizeEntityId(sender);
+  const counterentityStr = normalizeEntityId(counterentity);
+  const entityIdNorm = normalizeEntityId(state.entityId);
+  const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
+  let counterpartyId = candidateCounterpartyId;
+  let account = state.accounts.get(counterpartyId);
+  if (!account) {
+    for (const [key, value] of state.accounts.entries()) {
+      if (normalizeEntityId(key) === candidateCounterpartyId) {
+        counterpartyId = key;
+        account = value;
+        break;
+      }
+    }
+  }
+  return {
+    senderStr,
+    counterentityStr,
+    entityIdNorm,
+    candidateCounterpartyId,
+    counterpartyId,
+    account,
+  };
+}
+
+function clearDisputeSettledDeltas(
+  account: AccountMachine,
+  finalProofbodyHash: string,
+  counterpartyId: string,
+): void {
+  const finalizedProofBody = finalProofbodyHash
+    ? account.disputeProofBodiesByHash?.[finalProofbodyHash] as { tokenIds?: unknown[]; offdeltas?: unknown[] } | undefined
+    : undefined;
+  if (finalizedProofBody && Array.isArray(finalizedProofBody.tokenIds) && Array.isArray(finalizedProofBody.offdeltas)) {
+    for (let i = 0; i < finalizedProofBody.tokenIds.length; i += 1) {
+      const tokenId = Number(finalizedProofBody.tokenIds[i]);
+      const delta = account.deltas.get(tokenId);
+      if (!delta) continue;
+      delta.collateral = 0n;
+      delta.ondelta = 0n;
+      delta.offdelta = 0n;
+      delta.leftHold = 0n;
+      delta.rightHold = 0n;
+      delta.leftAllowance = 0n;
+      delta.rightAllowance = 0n;
+    }
+    return;
+  }
+
+  jEventLog.warn('dispute_finalized.proof_body_missing', { counterparty: shortId(counterpartyId) });
+  for (const delta of account.deltas.values()) {
+    delta.collateral = 0n;
+    delta.ondelta = 0n;
+    delta.offdelta = 0n;
+    delta.leftHold = 0n;
+    delta.rightHold = 0n;
+    delta.leftAllowance = 0n;
+    delta.rightAllowance = 0n;
+  }
+}
+
+async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promise<void> {
+  const { newState, event, env, blockNumber, transactionHash, mempoolOps, outputs, dirtyAccounts } = context;
+  const data = event.data as {
+    sender: string;
+    counterentity: string;
+    nonce: string;
+    proofbodyHash: string;
+    starterInitialArguments: string;
+    starterIncrementedArguments: string;
+    watchSeed?: unknown;
+    batchNonce?: number;
+    disputeTimeout?: unknown;
+    onChainNonce?: unknown;
+  };
+  const { sender, counterentity, nonce, proofbodyHash } = data;
+  const {
+    senderStr,
+    entityIdNorm,
+    candidateCounterpartyId,
+    counterpartyId,
+    account,
+  } = resolveDisputeAccountContext(newState, sender, counterentity);
+  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
+
+  if (!account) {
+    jEventLog.warn('dispute_started.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
+    return;
+  }
+
+  dirtyAccounts.add(counterpartyId.toLowerCase());
+  account.status = 'disputed';
+  const weAreStarter = senderStr === entityIdNorm;
+  const disputeTimeout =
+    Number(data.disputeTimeout ?? 0) ||
+    (
+      Number(blockNumber || 0) +
+      getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, newState.config.jurisdiction?.name, 5)
+    );
+  const onChainNonce = Number(data.onChainNonce ?? nonce);
+
+  // Unified nonce: initialNonce = the nonce used in disputeStart (from event).
+  // onChainNonce defaults to the dispute nonce when no richer event payload exists.
+  account.activeDispute = {
+    startedByLeft: isDisputeStartedByLeft(senderStr, account.leftEntity, account.rightEntity),
+    initialProofbodyHash: String(proofbodyHash),
+    initialNonce: Number(nonce),
+    disputeTimeout,
+    onChainNonce,
+    starterInitialArguments: data.starterInitialArguments || '0x',
+    starterIncrementedArguments: data.starterIncrementedArguments || '0x',
+    observedOnChain: true,
+    observedBlockNumber: Number(blockNumber || 0),
+    ...(data.batchNonce !== undefined ? { batchNonce: Number(data.batchNonce) } : {}),
+    finalizeQueued: false,
+  };
+  account.onChainSettlementNonce = Math.max(Number(account.onChainSettlementNonce ?? 0), onChainNonce);
+
+  const { buildAccountProofBody } = await import('../proof-builder');
+  const localProof = buildAccountProofBody(account);
+  const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
+  const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
+    .some((hash) => hash.toLowerCase() === onChainProofHash);
+  if (localProof.proofBodyHash.toLowerCase() !== onChainProofHash) {
+    jEventLog.debug('dispute.proof_hash_not_current', {
+      counterparty: shortId(counterpartyId),
+      local: shortHash(localProof.proofBodyHash),
+      onChain: shortHash(account.activeDispute.initialProofbodyHash),
+      storedProofKnown,
+    });
+  }
+
+  const starterInitialArguments = data.starterInitialArguments || '0x';
+  const disputeSecrets = decodeDisputeStarterInitialSecrets(starterInitialArguments);
+  if (disputeSecrets.length > 0) {
+    for (const disputeSecret of disputeSecrets) {
+      const hashlock = hashHtlcSecret(disputeSecret);
+      applyKnownHtlcSecret(env, newState, mempoolOps, outputs, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
+    }
+  }
+  queueCrossJurisdictionSalvageFromDispute(
+    env,
+    newState,
+    outputs,
+    counterpartyId,
+    starterInitialArguments,
+    blockNumber,
+  );
+  queueCrossJurisdictionSourceDisputeFromTargetDispute(
+    env,
+    newState,
+    outputs,
+    counterpartyId,
+    starterInitialArguments,
+  );
+
+  addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
+  if (!weAreStarter) {
+    const ops = emptyOpBreakdown();
+    ops.disputeStarts = 1;
+    appendBatchHistory(newState, {
+      batchHash: `event:dispute-start:${String(proofbodyHash).slice(0, 12)}`,
+      txHash: transactionHash || '',
+      status: 'confirmed' as const,
+      broadcastedAt: newState.timestamp,
+      confirmedAt: newState.timestamp,
+      opCount: 1,
+      entityNonce: Number(nonce || 0),
+      jBlockNumber: Number(blockNumber || 0),
+      batch: {
+        flashloans: [],
+        reserveToReserve: [],
+        reserveToCollateral: [],
+        collateralToReserve: [],
+        settlements: [],
+        disputeStarts: [{
+          counterentity: counterpartyId,
+          nonce: Number(nonce || 0),
+          proofbodyHash: String(proofbodyHash || '0x'),
+          watchSeed: String(data.watchSeed || '0x'),
+          sig: '0x',
+          starterInitialArguments: String(starterInitialArguments || '0x'),
+          starterIncrementedArguments: String(data.starterIncrementedArguments || '0x'),
+        }],
+        disputeFinalizations: [],
+        externalTokenToReserve: [],
+        reserveToExternalToken: [],
+        revealSecrets: [],
+        hub_id: 0,
+      },
+      operations: ops,
+      source: 'counterparty-event' as const,
+      eventType: 'DisputeStarted' as const,
+      note: `Counterparty ${senderStr.slice(-4)} started dispute`,
+    });
+  }
+
+  if (newState.crontabState) {
+    const kickoffDelayMs = weAreStarter ? 1 : 5000;
+    const logicalTimestamp =
+      Number.isFinite(Number(newState.timestamp)) && Number(newState.timestamp) >= 0
+        ? Number(newState.timestamp)
+        : 0;
+    scheduleCrontabHook(newState.crontabState, {
+      id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
+      triggerAt: logicalTimestamp + kickoffDelayMs,
+      type: 'dispute_deadline',
+      data: { accountId: counterpartyId },
+    });
+    markStorageEntityDirty(env, newState.entityId);
+  }
+}
+
+function applyDisputeFinalizedJEvent(
+  context: FinalizedJEventContext,
+  disputeFinalizationEvidence: DisputeFinalizationEvidence[],
+): void {
+  const { newState, event, env, blockNumber, transactionHash, outputs, dirtyAccounts } = context;
+  const data = event.data as { sender: string; counterentity: string; initialNonce: string; initialProofbodyHash: string; finalProofbodyHash: string; batchNonce?: number };
+  const { sender, counterentity, initialNonce, initialProofbodyHash } = data;
+  const {
+    senderStr,
+    counterentityStr,
+    entityIdNorm,
+    candidateCounterpartyId,
+    counterpartyId,
+    account,
+  } = resolveDisputeAccountContext(newState, sender, counterentity);
+  syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, data.batchNonce);
+
+  if (!account) {
+    jEventLog.warn('dispute_finalized.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
+    return;
+  }
+
+  dirtyAccounts.add(counterpartyId.toLowerCase());
+  const weAreFinalizer = senderStr === entityIdNorm;
+  const finalProofbodyHash = String(data.finalProofbodyHash || '0x');
+  const finalizationEvidence = disputeFinalizationEvidence.filter((evidence) =>
+    normalizeEntityId(evidence.sender) === senderStr &&
+    normalizeEntityId(evidence.counterentity) === counterentityStr &&
+    String(evidence.initialNonce) === String(initialNonce) &&
+    String(evidence.initialProofbodyHash).toLowerCase() === String(initialProofbodyHash).toLowerCase() &&
+    String(evidence.finalProofbodyHash).toLowerCase() === finalProofbodyHash.toLowerCase()
+  );
+  const primaryFinalizationEvidence = finalizationEvidence[0];
+  const initialNonceNumber = Number(initialNonce || 0);
+  const evidenceFinalNonce = Number(primaryFinalizationEvidence?.finalNonce ?? NaN);
+  const evidenceSig = String(primaryFinalizationEvidence?.sig ?? '').toLowerCase();
+  const evidenceIsUnsignedUnilateral = evidenceSig === '' || evidenceSig === '0x';
+  const finalProofMatchesInitial =
+    finalProofbodyHash.toLowerCase() === String(initialProofbodyHash || '').toLowerCase();
+  const eventOnChainNonce = primaryFinalizationEvidence
+    ? evidenceIsUnsignedUnilateral
+      ? initialNonceNumber + 1
+      : Number.isFinite(evidenceFinalNonce)
+        ? evidenceFinalNonce
+        : initialNonceNumber
+    : finalProofMatchesInitial
+      ? initialNonceNumber + 1
+      : initialNonceNumber;
+  const finalizedOnChainNonce = Math.max(
+    Number(account.onChainSettlementNonce ?? 0),
+    eventOnChainNonce,
+  );
+  account.onChainSettlementNonce = finalizedOnChainNonce;
+  if (account.activeDispute) {
+    delete account.activeDispute;
+    addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
+    if (newState.crontabState) {
+      cancelCrontabHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
+      markStorageEntityDirty(env, newState.entityId);
+    }
+  } else {
+    jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
+  }
+  if (account.proofHeader.nonce <= finalizedOnChainNonce) {
+    account.proofHeader.nonce = finalizedOnChainNonce + 1;
+  }
+  account.status = 'disputed';
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  delete account.clonedForValidation;
+  account.rollbackCount = 0;
+  delete account.lastRollbackFrameHash;
+  delete account.counterpartyDisputeProofHanko;
+  delete account.counterpartyDisputeProofNonce;
+  delete account.counterpartyDisputeProofBodyHash;
+  if (!weAreFinalizer) {
+    const ops = emptyOpBreakdown();
+    ops.disputeFinalizations = 1;
+    appendBatchHistory(newState, {
+      batchHash: `event:dispute-finalize:${String(initialProofbodyHash).slice(0, 12)}`,
+      txHash: transactionHash || '',
+      status: 'confirmed' as const,
+      broadcastedAt: newState.timestamp,
+      confirmedAt: newState.timestamp,
+      opCount: 1,
+      entityNonce: Number(initialNonce || 0),
+      jBlockNumber: Number(blockNumber || 0),
+      batch: {
+        flashloans: [],
+        reserveToReserve: [],
+        reserveToCollateral: [],
+        collateralToReserve: [],
+        settlements: [],
+        disputeStarts: [],
+        disputeFinalizations: [{
+          counterentity: counterpartyId,
+          initialNonce: Number(initialNonce || 0),
+          finalNonce: finalizedOnChainNonce,
+          initialProofbodyHash: String(initialProofbodyHash || '0x'),
+          finalProofbody: {
+            watchSeed: account.watchSeed,
+            offdeltas: [],
+            tokenIds: [],
+            transformers: [],
+          },
+          leftArguments: '0x',
+          rightArguments: '0x',
+          starterInitialArguments: '0x',
+          starterIncrementedArguments: '0x',
+          sig: '0x',
+          startedByLeft: false,
+          disputeUntilBlock: Number(blockNumber || 0),
+          cooperative: false,
+        }],
+        externalTokenToReserve: [],
+        reserveToExternalToken: [],
+        revealSecrets: [],
+        hub_id: 0,
+      },
+      operations: ops,
+      source: 'counterparty-event' as const,
+      eventType: 'DisputeFinalized' as const,
+      note: `Counterparty ${senderStr.slice(-4)} finalized dispute`,
+    });
+  }
+
+  // Drop stale local draft dispute-finalize ops for this account. If the dispute
+  // is already finalized on-chain, re-broadcasting it can revert a future batch.
+  const removedDraft = scrubDisputeFinalizationsForCounterparty(
+    newState.jBatchState?.batch,
+    candidateCounterpartyId,
+  );
+  const removedSent = scrubDisputeFinalizationsForCounterparty(
+    newState.jBatchState?.sentBatch?.batch,
+    candidateCounterpartyId,
+  );
+  const removed = removedDraft + removedSent;
+  if (removed > 0) {
+    addMessage(newState, `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
+  }
+
+  const finalizationArgumentBlobs = finalizationEvidence.flatMap((evidence) => [
+    evidence.leftArguments,
+    evidence.rightArguments,
+    evidence.starterInitialArguments,
+    evidence.starterIncrementedArguments,
+  ]);
+  if (finalizationArgumentBlobs.length > 0) {
+    queueCrossJurisdictionSalvageFromArgumentList(
+      env,
+      newState,
+      outputs,
+      counterpartyId,
+      finalizationArgumentBlobs,
+      blockNumber,
+    );
+  }
+
+  clearDisputeSettledDeltas(account, finalProofbodyHash, counterpartyId);
+
+  // Drop off-chain intents from pre-dispute epoch.
+  if (account.swapOffers.size > 0) {
+    account.swapOffers.clear();
+  }
+  if (account.locks.size > 0) {
+    account.locks.clear();
+  }
+}
+
 async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent,
@@ -487,6 +898,17 @@ async function applyFinalizedJEvent(
     outputs,
     dirtyAccounts: Array.from(dirtyAccounts),
   });
+  const context: FinalizedJEventContext = {
+    entityState,
+    newState,
+    event,
+    env,
+    blockNumber,
+    transactionHash,
+    mempoolOps,
+    outputs,
+    dirtyAccounts,
+  };
 
   if (event.type === 'ReserveUpdated') {
     const { entity, tokenId, newBalance } = event.data;
@@ -711,344 +1133,10 @@ async function applyFinalizedJEvent(
     addMessage(newState, `🩶 DEBT FORGIVEN: ${forgivenDisplay} ${tokenSymbol} between ${(debtor as string).slice(-8)} and ${(creditor as string).slice(-8)} | Block ${blockNumber} · debt #${debtIndex}`);
 
   } else if (event.type === 'DisputeStarted') {
-    const { sender, counterentity, nonce, proofbodyHash } = event.data as {
-      sender: string;
-      counterentity: string;
-      nonce: string;
-      proofbodyHash: string;
-      starterInitialArguments: string;
-      starterIncrementedArguments: string;
-      batchNonce?: number;
-    };
-    const normalizeId = (id: string) => String(id).toLowerCase();
-    const senderStr = normalizeId(sender as string);
-    const counterentityStr = normalizeId(counterentity as string);
-    const entityIdNorm = normalizeId(newState.entityId);
-    syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, event.data.batchNonce);
-
-    const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
-    let counterpartyId = candidateCounterpartyId;
-    let account = newState.accounts.get(counterpartyId);
-    if (!account) {
-      for (const [key, value] of newState.accounts.entries()) {
-        if (normalizeId(key) === candidateCounterpartyId) {
-          counterpartyId = key;
-          account = value;
-          break;
-        }
-      }
-    }
-
-    if (account) {
-      dirtyAccounts.add(counterpartyId.toLowerCase());
-      account.status = 'disputed';
-      const weAreStarter = senderStr === entityIdNorm;
-      const disputeEventData = event.data as typeof event.data & {
-        disputeTimeout?: unknown;
-        onChainNonce?: unknown;
-      };
-      const disputeTimeout =
-        Number(disputeEventData.disputeTimeout ?? 0) ||
-        (
-          Number(blockNumber || 0) +
-          getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, newState.config.jurisdiction?.name, 5)
-        );
-      const onChainNonce = Number(disputeEventData.onChainNonce ?? nonce);
-
-      // Unified nonce: initialNonce = the nonce used in disputeStart (from event)
-      // onChainNonce defaults to the dispute nonce when no richer event payload exists.
-      account.activeDispute = {
-        startedByLeft: isDisputeStartedByLeft(senderStr, account.leftEntity, account.rightEntity),
-        initialProofbodyHash: String(proofbodyHash),  // From event (committed on-chain)
-        initialNonce: Number(nonce),
-        disputeTimeout,
-        onChainNonce,
-        starterInitialArguments: event.data.starterInitialArguments || '0x',
-        starterIncrementedArguments: event.data.starterIncrementedArguments || '0x',
-        observedOnChain: true,
-        observedBlockNumber: Number(blockNumber || 0),
-        ...(event.data.batchNonce !== undefined ? { batchNonce: Number(event.data.batchNonce) } : {}),
-        finalizeQueued: false,
-      };
-      account.onChainSettlementNonce = Math.max(Number(account.onChainSettlementNonce ?? 0), onChainNonce);
-
-      const { buildAccountProofBody } = await import('../proof-builder');
-      const localProof = buildAccountProofBody(account);
-      const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
-      const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
-        .some((hash) => hash.toLowerCase() === onChainProofHash);
-      if (localProof.proofBodyHash.toLowerCase() !== onChainProofHash) {
-        jEventLog.warn('dispute.proof_hash_not_current', {
-          counterparty: shortId(counterpartyId),
-          local: shortHash(localProof.proofBodyHash),
-          onChain: shortHash(account.activeDispute.initialProofbodyHash),
-          storedProofKnown,
-        });
-      }
-
-      const starterInitialArguments = event.data.starterInitialArguments || '0x';
-      const disputeSecrets = decodeDisputeStarterInitialSecrets(starterInitialArguments);
-      if (disputeSecrets.length > 0) {
-        for (const disputeSecret of disputeSecrets) {
-          const hashlock = hashHtlcSecret(disputeSecret);
-          applyKnownHtlcSecret(env, newState, mempoolOps, outputs, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
-        }
-      }
-      queueCrossJurisdictionSalvageFromDispute(
-        env,
-        newState,
-        outputs,
-        counterpartyId,
-        starterInitialArguments,
-        blockNumber,
-      );
-      queueCrossJurisdictionSourceDisputeFromTargetDispute(
-        env,
-        newState,
-        outputs,
-        counterpartyId,
-        starterInitialArguments,
-      );
-
-      addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
-      if (!weAreStarter) {
-        const ops = emptyOpBreakdown();
-        ops.disputeStarts = 1;
-        appendBatchHistory(newState, {
-          batchHash: `event:dispute-start:${String(proofbodyHash).slice(0, 12)}`,
-          txHash: transactionHash || '',
-          status: 'confirmed' as const,
-          broadcastedAt: newState.timestamp,
-          confirmedAt: newState.timestamp,
-          opCount: 1,
-          entityNonce: Number(nonce || 0),
-          jBlockNumber: Number(blockNumber || 0),
-          batch: {
-            flashloans: [],
-            reserveToReserve: [],
-            reserveToCollateral: [],
-            collateralToReserve: [],
-            settlements: [],
-            disputeStarts: [{
-              counterentity: counterpartyId,
-              nonce: Number(nonce || 0),
-              proofbodyHash: String(proofbodyHash || '0x'),
-              watchSeed: String(event.data.watchSeed || '0x'),
-              sig: '0x',
-              starterInitialArguments: String(starterInitialArguments || '0x'),
-              starterIncrementedArguments: String(event.data.starterIncrementedArguments || '0x'),
-            }],
-            disputeFinalizations: [],
-            externalTokenToReserve: [],
-            reserveToExternalToken: [],
-            revealSecrets: [],
-            hub_id: 0,
-          },
-          operations: ops,
-          source: 'counterparty-event' as const,
-          eventType: 'DisputeStarted' as const,
-          note: `Counterparty ${senderStr.slice(-4)} started dispute`,
-        });
-      }
-
-      if (newState.crontabState) {
-        const kickoffDelayMs = weAreStarter ? 1 : 5000;
-        const logicalTimestamp =
-          Number.isFinite(Number(newState.timestamp)) && Number(newState.timestamp) >= 0
-            ? Number(newState.timestamp)
-            : 0;
-        scheduleCrontabHook(newState.crontabState, {
-          id: `dispute-deadline:${counterpartyId.toLowerCase()}`,
-          triggerAt: logicalTimestamp + kickoffDelayMs,
-          type: 'dispute_deadline',
-          data: { accountId: counterpartyId },
-        });
-        markStorageEntityDirty(env, newState.entityId);
-      }
-    } else {
-      jEventLog.warn('dispute_started.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
-    }
+    await applyDisputeStartedJEvent(context);
 
   } else if (event.type === 'DisputeFinalized') {
-    const { sender, counterentity, initialNonce, initialProofbodyHash } = event.data as { sender: string; counterentity: string; initialNonce: string; initialProofbodyHash: string; finalProofbodyHash: string; batchNonce?: number };
-    const normalizeId = (id: string) => String(id).toLowerCase();
-    const senderStr = normalizeId(sender as string);
-    const counterentityStr = normalizeId(counterentity as string);
-    const entityIdNorm = normalizeId(newState.entityId);
-    syncJBatchEntityNonceFromEvent(newState, senderStr, entityIdNorm, event.data.batchNonce);
-
-    const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
-    let counterpartyId = candidateCounterpartyId;
-    let account = newState.accounts.get(counterpartyId);
-    if (!account) {
-      for (const [key, value] of newState.accounts.entries()) {
-        if (normalizeId(key) === candidateCounterpartyId) {
-          counterpartyId = key;
-          account = value;
-          break;
-        }
-      }
-    }
-
-    if (account) {
-      dirtyAccounts.add(counterpartyId.toLowerCase());
-      const weAreFinalizer = senderStr === entityIdNorm;
-      const finalProofbodyHash = String(event.data.finalProofbodyHash || '0x');
-      const finalizedOnChainNonce = Math.max(
-        Number(account.onChainSettlementNonce ?? 0),
-        Number(initialNonce || 0),
-      );
-      account.onChainSettlementNonce = finalizedOnChainNonce;
-      if (account.activeDispute) {
-        delete account.activeDispute;
-        addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
-        if (newState.crontabState) {
-          cancelCrontabHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
-          markStorageEntityDirty(env, newState.entityId);
-        }
-      } else {
-        jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
-      }
-      if (account.proofHeader.nonce <= finalizedOnChainNonce) {
-        account.proofHeader.nonce = finalizedOnChainNonce + 1;
-      }
-      account.status = 'disputed';
-      delete account.pendingFrame;
-      delete account.pendingAccountInput;
-      delete account.clonedForValidation;
-      account.rollbackCount = 0;
-      delete account.lastRollbackFrameHash;
-      delete account.counterpartyDisputeProofHanko;
-      delete account.counterpartyDisputeProofNonce;
-      delete account.counterpartyDisputeProofBodyHash;
-      if (!weAreFinalizer) {
-        const ops = emptyOpBreakdown();
-        ops.disputeFinalizations = 1;
-        appendBatchHistory(newState, {
-          batchHash: `event:dispute-finalize:${String(initialProofbodyHash).slice(0, 12)}`,
-          txHash: transactionHash || '',
-          status: 'confirmed' as const,
-          broadcastedAt: newState.timestamp,
-          confirmedAt: newState.timestamp,
-          opCount: 1,
-          entityNonce: Number(initialNonce || 0),
-          jBlockNumber: Number(blockNumber || 0),
-          batch: {
-            flashloans: [],
-            reserveToReserve: [],
-            reserveToCollateral: [],
-            collateralToReserve: [],
-            settlements: [],
-            disputeStarts: [],
-            disputeFinalizations: [{
-              counterentity: counterpartyId,
-              initialNonce: Number(initialNonce || 0),
-              finalNonce: Number(initialNonce || 0),
-              initialProofbodyHash: String(initialProofbodyHash || '0x'),
-              finalProofbody: {
-                watchSeed: account.watchSeed,
-                offdeltas: [],
-                tokenIds: [],
-                transformers: [],
-              },
-              leftArguments: '0x',
-              rightArguments: '0x',
-              starterInitialArguments: '0x',
-              starterIncrementedArguments: '0x',
-              sig: '0x',
-              startedByLeft: false,
-              disputeUntilBlock: Number(blockNumber || 0),
-              cooperative: false,
-            }],
-            externalTokenToReserve: [],
-            reserveToExternalToken: [],
-            revealSecrets: [],
-            hub_id: 0,
-          },
-          operations: ops,
-          source: 'counterparty-event' as const,
-          eventType: 'DisputeFinalized' as const,
-          note: `Counterparty ${senderStr.slice(-4)} finalized dispute`,
-        });
-      }
-
-      // Drop stale local draft dispute-finalize ops for this account.
-      // If the dispute is already finalized on-chain, re-broadcasting the same finalize
-      // in a future mixed batch can revert the whole batch.
-      const removedDraft = scrubDisputeFinalizationsForCounterparty(
-        newState.jBatchState?.batch,
-        candidateCounterpartyId,
-      );
-      const removedSent = scrubDisputeFinalizationsForCounterparty(
-        newState.jBatchState?.sentBatch?.batch,
-        candidateCounterpartyId,
-      );
-      const removed = removedDraft + removedSent;
-      if (removed > 0) {
-        addMessage(newState, `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
-      }
-
-      const finalizationEvidence = disputeFinalizationEvidence.filter((evidence) =>
-        normalizeId(evidence.sender) === senderStr &&
-        normalizeId(evidence.counterentity) === counterentityStr &&
-        String(evidence.initialNonce) === String(initialNonce) &&
-        String(evidence.initialProofbodyHash).toLowerCase() === String(initialProofbodyHash).toLowerCase() &&
-        String(evidence.finalProofbodyHash).toLowerCase() === finalProofbodyHash.toLowerCase()
-      );
-      const finalizationArgumentBlobs = finalizationEvidence.flatMap((evidence) => [
-        evidence.leftArguments,
-        evidence.rightArguments,
-        evidence.starterInitialArguments,
-        evidence.starterIncrementedArguments,
-      ]);
-      if (finalizationArgumentBlobs.length > 0) {
-        queueCrossJurisdictionSalvageFromArgumentList(
-          env,
-          newState,
-          outputs,
-          counterpartyId,
-          finalizationArgumentBlobs,
-          blockNumber,
-        );
-      }
-
-      // DisputeFinalized is authoritative. Clear the off-chain component and transient holds
-      // using locally stored proof-body knowledge only.
-      const finalizedProofBody = finalProofbodyHash
-        ? account.disputeProofBodiesByHash?.[finalProofbodyHash] as { tokenIds?: unknown[]; offdeltas?: unknown[] } | undefined
-        : undefined;
-      if (finalizedProofBody && Array.isArray(finalizedProofBody.tokenIds) && Array.isArray(finalizedProofBody.offdeltas)) {
-        for (let i = 0; i < finalizedProofBody.tokenIds.length; i += 1) {
-          const tokenId = Number(finalizedProofBody.tokenIds[i]);
-          const delta = account.deltas.get(tokenId);
-          if (!delta) continue;
-          delta.offdelta = 0n;
-          delta.leftHold = 0n;
-          delta.rightHold = 0n;
-          delta.leftAllowance = 0n;
-          delta.rightAllowance = 0n;
-        }
-      } else {
-        jEventLog.warn('dispute_finalized.proof_body_missing', { counterparty: shortId(counterpartyId) });
-        for (const delta of account.deltas.values()) {
-          delta.offdelta = 0n;
-          delta.leftHold = 0n;
-          delta.rightHold = 0n;
-          delta.leftAllowance = 0n;
-          delta.rightAllowance = 0n;
-        }
-      }
-
-      // Drop off-chain intents from pre-dispute epoch.
-      if (account.swapOffers.size > 0) {
-        account.swapOffers.clear();
-      }
-      if (account.locks.size > 0) {
-        account.locks.clear();
-      }
-    } else {
-      jEventLog.warn('dispute_finalized.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
-    }
+    applyDisputeFinalizedJEvent(context, disputeFinalizationEvidence);
 
   } else if (event.type === 'HankoBatchProcessed') {
     await applyHankoBatchProcessedEvent({ newState, event, transactionHash, blockNumber, dirtyAccounts });

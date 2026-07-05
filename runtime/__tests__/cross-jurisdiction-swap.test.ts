@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../entity-tx/apply';
-import { processAccountTx } from '../account-tx/apply';
+import { applyAccountTx } from '../account-tx/apply';
 import { handlePullCancel } from '../account-tx/handlers/pull';
 import { processOrderbookCancels } from '../entity-tx/handlers/account';
 import { applyEntityInput } from '../entity-consensus';
@@ -989,7 +989,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         createdHeight: 1,
         createdTimestamp: 1_000,
       });
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'swap_offer',
       data: {
         offerId: route.orderId,
@@ -1057,7 +1057,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const before = account.deltas.get(route.source.tokenId)!.offdelta;
       const privateSeed = deriveCrossJurisdictionPrivateSeed('cross-early-source-reveal', route);
       const binary = buildCrossJurisdictionPullReveal(route, 65_535, privateSeed).binary;
-      const result = await processAccountTx(account, {
+      const result = await applyAccountTx(account, {
         type: 'pull_resolve',
         data: { pullId: route.sourcePull!.pullId, binary },
       }, route.sourcePull!.signedAmount > 0n, 2_000, 1);
@@ -1315,7 +1315,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdTimestamp: 1_000,
     }]]);
 
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
         offerId: route.orderId,
@@ -1376,7 +1376,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: { ...route, status: 'resting' },
     });
 
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
         offerId: route.orderId,
@@ -1441,7 +1441,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: { ...route, status: 'resting' },
     });
 
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
         offerId: route.orderId,
@@ -1558,7 +1558,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: { ...route, status: 'resting' },
     });
 
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
         offerId: route.orderId,
@@ -1636,7 +1636,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     const cumulative = lot + 1n;
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
         offerId: route.orderId,
@@ -1771,7 +1771,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: { ...route, status: 'resting' },
     });
 
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
         offerId: route.orderId,
@@ -1854,7 +1854,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
     ]]);
 
-    const result = await processAccountTx(account, {
+    const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
         offerId: route.orderId,
@@ -1901,14 +1901,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdTimestamp: 1_000,
     }]]);
 
-    const early = await processAccountTx(account, {
+    const early = await applyAccountTx(account, {
       type: 'pull_cancel',
       data: { pullId, reason: 'expired' },
     }, payerIsLeft, 9_999, 2);
     expect(early.success).toBe(false);
     expect(account.pulls.has(pullId)).toBe(true);
 
-    const expired = await processAccountTx(account, {
+    const expired = await applyAccountTx(account, {
       type: 'pull_cancel',
       data: { pullId, reason: 'expired' },
     }, payerIsLeft, 10_000, 3);
@@ -1988,7 +1988,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const accountAfterClear = result.newState.accounts.get(sourceUser)!;
     const bySourceHub = sourceHub.toLowerCase() < sourceUser.toLowerCase();
-    const resolveResult = await processAccountTx(accountAfterClear, result.mempoolOps![0]!.tx, bySourceHub, env.timestamp, 1);
+    const resolveResult = await applyAccountTx(accountAfterClear, result.mempoolOps![0]!.tx, bySourceHub, env.timestamp, 1);
     expect(resolveResult.success, resolveResult.error).toBe(true);
     expect(accountAfterClear.pulls?.has(route.sourcePull!.pullId)).toBe(false);
     const releasedDelta = accountAfterClear.deltas.get(route.sourcePull!.tokenId)!;
@@ -2067,7 +2067,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     }]]);
     const byTargetUser = targetUser.toLowerCase() < targetHub.toLowerCase();
 
-    const lowerProofResult = await processAccountTx(account, {
+    const lowerProofResult = await applyAccountTx(account, {
       type: 'cross_pull_close',
       data: { pullId: highRoute.targetPull!.pullId, binary: lowBinary, proof: lowProof },
     }, byTargetUser, env.timestamp, 1);
@@ -2075,7 +2075,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(lowerProofResult.error).toContain('ratio');
     expect(account.pulls?.has(highRoute.targetPull!.pullId)).toBe(true);
 
-    const lowerBinaryResult = await processAccountTx(account, {
+    const lowerBinaryResult = await applyAccountTx(account, {
       type: 'cross_pull_close',
       data: { pullId: highRoute.targetPull!.pullId, binary: lowBinary, proof: highProof },
     }, byTargetUser, env.timestamp, 2);
@@ -2398,7 +2398,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       const syncedBinding = syncedAccount?.pulls?.get(route.targetPull!.pullId)?.crossJurisdiction;
       expect(syncedBinding?.status).toBe('clearing');
       expect(syncedBinding?.cumulativeFillRatio).toBe(0x4567);
-      const accountResult = await processAccountTx(
+      const accountResult = await applyAccountTx(
         syncedAccount!,
         result.mempoolOps![0]!.tx,
         targetUser.toLowerCase() < targetHub.toLowerCase(),
@@ -3971,7 +3971,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     }
 
     expect(errors).toEqual([]);
-    expect(warnings.some((message) => message.includes('dispute.proof_hash_not_current'))).toBe(true);
+    expect(warnings).toEqual([]);
 
     const sourceOutput = result!.outputs.find(output => output.entityId === sourceUser);
     expect(sourceOutput?.entityTxs?.map(tx => tx.type)).toEqual(['disputeStart', 'j_broadcast']);

@@ -80,4 +80,11 @@ describe('external wallet snapshot helpers', () => {
     expect(fetchSource).toContain('const spender = resolveExternalWalletSpender(jadapter, jurisdiction);');
     expect(source).toContain('const snapshot = await requestExternalWalletSnapshot(entityId, owner, tokenList, allowanceReads, jadapter);');
   });
+
+  test('external wallet snapshot transport failures are non-fatal browser warnings', () => {
+    const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
+    expect(source).toContain('function isExternalWalletSnapshotTransportFailure(message: string): boolean');
+    expect(source).toContain("console.warn('[EntityPanel] External token snapshot unavailable:', err);");
+    expect(source).toContain("console.error('[EntityPanel] Failed to fetch external tokens:', err);");
+  });
 });

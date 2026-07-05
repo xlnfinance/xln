@@ -1,4 +1,4 @@
-import { processAccountTx } from '../account-tx/apply';
+import { applyAccountTx } from '../account-tx/apply';
 import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
@@ -282,13 +282,13 @@ const runPass = async (
   const startedAt = getPerfMs();
   const sameStartedAt = getPerfMs();
   for (let index = 0; index < swaps; index += 1) {
-    const result = await processAccountTx(same, sameResolveTx(index), false, 2_000 + index, 2 + index);
+    const result = await applyAccountTx(same, sameResolveTx(index), false, 2_000 + index, 2 + index);
     if (!result.success) throw new Error(`SAME_SWAP_FAILED:${index}:${result.error}`);
   }
   const sameElapsedMs = getPerfMs() - sameStartedAt;
   const crossStartedAt = getPerfMs();
   for (let index = 0; index < swaps; index += 1) {
-    const result = await processAccountTx(cross, crossAckTx(index), false, 2_000 + index, 2 + index);
+    const result = await applyAccountTx(cross, crossAckTx(index), false, 2_000 + index, 2 + index);
     if (!result.success) throw new Error(`CROSS_SWAP_FAILED:${index}:${result.error}`);
   }
   const crossElapsedMs = getPerfMs() - crossStartedAt;

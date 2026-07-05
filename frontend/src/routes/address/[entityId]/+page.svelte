@@ -26,12 +26,14 @@
   let loading = true;
   let error: string | null = null;
   let entity: ExplorerEntity | null = null;
-  let lastLoadedEntityId = '';
+  let lastLoadedRouteKey = '';
   let mounted = false;
   let activeTab: 'overview' | 'history' = 'history';
 
   $: entityId = decodeURIComponent($page.params.entityId || '').trim();
   $: normalized = entityId.toLowerCase();
+  $: requestedRuntimeId = normalizeRuntimeId($page.url.searchParams.get('runtimeId') || $page.url.searchParams.get('rt'));
+  $: routeKey = `${normalized}:${requestedRuntimeId}`;
   $: validEntityId = /^0x[0-9a-f]{64}$/.test(normalized);
 
   function normalizeEntityId(value: string | null | undefined): string {
@@ -52,6 +54,19 @@
 
   function summaryRuntimeId(summary: RuntimeAdapterEntitySummary | null | undefined): string {
     return normalizeRuntimeId(summary?.runtimeId) || currentRuntimeId();
+  }
+
+  function canReadEntityRuntime(targetRuntimeId: string | undefined): boolean {
+    const target = normalizeRuntimeId(targetRuntimeId);
+    return !target || target === currentRuntimeId();
+  }
+
+  async function selectRequestedRuntime(targetRuntimeId: string): Promise<boolean> {
+    if (!targetRuntimeId || targetRuntimeId === currentRuntimeId()) return false;
+    const targetRuntime = get(runtimes).get(targetRuntimeId);
+    if (!targetRuntime) throw new Error(`Runtime ${targetRuntimeId} is not imported in this browser profile.`);
+    await runtimeOperations.selectRuntime(targetRuntimeId);
+    return true;
   }
 
   function buildExplorerEntityFromSummary(
@@ -165,7 +180,8 @@
     error = null;
     try {
       await ensureProjectionRuntimeConnected();
-      if (await selectEntityRuntimeFromDirectory(normalized)) {
+      const selectedExplicitRuntime = await selectRequestedRuntime(requestedRuntimeId);
+      if (selectedExplicitRuntime || await selectEntityRuntimeFromDirectory(normalized)) {
         await ensureProjectionRuntimeConnected();
       }
       const summaryEntity = await fetchSummaryExplorerEntity(normalized);
@@ -205,19 +221,19 @@
     }
   }
 
-  $: if (browser && mounted && entityId && entityId !== lastLoadedEntityId) {
-    lastLoadedEntityId = entityId;
+  $: if (browser && mounted && entityId && routeKey !== lastLoadedRouteKey) {
+    lastLoadedRouteKey = routeKey;
     fetchExplorer();
   }
 
   onMount(() => {
     mounted = true;
-    if (entityId && entityId !== lastLoadedEntityId) {
-      lastLoadedEntityId = entityId;
+    if (entityId && routeKey !== lastLoadedRouteKey) {
+      lastLoadedRouteKey = routeKey;
       void fetchExplorer();
     }
     const unsubscribeHeight = runtimeAdapterHeight.subscribe(() => {
-      if (!mounted || !entityId || entityId !== lastLoadedEntityId) return;
+      if (!mounted || !entityId || routeKey !== lastLoadedRouteKey) return;
       void fetchExplorer();
     });
     return () => {
@@ -279,8 +295,12 @@
           </div>
           <pre>{JSON.stringify(entity.metadata || {}, null, 2)}</pre>
         </div>
-      {:else}
+      {:else if canReadEntityRuntime(entity.runtimeId)}
         <ActivityHistoryPanel entityId={entity.entityId} runtimeId={entity.runtimeId} />
+      {:else}
+        <div class="notice" data-testid="entity-history-runtime-mismatch">
+          Select runtime {entity.runtimeId?.slice(0, 14)}... to inspect this entity history.
+        </div>
       {/if}
     </section>
   {/if}
@@ -352,6 +372,14 @@
     border-color: #6fb6ff;
     background: #112b3f;
     color: #e7f4ff;
+  }
+  .notice {
+    border: 1px solid #2b3a4d;
+    border-radius: 8px;
+    background: #0b121b;
+    color: #9fb0c8;
+    padding: 12px;
+    font-size: 13px;
   }
   .overview {
     display: grid;

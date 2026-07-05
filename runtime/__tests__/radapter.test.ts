@@ -1343,6 +1343,50 @@ test('runtime adapter activity read uses typed projection context', async () => 
   }]);
 });
 
+test('runtime adapter activity read forwards bounded deep scan requests', async () => {
+  const env = makeEnv();
+  const seen: unknown[] = [];
+
+  await resolveRuntimeAdapterRead({
+    env,
+    readActivityPage: async (opts) => {
+      seen.push(opts);
+      return {
+        ok: true,
+        runtimeId: 'activity-runtime',
+        latestHeight: 1000,
+        fromHeight: 1,
+        toHeight: 1000,
+        scannedFrames: 1000,
+        returned: 0,
+        limit: 80,
+        scanLimit: 1000,
+        nextBeforeHeight: null,
+        filters: opts,
+        events: [],
+      };
+    },
+  }, 'activity', {
+    entityId,
+    kind: 'offchain',
+    types: ['payment'],
+    limit: 80,
+    scanLimit: 1000,
+  });
+
+  expect(seen).toEqual([{
+    entityId,
+    kind: 'offchain',
+    types: ['payment'],
+    query: '',
+    fromTimestamp: undefined,
+    toTimestamp: undefined,
+    beforeHeight: undefined,
+    limit: 80,
+    scanLimit: 1000,
+  }]);
+});
+
 test('runtime adapter activity read fails fast on malformed queries', async () => {
   const env = makeEnv();
 

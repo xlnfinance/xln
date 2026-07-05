@@ -1,5 +1,5 @@
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
+import { applyAccountInput, proposeAccountFrame } from '../account-consensus';
 import { isLeft } from '../account-utils';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -506,10 +506,10 @@ const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: Stage
   const proposed = await proposeAccountFrame(benchCase.proposerEnv, benchCase.proposer);
   const receiveStartedAt = getPerfMs();
   if (!proposed.success) throw new Error(`${benchCase.kind}:propose_failed:${proposed.error}`);
-  const received = await handleAccountInput(benchCase.receiverEnv, benchCase.receiver, expectInput(proposed.accountInput, benchCase.kind));
+  const received = await applyAccountInput(benchCase.receiverEnv, benchCase.receiver, expectInput(proposed.accountInput, benchCase.kind));
   const commitStartedAt = getPerfMs();
   if (!received.success) throw new Error(`${benchCase.kind}:receive_failed:${received.error}`);
-  const committed = await handleAccountInput(benchCase.proposerEnv, benchCase.proposer, expectInput(received.response, benchCase.kind));
+  const committed = await applyAccountInput(benchCase.proposerEnv, benchCase.proposer, expectInput(received.response, benchCase.kind));
   const committedAt = getPerfMs();
   if (stages) {
     stages.propose += receiveStartedAt - proposeStartedAt;

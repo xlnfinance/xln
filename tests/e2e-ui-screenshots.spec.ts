@@ -29,6 +29,32 @@ async function captureUxPage(
   });
 }
 
+async function waitForRpcProxyReachable(page: Page, timeoutMs = 30_000): Promise<void> {
+  const startedAt = Date.now();
+  let lastError = '';
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await page.request.post(`${APP_BASE_URL}/rpc`, {
+        data: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_chainId',
+          params: [],
+        },
+        headers: { 'Cache-Control': 'no-store' },
+        timeout: 5_000,
+      });
+      const body = await response.json().catch(() => null) as { result?: unknown; error?: unknown } | null;
+      if (response.ok() && typeof body?.result === 'string' && body.result.length > 0) return;
+      lastError = `status=${response.status()} body=${JSON.stringify(body)}`;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`/rpc did not become reachable before health screenshot: ${lastError}`);
+}
+
 async function captureUxLocator(
   locator: Parameters<typeof captureLocatorScreenshot>[0],
   output: Parameters<typeof captureLocatorScreenshot>[1],
@@ -396,6 +422,7 @@ test('ui screenshot smoke captures operator admin surfaces', async ({ page }, te
     tags: ['qa', 'cockpit', 'evidence'],
   });
 
+  await waitForRpcProxyReachable(page);
   await page.goto(`${APP_BASE_URL}/health`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByRole('heading', { name: /xln health admin/i })).toBeVisible({ timeout: 30_000 });
   await captureUxPage(page, testInfo, 'desktop-health-admin.png', {

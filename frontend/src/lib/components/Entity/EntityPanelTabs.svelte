@@ -2080,6 +2080,13 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       ?.get?.(`${tokenKey}:${spenderKey}`)
       ?.allowance ?? null;
   }
+  function isExternalWalletSnapshotTransportFailure(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return normalized.includes('failed to fetch')
+      || normalized.includes('load failed')
+      || normalized.includes('networkerror')
+      || normalized.includes('network error');
+  }
   async function applyCanonicalJEventsToActiveEnv(
     events: NonNullable<FaucetApiResult['events']>,
     label: string,
@@ -2428,7 +2435,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
           externalTokensLoading = false;
           return;
         }
-        console.error('[EntityPanel] Failed to fetch external tokens:', err);
+        if (isExternalWalletSnapshotTransportFailure(message)) {
+          console.warn('[EntityPanel] External token snapshot unavailable:', err);
+        } else {
+          console.error('[EntityPanel] Failed to fetch external tokens:', err);
+        }
         externalWalletSnapshotSource = null;
         if (moveAllowanceRouteEnabled) {
           moveAllowanceRaw = null;

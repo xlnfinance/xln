@@ -135,7 +135,7 @@ import {
   EntityMap,
   jIdFromChainId,
   createLazyJId,
-  // Migration helpers
+  // Tolerant parsing helpers
   safeParseReplicaKey,
   safeExtractEntityId,
 } from './ids';
@@ -1999,7 +1999,7 @@ export {
   // Jurisdiction helpers
   jIdFromChainId,
   createLazyJId,
-  // Migration helpers
+  // Tolerant parsing helpers
   safeParseReplicaKey,
   safeExtractEntityId,
   // Constants
@@ -3798,7 +3798,7 @@ export const readPersistedRuntimeActivityPage = async (
 ): Promise<PersistedRuntimeActivityPage> => {
   const latestHeight = await resolvePersistedLatestHeight(env);
   const limit = Math.max(1, Math.min(500, Math.floor(Number(opts.limit ?? 100))));
-  const scanLimit = Math.max(1, Math.min(500, Math.floor(Number(opts.scanLimit ?? 100))));
+  const scanLimit = Math.max(1, Math.min(1000, Math.floor(Number(opts.scanLimit ?? 100))));
   if (latestHeight <= 0) {
     return {
       ok: true,
