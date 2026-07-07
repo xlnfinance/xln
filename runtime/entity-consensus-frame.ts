@@ -132,6 +132,45 @@ const canonicalAccountInputForFrameHash = (value: unknown): Record<string, unkno
   };
 };
 
+const canonicalExternalWalletForFrameHash = (
+  wallet: NonNullable<EntityState['externalWallet']>,
+): Record<string, unknown> => ({
+  balances: Array.from(wallet.balances.entries())
+    .sort((a, b) => compareCanonicalText(a[0], b[0]))
+    .map(([owner, balances]) => [
+      owner,
+      Array.from(balances.entries())
+        .sort((a, b) => compareCanonicalText(a[0], b[0]))
+        .map(([key, record]) => [
+          key,
+          {
+            tokenAddress: String(record.tokenAddress || '').toLowerCase(),
+            ...(record.tokenId !== undefined ? { tokenId: Number(record.tokenId) } : {}),
+            balance: record.balance.toString(),
+            jHeight: Number(record.jHeight),
+            ...(record.transactionHash ? { transactionHash: record.transactionHash } : {}),
+          },
+        ]),
+    ]),
+  allowances: Array.from(wallet.allowances.entries())
+    .sort((a, b) => compareCanonicalText(a[0], b[0]))
+    .map(([owner, allowances]) => [
+      owner,
+      Array.from(allowances.entries())
+        .sort((a, b) => compareCanonicalText(a[0], b[0]))
+        .map(([key, record]) => [
+          key,
+          {
+            tokenAddress: String(record.tokenAddress || '').toLowerCase(),
+            spender: String(record.spender || '').toLowerCase(),
+            allowance: record.allowance.toString(),
+            jHeight: Number(record.jHeight),
+            ...(record.transactionHash ? { transactionHash: record.transactionHash } : {}),
+          },
+        ]),
+    ]),
+});
+
 const canonicalEntityTxForFrameHash = (tx: EntityTx): Record<string, unknown> => {
   if (tx.type === 'j_event') {
     return { type: tx.type, data: canonicalJEventDataForFrameHash(tx.data) };
@@ -179,6 +218,13 @@ export async function createEntityFrameHash(
     reserves: Array.from(newState.reserves.entries())
       .sort((a, b) => compareNumericKey(a[0], b[0]))
       .map(([k, v]) => [k, v.toString()]),
+    ...(newState.externalWallet
+      ? {
+          externalWalletHash: ethers.keccak256(ethers.toUtf8Bytes(
+            safeStringify(canonicalExternalWalletForFrameHash(newState.externalWallet)),
+          )),
+        }
+      : {}),
     lastFinalizedJHeight: newState.lastFinalizedJHeight,
     accountHashes: Array.from(newState.accounts.entries())
       .sort((a, b) => compareCanonicalText(a[0], b[0]))

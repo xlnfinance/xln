@@ -162,11 +162,11 @@ Scope: synthesized from four external admin/QA/runtime audits. This is the opera
   - Status: done. External-wallet API and local UI snapshots now resolve a safe source block from `getCurrentBlockNumber() - getFinalityDepth()`, read balances at that block tag, emit/apply the canonical `ExternalWalletSnapshot` at the source height/hash, and return source metadata to the browser. Assets shows a compact snapshot source line under the external EOA.
   - Evidence: L1 `bun test runtime/__tests__/external-wallet-api.test.ts` PASS `4/4` and proves tip `77` with depth `1` reads block `76`; wiring unit PASS `25/25`; focused screenshot e2e PASS `3/3`, wall `53.8s`, code hash `879f68670bb0a991`, browser errors `0`, benchmark OK vs `20260624-005624-512`, and asserts `external-wallet-source` renders.
 
-- [ ] Move display-only `externalWallet` state out of consensus hot-path entity state.
+- [x] Decide and harden signer-owned `externalWallet` state.
   - Impact: medium-high.
-  - Current issue: external wallet state is cloned/validated/persisted with EntityState even though it is excluded from the frame hash.
-  - Fix: move it to `env.runtimeState` or a dedicated side store keyed by entityId, with explicit source height/hash/finality metadata.
-  - Tests: entity frame hash remains unchanged by wallet display deltas; wallet panel still renders from side-store snapshots.
+  - Decision: keep external wallet balances/allowances inside the signer entity state, alongside reserves, instead of moving them to `env.runtimeState`.
+  - Fix: external wallet snapshot/delta application now lives in `runtime/signer-entity-wallet.ts`, rejects owners that are not configured entity validators, and commits `externalWalletHash` into the entity frame hash when wallet state exists.
+  - Tests: L1/L2 external wallet tests cover clone/storage, runtime input, baseline deltas, non-signer owner rejection, and deterministic frame hash commitment; focused isolated browser e2e covers direct external-to-external signer wallet move.
 
 - [x] Fix runId/timezone model.
   - Impact: medium.

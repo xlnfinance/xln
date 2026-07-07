@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
+import { createEntityFrameHash } from '../entity-consensus-frame';
 import { applyJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
 import { buildJEventsRuntimeInput } from '../jadapter/watcher';
 import {
@@ -9,13 +10,15 @@ import {
   createEmptyEnv,
   generateLazyEntityId,
 } from '../runtime';
+import { applySignerEntityExternalWalletSnapshot } from '../signer-entity-wallet';
 import { cloneEntityState } from '../state-helpers';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
-import type { ConsensusConfig, EntityState, JurisdictionEvent } from '../types';
+import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionEvent } from '../types';
 
 const TOKEN = '0x2222222222222222222222222222222222222222';
 const SPENDER = '0x3333333333333333333333333333333333333333';
 const NATIVE = '0x0000000000000000000000000000000000000000';
+type ExternalWalletSnapshotEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletSnapshot' }>;
 
 const makeConfig = (signerId: string): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -105,6 +108,28 @@ const buildSignedInput = (
 });
 
 describe('external wallet observed state', () => {
+  test('signer wallet module rejects a non-validator external owner', () => {
+    const signerId = `0x${'11'.repeat(20)}`;
+    const foreignOwner = `0x${'44'.repeat(20)}`;
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    const state = makeState(entityId, signerId);
+    const event: ExternalWalletSnapshotEvent = {
+      type: 'ExternalWalletSnapshot',
+      blockNumber: 41,
+      blockHash: `0x${'41'.repeat(32)}`,
+      transactionHash: `0x${'91'.repeat(32)}`,
+      data: {
+        entityId,
+        owner: foreignOwner,
+        nativeBalance: '1',
+      },
+    };
+
+    expect(() => applySignerEntityExternalWalletSnapshot(state, event, 41, `0x${'91'.repeat(32)}`))
+      .toThrow('EXTERNAL_WALLET_OWNER_NOT_SIGNER');
+    expect(state.externalWallet).toBeUndefined();
+  });
+
   test('applies finalized wallet snapshot and preserves it through clone/storage projection', async () => {
     const seed = 'external-wallet-state';
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -146,6 +171,73 @@ describe('external wallet observed state', () => {
     expect(hydrated.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_500n);
   });
 
+  test('entity frame hash commits to external wallet balances and allowances', async () => {
+    const seed = 'external-wallet-frame-hash';
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    const baseline = makeState(entityId, signerId);
+    baseline.externalWallet = {
+      balances: new Map([[signerId, new Map([
+        [NATIVE, {
+          tokenAddress: NATIVE,
+          tokenId: 0,
+          balance: 10n,
+          jHeight: 10,
+          transactionHash: `0x${'10'.repeat(32)}`,
+        }],
+        [TOKEN, {
+          tokenAddress: TOKEN,
+          tokenId: 7,
+          balance: 2_500n,
+          jHeight: 10,
+          transactionHash: `0x${'10'.repeat(32)}`,
+        }],
+      ])]]),
+      allowances: new Map([[signerId, new Map([[`${TOKEN}:${SPENDER}`, {
+        tokenAddress: TOKEN,
+        spender: SPENDER,
+        allowance: 900n,
+        jHeight: 10,
+        transactionHash: `0x${'10'.repeat(32)}`,
+      }]])]]),
+    };
+    const sameDataDifferentOrder = makeState(entityId, signerId);
+    sameDataDifferentOrder.externalWallet = {
+      balances: new Map([[signerId, new Map([
+        [TOKEN, {
+          tokenAddress: TOKEN,
+          tokenId: 7,
+          balance: 2_500n,
+          jHeight: 10,
+          transactionHash: `0x${'10'.repeat(32)}`,
+        }],
+        [NATIVE, {
+          tokenAddress: NATIVE,
+          tokenId: 0,
+          balance: 10n,
+          jHeight: 10,
+          transactionHash: `0x${'10'.repeat(32)}`,
+        }],
+      ])]]),
+      allowances: new Map([[signerId, new Map([[`${TOKEN}:${SPENDER}`, {
+        tokenAddress: TOKEN,
+        spender: SPENDER,
+        allowance: 900n,
+        jHeight: 10,
+        transactionHash: `0x${'10'.repeat(32)}`,
+      }]])]]),
+    };
+    const mutated = cloneEntityState(baseline);
+    mutated.externalWallet!.balances.get(signerId)!.get(TOKEN)!.balance = 2_501n;
+
+    const hashBaseline = await createEntityFrameHash('genesis', 1, 1_000, [], baseline);
+    const hashSame = await createEntityFrameHash('genesis', 1, 1_000, [], sameDataDifferentOrder);
+    const hashMutated = await createEntityFrameHash('genesis', 1, 1_000, [], mutated);
+
+    expect(hashSame).toBe(hashBaseline);
+    expect(hashMutated).not.toBe(hashBaseline);
+  });
+
   test('applies wallet snapshot to a projection-shaped replica through canonical runtime input', async () => {
     const seed = 'external-wallet-runtime-input';
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -154,13 +246,15 @@ describe('external wallet observed state', () => {
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
     env.quietRuntimeLogs = true;
-    env.eReplicas.set(`${entityId}:${signerId}`, {
+    const seededReplica: EntityReplica = {
       entityId,
       signerId,
       isProposer: true,
       state: makeState(entityId, signerId),
+      mempool: [],
       hankoWitness: new Map(),
-    } as any);
+    };
+    env.eReplicas.set(`${entityId}:${signerId}`, seededReplica);
 
     const input = buildJEventsRuntimeInput(env, [{
       name: 'ExternalWalletSnapshot',
@@ -225,6 +319,58 @@ describe('external wallet observed state', () => {
     const result = await applyJEvent(afterSnapshot.newState, buildSignedInput(env, entityId, signerId, delta), env);
     expect(result.newState.externalWallet?.balances.get(signerId)?.get(TOKEN)?.balance).toBe(2_100n);
     expect(result.newState.externalWallet?.allowances.get(signerId)?.get(`${TOKEN}:${SPENDER}`)?.allowance).toBe(700n);
+  });
+
+  test('rejects wallet snapshot and delta for an external owner outside entity validators', async () => {
+    const seed = 'external-wallet-non-signer-owner';
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const foreignOwner = deriveSignerAddressSync(seed, 'foreign').toLowerCase();
+    registerSignerKey(signerId, deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+
+    const snapshot: JurisdictionEvent = {
+      type: 'ExternalWalletSnapshot',
+      blockNumber: 42,
+      blockHash: `0x${'42'.repeat(32)}`,
+      transactionHash: 'external-wallet-snapshot:42:foreign-owner',
+      data: {
+        entityId,
+        owner: foreignOwner,
+        tokenBalances: [{ tokenAddress: TOKEN, tokenId: 7, balance: '2500' }],
+      },
+    };
+    await expect(
+      applyJEvent(makeState(entityId, signerId), buildSignedInput(env, entityId, signerId, snapshot), env),
+    ).rejects.toThrow('EXTERNAL_WALLET_OWNER_NOT_SIGNER');
+
+    const stateWithForeignBaseline = makeState(entityId, signerId);
+    stateWithForeignBaseline.externalWallet = {
+      balances: new Map([[foreignOwner, new Map([[TOKEN, {
+        tokenAddress: TOKEN,
+        tokenId: 7,
+        balance: 2_500n,
+        jHeight: 42,
+      }]])]]),
+      allowances: new Map(),
+    };
+    const delta: JurisdictionEvent = {
+      type: 'ExternalWalletDelta',
+      blockNumber: 43,
+      blockHash: `0x${'43'.repeat(32)}`,
+      transactionHash: `0x${'cd'.repeat(32)}`,
+      data: {
+        entityId,
+        owner: foreignOwner,
+        tokenAddress: TOKEN,
+        tokenId: 7,
+        balanceDelta: '1',
+      },
+    };
+    await expect(
+      applyJEvent(stateWithForeignBaseline, buildSignedInput(env, entityId, signerId, delta), env),
+    ).rejects.toThrow('EXTERNAL_WALLET_OWNER_NOT_SIGNER');
   });
 
   test('rejects ERC20 delta without a committed wallet baseline', async () => {

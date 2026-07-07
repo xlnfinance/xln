@@ -45,6 +45,10 @@ import type { JEventApplyResult, JEventMempoolOp } from './j-events-types';
 import { appendBatchHistory, emptyOpBreakdown } from './j-events-history';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
 import { isDisputeStartedByLeft } from '../account-dispute-policy';
+import {
+  applySignerEntityExternalWalletDelta,
+  applySignerEntityExternalWalletSnapshot,
+} from '../signer-entity-wallet';
 
 const jEventLog = createStructuredLogger('j.event');
 
@@ -106,36 +110,6 @@ const getTokenSymbol = (tokenId: number): string => {
 
 const getTokenDecimals = (tokenId: number): number => {
   return getTokenInfo(tokenId).decimals;
-};
-
-const NATIVE_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000';
-
-const normalizeExternalAddress = (value: unknown, label: string): string => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (!/^0x[0-9a-f]{40}$/.test(normalized)) {
-    throw new Error(`j_event rejected: invalid external wallet ${label}`);
-  }
-  return normalized;
-};
-
-const externalBalanceKey = (tokenAddress: string): string => tokenAddress.toLowerCase();
-
-const externalAllowanceKey = (tokenAddress: string, spender: string): string =>
-  `${tokenAddress.toLowerCase()}:${spender.toLowerCase()}`;
-
-const ensureExternalWalletState = (state: EntityState): NonNullable<EntityState['externalWallet']> => {
-  if (!state.externalWallet) {
-    state.externalWallet = { balances: new Map(), allowances: new Map() };
-  }
-  return state.externalWallet;
-};
-
-const ensureNestedMap = <T>(map: Map<string, Map<string, T>>, key: string): Map<string, T> => {
-  const existing = map.get(key);
-  if (existing) return existing;
-  const next = new Map<string, T>();
-  map.set(key, next);
-  return next;
 };
 
 const syncJBatchEntityNonceFromEvent = (
@@ -924,107 +898,20 @@ async function applyFinalizedJEvent(
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);
 
   } else if (event.type === 'ExternalWalletSnapshot') {
-    const { entityId, owner, nativeBalance, tokenBalances, allowances } = event.data;
+    const { entityId } = event.data;
     if (String(entityId).toLowerCase() !== String(entityState.entityId).toLowerCase()) {
       return done();
     }
-    const normalizedOwner = normalizeExternalAddress(owner, 'owner');
-    const wallet = ensureExternalWalletState(newState);
-    const balancesByToken = ensureNestedMap(wallet.balances, normalizedOwner);
-    const allowancesBySpender = ensureNestedMap(wallet.allowances, normalizedOwner);
-    const jHeight = Number(event.blockNumber ?? blockNumber);
-
-    if (nativeBalance !== undefined) {
-      balancesByToken.set(NATIVE_TOKEN_ADDRESS, {
-        tokenAddress: NATIVE_TOKEN_ADDRESS,
-        tokenId: 0,
-        balance: BigInt(nativeBalance),
-        jHeight,
-        transactionHash,
-      });
-    }
-    for (const entry of tokenBalances ?? []) {
-      const tokenAddress = normalizeExternalAddress(entry.tokenAddress, 'tokenAddress');
-      const tokenId = typeof entry.tokenId === 'number' && Number.isInteger(entry.tokenId) && entry.tokenId >= 0
-        ? entry.tokenId
-        : undefined;
-      balancesByToken.set(externalBalanceKey(tokenAddress), {
-        tokenAddress,
-        ...(tokenId !== undefined ? { tokenId } : {}),
-        balance: BigInt(entry.balance),
-        jHeight,
-        transactionHash,
-      });
-    }
-    for (const entry of allowances ?? []) {
-      const tokenAddress = normalizeExternalAddress(entry.tokenAddress, 'tokenAddress');
-      const spender = normalizeExternalAddress(entry.spender, 'spender');
-      allowancesBySpender.set(externalAllowanceKey(tokenAddress, spender), {
-        tokenAddress,
-        spender,
-        allowance: BigInt(entry.allowance),
-        jHeight,
-        transactionHash,
-      });
-    }
+    const normalizedOwner = applySignerEntityExternalWalletSnapshot(newState, event, blockNumber, transactionHash);
 
     addMessage(newState, `💼 EXTERNAL: ${normalizedOwner.slice(0, 10)} snapshot | Block ${blockNumber} | Tx ${txHashShort}`);
 
   } else if (event.type === 'ExternalWalletDelta') {
-    const { entityId, owner, tokenAddress, tokenId, balanceDelta, spender, allowance } = event.data;
+    const { entityId } = event.data;
     if (String(entityId).toLowerCase() !== String(entityState.entityId).toLowerCase()) {
       return done();
     }
-    const normalizedOwner = normalizeExternalAddress(owner, 'owner');
-    const normalizedToken = normalizeExternalAddress(tokenAddress, 'tokenAddress');
-    const wallet = newState.externalWallet;
-    const balancesByToken = wallet?.balances.get(normalizedOwner);
-    const allowancesBySpender = wallet?.allowances.get(normalizedOwner);
-    const jHeight = Number(event.blockNumber ?? blockNumber);
-
-    if (balanceDelta !== undefined) {
-      const tokenKey = externalBalanceKey(normalizedToken);
-      const current = balancesByToken?.get(tokenKey);
-      if (!current) {
-        throw new Error(
-          `EXTERNAL_WALLET_BASELINE_MISSING:balance entity=${String(entityId).slice(0, 12)} owner=${normalizedOwner} token=${normalizedToken}`,
-        );
-      }
-      const nextBalance = current.balance + BigInt(balanceDelta);
-      if (nextBalance < 0n) {
-        throw new Error(
-          `EXTERNAL_WALLET_BALANCE_UNDERFLOW entity=${String(entityId).slice(0, 12)} owner=${normalizedOwner} token=${normalizedToken}`,
-        );
-      }
-      const nextTokenId = typeof tokenId === 'number' && Number.isInteger(tokenId) && tokenId >= 0
-        ? tokenId
-        : current.tokenId;
-      balancesByToken!.set(tokenKey, {
-        tokenAddress: normalizedToken,
-        ...(nextTokenId !== undefined ? { tokenId: nextTokenId } : {}),
-        balance: nextBalance,
-        jHeight,
-        transactionHash,
-      });
-    }
-
-    if (allowance !== undefined || spender !== undefined) {
-      const normalizedSpender = normalizeExternalAddress(spender, 'spender');
-      const allowanceKey = externalAllowanceKey(normalizedToken, normalizedSpender);
-      const current = allowancesBySpender?.get(allowanceKey);
-      if (!current) {
-        throw new Error(
-          `EXTERNAL_WALLET_BASELINE_MISSING:allowance entity=${String(entityId).slice(0, 12)} owner=${normalizedOwner} token=${normalizedToken} spender=${normalizedSpender}`,
-        );
-      }
-      allowancesBySpender!.set(allowanceKey, {
-        tokenAddress: normalizedToken,
-        spender: normalizedSpender,
-        allowance: allowance !== undefined ? BigInt(allowance) : current.allowance,
-        jHeight,
-        transactionHash,
-      });
-    }
+    const normalizedOwner = applySignerEntityExternalWalletDelta(newState, event, blockNumber, transactionHash);
 
     addMessage(newState, `💼 EXTERNAL: ${normalizedOwner.slice(0, 10)} delta | Block ${blockNumber} | Tx ${txHashShort}`);
 
