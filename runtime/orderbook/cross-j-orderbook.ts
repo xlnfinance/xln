@@ -3,8 +3,8 @@ import {
   normalizeSwapOfferForOrderbook,
   type SwapCancelEvent,
 } from '../entity-tx/handlers/account';
-import { type OrderbookExtState } from '../orderbook';
-import { removeBookOrderById } from '../orderbook/cross-j';
+import { type OrderbookExtState } from './index';
+import { removeBookOrderById } from './cross-j';
 import {
   assertCrossJurisdictionOrderAdmissible,
   crossJurisdictionBookAdmissionKeyFor,

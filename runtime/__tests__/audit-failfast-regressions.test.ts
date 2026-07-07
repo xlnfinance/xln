@@ -22,7 +22,7 @@ import { createEntityFrameHash } from '../entity-consensus-frame';
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
-} from '../entity-consensus/cross-j-orderbook';
+} from '../orderbook/cross-j-orderbook';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
   buildCrossJurisdictionMarketOffer,

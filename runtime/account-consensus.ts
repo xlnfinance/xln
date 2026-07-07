@@ -312,6 +312,73 @@ async function buildDuplicateCommittedFrameAck(
   };
 }
 
+async function handleReplayOrObsoleteAccountInput(
+  env: Env,
+  accountMachine: AccountMachine,
+  input: AccountInput,
+  replay: AccountInputReplayClassification,
+  events: string[],
+): Promise<HandleAccountInputResult | undefined> {
+  if (input.newAccountFrame !== undefined && input.newAccountFrame !== null) {
+    // Network delivery is at-least-once. If the peer retries an already
+    // committed frame because our ACK was lost, re-ACK before the generic stale
+    // guards. The safety gate is exact: same height and same committed stateHash.
+    const duplicateAck = await buildDuplicateCommittedFrameAck(
+      env,
+      accountMachine,
+      input,
+      events,
+      replay.currentHeight,
+      input.newAccountFrame,
+    );
+    if (duplicateAck) return duplicateAck;
+  }
+  if (replay.ackIsStale && (replay.newFrameHeight === undefined || replay.frameIsStale)) {
+    // Network delivery is at-least-once: a valid ACK/frame_ack can arrive after
+    // the account has already advanced. Its dispute seal was signed for the old
+    // account nonce, so validating it against the newer local nonce creates a
+    // false DISPUTE_SEAL_HASH_MISMATCH. Classify pure stale traffic before seal
+    // validation; any input that can still advance state falls through and must
+    // pass the full dispute-seal checks below.
+    accountLog.debug('input.stale_ack_ignored', {
+      currentHeight: replay.currentHeight,
+      pendingHeight: replay.pendingHeight,
+      inputHeight: replay.inputHeight,
+      newFrameHeight: replay.newFrameHeight ?? null,
+      from: shortId(input.fromEntityId),
+    });
+    return { success: true, events };
+  }
+  if (!input.prevHanko && replay.frameIsStale) {
+    accountLog.debug('input.stale_frame_ignored', {
+      currentHeight: replay.currentHeight,
+      inputHeight: replay.inputHeight,
+      newFrameHeight: replay.newFrameHeight ?? null,
+      from: shortId(input.fromEntityId),
+    });
+    return { success: true, events };
+  }
+  if (
+    input.prevHanko &&
+    !input.newAccountFrame &&
+    !accountMachine.pendingFrame &&
+    (accountMachine.status ?? 'active') !== 'active'
+  ) {
+    events.push(
+      `ℹ️ Ignored obsolete ACK for frozen account frame ${String(replay.inputHeight ?? 'none')} ` +
+      `(current=${String(accountMachine.currentHeight ?? 0)}, status=${String(accountMachine.status)})`,
+    );
+    accountLog.debug('input.frozen_ack_ignored', {
+      currentHeight: replay.currentHeight,
+      inputHeight: replay.inputHeight,
+      status: accountMachine.status,
+      from: shortId(input.fromEntityId),
+    });
+    return { success: true, events };
+  }
+  return undefined;
+}
+
 type PendingFrameAckResult =
   | { kind: 'not_applicable' }
   | { kind: 'fallthrough' }
@@ -550,6 +617,120 @@ type IncomingFrameValidationResult =
 type IncomingFrameResult =
   | { kind: 'not_applicable' }
   | { kind: 'return'; result: HandleAccountInputResult };
+
+type AccountAckTarget = {
+  pendingHeight: number;
+  bundledNewFrameHeight: number | undefined;
+  ackHeight: number | undefined;
+};
+
+function resolveAccountAckTarget(
+  accountMachine: AccountMachine,
+  input: AccountInput,
+  normalizedInputHeight: number | undefined,
+): AccountAckTarget {
+  const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  const bundledNewFrameHeight =
+    input.newAccountFrame === undefined || input.newAccountFrame === null
+      ? undefined
+      : Number(input.newAccountFrame.height);
+  const ackTargetsPendingFrame =
+    Boolean(input.prevHanko) &&
+    Boolean(accountMachine.pendingFrame) &&
+    // Normal ACK-only message.
+    (normalizedInputHeight === pendingHeight ||
+      // BATCHED message: ACK for pending frame + next proposed frame.
+      (bundledNewFrameHeight !== undefined && bundledNewFrameHeight === pendingHeight + 1));
+  return {
+    pendingHeight,
+    bundledNewFrameHeight,
+    ackHeight: ackTargetsPendingFrame ? pendingHeight : normalizedInputHeight,
+  };
+}
+
+function isSameHeightSimultaneousProposalAck(
+  accountMachine: AccountMachine,
+  input: AccountInput,
+  normalizedInputHeight: number | undefined,
+): boolean {
+  const pendingFrameHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  return (
+    Boolean(input.prevHanko) &&
+    Boolean(input.newAccountFrame) &&
+    pendingFrameHeight > 0 &&
+    Number(input.newAccountFrame?.height ?? 0) === pendingFrameHeight &&
+    Number(normalizedInputHeight ?? 0) === pendingFrameHeight - 1
+  );
+}
+
+function handleUnmatchedAck(
+  accountMachine: AccountMachine,
+  input: AccountInput,
+  normalizedInputHeight: number | undefined,
+  ackProcessed: boolean,
+  events: string[],
+  committedFrames: AccountCommittedFrame[],
+  phase: 'before_frame' | 'after_frame',
+): HandleAccountInputResult | undefined {
+  if (!input.prevHanko || ackProcessed) return undefined;
+  if (phase === 'before_frame') {
+    if (!accountMachine.pendingFrame || isSameHeightSimultaneousProposalAck(accountMachine, input, normalizedInputHeight)) {
+      return undefined;
+    }
+    const pending = accountMachine.pendingFrame.height;
+    const staleAck =
+      normalizedInputHeight !== undefined &&
+      Number(normalizedInputHeight) > 0 &&
+      Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
+    if (staleAck) {
+      events.push(
+        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
+      );
+      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
+    }
+    return {
+      success: false,
+      error:
+        `Unmatched ACK with pending frame: ` +
+        `inputHeight=${String(normalizedInputHeight ?? 'none')} ` +
+        `pending=${String(pending)} ` +
+        `newFrame=${String(input.newAccountFrame?.height ?? 'none')}`,
+      events,
+    };
+  }
+
+  if (input.newAccountFrame) return undefined;
+  const pending = accountMachine.pendingFrame?.height ?? 'none';
+  const nextHeightAckWithoutPending =
+    normalizedInputHeight !== undefined &&
+    Number(normalizedInputHeight) === Number(accountMachine.currentHeight ?? 0) + 1 &&
+    !accountMachine.pendingFrame;
+  const staleAck =
+    normalizedInputHeight !== undefined &&
+    Number(normalizedInputHeight) > 0 &&
+    Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
+  if (staleAck) {
+    events.push(
+      `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
+    );
+    return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
+  }
+  if (nextHeightAckWithoutPending) {
+    // Remote delivery is only ordered per transport, not across the local
+    // frame-install tick. A pure ACK for the next frame cannot advance state
+    // without the matching pending frame, so keep it non-mutating and rely on
+    // the account pending resend path to recover the ACK deterministically.
+    events.push(
+      `Ignored early ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=none)`,
+    );
+    return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
+  }
+  return {
+    success: false,
+    error: `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} pending=${String(pending)}`,
+    events,
+  };
+}
 
 function handleSameHeightIncomingFrame(
   env: Env,
@@ -1454,63 +1635,14 @@ export async function applyAccountInput(
 
   const replay = classifyAccountInputReplay(accountMachine, input);
 
-  if (input.newAccountFrame !== undefined && input.newAccountFrame !== null) {
-    // Network delivery is at-least-once. If the peer retries an already
-    // committed frame because our ACK was lost, re-ACK before the generic stale
-    // guards. The safety gate is exact: same height and same committed stateHash.
-    const duplicateAck = await buildDuplicateCommittedFrameAck(
-      env,
-      accountMachine,
-      input,
-      events,
-      replay.currentHeight,
-      input.newAccountFrame,
-    );
-    if (duplicateAck) return duplicateAck;
-  }
-  if (replay.ackIsStale && (replay.newFrameHeight === undefined || replay.frameIsStale)) {
-    // Network delivery is at-least-once: a valid ACK/frame_ack can arrive after
-    // the account has already advanced. Its dispute seal was signed for the old
-    // account nonce, so validating it against the newer local nonce creates a
-    // false DISPUTE_SEAL_HASH_MISMATCH. Classify pure stale traffic before seal
-    // validation; any input that can still advance state falls through and must
-    // pass the full dispute-seal checks below.
-    accountLog.debug('input.stale_ack_ignored', {
-      currentHeight: replay.currentHeight,
-      pendingHeight: replay.pendingHeight,
-      inputHeight: replay.inputHeight,
-      newFrameHeight: replay.newFrameHeight ?? null,
-      from: shortId(input.fromEntityId),
-    });
-    return { success: true, events };
-  }
-  if (!input.prevHanko && replay.frameIsStale) {
-    accountLog.debug('input.stale_frame_ignored', {
-      currentHeight: replay.currentHeight,
-      inputHeight: replay.inputHeight,
-      newFrameHeight: replay.newFrameHeight ?? null,
-      from: shortId(input.fromEntityId),
-    });
-    return { success: true, events };
-  }
-  if (
-    input.prevHanko &&
-    !input.newAccountFrame &&
-    !accountMachine.pendingFrame &&
-    (accountMachine.status ?? 'active') !== 'active'
-  ) {
-    events.push(
-      `ℹ️ Ignored obsolete ACK for frozen account frame ${String(replay.inputHeight ?? 'none')} ` +
-      `(current=${String(accountMachine.currentHeight ?? 0)}, status=${String(accountMachine.status)})`,
-    );
-    accountLog.debug('input.frozen_ack_ignored', {
-      currentHeight: replay.currentHeight,
-      inputHeight: replay.inputHeight,
-      status: accountMachine.status,
-      from: shortId(input.fromEntityId),
-    });
-    return { success: true, events };
-  }
+  const replayGateResult = await handleReplayOrObsoleteAccountInput(
+    env,
+    accountMachine,
+    input,
+    replay,
+    events,
+  );
+  if (replayGateResult) return replayGateResult;
 
   let validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
   try {
@@ -1524,19 +1656,7 @@ export async function applyAccountInput(
     return { success: false, error: (error as Error).message, events };
   }
 
-  const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
-  const bundledNewFrameHeight =
-    input.newAccountFrame === undefined || input.newAccountFrame === null
-      ? undefined
-      : Number(input.newAccountFrame.height);
-  const ackTargetsPendingFrame =
-    Boolean(input.prevHanko) &&
-    Boolean(accountMachine.pendingFrame) &&
-    // Normal ACK-only message.
-    (normalizedInputHeight === pendingHeight ||
-      // BATCHED message: ACK for pending frame + next proposed frame.
-      (bundledNewFrameHeight !== undefined && bundledNewFrameHeight === pendingHeight + 1));
-  const ackHeight = ackTargetsPendingFrame ? pendingHeight : normalizedInputHeight;
+  const { ackHeight } = resolveAccountAckTarget(accountMachine, input, normalizedInputHeight);
 
   const pendingAckResult = await handlePendingFrameAck(
     env,
@@ -1551,40 +1671,20 @@ export async function applyAccountInput(
   if (pendingAckResult.kind === 'return') return pendingAckResult.result;
   if (pendingAckResult.kind === 'fallthrough') ackProcessed = true;
 
-  const pendingFrameHeight = Number(accountMachine.pendingFrame?.height ?? 0);
-  const isSameHeightSimultaneousProposal =
-    Boolean(input.prevHanko) &&
-    Boolean(input.newAccountFrame) &&
-    pendingFrameHeight > 0 &&
-    Number(input.newAccountFrame?.height ?? 0) === pendingFrameHeight &&
-    Number(normalizedInputHeight ?? 0) === pendingFrameHeight - 1;
-
   // ACK for a pending frame must never be ignored unless this is the valid
   // same-height race case: peer ACKs the last committed frame and proposes the
   // same next height we already have pending. That path is resolved below by
   // the simultaneous-proposal handler.
-  if (input.prevHanko && !ackProcessed && accountMachine.pendingFrame && !isSameHeightSimultaneousProposal) {
-    const pending = accountMachine.pendingFrame.height;
-    const staleAck =
-      normalizedInputHeight !== undefined &&
-      Number(normalizedInputHeight) > 0 &&
-      Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
-    if (staleAck) {
-      events.push(
-        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
-      );
-      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
-    }
-    return {
-      success: false,
-      error:
-        `Unmatched ACK with pending frame: ` +
-        `inputHeight=${String(normalizedInputHeight ?? 'none')} ` +
-        `pending=${String(pending)} ` +
-        `newFrame=${String(input.newAccountFrame?.height ?? 'none')}`,
-      events,
-    };
-  }
+  const unmatchedPendingAck = handleUnmatchedAck(
+    accountMachine,
+    input,
+    normalizedInputHeight,
+    ackProcessed,
+    events,
+    committedFrames,
+    'before_frame',
+  );
+  if (unmatchedPendingAck) return unmatchedPendingAck;
 
   const incomingFrameResult = await handleIncomingAccountFrame(
     env,
@@ -1601,38 +1701,16 @@ export async function applyAccountInput(
   if (incomingFrameResult.kind === 'return') return incomingFrameResult.result;
 
   // ACK inputs must never be silently ignored; this causes replay divergence.
-  if (input.prevHanko && !ackProcessed && !input.newAccountFrame) {
-    const pending = accountMachine.pendingFrame?.height ?? 'none';
-    const nextHeightAckWithoutPending =
-      normalizedInputHeight !== undefined &&
-      Number(normalizedInputHeight) === Number(accountMachine.currentHeight ?? 0) + 1 &&
-      !accountMachine.pendingFrame;
-    const staleAck =
-      normalizedInputHeight !== undefined &&
-      Number(normalizedInputHeight) > 0 &&
-      Number(normalizedInputHeight) <= Number(accountMachine.currentHeight ?? 0);
-    if (staleAck) {
-      events.push(
-        `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
-      );
-      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
-    }
-    if (nextHeightAckWithoutPending) {
-      // Remote delivery is only ordered per transport, not across the local
-      // frame-install tick. A pure ACK for the next frame cannot advance state
-      // without the matching pending frame, so keep it non-mutating and rely on
-      // the account pending resend path to recover the ACK deterministically.
-      events.push(
-        `Ignored early ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=none)`,
-      );
-      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
-    }
-    return {
-      success: false,
-      error: `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} pending=${String(pending)}`,
-      events,
-    };
-  }
+  const unmatchedAck = handleUnmatchedAck(
+    accountMachine,
+    input,
+    normalizedInputHeight,
+    ackProcessed,
+    events,
+    committedFrames,
+    'after_frame',
+  );
+  if (unmatchedAck) return unmatchedAck;
 
   if (HEAVY_LOGS) console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
   return {

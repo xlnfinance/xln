@@ -78,6 +78,14 @@ export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 export type { JAdapter, JEvent } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
+export type {
+  MppChallenge,
+  MppChallengeBindingInput,
+  MppCredential,
+  MppJsonRecord,
+  MppJsonValue,
+  MppReceipt,
+} from './agent-payments/mpp';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
 export type {
   RuntimeAdapter,
@@ -88,6 +96,18 @@ export type {
 	  RuntimeAdapterStatus,
 	} from './radapter';
 export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
+export {
+  buildMppChallengeHeader,
+  buildMppCredentialHeader,
+  buildMppReceiptHeader,
+  canonicalizeMppJson,
+  computeMppChallengeId,
+  decodeMppJson,
+  encodeMppJson,
+  parseMppChallengeHeader,
+  parseMppCredentialHeader,
+  parseMppReceiptHeader,
+} from './agent-payments/mpp';
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
@@ -383,6 +403,21 @@ export interface XLNModule {
   safeStringify: (obj: unknown, space?: number) => string;
   encode: (data: unknown) => Uint8Array;
   decode: (data: Uint8Array) => unknown;
+
+  // Machine Payments Protocol core compatibility
+  canonicalizeMppJson: (value: unknown) => string;
+  encodeMppJson: (value: unknown) => string;
+  decodeMppJson: <T = import('./agent-payments/mpp').MppJsonValue>(value: string) => T;
+  buildMppChallengeHeader: (challenge: import('./agent-payments/mpp').MppChallenge) => string;
+  parseMppChallengeHeader: (header: string) => import('./agent-payments/mpp').MppChallenge;
+  buildMppCredentialHeader: (credential: import('./agent-payments/mpp').MppCredential) => string;
+  parseMppCredentialHeader: (header: string) => import('./agent-payments/mpp').MppCredential;
+  buildMppReceiptHeader: (receipt: import('./agent-payments/mpp').MppReceipt) => string;
+  parseMppReceiptHeader: (header: string) => import('./agent-payments/mpp').MppReceipt;
+  computeMppChallengeId: (
+    secret: string | Uint8Array,
+    challenge: import('./agent-payments/mpp').MppChallengeBindingInput,
+  ) => string;
 
   // Validation
   validateDelta: (delta: unknown) => Delta;

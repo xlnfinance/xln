@@ -66,7 +66,7 @@ import {
   getCrossJurisdictionBookAdmissionError,
   isCrossJurisdictionBookAdmissionPending,
   normalizeEntityRef,
-} from './entity-consensus/cross-j-orderbook';
+} from './orderbook/cross-j-orderbook';
 import { markCrossJurisdictionBookAdmissionResolving } from './cross-jurisdiction-orderbook';
 import { createEntityFrameHash } from './entity-consensus-frame';
 import {

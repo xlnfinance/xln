@@ -103,7 +103,7 @@ const CORE_FILES = {
     'cross-jurisdiction-market.ts',          // Canonical cross-j market derivation
     'cross-jurisdiction-orderbook.ts',       // Cross-j book-owner and route ownership rules
     'cross-jurisdiction-boundary.ts',        // Runtime topology for source/target/book-owner roles
-    'entity-consensus/cross-j-orderbook.ts', // Cross-j admission lookup/stash/drain helpers
+    'orderbook/cross-j-orderbook.ts', // Cross-j admission lookup/stash/drain helpers
     'entity-tx/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
     'entity-tx/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
     'entity-tx/handlers/swap-requests.ts',   // Same-chain and cross-j swap request creation
@@ -252,7 +252,7 @@ const CROSS_FILES = {
     'runtime-output-routing.ts',
     'runtime-j-submit.ts',
     'entity-consensus.ts',
-    'entity-consensus/cross-j-orderbook.ts',
+    'orderbook/cross-j-orderbook.ts',
     'account-consensus.ts',
     'account-consensus-state.ts',
     'account-dispute-policy.ts',
@@ -478,7 +478,7 @@ const ORDERBOOK_FILES = {
     'swap-keys.ts',
     'open-swap-offers.ts',
     'entity-consensus.ts',
-    'entity-consensus/cross-j-orderbook.ts',
+    'orderbook/cross-j-orderbook.ts',
     'entity-tx/handlers/account.ts',
     'entity-tx/handlers/account/orderbook-offers.ts',
     'entity-tx/handlers/account/orderbook-queue.ts',
@@ -1021,7 +1021,7 @@ Read these together:
 - \`runtime/cross-jurisdiction-market.ts\`
 - \`runtime/cross-jurisdiction-orderbook.ts\`
 - \`runtime/cross-jurisdiction-boundary.ts\`
-- \`runtime/entity-consensus/cross-j-orderbook.ts\`
+- \`runtime/orderbook/cross-j-orderbook.ts\`
 - \`runtime/entity-tx/handlers/cross-j-*.ts\`
 - \`runtime/account-tx/handlers/cross-swap-fill-ack.ts\`
 
@@ -1140,7 +1140,7 @@ xln/
       cross-jurisdiction.ts       ${fileSizes['runtime/cross-jurisdiction.ts'] || '?'} lines - Cross-j route hashes and fill progress
       cross-jurisdiction-market.ts ${fileSizes['runtime/cross-jurisdiction-market.ts'] || '?'} lines - Cross-j market derivation
       cross-jurisdiction-orderbook.ts ${fileSizes['runtime/cross-jurisdiction-orderbook.ts'] || '?'} lines - Cross-j book owner rules
-      entity-consensus/cross-j-orderbook.ts ${fileSizes['runtime/entity-consensus/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
+      orderbook/cross-j-orderbook.ts ${fileSizes['runtime/orderbook/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
       entity-tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity-tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
       account-tx/handlers/swap-*.ts - Account-level offer/resolve/cancel

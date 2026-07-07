@@ -4011,6 +4011,26 @@ export {
   getCrossJurisdictionPrivateSeed,
 } from './cross-jurisdiction';
 export { buildDisputeArgumentsForSnapshot } from './dispute-arguments';
+export {
+  buildMppChallengeHeader,
+  buildMppCredentialHeader,
+  buildMppReceiptHeader,
+  canonicalizeMppJson,
+  computeMppChallengeId,
+  decodeMppJson,
+  encodeMppJson,
+  parseMppChallengeHeader,
+  parseMppCredentialHeader,
+  parseMppReceiptHeader,
+} from './agent-payments/mpp';
+export type {
+  MppChallenge,
+  MppChallengeBindingInput,
+  MppCredential,
+  MppJsonRecord,
+  MppJsonValue,
+  MppReceipt,
+} from './agent-payments/mpp';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 // Runtime no longer keeps a module-global env/db; these pure wrappers expose
