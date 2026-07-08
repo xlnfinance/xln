@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import {
   buildCappedTestnetGateSteps,
@@ -53,6 +54,13 @@ test('capped testnet gate includes agreed one-hour soak unless explicitly skippe
 
   const preflight = buildCappedTestnetGateSteps(validPolicy(), { skipSoak: true });
   expect(preflight.some(step => step.command.includes('--minutes=60'))).toBe(false);
+});
+
+test('package capped soak script matches the agreed one-hour policy', () => {
+  const packageJson = JSON.parse(readFileSync('package.json', 'utf8')) as { scripts?: Record<string, string> };
+  expect(packageJson.scripts?.['soak:capped-testnet']).toBe(
+    `bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=${MAINNET_GATE.soakMinutes}`,
+  );
 });
 
 test('capped testnet gate arg parser supports preflight and dry run', () => {

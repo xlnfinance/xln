@@ -12,17 +12,19 @@ acceptance prompt and evidence loop in
 
 ## Current Position
 
-**Date:** 2026-06-14
+**Date:** 2026-07-08
 **State:** current `main` is not mainnet-ready.
 
 The current branch materially raised the floor: watchtower recovery is live,
 encrypted, scheduled, covered by browser E2E, direct same-chain/cross-j swaps
-and lending are in the fast E2E gate, `bun run gate:release` passed, production
-health smoke passed, and a release soak completed 13 full gate/benchmark
-iterations before being stopped manually. That is enough for serious
-public-testnet hardening. It is not enough for real funds because the full
-uninterrupted release soak, real mainnet ops, Peer State Refresh, and external
-audit are still open.
+and lending are in the fast E2E gate, `bun run gate:release` passed on the
+release line, `bun run test:all:fast` passed on 2026-07-08 with 95/95 isolated
+browser shards, `bun run security:audit-pack` passed on 2026-07-08, and a
+historical release soak completed 13 full gate/benchmark iterations before
+being stopped manually. That is enough for serious public-testnet hardening. It
+is not enough for real funds because the full uninterrupted current
+mainnet-preflight soak, signing/HSM separation, real mainnet ops, Peer State
+Refresh, and independent external audit are still open.
 
 ## Public Testnet / Demo Scope
 
@@ -103,9 +105,12 @@ bun run gate:release
 bun run soak:release
 ```
 
-Current evidence: `bun run gate:release` passed on `d328c43a`; the long
-`bun run soak:release` command was manually stopped after 13 complete successful
-iterations, so it is useful evidence but not a completed gate.
+Current evidence: `bun run gate:release` passed on the release line; `bun run
+test:all:fast` and `bun run security:audit-pack` passed on 2026-07-08. The
+historical long soak was manually stopped after 13 complete successful
+iterations, so it is useful evidence but not a completed gate. The current
+required soak evidence is the one-hour `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak`
+run from a clean tree.
 
 ### 4. Operational readiness
 
@@ -145,6 +150,9 @@ bun run security:audit-pack
 ```
 
 Brief: [docs/security/external-audit-brief.md](security/external-audit-brief.md)
+
+The audit pack command must stay green, but green internal gates are not a
+substitute for an independent audit before uncapped real funds.
 
 ## Things That Are Mainnet-Relevant But Not First-Launch Gates
 

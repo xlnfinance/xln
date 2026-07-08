@@ -2,6 +2,12 @@
 
 This is the handoff brief for an independent reviewer before any open testnet or mainnet exposure. The goal is not a broad style review. The goal is to prove that runtime consensus, storage recovery, J-layer settlement, transport ingress, and cross-jurisdiction swaps fail closed under adversarial inputs.
 
+Last refreshed: 2026-07-08. Current internal evidence includes green
+`bun run security:audit-pack`, green `bun run check`, and a green
+`bun run test:all:fast` run with scenarios exiting `0` and 95/95 isolated
+browser shards passing. This is handoff evidence only; it is not external audit
+sign-off.
+
 ## Scope
 
 Review these surfaces first:
@@ -107,6 +113,17 @@ The soak release command is deliberately long. It is the operational evidence fo
   multihop is advisory/manual only.
 - Do not accept BrowserVM-only evidence for J-layer correctness. BrowserVM is a
   dev/demo simulator for now; the public-testnet gate is RPC/anvil only.
+
+## Known Open Mainnet Blockers
+
+- Signing remains scheduled for a remote signer/HSM boundary; raw runtime
+  signing seed material must not be treated as a final real-funds posture.
+- The current one-hour mainnet-preflight soak must complete uninterrupted from a
+  clean tree.
+- Real mainnet RPC endpoints, operator/tower funding, gas policy, incident
+  drills, and alert thresholds must be explicit before uncapped launch.
+- Independent external audit is required before real user funds, even when all
+  internal gates are green.
 
 ## Auditor Deliverables
 

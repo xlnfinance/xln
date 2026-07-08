@@ -210,8 +210,8 @@ Report format:
      dispute, reload, and local backup import.
 
 4. Run the 1-hour soak.
-   - Current `bun run soak:release` is a 240-minute script.
-   - The capped-testnet gate command is:
+   - `bun run soak:release` remains the longer release soak script.
+   - The capped-testnet gate command is the one-hour soak:
 
      ```bash
      bun run soak:capped-testnet

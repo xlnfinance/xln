@@ -9,7 +9,7 @@ summarizes why those items matter and how they fit the protocol.
 
 ## Current Snapshot
 
-**Date:** 2026-06-14
+**Date:** 2026-07-08
 **State:** current `main` is production-demo/public-testnet grade, not mainnet-ready.
 
 What is true now:
@@ -22,12 +22,19 @@ What is true now:
   covered by browser E2E;
 - direct same-chain swaps, direct cross-j swaps, and lending are included in the
   fast E2E gate;
-- `bun run gate:release` passed on current `main`;
+- `bun run gate:release` passed on the current release line;
+- `bun run test:all:fast` passed on 2026-07-08 with scenarios green and
+  95/95 isolated browser shards green;
+- `bun run security:audit-pack` passed on 2026-07-08;
+- test runners now clean old generated artifacts by default and enforce a
+  50GiB generated-workspace budget unless an operator explicitly keeps
+  artifacts;
 - a release soak passed 13 complete `gate:ci + hub10k` iterations before manual
-  stop, but the full 240-minute soak remains open;
-- remaining mainnet risk is concentrated in uninterrupted release-duration soak,
-  external audit, real mainnet ops, PSR/peer recovery, observability, and
-  explicit product boundaries.
+  stop, but the current one-hour mainnet-preflight soak has not completed
+  uninterrupted on this line;
+- remaining mainnet risk is concentrated in signing/HSM separation,
+  uninterrupted release-duration soak, external audit, real mainnet ops,
+  PSR/peer recovery, observability, and explicit product boundaries.
 
 ## Precedence
 
@@ -85,6 +92,13 @@ When docs disagree, use this order:
   tests, soundcheck, frontend check, contract full suite, RPC settlement parity,
   security audit pack, persistence, watchtower, fast E2E, bounded soak, core
   E2E, RPC system scenarios, hub10k benchmark, and production health smoke.
+- On 2026-07-08, `bun run test:all:fast` passed end to end: scenarios exited
+  `0`, E2E exited `0`, and all 95 isolated browser shards passed.
+- On 2026-07-08, `bun run check` and `bun run security:audit-pack` passed after
+  the runtime hardening and test-artifact cleanup pass.
+- The capped-testnet soak policy is one hour in `MAINNET_GATE.soakMinutes`, the
+  capped policy file, gate builders, and the `soak:capped-testnet` package
+  script.
 - The RPC/JAdapter Anvil latest-state snapshot race that produced repeated
   `staticCall`/`J_SUBMIT_FATAL` failures is fixed without relaxing real ABI
   reverts or non-dev-chain failures.
@@ -100,14 +114,15 @@ When docs disagree, use this order:
 
 1. Publish the GitHub Release object for `v0.1.5`; the tag is pushed, but the
    release object is blocked by missing `gh` auth or `GH_TOKEN`.
-2. Complete the multi-hour `bun run soak:release` before calling any build a
-   mainnet candidate. `bun run gate:release` already passed on current `main`;
-   the long soak has only partial evidence so far.
+2. Complete the current one-hour
+   `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak` before
+   calling any build a mainnet candidate. `bun run gate:release` already passed
+   on the release line; the soak has only partial historical evidence so far.
 3. Document real mainnet chain/RPC, operator keys, tower gas policy,
    backup/restore drills, last-resort dispute drills, and monitoring
    thresholds.
-4. Refresh the external audit pack and treat external audit as required for
-   real user funds.
+4. Keep the external audit pack current and treat independent external audit as
+   required for real user funds.
 
 ### P1 - protocol and runtime
 

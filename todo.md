@@ -55,7 +55,7 @@ file and older docs disagree, prefer code and tests first, then this file.
   `staticCall` snapshot races are tolerated only after successful gas estimate
   on dev chains, and fatal-log scanning no longer treats that handled dev race
   as a protocol failure.
-- Confirmed on current `main` (`d328c43a`): `bun run gate:release` passed,
+- Confirmed on the current release line: `bun run gate:release` passed,
   production health smoke returned healthy, and a release soak was manually
   stopped after 13 complete `gate:ci + hub10k` iterations with exit code `0`.
 - Added mainnet-preflight gate plan and reduced the capped-testnet executable
@@ -63,6 +63,12 @@ file and older docs disagree, prefer code and tests first, then this file.
   uncapped real-funds bar can still require a longer soak before launch.
 - Added the dev control-panel banner, QA verdict explanation panel, browser-side
   remote-runtime import diagnostics, and admin cockpit selftest assertions.
+- Aligned capped-testnet soak execution with the one-hour policy:
+  `soak:capped-testnet`, `MAINNET_GATE.soakMinutes`, the capped policy file,
+  and capped-gate tests now agree on 60 minutes.
+- Refreshed current mainnet/security status docs and re-ran
+  `bun run security:audit-pack`; this prepares the internal audit handoff pack
+  but does not replace an independent external audit.
 
 ## P0 - Release And Mainnet Readiness
 

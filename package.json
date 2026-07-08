@@ -48,7 +48,7 @@
     "soak:quick": "bun runtime/scripts/run-soak-gate.ts --profile=quick --iterations=2",
     "soak:swap10m": "bun runtime/scripts/run-soak-gate.ts --profile=swap --minutes=10",
     "soak:release": "bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=240",
-    "soak:capped-testnet": "bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=1440",
+    "soak:capped-testnet": "bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=60",
     "prod:health": "bun runtime/scripts/prod-health-smoke.ts",
     "prod:health:capped-testnet": "bun runtime/scripts/prod-health-smoke.ts --expected-hubs=3 --require-hub-self-relay --expected-towers=1 --tower-url=https://xln.finance/api/tower/healthz",
     "prod:smoke:local": "bun runtime/scripts/local-prod-smoke.ts",
