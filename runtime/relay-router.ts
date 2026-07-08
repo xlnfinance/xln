@@ -9,8 +9,10 @@ import { safeStringify } from './serialization-utils';
 import { asFailFastPayload, failfastAssert } from './networking/failfast';
 import {
   type RelaySocketLike,
+  type RelaySendResult,
   type RelayStore,
   isCanonicalRuntimeId,
+  isRelaySendResultFailure,
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
@@ -96,8 +98,6 @@ const closeDuplicateRuntimeSocket = (ws: RelaySocketLike): void => {
 // Config
 // ---------------------------------------------------------------------------
 
-export type RelaySendResult = boolean | number | void;
-
 export type RelayRouterConfig = {
   store: RelayStore;
   localRuntimeId: string;
@@ -136,8 +136,7 @@ const trySendRelay = (
   if (!isRelaySocketOpen(ws)) return false;
   try {
     const result = config.send(ws, safeStringify(msg));
-    if (result === false) return false;
-    return !(typeof result === 'number' && result < 0);
+    return !isRelaySendResultFailure(result);
   } catch (error) {
     pushDebugEvent(config.store, {
       event: 'delivery',

@@ -4,12 +4,22 @@ import {
   createRelayStore,
   enqueueMessage,
   flushPendingMessages,
+  isRelaySendResultFailure,
   pushDebugEvent,
   storeVerifiedGossipProfile,
 } from '../relay-store';
 import type { Profile } from '../networking/gossip';
 
 const asRecords = (items: unknown[]): Array<Record<string, unknown>> => items as Array<Record<string, unknown>>;
+
+test('relay send result predicate matches websocket failure contract', () => {
+  expect(isRelaySendResultFailure(false)).toBe(true);
+  expect(isRelaySendResultFailure(-1)).toBe(true);
+  expect(isRelaySendResultFailure(true)).toBe(false);
+  expect(isRelaySendResultFailure(0)).toBe(false);
+  expect(isRelaySendResultFailure(1)).toBe(false);
+  expect(isRelaySendResultFailure()).toBe(false);
+});
 
 const makeProfile = (suffix: string, updatedAt = 1): Profile => ({
   entityId: `0x${suffix.padStart(40, '0')}`,

@@ -42,6 +42,8 @@ export type RelaySocketLike = {
   readyState?: unknown;
 };
 
+export type RelaySendResult = boolean | number | void;
+
 export type RelayDebugEvent = {
   id: number;
   ts: number;
@@ -168,6 +170,9 @@ export const isRelaySocketOpen = (ws: unknown): boolean => {
   const readyState = Number((ws as { readyState?: unknown }).readyState);
   return !Number.isFinite(readyState) || readyState === 1;
 };
+
+export const isRelaySendResultFailure = (result: RelaySendResult): boolean =>
+  result === false || (typeof result === 'number' && result < 0);
 
 const deliveryCodeFor = (status: string, reason: string): string => {
   if (reason) return normalizeRuntimeFailureCode(reason);

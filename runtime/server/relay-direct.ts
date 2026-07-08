@@ -3,6 +3,7 @@ import type { DeliverableEntityInput, Env } from '../types';
 import { encryptJSON, hexToPubKey } from '../networking/p2p-crypto';
 import {
   isRelaySocketOpen,
+  isRelaySendResultFailure,
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
@@ -18,9 +19,6 @@ import {
 
 export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 export type RelaySocket = ServerWebSocket<RelaySocketData>;
-
-const relaySocketSendFailed = (result: boolean | number | void): boolean =>
-  result === false || (typeof result === 'number' && result < 0);
 
 export const resolveRequestClientIp = (request: Request): string => {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
@@ -98,7 +96,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     };
     if (target && isRelaySocketOpen(target.ws)) {
       const result = target.ws.send(safeStringify(msg));
-      if (relaySocketSendFailed(result)) {
+      if (isRelaySendResultFailure(result)) {
         pushDebugEvent(relayStore, {
           event: 'delivery',
           from: fromRuntimeId,

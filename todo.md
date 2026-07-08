@@ -324,6 +324,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      failed `send()` results as typed deferred delivery instead of claiming
      delivery, and its direct packet id comes from relay store sequencing rather
      than wall-clock/random data.
+   - Partial: relay router and process-local relay direct dispatch now share
+     one relay send-result predicate for `false` and negative native send
+     return values.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 
