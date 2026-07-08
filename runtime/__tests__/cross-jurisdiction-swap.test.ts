@@ -27,6 +27,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
   deriveCrossJurisdictionRouteHash,
+  hasCrossJurisdictionCommittedFill,
   isCrossJurisdictionRouteTransitionAllowed,
   projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionQuantization,
@@ -1682,6 +1683,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceBinding = buildCrossJurisdictionPullBinding(ratioOnlyExactRoute, 'source');
     const targetBinding = buildCrossJurisdictionPullBinding(ratioOnlyExactRoute, 'target');
 
+    expect(hasCrossJurisdictionCommittedFill(route)).toBe(false);
+    expect(hasCrossJurisdictionCommittedFill(ratioOnlyExactRoute)).toBe(true);
     expect(remaining.filledSourceAmount).toBe(10_000_000_000_000_000n);
     expect(remaining.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
     expect(remaining.sourceRemaining).toBe(30_000_000_000_000_000n);
@@ -3294,12 +3297,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       }, { runtimeSeed: 'cross-sweep-filled-expired-clear', sourceDisputeDelayMs: 5_000, now: 1_000 }),
       status: 'partially_filled' as const,
       fillSeq: 1,
-      cumulativeFillRatio: 32_768,
-      claimedRatio: 32_768,
-      filledSourceAmount: 500n,
-      filledTargetAmount: 450n,
-      sourceClaimed: 500n,
-      targetClaimed: 450n,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
     };
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const account = state.accounts.get(sourceUser)!;
@@ -3336,6 +3335,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    expect((result.mempoolOps?.[0]?.tx as any).data.fillNumerator).toBe(1n);
+    expect((result.mempoolOps?.[0]?.tx as any).data.fillDenominator).toBe(2n);
+    expect((result.mempoolOps?.[0]?.tx as any).data.cumulativeSourceAmount).toBe(500n);
+    expect((result.mempoolOps?.[0]?.tx as any).data.cumulativeTargetAmount).toBe(450n);
     const swept = result.newState.crossJurisdictionSwaps?.get(route.orderId);
     expect(swept?.status).toBe('clear_requested');
     expect(swept?.clearingPolicy).toBe('cancel_and_clear');

@@ -1,5 +1,6 @@
 import {
   buildCrossJurisdictionCloseProof,
+  hasCrossJurisdictionCommittedFill,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   isCrossJurisdictionTerminalStatus,
@@ -85,10 +86,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
 
     const accountId = findAccountKey(newState, sourceEntityId);
     const account = accountId ? newState.accounts.get(accountId) : undefined;
-    const hasFilledAmount =
-      Number(route.cumulativeFillRatio || route.claimedRatio || 0) > 0 ||
-      (route.filledSourceAmount ?? route.sourceClaimed ?? 0n) > 0n ||
-      (route.filledTargetAmount ?? route.targetClaimed ?? 0n) > 0n;
+    const hasFilledAmount = hasCrossJurisdictionCommittedFill(route);
 
     if (accountId && account?.swapOffers?.has(orderId)) {
       cancelOrderbookOfferIfPresent(env, newState, accountId, orderId);

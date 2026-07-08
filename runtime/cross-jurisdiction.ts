@@ -191,6 +191,17 @@ export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictio
   };
 }
 
+const committedFillAmountsHaveProgress = (
+  committedFill: Pick<ReturnType<typeof getCrossJurisdictionCommittedFillAmounts>, 'fillRatio' | 'filledSourceAmount' | 'filledTargetAmount'>,
+): boolean => (
+  committedFill.fillRatio > 0 ||
+  committedFill.filledSourceAmount > 0n ||
+  committedFill.filledTargetAmount > 0n
+);
+
+export const hasCrossJurisdictionCommittedFill = (route: CrossJurisdictionSwapRoute): boolean =>
+  committedFillAmountsHaveProgress(getCrossJurisdictionCommittedFillAmounts(route));
+
 const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
   if (denominator <= 0n) throw new Error(`CROSS_J_CEIL_DIV_DENOMINATOR_INVALID:${denominator.toString()}`);
   return numerator <= 0n ? 0n : (numerator + denominator - 1n) / denominator;
@@ -945,10 +956,7 @@ export function buildCrossJurisdictionPullBinding(
 ): CrossJurisdictionPullBinding {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
   const committedFill = getCrossJurisdictionCommittedFillAmounts(canonical);
-  const hasCommittedFill =
-    committedFill.fillRatio > 0 ||
-    committedFill.filledSourceAmount > 0n ||
-    committedFill.filledTargetAmount > 0n;
+  const hasCommittedFill = committedFillAmountsHaveProgress(committedFill);
   return cloneCrossJurisdictionPullBinding({
     orderId: canonical.orderId,
     routeHash: canonical.routeHash || deriveCrossJurisdictionRouteHash(canonical),
@@ -975,10 +983,7 @@ export function buildCommittedCrossJurisdictionPullBinding(
   const routeHash = String(route.routeHash || '').toLowerCase();
   if (!routeHash) throw new Error(`CROSS_J_ROUTE_HASH_MISSING:${route.orderId}`);
   const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
-  const hasCommittedFill =
-    committedFill.fillRatio > 0 ||
-    committedFill.filledSourceAmount > 0n ||
-    committedFill.filledTargetAmount > 0n;
+  const hasCommittedFill = committedFillAmountsHaveProgress(committedFill);
   // Use this only after the route has entered committed account state. Immutable
   // economic terms were already route-hash checked at admission/swap_offer time;
   // fill progress is mutable and deliberately not part of the route hash.

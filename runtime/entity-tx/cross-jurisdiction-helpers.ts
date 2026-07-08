@@ -119,17 +119,6 @@ export const findCrossJurisdictionPullRoute = (
   return null;
 };
 
-export const hasCommittedCrossJurisdictionFill = (route: CrossJurisdictionSwapRoute): boolean => (
-  Math.max(
-    Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0),
-    Math.floor(Number(route.claimedRatio ?? 0) || 0),
-  ) > 0 ||
-  (route.filledSourceAmount ?? 0n) > 0n ||
-  (route.filledTargetAmount ?? 0n) > 0n ||
-  (route.sourceClaimed ?? 0n) > 0n ||
-  (route.targetClaimed ?? 0n) > 0n
-);
-
 export const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRoute): boolean => (
   route.status === 'clearing' ||
   route.status === 'source_claimed' ||

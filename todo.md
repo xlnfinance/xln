@@ -429,6 +429,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: cross-j pull bindings now materialize exact committed fill
      amounts and preserve exact ratio fields, so account-level close proof
      checks do not fall back to uint16-derived economics.
+   - Partial: committed-fill detection now uses the shared exact-aware resolver
+     instead of bespoke ratio/amount predicates.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
