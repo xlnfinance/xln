@@ -81,6 +81,8 @@ import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from '.
 import { pruneSettledOriginatedHtlcRoutes } from './entity-tx/htlc-route-lifecycle';
 export { mergeEntityInputs } from './entity-input-merge';
 
+export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;
+
 const ENTITY_FRAME_PROFILE =
   nodeProcess?.env?.['XLN_ENTITY_FRAME_PROFILE'] === '1' ||
   nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' ||
@@ -297,6 +299,40 @@ const pendingCrossJurisdictionFillAckKey = (accountId: string, tx: CrossSwapFill
     tx.data.cumulativeTargetAmount?.toString() ?? '',
   ].join('|');
 
+const prunePendingCrossJurisdictionFillAcks = (
+  env: Env,
+  currentEntityState: EntityState,
+): number => {
+  const pending = currentEntityState.pendingCrossJurisdictionFillAcks;
+  if (!pending || pending.size < MAX_PENDING_CROSS_J_FILL_ACKS) return 0;
+  const targetSize = Math.max(0, MAX_PENDING_CROSS_J_FILL_ACKS - 1);
+  const ranked = Array.from(pending.entries()).sort(([leftKey, left], [rightKey, right]) => {
+    const leftExpired = Number(left.ttlExpiredAt || 0) > 0 ? 0 : 1;
+    const rightExpired = Number(right.ttlExpiredAt || 0) > 0 ? 0 : 1;
+    if (leftExpired !== rightExpired) return leftExpired - rightExpired;
+    const leftAge = Number(left.ttlExpiredAt || left.storedAt || 0);
+    const rightAge = Number(right.ttlExpiredAt || right.storedAt || 0);
+    if (leftAge !== rightAge) return leftAge - rightAge;
+    return compareStableText(leftKey, rightKey);
+  });
+  let removed = 0;
+  for (const [key] of ranked) {
+    if (pending.size <= targetSize) break;
+    pending.delete(key);
+    removed += 1;
+  }
+  if (removed > 0) {
+    markStorageEntityDirty(env, currentEntityState.entityId);
+    entityLog.warn('crossj.fill_ack_stash_pruned', {
+      entity: shortId(currentEntityState.entityId, 8),
+      removed,
+      remaining: pending.size,
+      max: MAX_PENDING_CROSS_J_FILL_ACKS,
+    });
+  }
+  return removed;
+};
+
 const ownsSourceHubRouteForFillAck = (
   currentEntityState: EntityState,
   tx: CrossSwapFillAckTx,
@@ -316,6 +352,7 @@ const stashPendingCrossJurisdictionFillAck = (
   currentEntityState.pendingCrossJurisdictionFillAcks ||= new Map();
   const key = pendingCrossJurisdictionFillAckKey(accountId, tx);
   if (currentEntityState.pendingCrossJurisdictionFillAcks.has(key)) return;
+  prunePendingCrossJurisdictionFillAcks(env, currentEntityState);
   currentEntityState.pendingCrossJurisdictionFillAcks.set(key, {
     accountId,
     tx: cloneCrossJurisdictionAccountTxRoute(tx) as CrossSwapFillAckTx,

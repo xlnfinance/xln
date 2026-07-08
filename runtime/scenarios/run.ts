@@ -14,6 +14,7 @@ import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
+import { cleanupTestArtifactsBeforeRun } from '../scripts/test-artifact-cleanup';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -204,6 +205,7 @@ type ParallelResult = {
 };
 
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
+  cleanupTestArtifactsBeforeRun({ reason: 'scenarios' });
   const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
   const selectedSet = set === 'smoke'
     ? SMOKE_PARALLEL_SET

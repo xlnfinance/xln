@@ -377,7 +377,7 @@ describe('entity panel model helpers', () => {
     expect(chrome).toContain('{entityNames}');
     expect(chrome).toContain('{jurisdictions}');
     expect(chrome).not.toContain('activeEnv');
-    expect(contextSwitcher).toContain("import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore'");
+    expect(contextSwitcher).toContain("import { refreshRuntimeView, runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore'");
     expect(contextSwitcher).toContain('projectionSummariesForRuntime(runtime.id');
     expect(contextSwitcher).not.toContain('runtime.env');
     expect(contextSwitcher).not.toContain('eReplicas');

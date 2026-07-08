@@ -47,7 +47,8 @@ test('ContextSwitcher remote rows switch runtime and selected projected entity t
   expect(source).toContain('setRuntimeViewActiveEntityId(normalizedEntityId)');
   expect(source).toContain('await refreshRuntimeView(normalizedEntityId ? { entityId: normalizedEntityId } : {})');
   expect(entitySource).toContain("if (group?.source === 'remote') {");
-  expect(entitySource).toContain('await selectRemoteRuntime(runtimeId, entity.entityId);');
+  expect(entitySource).toContain("const selectedEntityId = entity.isPlaceholder ? '' : entity.entityId");
+  expect(entitySource).toContain('await selectRemoteRuntime(runtimeId, selectedEntityId);');
   expect(entitySource).toContain("dispatch('entitySelect'");
   expect(entitySource.indexOf("dispatch('entitySelect'")).toBeLessThan(entitySource.indexOf('return;'));
   expect(source).not.toContain('async function selectRuntimeSelf');
@@ -63,6 +64,10 @@ test('ContextSwitcher does not pick the first sorted projection entity as the re
   const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
 
   expect(source).toContain('const selfEntity = resolveRemotePrimaryEntity(runtime, entities)');
+  expect(source).toContain('const ownedHubEntities = (runtime.hubEntities ?? []).filter');
+  expect(source).toContain('ownerRuntimeId === runtimeId');
+  expect(source).toContain('isPlaceholder: true');
+  expect(source).toContain("const selectedEntityId = entity.isPlaceholder ? '' : entity.entityId");
   expect(source).toContain('remoteEntityNameMatchesRuntimeLabel');
   expect(source).toContain('normalizeId(entity.entityId) !== normalizeId(selfEntity.entityId)');
   expect(source).not.toContain('const selfEntity = entities[0] || null');

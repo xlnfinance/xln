@@ -12,6 +12,7 @@
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
+import { cleanupTestArtifactsBeforeRun, TEST_ARTIFACT_CLEANUP_DONE_ENV } from './test-artifact-cleanup';
 
 type CliArgs = {
   scenarioWorkers: number;
@@ -19,6 +20,7 @@ type CliArgs = {
   smoke: boolean;
   quick: boolean;
   skipBuild: boolean;
+  keepTestArtifacts: boolean;
 };
 
 const parseArgs = (): CliArgs => {
@@ -43,6 +45,7 @@ const parseArgs = (): CliArgs => {
     smoke: args.includes('--smoke'),
     quick: args.includes('--quick'),
     skipBuild: args.includes('--skip-build'),
+    keepTestArtifacts: args.includes('--keep-test-artifacts') || args.includes('--no-cleanup'),
   };
 };
 
@@ -51,10 +54,15 @@ type JobResult = {
   code: number | null;
 };
 
-const runJob = async (name: string, cmd: string, args: string[]): Promise<JobResult> => {
+const runJob = async (
+  name: string,
+  cmd: string,
+  args: string[],
+  env: Record<string, string | undefined>,
+): Promise<JobResult> => {
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
+    env,
   });
 
   proc.stdout.on('data', chunk => process.stdout.write(`[${name}] ${chunk.toString()}`));
@@ -79,6 +87,15 @@ async function main(): Promise<void> {
   console.log(`Mode            : ${modeLabel}`);
   console.log('='.repeat(72) + '\n');
 
+  cleanupTestArtifactsBeforeRun({
+    reason: 'all-tests',
+    argv: args.keepTestArtifacts ? ['--keep-test-artifacts'] : process.argv.slice(2),
+  });
+  const childEnv = {
+    ...process.env,
+    [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
+  };
+
   const startedAt = Date.now();
 
   const scenarioPromise = runJob(
@@ -89,6 +106,7 @@ async function main(): Promise<void> {
       `--workers=${args.scenarioWorkers}`,
       ...(args.quick || args.smoke ? ['--set=smoke'] : []),
     ],
+    childEnv,
   );
 
   const e2eArgs = ['runtime/scripts/run-e2e-parallel-isolated.ts', `--shards=${args.e2eShards}`];
@@ -104,6 +122,7 @@ async function main(): Promise<void> {
     'e2e',
     'bun',
     e2eArgs,
+    childEnv,
   );
 
   const [scenarioResult, e2eResult] = await Promise.all([scenarioPromise, e2ePromise]);

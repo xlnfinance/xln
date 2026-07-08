@@ -15,6 +15,7 @@ import { generateLazyEntityId, generateNumberedEntityId } from '../entity-factor
 import { isLeftEntity } from '../entity-id-utils';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
+  MAX_PENDING_CROSS_J_FILL_ACKS,
   applyEntityFrame,
   applyEntityInput,
 } from '../entity-consensus';
@@ -3239,70 +3240,76 @@ describe('audit fail-fast regressions', () => {
   });
 
   test('receiver commit preserves explicit zero jHeight instead of falling back to account height', async () => {
-    const seed = 'account-frame-zero-jheight-receiver-commit';
-    const env = createEmptyEnv(seed);
-    env.quietRuntimeLogs = true;
-    env.timestamp = 10_000;
-    env.browserVM = {
-      getDepositoryAddress: () => hex20('dd'),
-    } as typeof env.browserVM;
     setDeltaTransformerAddress(hex20('99'));
 
-    const first = registerLazySigner(seed, '1');
-    const second = registerLazySigner(seed, '2');
-    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
-    const right = left === first ? second : first;
-    attachSigningReplica(env, left.entityId, left.signerId);
-    attachSigningReplica(env, right.entityId, right.signerId);
+    for (const accountHeight of [1, 10, 100]) {
+      for (const revealBeforeHeight of [1, 2, 11]) {
+        const seed = `account-frame-zero-jheight-receiver-commit-${accountHeight}-${revealBeforeHeight}`;
+        const env = createEmptyEnv(seed);
+        env.quietRuntimeLogs = true;
+        env.timestamp = 10_000;
+        env.browserVM = {
+          getDepositoryAddress: () => hex20('dd'),
+        } as typeof env.browserVM;
 
-    const makeFundedDelta = () => ({
-      ...createDefaultDelta(1),
-      leftCreditLimit: 10n,
-    });
-    const htlcTx: AccountTx = {
-      type: 'htlc_lock',
-      data: {
-        lockId: 'zero-jheight-lock',
-        hashlock: `0x${'31'.repeat(32)}`,
-        timelock: BigInt(env.timestamp + 60_000),
-        revealBeforeHeight: 1,
-        amount: 1n,
-        tokenId: 1,
-      },
-    };
-    const previousStateHash = `0x${'ab'.repeat(32)}`;
-    const proposerAccount = makeProposalAccount([htlcTx], left.entityId, right.entityId);
-    proposerAccount.currentHeight = 10;
-    proposerAccount.currentFrame = {
-      ...proposerAccount.currentFrame,
-      height: 10,
-      timestamp: env.timestamp - 1,
-      stateHash: previousStateHash,
-    };
-    proposerAccount.deltas.set(1, makeFundedDelta());
+        const first = registerLazySigner(seed, '1');
+        const second = registerLazySigner(seed, '2');
+        const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+        const right = left === first ? second : first;
+        attachSigningReplica(env, left.entityId, left.signerId);
+        attachSigningReplica(env, right.entityId, right.signerId);
 
-    const proposed = await proposeAccountFrame(env, proposerAccount, false, 0);
-    if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
-    expect(proposed.success).toBe(true);
-    expect(proposed.accountInput?.newAccountFrame.jHeight).toBe(0);
+        const makeFundedDelta = () => ({
+          ...createDefaultDelta(1),
+          leftCreditLimit: 10n,
+        });
+        const lockId = `zero-jheight-lock-${accountHeight}-${revealBeforeHeight}`;
+        const htlcTx: AccountTx = {
+          type: 'htlc_lock',
+          data: {
+            lockId,
+            hashlock: `0x${'31'.repeat(32)}`,
+            timelock: BigInt(env.timestamp + 60_000),
+            revealBeforeHeight,
+            amount: 1n,
+            tokenId: 1,
+          },
+        };
+        const previousStateHash = `0x${'ab'.repeat(32)}`;
+        const proposerAccount = makeProposalAccount([htlcTx], left.entityId, right.entityId);
+        proposerAccount.currentHeight = accountHeight;
+        proposerAccount.currentFrame = {
+          ...proposerAccount.currentFrame,
+          height: accountHeight,
+          timestamp: env.timestamp - 1,
+          stateHash: previousStateHash,
+        };
+        proposerAccount.deltas.set(1, makeFundedDelta());
 
-    const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
-    receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nonce: 0 };
-    receiverAccount.currentHeight = 10;
-    receiverAccount.currentFrame = {
-      ...receiverAccount.currentFrame,
-      height: 10,
-      timestamp: env.timestamp - 1,
-      stateHash: previousStateHash,
-    };
-    receiverAccount.deltas.set(1, makeFundedDelta());
+        const proposed = await proposeAccountFrame(env, proposerAccount, false, 0);
+        if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
+        expect(proposed.success).toBe(true);
+        expect(proposed.accountInput?.newAccountFrame.jHeight).toBe(0);
 
-    const result = await applyAccountInput(env, receiverAccount, proposed.accountInput!);
+        const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
+        receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nonce: 0 };
+        receiverAccount.currentHeight = accountHeight;
+        receiverAccount.currentFrame = {
+          ...receiverAccount.currentFrame,
+          height: accountHeight,
+          timestamp: env.timestamp - 1,
+          stateHash: previousStateHash,
+        };
+        receiverAccount.deltas.set(1, makeFundedDelta());
 
-    expect(result.success).toBe(true);
-    expect(receiverAccount.currentHeight).toBe(11);
-    expect(receiverAccount.currentFrame.jHeight).toBe(0);
-    expect(receiverAccount.locks.has('zero-jheight-lock')).toBe(true);
+        const result = await applyAccountInput(env, receiverAccount, proposed.accountInput!);
+
+        expect(result.success).toBe(true);
+        expect(receiverAccount.currentHeight).toBe(accountHeight + 1);
+        expect(receiverAccount.currentFrame.jHeight).toBe(0);
+        expect(receiverAccount.locks.has(lockId)).toBe(true);
+      }
+    }
   });
 
   test('account storage keeps last outbound ACK so restored runtimes can bundle the next frame', () => {
@@ -5042,6 +5049,49 @@ describe('audit fail-fast regressions', () => {
     sourceState.config = makeSingleSignerConfigFor('source-hub-signer');
     sourceState.crossJurisdictionSwaps = new Map([[orderId, route]]);
     sourceState.accounts.set(sourceUser, makeProposalAccount([], sourceHub, sourceUser));
+
+    const cappedState = structuredClone(sourceState) as typeof sourceState;
+    cappedState.pendingCrossJurisdictionFillAcks = new Map();
+    for (let index = 0; index < MAX_PENDING_CROSS_J_FILL_ACKS; index += 1) {
+      const oldAck: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
+        type: 'cross_swap_fill_ack',
+        data: {
+          offerId: `old-source-offer-race-${index}`,
+          routeHash: route.routeHash,
+          fillSeq: index + 1,
+          cumulativeFillRatio: index % 65_536,
+          cumulativeSourceAmount: 1n,
+          cumulativeTargetAmount: 1n,
+        },
+      };
+      cappedState.pendingCrossJurisdictionFillAcks.set(`old-${index}`, {
+        accountId: sourceUser,
+        tx: oldAck,
+        storedAt: env.timestamp - 100_000 - index,
+        ttlExpiredAt: env.timestamp - 50_000 - index,
+        reason: 'test-cap',
+      });
+    }
+    const capped = await applyEntityFrame(env, cappedState, [
+      {
+        type: 'crossJurisdictionFillNotice',
+        data: {
+          orderId,
+          fillSeq: 1,
+          incrementalSourceAmount: 30n * lot,
+          incrementalTargetAmount: 75_000n * lot,
+          cumulativeSourceAmount: 30n * lot,
+          cumulativeTargetAmount: 75_000n * lot,
+          cumulativeFillRatio: 65_535,
+          pairId,
+        },
+      },
+    ]);
+    const cappedPending = capped.newState.pendingCrossJurisdictionFillAcks;
+    expect(cappedPending?.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);
+    expect(Array.from(cappedPending?.values() ?? []).some((entry) =>
+      entry.tx.data.offerId === orderId && entry.tx.data.fillSeq === 1
+    )).toBe(true);
 
     const first = await applyEntityFrame(env, sourceState, [
       {

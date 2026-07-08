@@ -22,8 +22,10 @@ const remoteHubSummaryFromEntity = (
   if (entity?.isHub !== true) return null;
   const entityId = String(entity.entityId || '').trim().toLowerCase();
   if (!entityId) return null;
+  const runtimeId = String(entity.runtimeId || '').trim().toLowerCase();
   return {
     entityId,
+    ...(runtimeId ? { runtimeId } : {}),
     label: String(entity.label || entityId).trim(),
     height: Math.max(0, Math.floor(Number(entity.height || 0))),
     ...(entity.jurisdiction ? { jurisdiction: entity.jurisdiction } : {}),
@@ -43,8 +45,20 @@ const hubLabelMatchesImportLabel = (hubLabel: string, importLabel: string): bool
 export const selectPrimaryRemoteHubSummary = (
   hubEntities: RemoteRuntimeHubSummary[],
   importLabel: string,
+  runtimeId = '',
 ): RemoteRuntimeHubSummary | null => {
   if (hubEntities.length === 0) return null;
+  const normalizedRuntimeId = String(runtimeId || '').trim().toLowerCase();
+  if (normalizedRuntimeId) {
+    return hubEntities.find((hub) =>
+      String(hub.runtimeId || '').trim().toLowerCase() === normalizedRuntimeId &&
+      hubLabelMatchesImportLabel(hub.label, importLabel)
+    )
+      ?? hubEntities.find((hub) => String(hub.runtimeId || '').trim().toLowerCase() === normalizedRuntimeId)
+      ?? hubEntities.find((hub) => hubLabelMatchesImportLabel(hub.label, importLabel))
+      ?? hubEntities[0]!
+      ?? null;
+  }
   return hubEntities.find((hub) => hubLabelMatchesImportLabel(hub.label, importLabel))
     ?? hubEntities[0]!
     ?? null;
@@ -89,7 +103,7 @@ export const validateRemoteRuntimeEntry = async (
       const summary = remoteHubSummaryFromEntity(entity);
       return summary ? [summary] : [];
     });
-    const primaryHub = selectPrimaryRemoteHubSummary(hubEntities, entry.label);
+    const primaryHub = selectPrimaryRemoteHubSummary(hubEntities, entry.label, runtimeId);
     options.onProgress?.({ index, status: 'connected', detail: `${entityCount} entities at height ${height}` });
     return {
       ...entry,

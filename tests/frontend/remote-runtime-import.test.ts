@@ -50,6 +50,7 @@ const makeStored = (
     },
     hubEntities: [{
       entityId: `0x${'aa'.repeat(32)}`,
+      runtimeId: remoteRuntimeIdForWsUrl(wsUrl),
       label,
       height: port,
       jurisdiction: {
@@ -215,6 +216,7 @@ describe('remote runtime import manager utilities', () => {
     expect(restored?.hubName).toBe('H1 admin');
     expect(restored?.hubJurisdiction?.depositoryAddress).toBe(`0x${'bb'.repeat(20)}`);
     expect(restored?.hubEntities?.[0]?.entityId).toBe(h1.hubEntityId);
+    expect(restored?.hubEntities?.[0]?.runtimeId).toBe(h1.runtimeId);
   });
 
   test('remote validation selects the hub matching the imported runtime label', () => {
@@ -231,6 +233,24 @@ describe('remote runtime import manager utilities', () => {
 
     expect(selectPrimaryRemoteHubSummary([h3, h1], 'H1')?.entityId).toBe(h1.entityId);
     expect(selectPrimaryRemoteHubSummary([h3, h1], 'missing')?.entityId).toBe(h3.entityId);
+  });
+
+  test('remote validation prefers the hub owned by the connected runtime over first visible gossip hub', () => {
+    const h1 = {
+      entityId: `0x${'11'.repeat(32)}`,
+      runtimeId: `0x${'01'.repeat(20)}`,
+      label: 'H1',
+      height: 10,
+    };
+    const h2 = {
+      entityId: `0x${'22'.repeat(32)}`,
+      runtimeId: `0x${'02'.repeat(20)}`,
+      label: 'H2',
+      height: 20,
+    };
+
+    expect(selectPrimaryRemoteHubSummary([h1, h2], 'H2', h2.runtimeId)?.entityId).toBe(h2.entityId);
+    expect(selectPrimaryRemoteHubSummary([h1, h2], 'missing', h2.runtimeId)?.entityId).toBe(h2.entityId);
   });
 
   test('restores the active admin token by normalized endpoint after reload', () => {

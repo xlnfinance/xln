@@ -26,6 +26,7 @@ export type RemoteRuntimeHubJurisdiction = {
 
 export type RemoteRuntimeHubSummary = {
   entityId: string;
+  runtimeId?: string;
   label: string;
   height: number;
   jurisdiction?: RemoteRuntimeHubJurisdiction;
@@ -193,11 +194,13 @@ const hubSummaryFromUnknown = (value: unknown): RemoteRuntimeHubSummary | null =
   if (!isRecord(value)) return null;
   const entityId = String(value['entityId'] || '').trim().toLowerCase();
   if (!entityId) return null;
+  const runtimeId = String(value['runtimeId'] || '').trim().toLowerCase();
   const label = String(value['label'] || value['name'] || entityId).trim();
   const height = Math.max(0, Math.floor(Number(value['height'] || 0)));
   const jurisdiction = hubJurisdictionFromUnknown(value['jurisdiction']);
   return {
     entityId,
+    ...(runtimeId ? { runtimeId } : {}),
     label,
     height,
     ...(jurisdiction ? { jurisdiction } : {}),

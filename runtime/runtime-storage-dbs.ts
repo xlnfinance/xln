@@ -74,6 +74,123 @@ export const resolveFrameDbPath = (env: Env): string => {
   return `${base}-frames`;
 };
 
+export const STORAGE_WRITER_LOCK_TTL_MS = 30_000;
+
+export const resolveStorageWriterLockPath = (env: Env): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-writer.lock`;
+};
+
+const activeStorageWriterLocks = new Set<string>();
+
+type StorageWriterLockBody = {
+  owner: string;
+  pid?: number;
+  runtimeId?: string;
+  frameHeight?: number;
+  acquiredAt: number;
+  expiresAt: number;
+};
+
+const parseStorageWriterLock = (raw: string): StorageWriterLockBody | null => {
+  try {
+    const body = JSON.parse(raw) as Partial<StorageWriterLockBody>;
+    if (!body || typeof body !== 'object') return null;
+    const expiresAt = Number(body.expiresAt);
+    if (!Number.isFinite(expiresAt)) return null;
+    return {
+      owner: String(body.owner || 'unknown'),
+      ...(typeof body.pid === 'number' ? { pid: body.pid } : {}),
+      ...(typeof body.runtimeId === 'string' ? { runtimeId: body.runtimeId } : {}),
+      ...(typeof body.frameHeight === 'number' ? { frameHeight: body.frameHeight } : {}),
+      acquiredAt: Number.isFinite(Number(body.acquiredAt)) ? Number(body.acquiredAt) : 0,
+      expiresAt,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const storageWriterLockHeldError = (lockPath: string, lock: StorageWriterLockBody | null): Error => {
+  const owner = lock?.owner ? ` owner=${lock.owner}` : '';
+  const frame = typeof lock?.frameHeight === 'number' ? ` frame=${lock.frameHeight}` : '';
+  return new Error(`STORAGE_WRITER_LOCK_HELD: path=${lockPath}${owner}${frame}`);
+};
+
+const storageWriterPidIsAlive = (pid: number | undefined): boolean => {
+  if (!Number.isFinite(pid) || Number(pid) <= 0) return false;
+  try {
+    nodeProcess?.kill(Number(pid), 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const tryAcquireStorageWriterLock = async (
+  env: Env,
+  lockPath: string,
+  fs: typeof import('fs/promises'),
+  path: typeof import('path'),
+): Promise<boolean> => {
+  const now = Date.now();
+  const body: StorageWriterLockBody = {
+    owner: `${nodeProcess?.pid ?? 'unknown'}:${now}:${Math.max(0, Number(env.height || 0))}`,
+    ...(typeof nodeProcess?.pid === 'number' ? { pid: nodeProcess.pid } : {}),
+    ...(typeof env.runtimeId === 'string' ? { runtimeId: env.runtimeId } : {}),
+    frameHeight: Math.max(0, Number(env.height || 0)),
+    acquiredAt: now,
+    expiresAt: now + STORAGE_WRITER_LOCK_TTL_MS,
+  };
+  await fs.mkdir(path.dirname(lockPath), { recursive: true });
+  const handle = await fs.open(lockPath, 'wx');
+  try {
+    await handle.writeFile(`${JSON.stringify(body)}\n`, 'utf8');
+    return true;
+  } finally {
+    await handle.close();
+  }
+};
+
+export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): Promise<T> => {
+  if (!nodeProcess) return await fn();
+
+  const lockPath = resolveStorageWriterLockPath(env);
+  if (activeStorageWriterLocks.has(lockPath)) {
+    throw storageWriterLockHeldError(lockPath, null);
+  }
+  activeStorageWriterLocks.add(lockPath);
+
+  const fs = await import('fs/promises');
+  const path = await import('path');
+  let acquired = false;
+  try {
+    try {
+      acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path);
+    } catch (error) {
+      const code = typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: unknown }).code || '')
+        : '';
+      if (code !== 'EEXIST') throw error;
+
+      const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
+      const existing = raw ? parseStorageWriterLock(raw) : null;
+      if (!existing || existing.expiresAt > Date.now() || storageWriterPidIsAlive(existing.pid)) {
+        throw storageWriterLockHeldError(lockPath, existing);
+      }
+      await fs.unlink(lockPath).catch(() => undefined);
+      acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path);
+    }
+
+    return await fn();
+  } finally {
+    if (acquired) {
+      await fs.unlink(lockPath).catch(() => undefined);
+    }
+    activeStorageWriterLocks.delete(lockPath);
+  }
+};
+
 const resolveStorageRotationMarkerPath = (env: Env): string => {
   const base = resolveDbPath(env, 'core');
   return `${base}-storage-rotation.json`;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 import {
@@ -30,11 +30,12 @@ import {
 import { getPerfMs } from '../utils';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
-import { KEY_HEAD, keyDiff, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
+import { KEY_HEAD, keyDiff, keyFrame, keyLiveReplicaMeta, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
 import type { JReplica, JurisdictionConfig } from '../types';
+import { resolveStorageWriterLockPath, STORAGE_WRITER_LOCK_TTL_MS } from '../runtime-storage-dbs';
 
 describe('storage frame journal retention', () => {
   const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
@@ -204,6 +205,111 @@ describe('storage frame journal retention', () => {
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
+  });
+
+  test('server writer fencing rejects an already held namespace lock before appending', async () => {
+    const env = await createSavedEmptyEnv('storage-writer-lock-held');
+    const lockPath = resolveStorageWriterLockPath(env);
+    writeFileSync(lockPath, `${JSON.stringify({
+      owner: 'test-writer',
+      pid: 999_999,
+      runtimeId: env.runtimeId,
+      frameHeight: 2,
+      acquiredAt: Date.now(),
+      expiresAt: Date.now() + STORAGE_WRITER_LOCK_TTL_MS,
+    })}\n`, 'utf8');
+
+    env.height = 2;
+    env.timestamp = 2_000;
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
+      'STORAGE_WRITER_LOCK_HELD',
+    );
+
+    expect(await readStorageFrameRecord(getFrameDb(env), 2)).toBeNull();
+    const head = await readStorageHead(getFrameDb(env));
+    expect(head?.latestHeight).toBe(1);
+
+    rmSync(lockPath, { force: true });
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('server writer fencing does not steal an expired lock while its pid is still alive', async () => {
+    const env = await createSavedEmptyEnv('storage-writer-live-expired-lock');
+    const lockPath = resolveStorageWriterLockPath(env);
+    writeFileSync(lockPath, `${JSON.stringify({
+      owner: 'test-live-writer',
+      pid: process.pid,
+      runtimeId: env.runtimeId,
+      frameHeight: 2,
+      acquiredAt: Date.now() - STORAGE_WRITER_LOCK_TTL_MS - 1_000,
+      expiresAt: Date.now() - 1_000,
+    })}\n`, 'utf8');
+
+    env.height = 2;
+    env.timestamp = 2_000;
+    await expect(saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [])).rejects.toThrow(
+      'STORAGE_WRITER_LOCK_HELD',
+    );
+
+    expect(await readStorageFrameRecord(getFrameDb(env), 2)).toBeNull();
+    const head = await readStorageHead(getFrameDb(env));
+    expect(head?.latestHeight).toBe(1);
+
+    rmSync(lockPath, { force: true });
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('latest restore fails closed for multi-validator replica when live identity meta is missing', async () => {
+    const seed = `storage-restore-missing-multisig-meta ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    const signerA = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const signerB = deriveSignerAddressSync(seed, '2').toLowerCase();
+    registerSignerKey(signerA, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(signerB, deriveSignerKeySync(seed, '2'));
+    const entityId = generateLazyEntityId([signerA, signerB], 2n).toLowerCase();
+    const jurisdiction = {
+      name: 'storage-restore-missing-multisig-meta',
+      address: 'browservm://storage-restore-missing-multisig-meta',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    installTestJurisdiction(env, jurisdiction);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signerA,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 2n,
+            validators: [signerA, signerB],
+            shares: { [signerA]: 1n, [signerB]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+    await getRuntimeStorageDb(env).del(keyLiveReplicaMeta(entityId));
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_REPLICA_META_REQUIRED');
   });
 
   test('stores replay frames and diffs only in the history frame DB', async () => {

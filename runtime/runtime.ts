@@ -331,6 +331,7 @@ import {
   tryOpenDb as tryOpenDbStorage,
   tryOpenFrameDb as tryOpenFrameDbStorage,
   tryOpenStorageDb as tryOpenStorageDbStorage,
+  withStorageWriterLock,
   type RuntimeStorageDbDeps,
   type StorageDbRole,
 } from './runtime-storage-dbs';
@@ -3060,19 +3061,22 @@ export const saveEnvToDB = async (
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
   const pendingFrameDbRecords = peekPendingFrameDbRecords(env, env.height, env.timestamp);
-  const saveResult = await withStorageWriteTimeout(env, saveRuntimeFrameToStorage({
+  const saveResult = await withStorageWriteTimeout(
     env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
-    tryOpenFrameDb,
-    getFrameDb,
-    rotateEpochDb: rotateStorageEpochDb,
-    getPerfMs,
-    formatPerfMs,
-    frameDbRecords: pendingFrameDbRecords,
-    stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
-    ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
-  }));
+    withStorageWriterLock(env, () => saveRuntimeFrameToStorage({
+      env,
+      tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+      getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+      tryOpenFrameDb,
+      getFrameDb,
+      rotateEpochDb: rotateStorageEpochDb,
+      getPerfMs,
+      formatPerfMs,
+      frameDbRecords: pendingFrameDbRecords,
+      stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
+      ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
+    })),
+  );
   if (saveResult.staleWriterStopped) {
     const state = ensureRuntimeState(env);
     state.halted = true;
@@ -3264,12 +3268,35 @@ export const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: num
   return Array.from(entityIds).sort();
 };
 
-const derivePersistedReplicaSignerId = (state: EntityState): string => {
-  const validator = Array.isArray(state.config?.validators) && state.config.validators.length > 0
-    ? state.config.validators[0]
-    : undefined;
-  const fallback = typeof validator === 'string' && validator.length > 0 ? validator : state.entityId;
-  return String(fallback || state.entityId).toLowerCase();
+const listPersistedReplicaValidators = (state: EntityState): string[] => {
+  if (!Array.isArray(state.config?.validators)) return [];
+  return state.config.validators
+    .map((validator) => String(validator || '').toLowerCase())
+    .filter((validator) => validator.length > 0);
+};
+
+const resolvePersistedReplicaIdentity = (
+  entityId: string,
+  state: EntityState,
+  meta: Awaited<ReturnType<typeof readPersistedStorageReplicaMeta>> | null,
+  targetHeight: number,
+  latestHeight: number,
+): { signerId: string; isProposer: boolean } => {
+  const validators = listPersistedReplicaValidators(state);
+  const metaSignerId = typeof meta?.signerId === 'string' && meta.signerId.trim().length > 0
+    ? meta.signerId.trim().toLowerCase()
+    : '';
+  const isLatestRestore = targetHeight === latestHeight;
+  if (isLatestRestore && !metaSignerId && validators.length > 1) {
+    throw new Error(
+      `STORAGE_RESTORE_REPLICA_META_REQUIRED: entity=${entityId} validators=${validators.length} height=${targetHeight}`,
+    );
+  }
+  const signerId = metaSignerId || validators[0] || String(state.entityId || entityId).toLowerCase();
+  const isProposer = typeof meta?.isProposer === 'boolean'
+    ? meta.isProposer
+    : isLatestRestore && validators.length === 1 && signerId === validators[0];
+  return { signerId, isProposer };
 };
 
 const rebuildPersistedJurisdictions = (env: Env): void => {
@@ -3336,14 +3363,14 @@ const loadEnvFromStorage = async (
     env.activeJurisdiction = undefined;
     for (const [entityId, state] of restoredStates.entries()) {
       const meta = targetHeight === latestHeight ? await readPersistedStorageReplicaMeta(env, entityId) : null;
-      const signerId = String(meta?.signerId || derivePersistedReplicaSignerId(state)).toLowerCase();
+      const { signerId, isProposer } = resolvePersistedReplicaIdentity(entityId, state, meta, targetHeight, latestHeight);
       const hankoWitness = meta?.hankoWitness instanceof Map ? meta.hankoWitness : new Map();
       env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), {
         entityId,
         signerId,
         state,
         mempool: [],
-        isProposer: typeof meta?.isProposer === 'boolean' ? meta.isProposer : true,
+        isProposer,
         hankoWitness,
         ...(meta?.proposal ? { proposal: meta.proposal } : {}),
         ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),

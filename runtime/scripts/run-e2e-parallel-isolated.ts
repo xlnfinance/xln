@@ -57,6 +57,7 @@ import type {
 } from '../qa/types';
 import { compareStableText } from '../serialization-utils';
 import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
+import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
 
 type CliArgs = {
   shards: number;
@@ -2134,6 +2135,7 @@ const runShard = async (
 
 async function main(): Promise<void> {
   const args = parseArgs();
+  cleanupTestArtifactsBeforeRun({ reason: 'e2e' });
   const logsDir = resolve(process.cwd(), '.logs', 'e2e-parallel', tsTag());
   const releaseRunnerLock = acquireRunnerLock(logsDir);
   mkdirSync(logsDir, { recursive: true });

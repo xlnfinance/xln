@@ -51,6 +51,7 @@
     jurisdiction: string;
     jurisdictionBadge: JurisdictionBadgeInfo | null;
     isSelf: boolean;
+    isPlaceholder?: boolean;
   };
 
   type EntityMenuRow = EntitySummary & {
@@ -215,8 +216,10 @@
     return compareStableText(a.name, b.name) || compareStableText(a.entityId, b.entityId);
   }
 
-  function remoteRuntimeFallbackSummaries(runtime: StoreRuntime): RuntimeAdapterEntitySummary[] {
-    const summaries: RuntimeAdapterEntitySummary[] = [];
+  type ContextRuntimeEntitySummary = RuntimeAdapterEntitySummary & { isPlaceholder?: boolean };
+
+  function remoteRuntimeFallbackSummaries(runtime: StoreRuntime): ContextRuntimeEntitySummary[] {
+    const summaries: ContextRuntimeEntitySummary[] = [];
     const seen = new Set<string>();
     const add = (
       entityId: string | null | undefined,
@@ -235,23 +238,40 @@
         ...(jurisdiction ? { jurisdiction } : {}),
       });
     };
-    for (const hub of runtime.hubEntities ?? []) {
+    const runtimeId = normalizeId(runtime.id);
+    const ownedHubEntities = (runtime.hubEntities ?? []).filter((hub) => {
+      const ownerRuntimeId = normalizeId(hub.runtimeId);
+      return !ownerRuntimeId || ownerRuntimeId === runtimeId;
+    });
+    for (const hub of ownedHubEntities) {
       add(hub.entityId, hub.label, hub.height, hub.jurisdiction);
     }
     add(runtime.hubEntityId, runtime.hubName || runtime.label, 0, runtime.hubJurisdiction);
+    if (summaries.length === 0) {
+      const runtimeId = normalizeId(runtime.id);
+      if (runtimeId) {
+        summaries.push({
+          entityId: runtimeId,
+          label: String(runtime.hubName || runtime.label || runtimeId).trim(),
+          height: Math.max(0, Math.floor(Number(runtime.entityCount || 0))),
+          isHub: true,
+          isPlaceholder: true,
+        });
+      }
+    }
     return summaries;
   }
 
   function projectionSummariesForRuntime(
     runtimeId: string,
-    fallbackSummaries: RuntimeAdapterEntitySummary[],
-  ): RuntimeAdapterEntitySummary[] {
-    const summaries = new Map<string, RuntimeAdapterEntitySummary>();
-    const add = (summary: RuntimeAdapterEntitySummary | null | undefined): void => {
+    fallbackSummaries: ContextRuntimeEntitySummary[],
+  ): ContextRuntimeEntitySummary[] {
+    const summaries = new Map<string, ContextRuntimeEntitySummary>();
+    const add = (summary: ContextRuntimeEntitySummary | null | undefined): void => {
       const entityId = normalizeId(summary?.entityId);
       if (!entityId) return;
       const previous = summaries.get(entityId);
-      const merged: RuntimeAdapterEntitySummary = {
+      const merged: ContextRuntimeEntitySummary = {
         entityId,
         label: String(summary?.label || previous?.label || entityId).trim(),
         height: Math.max(0, Math.floor(Number(summary?.height ?? previous?.height ?? 0))),
@@ -261,6 +281,7 @@
       if (signerId) merged.signerId = signerId;
       if (jurisdiction) merged.jurisdiction = jurisdiction;
       if (summary?.isHub === true || previous?.isHub === true) merged.isHub = true;
+      if (summary?.isPlaceholder === true || previous?.isPlaceholder === true) merged.isPlaceholder = true;
       summaries.set(entityId, merged);
     };
     for (const summary of fallbackSummaries) add(summary);
@@ -296,7 +317,7 @@
   }
 
   function collectEntitySummaries(
-    summaries: RuntimeAdapterEntitySummary[],
+    summaries: ContextRuntimeEntitySummary[],
     signerId: string,
     selfEntityId: string | null,
   ): EntitySummary[] {
@@ -325,6 +346,7 @@
           Number.isFinite(chainId) ? chainId : null,
         ),
         isSelf: normalizedEntityId === normalizeId(selfEntityId),
+        ...(summary.isPlaceholder === true ? { isPlaceholder: true } : {}),
       });
     }
 
@@ -391,11 +413,12 @@
     const group = runtimeGroups.find((candidate) => candidate.runtimeId === runtimeId);
     open = false;
     if (group?.source === 'remote') {
-      await selectRemoteRuntime(runtimeId, entity.entityId);
+      const selectedEntityId = entity.isPlaceholder ? '' : entity.entityId;
+      await selectRemoteRuntime(runtimeId, selectedEntityId);
       dispatch('entitySelect', {
         jurisdiction: entity.jurisdiction || 'browservm',
         signerId: entity.signerId || signerId,
-        entityId: entity.entityId
+        entityId: selectedEntityId
       });
       return;
     }

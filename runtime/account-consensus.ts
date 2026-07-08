@@ -454,7 +454,7 @@ async function handlePendingFrameAck(
 
   // Re-execute all frame txs on REAL accountMachine (deterministic)
   // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
-  const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentHeight;
+  const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.lastFinalizedJHeight ?? 0;
   for (const tx of accountMachine.pendingFrame.accountTxs) {
     const beforeSettlement = captureSettlementVector(accountMachine);
     const commitResult = await applyAccountTx(
@@ -941,8 +941,7 @@ async function preflightIncomingAccountFrame(
   }
 
   const ourEntityId = accountMachine.proofHeader.fromEntity;
-  const ourReplica = getReplicaByEntityId(env, ourEntityId);
-  const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
+  const currentJHeight = accountMachine.lastFinalizedJHeight ?? 0;
   const frameJHeight = receivedFrame.jHeight ?? currentJHeight;
 
   return { kind: 'continue', receivedFrame, ourEntityId, frameJHeight };

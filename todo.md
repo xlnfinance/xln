@@ -6,6 +6,13 @@ This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
 file and older docs disagree, prefer code and tests first, then this file.
 
+## Mainnet Deferred
+
+- [ ] P0 security: move signing behind a remote signer/HSM boundary and keep raw
+  runtime signing seed material out of persisted artifacts and long-running
+  runtime process memory. Deferred by user on 2026-07-08 while non-signature
+  mainnet blockers are closed first.
+
 ## Closed Or Removed
 
 - Removed the stale testnet handoff whose old faucet/runtime notes were from a
