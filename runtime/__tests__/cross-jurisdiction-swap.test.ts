@@ -552,6 +552,87 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.newState.messages.at(-1)).not.toContain('no pending fill');
   });
 
+  test('source pull resolve accepts exact-only committed binding proof ratio', async () => {
+    const env = createEmptyEnv('cross-source-resolve-exact-only-binding');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('ac');
+    const sourceHub = entity('ad');
+    const targetHub = entity('ae');
+    const targetUser = entity('af');
+    const prepared = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-source-resolve-exact-only-binding',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const route = {
+      ...prepared,
+      status: 'clear_requested' as const,
+      fillSeq: 1,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
+      targetReceipt: {
+        receiptHash: secret('b0'),
+        leg: 'target' as const,
+        orderId: prepared.orderId,
+        routeHash: prepared.routeHash!,
+        hubEntityId: targetHub,
+        counterpartyEntityId: targetUser,
+        pullId: prepared.targetPull!.pullId,
+        tokenId: prepared.targetPull!.tokenId,
+        signedAmount: prepared.targetPull!.signedAmount,
+        revealedUntilTimestamp: prepared.targetPull!.revealedUntilTimestamp,
+        fullHash: prepared.targetPull!.fullHash,
+        partialRoot: prepared.targetPull!.partialRoot,
+        committedAt: env.timestamp,
+      },
+    };
+    const account = makeAccount(sourceUser, sourceHub);
+    const sourcePull = route.sourcePull!;
+    const absAmount = sourcePull.signedAmount >= 0n ? sourcePull.signedAmount : -sourcePull.signedAmount;
+    const beneficiaryIsLeft = sourcePull.signedAmount > 0n;
+    const payerIsLeft = !beneficiaryIsLeft;
+    const delta = account.deltas.get(sourcePull.tokenId) ?? createDefaultDelta(sourcePull.tokenId);
+    account.deltas.set(sourcePull.tokenId, delta);
+    if (payerIsLeft) delta.leftHold = absAmount;
+    else delta.rightHold = absAmount;
+    account.pulls = new Map([[sourcePull.pullId, {
+      pullId: sourcePull.pullId,
+      tokenId: sourcePull.tokenId,
+      amount: sourcePull.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
+      fullHash: sourcePull.fullHash,
+      partialRoot: sourcePull.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'source'),
+      createdHeight: 0,
+      createdTimestamp: env.timestamp,
+    }]]);
+    const binary = buildCrossJurisdictionPullReveal(
+      route,
+      32_768,
+      deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route),
+    ).binary;
+
+    const result = await applyAccountTx(account, {
+      type: 'pull_resolve',
+      data: { pullId: sourcePull.pullId, binary },
+    }, beneficiaryIsLeft, env.timestamp, 1);
+
+    expect(result.success, result.error).toBe(true);
+    expect(account.pulls?.get(sourcePull.pullId)?.claimedRatio).toBe(32_768);
+    expect(account.pulls?.get(sourcePull.pullId)?.claimedAmount).toBe(500n);
+  });
+
   test('source hub committed pull resolve relays hash-ladder binary to target user', () => {
     const env = createEmptyEnv('cross-source-hub-relay');
     env.timestamp = 10_000;

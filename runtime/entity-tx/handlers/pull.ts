@@ -1,6 +1,7 @@
 import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
+  getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
   isCrossJurisdictionRouteTransitionAllowed,
   isCrossJurisdictionTerminalStatus,
@@ -89,11 +90,12 @@ const syncTargetPullBinding = (
 ): void => {
   const pull = result.newState.accounts.get(accountId)?.pulls?.get(pullId);
   if (!pull) return;
+  const committedRatio = getCrossJurisdictionCommittedProofRatio(route);
   pull.crossJurisdiction = buildCrossJurisdictionPullBinding({
     ...route,
     ...(route.sourceCloseProof ? { sourceCloseProof: route.sourceCloseProof } : {}),
-    cumulativeFillRatio: Math.max(Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0), fillRatio),
-    claimedRatio: Math.max(Math.floor(Number(route.claimedRatio ?? 0) || 0), fillRatio),
+    cumulativeFillRatio: Math.max(committedRatio, fillRatio),
+    claimedRatio: Math.max(committedRatio, fillRatio),
   }, 'target');
 };
 
@@ -152,7 +154,7 @@ const proofRouteError = (
     if (!sourceProof) return 'source close proof missing';
     if (!closeProofsMatch(sourceProof, proof)) return 'source close proof mismatch';
   }
-  const routeRatio = Math.max(Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0), Math.floor(Number(route.claimedRatio ?? 0) || 0));
+  const routeRatio = getCrossJurisdictionCommittedProofRatio(route);
   if (leg === 'source' || routeRatio > 0) {
     const expectedProof = buildCrossJurisdictionCloseProof(route, binary);
     if (proof.fillRatio !== expectedProof.fillRatio) return `ratio ${proof.fillRatio} != ${expectedProof.fillRatio}`;
@@ -189,7 +191,7 @@ const validateCrossTargetResolve = (
   } catch (error) {
     return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const committedRatio = Math.max(Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0), Math.floor(Number(route.claimedRatio ?? 0) || 0));
+  const committedRatio = getCrossJurisdictionCommittedProofRatio(route);
   if (decodedRatio <= 0) return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: empty reveal`);
   const sourceProof = route.sourceCloseProof;
   if (!sourceProof) {

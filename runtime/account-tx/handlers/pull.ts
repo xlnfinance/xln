@@ -4,6 +4,7 @@ import { FINANCIAL, LIMITS } from '../../constants';
 import {
   buildCommittedCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
+  getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
 } from '../../cross-jurisdiction';
 import {
@@ -45,13 +46,7 @@ const findCrossJurisdictionRouteForPull = (
 };
 
 const committedCrossJurisdictionRatio = (binding: CrossJurisdictionPullBinding): number =>
-  Math.max(
-    0,
-    Math.min(
-      HASHLADDER_MAX_FILL_RATIO,
-      Math.floor(Number(binding.cumulativeFillRatio ?? binding.claimedRatio ?? 0) || 0),
-    ),
-  );
+  getCrossJurisdictionCommittedProofRatio(binding);
 
 const findCrossJurisdictionPullBinding = (
   accountMachine: AccountMachine,

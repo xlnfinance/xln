@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import {
+  getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteTransitionAllowed,
   transitionCrossJurisdictionRouteStatus,
@@ -69,10 +70,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
     addMessage(newState, `❌ Cross-j salvage ${routeId} fill mismatch: claimed ${claimedFillRatio}, verified ${verifiedFillRatio}`);
     return { newState, outputs };
   }
-  const committedRatio = Math.max(
-    Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0),
-    Math.floor(Number(route.claimedRatio ?? 0) || 0),
-  );
+  const committedRatio = getCrossJurisdictionCommittedProofRatio(route);
   if (committedRatio > 0 && verifiedFillRatio > committedRatio) {
     addMessage(newState, `❌ Cross-j salvage ${routeId} exceeds committed fill: ${verifiedFillRatio}/${committedRatio}`);
     return { newState, outputs };

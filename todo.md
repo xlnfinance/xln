@@ -435,6 +435,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      hash-ladder proof ratio inside the shared resolver when legacy
      `cumulativeFillRatio` is absent, and source clear uses that resolver
      instead of treating exact-only committed fills as empty.
+   - Partial: account/entity pull close, pull resolve, and cross-j salvage
+     proof-boundary checks now use the same exact-aware committed proof-ratio
+     helper instead of local `cumulativeFillRatio/claimedRatio` math.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
