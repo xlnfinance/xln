@@ -1,9 +1,11 @@
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 
 export type MeshJurisdictionConfig = {
   name: string;
   chainId: number;
   rpc: string;
+  primary?: boolean;
   blockTimeMs?: number;
   contracts?: {
     depository: string;
@@ -12,6 +14,26 @@ export type MeshJurisdictionConfig = {
     deltaTransformer?: string;
   };
 };
+
+const hasRequiredContracts = (entry: unknown): entry is MeshJurisdictionConfig => {
+  const jurisdiction = entry as MeshJurisdictionConfig | null | undefined;
+  return Boolean(
+    jurisdiction?.contracts?.depository &&
+    jurisdiction.contracts.entityProvider,
+  );
+};
+
+const sameMeshRpc = (left: unknown, right: unknown): boolean => {
+  const leftRaw = String(left || '').trim();
+  const rightRaw = String(right || '').trim();
+  if (!leftRaw || !rightRaw) return false;
+  if (leftRaw === rightRaw) return true;
+  if (normalizeLoopbackUrl(leftRaw) === normalizeLoopbackUrl(rightRaw)) return true;
+  return leftRaw === toPublicRpcUrl(rightRaw, '/rpc') || rightRaw === toPublicRpcUrl(leftRaw, '/rpc');
+};
+
+const isPrimaryJurisdiction = (entry: unknown): boolean =>
+  (entry as { primary?: unknown } | null | undefined)?.primary === true;
 
 export const resetMeshJurisdictionsCache = (): void => {
   clearJurisdictionsCache();
@@ -23,18 +45,16 @@ export const resolveMeshJurisdictionConfig = <T extends MeshJurisdictionConfig =
   const data = loadJurisdictions();
   const map = data.jurisdictions ?? {};
   const requestedRpc = String(rpcUrlOverride || '').trim();
-  const exactMatch = Object.values(map).find((entry) => {
-    if (!entry || typeof entry !== 'object') return false;
-    return String((entry as MeshJurisdictionConfig).rpc || '').trim() === requestedRpc;
-  });
-  const arrakis = exactMatch ?? map['arrakis'] ?? Object.values(map)[0];
-  if (!arrakis) {
+  const entries = Object.values(map).filter(hasRequiredContracts);
+  const exactMatch = entries.find((entry) => sameMeshRpc(entry.rpc, requestedRpc));
+  const selected = exactMatch ?? entries.find(isPrimaryJurisdiction) ?? entries[0];
+  if (!selected) {
     throw new Error('JURISDICTION_NOT_FOUND');
   }
   return {
-    ...(arrakis as MeshJurisdictionConfig),
-    rpc: rpcUrlOverride || (arrakis as MeshJurisdictionConfig).rpc,
-  } as T;
+    ...selected,
+    rpc: rpcUrlOverride || selected.rpc,
+  } as unknown as T;
 };
 
 export const requireJurisdictionBlockTimeMs = (jurisdiction: MeshJurisdictionConfig): number => {

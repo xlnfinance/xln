@@ -387,6 +387,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: `/api/jurisdictions` and hub runtime jurisdiction payloads now
      preserve configured/runtime display labels instead of forcing `arrakis` to
      `Testnet`.
+   - Partial: mesh jurisdiction selection now resolves primary stacks by exact or
+     public RPC URL and explicit `primary:true`, so hub/MM/server bootstrap no
+     longer depends on an `arrakis` config key for renamed primary jurisdictions.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

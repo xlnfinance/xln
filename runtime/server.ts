@@ -101,6 +101,7 @@ import { handleRuntimeInputControl, handleRuntimeInputStatus } from './server/ru
 import { handleSignerRegistration } from './server/signer-control';
 import { fetchRpcCode, probeLocalAnvilContractStack } from './server/stack-probe';
 import { handleRuntimeActivityRequest } from './server/activity-api';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from './loopback-url';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -120,6 +121,42 @@ const serverLog = createStructuredLogger('server');
 const tokenCatalogController = createTokenCatalogController({
   getAdapter: () => globalJAdapter,
 });
+
+type PredeployedJurisdictionEntry = {
+  rpc?: unknown;
+  chainId?: unknown;
+  primary?: unknown;
+  contracts?: Record<string, unknown>;
+};
+
+const hasPredeployedContracts = (entry: unknown): entry is PredeployedJurisdictionEntry => {
+  const contracts = (entry as PredeployedJurisdictionEntry | null | undefined)?.contracts;
+  return Boolean(contracts?.['depository'] && contracts['entityProvider']);
+};
+
+const samePredeployedRpc = (left: unknown, right: unknown): boolean => {
+  const leftRaw = String(left || '').trim();
+  const rightRaw = String(right || '').trim();
+  if (!leftRaw || !rightRaw) return false;
+  if (leftRaw === rightRaw) return true;
+  if (normalizeLoopbackUrl(leftRaw) === normalizeLoopbackUrl(rightRaw)) return true;
+  return leftRaw === toPublicRpcUrl(rightRaw, '/rpc') || rightRaw === toPublicRpcUrl(leftRaw, '/rpc');
+};
+
+const selectPredeployedJurisdiction = (
+  payload: unknown,
+  rpcUrl: string,
+): PredeployedJurisdictionEntry | null => {
+  const jurisdictions = (payload as { jurisdictions?: unknown } | null | undefined)?.jurisdictions;
+  if (!jurisdictions || typeof jurisdictions !== 'object' || Array.isArray(jurisdictions)) return null;
+  const entries = Object.values(jurisdictions).filter(hasPredeployedContracts);
+  return (
+    entries.find(entry => samePredeployedRpc(entry.rpc, rpcUrl)) ??
+    entries.find(entry => entry.primary === true) ??
+    entries[0] ??
+    null
+  );
+};
 
 const STARTUP_STEP_TIMEOUT_MS = Math.max(
   5_000,
@@ -1013,14 +1050,20 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         serverLog.info('anvil.predeployed.load', { path: jurisdictionsPath });
         const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
         const jurisdictions = JSON.parse(jurisdictionsData);
-        const arrakisConfig = jurisdictions?.jurisdictions?.arrakis;
+        const predeployedConfig = selectPredeployedJurisdiction(jurisdictions, anvilRpc);
 
-        if (arrakisConfig?.contracts) {
+        if (predeployedConfig?.contracts) {
+          const contracts = predeployedConfig.contracts;
           fromReplica = {
-            depositoryAddress: arrakisConfig.contracts.depository,
-            entityProviderAddress: arrakisConfig.contracts.entityProvider,
-            contracts: arrakisConfig.contracts,
-            chainId: arrakisConfig.chainId ?? 31337,
+            depositoryAddress: String(contracts['depository']),
+            entityProviderAddress: String(contracts['entityProvider']),
+            contracts: {
+              account: String(contracts['account'] || ''),
+              depository: String(contracts['depository']),
+              entityProvider: String(contracts['entityProvider']),
+              deltaTransformer: String(contracts['deltaTransformer'] || ''),
+            },
+            chainId: Number(predeployedConfig.chainId ?? 31337),
           } as JAdapterConfig['fromReplica'];
           serverLog.info('anvil.predeployed.loaded');
         }

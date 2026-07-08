@@ -55,6 +55,7 @@ describe('production startup wiring', () => {
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
     const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime-entity-routing.ts'), 'utf8');
     const runtimeMainSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+    const standaloneServer = readFileSync(join(repoRoot, 'runtime/server.ts'), 'utf8');
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
     expect(orchestratorConfig).toContain("const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;");
     expect(orchestratorConfig).toContain("readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
@@ -90,6 +91,9 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('const childReady = marketMakerHealth?.marketMaker?.ok === true;');
     expect(marketMakerAggregation).toContain('if (!marketMakerActive) {');
     expect(marketMakerAggregation).toContain('const ok = !mmEnabled || failure === null;');
+    expect(standaloneServer).toContain('const selectPredeployedJurisdiction = (');
+    expect(standaloneServer).toContain('entries.find(entry => samePredeployedRpc(entry.rpc, rpcUrl))');
+    expect(standaloneServer).not.toContain('arrakisConfig');
     const waitForMarketMakerReady = orchestrator.slice(orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'));
     const waitForMarketMakerReadyEnd = waitForMarketMakerReady.indexOf('const waitForHubSelfReady = async (child: HubChild): Promise<void> => {');
     expect(waitForMarketMakerReadyEnd).toBeGreaterThan(0);
@@ -175,6 +179,10 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain("normalized === 'arrakis'");
     expect(hubNode).not.toContain("normalized === 'wakanda'");
     expect(hubNode).not.toContain('PRIMARY_TESTNET_JURISDICTION_NAME');
+    const meshJurisdictions = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-jurisdictions.ts'), 'utf8');
+    expect(meshJurisdictions).toContain('const exactMatch = entries.find((entry) => sameMeshRpc(entry.rpc, requestedRpc));');
+    expect(meshJurisdictions).toContain('entries.find(isPrimaryJurisdiction)');
+    expect(meshJurisdictions).not.toContain("map['arrakis']");
     expect(serverJurisdictions).toContain("const normalizeJurisdictionDisplayName = (value: unknown): string =>");
     expect(serverJurisdictions).not.toContain("normalized === 'arrakis'");
     expect(serverJurisdictions).not.toContain("normalized === 'wakanda'");
