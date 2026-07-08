@@ -107,6 +107,13 @@ test('runtime recovery discovery status persists peer refresh counters', () => {
     peerBackupCount: 1,
     backupCount: 3,
     errors: ['peer-a:timeout'],
+    failures: [{
+      source: 'peer',
+      sourceLabel: 'peer-a',
+      category: 'TransientRace',
+      code: 'RECOVERY_REQUEST_TIMEOUT',
+      message: 'timeout',
+    }],
     checkedAt: 123,
   });
 
@@ -117,6 +124,13 @@ test('runtime recovery discovery status persists peer refresh counters', () => {
     peerBackupCount: 1,
     backupCount: 3,
     errors: ['peer-a:timeout'],
+    failures: [{
+      source: 'peer',
+      sourceLabel: 'peer-a',
+      category: 'TransientRace',
+      code: 'RECOVERY_REQUEST_TIMEOUT',
+      message: 'timeout',
+    }],
     checkedAt: 123,
   });
 

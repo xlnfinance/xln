@@ -10,6 +10,7 @@
     vaultOperations,
     allRuntimes,
     type RuntimeRecoveryCandidate,
+    type RuntimeRecoveryDiscoveryFailure,
   } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { resetEverything } from '$lib/utils/resetEverything';
@@ -298,6 +299,7 @@
   let recoveryLabel = '';
   let recoveryCandidates: RuntimeRecoveryCandidate[] = [];
   let recoveryErrors: string[] = [];
+  let recoveryFailures: RuntimeRecoveryDiscoveryFailure[] = [];
   let recoveryCheckedTowers = 0;
   let recoveryCheckedPeers = 0;
   let recoveryPeerBackupCount = 0;
@@ -346,6 +348,7 @@
     recoveryLabel = '';
     recoveryCandidates = [];
     recoveryErrors = [];
+    recoveryFailures = [];
     recoveryCheckedTowers = 0;
     recoveryCheckedPeers = 0;
     recoveryPeerBackupCount = 0;
@@ -362,6 +365,7 @@
     recoveryLabel = (labelOverride || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
     recoveryCandidates = [];
     recoveryErrors = [];
+    recoveryFailures = [];
     recoveryCheckedTowers = 0;
     recoveryCheckedPeers = 0;
     recoveryPeerBackupCount = 0;
@@ -374,6 +378,7 @@
       });
       recoveryCandidates = discovery.candidates;
       recoveryErrors = discovery.errors;
+      recoveryFailures = discovery.failures;
       recoveryCheckedTowers = discovery.checkedTowers;
       recoveryCheckedPeers = discovery.checkedPeers;
       recoveryPeerBackupCount = recoveryCandidates.filter((candidate) => candidate.source === 'peer').length;
@@ -384,6 +389,7 @@
       return true;
     } catch (err) {
       recoveryErrors = [err instanceof Error ? err.message : String(err)];
+      recoveryFailures = [];
       return false;
     } finally {
       recoveryChecking = false;
@@ -398,6 +404,7 @@
       peerBackupCount: recoveryPeerBackupCount,
       backupCount: recoveryCandidates.length,
       errors: recoveryErrors,
+      failures: recoveryFailures,
       checkedAt: Date.now(),
     });
   }

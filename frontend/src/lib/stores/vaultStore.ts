@@ -271,6 +271,15 @@ type TowerDiscoverPayload = {
 };
 
 export type RuntimeRecoveryCandidateSource = 'tower' | 'file' | 'peer';
+export type RuntimeRecoveryFailureCategory = 'ExpectedEmpty' | 'TransientRace' | 'Contradiction';
+
+export type RuntimeRecoveryDiscoveryFailure = {
+  source: Exclude<RuntimeRecoveryCandidateSource, 'file'>;
+  sourceLabel: string;
+  category: RuntimeRecoveryFailureCategory;
+  code: string;
+  message: string;
+};
 
 export type RuntimeRecoveryPeerRequest = {
   runtimeId: string;
@@ -307,6 +316,7 @@ export type RuntimeRecoveryDiscoveryResult = {
   lookupKey: string;
   candidates: RuntimeRecoveryCandidate[];
   errors: string[];
+  failures: RuntimeRecoveryDiscoveryFailure[];
   checkedTowers: number;
   checkedPeers: number;
 };
@@ -787,6 +797,52 @@ const sortRecoveryCandidatesByTip = (
   return (right.receipt?.sequence || 0) - (left.receipt?.sequence || 0);
 };
 
+const normalizeRecoveryFailureCode = (message: string): string => {
+  const code = message.trim().split(/[\s:]/)[0] || 'UNKNOWN';
+  return code.replace(/[^A-Z0-9_]/gi, '_').toUpperCase();
+};
+
+export const classifyRuntimeRecoveryDiscoveryFailure = (input: {
+  source: Exclude<RuntimeRecoveryCandidateSource, 'file'>;
+  sourceLabel: string;
+  message: string;
+}): RuntimeRecoveryDiscoveryFailure => {
+  const message = String(input.message || 'unknown').trim() || 'unknown';
+  const code = normalizeRecoveryFailureCode(message);
+  const lower = message.toLowerCase();
+  const category: RuntimeRecoveryFailureCategory =
+    code === 'TOWER_BUNDLE_NOT_FOUND' ||
+    code === 'PEER_RECOVERY_BUNDLE_EMPTY' ||
+    code === 'RECOVERY_CANDIDATE_EMPTY' ||
+    code === 'HTTP_404'
+      ? 'ExpectedEmpty'
+      : code.startsWith('HTTP_5') ||
+        code === 'HTTP_408' ||
+        code === 'HTTP_409' ||
+        code === 'HTTP_425' ||
+        code === 'HTTP_429' ||
+        lower.includes('timeout') ||
+        lower.includes('offline') ||
+        lower.includes('connect') ||
+        lower.includes('network') ||
+        lower.includes('fetch') ||
+        code === 'RECOVERY_REQUEST_SEND_FAILED' ||
+        code === 'RECOVERY_REQUEST_SOCKET_CLOSED' ||
+        code === 'RECOVERY_REQUEST_SOCKET_PAUSED'
+        ? 'TransientRace'
+        : 'Contradiction';
+  return {
+    source: input.source,
+    sourceLabel: String(input.sourceLabel || input.source).trim() || input.source,
+    category,
+    code,
+    message,
+  };
+};
+
+const recoveryFailureErrorText = (failure: RuntimeRecoveryDiscoveryFailure): string =>
+  `${failure.sourceLabel}:${failure.message}`;
+
 const buildRuntimeRecoveryCandidate = async (
   input: {
     source: RuntimeRecoveryCandidateSource;
@@ -911,11 +967,24 @@ export async function discoverRuntimeRecoveryCandidates(
   const towers = getConfiguredRecoveryTowers(runtimeProbe);
   const candidates: RuntimeRecoveryCandidate[] = [];
   const errors: string[] = [];
+  const failures: RuntimeRecoveryDiscoveryFailure[] = [];
   const peers = options.peers || [];
+  const recordFailure = (
+    source: Exclude<RuntimeRecoveryCandidateSource, 'file'>,
+    sourceLabel: string,
+    message: string,
+  ): void => {
+    const failure = classifyRuntimeRecoveryDiscoveryFailure({ source, sourceLabel, message });
+    failures.push(failure);
+    if (failure.category !== 'ExpectedEmpty') {
+      errors.push(recoveryFailureErrorText(failure));
+    }
+  };
 
   for (const tower of towers) {
     try {
       if (!await towerHasRecoveryBundle(tower, lookupKey)) {
+        recordFailure('tower', tower.url, 'TOWER_BUNDLE_NOT_FOUND');
         continue;
       }
       const restoreUrl = buildTowerRequestUrl(tower.url, '/api/tower/restore');
@@ -924,16 +993,22 @@ export async function discoverRuntimeRecoveryCandidates(
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ lookupKey }),
       });
-      if (response.status === 404) continue;
+      if (response.status === 404) {
+        recordFailure('tower', tower.url, 'HTTP_404');
+        continue;
+      }
       if (!response.ok) {
-        errors.push(`${tower.url}:HTTP_${response.status}`);
+        recordFailure('tower', tower.url, `HTTP_${response.status}`);
         continue;
       }
       const payload = await response.json() as TowerRestorePayload;
       const encryptedBundles = extractEncryptedRecoveryBundles(payload);
       if (!payload.ok || encryptedBundles.length === 0) {
-        if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') continue;
-        errors.push(`${tower.url}:${String(payload.error || 'unknown')}`);
+        if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') {
+          recordFailure('tower', tower.url, 'TOWER_BUNDLE_NOT_FOUND');
+          continue;
+        }
+        recordFailure('tower', tower.url, String(payload.error || 'unknown'));
         continue;
       }
       candidates.push(await buildRuntimeRecoveryCandidate({
@@ -947,7 +1022,7 @@ export async function discoverRuntimeRecoveryCandidates(
         xln,
       }));
     } catch (error) {
-      errors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
+      recordFailure('tower', tower.url, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -957,7 +1032,7 @@ export async function discoverRuntimeRecoveryCandidates(
       const payload = await peer.fetchBundles({ runtimeId, lookupKey });
       const encryptedBundles = extractEncryptedRecoveryBundles(payload);
       if (encryptedBundles.length === 0) {
-        errors.push(`${sourceLabel}:PEER_RECOVERY_BUNDLE_EMPTY`);
+        recordFailure('peer', sourceLabel, 'PEER_RECOVERY_BUNDLE_EMPTY');
         continue;
       }
       candidates.push(await buildRuntimeRecoveryCandidate({
@@ -970,7 +1045,7 @@ export async function discoverRuntimeRecoveryCandidates(
         xln,
       }));
     } catch (error) {
-      errors.push(`${sourceLabel}:${error instanceof Error ? error.message : String(error)}`);
+      recordFailure('peer', sourceLabel, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -980,6 +1055,7 @@ export async function discoverRuntimeRecoveryCandidates(
     lookupKey,
     candidates,
     errors,
+    failures,
     checkedTowers: towers.length,
     checkedPeers: peers.length,
   };

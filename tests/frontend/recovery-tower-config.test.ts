@@ -5,6 +5,7 @@ import { AbiCoder, HDNodeWallet, Mnemonic, ParamType, Wallet, getIndexedAccountP
 import {
   buildDelayedLastResortAppointmentsForTower,
   buildRuntimeRecoveryConfigForMode,
+  classifyRuntimeRecoveryDiscoveryFailure,
   discoverRuntimeRecoveryCandidates,
   mergeRuntimeRecoveryTowerReceipts,
   parseRuntimeRecoveryCandidateFile,
@@ -406,6 +407,7 @@ test('runtime recovery discovery asks every tower and sorts candidates by runtim
     expect(result.checkedPeers).toBe(1);
     expect(calls.filter((call) => call.includes('/api/recovery/discover'))).toHaveLength(2);
     expect(calls.filter((call) => call.includes('/api/tower/restore'))).toHaveLength(2);
+    expect(result.failures).toEqual([]);
     expect(result.candidates).toHaveLength(3);
     expect(result.candidates[0]).toMatchObject({
       source: 'peer',
@@ -421,6 +423,96 @@ test('runtime recovery discovery asks every tower and sorts candidates by runtim
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('runtime recovery discovery classifies expected empty and transient failures', async () => {
+  const originalFetch = globalThis.fetch;
+  const runtimeId = deriveTestAddress(0);
+  const lookupKey = keccak256(toUtf8Bytes('discovery-failure-lookup'));
+
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/api/recovery/discover')) {
+      return new Response(JSON.stringify({
+        ok: true,
+        lookupKey,
+        available: false,
+        latestReceipt: null,
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  }) as typeof fetch;
+
+  try {
+    const result = await discoverRuntimeRecoveryCandidates(testMnemonic, {
+      towers: [{ url: 'http://127.0.0.1:9101', towerMode: 'blind_backup' }],
+      peers: [
+        {
+          id: 'peer-empty',
+          label: 'Peer Empty',
+          fetchBundles: async () => ({ ok: true, bundles: [] }),
+        },
+        {
+          id: 'peer-timeout',
+          label: 'Peer Timeout',
+          fetchBundles: async () => {
+            throw new Error('RECOVERY_REQUEST_TIMEOUT: target=peer');
+          },
+        },
+      ],
+      xln: {
+        deriveRuntimeRecoveryLookupKey: () => lookupKey,
+        decryptRuntimeRecoveryBundle: async () => {
+          throw new Error('decrypt should not run without encrypted bundles');
+        },
+      } as unknown as XLNModule,
+    });
+
+    expect(result.runtimeId).toBe(runtimeId);
+    expect(result.candidates).toHaveLength(0);
+    expect(result.errors).toEqual(['Peer Timeout:RECOVERY_REQUEST_TIMEOUT: target=peer']);
+    expect(result.failures).toEqual([
+      {
+        source: 'tower',
+        sourceLabel: 'http://127.0.0.1:9101',
+        category: 'ExpectedEmpty',
+        code: 'TOWER_BUNDLE_NOT_FOUND',
+        message: 'TOWER_BUNDLE_NOT_FOUND',
+      },
+      {
+        source: 'peer',
+        sourceLabel: 'Peer Empty',
+        category: 'ExpectedEmpty',
+        code: 'PEER_RECOVERY_BUNDLE_EMPTY',
+        message: 'PEER_RECOVERY_BUNDLE_EMPTY',
+      },
+      {
+        source: 'peer',
+        sourceLabel: 'Peer Timeout',
+        category: 'TransientRace',
+        code: 'RECOVERY_REQUEST_TIMEOUT',
+        message: 'RECOVERY_REQUEST_TIMEOUT: target=peer',
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('runtime recovery discovery classifier marks invalid state as contradiction', () => {
+  expect(classifyRuntimeRecoveryDiscoveryFailure({
+    source: 'peer',
+    sourceLabel: 'Peer Bad',
+    message: 'RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH: expected=a actual=b',
+  })).toMatchObject({
+    source: 'peer',
+    sourceLabel: 'Peer Bad',
+    category: 'Contradiction',
+    code: 'RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH',
+  });
 });
 
 test('local runtime backup file is parsed as an explicit recovery candidate', async () => {

@@ -229,6 +229,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Baseline categories: `Contradiction` is fatal and halts,
      `ExpectedEmpty` is normal empty state, `TransientRace` retries with a
      bounded TTL and only becomes fatal after expiry.
+   - Partial: recovery discovery now records structured tower/peer failures
+     with `ExpectedEmpty`, `TransientRace`, and `Contradiction` categories while
+     keeping legacy warning strings for non-empty failures only.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.
