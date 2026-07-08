@@ -1113,6 +1113,10 @@ describe('production startup wiring', () => {
     const reserveBootstrap = hubNode.slice(reserveStart, supportPeerReserveEnd);
     expect(reserveBootstrap).toContain('tokenCatalogForHubJurisdiction(tokenCatalog, {');
     expect(reserveBootstrap).toContain('const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });');
+    expect(reserveBootstrap).toContain('profile.jurisdictionRef || jurisdictionName');
+    expect(reserveBootstrap).toContain('resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef || jurisdiction)');
+    expect(reserveBootstrap).toContain('sameJurisdictionRefOrNameFallback(jurisdiction, activeJurisdiction)');
+    expect(reserveBootstrap).not.toContain('profilesByJurisdiction.has(jurisdictionName)');
     expect(reserveBootstrap).not.toContain('tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });

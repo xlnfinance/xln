@@ -362,6 +362,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: orchestrator now passes chain/depository in market-maker support
      identities, and hub/MM matching refuses name-only fallback when either
      side already carries a canonical jurisdiction ref.
+   - Partial: hub peer reserve bootstrap now groups visible peer hubs by
+     canonical jurisdiction ref and resolves the funding J-adapter by that ref
+     before using legacy names.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

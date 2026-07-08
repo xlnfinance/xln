@@ -44,7 +44,7 @@ import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
-  sameJurisdictionIdentityOrNameFallback,
+  isJurisdictionStackRef,
   sameJurisdictionIdentityOrNameOnlyFallback,
 } from '../jurisdiction-runtime';
 import {
@@ -169,6 +169,8 @@ type VisibleHubProfile = {
   entityId: string;
   runtimeId: string;
   jurisdictionName: string;
+  chainId?: number;
+  depositoryAddress?: string;
   jurisdictionRef?: string;
 };
 
@@ -302,10 +304,27 @@ const resolveJReplicaForJurisdictionName = (
   env: Env,
   jurisdictionName: string,
 ): { name: string; replica: JReplica } | null => {
-  const target = { name: jurisdictionName };
-  if (!normalizeJurisdictionKey(jurisdictionName)) return null;
+  return resolveJReplicaForJurisdictionIdentity(env, { name: jurisdictionName });
+};
+
+const resolveJReplicaForJurisdictionIdentity = (
+  env: Env,
+  jurisdiction: unknown,
+): { name: string; replica: JReplica } | null => {
+  const explicitRef = isJurisdictionStackRef(jurisdiction) ? String(jurisdiction).trim().toLowerCase() : '';
+  const targetRef = explicitRef || getJurisdictionIdentityRef(jurisdiction);
+  const targetName = normalizeJurisdictionKey(typeof jurisdiction === 'string'
+    ? jurisdiction
+    : (jurisdiction as { name?: unknown; jurisdictionName?: unknown } | null | undefined)?.name ||
+      (jurisdiction as { jurisdictionName?: unknown } | null | undefined)?.jurisdictionName);
+  if (!targetRef && !targetName) return null;
   for (const [name, replica] of env.jReplicas?.entries?.() || []) {
-    if (sameJurisdictionIdentityOrNameFallback(target, { ...replica, name: replica?.name || name })) {
+    const candidate = { ...replica, name: replica?.name || name };
+    if (targetRef) {
+      if (getJurisdictionIdentityRef(candidate) === targetRef) return { name, replica };
+      continue;
+    }
+    if (sameJurisdictionIdentityOrNameOnlyFallback(jurisdiction, candidate)) {
       return { name, replica };
     }
   }
@@ -316,7 +335,7 @@ const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boo
   Boolean(resolveJReplicaForJurisdictionName(env, jurisdictionName)?.replica?.jadapter);
 
 const sameJurisdictionRefOrNameFallback = (left: unknown, right: unknown): boolean => {
-  return sameJurisdictionIdentityOrNameFallback(left, right);
+  return sameJurisdictionIdentityOrNameOnlyFallback(left, right);
 };
 
 type JurisdictionImportDiagnostics = {
@@ -1085,27 +1104,36 @@ const ensurePeerBootstrapReserves = async (
   tokenCatalog: JTokenInfo[],
 ): Promise<void> => {
   if (!resolvedArgs.deployTokens || peerProfiles.length === 0) return;
-  const profilesByJurisdiction = new Map<string, VisibleHubProfile[]>();
+  const profilesByJurisdiction = new Map<string, { jurisdiction: VisibleHubProfile; profiles: VisibleHubProfile[] }>();
   for (const profile of peerProfiles) {
     const jurisdictionName = String(profile.jurisdictionName || '').trim();
-    if (!jurisdictionName) {
+    const jurisdictionKey = String(profile.jurisdictionRef || jurisdictionName).trim();
+    if (!jurisdictionKey) {
       throw new Error(`PEER_RESERVE_JURISDICTION_MISSING: entity=${profile.entityId}`);
     }
-    if (!profilesByJurisdiction.has(jurisdictionName)) profilesByJurisdiction.set(jurisdictionName, []);
-    profilesByJurisdiction.get(jurisdictionName)!.push(profile);
+    const group = profilesByJurisdiction.get(jurisdictionKey) ?? { jurisdiction: profile, profiles: [] };
+    group.profiles.push(profile);
+    profilesByJurisdiction.set(jurisdictionKey, group);
   }
 
-  for (const [jurisdictionName, profiles] of profilesByJurisdiction) {
-    const resolvedReplica = resolveJReplicaForJurisdictionName(env, jurisdictionName);
+  const activeReplicaName = String(env.activeJurisdiction || '');
+  const activeReplica = activeReplicaName ? env.jReplicas?.get(activeReplicaName) : undefined;
+  const activeJurisdiction = activeReplica
+    ? { ...activeReplica, name: activeReplica.name || activeReplicaName }
+    : activeReplicaName;
+  for (const [jurisdictionKey, group] of profilesByJurisdiction) {
+    const { jurisdiction, profiles } = group;
+    const jurisdictionName = String(jurisdiction.jurisdictionName || jurisdictionKey).trim();
+    const resolvedReplica = resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef || jurisdiction);
     const replicaName = resolvedReplica?.replica?.name || resolvedReplica?.name || jurisdictionName;
     const jadapter = resolvedReplica?.replica?.jadapter;
     if (!jadapter) {
       throw new Error(
-        `PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionName} ` +
+        `PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionKey} ` +
         `known=${Array.from(env.jReplicas?.keys?.() || []).join(',')}`,
       );
     }
-    const catalog = sameJurisdictionRefOrNameFallback(jurisdictionName, env.activeJurisdiction || replicaName)
+    const catalog = sameJurisdictionRefOrNameFallback(jurisdiction, activeJurisdiction)
       ? tokenCatalog
       : await ensureTokenCatalog(jadapter, true, replicaName);
     const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });
@@ -1250,14 +1278,21 @@ const readVisibleHubProfiles = (env: Env, jurisdiction: unknown): VisibleHubProf
       if (!targetRef && !targetName) return true;
       return sameJurisdictionIdentityOrNameOnlyFallback(jurisdiction, profile.metadata?.jurisdiction);
     })
-    .map(profile => ({
-      name: String(profile.name || '').trim(),
-      hubName: typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName.trim() : '',
-      entityId: String(profile.entityId || '').toLowerCase(),
-      runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
-      jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
-      jurisdictionRef: getJurisdictionIdentityRef(profile.metadata?.jurisdiction),
-    }))
+    .map(profile => {
+      const chainId = Number(profile.metadata?.jurisdiction?.chainId || 0);
+      const depositoryAddress = String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim();
+      const jurisdictionRef = getJurisdictionIdentityRef(profile.metadata?.jurisdiction);
+      return {
+        name: String(profile.name || '').trim(),
+        hubName: typeof profile.metadata?.hubName === 'string' ? profile.metadata.hubName.trim() : '',
+        entityId: String(profile.entityId || '').toLowerCase(),
+        runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
+        jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
+        ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
+        ...(depositoryAddress ? { depositoryAddress } : {}),
+        ...(jurisdictionRef ? { jurisdictionRef } : {}),
+      };
+    })
     .filter(profile =>
       profile.name.length > 0 &&
       profile.entityId.length > 0 &&
