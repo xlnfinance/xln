@@ -9,6 +9,11 @@
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
+  import {
+    isRelayTimelineError,
+    isRelayTimelineWarning,
+    type RelayTimelineDelivery,
+  } from '$lib/health/relayEventSeverity';
   import type { RuntimeActivityEvent, RuntimeAdapterEntitySummary } from '@xln/runtime/xln-api';
   import { makeQaSeveritySignal, type QaSeverity, type QaSeveritySignal } from '@xln/runtime/qa/severity';
   import { DISPLAY } from '@xln/runtime/constants';
@@ -257,6 +262,7 @@
     encrypted?: boolean;
     size?: number;
     queueSize?: number;
+    delivery?: RelayTimelineDelivery;
     details?: unknown;
   };
 
@@ -419,6 +425,7 @@
   }
 
   function isCriticalEvent(e: RuntimeProjectionEvent): boolean {
+    if (e.delivery?.fatal === true) return true;
     if (e.event === 'error') return true;
     const blob = eventBlob(e);
     return BUG_PATTERNS.some((p) => blob.includes(p));
@@ -1205,7 +1212,7 @@
             <div class="empty">No events match filters.</div>
           {:else}
             {#each filteredEvents as e}
-              <article class="evt" class:err={e.event === 'error' || e.status === 'rejected' || e.status === 'local-delivery-failed'} class:warn={e.status === 'queued'}>
+              <article class="evt" class:err={isRelayTimelineError(e)} class:warn={isRelayTimelineWarning(e)}>
                 <div class="evt-head">
                   <span>{new Date(e.ts).toLocaleString()}</span>
                   <span class="chip">{e.event}</span>
@@ -1220,7 +1227,7 @@
                   {#if e.queueSize !== undefined}<span>queue: {e.queueSize}</span>{/if}
                   {#if e.size !== undefined}<span>size: {e.size}</span>{/if}
                 </div>
-                <pre>{JSON.stringify({ id: e.id, reason: e.reason, details: e.details }, null, 2)}</pre>
+                <pre>{JSON.stringify({ id: e.id, reason: e.reason, delivery: e.delivery, details: e.details }, null, 2)}</pre>
               </article>
             {/each}
           {/if}
