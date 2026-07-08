@@ -57,6 +57,7 @@ import type {
   QaScenarioMetadata,
   QaSlowStep,
 } from '../qa/types';
+import { assertMinDiskFree } from '../orchestrator/storage-monitor';
 import { compareStableText } from '../serialization-utils';
 import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
 import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
@@ -560,6 +561,7 @@ const flushLog = async (log: ReturnType<typeof createWriteStream>, marker: strin
 };
 
 const assertRunnerPreflight = async (): Promise<void> => {
+  assertMinDiskFree();
   const typechainIndex = resolve(process.cwd(), 'jurisdictions', 'typechain-types', 'index.ts');
   if (!existsSync(typechainIndex)) {
     throw new Error(`RUNNER_PREFLIGHT_FAILED missing ${typechainIndex}`);

@@ -79,6 +79,14 @@ const statDiskBytes = (): { totalBytes: number; usedBytes: number; freeBytes: nu
   return { totalBytes, usedBytes, freeBytes };
 };
 
+export const assertDiskFreeAtLeast = (freeBytes: number, requiredBytes = MIN_DISK_FREE_BYTES): void => {
+  if (freeBytes < requiredBytes) {
+    throw new Error(
+      `INSUFFICIENT_DISK_FREE: free=${String(freeBytes)} required=${String(requiredBytes)}`,
+    );
+  }
+};
+
 type PathByteScan = {
   bytes: number;
   entries: number;
@@ -271,9 +279,5 @@ export const getStorageHealthSnapshotSync = (): StorageHealth => {
 
 export const assertMinDiskFree = (): void => {
   const disk = statDiskBytes();
-  if (disk.freeBytes < MIN_DISK_FREE_BYTES) {
-    throw new Error(
-      `INSUFFICIENT_DISK_FREE: free=${String(disk.freeBytes)} required=${String(MIN_DISK_FREE_BYTES)}`,
-    );
-  }
+  assertDiskFreeAtLeast(disk.freeBytes);
 };
