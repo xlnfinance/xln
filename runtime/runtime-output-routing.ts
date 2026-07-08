@@ -60,9 +60,6 @@ type RuntimeP2PDispatch = {
 export type RuntimeDirectEntityInputDispatchResult = DeliveryResult;
 
 export type RuntimeEntityInputRoutingResult = {
-  sent: boolean;
-  deferred: boolean;
-  queuedLocal: boolean;
   delivery: DeliveryResult;
 };
 
@@ -508,9 +505,6 @@ export const sendEntityInputWithRouting = (
   );
 
   return {
-    sent: remoteOutputs.length > 0 && deferred.length === 0,
-    deferred: env.pendingNetworkOutputs.length > 0,
-    queuedLocal: localOutputs.length > 0,
     delivery: buildRoutingDeliveryResult({
       remoteCount: remoteOutputs.length,
       localCount: localOutputs.length,

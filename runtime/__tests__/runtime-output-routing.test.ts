@@ -309,9 +309,6 @@ describe('runtime output routing', () => {
     });
 
     expect(result).toMatchObject({
-      sent: true,
-      deferred: false,
-      queuedLocal: false,
       delivery: {
         outcome: 'delivered',
         code: 'ROUTE_REMOTE_DELIVERED',
@@ -356,9 +353,6 @@ describe('runtime output routing', () => {
     });
 
     expect(result).toMatchObject({
-      sent: false,
-      deferred: false,
-      queuedLocal: true,
       delivery: {
         outcome: 'queued',
         code: 'ROUTE_LOCAL_QUEUED',

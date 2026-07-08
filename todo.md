@@ -291,8 +291,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      first and only falls back to legacy status strings for old events.
    - Partial: P2P entity-input send and pending flush now use the same typed
      delivery result shape internally while preserving the public boolean API.
-   - Partial: public runtime `sendEntityInput`/routing results now include a
-     typed `delivery` result beside the legacy boolean summary fields.
+   - Partial: public runtime `sendEntityInput`/routing results now return the
+     typed `delivery` result without legacy boolean summary fields.
    - Partial: process-local direct entity dispatch is now typed-only at the
      routing boundary; legacy boolean returns fail fast instead of falling
      through to P2P.
