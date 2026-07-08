@@ -88,8 +88,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const marketMakerHealth = normalizeMarketMakerHealthPayload(options.marketMakerHealthOverride ?? marketMakerChild.lastHealth);');
     expect(orchestrator).toContain('const aggregatedMarketMakerHealth = buildAggregatedMarketMakerHealth({');
     expect(marketMakerAggregation).toContain('const childReady = marketMakerHealth?.marketMaker?.ok === true;');
-    expect(marketMakerAggregation).toContain('const ok = !mmEnabled');
-    expect(marketMakerAggregation).toContain('marketMakerActive &&');
+    expect(marketMakerAggregation).toContain('if (!marketMakerActive) {');
+    expect(marketMakerAggregation).toContain('const ok = !mmEnabled || failure === null;');
     const waitForMarketMakerReady = orchestrator.slice(orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'));
     const waitForMarketMakerReadyEnd = waitForMarketMakerReady.indexOf('const waitForHubSelfReady = async (child: HubChild): Promise<void> => {');
     expect(waitForMarketMakerReadyEnd).toBeGreaterThan(0);
@@ -111,7 +111,7 @@ describe('production startup wiring', () => {
     expect(lastStartupPhaseUpdate.indexOf('child.lastInfo?.startupPhase ||')).toBeLessThan(
       lastStartupPhaseUpdate.indexOf('child.lastHealth?.startupPhase ||'),
     );
-    expect(marketMakerAggregation).toContain('hubs.every((hub) => hub.depthReady) &&');
+    expect(marketMakerAggregation).toContain('MARKET_MAKER_HUB_DEPTH_NOT_READY');
     expect(marketMakerAggregation).toContain('depthReady: route.depthReady === true');
     expect(marketMakerAggregation).toContain('expectedOffers: Number(pair.expectedOffers || 0)');
     expect(orchestrator).toContain('health.marketMaker.hubs.every(hub => hub.depthReady)');
@@ -169,7 +169,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(hubNode).toContain('jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || \'\')');
-    expect(hubNode).toContain('normalizeJurisdictionKey(identity.jurisdictionName) !== normalizedJurisdiction');
+    expect(hubNode).toContain('sameJurisdictionIdentityOrNameFallback(identity.jurisdictionName, jurisdiction)');
     expect(hubNode).toContain('for (const hubBootstrap of hubBootstraps)');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
@@ -213,8 +213,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const prewarmLocalMarketMakerSignerKeys = (): void => {');
     expect(mmNode).toContain('prewarmLocalMarketMakerSignerKeys();');
     expect(mmNode.indexOf('prewarmLocalMarketMakerSignerKeys();')).toBeLessThan(mmNode.indexOf('startRuntimeLoop(env, {'));
-    expect(mmNode).toContain('const hasLiveJurisdictionAdapter = (env: Env, name: string): boolean => {');
-    expect(mmNode).toContain('if (hasJurisdictionReplica(env, jurisdiction.name) && hasLiveJurisdictionAdapter(env, jurisdiction.name)) return;');
+    expect(mmNode).toContain('const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {');
+    expect(mmNode).toContain('if (hasJurisdictionReplica(env, jurisdiction) && hasLiveJurisdictionAdapter(env, jurisdiction)) return;');
     const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     expect(runtimeSource).toContain('const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));');
     expect(runtimeSource).toContain('maxEntityInputsPerFrame?: number');

@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import { buildDebtEnforcementRuntimeInput, createEmptyEnv, enqueueRuntimeInput, process } from '../runtime';
 import { applyEntityTx } from '../entity-tx/apply';
-import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
+import {
+  assertSameJurisdictionAccount,
+  getJurisdictionIdentityRef,
+  sameJurisdictionIdentityOrNameFallback,
+} from '../jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
@@ -61,6 +65,16 @@ const makeEnv = (label: string): Env => {
 };
 
 describe('multi-jurisdiction entity binding', () => {
+  test('jurisdiction identity uses stack refs before display names', () => {
+    const canonical = makeJurisdiction('Testnet', 31337, '11', '12');
+    const relabeled = { ...canonical, name: 'Renamed Local Chain' };
+    const conflicting = makeJurisdiction('Testnet', 31338, '21', '22');
+
+    expect(getJurisdictionIdentityRef(canonical)).toBe(`stack:31337:${addr('11')}`);
+    expect(sameJurisdictionIdentityOrNameFallback(canonical, relabeled)).toBe(true);
+    expect(sameJurisdictionIdentityOrNameFallback(canonical, conflicting)).toBe(false);
+  });
+
   const importEntity = async (
     env: Env,
     entityId: string,

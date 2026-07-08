@@ -355,6 +355,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      names as cosmetic only.
    - Delete alias allowlists and name-based matching from runtime, market maker,
      health, and tests.
+   - Partial: shared jurisdiction identity helpers now derive canonical
+     `stack:<chainId>:<depository>` refs and hub/MM bootstrap readiness compares
+     those refs before falling back to legacy display names for incomplete
+     fixtures.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

@@ -31,6 +31,50 @@ export const normalizeJurisdictionName = (value: unknown): string =>
 export const getJurisdictionConfigName = (jurisdiction?: Pick<JurisdictionConfig, 'name'> | null): string =>
   typeof jurisdiction?.name === 'string' ? jurisdiction.name.trim() : '';
 
+type JurisdictionIdentitySource = {
+  name?: unknown;
+  chainId?: unknown;
+  depositoryAddress?: unknown;
+  contracts?: { depository?: unknown } | null;
+  jadapter?: { chainId?: unknown; addresses?: { depository?: unknown } | null } | null;
+};
+
+const readJurisdictionIdentityName = (jurisdiction: unknown): string => {
+  if (typeof jurisdiction === 'string') return jurisdiction.trim();
+  if (!jurisdiction || typeof jurisdiction !== 'object') return '';
+  return String((jurisdiction as JurisdictionIdentitySource).name || '').trim();
+};
+
+export const getJurisdictionIdentityRef = (jurisdiction: unknown): string => {
+  if (!jurisdiction || typeof jurisdiction !== 'object') return '';
+  const source = jurisdiction as JurisdictionIdentitySource;
+  const depository = firstUsableContractAddress(
+    source.jadapter?.addresses?.depository,
+    source.depositoryAddress,
+    source.contracts?.depository,
+  );
+  const chainId = normalizeStackChainId(source.chainId ?? source.jadapter?.chainId);
+  return getJurisdictionStackId({
+    depositoryAddress: depository || '',
+    ...(chainId !== null ? { chainId } : {}),
+  });
+};
+
+export const sameJurisdictionIdentity = (left: unknown, right: unknown): boolean => {
+  const leftRef = getJurisdictionIdentityRef(left);
+  const rightRef = getJurisdictionIdentityRef(right);
+  return Boolean(leftRef && rightRef && leftRef === rightRef);
+};
+
+export const sameJurisdictionIdentityOrNameFallback = (left: unknown, right: unknown): boolean => {
+  const leftRef = getJurisdictionIdentityRef(left);
+  const rightRef = getJurisdictionIdentityRef(right);
+  if (leftRef && rightRef) return leftRef === rightRef;
+  const leftName = normalizeJurisdictionName(readJurisdictionIdentityName(left));
+  const rightName = normalizeJurisdictionName(readJurisdictionIdentityName(right));
+  return Boolean(leftName && rightName && leftName === rightName);
+};
+
 const getJReplicaStackId = (replica: JReplica | undefined): string => {
   if (!replica) return '';
   const depository = firstUsableContractAddress(

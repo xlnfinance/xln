@@ -82,6 +82,7 @@ import {
 import { resolveCrossJurisdictionRuntimeTopology } from '../cross-jurisdiction-boundary';
 import { crossJurisdictionBookOwnerRef } from '../cross-jurisdiction-orderbook';
 import { getJurisdictionStackId } from '../jurisdiction-stack';
+import { sameJurisdictionIdentityOrNameFallback } from '../jurisdiction-runtime';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import {
@@ -597,23 +598,22 @@ const toEntityJurisdictionConfig = (jurisdiction: JurisdictionConfig): MarketMak
   chainId: jurisdiction.chainId,
 });
 
-const hasJurisdictionReplica = (env: Env, name: string): boolean => {
-  const normalized = String(name || '').trim().toLowerCase();
-  if (!normalized) return false;
-  for (const existing of env.jReplicas?.keys?.() || []) {
-    if (String(existing || '').trim().toLowerCase() === normalized) return true;
+const sameImportedJurisdiction = (target: JurisdictionConfig, existingName: string, replica: unknown): boolean =>
+  sameJurisdictionIdentityOrNameFallback(target, {
+    ...(replica && typeof replica === 'object' ? replica : {}),
+    name: (replica as { name?: unknown } | null | undefined)?.name || existingName,
+  });
+
+const hasJurisdictionReplica = (env: Env, jurisdiction: JurisdictionConfig): boolean => {
+  for (const [existing, replica] of env.jReplicas?.entries?.() || []) {
+    if (sameImportedJurisdiction(jurisdiction, String(existing || ''), replica)) return true;
   }
   return false;
 };
 
-const hasLiveJurisdictionAdapter = (env: Env, name: string): boolean => {
-  const normalized = String(name || '').trim().toLowerCase();
-  if (!normalized) return false;
+const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {
   for (const [existing, replica] of env.jReplicas?.entries?.() || []) {
-    if (
-      String(existing || '').trim().toLowerCase() === normalized ||
-      String(replica?.name || '').trim().toLowerCase() === normalized
-    ) {
+    if (sameImportedJurisdiction(jurisdiction, String(existing || ''), replica)) {
       return Boolean(replica?.jadapter);
     }
   }
@@ -625,7 +625,7 @@ const importJurisdictionIfNeeded = async (
   jurisdiction: JurisdictionConfig,
   rounds = 35,
 ): Promise<void> => {
-  if (hasJurisdictionReplica(env, jurisdiction.name) && hasLiveJurisdictionAdapter(env, jurisdiction.name)) return;
+  if (hasJurisdictionReplica(env, jurisdiction) && hasLiveJurisdictionAdapter(env, jurisdiction)) return;
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importJ',

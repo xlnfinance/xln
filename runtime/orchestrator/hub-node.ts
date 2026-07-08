@@ -41,7 +41,11 @@ import {
   resolveRuntimeAdapterAuthSeed,
 } from '../radapter/auth';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
-import { getJReplicaByJurisdictionRef } from '../jurisdiction-runtime';
+import {
+  getJReplicaByJurisdictionRef,
+  getJurisdictionIdentityRef,
+  sameJurisdictionIdentityOrNameFallback,
+} from '../jurisdiction-runtime';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,
@@ -162,6 +166,7 @@ type VisibleHubProfile = {
   entityId: string;
   runtimeId: string;
   jurisdictionName: string;
+  jurisdictionRef?: string;
 };
 
 type VisibleSupportPeer = SupportPeerIdentity & {
@@ -294,13 +299,10 @@ const resolveJReplicaForJurisdictionName = (
   env: Env,
   jurisdictionName: string,
 ): { name: string; replica: JReplica } | null => {
-  const targetKey = normalizeJurisdictionKey(jurisdictionName);
-  if (!targetKey) return null;
+  const target = { name: jurisdictionName };
+  if (!normalizeJurisdictionKey(jurisdictionName)) return null;
   for (const [name, replica] of env.jReplicas?.entries?.() || []) {
-    if (
-      normalizeJurisdictionKey(name) === targetKey ||
-      normalizeJurisdictionKey(replica?.name || '') === targetKey
-    ) {
+    if (sameJurisdictionIdentityOrNameFallback(target, { ...replica, name: replica?.name || name })) {
       return { name, replica };
     }
   }
@@ -310,10 +312,8 @@ const resolveJReplicaForJurisdictionName = (
 const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>
   Boolean(resolveJReplicaForJurisdictionName(env, jurisdictionName)?.replica?.jadapter);
 
-const sameJurisdictionName = (left: unknown, right: unknown): boolean => {
-  const leftKey = normalizeJurisdictionKey(left);
-  const rightKey = normalizeJurisdictionKey(right);
-  return leftKey.length > 0 && leftKey === rightKey;
+const sameJurisdictionRefOrNameFallback = (left: unknown, right: unknown): boolean => {
+  return sameJurisdictionIdentityOrNameFallback(left, right);
 };
 
 type JurisdictionImportDiagnostics = {
@@ -1095,7 +1095,7 @@ const ensurePeerBootstrapReserves = async (
         `known=${Array.from(env.jReplicas?.keys?.() || []).join(',')}`,
       );
     }
-    const catalog = sameJurisdictionName(jurisdictionName, env.activeJurisdiction || replicaName)
+    const catalog = sameJurisdictionRefOrNameFallback(jurisdictionName, env.activeJurisdiction || replicaName)
       ? tokenCatalog
       : await ensureTokenCatalog(jadapter, true, replicaName);
     const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });
@@ -1126,6 +1126,12 @@ const getEntityJurisdictionName = (env: Env, entityId: string | null): string =>
   if (!entityId) return '';
   const replica = getEntityReplicaById(env, entityId);
   return normalizeJurisdictionDisplayName(replica?.state?.config?.jurisdiction?.name || '');
+};
+
+const getEntityJurisdiction = (env: Env, entityId: string | null): unknown | null => {
+  if (!entityId) return null;
+  const replica = getEntityReplicaById(env, entityId);
+  return replica?.state?.config?.jurisdiction ?? null;
 };
 
 const resolveEntityTokenCatalog = async (
@@ -1222,14 +1228,17 @@ const ensureHubBootstrapReserves = async (
   return buildAggregateReserveHealth(primaryHealth, entities);
 };
 
-const readVisibleHubProfiles = (env: Env, jurisdictionName: string): VisibleHubProfile[] => {
-  const normalizedJurisdiction = normalizeJurisdictionKey(jurisdictionName);
+const readVisibleHubProfiles = (env: Env, jurisdiction: unknown): VisibleHubProfile[] => {
   const profiles = env.gossip?.getProfiles?.() || [];
   return profiles
     .filter(profile => profile.metadata?.isHub === true)
     .filter(profile => {
-      if (!normalizedJurisdiction) return true;
-      return normalizeJurisdictionKey(profile.metadata?.jurisdiction?.name || '') === normalizedJurisdiction;
+      const targetRef = getJurisdictionIdentityRef(jurisdiction);
+      const targetName = normalizeJurisdictionKey(typeof jurisdiction === 'string'
+        ? jurisdiction
+        : (jurisdiction as { name?: unknown } | null | undefined)?.name);
+      if (!targetRef && !targetName) return true;
+      return sameJurisdictionIdentityOrNameFallback(jurisdiction, profile.metadata?.jurisdiction);
     })
     .map(profile => ({
       name: String(profile.name || '').trim(),
@@ -1237,6 +1246,7 @@ const readVisibleHubProfiles = (env: Env, jurisdictionName: string): VisibleHubP
       entityId: String(profile.entityId || '').toLowerCase(),
       runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
       jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
+      jurisdictionRef: getJurisdictionIdentityRef(profile.metadata?.jurisdiction),
     }))
     .filter(profile =>
       profile.name.length > 0 &&
@@ -1265,9 +1275,8 @@ const visibleDirectSupportPeers = (
   identities: SupportPeerIdentity[],
   profiles: ReturnType<NonNullable<Env['gossip']>['getProfiles']>,
   selfEntityId: string,
-  jurisdictionName: string,
+  jurisdiction: unknown,
 ): VisibleSupportPeer[] => {
-  const normalizedJurisdiction = normalizeJurisdictionKey(jurisdictionName);
   const profilesByEntityId = new Map(
     profiles.map(profile => [String(profile.entityId || '').toLowerCase(), profile] as const),
   );
@@ -1275,7 +1284,7 @@ const visibleDirectSupportPeers = (
     .map((identity) => {
       const entityId = identity.entityId.toLowerCase();
       if (entityId === selfEntityId.toLowerCase()) return null;
-      if (normalizeJurisdictionKey(identity.jurisdictionName) !== normalizedJurisdiction) return null;
+      if (!sameJurisdictionIdentityOrNameFallback(identity.jurisdictionName, jurisdiction)) return null;
       const profile = profilesByEntityId.get(entityId);
       const runtimeId = normalizeRuntimeId(profile?.runtimeId || '');
       if (!runtimeId) return null;
@@ -1308,7 +1317,8 @@ const buildLocalHealth = (
   hubEntities: HubBootstrapEntry[] = [],
 ): LocalHealthResponse => {
   const selfJurisdictionName = getEntityJurisdictionName(env, entityId);
-  const visibleHubProfiles = readVisibleHubProfiles(env, selfJurisdictionName);
+  const selfJurisdiction = getEntityJurisdiction(env, entityId) || selfJurisdictionName;
+  const visibleHubProfiles = readVisibleHubProfiles(env, selfJurisdiction);
   const visibleNames = visibleHubProfiles.map(profile => profile.name);
   const visibleIds = visibleHubProfiles.map(profile => profile.entityId);
   const requiredNames = resolvedArgs.meshHubNames;
@@ -2083,7 +2093,7 @@ const run = async (): Promise<void> => {
     if (!bootstrap || meshLoopInFlight) return;
     meshLoopInFlight = true;
     try {
-      const visibleHubProfiles = readVisibleHubProfiles(env, primaryJurisdictionName);
+      const visibleHubProfiles = readVisibleHubProfiles(env, jurisdiction);
       const requiredHubNames = new Set(resolvedArgs.meshHubNames.map(name => name.trim().toLowerCase()).filter(Boolean));
       const requiredHubProfiles = visibleHubProfiles.filter(profile => {
         const hubName = String(profile.hubName || profile.name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
@@ -2107,7 +2117,7 @@ const run = async (): Promise<void> => {
       const creditInputs: EntityInput[] = [];
 
       const collectSupportPeerInputs = (
-        owner: Pick<HubBootstrapEntry, 'entityId' | 'signerId' | 'jurisdictionName' | 'chainId'>,
+        owner: Pick<HubBootstrapEntry, 'entityId' | 'signerId' | 'jurisdictionName' | 'chainId' | 'depositoryAddress'>,
       ): void => {
         const supportPeerTokenIds = tokenIdsForHubJurisdiction(owner);
         const [openTokenId = HUB_MESH_TOKEN_ID, ...extraCreditTokenIds] = supportPeerTokenIds;
@@ -2115,7 +2125,7 @@ const run = async (): Promise<void> => {
           supportPeerIdentities,
           visibleProfiles,
           owner.entityId,
-          owner.jurisdictionName,
+          owner,
         );
         for (const peer of visibleSupportPeers) {
           const localAccount = getAccountMachine(env, owner.entityId, peer.entityId);
