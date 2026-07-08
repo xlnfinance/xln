@@ -96,6 +96,74 @@ test('runtime recovery coverage reports saved remote runtime peer refresh source
   });
 });
 
+test('runtime recovery coverage surfaces typed peer refresh failures', () => {
+  const empty = byId(buildRuntimeRecoveryCoverage({
+    runtime: runtimeFixture(),
+    peerSourceCount: 2,
+    discovery: {
+      checkedPeers: 2,
+      peerBackupCount: 0,
+      failures: [{
+        source: 'peer',
+        sourceLabel: 'Peer Empty',
+        category: 'ExpectedEmpty',
+        code: 'PEER_RECOVERY_BUNDLE_EMPTY',
+        message: 'peer did not have a backup bundle',
+      }],
+    },
+  }));
+
+  expect(empty.peer_refresh).toMatchObject({
+    status: 'configured',
+    statusLabel: 'No backup',
+    detail: '2 remote runtimes checked · no peer backup found (PEER_RECOVERY_BUNDLE_EMPTY)',
+  });
+
+  const transient = byId(buildRuntimeRecoveryCoverage({
+    runtime: runtimeFixture(),
+    peerSourceCount: 1,
+    discovery: {
+      checkedPeers: 1,
+      peerBackupCount: 0,
+      failures: [{
+        source: 'peer',
+        sourceLabel: 'Peer Slow',
+        category: 'TransientRace',
+        code: 'RECOVERY_REQUEST_TIMEOUT',
+        message: 'request timeout',
+      }],
+    },
+  }));
+
+  expect(transient.peer_refresh).toMatchObject({
+    status: 'configured',
+    statusLabel: 'Retry pending',
+    detail: '1 remote runtime checked · peer refresh retry pending (RECOVERY_REQUEST_TIMEOUT)',
+  });
+
+  const contradiction = byId(buildRuntimeRecoveryCoverage({
+    runtime: runtimeFixture(),
+    peerSourceCount: 1,
+    discovery: {
+      checkedPeers: 1,
+      peerBackupCount: 0,
+      failures: [{
+        source: 'peer',
+        sourceLabel: 'Peer Wrong',
+        category: 'Contradiction',
+        code: 'RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH',
+        message: 'candidate runtime id mismatch',
+      }],
+    },
+  }));
+
+  expect(contradiction.peer_refresh).toMatchObject({
+    status: 'configured',
+    statusLabel: 'Check failed',
+    detail: '1 remote runtime checked · peer refresh failed (RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH)',
+  });
+});
+
 test('runtime recovery discovery status persists peer refresh counters', () => {
   installMemoryLocalStorage();
   const runtimeId = '0x1111111111111111111111111111111111111111';

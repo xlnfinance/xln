@@ -18,6 +18,14 @@ export type RecoveryTowerStatusItem = {
   detail: string;
 };
 
+type RecoveryDiscoveryFailureInput = {
+  source?: 'tower' | 'peer' | string;
+  sourceLabel?: string;
+  category?: 'ExpectedEmpty' | 'TransientRace' | 'Contradiction' | string;
+  code?: string;
+  message?: string;
+};
+
 type RecoveryCoverageInput = {
   runtime: Runtime | null | undefined;
   towers?: RecoveryTowerConfig[];
@@ -26,6 +34,7 @@ type RecoveryCoverageInput = {
   discovery?: {
     checkedPeers?: number | null | undefined;
     peerBackupCount?: number | null | undefined;
+    failures?: RecoveryDiscoveryFailureInput[] | null | undefined;
   } | null | undefined;
 };
 
@@ -41,6 +50,22 @@ const normalizeMode = (mode: unknown): 'blind_backup' | 'delayed_last_resort' =>
   mode === 'delayed_last_resort' ? 'delayed_last_resort' : 'blind_backup';
 
 const normalizeUrl = (value: unknown): string => String(value || '').trim().replace(/\/+$/, '');
+
+const latestPeerFailure = (
+  failures: RecoveryDiscoveryFailureInput[] | null | undefined,
+): RecoveryDiscoveryFailureInput | null => (
+  Array.isArray(failures)
+    ? [...failures].reverse().find((failure) => failure?.source === 'peer') ?? null
+    : null
+);
+
+const peerFailureLabel = (failure: RecoveryDiscoveryFailureInput | null): string => {
+  if (!failure) return '';
+  const code = String(failure.code || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+  if (failure.category === 'ExpectedEmpty') return `no peer backup found (${code})`;
+  if (failure.category === 'TransientRace') return `peer refresh retry pending (${code})`;
+  return `peer refresh failed (${code})`;
+};
 
 const newestFirst = <T extends { receivedAt?: number; checkedAt?: number; height?: number; sequence?: number }>(
   left: T,
@@ -93,13 +118,27 @@ export function buildRuntimeRecoveryCoverage(input: RecoveryCoverageInput): Reco
   const peerSourceCount = positiveInt(input.peerSourceCount);
   const checkedPeerCount = positiveInt(input.discovery?.checkedPeers);
   const peerBackupCount = positiveInt(input.discovery?.peerBackupCount);
+  const peerFailure = latestPeerFailure(input.discovery?.failures);
+  const peerFailureText = peerFailureLabel(peerFailure);
   const effectivePeerCount = Math.max(peerSourceCount, checkedPeerCount);
   const peerRefreshStatus: RecoveryCoverageStatus =
     peerBackupCount > 0 ? 'ready' : effectivePeerCount > 0 ? 'configured' : 'missing';
   const peerRefreshStatusLabel =
-    peerBackupCount > 0 ? 'Backup observed' : effectivePeerCount > 0 ? 'Configured' : 'Not available';
+    peerBackupCount > 0
+      ? 'Backup observed'
+      : peerFailure?.category === 'Contradiction'
+        ? 'Check failed'
+        : peerFailure?.category === 'TransientRace'
+          ? 'Retry pending'
+          : peerFailure?.category === 'ExpectedEmpty'
+            ? 'No backup'
+            : effectivePeerCount > 0
+              ? 'Configured'
+              : 'Not available';
   const peerRefreshDetail = peerBackupCount > 0
     ? `${plural(peerBackupCount, 'peer backup', 'peer backups')} from ${plural(checkedPeerCount || effectivePeerCount, 'remote runtime', 'remote runtimes')}`
+    : checkedPeerCount > 0 && peerFailureText
+      ? `${plural(checkedPeerCount, 'remote runtime', 'remote runtimes')} checked · ${peerFailureText}`
     : effectivePeerCount > 0
       ? `${plural(effectivePeerCount, 'saved remote runtime', 'saved remote runtimes')} available for restore checks`
       : 'Restore currently depends on local state or tower backup';

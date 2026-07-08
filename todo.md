@@ -222,6 +222,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Show local, tower backup, delayed-last-resort, and peer-refresh coverage
      per runtime/account.
    - Surface last successful tower upload height and failure reason.
+   - Partial: peer-refresh coverage now surfaces persisted typed peer discovery
+     failure category/code for empty, transient, and contradictory PSR outcomes.
 
 3. **Typed failure taxonomy across runtime and ops.**
    - Split failures into explicit categories instead of treating every loud

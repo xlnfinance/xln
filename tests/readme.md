@@ -6,7 +6,7 @@ This directory contains the browser-facing tests and shared Playwright helpers. 
 
 | Layer | Purpose | Command |
 | --- | --- | --- |
-| L1 unit/component | Pure or near-pure runtime/frontend/native checks with no browser stack. Use for orderbook, serialization, storage projections, recovery builders, guards. | `bun test runtime/__tests__ tests/unit tests/frontend native/__tests__` |
+| L1 unit/component | Pure or near-pure runtime/frontend/native checks with no browser stack. Use for orderbook, serialization, storage projections, recovery builders, guards. | `bun run test:unit` |
 | L2 runtime scenarios | Deterministic runtime behavior through scenario execution, including non-network and isolated RPC/relay paths. Use when behavior crosses entity/account/jurisdiction boundaries. | `bun run test:scenarios:parallel:isolated` |
 | L3 browser e2e | Real user flows in Playwright against isolated local stacks. Use as a release gate after L1/L2 are green, not as the first debugger for a known narrow failure. | `bun run test:e2e:fast` |
 | L4 contracts | Solidity jurisdiction contracts and runtime/contract proof compatibility. | `bun run test:contracts:full` |
@@ -15,6 +15,7 @@ This directory contains the browser-facing tests and shared Playwright helpers. 
 
 ```bash
 bun run check
+bun run test:unit
 bun run test
 bun run test:e2e:fast
 ```

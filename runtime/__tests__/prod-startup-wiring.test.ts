@@ -872,6 +872,7 @@ describe('production startup wiring', () => {
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
     const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
     const allTestsFast = readFileSync(join(repoRoot, 'runtime/scripts/run-all-tests-fast.ts'), 'utf8');
+    const unitTestsRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-unit-tests.ts'), 'utf8');
     const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-system-tests-parallel.ts'), 'utf8');
     const cleanupHelper = readFileSync(join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts'), 'utf8');
     const bootstrapSoundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
@@ -900,6 +901,11 @@ describe('production startup wiring', () => {
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGKILL')");
     expect(packageJson).toContain('"test:e2e:monitor": "bun runtime/scripts/e2e-fail-fast-monitor.ts"');
     expect(packageJson).toContain('"test:cleanup": "bun runtime/scripts/test-artifact-cleanup.ts"');
+    expect(packageJson).toContain('"test:unit": "bun runtime/scripts/run-unit-tests.ts"');
+    expect(packageJson).toContain('"test:persistence:cli": "bun runtime/scripts/test-artifact-cleanup.ts --reason=persistence-cli && bun runtime/scripts/persistence-wal-smoke.ts"');
+    expect(packageJson).toContain('"test:watchtower:smoke": "bun runtime/scripts/test-artifact-cleanup.ts --reason=watchtower-smoke && bun runtime/scripts/watchtower-smoke.ts"');
+    expect(packageJson).toContain('"test:rpc-settlement": "bun runtime/scripts/test-artifact-cleanup.ts --reason=rpc-settlement && bun runtime/scripts/rpc-settlement-parity.ts"');
+    expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/test-artifact-cleanup.ts --reason=contracts && cd jurisdictions && bun run test"');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'");
@@ -918,6 +924,11 @@ describe('production startup wiring', () => {
     expect(releaseGate).toContain("process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1'");
     expect(releaseGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
     expect(mainnetGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
+    expect(unitTestsRunner).toContain('cleanupTestArtifactsBeforeRun({');
+    expect(unitTestsRunner).toContain("reason: 'unit-tests'");
+    expect(unitTestsRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
+    expect(unitTestsRunner).toContain("'--keep-test-artifacts'");
+    expect(unitTestsRunner).toContain("'--no-cleanup'");
     expect(allTestsFast).toContain('const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);');
     expect(allTestsFast).toContain('e2eEnv,');
     expect(systemRunner).toContain("import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';");
