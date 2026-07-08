@@ -332,6 +332,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: P2P pending queue flush now produces one typed per-entry
      flush result (`delivery`, retain/drop, optional event, gossip refresh)
      before mutating the queue.
+   - Partial: relay router entity-input admission rejects and local-delivery
+     failures now attach typed `delivery` metadata while preserving existing
+     debug event status fields.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

@@ -26,6 +26,7 @@ import {
   enqueueMessage,
   cacheEncryptionKey,
   isRelaySocketOpen,
+  classifyRelayDeliveryEvent,
 } from './relay-store';
 import type { Profile } from './networking/gossip';
 import { verifyProfileSignature, type ProfileVerifyResult } from './networking/profile-signing';
@@ -146,6 +147,9 @@ const trySendRelay = (
     return false;
   }
 };
+
+const relayDeliveryMetadata = (status: string, reason?: string) =>
+  classifyRelayDeliveryEvent({ status, ...(reason ? { reason } : {}) }) ?? undefined;
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -513,6 +517,7 @@ export const relayRoute = async (
         msgType: type,
         status: 'rejected',
         reason: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+        delivery: relayDeliveryMetadata('rejected', 'ENTITY_INPUT_MUST_BE_ENCRYPTED'),
         details: { traceId },
       });
       send(ws, safeStringify({ type: 'error', error: 'entity_input must be encrypted' }));
@@ -572,6 +577,7 @@ export const relayRoute = async (
           msgType: type,
           status: 'local-delivery-failed',
           reason,
+          delivery: relayDeliveryMetadata('local-delivery-failed', reason),
           details: { traceId },
         });
         // Non-recoverable decrypt/auth errors should be dropped immediately.

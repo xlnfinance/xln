@@ -546,6 +546,65 @@ describe('relay-router gossip fanout', () => {
     });
     expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
     expect(store.debugEvents.some(event => event.reason === 'ENTITY_INPUT_MUST_BE_ENCRYPTED')).toBe(true);
+    expect(store.debugEvents.find(event => event.reason === 'ENTITY_INPUT_MUST_BE_ENCRYPTED')?.delivery).toMatchObject({
+      outcome: 'failed',
+      code: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+      retryable: false,
+      fatal: true,
+      terminal: true,
+      failure: {
+        category: 'Contradiction',
+        code: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+      },
+    });
+  });
+
+  test('local entity_input delivery failures expose typed delivery metadata', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {
+        throw new Error('NO_LOCAL_REPLICA: entityId=0xabc');
+      },
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsA, {
+      type: 'entity_input',
+      id: 'local-delivery-fail',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: SERVER_RUNTIME_ID,
+      payload: 'encrypted-payload',
+      encrypted: true,
+      entityId: ENTITY_C,
+      txs: 1,
+    });
+
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'NO_LOCAL_REPLICA: entityId=0xabc',
+    });
+    expect(store.pendingMessages.get(SERVER_RUNTIME_ID)).toBeUndefined();
+    expect(store.debugEvents.find(event => event.status === 'local-delivery-failed')?.delivery).toMatchObject({
+      outcome: 'failed',
+      code: 'NO_LOCAL_REPLICA',
+      retryable: false,
+      fatal: true,
+      terminal: true,
+      failure: {
+        category: 'Contradiction',
+        code: 'NO_LOCAL_REPLICA',
+      },
+    });
   });
 
   test('runtime_input is not a relay protocol message', async () => {
