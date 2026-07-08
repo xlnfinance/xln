@@ -441,6 +441,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: cross-j fill ACK cancel handling, duplicate fill-notice
      idempotency, and pending-fill metadata now derive their proof ratio from
      exact numerator/denominator when the legacy coarse field is absent.
+   - Partial: duplicate cross-j book progress now uses the exact-aware proof
+     ratio helper, so exact-only replay clears pending fill instead of failing
+     stale.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

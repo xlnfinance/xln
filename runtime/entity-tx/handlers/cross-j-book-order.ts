@@ -2,6 +2,7 @@ import {
   cloneCrossJurisdictionRoute,
   compareCrossJurisdictionRouteStatus,
   applyCrossJurisdictionFillProgress,
+  getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
@@ -52,7 +53,12 @@ const isSameCommittedBookProgress = (
   data: CrossJurisdictionBookProgressTx['data'],
 ): boolean => (
   Math.floor(Number(route.fillSeq ?? 0)) === Math.floor(Number(data.fillSeq)) &&
-  Math.floor(Number(route.cumulativeFillRatio ?? 0)) === Math.floor(Number(data.cumulativeFillRatio)) &&
+  getCrossJurisdictionCommittedProofRatio(route) === getCrossJurisdictionCommittedProofRatio({
+    orderId: data.orderId,
+    cumulativeFillRatio: data.cumulativeFillRatio,
+    fillNumerator: data.fillNumerator,
+    fillDenominator: data.fillDenominator,
+  }) &&
   route.filledSourceAmount === data.cumulativeSourceAmount &&
   route.filledTargetAmount === data.cumulativeTargetAmount &&
   (route.fillNumerator ?? undefined) === (data.fillNumerator ?? undefined) &&

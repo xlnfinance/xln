@@ -2800,7 +2800,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    applyCrossJurisdictionBookProgressToState(env, entityState, {
+    const changed = applyCrossJurisdictionBookProgressToState(env, entityState, {
       orderId: 'maker-cross-progress',
       sourceEntityId: 'maker-entity',
       fillSeq: 1,
@@ -2815,10 +2815,42 @@ describe('orderbook matching fallback execution mapping', () => {
     });
 
     const admission = entityState.crossJurisdictionBookAdmissions.get('maker-entity:maker-cross-progress');
+    expect(changed).toBe(true);
     expect(admission?.route.status).toBe('partially_filled');
     expect(admission?.route.filledSourceAmount).toBe(filledSourceAmount);
     expect(admission?.route.filledTargetAmount).toBe(filledTargetAmount);
     expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(30_000n);
+
+    admission!.pendingFill = {
+      fillId: 'pending-exact-duplicate',
+      receiptHash: 'pending-exact-duplicate',
+      ackKind: 'fill',
+      fillSeq: 1,
+      cumulativeFillRatio: 0,
+      cumulativeSourceAmount: filledSourceAmount,
+      cumulativeTargetAmount: filledTargetAmount,
+      fillNumerator: 1n,
+      fillDenominator: 4n,
+      routeHash: admission!.routeHash,
+      updatedAt: 2,
+      firstSeenAt: 2,
+    };
+    const duplicateChanged = applyCrossJurisdictionBookProgressToState(env, entityState, {
+      orderId: 'maker-cross-progress',
+      sourceEntityId: 'maker-entity',
+      fillSeq: 1,
+      incrementalSourceAmount: 0n,
+      incrementalTargetAmount: 0n,
+      cumulativeSourceAmount: filledSourceAmount,
+      cumulativeTargetAmount: filledTargetAmount,
+      cumulativeFillRatio: 0,
+      fillNumerator: 1n,
+      fillDenominator: 4n,
+      reason: 'duplicate_exact_only_ack',
+    });
+    expect(duplicateChanged).toBe(false);
+    expect(admission?.pendingFill).toBeUndefined();
+    expect(admission?.route.fillSeq).toBe(1);
     expect(() => processCommittedOrderbookSwaps(entityState, [] as any)).not.toThrow();
   });
 
