@@ -27,6 +27,14 @@ const recordArrayOf = (record: PublicHealthRecord, key: string): PublicHealthRec
   return Array.isArray(value) ? value.filter(isRecord) : [];
 };
 
+const publicFailureSignals = (record: PublicHealthRecord): Array<Record<string, unknown>> =>
+  recordArrayOf(record, 'failures').map((failure) => ({
+    category: valueOf(failure, 'category'),
+    code: valueOf(failure, 'code'),
+    retryable: valueOf(failure, 'retryable') === true,
+    fatal: valueOf(failure, 'fatal') === true,
+  }));
+
 const readyCount = (record: PublicHealthRecord, key: string): number =>
   recordArrayOf(record, key).filter(item => valueOf(item, 'ready') === true).length;
 
@@ -71,6 +79,7 @@ export const publicRuntimeHealth = (payload: unknown): Record<string, unknown> =
     coreOk: valueOf(root, 'coreOk'),
     systemOk: valueOf(root, 'systemOk'),
     degraded: arrayOf(root, 'degraded'),
+    failures: publicFailureSignals(root),
     system: valueOf(root, 'system'),
     boot: boot
       ? {
@@ -134,6 +143,7 @@ export const publicAggregatedHealth = (health: unknown): Record<string, unknown>
     coreOk: valueOf(root, 'coreOk'),
     systemOk: valueOf(root, 'systemOk'),
     degraded: arrayOf(root, 'degraded') ?? [],
+    failures: publicFailureSignals(root),
     reset: reset
       ? {
         inProgress: valueOf(reset, 'inProgress') === true,

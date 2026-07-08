@@ -235,6 +235,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime import readiness now returns typed `failure` metadata
      (`category`, `code`, `retryable`, `fatal`) instead of forcing health/API
      callers to parse `reason` strings.
+   - Partial: aggregated runtime health now includes typed `failures[]` beside
+     legacy `degraded[]`, and public health redaction exposes safe failure
+     codes without leaking internal messages.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.

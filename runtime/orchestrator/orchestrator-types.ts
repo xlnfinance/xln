@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import type { ServerWebSocket } from 'bun';
+import type { RuntimeFailureSignal } from '../failure-taxonomy';
 import type { ManagedChild, ManagedIdentity } from './custody-bootstrap';
 import type { StorageHealth } from './storage-monitor';
 
@@ -321,6 +322,7 @@ export type AggregatedHealth = {
   coreOk: boolean;
   systemOk: boolean;
   degraded: string[];
+  failures: RuntimeFailureSignal[];
   reset: ResetState;
   system: {
     runtime: boolean;

@@ -48,6 +48,13 @@ test('public aggregated health strips child process ids and hub runtime ids', ()
     timestamp: 1,
     coreOk: true,
     systemOk: true,
+    failures: [{
+      category: 'TransientRace',
+      code: 'HUBS_NOT_READY',
+      message: 'internal hub pid 999 stale',
+      retryable: true,
+      fatal: false,
+    }],
     relay: {
       clientCount: 1,
       managedRuntimeIds: ['runtime-secret'],
@@ -66,6 +73,9 @@ test('public aggregated health strips child process ids and hub runtime ids', ()
   expect(body).not.toContain('owner-secret');
   expect(body).not.toContain('/secret/db');
   expect(body).not.toContain('accounts');
+  expect(body).not.toContain('internal hub pid');
+  expect(body).toContain('HUBS_NOT_READY');
+  expect(body).toContain('TransientRace');
   expect(body).toContain('childCount');
 });
 

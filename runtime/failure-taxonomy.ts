@@ -8,6 +8,17 @@ export type RuntimeFailureSignal = {
   fatal: boolean;
 };
 
+const HEALTH_DEGRADED_CODES: Record<string, string> = {
+  storage: 'STORAGE_NOT_READY',
+  hubs: 'HUBS_NOT_READY',
+  hubMesh: 'HUB_MESH_NOT_READY',
+  reset: 'RESET_NOT_READY',
+  marketMaker: 'MARKET_MAKER_NOT_READY',
+  custody: 'CUSTODY_NOT_READY',
+  bootstrapReserves: 'BOOTSTRAP_RESERVES_NOT_READY',
+  bootstrapReserveTargets: 'BOOTSTRAP_RESERVE_TARGETS_NOT_READY',
+};
+
 export const normalizeRuntimeFailureCode = (value: unknown): string => {
   const raw = String(value || '').trim();
   const token = raw.split(/[\s:]/)[0] || 'UNKNOWN';
@@ -45,3 +56,16 @@ export const classifyRuntimeImportReadinessReason = (reason: string): RuntimeFai
     message: normalized,
   });
 };
+
+export const classifyRuntimeHealthDegradedReason = (reason: string): RuntimeFailureSignal => {
+  const normalized = String(reason || '').trim() || 'unknown';
+  const code = HEALTH_DEGRADED_CODES[normalized] ?? normalizeRuntimeFailureCode(normalized);
+  return buildRuntimeFailureSignal({
+    category: 'TransientRace',
+    code,
+    message: normalized,
+  });
+};
+
+export const buildRuntimeHealthFailures = (degraded: string[]): RuntimeFailureSignal[] =>
+  degraded.map(classifyRuntimeHealthDegradedReason);

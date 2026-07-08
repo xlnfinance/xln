@@ -111,6 +111,7 @@ import {
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
+import { buildRuntimeHealthFailures } from '../failure-taxonomy';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -1738,6 +1739,7 @@ const computeAggregatedHealth = (options: {
     bootstrapReservesOk ? null : 'bootstrapReserves',
     bootstrapReserveTargetsMet ? null : 'bootstrapReserveTargets',
   ].filter((value): value is string => Boolean(value));
+  const failures = buildRuntimeHealthFailures(degraded);
   const sourceHeights = [
     ...hubChildren.map(child => Number(child.lastHealth?.height || 0)),
     Number(marketMakerHealth?.height || 0),
@@ -1782,6 +1784,7 @@ const computeAggregatedHealth = (options: {
     coreOk,
     systemOk,
     degraded,
+    failures,
     reset: { ...resetState },
     system: {
       runtime: true,
@@ -1873,10 +1876,12 @@ const recomputeHealthWithMarketMaker = (
     health.bootstrapReserves.ok ? null : 'bootstrapReserves',
     health.bootstrapReserves.targetMet ? null : 'bootstrapReserveTargets',
   ].filter((value): value is string => Boolean(value));
+  const failures = buildRuntimeHealthFailures(degraded);
   return {
     ...health,
     systemOk,
     degraded,
+    failures,
     marketMaker,
   };
 };
