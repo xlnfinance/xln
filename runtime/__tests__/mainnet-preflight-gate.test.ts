@@ -1,10 +1,14 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { MAINNET_GATE } from '../scripts/mainnet-gate-constants';
 import {
   buildMainnetPreflightSteps,
   parseMainnetPreflightArgs,
 } from '../scripts/run-mainnet-preflight-gate';
+
+const repoRoot = join(import.meta.dir, '..', '..');
 
 test('mainnet preflight builds money, recovery, health, and full e2e evidence by default', () => {
   const steps = buildMainnetPreflightSteps({ includeSoak: false, includeScale: false });
@@ -63,4 +67,20 @@ test('mainnet preflight arg parser accepts explicit test artifact retention', ()
   expect(parseMainnetPreflightArgs(['--no-cleanup'])).toMatchObject({
     keepTestArtifacts: true,
   });
+});
+
+test('mainnet and release gates check disk before expensive browser/runtime gates', () => {
+  const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
+  const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
+
+  expect(mainnetGate).toContain("import { assertMinDiskFree } from '../orchestrator/storage-monitor';");
+  expect(mainnetGate.indexOf('cleanupTestArtifactsBeforeRun({')).toBeLessThan(
+    mainnetGate.indexOf('assertMinDiskFree();'),
+  );
+  expect(mainnetGate.indexOf('assertMinDiskFree();')).toBeLessThan(mainnetGate.indexOf('printPlan(steps);'));
+  expect(releaseGate).toContain("import { assertMinDiskFree } from '../orchestrator/storage-monitor';");
+  expect(releaseGate).toContain("if (profile !== 'quick') assertMinDiskFree();");
+  expect(releaseGate.indexOf('cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` })')).toBeLessThan(
+    releaseGate.indexOf("if (profile !== 'quick') assertMinDiskFree();"),
+  );
 });

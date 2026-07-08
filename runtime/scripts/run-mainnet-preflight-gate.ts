@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 
+import { assertMinDiskFree } from '../orchestrator/storage-monitor';
 import { MAINNET_GATE } from './mainnet-gate-constants';
 import {
   cleanupTestArtifactsBeforeRun,
@@ -217,6 +218,7 @@ const main = async (): Promise<void> => {
       argv: args.keepTestArtifacts ? ['--keep-test-artifacts'] : process.argv.slice(2),
     });
     process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
+    assertMinDiskFree();
   }
 
   const steps = buildMainnetPreflightSteps(args);

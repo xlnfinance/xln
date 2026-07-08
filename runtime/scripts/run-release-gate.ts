@@ -3,6 +3,7 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
+import { assertMinDiskFree } from '../orchestrator/storage-monitor';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
@@ -178,6 +179,7 @@ async function main(): Promise<void> {
   const steps = profileSteps[profile];
   cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` });
   process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
+  if (profile !== 'quick') assertMinDiskFree();
   printPlan(profile, steps);
 
   const results: StepResult[] = [];
