@@ -14,6 +14,7 @@
 import { ethers } from 'ethers';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
 import type { JurisdictionConfig } from './types';
+import type { RuntimeFailureSignal } from './failure-taxonomy';
 import { normalizeEntityId, compareEntityIds } from './entity-id-utils';
 import { PROOF_BODY_ABI } from './proof-body-types';
 
@@ -135,9 +136,15 @@ export interface SentJBatch {
   lastSubmittedAt: number;
   submitAttempts: number;
   txHash?: string;
+  lastFailure?: {
+    message: string;
+    failedAt: number;
+    failure: RuntimeFailureSignal;
+  };
   terminalFailure?: {
     message: string;
     failedAt: number;
+    failure?: RuntimeFailureSignal;
   };
 }
 

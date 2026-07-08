@@ -2487,6 +2487,17 @@ describe('audit fail-fast regressions', () => {
     expect(state.jBatchState?.status).toBe('sent');
     expect(state.jBatchState?.failedAttempts).toBe(1);
     expect(state.jBatchState?.sentBatch).toBeDefined();
+    expect(state.jBatchState?.sentBatch?.lastFailure).toMatchObject({
+      message: 'ECONNREFUSED',
+      failedAt: 123,
+      failure: {
+        category: 'TransientRace',
+        code: 'J_SUBMIT_TRANSIENT',
+        message: 'ECONNREFUSED',
+        retryable: true,
+        fatal: false,
+      },
+    });
     expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
   });
 
@@ -2577,10 +2588,18 @@ describe('audit fail-fast regressions', () => {
 
     expect(state.jBatchState?.status).toBe('failed');
     expect(state.jBatchState?.failedAttempts).toBe(1);
-    expect(state.jBatchState?.sentBatch?.terminalFailure).toEqual({
+    expect(state.jBatchState?.sentBatch?.terminalFailure).toMatchObject({
       message: 'staticCall revert: E3()',
       failedAt: 124,
+      failure: {
+        category: 'Contradiction',
+        code: 'J_SUBMIT_FATAL',
+        message: 'staticCall revert: E3()',
+        retryable: false,
+        fatal: true,
+      },
     });
+    expect(state.jBatchState?.sentBatch?.lastFailure).toMatchObject(state.jBatchState?.sentBatch?.terminalFailure ?? {});
   });
 
   test('submitRuntimeJOutbox skips sealed batches owned by another runtime signer', async () => {

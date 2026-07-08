@@ -6,6 +6,7 @@ import {
   classifyRuntimeImportReadinessReason,
   classifyRuntimeFaucetFailure,
   classifyRuntimeBootstrapStageFailure,
+  classifyRuntimeJBatchFailure,
   classifyRuntimeMarketMakerFailure,
   classifyRuntimeTransportFailure,
 } from '../failure-taxonomy';
@@ -114,6 +115,28 @@ describe('runtime failure taxonomy', () => {
     expect(classifyRuntimeMarketMakerFailure('MARKET_MAKER_DISABLED')).toMatchObject({
       category: 'ExpectedEmpty',
       code: 'MARKET_MAKER_DISABLED',
+      retryable: false,
+      fatal: false,
+    });
+  });
+
+  test('classifies settlement batching failures by retry semantics', () => {
+    expect(classifyRuntimeJBatchFailure('J_SUBMIT_TRANSIENT', 'ECONNREFUSED')).toMatchObject({
+      category: 'TransientRace',
+      code: 'J_SUBMIT_TRANSIENT',
+      message: 'ECONNREFUSED',
+      retryable: true,
+      fatal: false,
+    });
+    expect(classifyRuntimeJBatchFailure('J_BATCH_LIMIT_EXCEEDED')).toMatchObject({
+      category: 'Contradiction',
+      code: 'J_BATCH_LIMIT_EXCEEDED',
+      retryable: false,
+      fatal: true,
+    });
+    expect(classifyRuntimeJBatchFailure('J_BATCH_EMPTY')).toMatchObject({
+      category: 'ExpectedEmpty',
+      code: 'J_BATCH_EMPTY',
       retryable: false,
       fatal: false,
     });

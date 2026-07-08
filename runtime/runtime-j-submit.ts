@@ -4,6 +4,7 @@ import { isBatchEmpty } from './j-batch';
 import { rememberRecentJEvents } from './j-event-evidence';
 import { getEntityReplicaById } from './orchestrator/mesh-common';
 import { ensureLiveJAdapterForReplica } from './runtime-infra';
+import { classifyRuntimeJBatchFailure } from './failure-taxonomy';
 
 export type RuntimeJOutboxQueue = (
   env: Env,
@@ -93,19 +94,32 @@ const markSentBatchTerminalFailure = (env: Env, jTx: JTx, message: string): void
   const submittedHash = String(jTx.data?.batchHash || '');
   if (submittedNonce !== null && Number(sentBatch.entityNonce) !== submittedNonce) return;
   if (submittedHash && sentBatch.batchHash && submittedHash !== sentBatch.batchHash) return;
+  const failure = classifyRuntimeJBatchFailure('J_SUBMIT_FATAL', message);
   sentBatch.terminalFailure = {
     message,
     failedAt: env.timestamp,
+    failure,
+  };
+  sentBatch.lastFailure = {
+    message,
+    failedAt: env.timestamp,
+    failure,
   };
   jBatchState.status = 'failed';
   jBatchState.failedAttempts = (jBatchState.failedAttempts || 0) + 1;
 };
 
-const markSentBatchTransientFailure = (env: Env, jTx: JTx): void => {
+const markSentBatchTransientFailure = (env: Env, jTx: JTx, message: string): void => {
   if (jTx.type !== 'batch') return;
   const replica = getEntityReplicaById(env, jTx.entityId);
   const jBatchState = replica?.state?.jBatchState;
-  if (!jBatchState?.sentBatch) return;
+  const sentBatch = jBatchState?.sentBatch;
+  if (!jBatchState || !sentBatch) return;
+  sentBatch.lastFailure = {
+    message,
+    failedAt: env.timestamp,
+    failure: classifyRuntimeJBatchFailure('J_SUBMIT_TRANSIENT', message),
+  };
   jBatchState.failedAttempts = (jBatchState.failedAttempts || 0) + 1;
   jBatchState.status = 'sent';
 };
@@ -229,7 +243,7 @@ export async function submitRuntimeJOutbox(
         console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
         const message = error instanceof Error ? error.message : String(error);
         if (isTransientJSubmitFailure(error)) {
-          markSentBatchTransientFailure(env, jTx);
+          markSentBatchTransientFailure(env, jTx, message);
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
         }
         markSentBatchTerminalFailure(env, jTx, message);
@@ -246,7 +260,7 @@ export async function submitRuntimeJOutbox(
         console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
         const message = result.error || 'unknown';
         if (isTransientJSubmitFailure(message)) {
-          markSentBatchTransientFailure(env, jTx);
+          markSentBatchTransientFailure(env, jTx, message);
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
         }
         markSentBatchTerminalFailure(env, jTx, message);

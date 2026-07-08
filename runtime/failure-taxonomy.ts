@@ -72,6 +72,21 @@ const MARKET_MAKER_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = 
   MARKET_MAKER_CROSS_NOT_READY: 'TransientRace',
 };
 
+const J_BATCH_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
+  J_BATCH_EMPTY: 'ExpectedEmpty',
+  J_BATCH_SENT_PENDING: 'TransientRace',
+  J_BATCH_JURISDICTION_MISSING: 'Contradiction',
+  J_BATCH_JURISDICTION_UNAVAILABLE: 'TransientRace',
+  J_BATCH_CHAIN_ID_MISSING: 'Contradiction',
+  J_BATCH_SIGNER_MISSING: 'Contradiction',
+  J_BATCH_LIMIT_EXCEEDED: 'Contradiction',
+  J_BATCH_CONSENSUS_HANKO_MISSING: 'Contradiction',
+  J_SUBMIT_MISSING_JREPLICA: 'TransientRace',
+  J_SUBMIT_MISSING_JADAPTER: 'TransientRace',
+  J_SUBMIT_TRANSIENT: 'TransientRace',
+  J_SUBMIT_FATAL: 'Contradiction',
+};
+
 export const normalizeRuntimeFailureCode = (value: unknown): string => {
   const raw = String(value || '').trim();
   const token = raw.split(/[\s:]/)[0] || 'UNKNOWN';
@@ -165,6 +180,21 @@ export const classifyRuntimeMarketMakerFailure = (
 ): RuntimeFailureSignal => {
   const normalizedCode = normalizeRuntimeFailureCode(code);
   const category = MARKET_MAKER_FAILURE_CATEGORIES[normalizedCode] ?? 'TransientRace';
+  return buildRuntimeFailureSignal({
+    category,
+    code: normalizedCode,
+    message: message ?? normalizedCode,
+  });
+};
+
+export const classifyRuntimeJBatchFailure = (
+  code: string,
+  message?: string,
+): RuntimeFailureSignal => {
+  const normalizedCode = normalizeRuntimeFailureCode(code);
+  const category = J_BATCH_FAILURE_CATEGORIES[normalizedCode] ?? (
+    normalizedCode.startsWith('J_SUBMIT_TRANSIENT') ? 'TransientRace' : 'Contradiction'
+  );
   return buildRuntimeFailureSignal({
     category,
     code: normalizedCode,
