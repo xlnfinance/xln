@@ -18,11 +18,13 @@ import {
   cpSync,
   createWriteStream,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -1582,6 +1584,28 @@ const fetchJsonWithTimeout = async (url: string, timeoutMs = 2000): Promise<unkn
   }
 };
 
+export const materializeSvelteKitShardOutDir = (sourceOutDir: string, shardOutDir: string): void => {
+  const sourceManifest = join(sourceOutDir, 'output', 'server', 'manifest.js');
+  if (!existsSync(sourceManifest)) {
+    throw new Error(`E2E_SVELTE_KIT_OUTPUT_MISSING:${sourceManifest}`);
+  }
+
+  rmSync(shardOutDir, { recursive: true, force: true });
+  mkdirSync(shardOutDir, { recursive: true });
+
+  for (const entry of readdirSync(sourceOutDir, { withFileTypes: true })) {
+    const sourcePath = join(sourceOutDir, entry.name);
+    const shardPath = join(shardOutDir, entry.name);
+    const linkType = entry.isDirectory() ? 'dir' : 'file';
+    symlinkSync(sourcePath, shardPath, linkType);
+  }
+
+  const shardManifest = join(shardOutDir, 'output', 'server', 'manifest.js');
+  if (!existsSync(shardManifest)) {
+    throw new Error(`E2E_SVELTE_KIT_SHARD_LINK_FAILED:${shardManifest}`);
+  }
+};
+
 const prepareShardSvelteKitOutDir = (
   sourceOutDir: string,
   logsDir: string,
@@ -1595,11 +1619,13 @@ const prepareShardSvelteKitOutDir = (
   }
 
   const shardOutDir = resolve(frontendRoot, '.svelte-kit-e2e', basename(logsDir), `shard-${shard}`);
-  rmSync(shardOutDir, { recursive: true, force: true });
-  cpSync(sourceOutDir, shardOutDir, { recursive: true });
+  materializeSvelteKitShardOutDir(sourceOutDir, shardOutDir);
 
   const outDirForFrontend = relative(frontendRoot, shardOutDir);
-  log.write(`[runner] shard-local SvelteKit output: ${outDirForFrontend}\n`);
+  const linkedEntries = readdirSync(shardOutDir, { withFileTypes: true })
+    .filter(entry => lstatSync(join(shardOutDir, entry.name)).isSymbolicLink())
+    .length;
+  log.write(`[runner] shard-local SvelteKit output: ${outDirForFrontend} (${linkedEntries} linked entries)\n`);
   return outDirForFrontend;
 };
 
@@ -2353,7 +2379,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch(err => {
-  console.error('E2E isolated parallel runner failed:', (err as Error).message);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch(err => {
+    console.error('E2E isolated parallel runner failed:', (err as Error).message);
+    process.exit(1);
+  });
+}
