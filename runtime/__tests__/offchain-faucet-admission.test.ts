@@ -37,7 +37,7 @@ const makeAccount = (input: {
   outCapacity?: bigint;
 }, ownerEntityId: string = HUB): AccountMachine => {
   const delta = createDefaultDelta(1);
-  delta.rightCreditLimit = input.outCapacity ?? 0n;
+  delta.leftCreditLimit = input.outCapacity ?? 0n;
   return {
     leftEntity: ownerEntityId,
     rightEntity: USER,
@@ -193,6 +193,58 @@ describe('offchain faucet admission', () => {
         route: [SECONDARY_HUB, USER],
       },
     });
+  });
+
+  test('reports typed transient failure when no faucet hub is visible', async () => {
+    const account = makeAccount({
+      currentHeight: 0,
+      pendingFrame: makeFrame(1),
+      mempool: [{ type: 'add_delta', data: { tokenId: 1 } }],
+      outCapacity: 0n,
+    });
+
+    const { response, body, enqueued } = await callFaucet(account, {
+      activeHubEntityIds: [],
+    });
+
+    expect(response.status).toBe(503);
+    expect(body.error).toBe('No faucet hub available in gossip');
+    expect(body.code).toBe('FAUCET_HUBS_EMPTY');
+    expect(body.category).toBe('TransientRace');
+    expect(body.retryable).toBe(true);
+    expect(body.fatal).toBe(false);
+    expect(body.failure).toMatchObject({
+      category: 'TransientRace',
+      code: 'FAUCET_HUBS_EMPTY',
+      retryable: true,
+      fatal: false,
+    });
+    expect(body.activeHubEntityIds).toEqual([]);
+    expect(enqueued).toBeNull();
+  });
+
+  test('reports typed expected-empty failure for settled insufficient capacity', async () => {
+    const account = makeAccount({
+      currentHeight: 1,
+      outCapacity: 99n * 10n ** 18n,
+    });
+
+    const { response, body, enqueued } = await callFaucet(account);
+
+    expect(response.status).toBe(409);
+    expect(body.success).toBe(false);
+    expect(body.code).toBe('FAUCET_INSUFFICIENT_OUT_CAPACITY');
+    expect(body.category).toBe('ExpectedEmpty');
+    expect(body.retryable).toBe(false);
+    expect(body.fatal).toBe(false);
+    expect(body.failure).toMatchObject({
+      category: 'ExpectedEmpty',
+      code: 'FAUCET_INSUFFICIENT_OUT_CAPACITY',
+      retryable: false,
+      fatal: false,
+    });
+    expect(body.senderOutCapacity).toBe((99n * 10n ** 18n).toString());
+    expect(enqueued).toBeNull();
   });
 
   test('still rejects insufficient capacity from a settled account snapshot', () => {

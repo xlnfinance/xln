@@ -28,6 +28,19 @@ const TRANSPORT_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
   RPC_UPSTREAM_NOT_CONFIGURED: 'Contradiction',
 };
 
+const FAUCET_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
+  FAUCET_ACCOUNT_NOT_OPEN: 'ExpectedEmpty',
+  FAUCET_HUB_REQUIRED: 'Contradiction',
+  FAUCET_INSUFFICIENT_OUT_CAPACITY: 'ExpectedEmpty',
+  FAUCET_INVALID_HUB_ENTITY_ID: 'Contradiction',
+  FAUCET_INVALID_USER_ENTITY_ID: 'Contradiction',
+  FAUCET_PAYMENT_ADMISSION_FAILED: 'TransientRace',
+  FAUCET_PAYMENT_RECEIPT_FAILED: 'TransientRace',
+  FAUCET_REQUESTED_HUB_NOT_FOUND: 'ExpectedEmpty',
+  FAUCET_RUNTIME_REQUIRED: 'TransientRace',
+  FAUCET_USER_ENTITY_ID_REQUIRED: 'Contradiction',
+};
+
 export const normalizeRuntimeFailureCode = (value: unknown): string => {
   const raw = String(value || '').trim();
   const token = raw.split(/[\s:]/)[0] || 'UNKNOWN';
@@ -82,6 +95,18 @@ export const buildRuntimeHealthFailures = (degraded: string[]): RuntimeFailureSi
 export const classifyRuntimeTransportFailure = (code: string, message?: string): RuntimeFailureSignal => {
   const normalizedCode = normalizeRuntimeFailureCode(code);
   const category = TRANSPORT_FAILURE_CATEGORIES[normalizedCode] ?? 'TransientRace';
+  return buildRuntimeFailureSignal({
+    category,
+    code: normalizedCode,
+    message: message ?? normalizedCode,
+  });
+};
+
+export const classifyRuntimeFaucetFailure = (code: string, message?: string): RuntimeFailureSignal => {
+  const normalizedCode = normalizeRuntimeFailureCode(code);
+  const category = FAUCET_FAILURE_CATEGORIES[normalizedCode] ?? (
+    normalizedCode.startsWith('FAUCET_INVALID_') ? 'Contradiction' : 'TransientRace'
+  );
   return buildRuntimeFailureSignal({
     category,
     code: normalizedCode,

@@ -4,6 +4,7 @@ import {
   buildRuntimeHealthFailures,
   classifyRuntimeHealthDegradedReason,
   classifyRuntimeImportReadinessReason,
+  classifyRuntimeFaucetFailure,
   classifyRuntimeTransportFailure,
 } from '../failure-taxonomy';
 
@@ -45,6 +46,27 @@ describe('runtime failure taxonomy', () => {
     expect(classifyRuntimeTransportFailure('RPC_UPSTREAM_NOT_CONFIGURED')).toMatchObject({
       category: 'Contradiction',
       code: 'RPC_UPSTREAM_NOT_CONFIGURED',
+      retryable: false,
+      fatal: true,
+    });
+  });
+
+  test('classifies faucet failures by retry semantics', () => {
+    expect(classifyRuntimeFaucetFailure('FAUCET_ACCOUNT_NOT_OPEN')).toMatchObject({
+      category: 'ExpectedEmpty',
+      code: 'FAUCET_ACCOUNT_NOT_OPEN',
+      retryable: false,
+      fatal: false,
+    });
+    expect(classifyRuntimeFaucetFailure('FAUCET_RUNTIME_REQUIRED')).toMatchObject({
+      category: 'TransientRace',
+      code: 'FAUCET_RUNTIME_REQUIRED',
+      retryable: true,
+      fatal: false,
+    });
+    expect(classifyRuntimeFaucetFailure('FAUCET_INVALID_USER_ENTITY_ID')).toMatchObject({
+      category: 'Contradiction',
+      code: 'FAUCET_INVALID_USER_ENTITY_ID',
       retryable: false,
       fatal: true,
     });

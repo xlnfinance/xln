@@ -241,6 +241,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: orchestrator transport/proxy failures now include stable `code`,
      `category`, `retryable`, `fatal`, and `failure` metadata while preserving
      legacy `error` text and HTTP status.
+   - Partial: offchain faucet rejection paths now include typed failure metadata
+     for empty hubs, missing accounts, capacity limits, validation errors, and
+     runtime admission failures.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.
