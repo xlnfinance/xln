@@ -59,7 +59,7 @@ type RuntimeP2PDispatch = {
   enqueueEntityInputDelivery?(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;
 };
 
-export type RuntimeDirectEntityInputDispatchResult = boolean | DeliveryResult;
+export type RuntimeDirectEntityInputDispatchResult = DeliveryResult;
 
 export type RuntimeEntityInputRoutingResult = {
   sent: boolean;
@@ -145,25 +145,18 @@ const buildRoutingDeliveryResult = (input: {
   return deliveryAccepted('ROUTE_NOOP');
 };
 
-const isDeliveryResult = (value: RuntimeDirectEntityInputDispatchResult): value is DeliveryResult =>
+const isDeliveryResult = (value: unknown): value is DeliveryResult =>
   typeof value === 'object' &&
   value !== null &&
-  typeof value.outcome === 'string' &&
-  typeof value.code === 'string' &&
-  typeof value.retryable === 'boolean' &&
-  typeof value.fatal === 'boolean' &&
-  typeof value.terminal === 'boolean';
+  typeof (value as DeliveryResult).outcome === 'string' &&
+  typeof (value as DeliveryResult).code === 'string' &&
+  typeof (value as DeliveryResult).retryable === 'boolean' &&
+  typeof (value as DeliveryResult).fatal === 'boolean' &&
+  typeof (value as DeliveryResult).terminal === 'boolean';
 
-const normalizeDirectDispatchDelivery = (
-  result: RuntimeDirectEntityInputDispatchResult,
-): DeliveryResult => {
-  if (isDeliveryResult(result)) return result;
-  return result
-    ? deliveryAccepted('ROUTE_DIRECT_DELIVERED')
-    : deliveryDeferred({
-      outcome: 'deferred',
-      code: 'ROUTE_DIRECT_MISS_FALLBACK',
-    });
+const requireDeliveryResult = (value: unknown, code: string): DeliveryResult => {
+  if (isDeliveryResult(value)) return value;
+  throw new Error(`${code}: expected DeliveryResult`);
 };
 
 const enqueueP2PEntityInputDelivery = (
@@ -173,7 +166,10 @@ const enqueueP2PEntityInputDelivery = (
   ingressTimestamp: number | undefined,
 ): DeliveryResult => {
   if (typeof p2p.enqueueEntityInputDelivery === 'function') {
-    return p2p.enqueueEntityInputDelivery(targetRuntimeId, output, ingressTimestamp);
+    return requireDeliveryResult(
+      p2p.enqueueEntityInputDelivery(targetRuntimeId, output, ingressTimestamp),
+      'ROUTE_P2P_INVALID_DELIVERY_RESULT',
+    );
   }
   return p2p.enqueueEntityInput(targetRuntimeId, output, ingressTimestamp)
     ? deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED')
@@ -442,8 +438,9 @@ export const dispatchEntityOutputs = (
   const deferredOutputs: RoutedEntityInput[] = [];
   for (const { output, targetRuntimeId } of batchedOutputs) {
     if (directDispatch) {
-      const directDelivery = normalizeDirectDispatchDelivery(
+      const directDelivery = requireDeliveryResult(
         directDispatch(targetRuntimeId, output, env.timestamp),
+        'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
       );
       if (directDelivery.outcome === 'delivered') {
         continue;

@@ -293,9 +293,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      delivery result shape internally while preserving the public boolean API.
    - Partial: public runtime `sendEntityInput`/routing results now include a
      typed `delivery` result beside the legacy boolean summary fields.
-   - Partial: process-local direct entity dispatch can now return typed
-     delivery results; legacy boolean direct dispatch remains accepted only as
-     a compatibility adapter.
+   - Partial: process-local direct entity dispatch is now typed-only at the
+     routing boundary; legacy boolean returns fail fast instead of falling
+     through to P2P.
    - Partial: relay-socket, hub-node, and market-maker direct dispatch
      implementations now return explicit `DeliveryResult`; boolean return is
      kept only on legacy helper wrappers.

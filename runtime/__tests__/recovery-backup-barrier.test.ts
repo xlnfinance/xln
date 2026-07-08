@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { createEmptyEnv, process as processRuntime, registerRecoveryBackupBarrier, sendEntityInput } from '../runtime.ts';
+import { deliveryAccepted } from '../delivery-result';
 
 test('stale pending network outputs fail fast instead of retrying after backup recovery', async () => {
   const env = createEmptyEnv('recovery-barrier-seed');
@@ -20,7 +21,7 @@ test('stale pending network outputs fail fast instead of retrying after backup r
     entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.timestamp }]]),
     directEntityInputDispatch: () => {
       dispatchCount += 1;
-      return true;
+      return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
     },
   };
 
@@ -47,7 +48,7 @@ test('direct remote sends fail closed while recovery backup barrier is active', 
     entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: env.timestamp }]]),
     directEntityInputDispatch: () => {
       dispatchCount += 1;
-      return true;
+      return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
     },
   };
 

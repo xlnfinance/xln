@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { handleInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../runtime-entity-routing';
 import { dispatchEntityOutputs, planEntityOutputs, sendEntityInputWithRouting } from '../runtime-output-routing';
+import { deliveryDeferred } from '../delivery-result';
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -15,7 +16,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 1234,
       runtimeState: {
-        directEntityInputDispatch: () => false,
+        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: (_scope: string, code: string) => {
         warnings.push(code);
@@ -63,7 +64,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 4321,
       runtimeState: {
-        directEntityInputDispatch: () => false,
+        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
       error: () => {},
@@ -153,6 +154,44 @@ describe('runtime output routing', () => {
     expect(p2pCalls).toHaveLength(0);
   });
 
+  test('rejects legacy boolean direct dispatch results', () => {
+    const targetRuntimeId = runtimeId('2a');
+    const p2pCalls: unknown[] = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 2469,
+      runtimeState: {
+        directEntityInputDispatch: (() => true) as any,
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+    const output: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: entityId('3e'),
+      signerId: runtimeId('3f'),
+      entityTxs: [],
+    };
+
+    expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => ({
+        enqueueEntityInput: () => {
+          p2pCalls.push(true);
+          return true;
+        },
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    })).toThrow(/ROUTE_DIRECT_INVALID_DELIVERY_RESULT/);
+    expect(p2pCalls).toHaveLength(0);
+  });
+
   test('falls back to P2P after typed direct dispatch defer', () => {
     const targetRuntimeId = runtimeId('25');
     const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
@@ -208,7 +247,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 2345,
       runtimeState: {
-        directEntityInputDispatch: () => false,
+        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
       error: () => {},
@@ -318,7 +357,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 9012,
       runtimeState: {
-        directEntityInputDispatch: () => false,
+        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
       error: (_scope: string, code: string, payload: any) => {
@@ -363,7 +402,7 @@ describe('runtime output routing', () => {
       runtimeId: runtimeId('11'),
       timestamp: 5678,
       runtimeState: {
-        directEntityInputDispatch: () => false,
+        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
       },
       warn: () => {},
     } as unknown as Env;
