@@ -70,5 +70,17 @@ describe('runtime failure taxonomy', () => {
       retryable: false,
       fatal: true,
     });
+    expect(classifyRuntimeFaucetFailure('FAUCET_HUB_INSUFFICIENT_RESERVES')).toMatchObject({
+      category: 'ExpectedEmpty',
+      code: 'FAUCET_HUB_INSUFFICIENT_RESERVES',
+      retryable: false,
+      fatal: false,
+    });
+    expect(classifyRuntimeFaucetFailure('FAUCET_RESERVE_EVENT_MISSING')).toMatchObject({
+      category: 'Contradiction',
+      code: 'FAUCET_RESERVE_EVENT_MISSING',
+      retryable: false,
+      fatal: true,
+    });
   });
 });

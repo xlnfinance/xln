@@ -244,6 +244,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: offchain faucet rejection paths now include typed failure metadata
      for empty hubs, missing accounts, capacity limits, validation errors, and
      runtime admission failures.
+   - Partial: reserve faucet rejection paths now share the faucet failure helper
+     and expose typed metadata for missing adapters, invalid tokens, empty hubs,
+     insufficient reserves, batch timeouts, and missing reserve evidence.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.

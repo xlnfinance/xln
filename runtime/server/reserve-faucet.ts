@@ -7,6 +7,7 @@ import { createStructuredLogger, shortId } from '../logger';
 import { resolveEntityProposerId } from '../state-helpers';
 import { formatTimingMs, getErrorMessage } from '../server-utils';
 import { getEntityReplicaById } from './entity-lookup';
+import { faucetFailureBody } from './faucet-failure';
 import { getFaucetHubProfiles } from './faucet-hubs';
 import {
   findRecentReserveUpdatedEvent,
@@ -172,10 +173,16 @@ export const handleReserveFaucet = async (input: {
   try {
     const adapter = getJAdapter();
     if (!adapter) {
-      return new Response(safeStringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+      return new Response(safeStringify(faucetFailureBody({
+        code: 'FAUCET_J_ADAPTER_NOT_INITIALIZED',
+        error: 'J-adapter not initialized',
+      })), { status: 503, headers });
     }
     if (!env) {
-      return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
+      return new Response(safeStringify(faucetFailureBody({
+        code: 'FAUCET_RUNTIME_NOT_INITIALIZED',
+        error: 'Runtime not initialized',
+      })), { status: 503, headers });
     }
 
     const body = await req.json();
@@ -188,21 +195,29 @@ export const handleReserveFaucet = async (input: {
       globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
     if (!userEntityId) {
-      return new Response(safeStringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+      return new Response(safeStringify(faucetFailureBody({
+        code: 'FAUCET_USER_ENTITY_ID_REQUIRED',
+        error: 'Missing userEntityId',
+      })), { status: 400, headers });
     }
     if (!Number.isFinite(tokenId)) {
-      return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+      return new Response(safeStringify(faucetFailureBody({
+        code: 'FAUCET_INVALID_TOKEN_ID',
+        error: 'Invalid tokenId',
+      })), { status: 400, headers });
     }
 
     const hubs = getFaucetHubProfiles(env, relayStore.activeHubEntityIds);
     if (hubs.length === 0) {
       return new Response(
-        JSON.stringify({
+        safeStringify(faucetFailureBody({
           error: 'No faucet hub available',
           code: 'FAUCET_HUBS_EMPTY',
-          profiles: env.gossip?.getProfiles?.()?.length || 0,
-          activeHubEntityIds: relayStore.activeHubEntityIds,
-        }),
+          extra: {
+            profiles: env.gossip?.getProfiles?.()?.length || 0,
+            activeHubEntityIds: relayStore.activeHubEntityIds,
+          },
+        })),
         { status: 503, headers },
       );
     }
@@ -218,7 +233,11 @@ export const handleReserveFaucet = async (input: {
       }
     }
     if (!tokenMeta) {
-      return new Response(safeStringify({ error: `Unknown token for faucet`, tokenId, tokenSymbol }), {
+      return new Response(safeStringify(faucetFailureBody({
+        code: 'FAUCET_TOKEN_UNKNOWN',
+        error: 'Unknown token for faucet',
+        extra: { tokenId, tokenSymbol },
+      })), {
         status: 400,
         headers,
       });
@@ -240,12 +259,15 @@ export const handleReserveFaucet = async (input: {
     const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
     if (hubReserve < amountWei) {
       return new Response(
-        JSON.stringify({
+        safeStringify(faucetFailureBody({
           error: `Hub has insufficient reserves for token ${tokenId}`,
-          have: hubReserve.toString(),
-          need: amountWei.toString(),
-          requestId,
-        }),
+          code: 'FAUCET_HUB_INSUFFICIENT_RESERVES',
+          extra: {
+            have: hubReserve.toString(),
+            need: amountWei.toString(),
+            requestId,
+          },
+        })),
         { status: 409, headers },
       );
     }
@@ -300,10 +322,11 @@ export const handleReserveFaucet = async (input: {
     const broadcastWindowReady = await waitForEntityBroadcastWindow(env, adapter, hubEntityId, 10000);
     if (!broadcastWindowReady) {
       return new Response(
-        JSON.stringify({
+        safeStringify(faucetFailureBody({
           error: 'Hub sentBatch did not clear in time',
-          requestId,
-        }),
+          code: 'FAUCET_SENT_BATCH_TIMEOUT',
+          extra: { requestId },
+        })),
         { status: 504, headers },
       );
     }
@@ -323,10 +346,11 @@ export const handleReserveFaucet = async (input: {
     const jBatchCleared = await waitForJBatchClear(env, adapter, 10000);
     if (!jBatchCleared) {
       return new Response(
-        JSON.stringify({
+        safeStringify(faucetFailureBody({
           error: 'J-batch did not broadcast in time',
-          requestId,
-        }),
+          code: 'FAUCET_J_BATCH_TIMEOUT',
+          extra: { requestId },
+        })),
         { status: 504, headers },
       );
     }
@@ -335,24 +359,28 @@ export const handleReserveFaucet = async (input: {
     const updatedReserve = await waitForReserveUpdate(adapter, userEntityId, tokenId, expectedMin, 10000);
     if (updatedReserve === null) {
       return new Response(
-        JSON.stringify({
+        safeStringify(faucetFailureBody({
           error: 'Reserve update not confirmed on-chain',
-          requestId,
-        }),
+          code: 'FAUCET_RESERVE_UPDATE_TIMEOUT',
+          extra: { requestId },
+        })),
         { status: 504, headers },
       );
     }
     const reserveEvent = await waitForRecentReserveUpdatedEvent(env, userEntityId, tokenId, expectedMin);
     if (!reserveEvent) {
       return new Response(
-        safeStringify({
+        safeStringify(faucetFailureBody({
           error: 'RESERVE_EVENT_MISSING',
-          requestId,
-          entityId: userEntityId,
-          tokenId,
-          expectedMin: expectedMin.toString(),
-          updatedReserve: updatedReserve.toString(),
-        }),
+          code: 'FAUCET_RESERVE_EVENT_MISSING',
+          extra: {
+            requestId,
+            entityId: userEntityId,
+            tokenId,
+            expectedMin: expectedMin.toString(),
+            updatedReserve: updatedReserve.toString(),
+          },
+        })),
         { status: 500, headers },
       );
     }
@@ -378,7 +406,10 @@ export const handleReserveFaucet = async (input: {
     );
   } catch (error: unknown) {
     faucetLog.error('reserve.error', { error: getErrorMessage(error) });
-    return new Response(safeStringify({ error: getErrorMessage(error) }), { status: 500, headers });
+    return new Response(safeStringify(faucetFailureBody({
+      code: 'FAUCET_RESERVE_UNHANDLED_ERROR',
+      error: getErrorMessage(error),
+    })), { status: 500, headers });
   } finally {
     faucetLock.release();
   }
