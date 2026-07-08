@@ -57,6 +57,8 @@ type RuntimeP2PDispatch = {
   enqueueEntityInput(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): boolean;
 };
 
+export type RuntimeDirectEntityInputDispatchResult = boolean | DeliveryResult;
+
 export type RuntimeEntityInputRoutingResult = {
   sent: boolean;
   deferred: boolean;
@@ -139,6 +141,27 @@ const buildRoutingDeliveryResult = (input: {
     });
   }
   return deliveryAccepted('ROUTE_NOOP');
+};
+
+const isDeliveryResult = (value: RuntimeDirectEntityInputDispatchResult): value is DeliveryResult =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof value.outcome === 'string' &&
+  typeof value.code === 'string' &&
+  typeof value.retryable === 'boolean' &&
+  typeof value.fatal === 'boolean' &&
+  typeof value.terminal === 'boolean';
+
+const normalizeDirectDispatchDelivery = (
+  result: RuntimeDirectEntityInputDispatchResult,
+): DeliveryResult => {
+  if (isDeliveryResult(result)) return result;
+  return result
+    ? deliveryAccepted('ROUTE_DIRECT_DELIVERED')
+    : deliveryDeferred({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_MISS_FALLBACK',
+    });
 };
 
 const readBoardValidatorSignerId = (validator: unknown): string => {
@@ -398,8 +421,10 @@ export const dispatchEntityOutputs = (
   const deferredOutputs: RoutedEntityInput[] = [];
   for (const { output, targetRuntimeId } of batchedOutputs) {
     if (directDispatch) {
-      const deliveredDirect = directDispatch(targetRuntimeId, output, env.timestamp);
-      if (deliveredDirect) {
+      const directDelivery = normalizeDirectDispatchDelivery(
+        directDispatch(targetRuntimeId, output, env.timestamp),
+      );
+      if (directDelivery.outcome === 'delivered') {
         continue;
       }
       // Direct dispatch is only an optimization for runtimes connected to this

@@ -293,6 +293,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      delivery result shape internally while preserving the public boolean API.
    - Partial: public runtime `sendEntityInput`/routing results now include a
      typed `delivery` result beside the legacy boolean summary fields.
+   - Partial: process-local direct entity dispatch can now return typed
+     delivery results; legacy boolean direct dispatch remains accepted only as
+     a compatibility adapter.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

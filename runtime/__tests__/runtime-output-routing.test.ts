@@ -56,6 +56,100 @@ describe('runtime output routing', () => {
     expect(warnings).not.toContain('ROUTE_DIRECT_SOCKET_REQUIRED');
   });
 
+  test('accepts typed direct dispatch delivery without touching P2P', () => {
+    const targetRuntimeId = runtimeId('24');
+    const p2pCalls: unknown[] = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 2468,
+      runtimeState: {
+        directEntityInputDispatch: () => ({
+          outcome: 'delivered',
+          code: 'ROUTE_DIRECT_DELIVERED',
+          retryable: false,
+          fatal: false,
+          terminal: true,
+        }),
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+    const output: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: entityId('3a'),
+      signerId: runtimeId('3b'),
+      entityTxs: [],
+    };
+
+    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => ({
+        enqueueEntityInput: () => {
+          p2pCalls.push(true);
+          return true;
+        },
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    });
+
+    expect(deferred).toEqual([]);
+    expect(p2pCalls).toHaveLength(0);
+  });
+
+  test('falls back to P2P after typed direct dispatch defer', () => {
+    const targetRuntimeId = runtimeId('25');
+    const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 1357,
+      runtimeState: {
+        directEntityInputDispatch: () => ({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_MISS_FALLBACK',
+          retryable: true,
+          fatal: false,
+          terminal: false,
+        }),
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+    const output: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: entityId('3c'),
+      signerId: runtimeId('3d'),
+      entityTxs: [],
+    };
+
+    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => ({
+        enqueueEntityInput: (runtimeId, input, ingressTimestamp) => {
+          p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
+          return true;
+        },
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    });
+
+    expect(deferred).toEqual([]);
+    expect(p2pCalls).toHaveLength(1);
+    expect(p2pCalls[0]?.targetRuntimeId).toBe(targetRuntimeId);
+    expect(p2pCalls[0]?.ingressTimestamp).toBe(1357);
+  });
+
   test('sendEntityInputWithRouting exposes typed remote delivery result', () => {
     const targetRuntimeId = runtimeId('23');
     const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
