@@ -241,7 +241,7 @@ let serverBootError: string | null = null;
 let serverBootStartedAt = 0;
 let serverBootCompletedAt: number | null = null;
 
-const sendEntityInputDirectViaRelaySocket = (
+const sendEntityInputDirectViaRelaySocketDelivery = (
   env: Env,
   targetRuntimeId: string,
   input: DeliverableEntityInput,
@@ -989,7 +989,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
     env.runtimeState = env.runtimeState ?? {};
     env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
-      sendEntityInputDirectViaRelaySocket(runtimeEnv, targetRuntimeId, input, ingressTimestamp);
+      sendEntityInputDirectViaRelaySocketDelivery(runtimeEnv, targetRuntimeId, input, ingressTimestamp);
     env.runtimeState.canUseConnectedRelayFallback = hasConnectedEncryptedRelayClient;
     startRuntimeLoop(env);
     serverLog.info('runtime.loop.started');

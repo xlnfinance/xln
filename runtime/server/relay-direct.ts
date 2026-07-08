@@ -36,23 +36,6 @@ export const hasConnectedEncryptedRelayClient = (relayStore: RelayStore, targetR
   );
 };
 
-export const sendEntityInputDirectViaRelaySocket = (
-  relayStore: RelayStore,
-  env: Env,
-  targetRuntimeId: string,
-  input: DeliverableEntityInput,
-  logOneShot: (key: string, message: string) => void,
-  ingressTimestamp?: number,
-): boolean =>
-  sendEntityInputDirectViaRelaySocketDelivery(
-    relayStore,
-    env,
-    targetRuntimeId,
-    input,
-    logOneShot,
-    ingressTimestamp,
-  ).outcome === 'delivered';
-
 export const sendEntityInputDirectViaRelaySocketDelivery = (
   relayStore: RelayStore,
   env: Env,

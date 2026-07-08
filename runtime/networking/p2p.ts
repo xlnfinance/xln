@@ -617,10 +617,6 @@ export class RuntimeP2P {
     );
   }
 
-  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
-    return this.enqueueEntityInputDelivery(targetRuntimeId, input, ingressTimestamp).outcome === 'delivered';
-  }
-
   requestGossip(runtimeId: string) {
     const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
     if (!normalizedRuntimeId) return;

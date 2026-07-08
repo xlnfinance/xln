@@ -289,19 +289,18 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      callers to parse status/reason strings.
    - Partial: health relay timeline severity now reads `delivery` metadata
      first and only falls back to legacy status strings for old events.
-   - Partial: P2P entity-input send and pending flush now use the same typed
-     delivery result shape internally while preserving the public boolean API.
+   - Partial: P2P entity-input send, pending flush, and public entity-input
+     dispatch now use the same typed delivery result shape; boolean remains
+     only on raw socket transport send.
    - Partial: public runtime `sendEntityInput`/routing results now return the
      typed `delivery` result without legacy boolean summary fields.
    - Partial: process-local direct entity dispatch is now typed-only at the
      routing boundary; legacy boolean returns fail fast instead of falling
      through to P2P.
    - Partial: relay-socket, hub-node, and market-maker direct dispatch
-     implementations now return explicit `DeliveryResult`; boolean return is
-     kept only on legacy helper wrappers.
+     implementations now return explicit `DeliveryResult`.
    - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
-     `dispatchEntityOutputs()` requires it, while `enqueueEntityInput()` remains
-     only as a legacy boolean helper on RuntimeP2P itself.
+     `dispatchEntityOutputs()` requires it, with no high-level boolean wrapper.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 
