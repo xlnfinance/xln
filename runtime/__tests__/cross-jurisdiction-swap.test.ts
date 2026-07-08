@@ -1763,7 +1763,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const filledRoute = {
       ...route,
       fillSeq: 1,
-      cumulativeFillRatio: 16_384,
+      cumulativeFillRatio: 0,
       fillNumerator: 1n,
       fillDenominator: 4n,
       filledSourceAmount: 10_000_000_000_000_000n,
@@ -1780,6 +1780,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(claimed.targetClaimed).toBe(25_000_000_000_000_000_000n);
     expect(claimed.filledSourceAmount).toBe(10_000_000_000_000_000n);
     expect(claimed.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
+    expect(claimed.cumulativeFillRatio).toBe(16_384);
     expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(claimed.filledSourceAmount);
   });
 
@@ -1905,7 +1906,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const ratioOnlyExactRoute = {
       ...route,
       fillSeq: 1,
-      cumulativeFillRatio: 16_384,
+      cumulativeFillRatio: 0,
       fillNumerator: 1n,
       fillDenominator: 4n,
     };
@@ -1933,7 +1934,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         incrementalTargetAmount: 25_000_000_000_000_000_000n,
         cumulativeSourceAmount: 20_000_000_000_000_000n,
         cumulativeTargetAmount: 50_000_000_000_000_000_000n,
-        cumulativeFillRatio: 32_768,
+        cumulativeFillRatio: 0,
         fillNumerator: 1n,
         fillDenominator: 2n,
         executionSourceAmount: 10_000_000_000_000_000n,
@@ -1947,6 +1948,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const updatedRoute = account.swapOffers.get(route.orderId)?.crossJurisdiction;
     expect(result.success).toBe(true);
     expect(updatedRoute?.fillSeq).toBe(2);
+    expect(updatedRoute?.cumulativeFillRatio).toBe(32_768);
     expect(updatedRoute?.filledSourceAmount).toBe(20_000_000_000_000_000n);
     expect(updatedRoute?.filledTargetAmount).toBe(50_000_000_000_000_000_000n);
     expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(10_000_000_000_000_000n);

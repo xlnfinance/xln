@@ -4,6 +4,7 @@ import {
   cloneCrossJurisdictionRoute,
   CROSS_J_MAX_FILL_RATIO,
   applyCrossJurisdictionFillProgress,
+  getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionClaimProgress,
@@ -33,7 +34,7 @@ const clampFillRatio = (value: unknown): number =>
   Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
 
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
-  Math.max(clampFillRatio(route.cumulativeFillRatio), clampFillRatio(route.claimedRatio));
+  getCrossJurisdictionCommittedProofRatio(route);
 
 const assertPullResolveAllowed = (
   route: CrossJurisdictionSwapRoute,

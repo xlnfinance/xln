@@ -444,6 +444,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: duplicate cross-j book progress now uses the exact-aware proof
      ratio helper, so exact-only replay clears pending fill instead of failing
      stale.
+   - Partial: cross-j fill validation, pull-resolve followups, and claim
+     progress now all derive committed proof ratio through the shared
+     exact-aware helper when legacy coarse ratio is absent.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
