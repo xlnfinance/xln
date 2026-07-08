@@ -13,16 +13,29 @@ export const KEEP_TEST_ARTIFACTS_ENV = 'XLN_KEEP_TEST_ARTIFACTS';
 export const TEST_WORKSPACE_MAX_BYTES_ENV = 'XLN_TEST_WORKSPACE_MAX_BYTES';
 export const DEFAULT_TEST_WORKSPACE_MAX_BYTES = 50 * 1024 * 1024 * 1024;
 
-const GENERATED_TEST_ARTIFACT_DIRS = [
+const E2E_TEST_ARTIFACT_DIRS = [
   '.logs/e2e-parallel',
-  '.logs/scenarios-parallel',
   'frontend/.svelte-kit-e2e',
+  'frontend/build',
+  'frontend/test-results',
+  'tests/test-results',
+  'e2e/test-results',
+  'debates/test-results',
   '.svelte-kit-e2e',
   'test-results',
   'playwright-report',
+];
+
+const GENERATED_TEST_ARTIFACT_DIRS = [
+  ...E2E_TEST_ARTIFACT_DIRS,
+  '.logs/scenarios-parallel',
   '.logs/bootstrap-soundcheck',
   '.logs/bootstrap-benchmark',
   '.logs/bootstrap-template',
+  '.tmp-tests',
+  'build',
+  'native/dist',
+  'native/extension/dist',
 ];
 
 const BUDGETED_WORKSPACE_PATHS = [
@@ -36,6 +49,13 @@ const BUDGETED_WORKSPACE_PATHS = [
   '.svelte-kit-e2e',
   'test-results',
   'playwright-report',
+  'frontend/test-results',
+  'tests/test-results',
+  'e2e/test-results',
+  'debates/test-results',
+  '.tmp-tests',
+  'native/dist',
+  'native/extension/dist',
 ];
 
 type CleanupOptions = {
@@ -43,6 +63,7 @@ type CleanupOptions = {
   argv?: string[];
   env?: Record<string, string | undefined>;
   reason: string;
+  scope?: 'all' | 'e2e';
   skipIfAlreadyDone?: boolean;
   log?: (message: string) => void;
 };
@@ -52,6 +73,14 @@ export type TestArtifactCleanupSummary = {
   removed: string[];
   estimatedBudgetedBytes: number;
   maxBytes: number;
+};
+
+export const withoutTestArtifactCleanupDoneEnv = (
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> => {
+  const next = { ...env };
+  delete next[TEST_ARTIFACT_CLEANUP_DONE_ENV];
+  return next;
 };
 
 const hasFlag = (argv: string[], name: string): boolean =>
@@ -123,8 +152,9 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
 
   assertNoLiveE2eRunnerLock(cwd);
 
+  const cleanupPaths = options.scope === 'e2e' ? E2E_TEST_ARTIFACT_DIRS : GENERATED_TEST_ARTIFACT_DIRS;
   const removed: string[] = [];
-  for (const relativePath of GENERATED_TEST_ARTIFACT_DIRS) {
+  for (const relativePath of cleanupPaths) {
     const absolutePath = join(cwd, relativePath);
     if (!existsSync(absolutePath)) continue;
     log(`test artifact cleanup (${options.reason}): removing ${relativePath}`);

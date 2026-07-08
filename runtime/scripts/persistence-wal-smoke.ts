@@ -185,7 +185,10 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((err) => {
+try {
+  await main();
+  process.exit(0);
+} catch (err) {
   console.error('❌ persistence-wal-smoke failed:', err);
   process.exit(1);
-});
+}

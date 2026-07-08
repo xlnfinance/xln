@@ -51,6 +51,16 @@ test('mainnet preflight arg parser supports dry-run reports and explicit heavy g
     allowDirty: true,
     includeSoak: true,
     includeScale: true,
+    keepTestArtifacts: false,
     outPath: 'out.json',
+  });
+});
+
+test('mainnet preflight arg parser accepts explicit test artifact retention', () => {
+  expect(parseMainnetPreflightArgs(['--keep-test-artifacts'])).toMatchObject({
+    keepTestArtifacts: true,
+  });
+  expect(parseMainnetPreflightArgs(['--no-cleanup'])).toMatchObject({
+    keepTestArtifacts: true,
   });
 });

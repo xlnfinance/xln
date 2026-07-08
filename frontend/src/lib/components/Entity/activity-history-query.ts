@@ -18,8 +18,14 @@ export type ActivityHistoryQueryInput = {
 
 export const BASE_ACTIVITY_SCAN_LIMIT = 100;
 export const FILTERED_ACTIVITY_SCAN_LIMIT = 1000;
+export const TRANSIENT_ACTIVITY_READ_ERROR_PATTERN = /Database is not open|Iterator is not open|cannot call next\(\) after close/i;
 
 export const normalizeActivityEntityId = (value: string): string => value.trim().toLowerCase();
+
+export const isTransientActivityReadError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return TRANSIENT_ACTIVITY_READ_ERROR_PATTERN.test(message);
+};
 
 export const resolveActivityHistoryScanLimit = (input: Pick<ActivityHistoryQueryInput, 'selectedTypes' | 'search' | 'mode'>): number => {
   const hasTypedFilter = input.selectedTypes.length > 0;

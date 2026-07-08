@@ -6,12 +6,18 @@ import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 
 import { MAINNET_GATE } from './mainnet-gate-constants';
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+  withoutTestArtifactCleanupDoneEnv,
+} from './test-artifact-cleanup';
 
 export type MainnetPreflightArgs = {
   dryRun: boolean;
   allowDirty: boolean;
   includeSoak: boolean;
   includeScale: boolean;
+  keepTestArtifacts: boolean;
   outPath: string;
 };
 
@@ -41,6 +47,7 @@ export const parseMainnetPreflightArgs = (argv = process.argv.slice(2)): Mainnet
   let allowDirty = false;
   let includeSoak = false;
   let includeScale = false;
+  let keepTestArtifacts = false;
   let outPath = join('.logs', 'gates', `mainnet-preflight-${timestampForPath()}.json`);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -62,6 +69,10 @@ export const parseMainnetPreflightArgs = (argv = process.argv.slice(2)): Mainnet
       includeScale = true;
       continue;
     }
+    if (arg === '--keep-test-artifacts' || arg === '--no-cleanup') {
+      keepTestArtifacts = true;
+      continue;
+    }
     if (arg.startsWith('--out=')) {
       outPath = arg.slice('--out='.length);
       continue;
@@ -74,7 +85,7 @@ export const parseMainnetPreflightArgs = (argv = process.argv.slice(2)): Mainnet
     throw new Error(`Unknown mainnet preflight argument: ${arg}`);
   }
 
-  return { dryRun, allowDirty, includeSoak, includeScale, outPath };
+  return { dryRun, allowDirty, includeSoak, includeScale, keepTestArtifacts, outPath };
 };
 
 export const buildMainnetPreflightSteps = (
@@ -131,7 +142,7 @@ const spawnText = (command: string, args: string[]): string | null => {
 const runTextCommand = async (command: string): Promise<{ code: number | null; stdout: string; stderr: string }> => {
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', command], {
     cwd: process.cwd(),
-    env: process.env,
+    env: withoutTestArtifactCleanupDoneEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -149,7 +160,7 @@ const runStep = async (step: MainnetPreflightStep): Promise<StepResult> => {
   const startedAt = Date.now();
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
     cwd: process.cwd(),
-    env: process.env,
+    env: withoutTestArtifactCleanupDoneEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const prefix = `[mainnet:${step.category}:${step.name}]`;
@@ -198,6 +209,14 @@ const main = async (): Promise<void> => {
   if (dirty.code !== 0) throw new Error(`MAINNET_PREFLIGHT_GIT_STATUS_UNAVAILABLE:${dirty.stderr || dirty.stdout}`);
   if (dirty.stdout.trim() && !args.allowDirty) {
     throw new Error(`MAINNET_PREFLIGHT_DIRTY_WORKTREE:\n${dirty.stdout}`);
+  }
+
+  if (!args.dryRun) {
+    cleanupTestArtifactsBeforeRun({
+      reason: 'mainnet-preflight',
+      argv: args.keepTestArtifacts ? ['--keep-test-artifacts'] : process.argv.slice(2),
+    });
+    process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   }
 
   const steps = buildMainnetPreflightSteps(args);

@@ -25,6 +25,11 @@ const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
 const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
 const MAX_BATCH_MINE_BLOCKS = 100;
+const MINE_BLOCKS_TIMEOUT_MS = 90_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -224,9 +229,18 @@ async function readAccountState(
 }
 
 async function readCurrentChainBlock(page: Page): Promise<number> {
-  const body = await postRpc(page, 'eth_blockNumber', []);
-  expect(typeof body.result === 'string', `unexpected eth_blockNumber body: ${JSON.stringify(body)}`).toBe(true);
-  return Number.parseInt(body.result!, 16);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const body = await postRpc(page, 'eth_blockNumber', []);
+      expect(typeof body.result === 'string', `unexpected eth_blockNumber body: ${JSON.stringify(body)}`).toBe(true);
+      return Number.parseInt(body.result!, 16);
+    } catch (error) {
+      lastError = error;
+      await sleep(100 * (attempt + 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 async function postRpc(page: Page, method: string, params: unknown[]): Promise<{ result?: unknown; error?: unknown }> {
@@ -239,8 +253,14 @@ async function postRpc(page: Page, method: string, params: unknown[]): Promise<{
       params,
     },
   });
-  expect(response.ok(), `${method} RPC HTTP request must succeed`).toBe(true);
-  const body = await response.json() as { result?: unknown; error?: unknown };
+  const text = await response.text();
+  let body: { result?: unknown; error?: unknown } = {};
+  try {
+    body = text ? JSON.parse(text) as { result?: unknown; error?: unknown } : {};
+  } catch {
+    body = { error: text.slice(0, 500) };
+  }
+  if (!response.ok()) throw new Error(`${method} RPC HTTP ${response.status()}: ${text.slice(0, 500)}`);
   if (body.error) throw new Error(`${method} RPC error: ${JSON.stringify(body.error)}`);
   return body;
 }
@@ -252,17 +272,34 @@ async function mineOneBlock(page: Page): Promise<void> {
 async function mineBlocks(page: Page, count: number): Promise<void> {
   const blocks = Math.max(0, Math.floor(count));
   if (blocks <= 0) return;
-  if (blocks === 1) {
-    await mineOneBlock(page);
-    return;
-  }
+  const startBlock = await readCurrentChainBlock(page);
+  const targetBlock = startBlock + blocks;
+  const deadline = Date.now() + MINE_BLOCKS_TIMEOUT_MS;
+  let chunkLimit = Math.min(blocks, MAX_BATCH_MINE_BLOCKS);
+  const errors: string[] = [];
 
-  let remaining = blocks;
-  while (remaining > 0) {
-    const chunk = Math.min(remaining, MAX_BATCH_MINE_BLOCKS);
-    await mineBlockChunk(page, chunk);
-    remaining -= chunk;
+  while (Date.now() < deadline) {
+    const currentBlock = await readCurrentChainBlock(page);
+    if (currentBlock >= targetBlock) return;
+    const chunk = Math.min(targetBlock - currentBlock, chunkLimit);
+    try {
+      await mineBlockChunk(page, chunk);
+      chunkLimit = Math.min(MAX_BATCH_MINE_BLOCKS, Math.max(chunkLimit, chunk));
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+      const afterFailureBlock = await readCurrentChainBlock(page).catch(() => currentBlock);
+      if (afterFailureBlock > currentBlock) {
+        chunkLimit = Math.max(1, Math.floor(chunkLimit / 2));
+        continue;
+      }
+      if (chunkLimit > 1) {
+        chunkLimit = Math.max(1, Math.floor(chunkLimit / 2));
+        continue;
+      }
+      throw new Error(`block mining stalled at ${currentBlock}/${targetBlock}: ${errors.slice(-5).join(' | ')}`);
+    }
   }
+  throw new Error(`timed out mining to block ${targetBlock}: ${errors.slice(-5).join(' | ')}`);
 }
 
 async function mineBlockChunk(page: Page, blocks: number): Promise<void> {

@@ -4,6 +4,7 @@ import {
   FILTERED_ACTIVITY_SCAN_LIMIT,
   activityFiltersFromQuery,
   buildActivityHistoryReadQuery,
+  isTransientActivityReadError,
   normalizeActivityHistoryPage,
 } from '../../frontend/src/lib/components/Entity/activity-history-query';
 
@@ -114,4 +115,11 @@ test('activity history normalizes the typed adapter page without alternate sourc
   expect(page.scannedFrames).toBe(5);
   expect(page.failures).toBeUndefined();
   expect(page.events.map((event) => event.id)).toEqual(['adapter:1']);
+});
+
+test('activity history identifies transient browser storage read failures', () => {
+  expect(isTransientActivityReadError(new Error('Database is not open'))).toBe(true);
+  expect(isTransientActivityReadError(new Error('Iterator is not open'))).toBe(true);
+  expect(isTransientActivityReadError(new Error('cannot call next() after close'))).toBe(true);
+  expect(isTransientActivityReadError(new Error('ACTIVITY_HISTORY_READ_FAILED'))).toBe(false);
 });

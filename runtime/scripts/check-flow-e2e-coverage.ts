@@ -89,7 +89,7 @@ const requirements: CoverageRequirement[] = [
   },
   {
     area: 'frontend',
-    file: 'frontend/src/lib/components/Entity/EntityPanelTabs.svelte',
+    file: 'frontend/src/lib/components/Entity/AccountWorkspaceView.svelte',
     patterns: [
       "label: 'Pay'",
       '<PaymentPanel',
@@ -100,13 +100,27 @@ const requirements: CoverageRequirement[] = [
     area: 'frontend',
     file: 'frontend/src/lib/components/Entity/SwapPanel.svelte',
     patterns: [
-      'data-testid="swap-any-builder"',
-      'data-testid="swap-route-select"',
-      "swapRouteMode === 'cross'",
-      "type: 'requestCrossJurisdictionSwap'",
+      '<SwapTradeTicket',
       "type: 'placeSwapOffer'",
       '<SwapOrderList',
       '{requestCrossClear}',
+    ],
+  },
+  {
+    area: 'frontend',
+    file: 'frontend/src/lib/components/Entity/SwapTradeTicket.svelte',
+    patterns: [
+      'data-testid="swap-any-builder"',
+      'data-testid="swap-route-select"',
+      "swapRouteMode === 'cross'",
+      'placeSwapOffer',
+    ],
+  },
+  {
+    area: 'frontend',
+    file: 'frontend/src/lib/components/Entity/swap-panel-helpers.ts',
+    patterns: [
+      "type: 'requestCrossJurisdictionSwap'",
     ],
   },
   {

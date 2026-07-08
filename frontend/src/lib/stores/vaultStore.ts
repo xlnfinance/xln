@@ -28,13 +28,13 @@ import {
 } from './xlnStore';
 import { settings } from './settingsStore';
 import { toasts } from './toastStore';
-import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
-import { writeOnboardingCompleteForEntities } from '$lib/utils/onboardingState';
+import { writeSavedCollateralPolicy, writeHubJoinPreference } from '../utils/onboardingPreferences';
+import { writeOnboardingCompleteForEntities } from '../utils/onboardingState';
 import { tabOperations } from './tabStore';
-import { isInactiveTabStandby } from '$lib/utils/activeTabLock';
-import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-import { registerDebugSurface } from '$lib/utils/debugSurface';
-import { generateLazyEntityIdPreview } from '$lib/utils/lazyEntityId';
+import { isInactiveTabStandby } from '../utils/activeTabLock';
+import { unwrapLiveRuntimeEnv } from '../utils/liveRuntimeEnv';
+import { registerDebugSurface } from '../utils/debugSurface';
+import { generateLazyEntityIdPreview } from '../utils/lazyEntityId';
 
 // Types
 export interface Signer {

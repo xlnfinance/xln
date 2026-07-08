@@ -18,6 +18,7 @@
   } from 'lucide-svelte';
   import {
     buildActivityHistoryReadQuery,
+    isTransientActivityReadError,
     normalizeActivityEntityId,
     normalizeActivityHistoryPage,
   } from './activity-history-query';
@@ -31,6 +32,7 @@
   type ActivityEvent = RuntimeActivityEvent;
 
   type ActivityResponse = ReturnType<typeof normalizeActivityHistoryPage>;
+  const ACTIVITY_READ_RETRY_DELAYS_MS = [100, 250, 500] as const;
 
   const typeOptions = [
     { id: 'payment', label: 'Payments' },
@@ -143,6 +145,27 @@
     return normalizeActivityHistoryPage(await runtimeQueryClient.readActivity(query), query);
   }
 
+  function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function readActivitySourcesWithRetry(beforeHeight: number | null): Promise<ActivityResponse> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= ACTIVITY_READ_RETRY_DELAYS_MS.length; attempt += 1) {
+      try {
+        return await readActivitySources(beforeHeight);
+      } catch (err) {
+        lastError = err;
+        const canRetry = isTransientActivityReadError(err) && attempt < ACTIVITY_READ_RETRY_DELAYS_MS.length;
+        if (!canRetry) break;
+        const retryDelayMs = ACTIVITY_READ_RETRY_DELAYS_MS[attempt];
+        if (retryDelayMs === undefined) break;
+        await sleep(retryDelayMs);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError || 'Failed to load activity history'));
+  }
+
   async function loadActivity(options: { append?: boolean; beforeHeight?: number | null } = {}): Promise<void> {
     const currentEntity = normalizeActivityEntityId(entityId);
     if (!/^0x[0-9a-f]{64}$/.test(currentEntity)) return;
@@ -150,7 +173,7 @@
     loading = true;
     error = null;
     try {
-      const body = await readActivitySources(options.beforeHeight ?? null);
+      const body = await readActivitySourcesWithRetry(options.beforeHeight ?? null);
       if (loadVersion !== activityLoadVersion) return;
       latestHeight = Number(body.latestHeight || 0);
       scannedFrames = Number(body.scannedFrames || 0);

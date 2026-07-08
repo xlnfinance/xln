@@ -3,6 +3,12 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+  withoutTestArtifactCleanupDoneEnv,
+} from './test-artifact-cleanup';
+
 type GateProfile = 'quick' | 'ci' | 'release';
 
 type GateStep = {
@@ -57,6 +63,7 @@ const SOUNDCHECK_TARGETS = [
 ].join(' ');
 
 const quickSteps: GateStep[] = [
+  { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
   { name: 'source checks', command: 'bun run check:src', timeoutMs: 120_000 },
   { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 180_000 },
   {
@@ -108,7 +115,7 @@ async function runStep(step: GateStep): Promise<StepResult> {
   const startedAt = Date.now();
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
     cwd: process.cwd(),
-    env: process.env,
+    env: withoutTestArtifactCleanupDoneEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -169,6 +176,8 @@ function printSummary(profile: GateProfile, results: StepResult[]): void {
 async function main(): Promise<void> {
   const profile = parseProfile();
   const steps = profileSteps[profile];
+  cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` });
+  process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   printPlan(profile, steps);
 
   const results: StepResult[] = [];

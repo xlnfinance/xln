@@ -2135,7 +2135,7 @@ const runShard = async (
 
 async function main(): Promise<void> {
   const args = parseArgs();
-  cleanupTestArtifactsBeforeRun({ reason: 'e2e' });
+  cleanupTestArtifactsBeforeRun({ reason: 'e2e', scope: 'e2e', skipIfAlreadyDone: false });
   const logsDir = resolve(process.cwd(), '.logs', 'e2e-parallel', tsTag());
   const releaseRunnerLock = acquireRunnerLock(logsDir);
   mkdirSync(logsDir, { recursive: true });

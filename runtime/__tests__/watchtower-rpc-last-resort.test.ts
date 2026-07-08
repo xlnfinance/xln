@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ContractFactory, HDNodeWallet, JsonRpcProvider, Wallet, ethers } from 'ethers';
@@ -27,6 +28,25 @@ const PROOF_BODY_ABI =
 const tempRoots: string[] = [];
 const servers: StandaloneWatchtowerServer[] = [];
 const anvilChildren: ChildProcessWithoutNullStreams[] = [];
+
+const reserveFreePort = async (): Promise<number> => new Promise((resolve, reject) => {
+  const server = createServer();
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', () => {
+    const address = server.address();
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      if (!address || typeof address === 'string') {
+        reject(new Error('FREE_PORT_ADDRESS_UNAVAILABLE'));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+});
 
 afterEach(async () => {
   while (servers.length > 0) {
@@ -158,7 +178,7 @@ describe('watchtower rpc last-resort integration', () => {
     const tempRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-rpc-'));
     tempRoots.push(tempRoot);
 
-    const anvilPort = 8654 + Math.floor(Math.random() * 1000);
+    const anvilPort = await reserveFreePort();
     const { rpcUrl } = await startAnvil(anvilPort);
     const provider = new JsonRpcProvider(rpcUrl, 31337);
     const nextNonce = createNonceManager(provider);
@@ -439,13 +459,13 @@ describe('watchtower rpc last-resort integration', () => {
     expect(actionPayload.receipts?.find((receipt) => receipt.status === 'submitted')?.txHash).toMatch(/^0x[0-9a-f]+$/);
 
     await provider.destroy();
-  }, 60_000);
+  }, 120_000);
 
   test('stale tower remedy cannot override a newer user-submitted counter-dispute', async () => {
     const tempRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-rpc-stale-'));
     tempRoots.push(tempRoot);
 
-    const anvilPort = 9654 + Math.floor(Math.random() * 1000);
+    const anvilPort = await reserveFreePort();
     const { rpcUrl } = await startAnvil(anvilPort);
     const provider = new JsonRpcProvider(rpcUrl, 31337);
     const nextNonce = createNonceManager(provider);
@@ -722,5 +742,5 @@ describe('watchtower rpc last-resort integration', () => {
     expect(actionPayload.receipts?.at(-1)?.status).toBe('skipped');
 
     await provider.destroy();
-  }, 60_000);
+  }, 120_000);
 });

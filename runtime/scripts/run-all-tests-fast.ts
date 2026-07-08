@@ -12,7 +12,11 @@
 
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
-import { cleanupTestArtifactsBeforeRun, TEST_ARTIFACT_CLEANUP_DONE_ENV } from './test-artifact-cleanup';
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+  withoutTestArtifactCleanupDoneEnv,
+} from './test-artifact-cleanup';
 
 type CliArgs = {
   scenarioWorkers: number;
@@ -95,6 +99,7 @@ async function main(): Promise<void> {
     ...process.env,
     [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
   };
+  const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);
 
   const startedAt = Date.now();
 
@@ -122,7 +127,7 @@ async function main(): Promise<void> {
     'e2e',
     'bun',
     e2eArgs,
-    childEnv,
+    e2eEnv,
   );
 
   const [scenarioResult, e2eResult] = await Promise.all([scenarioPromise, e2ePromise]);

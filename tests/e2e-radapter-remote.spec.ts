@@ -2329,7 +2329,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   await page.goto(`${APP_BASE_URL}/radapter/manage`, { waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('remote-runtime-manager')).toBeVisible({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Attach' }).click();
-  await page.getByTestId('remote-runtime-label').fill('H2 dropdown');
+  await page.getByTestId('remote-runtime-label').fill('H2');
   await page.getByTestId('remote-runtime-ws').fill(h2WsUrl);
   await page.getByTestId('remote-runtime-token').fill(h2Key);
   const reloadAfterAttach = page.waitForEvent('framenavigated', { timeout: 90_000 }).catch(() => null);
@@ -2359,7 +2359,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   expect(managerState.sessionRegistryPresent).toBe(false);
   expect(managerState.imports.length).toBeGreaterThanOrEqual(1);
   expect(managerState.imports.length).toBeLessThanOrEqual(100);
-  expect(managerState.h2Import?.label).toBe('H2 dropdown');
+  expect(managerState.h2Import?.label).toBe('H2');
   expect(managerState.h2Import?.access).toBe('read');
   expect(managerState.h2Import?.entityCount ?? 0).toBeGreaterThan(0);
 

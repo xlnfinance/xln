@@ -62,6 +62,11 @@ function isExpectedUiPaymentActivity(event: ActivityApiEvent): boolean {
   );
 }
 
+function isTransientActivityReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /Database is not open|Iterator is not open|cannot call next\(\) after close/i.test(message);
+}
+
 function randomMnemonic(): string {
   const mnemonic = Wallet.createRandom().mnemonic?.phrase;
   if (!mnemonic) throw new Error('failed to generate mnemonic');
@@ -257,25 +262,31 @@ async function countRuntimeActivityEvents(
   params: Record<string, string>,
   predicate: (event: ActivityApiEvent) => boolean,
 ): Promise<number> {
-  const events = await page.evaluate(async ({ targetEntityId, sourceParams }) => {
-    const view = window as typeof window & {
-      __xln?: {
-        adapter?: RuntimeAdapterDebugSurface;
+  let events: ActivityApiEvent[];
+  try {
+    events = await page.evaluate(async ({ targetEntityId, sourceParams }) => {
+      const view = window as typeof window & {
+        __xln?: {
+          adapter?: RuntimeAdapterDebugSurface;
+        };
       };
-    };
-    const readActivity = view.__xln?.adapter?.query?.activity;
-    if (!readActivity) throw new Error('E2E_ACTIVITY_QUERY_UNAVAILABLE');
-    const kind = sourceParams.kind && sourceParams.kind !== 'all' ? sourceParams.kind : undefined;
-    const types = sourceParams.types ? String(sourceParams.types).split(',').filter(Boolean) : undefined;
-    const body = await readActivity<{ events?: ActivityApiEvent[] }>({
-      entityId: targetEntityId,
-      ...(kind ? { kind } : {}),
-      ...(types ? { types } : {}),
-      limit: 80,
-      scanLimit: types?.length ? 1000 : 100,
-    });
-    return Array.isArray(body.events) ? body.events : [];
-  }, { targetEntityId: entityId, sourceParams: params });
+      const readActivity = view.__xln?.adapter?.query?.activity;
+      if (!readActivity) throw new Error('E2E_ACTIVITY_QUERY_UNAVAILABLE');
+      const kind = sourceParams.kind && sourceParams.kind !== 'all' ? sourceParams.kind : undefined;
+      const types = sourceParams.types ? String(sourceParams.types).split(',').filter(Boolean) : undefined;
+      const body = await readActivity<{ events?: ActivityApiEvent[] }>({
+        entityId: targetEntityId,
+        ...(kind ? { kind } : {}),
+        ...(types ? { types } : {}),
+        limit: 80,
+        scanLimit: types?.length ? 1000 : 100,
+      });
+      return Array.isArray(body.events) ? body.events : [];
+    }, { targetEntityId: entityId, sourceParams: params });
+  } catch (error) {
+    if (isTransientActivityReadError(error)) return 0;
+    throw error;
+  }
 
   return events.filter(predicate).length;
 }
