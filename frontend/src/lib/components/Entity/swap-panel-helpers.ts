@@ -248,17 +248,7 @@ function escapeRegExp(value: string): string {
 }
 
 export function normalizeJurisdictionDisplayName(value: unknown): string {
-  const name = String(value || '').trim();
-  const normalized = name.toLowerCase();
-  if (
-    normalized === 'arrakis'
-    || normalized === 'arrakis (shared anvil)'
-    || normalized === 'shared anvil'
-    || normalized === 'wakanda'
-  ) {
-    return 'Testnet';
-  }
-  return name;
+  return String(value || '').trim();
 }
 
 export function stripJurisdictionSuffix(name: string, jurisdiction: string): string {

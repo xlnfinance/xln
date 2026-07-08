@@ -369,6 +369,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      remaining fallback only matches display names when both sides lack refs.
    - Partial: removed the runtime hub-node display alias allowlist that rewrote
      Arrakis/Wakanda/shared-anvil labels to Testnet.
+   - Partial: removed frontend wallet/swap display aliasing that rewrote
+     arrakis/wakanda/local test labels to Testnet/Tron during default imports
+     and account/orderbook label rendering.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

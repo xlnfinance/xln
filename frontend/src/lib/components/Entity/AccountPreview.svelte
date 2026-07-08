@@ -14,6 +14,7 @@
   import { formatEntityId } from '$lib/utils/format';
   import { getAccountUiStatus, getAccountUiStatusDescription, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
   import { faucetPendingKey } from './account-faucet';
+  import { formatEntityNetworkLabel, normalizeJurisdictionDisplayName } from './swap-panel-helpers';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -50,36 +51,6 @@
   let expandedDetailTokenId: number | 'all' | null = null;
 
   $: activeXlnFunctions = $xlnFunctions;
-
-  function normalizeJurisdictionDisplayName(value: unknown): string {
-    const name = String(value || '').trim();
-    const normalized = name.toLowerCase();
-    if (
-      normalized === 'arrakis'
-      || normalized === 'arrakis (shared anvil)'
-      || normalized === 'shared anvil'
-      || normalized === 'wakanda'
-    ) {
-      return 'Testnet';
-    }
-    return name;
-  }
-
-  function escapeRegExp(value: string): string {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  function formatEntityNetworkLabel(name: string, jurisdiction: string): string {
-    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
-    let cleanName = String(name || '').trim() || 'Unknown';
-    if (cleanJurisdiction) {
-      cleanName = cleanName
-        .replace(new RegExp(`\\s*\\(${escapeRegExp(cleanJurisdiction)}\\)\\s*$`, 'i'), '')
-        .replace(new RegExp(`\\s+${escapeRegExp(cleanJurisdiction)}\\s*$`, 'i'), '')
-        .trim() || cleanName;
-    }
-    return cleanJurisdiction ? `${cleanName} (${cleanJurisdiction})` : cleanName;
-  }
 
   $: counterpartyJurisdiction = normalizeJurisdictionDisplayName(counterpartyProfile?.metadata?.jurisdiction?.name);
   $: counterpartyDisplayName = formatEntityNetworkLabel(counterpartyName || formatEntityId(counterpartyId), counterpartyJurisdiction);

@@ -127,13 +127,13 @@ describe('swap panel helpers', () => {
     expect(view.getPairBook(hubId, '1/2')).toBe(book);
   });
 
-  test('normalizes dev jurisdiction labels and strips repeated suffixes', () => {
-    expect(normalizeJurisdictionDisplayName('arrakis')).toBe('Testnet');
-    expect(normalizeJurisdictionDisplayName('Arrakis (shared anvil)')).toBe('Testnet');
-    expect(normalizeJurisdictionDisplayName('Wakanda')).toBe('Testnet');
+  test('preserves jurisdiction labels and strips repeated suffixes', () => {
+    expect(normalizeJurisdictionDisplayName('arrakis')).toBe('arrakis');
+    expect(normalizeJurisdictionDisplayName('Arrakis (shared anvil)')).toBe('Arrakis (shared anvil)');
+    expect(normalizeJurisdictionDisplayName('Wakanda')).toBe('Wakanda');
     expect(normalizeJurisdictionDisplayName('Base Sepolia')).toBe('Base Sepolia');
 
-    expect(formatEntityNetworkLabel('Hub Alpha (Testnet)', 'arrakis')).toBe('Hub Alpha (Testnet)');
+    expect(formatEntityNetworkLabel('Hub Alpha (arrakis)', 'arrakis')).toBe('Hub Alpha (arrakis)');
     expect(formatEntityNetworkLabel('Hub Alpha Testnet', 'Testnet')).toBe('Hub Alpha (Testnet)');
     expect(formatEntityNetworkLabel('', '')).toBe('Unknown');
   });
@@ -156,16 +156,16 @@ describe('swap panel helpers', () => {
     expect(parseCrossAssetKey(':2')).toBeNull();
     expect(parseCrossAssetKey('chain-a:two')).toBeNull();
 
-    expect(tokenNetworkLabel(1, 'wakanda', tokenSymbol)).toBe('WETH (Testnet)');
+    expect(tokenNetworkLabel(1, 'wakanda', tokenSymbol)).toBe('WETH (wakanda)');
     expect(sameOrderbookPairLabel(1, 2, 'Base Sepolia', tokenSymbol)).toBe('WETH-USDC (Base Sepolia)');
-    expect(crossOrderbookPairLabel(1, 'arrakis', 2, 'Base Sepolia', tokenSymbol)).toBe('WETH (Testnet) - USDC (Base Sepolia)');
+    expect(crossOrderbookPairLabel(1, 'arrakis', 2, 'Base Sepolia', tokenSymbol)).toBe('WETH (arrakis) - USDC (Base Sepolia)');
   });
 
   test('formats compact identity markers and token maps', () => {
     expect(entityInitials('0xabcdef', 'Grace Tron')).toBe('GR');
     expect(entityInitials('0xabcdef')).toBe('0X');
     expect(jurisdictionBadgeText('Base Sepolia')).toBe('BS');
-    expect(jurisdictionBadgeText('arrakis')).toBe('TE');
+    expect(jurisdictionBadgeText('arrakis')).toBe('AR');
     expect(jurisdictionBadgeText('')).toBe('J');
 
     expect(getTokenMapValue(new Map<number, string>([[1, 'number-key']]), 1)).toBe('number-key');

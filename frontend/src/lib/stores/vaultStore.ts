@@ -1685,27 +1685,12 @@ const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): ApiJuri
   return first;
 };
 
-const stripLocalJurisdictionSuffix = (name: string): string =>
-  String(name || '').replace(/\s*\((?:shared|local)\s+anvil\)\s*$/i, '').trim();
-
 const resolveDefaultJurisdictionImportName = (
   key: string,
   config: ApiJurisdictionConfig,
   index: number,
 ): string => {
-  const rawName = stripLocalJurisdictionSuffix(config.name || key);
-  const normalizedKey = normalizeJurisdictionKey(key);
-  const normalizedName = normalizeJurisdictionKey(rawName);
-  const chainId = Number(config.chainId || 0);
-  if (
-    index === 0 &&
-    (normalizedKey === 'arrakis' || normalizedName === 'arrakis' || normalizedName === 'localhost' || chainId === 31337)
-  ) {
-    return 'Testnet';
-  }
-  if (normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName === 'tron') {
-    return 'Tron';
-  }
+  const rawName = String(config.name || key).trim();
   return rawName || (index === 0 ? 'primary' : `Jurisdiction ${index + 1}`);
 };
 
@@ -2455,7 +2440,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
   const primaryJurisdictionName =
     defaultJurisdictionImports[0]?.name ||
-    stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
+    String(arrakisConfig.name || 'primary').trim() ||
     'primary';
   const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
   const canonicalDeltaTransformerAddress = requireContractAddress(
@@ -3153,7 +3138,7 @@ export const vaultOperations = {
         const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
         const primaryJurisdictionName =
           defaultJurisdictionImports[0]?.name ||
-          stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
+          String(arrakisConfig.name || 'primary').trim() ||
           'primary';
         const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
         const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
