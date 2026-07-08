@@ -320,6 +320,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: P2P pending flush now gets retry/drop event disposition from the
      shared delivery helper instead of mapping `terminal` to event level/code
      locally.
+   - Partial: process-local relay direct dispatch now treats stale sockets and
+     failed `send()` results as typed deferred delivery instead of claiming
+     delivery, and its direct packet id comes from relay store sequencing rather
+     than wall-clock/random data.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

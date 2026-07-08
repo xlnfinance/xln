@@ -2,6 +2,7 @@ import type { ServerWebSocket } from 'bun';
 import type { DeliverableEntityInput, Env } from '../types';
 import { encryptJSON, hexToPubKey } from '../networking/p2p-crypto';
 import {
+  isRelaySocketOpen,
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
@@ -18,6 +19,9 @@ import {
 export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 export type RelaySocket = ServerWebSocket<RelaySocketData>;
 
+const relaySocketSendFailed = (result: boolean | number | void): boolean =>
+  result === false || (typeof result === 'number' && result < 0);
+
 export const resolveRequestClientIp = (request: Request): string => {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
   const realIp = request.headers.get('x-real-ip')?.trim();
@@ -30,10 +34,8 @@ export const getRelayClientIp = (ws: RelaySocket): string => String(ws.data?.cli
 export const hasConnectedEncryptedRelayClient = (relayStore: RelayStore, targetRuntimeId: string): boolean => {
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
   if (!targetKey) return false;
-  return Boolean(
-    relayStore.clients.has(targetKey) &&
-    resolveEncryptionPublicKeyHex(relayStore, targetKey),
-  );
+  const target = relayStore.clients.get(targetKey);
+  return Boolean(target && isRelaySocketOpen(target.ws) && resolveEncryptionPublicKeyHex(relayStore, targetKey));
 };
 
 export const sendEntityInputDirectViaRelaySocketDelivery = (
@@ -78,23 +80,43 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
   try {
     const payload = encryptJSON(input, hexToPubKey(targetPubKeyHex));
     const target = relayStore.clients.get(targetKey);
+    const messageSeq = nextWsTimestamp(relayStore);
     const msg = {
       type: 'entity_input',
-      id: `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      id: `srv_${messageSeq}`,
       from: fromRuntimeId,
       fromEncryptionPubKey: fromPubKeyHex,
       to: target?.runtimeId || targetRuntimeId,
       timestamp:
         typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
           ? ingressTimestamp
-          : nextWsTimestamp(relayStore),
+          : messageSeq,
       payload,
       encrypted: true,
       entityId: input.entityId,
       txs: input.entityTxs?.length ?? 0,
     };
-    if (target) {
-      target.ws.send(safeStringify(msg));
+    if (target && isRelaySocketOpen(target.ws)) {
+      const result = target.ws.send(safeStringify(msg));
+      if (relaySocketSendFailed(result)) {
+        pushDebugEvent(relayStore, {
+          event: 'delivery',
+          from: fromRuntimeId,
+          to: targetRuntimeId,
+          msgType: 'entity_input',
+          encrypted: true,
+          status: 'send-failed',
+          reason: 'ROUTE_DIRECT_SEND_FALSE',
+          details: {
+            entityId: input.entityId,
+            txs: input.entityTxs?.length ?? 0,
+          },
+        });
+        return deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_SEND_FAILED',
+        });
+      }
       pushDebugEvent(relayStore, {
         event: 'delivery',
         from: fromRuntimeId,
@@ -110,7 +132,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
       return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
     }
 
-    // No local WS client for target runtime in this process.
+    // No open local WS client for target runtime in this process.
     // Return false so the runtime can use its normal P2P route; process-local
     // relay queues can blackhole outputs when the relay is external.
     pushDebugEvent(relayStore, {
