@@ -35,6 +35,14 @@ export const isDeliveryDelivered = (delivery: DeliveryResult): boolean =>
 export const shouldRetryDelivery = (delivery: DeliveryResult): boolean =>
   !isDeliveryDelivered(delivery) && !delivery.terminal;
 
+export const requireDeliveryDelivered = (
+  delivery: DeliveryResult,
+  message: string | ((delivery: DeliveryResult) => string),
+): DeliveryResult => {
+  if (isDeliveryDelivered(delivery)) return delivery;
+  throw new Error(typeof message === 'function' ? message(delivery) : message);
+};
+
 export const deliveryAccepted = (code = 'DELIVERY_ACCEPTED'): DeliveryResult => ({
   outcome: 'delivered',
   code,

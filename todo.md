@@ -314,6 +314,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      live in shared `delivery-result` helpers instead of per-call-site logic.
    - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
      `dispatchEntityOutputs()` requires it, with no high-level boolean wrapper.
+   - Partial: route dispatch now uses shared delivered-check helpers for direct
+     fast-path acceptance and P2P hard-delivery assertions instead of raw
+     `outcome` comparisons.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

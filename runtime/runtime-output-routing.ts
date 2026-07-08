@@ -12,6 +12,8 @@ import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryQueued,
+  isDeliveryDelivered,
+  requireDeliveryDelivered,
   requireDeliveryResult,
   type DeliveryResult,
 } from './delivery-result';
@@ -414,7 +416,7 @@ export const dispatchEntityOutputs = (
         directDispatch(targetRuntimeId, output, env.timestamp),
         'ROUTE_DIRECT_INVALID_DELIVERY_RESULT',
       );
-      if (directDelivery.outcome === 'delivered') {
+      if (isDeliveryDelivered(directDelivery)) {
         continue;
       }
       // Direct dispatch is only an optimization for runtimes connected to this
@@ -438,12 +440,12 @@ export const dispatchEntityOutputs = (
     let p2pDelivery: DeliveryResult | null = null;
     try {
       p2pDelivery = enqueueP2PEntityInputDelivery(p2p, targetRuntimeId, output, env.timestamp);
-      if (p2pDelivery.outcome !== 'delivered') {
-        throw new Error(
+      requireDeliveryDelivered(
+        p2pDelivery,
+        (delivery) =>
           `ROUTE_SEND_NOT_DELIVERED: entity=${output.entityId} runtime=${targetRuntimeId} ` +
-          `code=${p2pDelivery.code} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
-        );
-      }
+          `code=${delivery.code} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
+      );
     } catch (error) {
       env.error?.('network', 'ROUTE_SEND_FAILED', {
         entityId: output.entityId,

@@ -6,6 +6,7 @@ import {
   deliveryFailure,
   isDeliveryDelivered,
   isDeliveryResult,
+  requireDeliveryDelivered,
   requireDeliveryResult,
   shouldRetryDelivery,
 } from '../delivery-result';
@@ -22,6 +23,17 @@ test('delivery result helpers validate the shared delivery contract', () => {
   expect(() => requireDeliveryResult(true, 'TEST_INVALID')).toThrow(
     'TEST_INVALID: expected DeliveryResult',
   );
+});
+
+test('delivered assertion centralizes hard delivery requirements', () => {
+  const delivered = deliveryAccepted('DELIVERED');
+  expect(requireDeliveryDelivered(delivered, 'MUST_DELIVER')).toBe(delivered);
+
+  const deferred = deliveryDeferred({ outcome: 'deferred', code: 'DEFERRED' });
+  expect(() => requireDeliveryDelivered(
+    deferred,
+    (delivery) => `MUST_DELIVER: code=${delivery.code}`,
+  )).toThrow('MUST_DELIVER: code=DEFERRED');
 });
 
 test('delivery retry helper retains only non-terminal delivery attempts', () => {
