@@ -69,6 +69,7 @@
     "gate:capped-testnet": "bun runtime/scripts/run-capped-testnet-gate.ts",
     "gate:capped-testnet:preflight": "bun runtime/scripts/run-capped-testnet-gate.ts --skip-soak",
     "debug:receipts": "bun runtime/scripts/read-frame-receipts.ts",
+    "debug:disk": "bun runtime/scripts/debug-disk.ts",
     "debug:persistence": "bun runtime/scripts/inspect-persistence.ts",
     "bench:storage:hub": "bun runtime/scripts/bench-storage-hub.ts",
     "bench:swap:orderbook": "bun runtime/scripts/bench-swap-orderbook-tps.ts --swaps 100000 --warmup 10000 --min-tps 10000",

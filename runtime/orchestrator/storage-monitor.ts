@@ -200,7 +200,7 @@ const writeStorageHistory = (entries: StorageHistoryEntry[]): void => {
   writeFileSync(STORAGE_HISTORY_PATH, JSON.stringify(entries), 'utf8');
 };
 
-const buildStorageHealth = (): StorageHealth => {
+const buildStorageHealth = (options: { writeHistory: boolean } = { writeHistory: true }): StorageHealth => {
   const sampledAt = Date.now();
   const disk = statDiskBytes();
   const scans = Object.fromEntries(
@@ -213,7 +213,7 @@ const buildStorageHealth = (): StorageHealth => {
   const existingHistory = readStorageHistory().filter((entry) => sampledAt - entry.ts <= STORAGE_HISTORY_WINDOW_MS);
   const nextHistory = [...existingHistory, { ts: sampledAt, freeBytes: disk.freeBytes, tracked: currentTracked }]
     .slice(-512);
-  writeStorageHistory(nextHistory);
+  if (options.writeHistory) writeStorageHistory(nextHistory);
 
   const tracked = TRACKED_STORAGE_PATHS.map((entry): StorageTrackedHealth => {
     const scan = scans[entry.name] ?? { bytes: 0, entries: 0, ms: 0, truncated: true, mode: STORAGE_HEALTH_DEEP_SCAN ? 'deep' as const : 'shallow' as const };
@@ -283,6 +283,9 @@ export const getStorageHealthSnapshotSync = (): StorageHealth => {
   cachedStorageHealthAt = now;
   return next;
 };
+
+export const getStorageHealthSnapshotReadOnlySync = (): StorageHealth =>
+  buildStorageHealth({ writeHistory: false });
 
 export const assertMinDiskFree = (): void => {
   const disk = statDiskBytes();
