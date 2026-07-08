@@ -295,6 +295,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: P2P pending flush retry/drop decisions now use typed
      `delivery.terminal` and emit typed delivery debug events for retryable and
      terminal failures.
+   - Partial: P2P pending TTL expiry now emits the same typed terminal
+     `delivery` metadata before dropping stale queued entity inputs.
    - Partial: public runtime `sendEntityInput`/routing results now return the
      typed `delivery` result without legacy boolean summary fields.
    - Partial: process-local direct entity dispatch is now typed-only at the

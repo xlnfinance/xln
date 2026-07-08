@@ -182,6 +182,20 @@ const p2pSendThrowResult = (
   );
 };
 
+const p2pPendingExpiredResult = (
+  transport: EntityInputDeliveryTransport,
+  ageMs: number,
+): EntityInputDeliveryResult =>
+  p2pDeliveryResult(
+    deliveryFailure({
+      category: 'TransientRace',
+      code: 'P2P_PENDING_EXPIRED',
+      message: `Pending entity input expired after ${ageMs}ms`,
+      terminal: true,
+    }),
+    transport,
+  );
+
 const shouldRetainPendingEntityInput = (delivery: EntityInputDeliveryResult): boolean =>
   delivery.outcome !== 'delivered' && !delivery.terminal;
 
@@ -703,14 +717,18 @@ export class RuntimeP2P {
       if (!client || !client.isOpen()) continue;
       const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
-        if (Date.now() - entry.enqueuedAt > PENDING_ENTITY_INPUT_MAX_AGE_MS) {
+        const ageMs = Date.now() - entry.enqueuedAt;
+        if (ageMs > PENDING_ENTITY_INPUT_MAX_AGE_MS) {
+          const delivery = p2pPendingExpiredResult(transport, ageMs);
           this.sendDebugEvent({
             level: 'warn',
             code: 'P2P_PENDING_EXPIRED',
-            message: 'Dropped stale pending entity input',
+            message: delivery.failure?.message ?? delivery.code,
             targetRuntimeId,
             entityId: entry.input.entityId,
-            ageMs: Date.now() - entry.enqueuedAt,
+            transport,
+            ageMs,
+            delivery,
           });
           continue;
         }

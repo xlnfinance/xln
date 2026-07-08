@@ -447,3 +447,52 @@ test('flushPending drops terminal typed delivery failures', () => {
     },
   });
 });
+
+test('flushPending emits typed terminal delivery when pending input expires', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const debugEvents: unknown[] = [];
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInput: () => {
+      throw new Error('expired pending input should not reach transport send');
+    },
+  };
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+
+  p2p.sendDebugEvent = (payload: unknown) => {
+    debugEvents.push(payload);
+    return true;
+  };
+  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
+  p2p.pendingByRuntime = new Map([[
+    TARGET_RUNTIME_ID,
+    [{ input, enqueuedAt: Date.now() - 301_000, ingressTimestamp: 9999 }],
+  ]]);
+
+  (p2p as any).flushPending();
+
+  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)).toBeUndefined();
+  expect(debugEvents.at(-1)).toMatchObject({
+    level: 'warn',
+    code: 'P2P_PENDING_EXPIRED',
+    targetRuntimeId: TARGET_RUNTIME_ID,
+    entityId: SOURCE_ENTITY_ID,
+    transport: 'relay',
+    delivery: {
+      outcome: 'failed',
+      code: 'P2P_PENDING_EXPIRED',
+      retryable: true,
+      fatal: false,
+      terminal: true,
+      transport: 'relay',
+      failure: {
+        category: 'TransientRace',
+        code: 'P2P_PENDING_EXPIRED',
+      },
+    },
+  });
+});
