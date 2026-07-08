@@ -188,9 +188,13 @@ describe('production startup wiring', () => {
     expect(serverJurisdictions).not.toContain("normalized === 'wakanda'");
     expect(serverJurisdictions).not.toContain("name: 'Testnet'");
     expect(serverJurisdictions).not.toContain('PRIMARY_TESTNET_JURISDICTION_NAME');
-    expect(serverJurisdictions).toContain("const arrakisDisplayName = normalizeJurisdictionDisplayName(existingArrakis['name']) || 'arrakis';");
-    expect(serverJurisdictions).toContain('name: arrakisDisplayName');
+    expect(serverJurisdictions).toContain('selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpc])');
+    expect(serverJurisdictions).not.toContain("jurisdictions['arrakis']");
+    expect(serverJurisdictions).not.toContain('arrakisDisplayName');
+    expect(serverJurisdictions).not.toContain('existingArrakis');
     expect(serverJurisdictions).toContain('name: displayName');
+    expect(hubNode).toContain('selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl])');
+    expect(hubNode).not.toContain("targetKey = 'arrakis'");
     expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
     expect(hubNode).toContain('entry.jurisdictionRef &&');
     expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');

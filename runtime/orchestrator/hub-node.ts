@@ -16,6 +16,11 @@ import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import {
+  normalizeJurisdictionKey as normalizePublicJurisdictionKey,
+  selectWritableJurisdictionKey,
+  type WritableJurisdictionEntry,
+} from '../jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
@@ -263,7 +268,7 @@ type JurisdictionsFile = {
   deployVersion?: string;
   networkVersion?: string;
   lastUpdated?: string;
-  jurisdictions?: Record<string, {
+  jurisdictions?: Record<string, WritableJurisdictionEntry & {
     name?: string;
     chainId?: number;
     rpc?: string;
@@ -710,12 +715,13 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
       ? JSON.parse(readFileSync(filePath, 'utf8'))
       : {};
     const jurisdictions = current.jurisdictions ?? {};
-    const targetKey = 'arrakis';
+    const targetKey = selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl]);
     const previous = jurisdictions[targetKey] ?? {};
     const displayName = normalizeJurisdictionDisplayName(previous.name) || targetKey;
     jurisdictions[targetKey] = {
       ...previous,
       name: displayName,
+      primary: previous.primary ?? true,
       chainId: Number(jadapter.chainId || 31337),
       rpc: publicRpcUrl,
       explorer: previous.explorer ?? '',
@@ -805,15 +811,18 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
   const displayName =
     normalizeJurisdictionDisplayName(replica.name || activeName) ||
     normalizeJurisdictionDisplayName(activeName) ||
-    'arrakis';
+    'primary';
+  const jurisdictionKey = normalizePublicJurisdictionKey(activeName || displayName);
   return JSON.stringify({
     version,
     deployVersion: networkVersion,
     networkVersion,
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
-      arrakis: {
+      [jurisdictionKey]: {
         name: displayName,
+        primary: true,
+        status: 'active',
         chainId: Number(replica.chainId || 31337),
         rpc: toPublicRpcUrl(String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc')),
         contracts: {

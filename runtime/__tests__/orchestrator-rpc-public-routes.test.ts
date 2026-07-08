@@ -29,8 +29,8 @@ describe('orchestrator public RPC routes', () => {
     }, JSON.stringify({
       version: '3',
       jurisdictions: {
-        arrakis: {
-          name: 'Testnet',
+        primary: {
+          name: 'Primary',
           chainId: 31337,
           rpc: 'http://127.0.0.1:8545',
           contracts: { depository: '0x1', entityProvider: '0x2' },
@@ -62,7 +62,7 @@ describe('orchestrator public RPC routes', () => {
       },
     })));
 
-    expect(payload.jurisdictions.arrakis.rpc).toBe('/rpc');
+    expect(payload.jurisdictions.primary.rpc).toBe('/rpc');
     expect(payload.jurisdictions.tron.rpc).toBe('/rpc2');
     expect(payload.jurisdictions.rpc3.rpc).toBe('/rpc3');
     expect(payload.jurisdictions.custom8.rpc).toBe('/rpc8');

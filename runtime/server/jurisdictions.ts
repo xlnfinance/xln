@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import type { Env } from '../types';
 import type { JAdapter } from '../jadapter';
+import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJurisdictionEntry } from '../jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../jurisdictions-version';
 import { toPublicRpcUrl } from '../loopback-url';
@@ -25,7 +26,7 @@ export const updateJurisdictionsJson = async (
 
     type MutableJurisdictionsJson = Record<string, unknown> & {
       defaults?: Record<string, unknown> & { rebalancePolicyUsd?: unknown };
-      jurisdictions?: Record<string, Record<string, unknown>>;
+      jurisdictions?: Record<string, WritableJurisdictionEntry>;
     };
     let data: MutableJurisdictionsJson = {};
     try {
@@ -54,18 +55,18 @@ export const updateJurisdictionsJson = async (
     };
     data.defaults = defaults;
     if (data['testnet']) delete data['testnet'];
-    const jurisdictions = data.jurisdictions ?? {};
-    for (const key of Object.keys(jurisdictions)) {
-      if (key !== 'arrakis' && key.startsWith('arrakis_')) delete jurisdictions[key];
-    }
-    const existingArrakis = jurisdictions['arrakis'] ?? {};
-    const arrakisDisplayName = normalizeJurisdictionDisplayName(existingArrakis['name']) || 'arrakis';
-    jurisdictions['arrakis'] = {
-      ...existingArrakis,
-      name: arrakisDisplayName,
+    const jurisdictions: Record<string, WritableJurisdictionEntry> = data.jurisdictions ?? {};
+    const targetKey = selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpc]);
+    const previous = jurisdictions[targetKey] ?? {};
+    const displayName = normalizeJurisdictionDisplayName(previous['name']) || targetKey;
+    jurisdictions[targetKey] = {
+      ...previous,
+      name: displayName,
+      primary: previous['primary'] ?? true,
+      status: previous['status'] ?? 'active',
       chainId: chainIdOverride ?? 31337,
       rpc: publicRpc,
-      rebalancePolicyUsd: existingArrakis['rebalancePolicyUsd'] ?? defaults.rebalancePolicyUsd,
+      rebalancePolicyUsd: previous['rebalancePolicyUsd'] ?? defaults.rebalancePolicyUsd,
       contracts: {
         account: contracts.account,
         depository: contracts.depository,
@@ -150,15 +151,18 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
   const displayName =
     normalizeJurisdictionDisplayName(replica.name || jurisdictionName) ||
     normalizeJurisdictionDisplayName(jurisdictionName) ||
-    'arrakis';
+    'primary';
+  const jurisdictionKey = normalizeJurisdictionKey(jurisdictionName || displayName);
   const payload = {
     version,
     deployVersion: networkVersion,
     networkVersion,
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
-      arrakis: {
+      [jurisdictionKey]: {
         name: displayName,
+        primary: true,
+        status: 'active',
         chainId: Number(replica.chainId || 31337),
         rpc: toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || replica.rpcs?.[0] || '/rpc')),
         contracts: {
