@@ -162,6 +162,33 @@ const estimateWorkspaceBytes = (cwd: string): number => {
   return estimatePathBytes(cwd);
 };
 
+const assertWorkspaceBudget = (
+  cwd: string,
+  maxBytes: number,
+  reason: string,
+): Pick<TestArtifactCleanupSummary, 'estimatedBudgetedBytes' | 'estimatedWorkspaceBytes'> => {
+  const estimatedBudgetedBytes = estimateBudgetedWorkspaceBytes(cwd);
+  const estimatedWorkspaceBytes = estimateWorkspaceBytes(cwd);
+  if (estimatedWorkspaceBytes > maxBytes) {
+    throw new Error(
+      `TEST_WORKSPACE_BUDGET_EXCEEDED: workspace=${estimatedWorkspaceBytes} budgeted=${estimatedBudgetedBytes} max=${maxBytes} reason=${reason}`,
+    );
+  }
+  return { estimatedBudgetedBytes, estimatedWorkspaceBytes };
+};
+
+const logWorkspaceBudget = (
+  reason: string,
+  maxBytes: number,
+  estimatedBudgetedBytes: number,
+  estimatedWorkspaceBytes: number,
+  log: (message: string) => void,
+): void => {
+  log(
+    `test artifact budget (${reason}): workspace=${(estimatedWorkspaceBytes / (1024 * 1024 * 1024)).toFixed(2)}GiB budgeted=${(estimatedBudgetedBytes / (1024 * 1024 * 1024)).toFixed(2)}GiB / ${(maxBytes / (1024 * 1024 * 1024)).toFixed(0)}GiB`,
+  );
+};
+
 export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArtifactCleanupSummary => {
   const cwd = resolve(options.cwd || process.cwd());
   const argv = options.argv || process.argv.slice(2);
@@ -173,7 +200,10 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
     return { skipped: true, removed: [], estimatedBudgetedBytes: 0, estimatedWorkspaceBytes: 0, maxBytes };
   }
   if (shouldKeepArtifacts(argv, env)) {
-    return { skipped: true, removed: [], estimatedBudgetedBytes: 0, estimatedWorkspaceBytes: 0, maxBytes };
+    const { estimatedBudgetedBytes, estimatedWorkspaceBytes } = assertWorkspaceBudget(cwd, maxBytes, options.reason);
+    log(`test artifact cleanup (${options.reason}): preserving existing artifacts`);
+    logWorkspaceBudget(options.reason, maxBytes, estimatedBudgetedBytes, estimatedWorkspaceBytes, log);
+    return { skipped: true, removed: [], estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes };
   }
 
   assertNoLiveE2eRunnerLock(cwd);
@@ -189,19 +219,11 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
   }
   mkdirSync(join(cwd, '.logs'), { recursive: true });
 
-  const estimatedBudgetedBytes = estimateBudgetedWorkspaceBytes(cwd);
-  const estimatedWorkspaceBytes = estimateWorkspaceBytes(cwd);
-  if (estimatedWorkspaceBytes > maxBytes) {
-    throw new Error(
-      `TEST_WORKSPACE_BUDGET_EXCEEDED: workspace=${estimatedWorkspaceBytes} budgeted=${estimatedBudgetedBytes} max=${maxBytes} reason=${options.reason}`,
-    );
-  }
+  const { estimatedBudgetedBytes, estimatedWorkspaceBytes } = assertWorkspaceBudget(cwd, maxBytes, options.reason);
   if (removed.length > 0) {
     log(`test artifact cleanup (${options.reason}): removed ${removed.join(', ')}`);
   }
-  log(
-    `test artifact budget (${options.reason}): workspace=${(estimatedWorkspaceBytes / (1024 * 1024 * 1024)).toFixed(2)}GiB budgeted=${(estimatedBudgetedBytes / (1024 * 1024 * 1024)).toFixed(2)}GiB / ${(maxBytes / (1024 * 1024 * 1024)).toFixed(0)}GiB`,
-  );
+  logWorkspaceBudget(options.reason, maxBytes, estimatedBudgetedBytes, estimatedWorkspaceBytes, log);
   return { skipped: false, removed, estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes };
 };
 
