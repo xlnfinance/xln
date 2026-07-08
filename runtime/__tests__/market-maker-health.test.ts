@@ -362,21 +362,34 @@ test('runtime market maker health stays red when same-chain offers are committed
 test('market maker hub discovery uses stable hubName instead of mutable display name', () => {
   const env = createEmptyEnv('market-maker-stable-hub-name');
   env.gossip = {
-    getProfiles: () => [{
-      name: 'Desk Renamed By Admin',
-      entityId: entity('90'),
-      runtimeId: '0xruntime',
-      metadata: {
-        isHub: true,
-        hubName: 'H1',
-        jurisdiction: {
-          name: 'Arrakis',
-          chainId: 31337,
-          depositoryAddress: addr('11'),
+    getProfiles: () => [
+      {
+        name: 'Name Only Hub',
+        entityId: entity('91'),
+        runtimeId: '0xnameonly',
+        metadata: {
+          isHub: true,
+          hubName: 'H1',
+          jurisdiction: { name: 'Arrakis' },
+          board: { validators: [{ signerId: addr('91') }] },
         },
-        board: { validators: [{ signerId: addr('90') }] },
       },
-    }],
+      {
+        name: 'Desk Renamed By Admin',
+        entityId: entity('90'),
+        runtimeId: '0xruntime',
+        metadata: {
+          isHub: true,
+          hubName: 'H1',
+          jurisdiction: {
+            name: 'Arrakis',
+            chainId: 31337,
+            depositoryAddress: addr('11'),
+          },
+          board: { validators: [{ signerId: addr('90') }] },
+        },
+      },
+    ],
   } as Env['gossip'];
 
   const visibleHubs = readVisibleHubProfiles(env);

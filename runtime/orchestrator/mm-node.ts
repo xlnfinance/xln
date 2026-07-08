@@ -126,7 +126,7 @@ export type HubProfile = {
   jurisdictionName?: string;
   chainId?: number;
   depositoryAddress?: string;
-  jurisdictionRef?: string;
+  jurisdictionRef: string;
 };
 
 export type MarketMakerOfferSpec = {
@@ -780,6 +780,7 @@ export const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubPr
         depositoryAddress: String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim(),
       }),
     }))
+    .filter(profile => profile.jurisdictionRef.length > 0)
     .sort((left, right) =>
       compareStableText(hubRoleName(left), hubRoleName(right)) ||
       (Number(left.chainId || 0) - Number(right.chainId || 0)) ||

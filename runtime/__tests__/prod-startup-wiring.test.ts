@@ -197,6 +197,7 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain("targetKey = 'arrakis'");
     expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
     expect(hubNode).toContain('entry.jurisdictionRef &&');
+    expect(mmNode).toContain('.filter(profile => profile.jurisdictionRef.length > 0)');
     expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');
     expect(hubNode).toContain('if (!sameJurisdictionRef(identity, jurisdiction)) return null;');
     expect(hubNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');

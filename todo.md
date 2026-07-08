@@ -405,6 +405,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: hub peer reserve bootstrap now requires visible hub profiles to
      carry canonical jurisdiction refs and resolves funding J-adapters only by
      that ref, not by jurisdiction display name.
+   - Partial: market-maker visible hub discovery now drops name-only
+     jurisdiction profiles before readiness/health planning instead of carrying
+     unmatched display-name hubs through the bootstrap loop.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**
