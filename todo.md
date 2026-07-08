@@ -1,6 +1,6 @@
 # XLN TODO
 
-Last updated: 2026-06-26
+Last updated: 2026-07-08
 
 This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
@@ -25,6 +25,10 @@ file and older docs disagree, prefer code and tests first, then this file.
 - Removed old agent scratchpads and top-level audit drafts from the live tree.
   Current consensus/signature/contract concerns are represented below instead
   of scattered through dated request documents.
+- Archived the stale admin/QA backlog from `docs/todo.md` to
+  `docs/archive/planning/todo-2026-06-25-admin-qa.md`; `bun run check`
+  now fails if another non-archived `todo.md`/`next.md` appears outside the
+  root live backlog.
 - Removed obsolete jurisdiction contract-size consultation notes that referred
   to pre-refactor `Depository.sol` structure.
 - Closed as `v0.1.5` work: official same-origin watchtower endpoint, scheduler,
