@@ -417,6 +417,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - `uint16` fill ratios are a one-way lossy projection for on-chain
      hash-ladder proofs only; never round-trip ratio data back into exact
      settlement amounts.
+   - Partial: cross-j claim progress now preserves exact committed
+     `filledSourceAmount`/`filledTargetAmount` and exact claim totals instead
+     of rehydrating them from the uint16 hash-ladder ratio during pull close.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

@@ -486,16 +486,38 @@ export function withCrossJurisdictionClaimProgress(
   }
 
   const claimedRatio = Math.max(previousClaimedRatio, nextRatio);
-  const sourceClaimed = (BigInt(route.source.amount) * BigInt(claimedRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
-  const targetClaimed = (BigInt(route.target.amount) * BigInt(claimedRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  const sourceTotal = BigInt(route.source.amount);
+  const targetTotal = BigInt(route.target.amount);
+  const claimAmountForRatio = (
+    total: bigint,
+    exactCommittedAmount: bigint | undefined,
+    committedClaimAmount: bigint | undefined,
+  ): bigint => {
+    if (claimedRatio >= committedRatio && committedRatio > 0) {
+      if (exactCommittedAmount !== undefined) return exactCommittedAmount;
+      if (committedClaimAmount !== undefined && previousClaimedRatio >= committedRatio) return committedClaimAmount;
+      if (
+        clampFillRatio(route.cumulativeFillRatio) === committedRatio &&
+        route.fillNumerator !== undefined &&
+        route.fillDenominator !== undefined
+      ) {
+        return scaleByExactRatio(total, route.fillNumerator, route.fillDenominator);
+      }
+    }
+    return claimedRatio >= CROSS_J_MAX_FILL_RATIO
+      ? total
+      : (total * BigInt(claimedRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  };
+  const sourceClaimed = claimAmountForRatio(sourceTotal, route.filledSourceAmount, route.sourceClaimed);
+  const targetClaimed = claimAmountForRatio(targetTotal, route.filledTargetAmount, route.targetClaimed);
   return {
     ...route,
     claimedRatio,
     cumulativeFillRatio: Math.max(clampFillRatio(route.cumulativeFillRatio), claimedRatio),
     sourceClaimed,
     targetClaimed,
-    filledSourceAmount: sourceClaimed,
-    filledTargetAmount: targetClaimed,
+    filledSourceAmount: route.filledSourceAmount ?? sourceClaimed,
+    filledTargetAmount: route.filledTargetAmount ?? targetClaimed,
     updatedAt,
   };
 }

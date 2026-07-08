@@ -31,6 +31,7 @@ import {
   projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionQuantization,
   withCanonicalCrossJurisdictionRouteHash,
+  withCrossJurisdictionClaimProgress,
   cloneCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
 import {
@@ -1586,6 +1587,56 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(updatedRoute?.fillDenominator).toBe(4n);
     expect(updatedRoute?.filledSourceAmount).toBe(10_000_000_000_000_000n);
     expect(updatedRoute?.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
+  });
+
+  test('cross-j claim progress preserves exact filled amounts instead of uint16-rounded economics', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-exact-quarter-claim',
+      makerEntityId: entity('7d'),
+      hubEntityId: entity('7e'),
+      source: {
+        jurisdiction: jref(eth),
+        entityId: entity('7d'),
+        counterpartyEntityId: entity('7e'),
+        tokenId: 2,
+        amount: 40_000_000_000_000_000n,
+      },
+      target: {
+        jurisdiction: jref(base),
+        entityId: entity('7f'),
+        counterpartyEntityId: entity('80'),
+        tokenId: 1,
+        amount: 100_000_000_000_000_000_000n,
+      },
+      priceImprovementMode: 'source_savings',
+      status: 'clearing',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-exact-quarter-claim-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const filledRoute = {
+      ...route,
+      fillSeq: 1,
+      cumulativeFillRatio: 16_384,
+      fillNumerator: 1n,
+      fillDenominator: 4n,
+      filledSourceAmount: 10_000_000_000_000_000n,
+      filledTargetAmount: 25_000_000_000_000_000_000n,
+      sourceClaimed: 10_000_000_000_000_000n,
+      targetClaimed: 25_000_000_000_000_000_000n,
+      claimedRatio: 0,
+    };
+
+    const claimed = withCrossJurisdictionClaimProgress(filledRoute, 16_384, 3_000);
+
+    expect(claimed.claimedRatio).toBe(16_384);
+    expect(claimed.sourceClaimed).toBe(10_000_000_000_000_000n);
+    expect(claimed.targetClaimed).toBe(25_000_000_000_000_000_000n);
+    expect(claimed.filledSourceAmount).toBe(10_000_000_000_000_000n);
+    expect(claimed.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
+    expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(claimed.filledSourceAmount);
   });
 
   test('cross-j fill closes sub-lot remainder instead of leaving a zombie order', async () => {
