@@ -39,6 +39,10 @@ const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
   'P2P_DECRYPT_ERROR',
   'NO_LOCAL_REPLICA',
 ];
+const LIVE_RECOVERY_MESSAGE_TYPES = new Set([
+  'recovery_bundle_request',
+  'recovery_bundle_response',
+]);
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
   ? (message: string): void => console.log(message)
   : (_message: string): void => {};
@@ -487,8 +491,8 @@ export const relayRoute = async (
     return;
   }
 
-  // ----- routable messages (entity_input, gossip_response) -----
-  if (type === 'entity_input' || type === 'gossip_response') {
+  // ----- routable messages -----
+  if (type === 'entity_input' || type === 'gossip_response' || LIVE_RECOVERY_MESSAGE_TYPES.has(type)) {
     if (!toKey) {
       pushDebugEvent(store, {
         event: 'error',
@@ -607,9 +611,32 @@ export const relayRoute = async (
       return;
     }
 
+    if (LIVE_RECOVERY_MESSAGE_TYPES.has(type)) {
+      const reason = 'RECOVERY_TARGET_NOT_CONNECTED';
+      relayLog(`[RELAY] → rejected ${type} (target not connected)`);
+      pushDebugEvent(store, {
+        event: 'delivery',
+        from,
+        to,
+        msgType: type,
+        encrypted: msg.encrypted === true,
+        status: 'rejected',
+        reason,
+        details: { traceId },
+      });
+      send(ws, safeStringify({
+        type: 'error',
+        error: reason,
+        inReplyTo: id,
+        to,
+      }));
+      return;
+    }
+
     // Queue gossip for offline clients. Financial entity_input traffic is never
     // queued here because the sender would otherwise continue with a pending
-    // consensus frame while the target runtime never saw the input.
+    // consensus frame while the target runtime never saw the input. Recovery
+    // request/response traffic is a live probe and must not be replayed later.
     const queueSize = enqueueMessage(store, toKey, msg);
     relayLog(`[RELAY] → queued (no client, queue=${queueSize})`);
     pushDebugEvent(store, {

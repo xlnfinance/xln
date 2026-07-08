@@ -49,6 +49,7 @@ import {
   handleRuntimeAdapterMessage,
   type RuntimeAdapterSocket,
 } from '../radapter/server';
+import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { redactTokenBearingUrlForLog } from './runtime-import-log';
 import {
   handleLendingBorrowRequest,
@@ -1452,6 +1453,8 @@ const run = async (): Promise<void> => {
   const directRuntimeWs = createDirectRuntimeWsRoute({
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed: resolvedArgs.seed,
+    onRecoveryBundleRequest: async (_from, lookupKey) =>
+      resolveRuntimeAdapterRead({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`),
     onEntityInput: async (from, input, ingressTimestamp) => {
       const debugEntry: DirectEntityInputDebug = {
         at: Date.now(),

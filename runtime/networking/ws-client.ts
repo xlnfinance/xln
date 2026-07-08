@@ -96,6 +96,8 @@ export type RuntimeWsClientOptions = {
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
+  onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
+  onRecoveryBundleResponse?: (from: string, payload: unknown, message: RuntimeWsMessage) => Promise<void> | void;
   onOpen?: () => void;
   onError?: (error: Error) => void;
   // <= 0 means unlimited reconnect attempts
@@ -124,6 +126,11 @@ const createWs = async (url: string): Promise<WebSocketLike> => {
   const ws = await import('ws');
   const instance = new ws.default(url);
   return instance as NodeWebSocket;
+};
+
+const readRecoveryLookupKey = (payload: unknown): string => {
+  if (!payload || typeof payload !== 'object') return '';
+  return String((payload as { lookupKey?: unknown }).lookupKey || '').trim();
 };
 
 export class RuntimeWsClient {
@@ -451,6 +458,37 @@ export class RuntimeWsClient {
       await this.options.onGossipAnnounce?.(msg.from, msg.payload);
       return;
     }
+    if (msg.type === 'recovery_bundle_request' && msg.from) {
+      const lookupKey = readRecoveryLookupKey(msg.payload);
+      if (!lookupKey) {
+        this.sendRecoveryBundleResponse(msg.from, msg.id, undefined, 'Recovery lookupKey is required');
+        return;
+      }
+      if (!this.options.onRecoveryBundleRequest) {
+        this.sendRecoveryBundleResponse(msg.from, msg.id, undefined, 'Recovery bundle reads unavailable');
+        return;
+      }
+      try {
+        const payload = await this.options.onRecoveryBundleRequest(msg.from, lookupKey);
+        this.sendRecoveryBundleResponse(msg.from, msg.id, payload);
+      } catch (error) {
+        this.sendRecoveryBundleResponse(
+          msg.from,
+          msg.id,
+          undefined,
+          `Recovery bundle request failed: ${(error as Error).message}`,
+        );
+      }
+      return;
+    }
+    if (msg.type === 'recovery_bundle_response' && msg.from) {
+      if (msg.error) {
+        this.options.onError?.(new Error(msg.error));
+        return;
+      }
+      await this.options.onRecoveryBundleResponse?.(msg.from, msg.payload, msg);
+      return;
+    }
   }
 
   sendEntityInput(to: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
@@ -525,6 +563,39 @@ export class RuntimeWsClient {
       to: this.options.runtimeId, // To relay (self)
       timestamp: nextTimestamp(),
       payload,
+    });
+  }
+
+  sendRecoveryBundleRequest(to: string, lookupKey: string): boolean {
+    const key = String(lookupKey || '').trim();
+    if (!key) {
+      this.options.onError?.(new Error('RECOVERY_LOOKUP_KEY_MISSING'));
+      return false;
+    }
+    return this.sendRaw({
+      type: 'recovery_bundle_request',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      to,
+      timestamp: nextTimestamp(),
+      payload: { lookupKey: key },
+    });
+  }
+
+  private sendRecoveryBundleResponse(
+    to: string,
+    inReplyTo: string | undefined,
+    payload?: unknown,
+    error?: string,
+  ): boolean {
+    return this.sendRaw({
+      type: 'recovery_bundle_response',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      to,
+      timestamp: nextTimestamp(),
+      ...(inReplyTo ? { inReplyTo } : {}),
+      ...(error ? { error } : { payload }),
     });
   }
 

@@ -150,6 +150,96 @@ describe('direct runtime websocket route', () => {
     expect(received).toEqual([]);
   });
 
+  test('answers read-only recovery bundle requests over the authenticated direct socket', async () => {
+    const serverSeed = 'direct-route-server-recovery';
+    const clientSeed = 'direct-route-client-recovery';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const requests: Array<{ from: string; lookupKey: string }> = [];
+
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onRecoveryBundleRequest: (from, lookupKey) => {
+        requests.push({ from, lookupKey });
+        return {
+          ok: true,
+          runtimeId: serverRuntimeId,
+          lookupKey,
+          bundle: { lookupKey, encryptedBundle: 'ciphertext' },
+          bundles: [{ lookupKey, encryptedBundle: 'ciphertext' }],
+        };
+      },
+      onEntityInput: () => {},
+    });
+
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'recovery_bundle_request',
+      id: 'recovery-request-1',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      payload: { lookupKey: 'lookup/key' },
+    }));
+
+    expect(requests).toEqual([{ from: clientRuntimeId, lookupKey: 'lookup/key' }]);
+    expect(sent.at(-1)).toMatchObject({
+      type: 'recovery_bundle_response',
+      inReplyTo: 'recovery-request-1',
+      from: serverRuntimeId,
+      to: clientRuntimeId,
+      payload: {
+        ok: true,
+        runtimeId: serverRuntimeId,
+        lookupKey: 'lookup/key',
+      },
+    });
+  });
+
+  test('rejects malformed recovery bundle requests without calling the resolver', async () => {
+    const serverSeed = 'direct-route-server-recovery-bad';
+    const clientSeed = 'direct-route-client-recovery-bad';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    let calls = 0;
+
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onRecoveryBundleRequest: () => {
+        calls += 1;
+        return {};
+      },
+      onEntityInput: () => {},
+    });
+
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'recovery_bundle_request',
+      id: 'recovery-request-empty',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      payload: {},
+    }));
+
+    expect(calls).toBe(0);
+    expect(sent.at(-1)).toMatchObject({
+      type: 'recovery_bundle_response',
+      inReplyTo: 'recovery-request-empty',
+      from: serverRuntimeId,
+      to: clientRuntimeId,
+      error: 'Recovery lookupKey is required',
+    });
+  });
+
   test('rejects same-runtime direct websocket peers', async () => {
     const serverSeed = 'direct-route-server-same-runtime';
     const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();

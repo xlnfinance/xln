@@ -30,6 +30,8 @@ export type RuntimeWsMessageType =
   | 'gossip_subscribed'
   | 'gossip_subscribe'
   | 'gossip_update'
+  | 'recovery_bundle_request'
+  | 'recovery_bundle_response'
   | 'error'
   | 'ping'
   | 'pong';

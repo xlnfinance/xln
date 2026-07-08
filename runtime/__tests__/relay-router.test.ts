@@ -404,6 +404,100 @@ describe('relay-router gossip fanout', () => {
     )).toBe(true);
   });
 
+  test('routes live recovery bundle request and response without queueing', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const requester: FakeWs = { label: 'requester', readyState: 1 };
+    const responder: FakeWs = { label: 'responder', readyState: 1 };
+
+    await relayRoute(config, requester, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, responder, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+    await relayRoute(config, requester, {
+      type: 'recovery_bundle_request',
+      id: 'psr-request-1',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: { lookupKey: 'lookup/key' },
+    });
+    await relayRoute(config, responder, {
+      type: 'recovery_bundle_response',
+      id: 'psr-response-1',
+      inReplyTo: 'psr-request-1',
+      from: RUNTIME_B,
+      fromEncryptionPubKey: KEY_B,
+      to: RUNTIME_A,
+      payload: { ok: true, lookupKey: 'lookup/key', bundles: [] },
+    });
+
+    expect(sentBySocket.get(responder)?.at(-1)).toMatchObject({
+      type: 'recovery_bundle_request',
+      id: 'psr-request-1',
+      from: RUNTIME_A,
+      to: RUNTIME_B,
+      payload: { lookupKey: 'lookup/key' },
+    });
+    expect(sentBySocket.get(requester)?.at(-1)).toMatchObject({
+      type: 'recovery_bundle_response',
+      id: 'psr-response-1',
+      inReplyTo: 'psr-request-1',
+      from: RUNTIME_B,
+      to: RUNTIME_A,
+      payload: { ok: true, lookupKey: 'lookup/key', bundles: [] },
+    });
+    expect(store.pendingMessages.get(RUNTIME_A)).toBeUndefined();
+    expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
+  });
+
+  test('rejects recovery bundle requests when the target runtime is offline', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const requester: FakeWs = { label: 'requester', readyState: 1 };
+
+    await relayRoute(config, requester, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, requester, {
+      type: 'recovery_bundle_request',
+      id: 'psr-request-offline',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: { lookupKey: 'lookup/key' },
+    });
+
+    expect(sentBySocket.get(requester)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'RECOVERY_TARGET_NOT_CONNECTED',
+      inReplyTo: 'psr-request-offline',
+      to: RUNTIME_B,
+    });
+    expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
+    expect(store.debugEvents.some(event =>
+      event.msgType === 'recovery_bundle_request' &&
+      event.status === 'rejected' &&
+      event.reason === 'RECOVERY_TARGET_NOT_CONNECTED',
+    )).toBe(true);
+  });
+
   test('rejects unencrypted entity_input at relay ingress', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();

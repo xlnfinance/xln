@@ -758,7 +758,15 @@ active backlog.
 1. done: define recovery protocol types in `runtime/recovery/types.ts`.
 2. done: build bundle creation from `AccountMachine` in `runtime/recovery/bundle.ts`.
 3. done: build deterministic verification in `runtime/recovery/verify.ts`.
-4. open: add PSR wire handling to direct runtime/hub/relay transports.
+4. partial: add PSR wire handling to direct runtime/hub/relay transports.
+   - done: authenticated direct runtime websocket accepts
+     `recovery_bundle_request` and answers with encrypted runtime recovery
+     bundles through the same typed adapter resolver as `/rpc`.
+   - done: relay routes `recovery_bundle_request` /
+     `recovery_bundle_response` as live, non-queued messages and fails closed
+     when the target runtime is offline.
+   - open: account-level `PeerStateRequestV1` / `PeerStateResponseV1`
+     materialization and restore selection remain broader PSR work.
 5. partial: add recovery discovery endpoint:
    - `POST /api/recovery/discover`
    - `POST /api/recovery/state`

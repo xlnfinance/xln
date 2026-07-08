@@ -12,6 +12,7 @@ type DirectRuntimeWsOptions = {
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
   onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
+  onRecoveryBundleRequest?: (from: string, lookupKey: string) => Promise<unknown> | unknown;
 };
 
 export type DirectWebSocket = {
@@ -73,6 +74,12 @@ const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): boolean => {
   }
 };
 
+const readRecoveryLookupKey = (payload: unknown): string => {
+  if (!payload || typeof payload !== 'object') return '';
+  const lookupKey = String((payload as { lookupKey?: unknown }).lookupKey || '').trim();
+  return lookupKey;
+};
+
 export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
   const routePath = options.path || '/ws';
   const serverRuntimeId = normalizeRuntimeId(options.runtimeId);
@@ -120,6 +127,24 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     session.lastSeen = Date.now();
     sessionsByRuntime.set(runtimeId, session);
     return true;
+  };
+
+  const sendRecoveryBundleResponse = (
+    ws: DirectWebSocket,
+    toRuntimeId: string,
+    requestId: string | undefined,
+    body: { payload: unknown } | { error: string },
+  ): void => {
+    send(ws, {
+      type: 'recovery_bundle_response',
+      id: makeMessageId(),
+      from: serverRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(keyPair.publicKey),
+      to: toRuntimeId,
+      timestamp: nextTimestamp(),
+      ...(requestId ? { inReplyTo: requestId } : {}),
+      ...body,
+    });
   };
 
   return {
@@ -248,6 +273,39 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         session.lastSeen = Date.now();
         const peerKey = normalizeEncryptionPubKey(msg.fromEncryptionPubKey);
         if (peerKey) session.peerEncryptionPubKey = peerKey;
+        if (msg.type === 'recovery_bundle_request') {
+          const fromRuntimeId = normalizeRuntimeId(session.runtimeId || '');
+          if (!fromRuntimeId) {
+            send(ws, { type: 'error', error: 'Missing source runtimeId' });
+            return;
+          }
+          if (msg.from && normalizeRuntimeId(msg.from) !== fromRuntimeId) {
+            sendRecoveryBundleResponse(ws, fromRuntimeId, msg.id, { error: 'Direct source runtimeId mismatch' });
+            return;
+          }
+          if (normalizeRuntimeId(msg.to || '') !== serverRuntimeId) {
+            sendRecoveryBundleResponse(ws, fromRuntimeId, msg.id, { error: 'Direct target runtimeId mismatch' });
+            return;
+          }
+          const lookupKey = readRecoveryLookupKey(msg.payload);
+          if (!lookupKey) {
+            sendRecoveryBundleResponse(ws, fromRuntimeId, msg.id, { error: 'Recovery lookupKey is required' });
+            return;
+          }
+          if (!options.onRecoveryBundleRequest) {
+            sendRecoveryBundleResponse(ws, fromRuntimeId, msg.id, { error: 'Direct recovery bundle reads unavailable' });
+            return;
+          }
+          try {
+            const payload = await options.onRecoveryBundleRequest(fromRuntimeId, lookupKey);
+            sendRecoveryBundleResponse(ws, fromRuntimeId, msg.id, { payload });
+          } catch (error) {
+            sendRecoveryBundleResponse(ws, fromRuntimeId, msg.id, {
+              error: `Recovery bundle request failed: ${(error as Error).message}`,
+            });
+          }
+          return;
+        }
         if (msg.type !== 'entity_input') {
           send(ws, { type: 'error', error: 'Unsupported direct ws message type' });
           return;
