@@ -17,7 +17,10 @@ import {
   parseRemoteRuntimeImportSourcePayload,
   type StoredRemoteRuntimeImportEntry,
 } from '../../frontend/src/lib/utils/remoteRuntimeImport';
-import { selectPrimaryRemoteHubSummary } from '../../frontend/src/lib/utils/remoteRuntimeValidation';
+import {
+  buildRemoteRuntimeRecoveryPeerSources,
+  selectPrimaryRemoteHubSummary,
+} from '../../frontend/src/lib/utils/remoteRuntimeValidation';
 
 const token = `xlnra1.read.${Date.now() + 60 * 60 * 1000}.aud.kid.jti.sig`;
 
@@ -253,6 +256,65 @@ describe('remote runtime import manager utilities', () => {
     expect(selectPrimaryRemoteHubSummary([h1, h2], 'missing', h2.runtimeId)?.entityId).toBe(h2.entityId);
   });
 
+  test('saved remote runtime imports become recovery peer sources for matching runtime ids', async () => {
+    const runtimeId = `0x${'12'.repeat(20)}`;
+    const matching = { ...makeStored('H1', 8092, 1), runtimeId };
+    const other = { ...makeStored('H2', 8093, 2), runtimeId: `0x${'34'.repeat(20)}` };
+    const reads: Array<{ path: string; query?: unknown }> = [];
+    let connectedConfig: unknown = null;
+    let disconnected = false;
+
+    const sources = buildRemoteRuntimeRecoveryPeerSources({
+      entries: [matching, other],
+      runtimeId,
+      createAdapter: () => ({
+        mode: 'remote',
+        runtimeId,
+        status: 'disconnected',
+        currentHeight: 12,
+        authLevel: null,
+        async connect(config: unknown) {
+          connectedConfig = config;
+          this.status = 'connected';
+          this.authLevel = 'inspect';
+        },
+        disconnect() {
+          disconnected = true;
+          this.status = 'disconnected';
+        },
+        async read(path: string, query?: unknown) {
+          reads.push({ path, query });
+          return { ok: true, runtimeId, lookupKey: 'lookup/key', bundle: { version: 1 }, bundles: [] };
+        },
+        async send() {
+          throw new Error('send should not be used for recovery peer reads');
+        },
+        onChange() {
+          return () => undefined;
+        },
+        onStatus() {
+          return () => undefined;
+        },
+      }) as never,
+    });
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.id).toBe(runtimeId);
+    expect(sources[0]?.label).toBe('H1');
+
+    const payload = await sources[0]!.fetchBundles({ runtimeId, lookupKey: 'lookup/key' });
+    expect(payload).toMatchObject({ ok: true, runtimeId, lookupKey: 'lookup/key' });
+    expect(connectedConfig).toMatchObject({
+      mode: 'remote',
+      runtimeId,
+      wsUrl: matching.wsUrl,
+      authKey: matching.token,
+      requestTimeoutMs: 5_000,
+    });
+    expect(reads).toEqual([{ path: 'recovery/bundles/lookup%2Fkey', query: undefined }]);
+    expect(disconnected).toBe(true);
+  });
+
   test('restores the active admin token by normalized endpoint after reload', () => {
     const admin = makeStored('H1 admin', 8092, 1, 'admin');
     persistRemoteRuntimeImports([admin]);
@@ -290,6 +352,8 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString())');
     expect(runtimeCreation).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString())');
+    expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
+    expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
     expect(vaultStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports();');
     expect(runtimeStore).toContain('validateRemoteRuntimeEntry(entry, { index, importedAt })');
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');

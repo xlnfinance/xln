@@ -4,11 +4,14 @@ import {
   assertRemoteRuntimeTokenFresh,
   describeRemoteRuntimeImportError,
   remoteRuntimeIdForWsUrl,
+  readStoredRemoteRuntimeImports,
   readRemoteRuntimeTokenAudience,
   type RemoteRuntimeImportEntry,
   type RemoteRuntimeHubSummary,
   type StoredRemoteRuntimeImportEntry,
 } from '$lib/utils/remoteRuntimeImport';
+import type { RuntimeRecoveryPeerSource } from '$lib/stores/vaultStore';
+import type { RuntimeAdapter } from '../../../../runtime/radapter/types';
 
 export type RemoteRuntimeValidationProgress = {
   index: number;
@@ -62,6 +65,75 @@ export const selectPrimaryRemoteHubSummary = (
   return hubEntities.find((hub) => hubLabelMatchesImportLabel(hub.label, importLabel))
     ?? hubEntities[0]!
     ?? null;
+};
+
+const normalizeRuntimeId = (value: unknown): string =>
+  String(value || '').trim().toLowerCase();
+
+const normalizeAddressRuntimeId = (value: unknown): string => {
+  const normalized = normalizeRuntimeId(value);
+  return /^0x[0-9a-f]{40}$/.test(normalized) ? normalized : '';
+};
+
+const remoteRuntimeRecoveryPeerId = (entry: Pick<StoredRemoteRuntimeImportEntry, 'runtimeId' | 'wsUrl'>): string =>
+  normalizeRuntimeId(entry.runtimeId) || remoteRuntimeIdForWsUrl(entry.wsUrl);
+
+export const buildRemoteRuntimeRecoveryPeerSources = (options: {
+  entries?: StoredRemoteRuntimeImportEntry[];
+  runtimeId?: string;
+  createAdapter?: (entry: StoredRemoteRuntimeImportEntry) => RuntimeAdapter;
+  now?: number;
+} = {}): RuntimeRecoveryPeerSource[] => {
+  const targetRuntimeId = normalizeRuntimeId(options.runtimeId);
+  const entries = options.entries ?? readStoredRemoteRuntimeImports();
+  const sources: RuntimeRecoveryPeerSource[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of entries) {
+    const runtimeId = remoteRuntimeRecoveryPeerId(entry);
+    const audience = normalizeAddressRuntimeId(readRemoteRuntimeTokenAudience(entry.token));
+    const comparableRuntimeId = audience || runtimeId;
+    if (targetRuntimeId && comparableRuntimeId && comparableRuntimeId !== targetRuntimeId) continue;
+    if (!runtimeId || seen.has(runtimeId)) continue;
+    seen.add(runtimeId);
+
+    sources.push({
+      id: runtimeId,
+      label: entry.hubName || entry.label || runtimeId,
+      fetchBundles: async (request) => {
+        const requestedRuntimeId = normalizeRuntimeId(request.runtimeId);
+        if (targetRuntimeId && requestedRuntimeId && requestedRuntimeId !== targetRuntimeId) {
+          throw new Error(`REMOTE_RECOVERY_RUNTIME_MISMATCH:${requestedRuntimeId}:${targetRuntimeId}`);
+        }
+        assertRemoteRuntimeTokenFresh(entry, options.now ?? Date.now());
+        const adapter = options.createAdapter?.(entry) ?? new RemoteRuntimeAdapter();
+        try {
+          await adapter.connect({
+            mode: 'remote',
+            runtimeId: entry.runtimeId,
+            wsUrl: entry.wsUrl,
+            authKey: entry.token,
+            reconnectMaxMs: 1_000,
+            requestTimeoutMs: 5_000,
+          });
+          if (adapter.status !== 'connected') {
+            throw new Error(`REMOTE_RUNTIME_CONNECT_FAILED:${entry.wsUrl}:${adapter.status}`);
+          }
+          const expectedAuthLevel = entry.access === 'admin' ? 'admin' : 'inspect';
+          if (adapter.authLevel !== expectedAuthLevel) {
+            throw new Error(`REMOTE_RUNTIME_ACCESS_MISMATCH:${entry.label}:${expectedAuthLevel}:${adapter.authLevel || 'none'}`);
+          }
+          const connectedRuntimeId = normalizeRuntimeId(adapter.runtimeId || audience || runtimeId);
+          const queryClient = new RuntimeQueryClient(() => adapter, connectedRuntimeId);
+          return queryClient.readRecoveryBundles(request.lookupKey);
+        } finally {
+          adapter.disconnect();
+        }
+      },
+    });
+  }
+
+  return sources;
 };
 
 export const validateRemoteRuntimeEntry = async (

@@ -14,6 +14,7 @@
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recoveryDiscoveryStatus';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/remoteRuntimeValidation';
   import {
     BRAINVAULT_V1,
     bytesToHex,
@@ -298,6 +299,7 @@
   let recoveryCandidates: RuntimeRecoveryCandidate[] = [];
   let recoveryErrors: string[] = [];
   let recoveryCheckedTowers = 0;
+  let recoveryCheckedPeers = 0;
   let selectedRecoveryCandidateId = '';
   let localRuntimeAvailable = false;
   let backupFileInput: HTMLInputElement | null = null;
@@ -344,6 +346,7 @@
     recoveryCandidates = [];
     recoveryErrors = [];
     recoveryCheckedTowers = 0;
+    recoveryCheckedPeers = 0;
     selectedRecoveryCandidateId = '';
     localRuntimeAvailable = false;
   }
@@ -358,14 +361,18 @@
     recoveryCandidates = [];
     recoveryErrors = [];
     recoveryCheckedTowers = 0;
+    recoveryCheckedPeers = 0;
     selectedRecoveryCandidateId = '';
     localRuntimeAvailable = vaultOperations.runtimeExists(recoveryRuntimeId);
 
     try {
-      const discovery = await discoverRuntimeRecoveryCandidates(mnemonic24);
+      const discovery = await discoverRuntimeRecoveryCandidates(mnemonic24, {
+        peers: buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId }),
+      });
       recoveryCandidates = discovery.candidates;
       recoveryErrors = discovery.errors;
       recoveryCheckedTowers = discovery.checkedTowers;
+      recoveryCheckedPeers = discovery.checkedPeers;
       selectedRecoveryCandidateId = recoveryCandidates[0]?.id || '';
       if (recoveryCandidates.length > 0) {
         phase = 'recovery';
@@ -383,6 +390,7 @@
     writeRuntimeRecoveryDiscoveryStatus({
       runtimeId: recoveryRuntimeId || ethereumAddress,
       checkedTowers: recoveryCheckedTowers,
+      checkedPeers: recoveryCheckedPeers,
       backupCount: recoveryCandidates.length,
       errors: recoveryErrors,
       checkedAt: Date.now(),
@@ -1452,6 +1460,10 @@
             <strong>{recoveryChecking ? 'checking...' : recoveryCheckedTowers}</strong>
           </div>
           <div>
+            <span class="recovery-label">Remote peers checked</span>
+            <strong>{recoveryChecking ? 'checking...' : recoveryCheckedPeers}</strong>
+          </div>
+          <div>
             <span class="recovery-label">Backups found</span>
             <strong>{recoveryCandidates.length}</strong>
           </div>
@@ -1460,7 +1472,7 @@
         {#if recoveryChecking}
           <div class="recovery-loading">
             <div class="recovery-spinner"></div>
-            <span>Asking every configured tower for encrypted backups...</span>
+            <span>Asking configured towers and saved remote runtimes for encrypted backups...</span>
           </div>
         {:else}
           {#if recoveryCandidates.length > 0}
@@ -1594,7 +1606,7 @@
 
   .recovery-status-strip {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 10px;
   }
 

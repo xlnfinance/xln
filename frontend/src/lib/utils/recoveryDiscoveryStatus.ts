@@ -1,6 +1,7 @@
 export type RuntimeRecoveryDiscoveryStatus = {
   runtimeId: string;
   checkedTowers: number;
+  checkedPeers?: number;
   backupCount: number;
   errors: string[];
   checkedAt: number;
@@ -21,6 +22,7 @@ export function writeRuntimeRecoveryDiscoveryStatus(status: RuntimeRecoveryDisco
   localStorage.setItem(storageKey(runtimeId), JSON.stringify({
     runtimeId,
     checkedTowers: Math.max(0, Math.floor(Number(status.checkedTowers || 0))),
+    checkedPeers: Math.max(0, Math.floor(Number(status.checkedPeers || 0))),
     backupCount: Math.max(0, Math.floor(Number(status.backupCount || 0))),
     errors: status.errors.map((entry) => String(entry || '')).filter(Boolean),
     checkedAt: Math.max(0, Math.floor(Number(status.checkedAt || Date.now()))),
@@ -41,6 +43,7 @@ export function readRuntimeRecoveryDiscoveryStatus(
     return {
       runtimeId: normalizedRuntimeId,
       checkedTowers: Math.max(0, Math.floor(Number(parsed.checkedTowers || 0))),
+      checkedPeers: Math.max(0, Math.floor(Number(parsed.checkedPeers || 0))),
       backupCount: Math.max(0, Math.floor(Number(parsed.backupCount || 0))),
       errors: Array.isArray(parsed.errors)
         ? parsed.errors.map((entry) => String(entry || '')).filter(Boolean)
