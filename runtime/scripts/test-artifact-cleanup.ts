@@ -7,6 +7,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 export const TEST_ARTIFACT_CLEANUP_DONE_ENV = 'XLN_TEST_ARTIFACT_CLEANUP_DONE';
 export const KEEP_TEST_ARTIFACTS_ENV = 'XLN_KEEP_TEST_ARTIFACTS';
@@ -39,6 +40,7 @@ const GENERATED_TEST_ARTIFACT_DIRS = [
   '.logs/bench-radapter',
   '.tmp-tests',
   'build',
+  'frontend/.svelte-kit/output',
   'native/dist',
   'native/extension/dist',
 ];
@@ -82,6 +84,7 @@ export type TestArtifactCleanupSummary = {
   skipped: boolean;
   removed: string[];
   estimatedBudgetedBytes: number;
+  estimatedWorkspaceBytes: number;
   maxBytes: number;
 };
 
@@ -146,6 +149,19 @@ const estimatePathBytes = (path: string): number => {
 const estimateBudgetedWorkspaceBytes = (cwd: string): number =>
   BUDGETED_WORKSPACE_PATHS.reduce((sum, relativePath) => sum + estimatePathBytes(join(cwd, relativePath)), 0);
 
+const estimateWorkspaceBytes = (cwd: string): number => {
+  const result = spawnSync('du', ['-sk', cwd], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+  if (result.status === 0) {
+    const [rawKb] = String(result.stdout || '').trim().split(/\s+/);
+    const kb = Number(rawKb);
+    if (Number.isFinite(kb) && kb >= 0) return Math.floor(kb * 1024);
+  }
+  return estimatePathBytes(cwd);
+};
+
 export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArtifactCleanupSummary => {
   const cwd = resolve(options.cwd || process.cwd());
   const argv = options.argv || process.argv.slice(2);
@@ -154,10 +170,10 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
   const maxBytes = parseMaxBytes(env);
 
   if (options.skipIfAlreadyDone !== false && env[TEST_ARTIFACT_CLEANUP_DONE_ENV] === '1') {
-    return { skipped: true, removed: [], estimatedBudgetedBytes: 0, maxBytes };
+    return { skipped: true, removed: [], estimatedBudgetedBytes: 0, estimatedWorkspaceBytes: 0, maxBytes };
   }
   if (shouldKeepArtifacts(argv, env)) {
-    return { skipped: true, removed: [], estimatedBudgetedBytes: 0, maxBytes };
+    return { skipped: true, removed: [], estimatedBudgetedBytes: 0, estimatedWorkspaceBytes: 0, maxBytes };
   }
 
   assertNoLiveE2eRunnerLock(cwd);
@@ -174,16 +190,42 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
   mkdirSync(join(cwd, '.logs'), { recursive: true });
 
   const estimatedBudgetedBytes = estimateBudgetedWorkspaceBytes(cwd);
-  if (estimatedBudgetedBytes > maxBytes) {
+  const estimatedWorkspaceBytes = estimateWorkspaceBytes(cwd);
+  if (estimatedWorkspaceBytes > maxBytes) {
     throw new Error(
-      `TEST_WORKSPACE_BUDGET_EXCEEDED: estimated=${estimatedBudgetedBytes} max=${maxBytes} reason=${options.reason}`,
+      `TEST_WORKSPACE_BUDGET_EXCEEDED: workspace=${estimatedWorkspaceBytes} budgeted=${estimatedBudgetedBytes} max=${maxBytes} reason=${options.reason}`,
     );
   }
   if (removed.length > 0) {
     log(`test artifact cleanup (${options.reason}): removed ${removed.join(', ')}`);
   }
   log(
-    `test artifact budget (${options.reason}): ${(estimatedBudgetedBytes / (1024 * 1024 * 1024)).toFixed(2)}GiB / ${(maxBytes / (1024 * 1024 * 1024)).toFixed(0)}GiB`,
+    `test artifact budget (${options.reason}): workspace=${(estimatedWorkspaceBytes / (1024 * 1024 * 1024)).toFixed(2)}GiB budgeted=${(estimatedBudgetedBytes / (1024 * 1024 * 1024)).toFixed(2)}GiB / ${(maxBytes / (1024 * 1024 * 1024)).toFixed(0)}GiB`,
   );
-  return { skipped: false, removed, estimatedBudgetedBytes, maxBytes };
+  return { skipped: false, removed, estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes };
 };
+
+const cliFlagValue = (argv: string[], name: string): string | undefined => {
+  const prefix = `--${name}=`;
+  const inline = argv.find(arg => arg.startsWith(prefix));
+  if (inline) return inline.slice(prefix.length);
+  const index = argv.findIndex(arg => arg === `--${name}`);
+  if (index >= 0) {
+    const next = argv[index + 1];
+    if (next && !next.startsWith('--')) return next;
+  }
+  return undefined;
+};
+
+if (import.meta.main) {
+  try {
+    cleanupTestArtifactsBeforeRun({
+      cwd: cliFlagValue(process.argv.slice(2), 'cwd') || process.cwd(),
+      reason: cliFlagValue(process.argv.slice(2), 'reason') || 'manual',
+      scope: cliFlagValue(process.argv.slice(2), 'scope') === 'e2e' ? 'e2e' : 'all',
+    });
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}

@@ -11,6 +11,10 @@ import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../rad
 import { EmbeddedRuntimeAdapter } from '../radapter/embedded';
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
+import {
+  decryptRuntimeRecoveryBundle,
+  deriveRuntimeRecoveryLookupKey,
+} from '../recovery/crypto';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { prepareStorageStateHashes } from '../storage/hashes';
@@ -953,6 +957,38 @@ test('runtime adapter receipt read returns ingress receipt status over websocket
   expect(receipt.id).toBe('receipt-1');
   expect(receipt.status).toBe('observed');
   expect(receipt.observedHeight).toBe(8);
+});
+
+test('runtime adapter recovery bundle read is gated by seed-derived lookup key', async () => {
+  const env = makeEnv();
+  env.runtimeId = `0x${'12'.repeat(20)}`;
+  env.runtimeSeed = 'test test test test test test test test test test test junk';
+  const lookupKey = deriveRuntimeRecoveryLookupKey(env.runtimeId, env.runtimeSeed);
+
+  const response = await resolveRuntimeAdapterRead<{
+    ok: true;
+    runtimeId: string;
+    lookupKey: string;
+    bundle: Parameters<typeof decryptRuntimeRecoveryBundle>[0];
+    bundles: Array<Parameters<typeof decryptRuntimeRecoveryBundle>[0]>;
+  }>({ env }, `recovery/bundles/${encodeURIComponent(lookupKey)}`);
+
+  expect(response.ok).toBe(true);
+  expect(response.runtimeId).toBe(env.runtimeId);
+  expect(response.lookupKey).toBe(lookupKey);
+  expect(response.bundle.lookupKey).toBe(lookupKey);
+  expect(response.bundles).toHaveLength(1);
+  const decrypted = await decryptRuntimeRecoveryBundle(response.bundle, env.runtimeSeed);
+  expect(decrypted.runtimeId).toBe(env.runtimeId);
+  expect(decrypted.runtimeHeight).toBe(env.height);
+  expect(decrypted.signers[0]?.address).toBe(env.runtimeId);
+
+  await expect(resolveRuntimeAdapterRead({ env }, `recovery/bundles/0x${'00'.repeat(32)}`))
+    .rejects.toThrow('recovery bundle not found');
+
+  const noSeedEnv = { ...env, runtimeSeed: undefined } as Env;
+  await expect(resolveRuntimeAdapterRead({ env: noSeedEnv }, `recovery/bundles/${encodeURIComponent(lookupKey)}`))
+    .rejects.toThrow('recovery bundle reads require runtimeSeed');
 });
 
 test('runtime adapter view frame defaults to 10 accounts and cursor pagination', async () => {

@@ -870,6 +870,8 @@ describe('production startup wiring', () => {
     const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
     const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
     const allTestsFast = readFileSync(join(repoRoot, 'runtime/scripts/run-all-tests-fast.ts'), 'utf8');
+    const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-system-tests-parallel.ts'), 'utf8');
+    const cleanupHelper = readFileSync(join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts'), 'utf8');
     const bootstrapSoundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
     const packageJson = readFileSync(join(repoRoot, 'package.json'), 'utf8');
     expect(fatalHelper).toContain('/MISSING_SIGNER_KEY/');
@@ -895,6 +897,7 @@ describe('production startup wiring', () => {
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGTERM')");
     expect(standaloneMonitor).toContain("process.kill(lock.pid, 'SIGKILL')");
     expect(packageJson).toContain('"test:e2e:monitor": "bun runtime/scripts/e2e-fail-fast-monitor.ts"');
+    expect(packageJson).toContain('"test:cleanup": "bun runtime/scripts/test-artifact-cleanup.ts"');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'");
@@ -915,6 +918,11 @@ describe('production startup wiring', () => {
     expect(mainnetGate).toContain('env: withoutTestArtifactCleanupDoneEnv()');
     expect(allTestsFast).toContain('const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);');
     expect(allTestsFast).toContain('e2eEnv,');
+    expect(systemRunner).toContain("import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';");
+    expect(systemRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'system-tests' })");
+    expect(cleanupHelper).toContain('export const DEFAULT_TEST_WORKSPACE_MAX_BYTES = 50 * 1024 * 1024 * 1024;');
+    expect(cleanupHelper).toContain('const estimatedWorkspaceBytes = estimateWorkspaceBytes(cwd);');
+    expect(cleanupHelper).toContain('if (estimatedWorkspaceBytes > maxBytes)');
     expect(runner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'e2e', scope: 'e2e', skipIfAlreadyDone: false })");
     expect(runner).toContain("XLN_TEST_ARTIFACT_CLEANUP_DONE: '1'");
     expect(readFileSync(join(repoRoot, 'playwright.config.ts'), 'utf8')).toContain(

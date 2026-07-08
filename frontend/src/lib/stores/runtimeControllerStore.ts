@@ -8,7 +8,7 @@ import type {
   RuntimeAdapterStatus,
   RuntimeInput,
 } from '@xln/runtime/xln-api';
-import { RemoteRuntimeAdapter } from '@xln/runtime/radapter/remote';
+import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import { sameWsEndpoint } from '$lib/utils/wsUrl';
 

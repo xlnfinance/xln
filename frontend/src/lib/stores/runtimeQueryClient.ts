@@ -1,5 +1,6 @@
 import { get, writable } from 'svelte/store';
 import type {
+  EncryptedRuntimeRecoveryBundleV1,
   RuntimeAdapter,
   RuntimeAdapterActivityPage,
   RuntimeAdapterEntitySummary,
@@ -33,6 +34,14 @@ export type RuntimeReceiptStatus = {
   enqueuedHeight?: number | null;
   observedHeight?: number | null;
   note?: string | null;
+};
+
+export type RuntimePeerRecoveryBundleResponse = {
+  ok: true;
+  runtimeId: string;
+  lookupKey: string;
+  bundle: EncryptedRuntimeRecoveryBundleV1;
+  bundles?: EncryptedRuntimeRecoveryBundleV1[];
 };
 
 const MAX_QUERY_CACHE_ENTRIES = 200;
@@ -134,6 +143,12 @@ export class RuntimeQueryClient {
     const id = String(receiptId || '').trim();
     if (!id) throw new Error('REMOTE_RUNTIME_RECEIPT_ID_MISSING');
     return this.read<RuntimeReceiptStatus>(`receipt/${encodeURIComponent(id)}`);
+  }
+
+  async readRecoveryBundles(lookupKey: string): Promise<RuntimePeerRecoveryBundleResponse> {
+    const key = String(lookupKey || '').trim();
+    if (!key) throw new Error('REMOTE_RUNTIME_RECOVERY_LOOKUP_KEY_MISSING');
+    return this.read<RuntimePeerRecoveryBundleResponse>(`recovery/bundles/${encodeURIComponent(key)}`);
   }
 }
 

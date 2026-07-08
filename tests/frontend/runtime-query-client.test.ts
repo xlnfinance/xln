@@ -17,8 +17,10 @@ test('runtime query client exposes typed projection reads and bounded cache', ()
   expect(source).toContain('readActivity');
   expect(source).toContain('readSolvencySummary');
   expect(source).toContain('readReceiptStatus');
+  expect(source).toContain('readRecoveryBundles');
   expect(source).toContain("'solvency-summary'");
   expect(source).toContain("`receipt/${encodeURIComponent(id)}`");
+  expect(source).toContain("`recovery/bundles/${encodeURIComponent(key)}`");
   expect(source).toContain('MAX_QUERY_CACHE_ENTRIES = 200');
   expect(source).toContain('clearRuntimeQueryCache');
   expect(source).toContain('runtimeAdapter.subscribe(() => clearRuntimeQueryCache())');
@@ -163,6 +165,48 @@ test('runtime receipt status reads through typed query client without cache reus
     { path: 'receipt/receipt%20id%2F1', query: undefined },
   ]);
   await expect(queryClient.readReceiptStatus('')).rejects.toThrow('REMOTE_RUNTIME_RECEIPT_ID_MISSING');
+});
+
+test('runtime recovery bundles read through typed query client without cache reuse', async () => {
+  const reads: Array<{ path: string; query?: unknown }> = [];
+  const adapter = {
+    read: async (path: string, query?: unknown) => {
+      reads.push({ path, query });
+      return {
+        ok: true,
+        runtimeId: 'runtime-a',
+        lookupKey: 'lookup/key',
+        bundle: {
+          version: 1,
+          runtimeId: 'runtime-a',
+          lookupKey: 'lookup/key',
+          cipher: 'aes-256-gcm',
+          kdf: 'hkdf-sha256',
+          iv: '0x01',
+          tag: '0x02',
+          ciphertext: '0x03',
+          createdAt: 1,
+          runtimeHeight: 2,
+          snapshotHeight: 2,
+          journalFromHeight: 3,
+          signerCount: 1,
+        },
+        bundles: [],
+      };
+    },
+  };
+  const queryClient = new RuntimeQueryClient(() => adapter as never, 'peer-recovery-runtime');
+
+  const first = await queryClient.readRecoveryBundles('lookup/key');
+  const second = await queryClient.readRecoveryBundles('lookup/key');
+
+  expect(first.ok).toBe(true);
+  expect(second.ok).toBe(true);
+  expect(reads).toEqual([
+    { path: 'recovery/bundles/lookup%2Fkey', query: undefined },
+    { path: 'recovery/bundles/lookup%2Fkey', query: undefined },
+  ]);
+  await expect(queryClient.readRecoveryBundles('')).rejects.toThrow('REMOTE_RUNTIME_RECOVERY_LOOKUP_KEY_MISSING');
 });
 
 test('runtime controller exposes only typed debug projection queries', () => {

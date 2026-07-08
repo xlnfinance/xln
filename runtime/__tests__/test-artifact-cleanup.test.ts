@@ -26,6 +26,7 @@ describe('test artifact cleanup', () => {
       writeFile(root, '.logs/e2e-parallel/old-run/log.txt');
       writeFile(root, '.logs/scenarios-parallel/old-run/log.txt');
       writeFile(root, 'frontend/.svelte-kit-e2e/old-run/output.txt');
+      writeFile(root, 'frontend/.svelte-kit/output/client/app.js');
       writeFile(root, '.logs/bootstrap-soundcheck/probe.log');
       writeFile(root, 'frontend/build/index.html');
       writeFile(root, 'frontend/playwright-report/index.html');
@@ -45,9 +46,12 @@ describe('test artifact cleanup', () => {
       });
 
       expect(summary.skipped).toBe(false);
+      expect(summary.estimatedWorkspaceBytes).toBeGreaterThanOrEqual(0);
+      expect(summary.estimatedBudgetedBytes).toBeLessThan(1024 * 1024);
       expect(summary.removed).toContain('.logs/e2e-parallel');
       expect(summary.removed).toContain('.logs/scenarios-parallel');
       expect(summary.removed).toContain('frontend/.svelte-kit-e2e');
+      expect(summary.removed).toContain('frontend/.svelte-kit/output');
       expect(summary.removed).toContain('frontend/build');
       expect(summary.removed).toContain('frontend/playwright-report');
       expect(summary.removed).toContain('native/dist');
@@ -59,6 +63,7 @@ describe('test artifact cleanup', () => {
       expect(existsSync(join(root, '.logs/e2e-parallel'))).toBe(false);
       expect(existsSync(join(root, '.logs/scenarios-parallel'))).toBe(false);
       expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
+      expect(existsSync(join(root, 'frontend/.svelte-kit/output'))).toBe(false);
       expect(existsSync(join(root, 'frontend/build'))).toBe(false);
       expect(existsSync(join(root, 'frontend/playwright-report'))).toBe(false);
       expect(existsSync(join(root, 'native/dist'))).toBe(false);
@@ -167,6 +172,23 @@ describe('test artifact cleanup', () => {
         env: { [TEST_WORKSPACE_MAX_BYTES_ENV]: '1' },
         argv: [],
         reason: 'unit-budget',
+        log: () => undefined,
+      })).toThrow('TEST_WORKSPACE_BUDGET_EXCEEDED');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('fails when the whole workspace exceeds the configured budget', () => {
+    const root = makeTempWorkspace();
+    try {
+      writeFile(root, 'node_modules/.cache/large.bin', 'too-large-for-budget');
+
+      expect(() => cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env: { [TEST_WORKSPACE_MAX_BYTES_ENV]: '1' },
+        argv: [],
+        reason: 'unit-workspace-budget',
         log: () => undefined,
       })).toThrow('TEST_WORKSPACE_BUDGET_EXCEEDED');
     } finally {

@@ -18,6 +18,15 @@ import type {
 } from '../storage/types';
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../sorted-index';
 import { RuntimeAdapterError } from './errors';
+import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
+import {
+  deriveRuntimeRecoveryLookupKey,
+  encryptRuntimeRecoveryBundle,
+} from '../recovery/crypto';
+import type {
+  EncryptedRuntimeRecoveryBundleV1,
+  RuntimeRecoverySignerV1,
+} from '../recovery/types';
 import type { RuntimeActivityFilters } from '../activity-history';
 import type {
   RuntimeAdapterActivityPage,
@@ -192,6 +201,74 @@ const readHeightBatch = (query?: RuntimeAdapterReadQuery): number[] => {
     heights.push(height);
   }
   return heights;
+};
+
+const normalizeRuntimeIdForRecovery = (value: unknown): string =>
+  String(value || '').trim().toLowerCase();
+
+const inferRecoverySignersForAdapter = (env: Env): RuntimeRecoverySignerV1[] => {
+  const runtimeId = normalizeRuntimeIdForRecovery(env.runtimeId);
+  if (!runtimeId) return [];
+  let entityId = '';
+  let jurisdiction = '';
+  let name = 'Runtime signer';
+  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
+    const signerId = normalizeRuntimeIdForRecovery(replica?.signerId);
+    const validators = [
+      ...Object.keys(replica?.state?.config?.shares || {}),
+      ...(replica?.state?.config?.validators || []),
+    ].map(normalizeRuntimeIdForRecovery);
+    if (signerId !== runtimeId && !validators.includes(runtimeId)) continue;
+    entityId = normalizeEntityId(replica?.state?.entityId || replica?.entityId || String(key).split(':')[0] || '');
+    jurisdiction = String(replica?.state?.config?.jurisdiction?.name || '').trim();
+    name = String(replica?.state?.profile?.name || replica?.entityId || 'Runtime signer').trim();
+    break;
+  }
+  return [{
+    index: 0,
+    derivationIndex: 0,
+    address: runtimeId,
+    name,
+    ...(entityId ? { entityId } : {}),
+    ...(jurisdiction ? { jurisdiction } : {}),
+  }];
+};
+
+const buildPeerRecoveryBundleRead = async (
+  ctx: RuntimeAdapterResolveContext,
+  lookupKey: string,
+): Promise<{
+  ok: true;
+  runtimeId: string;
+  lookupKey: string;
+  bundle: EncryptedRuntimeRecoveryBundleV1;
+  bundles: EncryptedRuntimeRecoveryBundleV1[];
+}> => {
+  const runtimeId = normalizeRuntimeIdForRecovery(ctx.env.runtimeId);
+  if (!runtimeId) throw new RuntimeAdapterError('E_BAD_QUERY', 'recovery bundle reads require runtimeId');
+  const runtimeSeed = String(ctx.env.runtimeSeed || '').trim();
+  if (!runtimeSeed) throw new RuntimeAdapterError('E_BAD_QUERY', 'recovery bundle reads require runtimeSeed');
+  const requestedLookupKey = String(lookupKey || '').trim().toLowerCase();
+  const expectedLookupKey = deriveRuntimeRecoveryLookupKey(runtimeId, runtimeSeed).toLowerCase();
+  if (!requestedLookupKey || requestedLookupKey !== expectedLookupKey) {
+    throw new RuntimeAdapterError('E_NOT_FOUND', 'recovery bundle not found');
+  }
+  const bundle = buildRuntimeRecoveryBundle(ctx.env, {
+    signers: inferRecoverySignersForAdapter(ctx.env),
+    createdAt: Math.max(0, Math.floor(Number(ctx.env.timestamp || ctx.env.height || 0))),
+    meta: { activeSignerIndex: 0 },
+  });
+  const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
+  if (String(encrypted.lookupKey || '').toLowerCase() !== expectedLookupKey) {
+    throw new RuntimeAdapterError('E_INTERNAL', 'recovery bundle lookup key mismatch');
+  }
+  return {
+    ok: true,
+    runtimeId,
+    lookupKey: expectedLookupKey,
+    bundle: encrypted,
+    bundles: [encrypted],
+  };
 };
 
 const parseStringList = (raw: unknown): string[] => {
@@ -1442,6 +1519,12 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
   if (parts.length === 1 && parts[0] === 'solvency-summary') {
     return projectSolvencySummary(ctx, query) as T;
+  }
+
+  if (parts[0] === 'recovery' && parts[1] === 'bundles' && parts.length === 3) {
+    const lookupKey = decodeURIComponent(parts[2] || '').trim();
+    if (!lookupKey) throw new RuntimeAdapterError('E_BAD_PATH', 'recovery lookup key is required');
+    return await buildPeerRecoveryBundleRead(ctx, lookupKey) as T;
   }
 
   if (parts[0] === 'receipt' && parts.length === 2) {

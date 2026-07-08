@@ -1,4 +1,4 @@
-import { RemoteRuntimeAdapter } from '@xln/runtime/radapter/remote';
+import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
 import { RuntimeQueryClient } from '$lib/stores/runtimeQueryClient';
 import {
   assertRemoteRuntimeTokenFresh,
