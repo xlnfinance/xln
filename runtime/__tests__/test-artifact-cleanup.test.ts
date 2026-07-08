@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import {
   TEST_WORKSPACE_MAX_BYTES_ENV,
   withoutTestArtifactCleanupDoneEnv,
 } from '../scripts/test-artifact-cleanup';
+import { parseRunWithTestCleanupArgs } from '../scripts/run-with-test-cleanup';
 
 const makeTempWorkspace = (): string => mkdtempSync(join(tmpdir(), 'xln-test-artifacts-'));
 
@@ -216,5 +217,44 @@ describe('test artifact cleanup', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('run-with-test-cleanup keeps cleanup flags out of the child command', () => {
+    const parsed = parseRunWithTestCleanupArgs([
+      '--reason=frontend-playwright',
+      '--scope=e2e',
+      '--cwd=..',
+      '--child-cwd=frontend',
+      '--',
+      'playwright',
+      'test',
+      '--keep-test-artifacts',
+      'tests/landing.spec.ts',
+    ]);
+
+    expect(parsed.reason).toBe('frontend-playwright');
+    expect(parsed.scope).toBe('e2e');
+    expect(parsed.cleanupCwd).toBe('..');
+    expect(parsed.childCwd).toBe('frontend');
+    expect(parsed.command).toBe('playwright');
+    expect(parsed.commandArgs).toEqual(['test', 'tests/landing.spec.ts']);
+    expect(parsed.cleanupArgv).toContain('--keep-test-artifacts');
+  });
+
+  test('package test shortcuts run through cleanup before direct browser or hardhat tests', () => {
+    const repoRoot = process.cwd();
+    const rootPackage = readFileSync(join(repoRoot, 'package.json'), 'utf8');
+    const frontendPackage = readFileSync(join(repoRoot, 'frontend/package.json'), 'utf8');
+    const contractsPackage = readFileSync(join(repoRoot, 'jurisdictions/package.json'), 'utf8');
+
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=e2e-payment-smoke --scope=e2e');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=e2e-prod-payment --scope=e2e');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=governance --child-cwd=jurisdictions');
+    expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=entity --child-cwd=jurisdictions');
+    expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e');
+    expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e');
+    expect(contractsPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts');
+    expect(contractsPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default');
   });
 });

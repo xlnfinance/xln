@@ -10,8 +10,8 @@
     "compile:tron": "bun scripts/compile-tron.cjs --all",
     "deploy:chains:testnet": "bun scripts/deploy-chain-matrix.cjs --profile=testnet --write-jurisdictions",
     "deploy:chains:mainnet": "bun scripts/deploy-chain-matrix.cjs --profile=mainnet --yes --write-jurisdictions",
-    "test": "bunx hardhat test test/*.ts test/*.cjs",
-    "test:default": "bunx hardhat test",
+    "test": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts -- bunx hardhat test test/*.ts test/*.cjs",
+    "test:default": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts-default -- bunx hardhat test",
     "deploy": "bunx hardhat ignition deploy ignition/modules/Depository.cjs --network ethereum",
     "console": "bunx hardhat console",
     "node": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536"

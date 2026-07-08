@@ -905,7 +905,7 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"test:persistence:cli": "bun runtime/scripts/test-artifact-cleanup.ts --reason=persistence-cli && bun runtime/scripts/persistence-wal-smoke.ts"');
     expect(packageJson).toContain('"test:watchtower:smoke": "bun runtime/scripts/test-artifact-cleanup.ts --reason=watchtower-smoke && bun runtime/scripts/watchtower-smoke.ts"');
     expect(packageJson).toContain('"test:rpc-settlement": "bun runtime/scripts/test-artifact-cleanup.ts --reason=rpc-settlement && bun runtime/scripts/rpc-settlement-parity.ts"');
-    expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/test-artifact-cleanup.ts --reason=contracts && cd jurisdictions && bun run test"');
+    expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- bunx hardhat test test/*.ts test/*.cjs"');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'");

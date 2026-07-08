@@ -16,10 +16,10 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "node copy-static-files.js && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && vite build",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"test": "playwright test",
-		"test:landing": "playwright test tests/landing.spec.ts",
-		"test:fed": "playwright test tests/fed-chair-demo.spec.ts",
-		"test:ui": "playwright test --ui"
+		"test": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e -- playwright test",
+		"test:landing": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-landing --scope=e2e -- playwright test tests/landing.spec.ts",
+		"test:fed": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-fed --scope=e2e -- playwright test tests/fed-chair-demo.spec.ts",
+		"test:ui": "bun ../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e -- playwright test --ui"
 	},
 	"devDependencies": {
 		"@capacitor/android": "^8.3.4",
