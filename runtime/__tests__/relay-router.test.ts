@@ -398,6 +398,8 @@ describe('relay-router gossip fanout', () => {
     expect(store.debugEvents.some(event =>
       event.event === 'delivery' &&
       event.status === 'delivered' &&
+      event.delivery?.outcome === 'delivered' &&
+      event.delivery?.code === 'DELIVERY_ACCEPTED' &&
       event.to === RUNTIME_B &&
       (event.details as { entityId?: string; txs?: number } | undefined)?.entityId === ENTITY_B &&
       (event.details as { entityId?: string; txs?: number } | undefined)?.txs === 1,
@@ -496,6 +498,18 @@ describe('relay-router gossip fanout', () => {
       event.status === 'rejected' &&
       event.reason === 'RECOVERY_TARGET_NOT_CONNECTED',
     )).toBe(true);
+    expect(store.debugEvents.find(event =>
+      event.msgType === 'recovery_bundle_request' &&
+      event.reason === 'RECOVERY_TARGET_NOT_CONNECTED',
+    )?.delivery).toMatchObject({
+      outcome: 'failed',
+      code: 'RECOVERY_TARGET_NOT_CONNECTED',
+      retryable: true,
+      fatal: false,
+      failure: {
+        category: 'TransientRace',
+      },
+    });
   });
 
   test('rejects unencrypted entity_input at relay ingress', async () => {

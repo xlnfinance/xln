@@ -284,6 +284,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      ACK interpretation into one transport boundary.
    - Relay is the official baseline; direct delivery is an opportunistic fast
      path with the same bounded queue semantics.
+   - Partial: relay/direct/local delivery debug events now get one typed
+     `delivery` result with retry/fatal/terminal semantics instead of requiring
+     callers to parse status/reason strings.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

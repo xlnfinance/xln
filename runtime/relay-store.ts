@@ -9,6 +9,12 @@ import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
 import { canonicalizeProfile, type Profile } from './networking/gossip';
 import { safeStringify } from './serialization-utils';
 import {
+  buildRuntimeFailureSignal,
+  normalizeRuntimeFailureCode,
+  type RuntimeFailureCategory,
+  type RuntimeFailureSignal,
+} from './failure-taxonomy';
+import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
   type GossipProfileBatchRequest,
@@ -44,7 +50,19 @@ export type RelayDebugEvent = {
   encrypted?: boolean | undefined;
   size?: number | undefined;
   queueSize?: number | undefined;
+  delivery?: RelayDeliveryResult | undefined;
   details?: unknown;
+};
+
+export type RelayDeliveryOutcome = 'delivered' | 'queued' | 'deferred' | 'failed';
+
+export type RelayDeliveryResult = {
+  outcome: RelayDeliveryOutcome;
+  code: string;
+  retryable: boolean;
+  fatal: boolean;
+  terminal: boolean;
+  failure?: RuntimeFailureSignal;
 };
 
 export type RelayStore = {
@@ -69,6 +87,31 @@ const MAX_PENDING_TOTAL_BYTES = 256 * 1024 * 1024;
 const MAX_PENDING_MESSAGE_AGE_MS = 5 * 60 * 1000;
 const MAX_GOSSIP_PROFILES = 50_000;
 export const DEFAULT_GOSSIP_SYNC_LIMIT = DEFAULT_GOSSIP_BATCH_LIMIT;
+
+const DELIVERY_ACCEPTED_STATUSES = new Set([
+  'delivered',
+  'delivered-local-queued',
+  'delivered-direct-local',
+]);
+
+const DELIVERY_DEFERRED_STATUSES = new Set([
+  'queued',
+  'direct-miss-fallback',
+  'stale-target',
+]);
+
+const DELIVERY_TRANSIENT_REASONS = new Set([
+  'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+  'RECOVERY_TARGET_NOT_CONNECTED',
+  'TARGET_SOCKET_NOT_OPEN',
+]);
+
+const DELIVERY_FATAL_REASON_PARTS = [
+  'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+  'NO_LOCAL_REPLICA',
+  'P2P_DECRYPT_ERROR',
+  'invalid tag',
+];
 
 type RelayPendingLimits = {
   maxPerTarget: number;
@@ -128,16 +171,73 @@ export const isRelaySocketOpen = (ws: unknown): boolean => {
   return !Number.isFinite(readyState) || readyState === 1;
 };
 
+const deliveryCodeFor = (status: string, reason: string): string => {
+  if (reason) return normalizeRuntimeFailureCode(reason);
+  if (status === 'queued') return 'DELIVERY_QUEUED';
+  if (status === 'direct-miss-fallback') return 'DELIVERY_DIRECT_MISS_FALLBACK';
+  if (status === 'stale-target') return 'DELIVERY_STALE_TARGET';
+  if (DELIVERY_ACCEPTED_STATUSES.has(status)) return 'DELIVERY_ACCEPTED';
+  return `DELIVERY_${normalizeRuntimeFailureCode(status)}`;
+};
+
+const deliveryFailureCategory = (
+  status: string,
+  code: string,
+  reason: string,
+): RuntimeFailureCategory => {
+  if (status === 'send-failed') return 'TransientRace';
+  if (status === 'local-delivery-failed') {
+    return DELIVERY_FATAL_REASON_PARTS.some((part) => reason.includes(part)) ? 'Contradiction' : 'TransientRace';
+  }
+  if (DELIVERY_TRANSIENT_REASONS.has(code)) return 'TransientRace';
+  if (code === 'DIRECT_MISS_FALLBACK' || code === 'DELIVERY_DIRECT_MISS_FALLBACK') return 'TransientRace';
+  if (code === 'DELIVERY_STALE_TARGET') return 'TransientRace';
+  return 'Contradiction';
+};
+
+export const classifyRelayDeliveryEvent = (event: {
+  status?: unknown;
+  reason?: unknown;
+}): RelayDeliveryResult | null => {
+  const status = String(event.status || '').trim();
+  if (!status) return null;
+  const reason = String(event.reason || '').trim();
+  const code = deliveryCodeFor(status, reason);
+
+  if (DELIVERY_ACCEPTED_STATUSES.has(status)) {
+    return { outcome: 'delivered', code, retryable: false, fatal: false, terminal: true };
+  }
+  if (DELIVERY_DEFERRED_STATUSES.has(status)) {
+    return { outcome: status === 'queued' ? 'queued' : 'deferred', code, retryable: true, fatal: false, terminal: false };
+  }
+
+  const failure = buildRuntimeFailureSignal({
+    category: deliveryFailureCategory(status, code, reason),
+    code,
+    message: reason || status,
+  });
+  return {
+    outcome: 'failed',
+    code: failure.code,
+    retryable: failure.retryable,
+    fatal: failure.fatal,
+    terminal: failure.fatal,
+    failure,
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Debug events
 // ---------------------------------------------------------------------------
 
 export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
   store.debugId += 1;
+  const delivery = event.delivery ?? (event.event === 'delivery' ? classifyRelayDeliveryEvent(event) ?? undefined : undefined);
   store.debugEvents.push({
     id: store.debugId,
     ts: Date.now(),
     ...event,
+    ...(delivery ? { delivery } : {}),
   });
   if (store.debugEvents.length > MAX_DEBUG_EVENTS) {
     store.debugEvents.shift();

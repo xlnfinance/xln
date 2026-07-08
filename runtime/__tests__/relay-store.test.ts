@@ -1,5 +1,12 @@
 import { expect, test } from 'bun:test';
-import { createRelayStore, enqueueMessage, flushPendingMessages, storeVerifiedGossipProfile } from '../relay-store';
+import {
+  classifyRelayDeliveryEvent,
+  createRelayStore,
+  enqueueMessage,
+  flushPendingMessages,
+  pushDebugEvent,
+  storeVerifiedGossipProfile,
+} from '../relay-store';
 import type { Profile } from '../networking/gossip';
 
 const asRecords = (items: unknown[]): Array<Record<string, unknown>> => items as Array<Record<string, unknown>>;
@@ -53,6 +60,63 @@ test('relay pending queue enforces total bytes and target caps', () => {
 
   expect(enqueueMessage(store, 'runtime-a', { payload: 'too-large-for-cap'.repeat(10) })).toBe(1);
   expect(store.debugEvents.some(event => event.reason === 'PENDING_MESSAGE_TOO_LARGE')).toBe(true);
+});
+
+test('relay delivery events expose typed retry and fatal semantics', () => {
+  expect(classifyRelayDeliveryEvent({ status: 'delivered' })).toMatchObject({
+    outcome: 'delivered',
+    code: 'DELIVERY_ACCEPTED',
+    retryable: false,
+    fatal: false,
+    terminal: true,
+  });
+  expect(classifyRelayDeliveryEvent({ status: 'queued' })).toMatchObject({
+    outcome: 'queued',
+    code: 'DELIVERY_QUEUED',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+  });
+  expect(classifyRelayDeliveryEvent({
+    status: 'rejected',
+    reason: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+  })).toMatchObject({
+    outcome: 'failed',
+    code: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    failure: {
+      category: 'TransientRace',
+      code: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+    },
+  });
+  expect(classifyRelayDeliveryEvent({
+    status: 'local-delivery-failed',
+    reason: 'NO_LOCAL_REPLICA: entityId=0xabc',
+  })).toMatchObject({
+    outcome: 'failed',
+    code: 'NO_LOCAL_REPLICA',
+    retryable: false,
+    fatal: true,
+    terminal: true,
+    failure: {
+      category: 'Contradiction',
+      code: 'NO_LOCAL_REPLICA',
+    },
+  });
+
+  const store = createRelayStore('relay-test');
+  pushDebugEvent(store, {
+    event: 'delivery',
+    status: 'direct-miss-fallback',
+  });
+  expect(store.debugEvents.at(-1)?.delivery).toMatchObject({
+    outcome: 'deferred',
+    code: 'DELIVERY_DIRECT_MISS_FALLBACK',
+    retryable: true,
+    fatal: false,
+  });
 });
 
 test('relay gossip profile cap rejects new profiles without evicting existing ones', () => {

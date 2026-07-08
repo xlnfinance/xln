@@ -96,6 +96,13 @@ describe('relay direct entity delivery', () => {
       to: targetRuntimeId,
       msgType: 'entity_input',
       status: 'delivered-direct-local',
+      delivery: {
+        outcome: 'delivered',
+        code: 'DELIVERY_ACCEPTED',
+        retryable: false,
+        fatal: false,
+        terminal: true,
+      },
       details: {
         entityId: input.entityId,
         txs: 1,
