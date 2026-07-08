@@ -292,6 +292,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: P2P entity-input send, pending flush, and public entity-input
      dispatch now use the same typed delivery result shape; boolean remains
      only on raw socket transport send.
+   - Partial: P2P pending flush retry/drop decisions now use typed
+     `delivery.terminal` and emit typed delivery debug events for retryable and
+     terminal failures.
    - Partial: public runtime `sendEntityInput`/routing results now return the
      typed `delivery` result without legacy boolean summary fields.
    - Partial: process-local direct entity dispatch is now typed-only at the

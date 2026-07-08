@@ -360,3 +360,90 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
   expect(relaySent[0]?.timestamp).toBe(6789);
   expect(directSent).toHaveLength(0);
 });
+
+test('flushPending retains retryable typed delivery failures', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const debugEvents: unknown[] = [];
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInput: () => false,
+  };
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+
+  p2p.sendDebugEvent = (payload: unknown) => {
+    debugEvents.push(payload);
+    return true;
+  };
+  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
+  p2p.pendingByRuntime = new Map([[
+    TARGET_RUNTIME_ID,
+    [{ input, enqueuedAt: Date.now(), ingressTimestamp: 7777 }],
+  ]]);
+
+  (p2p as any).flushPending();
+
+  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)).toHaveLength(1);
+  expect(debugEvents.at(-1)).toMatchObject({
+    level: 'warn',
+    code: 'P2P_PENDING_DELIVERY_RETRY',
+    targetRuntimeId: TARGET_RUNTIME_ID,
+    entityId: SOURCE_ENTITY_ID,
+    transport: 'relay',
+    delivery: {
+      outcome: 'failed',
+      code: 'P2P_SEND_RETURNED_FALSE',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+    },
+  });
+});
+
+test('flushPending drops terminal typed delivery failures', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const debugEvents: unknown[] = [];
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInput: () => {
+      throw new Error('socket exploded');
+    },
+  };
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+
+  p2p.sendDebugEvent = (payload: unknown) => {
+    debugEvents.push(payload);
+    return true;
+  };
+  p2p.refreshGossip = () => undefined;
+  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
+  p2p.pendingByRuntime = new Map([[
+    TARGET_RUNTIME_ID,
+    [{ input, enqueuedAt: Date.now(), ingressTimestamp: 8888 }],
+  ]]);
+
+  (p2p as any).flushPending();
+
+  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)).toBeUndefined();
+  expect(debugEvents.at(-1)).toMatchObject({
+    level: 'error',
+    code: 'P2P_PENDING_DELIVERY_DROPPED',
+    targetRuntimeId: TARGET_RUNTIME_ID,
+    entityId: SOURCE_ENTITY_ID,
+    transport: 'relay',
+    delivery: {
+      outcome: 'failed',
+      code: 'P2P_SEND_THROW',
+      retryable: false,
+      fatal: true,
+      terminal: true,
+    },
+  });
+});

@@ -182,6 +182,9 @@ const p2pSendThrowResult = (
   );
 };
 
+const shouldRetainPendingEntityInput = (delivery: EntityInputDeliveryResult): boolean =>
+  delivery.outcome !== 'delivered' && !delivery.terminal;
+
 const normalizeId = (value: string): string => value.toLowerCase();
 const getReplicaSignerId = (replicaKey: string): string => {
   const idx = replicaKey.lastIndexOf(':');
@@ -713,12 +716,34 @@ export class RuntimeP2P {
         }
         try {
           const delivery = this.deliverEntityInput(client, targetRuntimeId, entry.input, entry.ingressTimestamp, transport);
-          if (delivery.outcome !== 'delivered') remaining.push(entry);
+          if (delivery.outcome !== 'delivered') {
+            this.sendDebugEvent({
+              level: delivery.terminal ? 'error' : 'warn',
+              code: delivery.terminal ? 'P2P_PENDING_DELIVERY_DROPPED' : 'P2P_PENDING_DELIVERY_RETRY',
+              message: delivery.failure?.message ?? delivery.code,
+              targetRuntimeId,
+              entityId: entry.input.entityId,
+              transport,
+              delivery,
+            });
+          }
+          if (shouldRetainPendingEntityInput(delivery)) remaining.push(entry);
         } catch (error) {
-          if (String((error as Error)?.message || error || '').includes('P2P_NO_PUBKEY')) {
+          const message = String((error as Error)?.message || error || '');
+          const delivery = p2pSendThrowResult(transport, message);
+          this.sendDebugEvent({
+            level: delivery.terminal ? 'error' : 'warn',
+            code: delivery.terminal ? 'P2P_PENDING_DELIVERY_DROPPED' : 'P2P_PENDING_DELIVERY_RETRY',
+            message,
+            targetRuntimeId,
+            entityId: entry.input.entityId,
+            transport,
+            delivery,
+          });
+          if (message.includes('P2P_NO_PUBKEY')) {
             this.refreshGossip();
           }
-          remaining.push(entry);
+          if (shouldRetainPendingEntityInput(delivery)) remaining.push(entry);
         }
       }
       if (remaining.length > 0) {
