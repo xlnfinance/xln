@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import {
   classifyRelayDeliveryEvent,
   createRelayStore,
+  deliverPendingMessages,
   enqueueMessage,
   flushPendingMessages,
   isRelaySendResultFailure,
@@ -70,6 +71,34 @@ test('relay pending queue enforces total bytes and target caps', () => {
 
   expect(enqueueMessage(store, 'runtime-a', { payload: 'too-large-for-cap'.repeat(10) })).toBe(1);
   expect(store.debugEvents.some(event => event.reason === 'PENDING_MESSAGE_TOO_LARGE')).toBe(true);
+});
+
+test('relay pending delivery retains current and later messages when send fails', () => {
+  const store = createRelayStore('relay-test');
+  const delivered: unknown[] = [];
+
+  enqueueMessage(store, 'runtime-a', { n: 1 });
+  enqueueMessage(store, 'runtime-a', { n: 2 });
+  enqueueMessage(store, 'runtime-a', { n: 3 });
+
+  const failed = deliverPendingMessages(store, 'runtime-a', (msg) => {
+    const record = msg as { n?: number };
+    if (record.n === 2) return false;
+    delivered.push(msg);
+    return true;
+  });
+
+  expect(failed).toMatchObject({
+    delivered: 1,
+    expired: 0,
+    retained: 2,
+    failure: {
+      reason: 'RELAY_PENDING_SEND_FAILED',
+    },
+  });
+  expect(asRecords(delivered).map(msg => msg['n'])).toEqual([1]);
+  expect(asRecords(flushPendingMessages(store, 'runtime-a')).map(msg => msg['n'])).toEqual([2, 3]);
+  expect(store.pendingMessageBytes).toBe(0);
 });
 
 test('relay delivery events expose typed retry and fatal semantics', () => {

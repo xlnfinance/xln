@@ -243,6 +243,74 @@ describe('relay-router gossip fanout', () => {
     expect(store.pendingMessages.has(RUNTIME_A)).toBe(false);
   });
 
+  test('retains pending messages when reconnect flush send fails', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    let failPendingOnce = true;
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const message = JSON.parse(raw);
+        if ((message as { id?: string }).id === 'pending-ack' && failPendingOnce) {
+          failPendingOnce = false;
+          return false;
+        }
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(message);
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A' };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    enqueueMessage(store, RUNTIME_A, {
+      type: 'entity_input',
+      id: 'pending-ack',
+      from: RUNTIME_B,
+      to: RUNTIME_A,
+      payload: 'encrypted-payload',
+      encrypted: true,
+    });
+    store.clients.clear();
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_request',
+      id: 'request-failed-flush',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: SERVER_RUNTIME_ID,
+      payload: { ids: [] },
+    });
+
+    expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
+    expect(store.pendingMessages.get(RUNTIME_A)).toHaveLength(1);
+    expect(store.debugEvents.find(event => event.status === 'send-failed')?.delivery).toMatchObject({
+      outcome: 'failed',
+      code: 'RELAY_PENDING_SEND_FAILED',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+    });
+    store.clients.clear();
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_request',
+      id: 'request-successful-flush',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: SERVER_RUNTIME_ID,
+      payload: { ids: [] },
+    });
+
+    const deliveredPending = (sentBySocket.get(wsA) ?? []).filter(
+      (message) => (message as { id?: string }).id === 'pending-ack',
+    );
+    expect(deliveredPending).toHaveLength(1);
+    expect(store.pendingMessages.has(RUNTIME_A)).toBe(false);
+  });
+
   test('rejects duplicate hello without closing the existing runtime socket', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();

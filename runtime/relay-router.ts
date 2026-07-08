@@ -22,7 +22,7 @@ import {
   DEFAULT_GOSSIP_SYNC_LIMIT,
   registerClient,
   removeClient,
-  flushPendingMessages,
+  deliverPendingMessages,
   enqueueMessage,
   cacheEncryptionKey,
   isRelaySocketOpen,
@@ -122,11 +122,24 @@ const flushPendingToSocket = <Socket>(
   ws: Socket,
   send: (ws: Socket, data: string) => RelaySendResult,
 ): number => {
-  const pending = flushPendingMessages(store, runtimeId);
-  for (const pendingMsg of pending) {
-    send(ws, safeStringify(pendingMsg));
+  const result = deliverPendingMessages(store, runtimeId, (pendingMsg) =>
+    send(ws, safeStringify(pendingMsg)),
+  );
+  if (result.failure) {
+    pushDebugEvent(store, {
+      event: 'delivery',
+      to: runtimeId,
+      status: 'send-failed',
+      reason: result.failure.reason,
+      queueSize: result.retained,
+      details: {
+        delivered: result.delivered,
+        expired: result.expired,
+        retained: result.retained,
+      },
+    });
   }
-  return pending.length;
+  return result.delivered;
 };
 
 const trySendRelay = (

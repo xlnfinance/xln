@@ -335,6 +335,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: relay router entity-input admission rejects and local-delivery
      failures now attach typed `delivery` metadata while preserving existing
      debug event status fields.
+   - Partial: relay pending flush now checks each send result and retains the
+     current plus remaining queued messages on send failure instead of dropping
+     them before delivery is confirmed.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

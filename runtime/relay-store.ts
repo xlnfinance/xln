@@ -131,6 +131,15 @@ type RelayStoreOptions = {
   maxGossipProfiles?: number;
 };
 
+export type RelayPendingDeliveryResult = {
+  delivered: number;
+  expired: number;
+  retained: number;
+  failure?: {
+    reason: string;
+  };
+};
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -442,6 +451,66 @@ export const flushPendingMessages = (store: RelayStore, toKey: string): unknown[
     deliverable.push(item.msg);
   }
   return deliverable;
+};
+
+export const deliverPendingMessages = (
+  store: RelayStore,
+  toKey: string,
+  deliver: (msg: unknown) => RelaySendResult,
+): RelayPendingDeliveryResult => {
+  const pending = store.pendingMessages.get(toKey) || [];
+  if (pending.length === 0) {
+    return { delivered: 0, expired: 0, retained: 0 };
+  }
+  const now = Date.now();
+  const retained: PendingRelayMessage[] = [];
+  let delivered = 0;
+  let expired = 0;
+  let failure: RelayPendingDeliveryResult['failure'];
+
+  for (const item of pending) {
+    if (failure) {
+      retained.push(item);
+      continue;
+    }
+    if (now - item.enqueuedAt > store.pendingLimits.maxAgeMs) {
+      expired++;
+      store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
+      pushDebugEvent(store, {
+        event: 'pending_drop',
+        to: toKey,
+        status: 'dropped',
+        reason: 'PENDING_MESSAGE_EXPIRED',
+        size: item.bytes,
+      });
+      continue;
+    }
+    try {
+      const sendResult = deliver(item.msg);
+      if (isRelaySendResultFailure(sendResult)) {
+        failure = { reason: 'RELAY_PENDING_SEND_FAILED' };
+        retained.push(item);
+        continue;
+      }
+      delivered++;
+      store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
+    } catch (error) {
+      failure = { reason: error instanceof Error ? error.message : String(error) };
+      retained.push(item);
+    }
+  }
+
+  if (retained.length > 0) {
+    store.pendingMessages.set(toKey, retained);
+  } else {
+    store.pendingMessages.delete(toKey);
+  }
+  return {
+    delivered,
+    expired,
+    retained: retained.length,
+    ...(failure ? { failure } : {}),
+  };
 };
 
 export const clearPendingMessages = (store: RelayStore): void => {
