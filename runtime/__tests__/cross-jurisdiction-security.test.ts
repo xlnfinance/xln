@@ -9,6 +9,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
 } from '../cross-jurisdiction';
+import { validateCrossJurisdictionLocalBinding } from '../entity-tx/cross-jurisdiction-helpers';
 import { createEmptyEnv } from '../runtime';
 import type { CrossJurisdictionSwapRoute } from '../types';
 import {
@@ -54,6 +55,22 @@ const buildRoute = (
 }, { runtimeSeed: seed, sourceDisputeDelayMs: 5_000, now: 1_000 });
 
 describe('cross-jurisdiction security invariants', () => {
+  test('local binding rejects display-name stack ref collision with wrong local stack', () => {
+    const env = createEmptyEnv('cross-local-stack-name-collision');
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const wrongLocal = {
+      ...makeJurisdiction('Wrong Local', 9, '99', '98'),
+      name: jref(eth),
+    };
+    installJurisdictions(env, eth, wrongLocal);
+    const route = buildRoute('cross-local-stack-name-collision', 'cross-local-stack-name-collision', eth);
+    const state = makeState(route.source.entityId, addr('31'), wrongLocal, route.source.counterpartyEntityId);
+
+    const error = validateCrossJurisdictionLocalBinding(env, state, route);
+
+    expect(error).toContain('does not match local jurisdiction');
+  });
+
   test('commit refuses forged target receipt before source lock exists', async () => {
     const env = createEmptyEnv('cross-forged-target-receipt');
     env.timestamp = 1_000;

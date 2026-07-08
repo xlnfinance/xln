@@ -399,6 +399,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: browser runtime restore no longer rewrites a missing legacy
      `testnet` signer jurisdiction to the current primary jurisdiction; missing
      signer jurisdiction now remains explicit.
+   - Partial: stack-ref jurisdiction lookup now resolves only by canonical
+     `(chainId, depositoryAddress)` identity and cross-j local binding no longer
+     accepts display-name/depository-only fallbacks.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

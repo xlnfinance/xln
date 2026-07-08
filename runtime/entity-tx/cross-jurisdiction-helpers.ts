@@ -12,7 +12,6 @@ import type { AccountTx, CrossJurisdictionSwapRoute, EntityState, Env } from '..
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
-const normalizeJurisdictionLabel = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 export const findCrossJurisdictionOfferRoute = (
   state: EntityState,
@@ -155,11 +154,7 @@ export const canonicalizeCrossJurisdictionRouteForKnownEntities = (
 
 const jurisdictionIdentityKey = (jurisdiction: { name?: string; chainId?: number; depositoryAddress?: string } | undefined | null): string => {
   if (!jurisdiction) return '';
-  const stackId = getJurisdictionStackId(jurisdiction);
-  if (stackId) return stackId;
-  const depository = normalizeAddress(jurisdiction.depositoryAddress);
-  if (depository) return `depository:${depository}`;
-  return `name:${normalizeJurisdictionLabel(jurisdiction.name)}`;
+  return getJurisdictionStackId(jurisdiction);
 };
 
 const routeJurisdictionMatchesLocal = (
@@ -169,9 +164,6 @@ const routeJurisdictionMatchesLocal = (
 ): boolean => {
   const local = state.config?.jurisdiction;
   if (!local) return false;
-  if (normalizeJurisdictionLabel(local.name) === normalizeJurisdictionLabel(routeJurisdictionName)) {
-    return true;
-  }
   let routeJurisdiction: typeof local | undefined;
   try {
     routeJurisdiction = requireRuntimeJurisdictionConfigByName(env, routeJurisdictionName);

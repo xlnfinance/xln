@@ -91,9 +91,7 @@ export const getJReplicaByName = (env: Env, name?: string | null): JReplica | un
 export const getJReplicaByJurisdictionRef = (env: Env, ref?: string | null): JReplica | undefined => {
   const raw = String(ref || '').trim();
   if (!raw) return undefined;
-  const byName = getJReplicaByName(env, raw);
-  if (byName) return byName;
-  if (!isJurisdictionStackRef(raw)) return undefined;
+  if (!isJurisdictionStackRef(raw)) return getJReplicaByName(env, raw);
   const wanted = raw.toLowerCase();
   for (const replica of env.jReplicas?.values?.() || []) {
     if (getJReplicaStackId(replica) === wanted) return replica;

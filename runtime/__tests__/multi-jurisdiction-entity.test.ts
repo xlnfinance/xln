@@ -4,6 +4,7 @@ import { buildDebtEnforcementRuntimeInput, createEmptyEnv, enqueueRuntimeInput, 
 import { applyEntityTx } from '../entity-tx/apply';
 import {
   assertSameJurisdictionAccount,
+  getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
 } from '../jurisdiction-runtime';
@@ -75,6 +76,23 @@ describe('multi-jurisdiction entity binding', () => {
     expect(sameJurisdictionIdentity(canonical, { name: canonical.name })).toBe(false);
     expect(sameJurisdictionIdentity(canonical, conflicting)).toBe(false);
     expect(sameJurisdictionIdentity({ name: canonical.name }, { name: 'testnet' })).toBe(false);
+  });
+
+  test('stack ref lookup cannot be captured by a display-name collision', () => {
+    const env = createEmptyEnv('jurisdiction-stack-ref-name-collision');
+    const canonical = makeJurisdiction('Canonical', 31337, '11', '12');
+    const canonicalRef = getJurisdictionIdentityRef(canonical);
+    const collision = {
+      ...makeJurisdiction(canonicalRef, 31338, '21', '22'),
+      name: canonicalRef,
+    };
+    installJurisdiction(env, collision);
+    installJurisdiction(env, canonical);
+
+    const resolved = getJReplicaByJurisdictionRef(env, canonicalRef);
+
+    expect(resolved?.name).toBe('Canonical');
+    expect(resolved?.depositoryAddress).toBe(canonical.depositoryAddress);
   });
 
   const importEntity = async (
