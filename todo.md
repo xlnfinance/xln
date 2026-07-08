@@ -224,6 +224,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Surface last successful tower upload height and failure reason.
    - Partial: peer-refresh coverage now surfaces persisted typed peer discovery
      failure category/code for empty, transient, and contradictory PSR outcomes.
+   - Partial: onboarding recovery check now renders typed tower/peer discovery
+     failure labels instead of hiding them behind a warning count only.
 
 3. **Typed failure taxonomy across runtime and ops.**
    - Split failures into explicit categories instead of treating every loud

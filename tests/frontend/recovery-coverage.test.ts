@@ -8,6 +8,7 @@ import {
 } from '../../frontend/src/lib/utils/recoveryCoverage';
 import {
   clearRuntimeRecoveryDiscoveryStatus,
+  formatRuntimeRecoveryDiscoveryFailure,
   readRuntimeRecoveryDiscoveryStatus,
   writeRuntimeRecoveryDiscoveryStatus,
 } from '../../frontend/src/lib/utils/recoveryDiscoveryStatus';
@@ -206,6 +207,32 @@ test('runtime recovery discovery status persists peer refresh counters', () => {
   expect(readRuntimeRecoveryDiscoveryStatus(runtimeId)).toBeNull();
 });
 
+test('runtime recovery discovery labels typed failures for onboarding', () => {
+  expect(formatRuntimeRecoveryDiscoveryFailure({
+    source: 'peer',
+    sourceLabel: 'Remote H1',
+    category: 'ExpectedEmpty',
+    code: 'PEER_RECOVERY_BUNDLE_EMPTY',
+    message: 'empty',
+  })).toBe('Remote H1: no backup (PEER_RECOVERY_BUNDLE_EMPTY)');
+
+  expect(formatRuntimeRecoveryDiscoveryFailure({
+    source: 'tower',
+    sourceLabel: 'Tower',
+    category: 'TransientRace',
+    code: 'http_503',
+    message: 'unavailable',
+  })).toBe('Tower: retry pending (HTTP_503)');
+
+  expect(formatRuntimeRecoveryDiscoveryFailure({
+    source: 'peer',
+    sourceLabel: 'Remote H2',
+    category: 'Contradiction',
+    code: 'RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH',
+    message: 'wrong runtime',
+  })).toBe('Remote H2: check failed (RECOVERY_CANDIDATE_RUNTIME_ID_MISMATCH)');
+});
+
 test('runtime recovery coverage distinguishes configured towers from observed receipts', () => {
   const configured = byId(buildRuntimeRecoveryCoverage({
     runtime: runtimeFixture(),
@@ -346,6 +373,13 @@ test('recovery settings panel renders the coverage grid inside existing recovery
   expect(source).toContain('data-testid="recovery-coverage-grid"');
   expect(source).toContain('data-testid={`recovery-coverage-${item.id}`}');
   expect(source).toContain('class="recovery-service-status"');
+});
+
+test('onboarding recovery check renders typed discovery failures', () => {
+  const source = readFileSync('frontend/src/lib/components/Entity/OnboardingPanel.svelte', 'utf8');
+  expect(source).toContain('formatRuntimeRecoveryDiscoveryFailure');
+  expect(source).toContain('recoveryDiscoveryFailureLabels');
+  expect(source).toContain('data-testid="runtime-recovery-check-failures"');
 });
 
 test('formatRecoveryBytes keeps recovery coverage labels compact', () => {

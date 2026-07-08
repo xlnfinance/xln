@@ -45,6 +45,16 @@ const normalizeFailureStatuses = (failures: unknown): RuntimeRecoveryDiscoveryFa
     })
     : [];
 
+export const formatRuntimeRecoveryDiscoveryFailure = (
+  failure: RuntimeRecoveryDiscoveryFailureStatus,
+): string => {
+  const sourceLabel = String(failure.sourceLabel || failure.source).trim() || failure.source;
+  const code = String(failure.code || 'UNKNOWN').trim().toUpperCase() || 'UNKNOWN';
+  if (failure.category === 'ExpectedEmpty') return `${sourceLabel}: no backup (${code})`;
+  if (failure.category === 'TransientRace') return `${sourceLabel}: retry pending (${code})`;
+  return `${sourceLabel}: check failed (${code})`;
+};
+
 export function writeRuntimeRecoveryDiscoveryStatus(status: RuntimeRecoveryDiscoveryStatus): void {
   if (typeof localStorage === 'undefined') return;
   const runtimeId = normalizeRuntimeId(status.runtimeId);

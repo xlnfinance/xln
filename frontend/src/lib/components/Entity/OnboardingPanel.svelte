@@ -42,6 +42,7 @@
   } from '../../utils/recoverySettings';
   import {
     clearRuntimeRecoveryDiscoveryStatus,
+    formatRuntimeRecoveryDiscoveryFailure,
     readRuntimeRecoveryDiscoveryStatus,
     type RuntimeRecoveryDiscoveryStatus,
   } from '../../utils/recoveryDiscoveryStatus';
@@ -85,6 +86,7 @@
   let recoveryMessageTone: 'neutral' | 'error' = 'neutral';
   let recoveryDiscoveryStatus: RuntimeRecoveryDiscoveryStatus | null = null;
   let recoveryDiscoveryLoadedFor = '';
+  let recoveryDiscoveryFailureLabels: string[] = [];
   let recoveryBackupFileInput: HTMLInputElement | null = null;
   let recoveryUploadMessage = '';
   let recoveryUploadTone: 'neutral' | 'error' = 'neutral';
@@ -200,6 +202,9 @@
       recoveryUploadTone = 'neutral';
     }
   }
+  $: recoveryDiscoveryFailureLabels = (recoveryDiscoveryStatus?.failures || [])
+    .map(formatRuntimeRecoveryDiscoveryFailure)
+    .slice(-2);
   $: jurisdictionOptions = ($activeRuntime?.signers || [])
     .map((signer, index) => {
       const name = String(signer.jurisdiction || (index === 0 ? 'Primary' : `Jurisdiction ${index + 1}`)).trim();
@@ -684,6 +689,13 @@
           {#if recoveryDiscoveryStatus.errors.length > 0}
             <small>{recoveryDiscoveryStatus.errors.length} warning{recoveryDiscoveryStatus.errors.length === 1 ? '' : 's'} during check</small>
           {/if}
+          {#if recoveryDiscoveryFailureLabels.length > 0}
+            <div class="recovery-check-failures" data-testid="runtime-recovery-check-failures">
+              {#each recoveryDiscoveryFailureLabels as failureLabel}
+                <small>{failureLabel}</small>
+              {/each}
+            </div>
+          {/if}
         </div>
         <button
           type="button"
@@ -1080,6 +1092,13 @@
   .recovery-check-copy small {
     color: #a8a29e;
     font-size: 11px;
+  }
+
+  .recovery-check-failures {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
   }
 
   .backup-file-input {
