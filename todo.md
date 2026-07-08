@@ -402,6 +402,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: stack-ref jurisdiction lookup now resolves only by canonical
      `(chainId, depositoryAddress)` identity and cross-j local binding no longer
      accepts display-name/depository-only fallbacks.
+   - Partial: hub peer reserve bootstrap now requires visible hub profiles to
+     carry canonical jurisdiction refs and resolves funding J-adapters only by
+     that ref, not by jurisdiction display name.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

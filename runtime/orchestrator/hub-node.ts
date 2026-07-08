@@ -176,7 +176,7 @@ type VisibleHubProfile = {
   jurisdictionName: string;
   chainId?: number;
   depositoryAddress?: string;
-  jurisdictionRef?: string;
+  jurisdictionRef: string;
 };
 
 type VisibleSupportPeer = SupportPeerIdentity & {
@@ -1112,8 +1112,7 @@ const ensurePeerBootstrapReserves = async (
   if (!resolvedArgs.deployTokens || peerProfiles.length === 0) return;
   const profilesByJurisdiction = new Map<string, { jurisdiction: VisibleHubProfile; profiles: VisibleHubProfile[] }>();
   for (const profile of peerProfiles) {
-    const jurisdictionName = String(profile.jurisdictionName || '').trim();
-    const jurisdictionKey = String(profile.jurisdictionRef || jurisdictionName).trim();
+    const jurisdictionKey = String(profile.jurisdictionRef || '').trim();
     if (!jurisdictionKey) {
       throw new Error(`PEER_RESERVE_JURISDICTION_MISSING: entity=${profile.entityId}`);
     }
@@ -1130,7 +1129,7 @@ const ensurePeerBootstrapReserves = async (
   for (const [jurisdictionKey, group] of profilesByJurisdiction) {
     const { jurisdiction, profiles } = group;
     const jurisdictionName = String(jurisdiction.jurisdictionName || jurisdictionKey).trim();
-    const resolvedReplica = resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef || jurisdiction);
+    const resolvedReplica = resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef);
     const replicaName = resolvedReplica?.replica?.name || resolvedReplica?.name || jurisdictionName;
     const jadapter = resolvedReplica?.replica?.jadapter;
     if (!jadapter) {
@@ -1293,14 +1292,15 @@ const readVisibleHubProfiles = (env: Env, jurisdiction: unknown): VisibleHubProf
         jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
         ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
         ...(depositoryAddress ? { depositoryAddress } : {}),
-        ...(jurisdictionRef ? { jurisdictionRef } : {}),
+        jurisdictionRef,
       };
     })
     .filter(profile =>
       profile.name.length > 0 &&
       profile.entityId.length > 0 &&
       profile.runtimeId.length > 0 &&
-      profile.jurisdictionName.length > 0,
+      profile.jurisdictionName.length > 0 &&
+      profile.jurisdictionRef.length > 0,
     );
 };
 
