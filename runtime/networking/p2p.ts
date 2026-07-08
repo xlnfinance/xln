@@ -533,13 +533,13 @@ export class RuntimeP2P {
   }
 
   private deliverEntityInput(
-    client: Pick<RuntimeWsClient, 'sendEntityInput'>,
+    client: Pick<RuntimeWsClient, 'sendEntityInputRaw'>,
     targetRuntimeId: string,
     input: RoutedEntityInput,
     ingressTimestamp: number | undefined,
     transport: EntityInputDeliveryTransport,
   ): EntityInputDeliveryResult {
-    const sent = client.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
+    const sent = client.sendEntityInputRaw(targetRuntimeId, input, ingressTimestamp);
     return sent
       ? p2pDeliveryResult(deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED'), transport)
       : p2pSendFalseDelivery(transport);

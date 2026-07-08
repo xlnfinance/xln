@@ -307,6 +307,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: direct runtime websocket route now exposes typed
      `sendEntityInputDelivery()` instead of a high-level boolean send wrapper;
      hub and market-maker nodes use that result directly.
+   - Partial: `RuntimeWsClient` entity-input send is now explicitly named
+     `sendEntityInputRaw()` and is only consumed inside P2P's typed delivery
+     adapter.
    - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
      `dispatchEntityOutputs()` requires it, with no high-level boolean wrapper.
    - Exit: callers receive one typed delivery result and no longer reimplement

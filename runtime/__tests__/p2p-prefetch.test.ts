@@ -96,7 +96,7 @@ test('enqueueEntityInputDelivery reports typed delivery result when transport se
   const warnings: unknown[][] = [];
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: () => false,
+    sendEntityInputRaw: () => false,
   };
 
   p2p.env = {
@@ -153,7 +153,7 @@ test('enqueueEntityInputDelivery uses official relay when advertised hub direct 
 
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
       sent.push({ to, input, timestamp });
       return true;
     },
@@ -213,7 +213,7 @@ test('enqueueEntityInputDelivery returns typed success with transport', () => {
   const sent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
       sent.push({ to, input, timestamp });
       return true;
     },
@@ -257,7 +257,7 @@ test('enqueueEntityInputDelivery prefers open direct transport over relay', () =
 
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: () => {
+    sendEntityInputRaw: () => {
       relaySent.push(true);
       return true;
     },
@@ -265,7 +265,7 @@ test('enqueueEntityInputDelivery prefers open direct transport over relay', () =
   const directClient = {
     isOpen: () => true,
     isConnecting: () => false,
-    sendEntityInput: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
       directSent.push({ to, input, timestamp });
       return true;
     },
@@ -309,7 +309,7 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
 
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+    sendEntityInputRaw: (to: string, input: RoutedEntityInput, timestamp?: number) => {
       relaySent.push({ to, input, timestamp });
       return true;
     },
@@ -317,7 +317,7 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
   const directClient = {
     isOpen: () => true,
     isConnecting: () => false,
-    sendEntityInput: () => {
+    sendEntityInputRaw: () => {
       directSent.push(true);
       return true;
     },
@@ -366,7 +366,7 @@ test('flushPending retains retryable typed delivery failures', () => {
   const debugEvents: unknown[] = [];
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: () => false,
+    sendEntityInputRaw: () => false,
   };
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -408,7 +408,7 @@ test('flushPending drops terminal typed delivery failures', () => {
   const debugEvents: unknown[] = [];
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: () => {
+    sendEntityInputRaw: () => {
       throw new Error('socket exploded');
     },
   };
@@ -453,7 +453,7 @@ test('flushPending emits typed terminal delivery when pending input expires', ()
   const debugEvents: unknown[] = [];
   const relayClient = {
     isOpen: () => true,
-    sendEntityInput: () => {
+    sendEntityInputRaw: () => {
       throw new Error('expired pending input should not reach transport send');
     },
   };

@@ -536,7 +536,7 @@ export class RuntimeWsClient {
     }
   }
 
-  sendEntityInput(to: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
+  sendEntityInputRaw(to: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
     // Encryption is MANDATORY for entity_input messages
     if (!this.options.getTargetEncryptionKey || !this.options.encryptionKeyPair) {
       throw new Error('P2P_NO_ENCRYPTION: Encryption not configured');
