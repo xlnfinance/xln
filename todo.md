@@ -390,6 +390,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: mesh jurisdiction selection now resolves primary stacks by exact or
      public RPC URL and explicit `primary:true`, so hub/MM/server bootstrap no
      longer depends on an `arrakis` config key for renamed primary jurisdictions.
+   - Partial: browser runtime create/restore now selects the first usable
+     `primary:true` jurisdiction, or the first active jurisdiction with contracts,
+     instead of depending on an `arrakis` key.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

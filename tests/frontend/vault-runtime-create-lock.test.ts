@@ -20,6 +20,22 @@ describe('vault runtime creation lock', () => {
     expect(source).not.toContain('stripLocalJurisdictionSuffix');
   });
 
+  test('primary jurisdiction selection does not depend on arrakis key', () => {
+    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const functionStart = source.indexOf('const resolveJurisdictionConfig = (');
+    const functionEnd = source.indexOf('const resolveDefaultJurisdictionImportName = (', functionStart);
+    expect(functionStart).toBeGreaterThan(0);
+    expect(functionEnd).toBeGreaterThan(functionStart);
+    const functionSource = source.slice(functionStart, functionEnd);
+
+    expect(functionSource).toContain('const usable = Object.values(jurisdictions.jurisdictions || {}).filter(hasUsableJurisdictionConfig);');
+    expect(functionSource).toContain('usable.find(isPrimaryJurisdictionConfig) ?? usable[0]');
+    expect(source).toContain('const isPrimaryJurisdictionConfig = (config: ApiJurisdictionConfig): boolean =>');
+    expect(source).toContain('config.primary === true');
+    expect(source).not.toContain("map['arrakis']");
+    expect(source).not.toContain('arrakisConfig');
+  });
+
   test('createRuntime serializes concurrent creation for the same runtime id', () => {
     const source = read('frontend/src/lib/stores/vaultStore.ts');
     const functionStart = source.indexOf('async createRuntime(name: string, seed: string');

@@ -133,6 +133,7 @@ type ImportedJMachineConfig = {
 type ApiJurisdictionConfig = JurisdictionConfig & {
   rpc?: string;
   rpcs?: string[];
+  primary?: boolean;
   contracts: {
     depository: string;
     entityProvider: string;
@@ -1676,13 +1677,21 @@ const hasConnectedJurisdictionAdapter = (replica: unknown): boolean => {
 };
 
 const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): ApiJurisdictionConfig => {
-  const map = jurisdictions.jurisdictions;
-  const arrakis = map['arrakis'];
-  const first = arrakis ?? Object.values(map)[0];
-  if (!first) {
+  const usable = Object.values(jurisdictions.jurisdictions || {}).filter(hasUsableJurisdictionConfig);
+  const selected = usable.find(isPrimaryJurisdictionConfig) ?? usable[0];
+  if (!selected) {
     throw new Error('No jurisdictions found in /api/jurisdictions');
   }
-  return first;
+  return selected;
+};
+
+const isPrimaryJurisdictionConfig = (config: ApiJurisdictionConfig): boolean =>
+  config.primary === true;
+
+const hasUsableJurisdictionConfig = (config: ApiJurisdictionConfig): boolean => {
+  const status = String((config as { status?: unknown })?.status || 'active').trim().toLowerCase();
+  return status === 'active' &&
+    Boolean(config?.contracts?.depository && config?.contracts?.entityProvider && resolveJurisdictionRpc(config));
 };
 
 const resolveDefaultJurisdictionImportName = (
@@ -1696,11 +1705,7 @@ const resolveDefaultJurisdictionImportName = (
 
 const listDefaultJurisdictionImports = (jurisdictions: JurisdictionsPayload): Array<{ key: string; name: string; config: ApiJurisdictionConfig }> => {
   const entries = Object.entries(jurisdictions.jurisdictions || {})
-    .filter(([, config]) => {
-      const status = String((config as { status?: unknown })?.status || 'active').trim().toLowerCase();
-      return status === 'active' &&
-        Boolean(config?.contracts?.depository && config?.contracts?.entityProvider && resolveJurisdictionRpc(config));
-    });
+    .filter(([, config]) => hasUsableJurisdictionConfig(config));
   if (entries.length === 0) return [];
   const primary = resolveJurisdictionConfig(jurisdictions);
   const primaryKey = entries.find(([, config]) => config === primary)?.[0] || 'primary';
@@ -2436,19 +2441,19 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
   const jurisdictions = await fetchJurisdictions(baseOrigin);
-  const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+  const primaryConfig = resolveJurisdictionConfig(jurisdictions);
   const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
   const primaryJurisdictionName =
     defaultJurisdictionImports[0]?.name ||
-    String(arrakisConfig.name || 'primary').trim() ||
+    String(primaryConfig.name || 'primary').trim() ||
     'primary';
-  const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
+  const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(primaryConfig), baseOrigin);
   const canonicalDeltaTransformerAddress = requireContractAddress(
-    arrakisConfig.contracts?.deltaTransformer,
+    primaryConfig.contracts?.deltaTransformer,
     'delta_transformer',
   );
   xln.setDeltaTransformerAddress?.(canonicalDeltaTransformerAddress);
-  const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.restore');
+  const chainId = resolveJurisdictionChainId(primaryConfig, 'VaultStore.restore');
 
   if (!env) {
     env = xln.createEmptyEnv(runtimeSeed);
@@ -2468,7 +2473,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
             ticker: 'USDC',
             rpcs: [rpcUrl],
             blockTimeMs: 1_000,
-            contracts: arrakisConfig.contracts,
+            contracts: primaryConfig.contracts,
           }
         }],
         entityInputs: []
@@ -2496,10 +2501,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
           deltaTransformer?: string;
         };
         jReplica.contracts = {
-          account: String(existingContracts.account || arrakisConfig.contracts.account || ''),
-          depository: String(existingContracts.depository || arrakisConfig.contracts.depository || ''),
-          entityProvider: String(existingContracts.entityProvider || arrakisConfig.contracts.entityProvider || ''),
-          deltaTransformer: String(existingContracts.deltaTransformer || arrakisConfig.contracts.deltaTransformer || ''),
+          account: String(existingContracts.account || primaryConfig.contracts.account || ''),
+          depository: String(existingContracts.depository || primaryConfig.contracts.depository || ''),
+          entityProvider: String(existingContracts.entityProvider || primaryConfig.contracts.entityProvider || ''),
+          deltaTransformer: String(existingContracts.deltaTransformer || primaryConfig.contracts.deltaTransformer || ''),
         };
         jReplica.depositoryAddress = String(jReplica.depositoryAddress || jReplica.contracts.depository || '');
         jReplica.entityProviderAddress = String(
@@ -2528,7 +2533,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
             ticker: 'USDC',
             rpcs: [rpcUrl],
             blockTimeMs: 1_000,
-            contracts: arrakisConfig.contracts,
+            contracts: primaryConfig.contracts,
           }
         }],
         entityInputs: []
@@ -3134,15 +3139,15 @@ export const vaultOperations = {
         markPerf('wait_server_runtime_ready');
         const jurisdictions = await fetchJurisdictions(baseOrigin);
         markPerf('fetch_jurisdictions');
-        const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+        const primaryConfig = resolveJurisdictionConfig(jurisdictions);
         const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
         const primaryJurisdictionName =
           defaultJurisdictionImports[0]?.name ||
-          String(arrakisConfig.name || 'primary').trim() ||
+          String(primaryConfig.name || 'primary').trim() ||
           'primary';
         const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
-        const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
-        const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.createRuntime');
+        const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(primaryConfig), baseOrigin);
+        const chainId = resolveJurisdictionChainId(primaryConfig, 'VaultStore.createRuntime');
 
       // Import the same primary jurisdiction name that hub profiles advertise.
         await enqueueAndAwait(
@@ -3157,7 +3162,7 @@ export const vaultOperations = {
               ticker: 'USDC',
               rpcs: [rpcUrl],
               blockTimeMs: 1_000,
-              contracts: arrakisConfig.contracts, // Use pre-deployed addresses
+              contracts: primaryConfig.contracts,
             }
           }],
           entityInputs: []
