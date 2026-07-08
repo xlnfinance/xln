@@ -178,24 +178,6 @@ export async function handleCrossSwapFillAck(
     return { success: false, error: `Cross-j target execution mismatch: expected ${expectedExecutionTarget}, got ${executionTargetAmount}`, events };
   }
   const sourceTotal = BigInt(route.source.amount);
-  if (fill.fillNumerator !== undefined && fill.fillDenominator !== undefined) {
-    // Exact fill ratio is hash-ledger/order progress, not execution economics.
-    // Source-savings price improvement may spend less source at execution time;
-    // it must not reduce the committed ratio or a full improved fill would fail
-    // validation and leave the owner-side order stuck in the book. The exact
-    // ratio can be target-derived, so source progress must use the same
-    // floor-aware scaling as requireCrossJurisdictionFillProgress().
-    const expectedSourceAmount = fill.fillNumerator >= fill.fillDenominator
-      ? sourceTotal
-      : (sourceTotal * fill.fillNumerator) / fill.fillDenominator;
-    if (fill.cumulativeSourceAmount !== expectedSourceAmount) {
-      return {
-        success: false,
-        error: `Cross-j exact fill ratio mismatch: ${fill.fillNumerator}/${fill.fillDenominator} != ${fill.cumulativeSourceAmount}/${sourceTotal}`,
-        events,
-      };
-    }
-  }
 
   const nextRoute = withCrossJurisdictionFillProgress(
     route,

@@ -2206,6 +2206,42 @@ describe('cross-jurisdiction hashledger swap', () => {
       crossJurisdiction: { ...route, status: 'resting' },
     });
 
+    const invalidTargetAccount = makeAccount(sourceHub, sourceUser);
+    invalidTargetAccount.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 2,
+      giveAmount: sourceTotal,
+      wantTokenId: 1,
+      wantAmount: targetTotal,
+      priceTicks: 1_000n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: invalidTargetAccount.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route, status: 'resting' },
+    });
+    const invalidTargetResult = await applyAccountTx(invalidTargetAccount, {
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: route.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: cumulativeSource,
+        incrementalTargetAmount: cumulativeTarget + 1n,
+        cumulativeSourceAmount: cumulativeSource,
+        cumulativeTargetAmount: cumulativeTarget + 1n,
+        cumulativeFillRatio: 0,
+        fillNumerator,
+        fillDenominator,
+        executionSourceAmount: cumulativeSource,
+        executionTargetAmount: cumulativeTarget + 1n,
+        priceImprovementMode: 'source_savings',
+        cancelRemainder: false,
+        pairId: 'cross:ethereum:1/tron:2',
+      },
+    }, invalidTargetAccount.leftEntity === sourceHub, 2_000, 1);
+    expect(invalidTargetResult.success).toBe(false);
+    expect(invalidTargetResult.error).toContain('cumulative target mismatch');
+
     const result = await applyAccountTx(account, {
       type: 'cross_swap_fill_ack',
       data: {
@@ -2215,7 +2251,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         incrementalTargetAmount: cumulativeTarget,
         cumulativeSourceAmount: cumulativeSource,
         cumulativeTargetAmount: cumulativeTarget,
-        cumulativeFillRatio: Number((65_535n * fillNumerator) / fillDenominator),
+        cumulativeFillRatio: 0,
         fillNumerator,
         fillDenominator,
         executionSourceAmount: cumulativeSource,
@@ -2230,6 +2266,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const updatedRoute = account.swapOffers.get(route.orderId)?.crossJurisdiction;
     expect(updatedRoute?.filledSourceAmount).toBe(cumulativeSource);
     expect(updatedRoute?.filledTargetAmount).toBe(cumulativeTarget);
+    expect(updatedRoute?.cumulativeFillRatio).toBe(132);
     expect(updatedRoute?.fillNumerator).toBe(fillNumerator);
     expect(updatedRoute?.fillDenominator).toBe(fillDenominator);
   });

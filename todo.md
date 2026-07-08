@@ -450,6 +450,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: committed exact-only terminal fill ACK followup now routes through
      clear handling instead of falling back into book-progress repair when
      legacy coarse ratio is absent.
+   - Partial: account-level cross-j fill ACK validation now relies on the shared
+     exact progress validator for both source and target cumulative amounts
+     instead of a duplicate source-only exact-ratio check.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
