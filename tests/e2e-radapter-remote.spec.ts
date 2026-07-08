@@ -1620,7 +1620,7 @@ test('health admin keeps QA evidence link-only and runtime adapter local', async
   await page.goto(`${API_BASE_URL}/radapter?ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(readKey)}`, {
     waitUntil: 'domcontentloaded',
   });
-  await expect(page).toHaveURL(/\/app\?runtime=remote&ws=.*#accounts$/);
+  await expect(page).toHaveURL(/\/app#accounts$/);
   await page.waitForFunction(() => {
     const view = window as typeof window & {
       __xlnRuntimeAdapter?: { status: () => { connected?: boolean; authLevel?: string | null } };
@@ -1628,6 +1628,17 @@ test('health admin keeps QA evidence link-only and runtime adapter local', async
     const status = (view as any).__xln?.adapter?.status();
     return status?.connected === true && status.authLevel === 'inspect';
   }, null, { timeout: REMOTE_E2E_WAIT_MS });
+  const appState = await page.evaluate(() => ({
+    url: window.location.href,
+    activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws') || '',
+    storedAccess: localStorage.getItem('xln-runtime-adapter-access') || '',
+    sessionKey: sessionStorage.getItem('xln-runtime-adapter-key') || '',
+  }));
+  expect(appState.url).not.toContain('runtime=remote');
+  expect(appState.url).not.toContain('ws=');
+  expect(appState.activeWsUrl).toBe(wsUrl);
+  expect(appState.storedAccess).toBe('read');
+  expect(appState.sessionKey).toBe(readKey);
   await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 
   await page.goto(`${API_BASE_URL}/admin`, { waitUntil: 'domcontentloaded' });

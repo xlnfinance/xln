@@ -30,6 +30,10 @@ describe('test artifact cleanup', () => {
       writeFile(root, 'frontend/build/index.html');
       writeFile(root, 'native/dist/xln.dmg');
       writeFile(root, 'tests/test-results/old.png');
+      writeFile(root, '.logs/soak/old.json');
+      writeFile(root, '.logs/system-tests/old/log.txt');
+      writeFile(root, '.logs/gates/report.json');
+      writeFile(root, '.logs/bench-radapter/result.json');
 
       const summary = cleanupTestArtifactsBeforeRun({
         cwd: root,
@@ -46,12 +50,20 @@ describe('test artifact cleanup', () => {
       expect(summary.removed).toContain('frontend/build');
       expect(summary.removed).toContain('native/dist');
       expect(summary.removed).toContain('tests/test-results');
+      expect(summary.removed).toContain('.logs/soak');
+      expect(summary.removed).toContain('.logs/system-tests');
+      expect(summary.removed).toContain('.logs/gates');
+      expect(summary.removed).toContain('.logs/bench-radapter');
       expect(existsSync(join(root, '.logs/e2e-parallel'))).toBe(false);
       expect(existsSync(join(root, '.logs/scenarios-parallel'))).toBe(false);
       expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
       expect(existsSync(join(root, 'frontend/build'))).toBe(false);
       expect(existsSync(join(root, 'native/dist'))).toBe(false);
       expect(existsSync(join(root, 'tests/test-results'))).toBe(false);
+      expect(existsSync(join(root, '.logs/soak'))).toBe(false);
+      expect(existsSync(join(root, '.logs/system-tests'))).toBe(false);
+      expect(existsSync(join(root, '.logs/gates'))).toBe(false);
+      expect(existsSync(join(root, '.logs/bench-radapter'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
