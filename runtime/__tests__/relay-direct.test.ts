@@ -21,13 +21,14 @@ type SentMessage = {
   payload?: string;
 };
 
-const makeSocket = (options: { readyState?: number; sendResult?: boolean | number | void } = {}) => {
+const makeSocket = (options: { readyState?: number; sendResult?: boolean | number | void; sendThrows?: string } = {}) => {
   const sent: SentMessage[] = [];
   return {
     sent,
     ws: {
       readyState: options.readyState ?? 1,
       send(raw: string) {
+        if (options.sendThrows) throw new Error(options.sendThrows);
         sent.push(JSON.parse(raw) as SentMessage);
         return options.sendResult ?? true;
       },
@@ -221,6 +222,67 @@ describe('relay direct entity delivery', () => {
         retryable: true,
         fatal: false,
         terminal: false,
+      },
+    });
+  });
+
+  test('falls back with typed delivery event when direct relay socket send throws', () => {
+    const sourceSeed = 'relay-direct-send-throw-source';
+    const targetSeed = 'relay-direct-send-throw-target';
+    const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
+    const targetRuntimeId = deriveSignerAddressSync(targetSeed, '1').toLowerCase();
+    const sourcePubKey = pubKeyToHex(deriveEncryptionKeyPair(sourceSeed).publicKey);
+    const targetPubKey = pubKeyToHex(deriveEncryptionKeyPair(targetSeed).publicKey);
+    const store = createRelayStore(sourceRuntimeId);
+    const targetSocket = makeSocket({ sendThrows: 'socket exploded' });
+    const logs: string[] = [];
+
+    cacheEncryptionKey(store, sourceRuntimeId, sourcePubKey);
+    cacheEncryptionKey(store, targetRuntimeId, targetPubKey);
+    expect(registerClient(store, targetRuntimeId, targetSocket.ws)).toBe(true);
+    expect(hasConnectedEncryptedRelayClient(store, targetRuntimeId)).toBe(true);
+
+    const input: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: `0x${'bc'.repeat(32)}`,
+      entityTxs: [],
+    };
+
+    const delivery = sendEntityInputDirectViaRelaySocketDelivery(
+      store,
+      { runtimeId: sourceRuntimeId } as Env,
+      targetRuntimeId,
+      input,
+      (_key, message) => logs.push(message),
+      45678,
+    );
+
+    expect(delivery).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SEND_FAILED',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+    });
+    expect(targetSocket.sent).toEqual([]);
+    expect(logs[0]).toContain('socket exploded');
+    expect(store.debugEvents.at(-1)).toMatchObject({
+      event: 'delivery',
+      from: sourceRuntimeId,
+      to: targetRuntimeId,
+      status: 'send-failed',
+      reason: 'ROUTE_DIRECT_SEND_THROW',
+      delivery: {
+        outcome: 'failed',
+        code: 'ROUTE_DIRECT_SEND_THROW',
+        retryable: true,
+        fatal: false,
+        terminal: false,
+      },
+      details: {
+        entityId: input.entityId,
+        txs: 0,
+        error: 'socket exploded',
       },
     });
   });

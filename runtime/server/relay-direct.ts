@@ -150,10 +150,25 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
       code: 'ROUTE_DIRECT_MISS_FALLBACK',
     });
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     logOneShot(
       `direct-dispatch-send-failed:${targetRuntimeId}`,
-      `[RELAY] Direct dispatch send failed for runtime ${targetRuntimeId.slice(0, 10)}: ${(error as Error).message}`,
+      `[RELAY] Direct dispatch send failed for runtime ${targetRuntimeId.slice(0, 10)}: ${reason}`,
     );
+    pushDebugEvent(relayStore, {
+      event: 'delivery',
+      from: fromRuntimeId,
+      to: targetRuntimeId,
+      msgType: 'entity_input',
+      encrypted: true,
+      status: 'send-failed',
+      reason: 'ROUTE_DIRECT_SEND_THROW',
+      details: {
+        entityId: input.entityId,
+        txs: input.entityTxs?.length ?? 0,
+        error: reason,
+      },
+    });
     return deliveryDeferred({
       outcome: 'deferred',
       code: 'ROUTE_DIRECT_SEND_FAILED',

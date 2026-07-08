@@ -338,6 +338,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: relay pending flush now checks each send result and retains the
      current plus remaining queued messages on send failure instead of dropping
      them before delivery is confirmed.
+   - Partial: process-local relay direct dispatch now emits typed delivery
+     debug metadata for thrown send/encrypt failures instead of only returning
+     a deferred result to the caller.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 
