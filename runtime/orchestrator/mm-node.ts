@@ -82,7 +82,7 @@ import {
 import { resolveCrossJurisdictionRuntimeTopology } from '../cross-jurisdiction-boundary';
 import { crossJurisdictionBookOwnerRef } from '../cross-jurisdiction-orderbook';
 import { getJurisdictionStackId } from '../jurisdiction-stack';
-import { sameJurisdictionIdentityOrNameOnlyFallback } from '../jurisdiction-runtime';
+import { getJurisdictionIdentityRef } from '../jurisdiction-runtime';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import {
@@ -598,22 +598,22 @@ const toEntityJurisdictionConfig = (jurisdiction: JurisdictionConfig): MarketMak
   chainId: jurisdiction.chainId,
 });
 
-const sameImportedJurisdiction = (target: JurisdictionConfig, existingName: string, replica: unknown): boolean =>
-  sameJurisdictionIdentityOrNameOnlyFallback(target, {
-    ...(replica && typeof replica === 'object' ? replica : {}),
-    name: (replica as { name?: unknown } | null | undefined)?.name || existingName,
-  });
+const sameImportedJurisdiction = (target: JurisdictionConfig, replica: unknown): boolean => {
+  const targetRef = getJurisdictionIdentityRef(target);
+  const replicaRef = getJurisdictionIdentityRef(replica);
+  return Boolean(targetRef && replicaRef && targetRef === replicaRef);
+};
 
 const hasJurisdictionReplica = (env: Env, jurisdiction: JurisdictionConfig): boolean => {
-  for (const [existing, replica] of env.jReplicas?.entries?.() || []) {
-    if (sameImportedJurisdiction(jurisdiction, String(existing || ''), replica)) return true;
+  for (const replica of env.jReplicas?.values?.() || []) {
+    if (sameImportedJurisdiction(jurisdiction, replica)) return true;
   }
   return false;
 };
 
 const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {
-  for (const [existing, replica] of env.jReplicas?.entries?.() || []) {
-    if (sameImportedJurisdiction(jurisdiction, String(existing || ''), replica)) {
+  for (const replica of env.jReplicas?.values?.() || []) {
+    if (sameImportedJurisdiction(jurisdiction, replica)) {
       return Boolean(replica?.jadapter);
     }
   }

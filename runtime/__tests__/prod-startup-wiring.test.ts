@@ -218,6 +218,9 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('prewarmLocalMarketMakerSignerKeys();');
     expect(mmNode.indexOf('prewarmLocalMarketMakerSignerKeys();')).toBeLessThan(mmNode.indexOf('startRuntimeLoop(env, {'));
     expect(mmNode).toContain('const hasLiveJurisdictionAdapter = (env: Env, jurisdiction: JurisdictionConfig): boolean => {');
+    expect(mmNode).toContain('const targetRef = getJurisdictionIdentityRef(target);');
+    expect(mmNode).toContain('const replicaRef = getJurisdictionIdentityRef(replica);');
+    expect(mmNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');
     expect(mmNode).toContain('if (hasJurisdictionReplica(env, jurisdiction) && hasLiveJurisdictionAdapter(env, jurisdiction)) return;');
     const runtimeSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     expect(runtimeSource).toContain('const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));');
