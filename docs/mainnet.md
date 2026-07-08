@@ -76,7 +76,8 @@ Required:
 - delayed-last-resort tower action remains green;
 - tower backup and last-resort disputer roles stay independently configurable
   even when served by one daemon;
-- Peer State Refresh exists for honest-peer recovery when towers are absent;
+- Peer State Refresh has recovery-candidate plumbing, but the honest-peer
+  endpoint and drill are still required before this is mainnet-complete;
 - persistence repair/recovery tooling is documented and usable;
 - restore drills cover wiped browser, restart, and offline user cases.
 

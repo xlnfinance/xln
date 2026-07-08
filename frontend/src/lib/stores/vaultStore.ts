@@ -270,13 +270,25 @@ type TowerDiscoverPayload = {
   error?: string;
 };
 
-export type RuntimeRecoveryCandidateSource = 'tower' | 'file';
+export type RuntimeRecoveryCandidateSource = 'tower' | 'file' | 'peer';
+
+export type RuntimeRecoveryPeerRequest = {
+  runtimeId: string;
+  lookupKey: string;
+};
+
+export type RuntimeRecoveryPeerSource = {
+  id?: string;
+  label: string;
+  fetchBundles: (request: RuntimeRecoveryPeerRequest) => Promise<unknown>;
+};
 
 export type RuntimeRecoveryCandidate = {
   id: string;
   source: RuntimeRecoveryCandidateSource;
   sourceLabel: string;
   towerUrl?: string;
+  peerId?: string;
   receipt?: TowerReceiptV1;
   encryptedBundles: EncryptedRuntimeRecoveryBundleV1[];
   bundles: RuntimeRecoveryBundleV1[];
@@ -296,6 +308,7 @@ export type RuntimeRecoveryDiscoveryResult = {
   candidates: RuntimeRecoveryCandidate[];
   errors: string[];
   checkedTowers: number;
+  checkedPeers: number;
 };
 
 type TowerServerInfo = {
@@ -783,6 +796,7 @@ const buildRuntimeRecoveryCandidate = async (
     encryptedBundles: EncryptedRuntimeRecoveryBundleV1[];
     xln: XLNModule;
     towerUrl?: string;
+    peerId?: string;
     receipt?: TowerReceiptV1;
   },
 ): Promise<RuntimeRecoveryCandidate> => {
@@ -818,6 +832,7 @@ const buildRuntimeRecoveryCandidate = async (
     source: input.source,
     sourceLabel: input.sourceLabel,
     ...(input.towerUrl ? { towerUrl: input.towerUrl } : {}),
+    ...(input.peerId ? { peerId: input.peerId } : {}),
     ...(input.receipt ? { receipt: input.receipt } : {}),
     encryptedBundles: input.encryptedBundles,
     bundles,
@@ -868,6 +883,7 @@ export async function discoverRuntimeRecoveryCandidates(
   options: {
     recovery?: RuntimeRecoveryConfig;
     towers?: RecoveryTowerConfig[];
+    peers?: RuntimeRecoveryPeerSource[];
     xln?: XLNModule;
   } = {},
 ): Promise<RuntimeRecoveryDiscoveryResult> {
@@ -895,6 +911,7 @@ export async function discoverRuntimeRecoveryCandidates(
   const towers = getConfiguredRecoveryTowers(runtimeProbe);
   const candidates: RuntimeRecoveryCandidate[] = [];
   const errors: string[] = [];
+  const peers = options.peers || [];
 
   for (const tower of towers) {
     try {
@@ -934,6 +951,29 @@ export async function discoverRuntimeRecoveryCandidates(
     }
   }
 
+  for (const peer of peers) {
+    const sourceLabel = String(peer.label || peer.id || 'Peer').trim() || 'Peer';
+    try {
+      const payload = await peer.fetchBundles({ runtimeId, lookupKey });
+      const encryptedBundles = extractEncryptedRecoveryBundles(payload);
+      if (encryptedBundles.length === 0) {
+        errors.push(`${sourceLabel}:PEER_RECOVERY_BUNDLE_EMPTY`);
+        continue;
+      }
+      candidates.push(await buildRuntimeRecoveryCandidate({
+        source: 'peer',
+        sourceLabel,
+        ...(peer.id ? { peerId: peer.id } : {}),
+        seed,
+        expectedRuntimeId: runtimeId,
+        encryptedBundles,
+        xln,
+      }));
+    } catch (error) {
+      errors.push(`${sourceLabel}:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   candidates.sort(sortRecoveryCandidatesByTip);
   return {
     runtimeId,
@@ -941,6 +981,7 @@ export async function discoverRuntimeRecoveryCandidates(
     candidates,
     errors,
     checkedTowers: towers.length,
+    checkedPeers: peers.length,
   };
 }
 

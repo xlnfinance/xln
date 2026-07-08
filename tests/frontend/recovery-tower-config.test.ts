@@ -345,6 +345,7 @@ test('runtime recovery discovery asks every tower and sorts candidates by runtim
     'http://127.0.0.1:9101': encryptedBundle(7, 700),
     'http://127.0.0.1:9102': encryptedBundle(30, 3000),
   };
+  const peerBundle = encryptedBundle(42, 4_200);
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -377,6 +378,14 @@ test('runtime recovery discovery asks every tower and sorts candidates by runtim
         { url: 'http://127.0.0.1:9101', towerMode: 'blind_backup' },
         { url: 'http://127.0.0.1:9102', towerMode: 'blind_backup' },
       ],
+      peers: [{
+        id: 'peer-a',
+        label: 'Peer A',
+        fetchBundles: async (request) => {
+          expect(request).toEqual({ runtimeId, lookupKey });
+          return { bundles: [peerBundle] };
+        },
+      }],
       xln: {
         deriveRuntimeRecoveryLookupKey: () => lookupKey,
         decryptRuntimeRecoveryBundle: async (encrypted: EncryptedRuntimeRecoveryBundleV1) => ({
@@ -394,11 +403,21 @@ test('runtime recovery discovery asks every tower and sorts candidates by runtim
     });
 
     expect(result.checkedTowers).toBe(2);
+    expect(result.checkedPeers).toBe(1);
     expect(calls.filter((call) => call.includes('/api/recovery/discover'))).toHaveLength(2);
     expect(calls.filter((call) => call.includes('/api/tower/restore'))).toHaveLength(2);
-    expect(result.candidates).toHaveLength(2);
-    expect(result.candidates[0]?.runtimeHeight).toBe(30);
-    expect(result.candidates[1]?.runtimeHeight).toBe(7);
+    expect(result.candidates).toHaveLength(3);
+    expect(result.candidates[0]).toMatchObject({
+      source: 'peer',
+      sourceLabel: 'Peer A',
+      peerId: 'peer-a',
+      runtimeHeight: 42,
+    });
+    expect(result.candidates[1]).toMatchObject({
+      source: 'tower',
+      runtimeHeight: 30,
+    });
+    expect(result.candidates[2]?.runtimeHeight).toBe(7);
   } finally {
     globalThis.fetch = originalFetch;
   }
