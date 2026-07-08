@@ -25,6 +25,10 @@ file and older docs disagree, prefer code and tests first, then this file.
 - Removed old agent scratchpads and top-level audit drafts from the live tree.
   Current consensus/signature/contract concerns are represented below instead
   of scattered through dated request documents.
+- Closed default test-artifact cleanup for test pipelines: runners remove old
+  generated test output before new runs unless `--keep-test-artifacts`,
+  `--no-cleanup`, or `XLN_KEEP_TEST_ARTIFACTS` says otherwise, and the default
+  workspace budget gate is 50GiB.
 - Archived the stale admin/QA backlog from `docs/todo.md` to
   `docs/archive/planning/todo-2026-06-25-admin-qa.md`; `bun run check`
   now fails if another non-archived `todo.md`/`next.md` appears outside the
@@ -380,6 +384,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      of falling back to matching display names.
    - Partial: deleted the remaining runtime jurisdiction name-fallback helper;
      tests now assert name-only jurisdiction objects are not identity matches.
+   - Partial: `/api/jurisdictions` and hub runtime jurisdiction payloads now
+     preserve configured/runtime display labels instead of forcing `arrakis` to
+     `Testnet`.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

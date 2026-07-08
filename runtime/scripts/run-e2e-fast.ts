@@ -2,6 +2,11 @@
 
 import { spawn } from 'node:child_process';
 
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+} from './test-artifact-cleanup';
+
 const FAST_E2E_TARGETS = [
   {
     file: 'tests/e2e-payment-smoke.spec.ts',
@@ -79,6 +84,11 @@ const FAST_E2E_TARGETS = [
 
 const fastTargets = FAST_E2E_TARGETS.map((target) => `${target.file}::${target.title}`);
 const passthrough = process.argv.slice(2);
+cleanupTestArtifactsBeforeRun({
+  reason: 'e2e-fast',
+  scope: 'e2e',
+  argv: passthrough,
+});
 const args = [
   'runtime/scripts/run-e2e-parallel-isolated.ts',
   ...passthrough,
@@ -95,7 +105,13 @@ const args = [
   '--max-failures=1',
 ];
 
-const child = spawn('bun', args, { stdio: 'inherit' });
+const child = spawn('bun', args, {
+  env: {
+    ...process.env,
+    [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
+  },
+  stdio: 'inherit',
+});
 child.on('exit', (code, signal) => {
   if (signal) {
     process.kill(process.pid, signal);

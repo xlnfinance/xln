@@ -9,21 +9,9 @@ import { createStructuredLogger } from '../logger';
 import { isRecord } from '../server-utils';
 
 const serverLog = createStructuredLogger('server');
-const PRIMARY_TESTNET_JURISDICTION_NAME = 'Testnet';
 
-const normalizeJurisdictionDisplayName = (value: unknown): string => {
-  const name = String(value || '').trim();
-  const normalized = name.toLowerCase();
-  if (
-    normalized === 'arrakis'
-    || normalized === 'arrakis (shared anvil)'
-    || normalized === 'shared anvil'
-    || normalized === 'wakanda'
-  ) {
-    return PRIMARY_TESTNET_JURISDICTION_NAME;
-  }
-  return name;
-};
+const normalizeJurisdictionDisplayName = (value: unknown): string =>
+  String(value || '').trim();
 
 export const updateJurisdictionsJson = async (
   contracts: JAdapter['addresses'],
@@ -71,9 +59,10 @@ export const updateJurisdictionsJson = async (
       if (key !== 'arrakis' && key.startsWith('arrakis_')) delete jurisdictions[key];
     }
     const existingArrakis = jurisdictions['arrakis'] ?? {};
+    const arrakisDisplayName = normalizeJurisdictionDisplayName(existingArrakis['name']) || 'arrakis';
     jurisdictions['arrakis'] = {
       ...existingArrakis,
-      name: 'Testnet',
+      name: arrakisDisplayName,
       chainId: chainIdOverride ?? 31337,
       rpc: publicRpc,
       rebalancePolicyUsd: existingArrakis['rebalancePolicyUsd'] ?? defaults.rebalancePolicyUsd,
@@ -158,6 +147,10 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
 
   const version = await readCanonicalJurisdictionsVersion();
   const networkVersion = await readCanonicalNetworkVersion();
+  const displayName =
+    normalizeJurisdictionDisplayName(replica.name || jurisdictionName) ||
+    normalizeJurisdictionDisplayName(jurisdictionName) ||
+    'arrakis';
   const payload = {
     version,
     deployVersion: networkVersion,
@@ -165,7 +158,7 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
       arrakis: {
-        name: normalizeJurisdictionDisplayName(replica.name || jurisdictionName) || PRIMARY_TESTNET_JURISDICTION_NAME,
+        name: displayName,
         chainId: Number(replica.chainId || 31337),
         rpc: toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || replica.rpcs?.[0] || '/rpc')),
         contracts: {

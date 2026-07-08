@@ -152,6 +152,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('hubsOnline &&');
 
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/server/jurisdictions.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime-tx-handlers.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
@@ -173,6 +174,15 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || \'\')');
     expect(hubNode).not.toContain("normalized === 'arrakis'");
     expect(hubNode).not.toContain("normalized === 'wakanda'");
+    expect(hubNode).not.toContain('PRIMARY_TESTNET_JURISDICTION_NAME');
+    expect(serverJurisdictions).toContain("const normalizeJurisdictionDisplayName = (value: unknown): string =>");
+    expect(serverJurisdictions).not.toContain("normalized === 'arrakis'");
+    expect(serverJurisdictions).not.toContain("normalized === 'wakanda'");
+    expect(serverJurisdictions).not.toContain("name: 'Testnet'");
+    expect(serverJurisdictions).not.toContain('PRIMARY_TESTNET_JURISDICTION_NAME');
+    expect(serverJurisdictions).toContain("const arrakisDisplayName = normalizeJurisdictionDisplayName(existingArrakis['name']) || 'arrakis';");
+    expect(serverJurisdictions).toContain('name: arrakisDisplayName');
+    expect(serverJurisdictions).toContain('name: displayName');
     expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
     expect(hubNode).toContain('entry.jurisdictionRef &&');
     expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');
@@ -884,6 +894,7 @@ describe('production startup wiring', () => {
     const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
     const allTestsFast = readFileSync(join(repoRoot, 'runtime/scripts/run-all-tests-fast.ts'), 'utf8');
     const unitTestsRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-unit-tests.ts'), 'utf8');
+    const e2eFastRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-fast.ts'), 'utf8');
     const systemRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-system-tests-parallel.ts'), 'utf8');
     const cleanupHelper = readFileSync(join(repoRoot, 'runtime/scripts/test-artifact-cleanup.ts'), 'utf8');
     const bootstrapSoundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
@@ -940,6 +951,10 @@ describe('production startup wiring', () => {
     expect(unitTestsRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
     expect(unitTestsRunner).toContain("'--keep-test-artifacts'");
     expect(unitTestsRunner).toContain("'--no-cleanup'");
+    expect(e2eFastRunner).toContain('cleanupTestArtifactsBeforeRun({');
+    expect(e2eFastRunner).toContain("reason: 'e2e-fast'");
+    expect(e2eFastRunner).toContain("scope: 'e2e'");
+    expect(e2eFastRunner).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
     expect(allTestsFast).toContain('const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);');
     expect(allTestsFast).toContain('e2eEnv,');
     expect(systemRunner).toContain("import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';");

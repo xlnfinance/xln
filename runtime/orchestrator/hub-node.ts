@@ -281,8 +281,6 @@ type JurisdictionsFile = {
   defaults?: Record<string, unknown>;
 };
 
-const PRIMARY_TESTNET_JURISDICTION_NAME = 'Testnet';
-
 const normalizeJurisdictionDisplayName = (value: unknown): string =>
   String(value || '').trim();
 
@@ -714,9 +712,10 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
     const jurisdictions = current.jurisdictions ?? {};
     const targetKey = 'arrakis';
     const previous = jurisdictions[targetKey] ?? {};
+    const displayName = normalizeJurisdictionDisplayName(previous.name) || targetKey;
     jurisdictions[targetKey] = {
       ...previous,
-      name: normalizeJurisdictionDisplayName(previous.name) || PRIMARY_TESTNET_JURISDICTION_NAME,
+      name: displayName,
       chainId: Number(jadapter.chainId || 31337),
       rpc: publicRpcUrl,
       explorer: previous.explorer ?? '',
@@ -803,6 +802,10 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
 
   const version = readCurrentJurisdictionsVersion();
   const networkVersion = readCurrentNetworkVersion();
+  const displayName =
+    normalizeJurisdictionDisplayName(replica.name || activeName) ||
+    normalizeJurisdictionDisplayName(activeName) ||
+    'arrakis';
   return JSON.stringify({
     version,
     deployVersion: networkVersion,
@@ -810,7 +813,7 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
       arrakis: {
-        name: normalizeJurisdictionDisplayName(replica.name || activeName) || PRIMARY_TESTNET_JURISDICTION_NAME,
+        name: displayName,
         chainId: Number(replica.chainId || 31337),
         rpc: toPublicRpcUrl(String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc')),
         contracts: {
