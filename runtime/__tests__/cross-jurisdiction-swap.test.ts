@@ -1679,6 +1679,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     const remaining = getCrossJurisdictionRouteRemainingAmounts(ratioOnlyExactRoute);
     const cancelAck = buildCrossJurisdictionCancelAck(ratioOnlyExactRoute.orderId, ratioOnlyExactRoute);
     const closeProof = buildCrossJurisdictionCloseProof(ratioOnlyExactRoute, '0x');
+    const sourceBinding = buildCrossJurisdictionPullBinding(ratioOnlyExactRoute, 'source');
+    const targetBinding = buildCrossJurisdictionPullBinding(ratioOnlyExactRoute, 'target');
 
     expect(remaining.filledSourceAmount).toBe(10_000_000_000_000_000n);
     expect(remaining.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
@@ -1690,6 +1692,14 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(cancelAck.data.fillDenominator).toBe(4n);
     expect(closeProof.cumulativeSourceAmount).toBe(10_000_000_000_000_000n);
     expect(closeProof.cumulativeTargetAmount).toBe(25_000_000_000_000_000_000n);
+    expect(sourceBinding.fillNumerator).toBe(1n);
+    expect(sourceBinding.fillDenominator).toBe(4n);
+    expect(sourceBinding.filledSourceAmount).toBe(10_000_000_000_000_000n);
+    expect(sourceBinding.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
+    expect(targetBinding.fillNumerator).toBe(1n);
+    expect(targetBinding.fillDenominator).toBe(4n);
+    expect(targetBinding.filledSourceAmount).toBe(10_000_000_000_000_000n);
+    expect(targetBinding.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
     expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(remaining.filledSourceAmount);
   });
 

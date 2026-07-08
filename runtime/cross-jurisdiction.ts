@@ -920,12 +920,16 @@ export function cloneCrossJurisdictionPullBinding(
   }
   if (binding.status) clone.status = binding.status;
   const cumulativeFillRatio = optionalNumber(binding.cumulativeFillRatio);
+  const fillNumerator = optionalBigInt(binding.fillNumerator);
+  const fillDenominator = optionalBigInt(binding.fillDenominator);
   const claimedRatio = optionalNumber(binding.claimedRatio);
   const filledSourceAmount = optionalBigInt(binding.filledSourceAmount);
   const filledTargetAmount = optionalBigInt(binding.filledTargetAmount);
   const sourceClaimed = optionalBigInt(binding.sourceClaimed);
   const targetClaimed = optionalBigInt(binding.targetClaimed);
   if (cumulativeFillRatio !== undefined) clone.cumulativeFillRatio = cumulativeFillRatio;
+  if (fillNumerator !== undefined) clone.fillNumerator = fillNumerator;
+  if (fillDenominator !== undefined) clone.fillDenominator = fillDenominator;
   if (claimedRatio !== undefined) clone.claimedRatio = claimedRatio;
   if (filledSourceAmount !== undefined) clone.filledSourceAmount = filledSourceAmount;
   if (filledTargetAmount !== undefined) clone.filledTargetAmount = filledTargetAmount;
@@ -940,6 +944,11 @@ export function buildCrossJurisdictionPullBinding(
   leg: CrossJurisdictionPullBinding['leg'],
 ): CrossJurisdictionPullBinding {
   const canonical = withCanonicalCrossJurisdictionRouteHash(route);
+  const committedFill = getCrossJurisdictionCommittedFillAmounts(canonical);
+  const hasCommittedFill =
+    committedFill.fillRatio > 0 ||
+    committedFill.filledSourceAmount > 0n ||
+    committedFill.filledTargetAmount > 0n;
   return cloneCrossJurisdictionPullBinding({
     orderId: canonical.orderId,
     routeHash: canonical.routeHash || deriveCrossJurisdictionRouteHash(canonical),
@@ -948,9 +957,11 @@ export function buildCrossJurisdictionPullBinding(
     ...(canonical.sourceCloseProof ? { sourceCloseProof: canonical.sourceCloseProof } : {}),
     status: canonical.status,
     ...(canonical.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: canonical.cumulativeFillRatio } : {}),
+    ...(canonical.fillNumerator !== undefined ? { fillNumerator: canonical.fillNumerator } : {}),
+    ...(canonical.fillDenominator !== undefined ? { fillDenominator: canonical.fillDenominator } : {}),
     ...(canonical.claimedRatio !== undefined ? { claimedRatio: canonical.claimedRatio } : {}),
-    ...(canonical.filledSourceAmount !== undefined ? { filledSourceAmount: canonical.filledSourceAmount } : {}),
-    ...(canonical.filledTargetAmount !== undefined ? { filledTargetAmount: canonical.filledTargetAmount } : {}),
+    ...(hasCommittedFill ? { filledSourceAmount: committedFill.filledSourceAmount } : {}),
+    ...(hasCommittedFill ? { filledTargetAmount: committedFill.filledTargetAmount } : {}),
     ...(canonical.sourceClaimed !== undefined ? { sourceClaimed: canonical.sourceClaimed } : {}),
     ...(canonical.targetClaimed !== undefined ? { targetClaimed: canonical.targetClaimed } : {}),
     ...(canonical.clearingPolicy ? { clearingPolicy: canonical.clearingPolicy } : {}),
@@ -963,6 +974,11 @@ export function buildCommittedCrossJurisdictionPullBinding(
 ): CrossJurisdictionPullBinding {
   const routeHash = String(route.routeHash || '').toLowerCase();
   if (!routeHash) throw new Error(`CROSS_J_ROUTE_HASH_MISSING:${route.orderId}`);
+  const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
+  const hasCommittedFill =
+    committedFill.fillRatio > 0 ||
+    committedFill.filledSourceAmount > 0n ||
+    committedFill.filledTargetAmount > 0n;
   // Use this only after the route has entered committed account state. Immutable
   // economic terms were already route-hash checked at admission/swap_offer time;
   // fill progress is mutable and deliberately not part of the route hash.
@@ -974,9 +990,11 @@ export function buildCommittedCrossJurisdictionPullBinding(
     ...(route.sourceCloseProof ? { sourceCloseProof: route.sourceCloseProof } : {}),
     status: route.status,
     ...(route.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: route.cumulativeFillRatio } : {}),
+    ...(route.fillNumerator !== undefined ? { fillNumerator: route.fillNumerator } : {}),
+    ...(route.fillDenominator !== undefined ? { fillDenominator: route.fillDenominator } : {}),
     ...(route.claimedRatio !== undefined ? { claimedRatio: route.claimedRatio } : {}),
-    ...(route.filledSourceAmount !== undefined ? { filledSourceAmount: route.filledSourceAmount } : {}),
-    ...(route.filledTargetAmount !== undefined ? { filledTargetAmount: route.filledTargetAmount } : {}),
+    ...(hasCommittedFill ? { filledSourceAmount: committedFill.filledSourceAmount } : {}),
+    ...(hasCommittedFill ? { filledTargetAmount: committedFill.filledTargetAmount } : {}),
     ...(route.sourceClaimed !== undefined ? { sourceClaimed: route.sourceClaimed } : {}),
     ...(route.targetClaimed !== undefined ? { targetClaimed: route.targetClaimed } : {}),
     ...(route.clearingPolicy ? { clearingPolicy: route.clearingPolicy } : {}),
