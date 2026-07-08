@@ -327,6 +327,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: relay router and process-local relay direct dispatch now share
      one relay send-result predicate for `false` and negative native send
      return values.
+   - Partial: P2P no-pubkey debug and gossip-refresh decisions now read
+     `delivery.code` instead of reparsing thrown error text at call sites.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

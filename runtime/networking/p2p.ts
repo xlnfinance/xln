@@ -184,6 +184,12 @@ const p2pSendThrowResult = (
   );
 };
 
+const p2pShouldRefreshGossip = (delivery: DeliveryResult): boolean =>
+  delivery.code === 'P2P_NO_PUBKEY';
+
+const p2pSendThrowDebugCode = (delivery: DeliveryResult): string =>
+  p2pShouldRefreshGossip(delivery) ? 'P2P_NO_PUBKEY_DELIVERY_FAILED' : 'P2P_SEND_THROW';
+
 const p2pPendingExpiredResult = (
   transport: EntityInputDeliveryTransport,
   ageMs: number,
@@ -591,27 +597,17 @@ export class RuntimeP2P {
       } catch (error) {
         const message = (error as Error).message || String(error);
         const delivery = p2pSendThrowResult(transport, message);
-        if (message.includes('P2P_NO_PUBKEY')) {
-          this.sendDebugEvent({
-            level: 'error',
-            code: 'P2P_NO_PUBKEY_DELIVERY_FAILED',
-            message,
-            targetRuntimeId: normalizedTargetRuntimeId,
-            entityId: input.entityId,
-            transport,
-            delivery,
-          });
+        this.sendDebugEvent({
+          level: 'error',
+          code: p2pSendThrowDebugCode(delivery),
+          message,
+          targetRuntimeId: normalizedTargetRuntimeId,
+          entityId: input.entityId,
+          transport,
+          delivery,
+        });
+        if (p2pShouldRefreshGossip(delivery)) {
           this.refreshGossip();
-        } else {
-          this.sendDebugEvent({
-            level: 'error',
-            code: 'P2P_SEND_THROW',
-            message,
-            targetRuntimeId: normalizedTargetRuntimeId,
-            entityId: input.entityId,
-            transport,
-            delivery,
-          });
         }
         throw new Error(
           `P2P_ENTITY_INPUT_SEND_THROW: runtime=${normalizedTargetRuntimeId} entity=${input.entityId} ` +
@@ -765,7 +761,7 @@ export class RuntimeP2P {
             transport,
             delivery,
           });
-          if (message.includes('P2P_NO_PUBKEY')) {
+          if (p2pShouldRefreshGossip(delivery)) {
             this.refreshGossip();
           }
           if (disposition.retry) remaining.push(entry);
