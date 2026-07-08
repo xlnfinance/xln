@@ -2476,6 +2476,11 @@ const server = Bun.serve({
           ready: false,
           error: readiness.error,
           reason: readiness.reason,
+          category: readiness.category,
+          code: readiness.code,
+          retryable: readiness.retryable,
+          fatal: readiness.fatal,
+          failure: readiness.failure,
           degraded: readiness.degraded,
           manifest: {
             issuedAt: 0,

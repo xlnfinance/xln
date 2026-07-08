@@ -1,4 +1,9 @@
 import type { AggregatedHealth } from './orchestrator-types';
+import {
+  classifyRuntimeImportReadinessReason,
+  type RuntimeFailureCategory,
+  type RuntimeFailureSignal,
+} from '../failure-taxonomy';
 
 export type RuntimeImportReadinessDecision =
   | { ok: true }
@@ -7,6 +12,11 @@ export type RuntimeImportReadinessDecision =
     status: 503;
     error: 'RUNTIME_IMPORT_NETWORK_NOT_READY';
     reason: string;
+    category: RuntimeFailureCategory;
+    code: string;
+    retryable: boolean;
+    fatal: boolean;
+    failure: RuntimeFailureSignal;
     degraded: string[];
   };
 
@@ -23,13 +33,21 @@ export const resolveRuntimeImportReadiness = (
   >,
 ): RuntimeImportReadinessDecision => {
   const degraded = Array.isArray(health.degraded) ? health.degraded : [];
-  const fail = (reason: string): RuntimeImportReadinessDecision => ({
-    ok: false,
-    status: 503,
-    error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
-    reason,
-    degraded,
-  });
+  const fail = (reason: string): RuntimeImportReadinessDecision => {
+    const failure = classifyRuntimeImportReadinessReason(reason);
+    return {
+      ok: false,
+      status: 503,
+      error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
+      reason,
+      category: failure.category,
+      code: failure.code,
+      retryable: failure.retryable,
+      fatal: failure.fatal,
+      failure,
+      degraded,
+    };
+  };
 
   if (health.reset?.inProgress === true) return fail('reset-in-progress');
   if (health.systemOk !== true) return fail('system-not-ok');

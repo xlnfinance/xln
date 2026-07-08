@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { classifyRuntimeImportReadinessReason } from '../failure-taxonomy';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 import type { AggregatedHealth } from '../orchestrator/orchestrator-types';
 
@@ -58,6 +59,17 @@ describe('runtime import readiness gate', () => {
       status: 503,
       error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
       reason: 'system-not-ok',
+      category: 'TransientRace',
+      code: 'SYSTEM_NOT_OK',
+      retryable: true,
+      fatal: false,
+      failure: {
+        category: 'TransientRace',
+        code: 'SYSTEM_NOT_OK',
+        message: 'system-not-ok',
+        retryable: true,
+        fatal: false,
+      },
       degraded: ['marketMaker'],
     });
   });
@@ -72,6 +84,17 @@ describe('runtime import readiness gate', () => {
       status: 503,
       error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
       reason: 'degraded:bootstrapReserveTargets',
+      category: 'TransientRace',
+      code: 'DEGRADED',
+      retryable: true,
+      fatal: false,
+      failure: {
+        category: 'TransientRace',
+        code: 'DEGRADED',
+        message: 'degraded:bootstrapReserveTargets',
+        retryable: true,
+        fatal: false,
+      },
       degraded: ['bootstrapReserveTargets'],
     });
   });
@@ -85,7 +108,33 @@ describe('runtime import readiness gate', () => {
       status: 503,
       error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
       reason: 'reset-in-progress',
+      category: 'TransientRace',
+      code: 'RESET_IN_PROGRESS',
+      retryable: true,
+      fatal: false,
+      failure: {
+        category: 'TransientRace',
+        code: 'RESET_IN_PROGRESS',
+        message: 'reset-in-progress',
+        retryable: true,
+        fatal: false,
+      },
       degraded: [],
+    });
+  });
+
+  test('classifies non-startup readiness reasons without string parsing at callers', () => {
+    expect(classifyRuntimeImportReadinessReason('NO_MANAGED_RUNTIME_IMPORTS')).toMatchObject({
+      category: 'ExpectedEmpty',
+      code: 'NO_MANAGED_RUNTIME_IMPORTS',
+      retryable: false,
+      fatal: false,
+    });
+    expect(classifyRuntimeImportReadinessReason('INVALID_RUNTIME_IMPORT_MANIFEST:bad-token')).toMatchObject({
+      category: 'Contradiction',
+      code: 'INVALID_RUNTIME_IMPORT_MANIFEST',
+      retryable: false,
+      fatal: true,
     });
   });
 });

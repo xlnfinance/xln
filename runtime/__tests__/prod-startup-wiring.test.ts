@@ -530,6 +530,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
     expect(orchestrator).toContain('if (!readiness.ok) {');
     expect(orchestrator).toContain('ready: false,');
+    expect(orchestrator).toContain('category: readiness.category,');
+    expect(orchestrator).toContain('failure: readiness.failure,');
     expect(orchestrator).toContain('entries: [],');
     expect(orchestrator).toContain("'Retry-After': '2'");
     expect(orchestrator).not.toContain('status: readiness.status, headers');
@@ -674,11 +676,11 @@ describe('production startup wiring', () => {
     const benchmark = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-benchmark.ts'), 'utf8');
     const soundcheck = readFileSync(join(repoRoot, 'runtime/scripts/bootstrap-soundcheck.ts'), 'utf8');
 
-    expect(packageJson).toContain('"prod:bootstrap:bench": "bun runtime/scripts/bootstrap-benchmark.ts"');
-    expect(packageJson).toContain('"prod:bootstrap:fresh": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=fresh"');
-    expect(packageJson).toContain('"prod:bootstrap:template": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"');
-    expect(packageJson).toContain('"prod:bootstrap:clone": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"');
-    expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
+    expect(packageJson).toContain('"prod:bootstrap:bench": "bun runtime/scripts/test-artifact-cleanup.ts --reason=bootstrap-bench && bun runtime/scripts/bootstrap-benchmark.ts"');
+    expect(packageJson).toContain('"prod:bootstrap:fresh": "bun runtime/scripts/test-artifact-cleanup.ts --reason=bootstrap-fresh && bun runtime/scripts/bootstrap-soundcheck.ts --mode=fresh"');
+    expect(packageJson).toContain('"prod:bootstrap:template": "bun runtime/scripts/test-artifact-cleanup.ts --reason=bootstrap-template && bun runtime/scripts/bootstrap-soundcheck.ts --mode=template"');
+    expect(packageJson).toContain('"prod:bootstrap:clone": "bun runtime/scripts/test-artifact-cleanup.ts --reason=bootstrap-clone && bun runtime/scripts/bootstrap-soundcheck.ts --mode=clone"');
+    expect(packageJson).toContain('"prod:bootstrap:hydrate": "bun runtime/scripts/test-artifact-cleanup.ts --reason=bootstrap-hydrate && bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate"');
     expect(soundcheck).toContain("import { createConnection } from 'node:net';");
     expect(soundcheck).toContain('const localProdSmokePortOffsets = [0, 1, 4, 7, 8, 10, 11, 12, 13];');
     expect(soundcheck).toContain('const findPortBaseForIndex = async (index: number): Promise<number>');

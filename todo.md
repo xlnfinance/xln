@@ -232,6 +232,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: recovery discovery now records structured tower/peer failures
      with `ExpectedEmpty`, `TransientRace`, and `Contradiction` categories while
      keeping legacy warning strings for non-empty failures only.
+   - Partial: runtime import readiness now returns typed `failure` metadata
+     (`category`, `code`, `retryable`, `fatal`) instead of forcing health/API
+     callers to parse `reason` strings.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.
