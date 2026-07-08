@@ -32,6 +32,7 @@ import type { Profile } from './networking/gossip';
 import { verifyProfileSignature, type ProfileVerifyResult } from './networking/profile-signing';
 import { verifyHelloAuth } from './networking/hello-auth';
 import type { RuntimeWsMessage } from './networking/ws-protocol';
+import { isDeliveryDelivered, type DeliveryResult } from './delivery-result';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -142,27 +143,33 @@ const flushPendingToSocket = <Socket>(
   return result.delivered;
 };
 
-const trySendRelay = (
+const relayDeliveryMetadata = (status: string, reason?: string) =>
+  classifyRelayDeliveryEvent({ status, ...(reason ? { reason } : {}) }) ?? undefined;
+
+const requireRelayDeliveryMetadata = (status: string, reason?: string): DeliveryResult => {
+  const delivery = relayDeliveryMetadata(status, reason);
+  if (!delivery) throw new Error(`RELAY_DELIVERY_CLASSIFICATION_MISSING: status=${status}`);
+  return delivery;
+};
+
+const sendRelayDelivery = (
   config: RelayRouterConfig,
   ws: RelaySocketLike,
   msg: unknown,
-): boolean => {
-  if (!isRelaySocketOpen(ws)) return false;
+): DeliveryResult => {
+  if (!isRelaySocketOpen(ws)) {
+    return requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN');
+  }
   try {
     const result = config.send(ws, safeStringify(msg));
-    return !isRelaySendResultFailure(result);
+    if (isRelaySendResultFailure(result)) {
+      return requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_FALSE');
+    }
+    return requireRelayDeliveryMetadata('delivered');
   } catch (error) {
-    pushDebugEvent(config.store, {
-      event: 'delivery',
-      status: 'send-failed',
-      reason: error instanceof Error ? error.message : String(error),
-    });
-    return false;
+    return requireRelayDeliveryMetadata('send-failed', error instanceof Error ? error.message : String(error));
   }
 };
-
-const relayDeliveryMetadata = (status: string, reason?: string) =>
-  classifyRelayDeliveryEvent({ status, ...(reason ? { reason } : {}) }) ?? undefined;
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -545,7 +552,8 @@ export const relayRoute = async (
     // If addressed to a remote WS client (not local), forward directly
     const target = store.clients.get(toKey);
     if (target && !isLocalTarget) {
-      if (trySendRelay(config, target.ws, msg)) {
+      const relayDelivery = sendRelayDelivery(config, target.ws, msg);
+      if (isDeliveryDelivered(relayDelivery)) {
         relayLog(`[RELAY] → forwarding to WS client`);
         pushDebugEvent(store, {
           event: 'delivery',
@@ -554,6 +562,7 @@ export const relayRoute = async (
           msgType: type,
           encrypted: msg.encrypted === true,
           status: 'delivered',
+          delivery: relayDelivery,
           details: {
             traceId,
             ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
@@ -563,15 +572,21 @@ export const relayRoute = async (
         return;
       }
       removeClient(store, target.ws);
+      const sendFailure = relayDelivery.code !== 'TARGET_SOCKET_NOT_OPEN' && relayDelivery.code !== 'DELIVERY_STALE_TARGET';
       pushDebugEvent(store, {
         event: 'delivery',
         from,
         to,
         msgType: type,
         encrypted: msg.encrypted === true,
-        status: 'stale-target',
-        reason: 'TARGET_SOCKET_NOT_OPEN',
-        details: { traceId },
+        status: sendFailure ? 'send-failed' : 'stale-target',
+        reason: relayDelivery.failure?.message ?? relayDelivery.code,
+        delivery: relayDelivery,
+        details: {
+          traceId,
+          ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
+          ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
+        },
       });
     }
 

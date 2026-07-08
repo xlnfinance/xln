@@ -423,6 +423,72 @@ describe('relay-router gossip fanout', () => {
     )).toBe(true);
   });
 
+  test('reports typed send failure when forwarding to active target socket returns false', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const message = JSON.parse(raw);
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(message);
+        sentBySocket.set(ws, bucket);
+        if (ws.label === 'B' && (message as { id?: string }).id === 'deliver-send-false') {
+          return false;
+        }
+      },
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+    const wsB: FakeWs = { label: 'B', readyState: 1 };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+    await relayRoute(config, wsA, {
+      type: 'entity_input',
+      id: 'deliver-send-false',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-account-input',
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    });
+
+    expect(store.clients.has(RUNTIME_B)).toBe(false);
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+      inReplyTo: 'deliver-send-false',
+      to: RUNTIME_B,
+    });
+    expect(store.debugEvents.find(event =>
+      event.event === 'delivery' &&
+      event.status === 'send-failed' &&
+      event.to === RUNTIME_B
+    )).toMatchObject({
+      reason: 'RELAY_SEND_FALSE',
+      delivery: {
+        outcome: 'failed',
+        code: 'RELAY_SEND_FALSE',
+        retryable: true,
+        fatal: false,
+        terminal: false,
+        failure: {
+          category: 'TransientRace',
+          code: 'RELAY_SEND_FALSE',
+        },
+      },
+      details: {
+        traceId: 'deliver-send-false',
+        entityId: ENTITY_B,
+        txs: 1,
+      },
+    });
+  });
+
   test('forwards encrypted accountInput to the active target runtime socket', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
