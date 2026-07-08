@@ -158,10 +158,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     filterEntityActivityRows,
   } from './entity-activity';
   import {
-    entityWorkspaceTabForLens,
-    type EntityWorkspaceLensId,
-  } from './entity-workspace';
-  import {
     emptyEntityWorkspaceRuntimeFrameContext,
     type EntityWorkspaceRuntimeFrameContext,
   } from './runtime-frame-context';
@@ -252,13 +248,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   export let userModeHeader: boolean = false;
   export let selectedJurisdiction: string | null = null;
   export let allowHeaderAddRuntime: boolean = false;
-  export let allowHeaderDeleteRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
   export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
   export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
-  export let workspaceLens: EntityWorkspaceLensId = 'wallet';
-  export let workspaceLensNavigationVersion = 0;
   export let runtimeProjectionFrame: RuntimeAdapterViewFrame | null = null;
   const dispatch = createEventDispatcher();
   let env: Env | EnvSnapshot | null = null;
@@ -307,8 +300,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   let accountWorkspaceTab: AccountWorkspaceTab = getInitialAccountWorkspaceTab();
   let assetWorkspaceTab: AssetWorkspaceTab = 'move';
   let configureWorkspaceTab: ConfigureWorkspaceTab = 'extend-credit';
-  let lastWorkspaceLens: EntityWorkspaceLensId | null = null;
-  let lastWorkspaceLensNavigationVersion = 0;
   let workspaceAccountId = '';
   let configureTokenId = 1;
   let pendingBatchSubmitting = false;
@@ -357,30 +348,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     if (next.accountWorkspaceTab) accountWorkspaceTab = next.accountWorkspaceTab;
     if (next.configureWorkspaceTab) configureWorkspaceTab = next.configureWorkspaceTab;
     if ('selectedJurisdictionName' in next) selectedJurisdictionName = next.selectedJurisdictionName ?? null;
-  }
-  function hasExplicitEntityPanelHashRoute(): boolean {
-    if (typeof window === 'undefined') return false;
-    return canonicalizeEntityPanelRoute(getLocationHashRoute(window.location)) !== null;
-  }
-  $: if (
-    workspaceLens
-    && (
-      workspaceLens !== lastWorkspaceLens
-      || workspaceLensNavigationVersion !== lastWorkspaceLensNavigationVersion
-    )
-  ) {
-    const userTriggeredLensNavigation =
-      workspaceLensNavigationVersion > 0
-      && workspaceLensNavigationVersion !== lastWorkspaceLensNavigationVersion;
-    lastWorkspaceLens = workspaceLens;
-    lastWorkspaceLensNavigationVersion = workspaceLensNavigationVersion;
-    const shouldApplyDefaultLensRoute = !hasExplicitEntityPanelHashRoute() && workspaceLens !== 'wallet';
-    if (userTriggeredLensNavigation || shouldApplyDefaultLensRoute) {
-      const lensRoute = entityWorkspaceTabForLens(workspaceLens);
-      activeTab = lensRoute.activeTab;
-      if (lensRoute.accountWorkspaceTab) accountWorkspaceTab = lensRoute.accountWorkspaceTab as AccountWorkspaceTab;
-      if (lensRoute.settingsSubview) settingsSubview = lensRoute.settingsSubview as SettingsSubview;
-    }
   }
   function syncHashToCurrentView(): void {
     if (typeof window === 'undefined') return;
@@ -3487,9 +3454,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   function handleHeaderAddRuntime() {
     dispatch('addRuntime');
   }
-  function handleHeaderDeleteRuntime(event: CustomEvent<{ runtimeId: string }>) {
-    dispatch('deleteRuntime', event.detail);
-  }
   function applyAccountNavigationPatch(patch: AccountWorkspaceNavigationPatch): void {
     if (patch.activeTab) activeTab = patch.activeTab;
     if (patch.accountWorkspaceTab) accountWorkspaceTab = patch.accountWorkspaceTab;
@@ -3633,11 +3597,9 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         {userModeHeader}
         {resettingEverything}
         {allowHeaderAddRuntime}
-        {allowHeaderDeleteRuntime}
         {headerRuntimeAddLabel}
         {handleResetEverything}
         {handleHeaderAddRuntime}
-        {handleHeaderDeleteRuntime}
         {handleHeaderAddJurisdiction}
         {handleHeaderAddEntity}
         {handleEntitySelect}
@@ -3665,7 +3627,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         {entityJurisdictionBadge}
         {heroDisplayName}
         {allowHeaderAddRuntime}
-        {allowHeaderDeleteRuntime}
         {headerRuntimeAddLabel}
         {currentEntityValue}
         {copiedMetaField}
@@ -3677,7 +3638,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         {copyMetaValue}
         {selectTopLevelTab}
         {handleHeaderAddRuntime}
-        {handleHeaderDeleteRuntime}
         {handleHeaderAddJurisdiction}
         {handleHeaderAddEntity}
         {handleEntitySelect}

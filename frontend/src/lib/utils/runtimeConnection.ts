@@ -11,6 +11,7 @@ import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
 import { initializeXLN, switchAppRuntimeAdapter } from '$lib/stores/xlnStore';
 import {
   REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+  REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
   persistRemoteRuntimeImports,
   remoteRuntimeIdForWsUrl,
   readRemoteRuntimeTokenAudience,
@@ -29,7 +30,24 @@ export type RemoteRuntimeRequest = {
   requiresAuthPaste?: boolean;
 };
 
-const RUNTIME_PARAM_KEYS = ['runtime', 'adapter', 'ws', 'runtimeWs', 'token', 'authKey', 'key', 'auth'];
+const RUNTIME_PARAM_KEYS = [
+  'runtime',
+  'adapter',
+  'ws',
+  'runtimeWs',
+  'token',
+  'authKey',
+  'key',
+  'auth',
+  'runtimeList',
+  'runtime-list',
+  'runtimeImport',
+  REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+  REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
+  'runtimes',
+  'remote-runtimes',
+  'xlnRemoteRuntimes',
+];
 const PROJECTION_RUNTIME_CONNECT_TIMEOUT_MS = 6_000;
 const PROJECTION_RUNTIME_REQUEST_TIMEOUT_MS = 5_000;
 const PROJECTION_RUNTIME_RECONNECT_MAX_MS = 2_000;
@@ -104,6 +122,10 @@ export function runtimeImportPayloadFromParams(params: URLSearchParams): string 
   ).trim();
 }
 
+export function runtimeImportSourceFromParams(params: URLSearchParams): string {
+  return String(params.get(REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM) || '').trim();
+}
+
 export function readRemoteRuntimeImportPayloadFromUrl(): string {
   if (typeof window === 'undefined') return '';
   return runtimeImportPayloadFromParams(new URLSearchParams(window.location.search));
@@ -116,6 +138,20 @@ export function readRemoteRuntimeImportPayloadFromHash(): string {
   if (!hash) return '';
   const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
   return runtimeImportPayloadFromParams(params);
+}
+
+export function readRemoteRuntimeImportSourceFromUrl(): string {
+  if (typeof window === 'undefined') return '';
+  return runtimeImportSourceFromParams(new URLSearchParams(window.location.search));
+}
+
+export function readRemoteRuntimeImportSourceFromHash(): string {
+  if (typeof window === 'undefined') return '';
+  const rawHash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+  const hash = rawHash.trim();
+  if (!hash) return '';
+  const params = new URLSearchParams(hash.startsWith('?') ? hash.slice(1) : hash);
+  return runtimeImportSourceFromParams(params);
 }
 
 export function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {
@@ -157,6 +193,20 @@ export function stripRemoteRuntimeParamsFromHistory(): void {
   const url = new URL(window.location.href);
   for (const key of RUNTIME_PARAM_KEYS) {
     url.searchParams.delete(key);
+  }
+  const rawHash = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
+  if (rawHash.trim()) {
+    const hashParams = new URLSearchParams(rawHash);
+    let changed = false;
+    for (const key of RUNTIME_PARAM_KEYS) {
+      if (!hashParams.has(key)) continue;
+      hashParams.delete(key);
+      changed = true;
+    }
+    if (changed) {
+      const nextHash = hashParams.toString();
+      url.hash = nextHash ? `#${nextHash}` : '';
+    }
   }
   const nextPath = `${url.pathname}${url.search}${url.hash}`;
   setTimeout(() => {

@@ -264,6 +264,11 @@ describe('runtime recovery tower', () => {
       }],
       createdAt: 5678,
     });
+    const checkpoint = buildRuntimeCheckpointSnapshot(env);
+    expect(checkpoint['runtimeSeed']).toBeUndefined();
+    expect(bundle.checkpoint?.['runtimeSeed']).toBeUndefined();
+    expect(serializeTaggedJson(bundle)).not.toContain(runtimeSeed);
+
     const checkpointReplica = (bundle.checkpoint!['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
     expect(checkpointReplica?.proposal).toBeUndefined();
     expect(checkpointReplica?.lockedFrame).toBeUndefined();

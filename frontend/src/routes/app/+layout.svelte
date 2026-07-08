@@ -26,13 +26,21 @@
     isInactiveTabStandby
   } from '$lib/utils/activeTabLock';
   import {
-    REMOTE_RUNTIME_IMPORT_HASH_PARAM,
+    describeRemoteRuntimeImportError,
+    parseRemoteRuntimeImportPayload,
   } from '$lib/utils/remoteRuntimeImport';
+  import {
+    fetchRemoteRuntimeImportSource,
+    importRemoteRuntimeEntries,
+    persistActiveRemoteRuntimeImport,
+  } from '$lib/utils/remoteRuntimeImportFlow';
   import {
     hasAcceptedRemoteRuntime,
     persistRemoteRuntimeRequest,
     readRemoteRuntimeImportPayloadFromHash,
     readRemoteRuntimeImportPayloadFromUrl,
+    readRemoteRuntimeImportSourceFromHash,
+    readRemoteRuntimeImportSourceFromUrl,
     readRemoteRuntimeRequestFromUrl,
     remoteAcceptKey,
     stripRemoteRuntimeParamsFromHistory,
@@ -131,16 +139,29 @@
     return rawMode === 'remote' || rawMode === 'ws' || params.has('ws') || params.has('runtimeWs');
   }
 
-  function redirectRemoteRuntimeImportToManager(payload: string): void {
-    if (!browser) return;
-    const url = new URL('/radapter/manage', window.location.origin);
-    url.hash = `${REMOTE_RUNTIME_IMPORT_HASH_PARAM}=${encodeURIComponent(payload)}`;
-    window.location.replace(url.toString());
-  }
-
   function stripRemoteRuntimeParams(): void {
     if (!browser) return;
     stripRemoteRuntimeParamsFromHistory();
+  }
+
+  async function importRemoteRuntimesIntoApp(input: { payload?: string; source?: string }): Promise<void> {
+    const payload = String(input.payload || '').trim();
+    const source = String(input.source || '').trim();
+    if (!payload && !source) return;
+    isLoading.set(true);
+    error.set(null);
+    try {
+      const entries = source
+        ? await fetchRemoteRuntimeImportSource(source)
+        : parseRemoteRuntimeImportPayload(payload);
+      const result = await importRemoteRuntimeEntries(entries);
+      const first = result.validated[0]!;
+      persistActiveRemoteRuntimeImport(first);
+      stripRemoteRuntimeParams();
+    } catch (err) {
+      stripRemoteRuntimeParams();
+      throw new Error(describeRemoteRuntimeImportError(err));
+    }
   }
 
   async function bootAfterActiveTabClaim(options: {
@@ -372,11 +393,10 @@
     void (async () => {
       if (await ensureCurrentDeployVersion()) return;
       if (await maybeHandleResetHash()) return;
-      const remoteImportPayload = readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash();
-      if (remoteImportPayload) {
-        redirectRemoteRuntimeImportToManager(remoteImportPayload);
-        return;
-      }
+      await importRemoteRuntimesIntoApp({
+        payload: readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash(),
+        source: readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash(),
+      });
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
       if (remoteRequest?.requiresAuthPaste || (remoteRequest && !remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest))) {
         pendingRemoteRuntime = remoteRequest;

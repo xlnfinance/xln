@@ -62,7 +62,7 @@ import { safeStringify } from '../serialization-utils';
 import { projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
-import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../proof-builder';
+import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';
 import { buildRealHanko } from '../hanko/core';
 import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
 import { NobleCryptoProvider } from '../crypto-noble';
@@ -2978,6 +2978,31 @@ describe('audit fail-fast regressions', () => {
     );
   });
 
+  test('entity mempool admission rejects overflow before clone and push', async () => {
+    const env = createEmptyEnv('entity-mempool-admission-overflow');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const replica = makeReplicaMissingPrevFrameHash();
+    const queuedTx: EntityTx = {
+      type: 'chatMessage',
+      data: { message: 'already queued' },
+    };
+    replica.mempool = Array.from({ length: LIMITS.MEMPOOL_SIZE }, () => queuedTx);
+
+    const result = await applyEntityInput(env, replica, {
+      entityId: replica.entityId,
+      entityTxs: [{
+        type: 'chatMessage',
+        data: { message: 'must not allocate into mempool' },
+      }],
+    });
+
+    expect(result.workingReplica).toBe(replica);
+    expect(result.outputs).toEqual([]);
+    expect(result.jOutputs).toEqual([]);
+    expect(replica.mempool).toHaveLength(LIMITS.MEMPOOL_SIZE);
+  });
+
   test('entity commit catch-up does not apply unsigned proposed newState mutations', async () => {
     const seed = 'entity-commit-catch-up-state-binding seed alpha beta gamma';
     const env = createEmptyEnv(seed);
@@ -3211,6 +3236,73 @@ describe('audit fail-fast regressions', () => {
     expect(result.accountInput?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.prevHanko);
     expect(result.accountInput?.newAccountFrame.height).toBe(11);
     expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
+  });
+
+  test('receiver commit preserves explicit zero jHeight instead of falling back to account height', async () => {
+    const seed = 'account-frame-zero-jheight-receiver-commit';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = {
+      getDepositoryAddress: () => hex20('dd'),
+    } as typeof env.browserVM;
+    setDeltaTransformerAddress(hex20('99'));
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const makeFundedDelta = () => ({
+      ...createDefaultDelta(1),
+      leftCreditLimit: 10n,
+    });
+    const htlcTx: AccountTx = {
+      type: 'htlc_lock',
+      data: {
+        lockId: 'zero-jheight-lock',
+        hashlock: `0x${'31'.repeat(32)}`,
+        timelock: BigInt(env.timestamp + 60_000),
+        revealBeforeHeight: 1,
+        amount: 1n,
+        tokenId: 1,
+      },
+    };
+    const previousStateHash = `0x${'ab'.repeat(32)}`;
+    const proposerAccount = makeProposalAccount([htlcTx], left.entityId, right.entityId);
+    proposerAccount.currentHeight = 10;
+    proposerAccount.currentFrame = {
+      ...proposerAccount.currentFrame,
+      height: 10,
+      timestamp: env.timestamp - 1,
+      stateHash: previousStateHash,
+    };
+    proposerAccount.deltas.set(1, makeFundedDelta());
+
+    const proposed = await proposeAccountFrame(env, proposerAccount, false, 0);
+    if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
+    expect(proposed.success).toBe(true);
+    expect(proposed.accountInput?.newAccountFrame.jHeight).toBe(0);
+
+    const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
+    receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nonce: 0 };
+    receiverAccount.currentHeight = 10;
+    receiverAccount.currentFrame = {
+      ...receiverAccount.currentFrame,
+      height: 10,
+      timestamp: env.timestamp - 1,
+      stateHash: previousStateHash,
+    };
+    receiverAccount.deltas.set(1, makeFundedDelta());
+
+    const result = await applyAccountInput(env, receiverAccount, proposed.accountInput!);
+
+    expect(result.success).toBe(true);
+    expect(receiverAccount.currentHeight).toBe(11);
+    expect(receiverAccount.currentFrame.jHeight).toBe(0);
+    expect(receiverAccount.locks.has('zero-jheight-lock')).toBe(true);
   });
 
   test('account storage keeps last outbound ACK so restored runtimes can bundle the next frame', () => {

@@ -175,12 +175,14 @@ test('remote projection never materializes fake Env snapshots', () => {
 });
 
 test('remote runtime bulk import validates with bounded parallelism', () => {
-  const source = readFileSync('frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte', 'utf8');
+  const source = readFileSync('frontend/src/lib/utils/remoteRuntimeImportFlow.ts', 'utf8');
+  const managerSource = readFileSync('frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte', 'utf8');
   expect(source).toContain('const REMOTE_RUNTIME_IMPORT_CONCURRENCY = 4');
-  expect(source).toContain('const validateImportEntries = async');
+  expect(source).toContain('export const validateRemoteRuntimeImportEntries = async');
   expect(source).toContain('Array.from({ length: workerCount }');
   expect(source).toContain('await Promise.allSettled(workers)');
-  expect(source).toContain('const results = await validateImportEntries(entries, importedAt)');
+  expect(source).toContain('const results = await validateRemoteRuntimeImportEntries(entries, {');
+  expect(managerSource).toContain('importRemoteRuntimeEntries(entries');
   expect(source).not.toContain('for (const [index, entry] of entries.entries())');
 });
 

@@ -1177,6 +1177,7 @@ async function commitIncomingFrameOnRealState(
   accountMachine: AccountMachine,
   input: AccountInput,
   receivedFrame: AccountFrame,
+  frameJHeight: number,
   validation: IncomingFrameValidation,
   ourEntityId: string,
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
@@ -1192,14 +1193,13 @@ async function commitIncomingFrameOnRealState(
   }
 
   for (const tx of receivedFrame.accountTxs) {
-    const jHeightForCommit = receivedFrame.jHeight || accountMachine.currentHeight;
     const beforeSettlement = captureSettlementVector(accountMachine);
     const commitResult = await applyAccountTx(
       accountMachine,
       tx,
       receivedFrame.byLeft!,
       receivedFrame.timestamp,
-      jHeightForCommit,
+      frameJHeight,
       false,
       env,
     );
@@ -1578,6 +1578,7 @@ async function handleIncomingAccountFrame(
     accountMachine,
     input,
     preflight.receivedFrame,
+    preflight.frameJHeight,
     validationResult.validation,
     preflight.ourEntityId,
     validatedCounterpartyDisputeSeal,

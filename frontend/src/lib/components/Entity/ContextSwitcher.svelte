@@ -9,7 +9,7 @@
     type Runtime as StoreRuntime,
   } from '$lib/stores/runtimeStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
+  import { refreshRuntimeView, runtimeView, setRuntimeViewActiveEntityId } from '$lib/stores/runtimeViewStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import type { RuntimeAdapterEntitySummary } from '@xln/runtime/xln-api';
@@ -20,7 +20,6 @@
 
   export let tab: Tab;
   export let allowAddRuntime = false;
-  export let allowDeleteRuntime = false;
   export let allowAddJurisdiction = false;
   export let allowAddEntity = false;
   export let addRuntimeLabel = '+ Add Runtime';
@@ -54,9 +53,26 @@
     isSelf: boolean;
   };
 
+  type EntityMenuRow = EntitySummary & {
+    runtimeId: string;
+    groupSignerId: string;
+  };
+
+  type JurisdictionGroup = {
+    key: string;
+    label: string;
+    badge: JurisdictionBadgeInfo | null;
+    entities: EntityMenuRow[];
+  };
+
+  type RuntimeMenuGroup = RuntimeSummary & {
+    jurisdictions: JurisdictionGroup[];
+  };
+
   $: xlnReady = !!$xlnInstance;
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
   $: runtimeGroups = buildRuntimeGroups();
+  $: runtimeMenuGroups = buildRuntimeMenuGroups(runtimeGroups);
   $: controllerRuntimeId = normalizeId($runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id);
   $: currentGroup = runtimeGroups.find((group) => normalizeId(group.runtimeId) === controllerRuntimeId)
     || runtimeGroups.find((group) => group.runtimeId === $activeStoreRuntimeId)
@@ -146,6 +162,57 @@
         ? entities.filter((entity) => normalizeId(entity.entityId) !== normalizeId(selfEntity.entityId))
         : entities,
     };
+  }
+
+  function jurisdictionKey(entity: EntitySummary): string {
+    const name = String(entity.jurisdiction || 'Unassigned').trim() || 'Unassigned';
+    return `${name.toLowerCase()}|${entity.jurisdictionBadge?.title || ''}`;
+  }
+
+  function jurisdictionLabel(entity: EntitySummary): string {
+    return String(entity.jurisdiction || entity.jurisdictionBadge?.title || 'Unassigned').trim() || 'Unassigned';
+  }
+
+  function menuRowsForRuntime(group: RuntimeSummary): EntityMenuRow[] {
+    const entities = [
+      ...(group.selfEntity ? [group.selfEntity] : []),
+      ...group.derivedEntities,
+    ];
+    return entities.map((entity) => ({
+      ...entity,
+      runtimeId: group.runtimeId,
+      groupSignerId: group.signerId,
+    }));
+  }
+
+  function buildJurisdictionGroups(entities: EntityMenuRow[]): JurisdictionGroup[] {
+    const byJurisdiction = new Map<string, JurisdictionGroup>();
+    for (const entity of entities.slice().sort(compareEntityRows)) {
+      const key = jurisdictionKey(entity);
+      const group = byJurisdiction.get(key) ?? {
+        key,
+        label: jurisdictionLabel(entity),
+        badge: entity.jurisdictionBadge,
+        entities: [],
+      };
+      group.entities.push(entity);
+      byJurisdiction.set(key, group);
+    }
+    return Array.from(byJurisdiction.values()).sort((a, b) => compareStableText(a.label, b.label));
+  }
+
+  function buildRuntimeMenuGroups(groups: RuntimeSummary[]): RuntimeMenuGroup[] {
+    return groups
+      .map((group) => ({
+        ...group,
+        jurisdictions: buildJurisdictionGroups(menuRowsForRuntime(group)),
+      }))
+      .filter((group) => group.jurisdictions.length > 0);
+  }
+
+  function compareEntityRows(a: EntityMenuRow, b: EntityMenuRow): number {
+    if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1;
+    return compareStableText(a.name, b.name) || compareStableText(a.entityId, b.entityId);
   }
 
   function remoteRuntimeFallbackSummaries(runtime: StoreRuntime): RuntimeAdapterEntitySummary[] {
@@ -313,16 +380,23 @@
     return entity ? `${source} · ${entity}` : source;
   }
 
-  async function selectRemoteRuntime(runtimeId: string): Promise<void> {
+  async function selectRemoteRuntime(runtimeId: string, entityId = ''): Promise<void> {
     await runtimeOperations.selectRuntime(runtimeId);
-    await refreshRuntimeView({});
+    const normalizedEntityId = normalizeId(entityId);
+    if (normalizedEntityId) setRuntimeViewActiveEntityId(normalizedEntityId);
+    await refreshRuntimeView(normalizedEntityId ? { entityId: normalizedEntityId } : {});
   }
 
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entity: EntitySummary) {
     const group = runtimeGroups.find((candidate) => candidate.runtimeId === runtimeId);
     open = false;
     if (group?.source === 'remote') {
-      await selectRemoteRuntime(runtimeId);
+      await selectRemoteRuntime(runtimeId, entity.entityId);
+      dispatch('entitySelect', {
+        jurisdiction: entity.jurisdiction || 'browservm',
+        signerId: entity.signerId || signerId,
+        entityId: entity.entityId
+      });
       return;
     }
     await vaultOperations.selectRuntime(runtimeId);
@@ -331,22 +405,6 @@
       signerId: entity.signerId || signerId,
       entityId: entity.entityId
     });
-  }
-
-  async function selectRuntimeSelf(group: RuntimeSummary) {
-    open = false;
-    if (group.source === 'remote') {
-      await selectRemoteRuntime(group.runtimeId);
-      return;
-    }
-    await vaultOperations.selectRuntime(group.runtimeId);
-    if (group.selfEntity) {
-      dispatch('entitySelect', {
-        jurisdiction: group.selfEntity.jurisdiction || 'browservm',
-        signerId: group.selfEntity.signerId || group.signerId,
-        entityId: group.selfEntity.entityId
-      });
-    }
   }
 
   function handleAddRuntime() {
@@ -361,13 +419,6 @@
 
   function handleAddEntity() {
     dispatch('addEntity');
-    open = false;
-  }
-
-  async function handleDeleteRuntime(event: MouseEvent, group: RuntimeSummary): Promise<void> {
-    event.stopPropagation();
-    if (group.source === 'remote') await runtimeOperations.disconnect(group.runtimeId);
-    else dispatch('deleteRuntime', { runtimeId: group.runtimeId });
     open = false;
   }
 
@@ -420,82 +471,83 @@
 
   <div slot="menu" class="switcher-menu">
     <div class="runtime-list">
-      {#each runtimeGroups as group (group.runtimeId)}
-        <section class="runtime-group" class:active={group.runtimeId === currentGroup?.runtimeId}>
-          <div class="runtime-row">
-            <button
-              class="runtime-main"
-              data-testid="context-entity-row"
-              data-runtime-id={normalizeId(group.runtimeId)}
-              data-entity-id={normalizeId(group.selfEntity?.entityId)}
-              data-signer-id={normalizeId(group.selfEntity?.signerId || group.signerId)}
-              data-jurisdiction={group.selfEntity?.jurisdiction || ''}
-              on:click={() => void selectRuntimeSelf(group)}
-            >
-              {#if group.avatar}
-                <img src={group.avatar} alt="" class="runtime-avatar" />
-              {:else}
-                <span class="runtime-avatar placeholder">◎</span>
-              {/if}
-              <span class="runtime-copy">
-                <span class="runtime-name">
-                  {#if group.selfEntity?.name && !isOpaqueIdLabel(group.selfEntity.name)}
-                    {group.selfEntity.name}
-                  {:else}
-                    {group.runtimeLabel}
-                  {/if}
-                </span>
-                <span class="runtime-meta">
-                  {resolveRuntimeMeta(group)}
+      {#each runtimeMenuGroups as runtimeGroup (runtimeGroup.runtimeId)}
+        <section
+          class="runtime-menu-group"
+          class:active={normalizeId(runtimeGroup.runtimeId) === normalizeId(currentRuntimeId)}
+          data-testid="context-runtime-group"
+          data-runtime-id={normalizeId(runtimeGroup.runtimeId)}
+        >
+          <div class="runtime-heading">
+            {#if runtimeGroup.avatar}
+              <img src={runtimeGroup.avatar} alt="" class="runtime-heading-avatar" />
+            {:else}
+              <span class="runtime-heading-avatar placeholder">◎</span>
+            {/if}
+            <span class="runtime-heading-copy">
+              <span class="runtime-heading-title">
+                <span>{runtimeGroup.runtimeLabel}</span>
+                <span class={`runtime-source ${runtimeGroup.source}`} data-testid="context-runtime-source">
+                  {runtimeGroup.source}
                 </span>
               </span>
-              <span class="status-badge {group.status}">{group.status}</span>
-            </button>
-            {#if group.source === 'remote' || allowDeleteRuntime}
-              <button class="runtime-delete" on:click={(event) => void handleDeleteRuntime(event, group)} title={group.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}>
-                ×
-              </button>
-            {/if}
+              <span class="runtime-heading-meta">{resolveRuntimeMeta(runtimeGroup)}</span>
+            </span>
           </div>
 
-          {#if group.derivedEntities.length > 0}
-            <div class="derived-list">
-              {#each group.derivedEntities as entity (entity.entityId)}
-                <button
-                  class="entity-row"
-                  data-testid="context-entity-row"
-                  data-runtime-id={normalizeId(group.runtimeId)}
-                  data-entity-id={normalizeId(entity.entityId)}
-                  data-signer-id={normalizeId(entity.signerId)}
-                  data-jurisdiction={entity.jurisdiction || ''}
-                  on:click={() => void selectRuntimeEntity(group.runtimeId, group.signerId, entity)}
-                >
-                  <span class="entity-avatar-wrap">
-                    {#if entity.avatar}
-                      <img src={entity.avatar} alt="" class="entity-avatar" />
-                    {:else}
-                      <span class="entity-avatar placeholder">◌</span>
-                    {/if}
-                    {#if entity.jurisdictionBadge}
-                      <span
-                        class={`jurisdiction-badge ${entity.jurisdictionBadge.className}`}
-                        title={entity.jurisdictionBadge.title}
-                      >
-                        {entity.jurisdictionBadge.symbol}
-                      </span>
-                    {/if}
+          {#each runtimeGroup.jurisdictions as jurisdiction (jurisdiction.key)}
+            <section class="jurisdiction-group" data-testid="context-jurisdiction-group" data-jurisdiction={jurisdiction.label}>
+              <div class="jurisdiction-heading">
+                {#if jurisdiction.badge}
+                  <span
+                    class={`jurisdiction-heading-badge ${jurisdiction.badge.className}`}
+                    title={jurisdiction.badge.title}
+                  >
+                    {jurisdiction.badge.symbol}
                   </span>
-                  <span class="entity-copy">
-                    <span class="entity-name">{isOpaqueIdLabel(entity.name) ? truncateMiddle(entity.entityId) : entity.name}</span>
-                    <span class="entity-meta">{formatEntityMeta(entity.entityId)}</span>
-                  </span>
-                </button>
-              {/each}
-            </div>
-          {/if}
+                {/if}
+                <span>{jurisdiction.label}</span>
+              </div>
+
+              <div class="entity-list">
+                {#each jurisdiction.entities as entity (`${normalizeId(entity.runtimeId)}:${normalizeId(entity.entityId)}`)}
+                  <button
+                    class="entity-row"
+                    class:active={normalizeId(entity.entityId) === normalizeId(currentEntityId) && normalizeId(entity.runtimeId) === normalizeId(currentRuntimeId)}
+                    data-testid="context-entity-row"
+                    data-runtime-id={normalizeId(entity.runtimeId)}
+                    data-entity-id={normalizeId(entity.entityId)}
+                    data-signer-id={normalizeId(entity.signerId || entity.groupSignerId)}
+                    data-jurisdiction={entity.jurisdiction || ''}
+                    on:click={() => void selectRuntimeEntity(entity.runtimeId, entity.groupSignerId, entity)}
+                  >
+                    <span class="entity-avatar-wrap">
+                      {#if entity.avatar}
+                        <img src={entity.avatar} alt="" class="entity-avatar" />
+                      {:else}
+                        <span class="entity-avatar placeholder">◌</span>
+                      {/if}
+                      {#if entity.jurisdictionBadge}
+                        <span
+                          class={`jurisdiction-badge ${entity.jurisdictionBadge.className}`}
+                          title={entity.jurisdictionBadge.title}
+                        >
+                          {entity.jurisdictionBadge.symbol}
+                        </span>
+                      {/if}
+                    </span>
+                    <span class="entity-copy">
+                      <span class="entity-name">{isOpaqueIdLabel(entity.name) ? truncateMiddle(entity.entityId) : entity.name}</span>
+                      <span class="entity-meta">{formatEntityMeta(entity.entityId)}</span>
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            </section>
+            {/each}
         </section>
       {/each}
-	    </div>
+		    </div>
 
 	    <div class="menu-footer">
       {#if allowAddJurisdiction}
@@ -554,7 +606,6 @@
   }
 
   .pill-avatar,
-  .runtime-avatar,
   .entity-avatar {
     width: 28px;
     height: 28px;
@@ -630,7 +681,6 @@
   }
 
   .pill-copy,
-  .runtime-copy,
   .entity-copy {
     display: flex;
     flex-direction: column;
@@ -639,7 +689,6 @@
   }
 
   .pill-title,
-  .runtime-name,
   .entity-name {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -654,13 +703,12 @@
   }
 
   .pill-subtitle,
-  .runtime-meta,
   .entity-meta {
     font-size: 10px;
     color: #a8a29e;
   }
 
-  .runtime-name {
+  .entity-name {
     font-weight: 600;
   }
 
@@ -689,98 +737,147 @@
   .runtime-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
 
-  .runtime-group {
-    border: 1px solid #292524;
+  .runtime-menu-group {
+    border: 1px solid rgba(68, 64, 60, 0.8);
     border-radius: 12px;
-    background: #141210;
-    overflow: hidden;
+    background: #11100f;
+    padding: 7px;
   }
 
-  .runtime-group.active {
-    border-color: rgba(251, 191, 36, 0.45);
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.12);
+  .runtime-menu-group.active {
+    border-color: rgba(251, 191, 36, 0.36);
   }
 
-  .runtime-row {
-    display: flex;
-    align-items: stretch;
-    gap: 6px;
-    padding: 6px;
-  }
-
-  .runtime-main,
-  .entity-row,
-  .add-runtime-btn,
-  .runtime-delete {
-    border: none;
-    cursor: pointer;
-  }
-
-  .runtime-main {
+  .runtime-heading {
     display: flex;
     align-items: center;
     gap: 9px;
-    width: 100%;
-    padding: 9px 10px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.03);
-    color: #f5f5f4;
-    text-align: left;
+    padding: 5px 6px 8px;
   }
 
-  .runtime-main:hover,
-  .entity-row:hover,
-  .add-runtime-btn:hover {
-    background: rgba(255, 255, 255, 0.06);
-  }
-
-  .status-badge {
+  .runtime-heading-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    object-fit: cover;
     flex-shrink: 0;
-    padding: 4px 9px;
-    border-radius: 999px;
-    font-size: 9px;
+  }
+
+  .runtime-heading-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .runtime-heading-title,
+  .runtime-heading-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .runtime-heading-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #f5f5f4;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .runtime-heading-title > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .runtime-source {
+    flex-shrink: 0;
+    border: 1px solid rgba(168, 162, 158, 0.22);
+    border-radius: 5px;
+    padding: 1px 5px;
+    color: #a8a29e;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 1.35;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    border: 1px solid transparent;
   }
 
-  .status-badge.connected {
-    color: #86efac;
-    background: rgba(34, 197, 94, 0.12);
-    border-color: rgba(34, 197, 94, 0.24);
+  .runtime-source.remote {
+    border-color: rgba(96, 165, 250, 0.35);
+    color: #93c5fd;
   }
 
-  .status-badge.syncing {
+  .runtime-source.browser {
+    border-color: rgba(251, 191, 36, 0.28);
     color: #fde68a;
-    background: rgba(234, 179, 8, 0.12);
-    border-color: rgba(234, 179, 8, 0.24);
   }
 
-  .status-badge.disconnected,
-  .status-badge.error,
-  .status-badge.inactive {
-    color: #fca5a5;
-    background: rgba(239, 68, 68, 0.12);
-    border-color: rgba(239, 68, 68, 0.24);
+  .runtime-heading-meta {
+    color: #a8a29e;
+    font-size: 10px;
   }
 
-  .runtime-delete {
-    width: 34px;
-    border-radius: 10px;
-    background: rgba(239, 68, 68, 0.08);
-    color: rgba(248, 113, 113, 0.92);
-    font-size: 20px;
-    line-height: 1;
+  .jurisdiction-group {
+    border-top: 1px solid rgba(68, 64, 60, 0.65);
+    border-radius: 0;
+    background: #141210;
+    padding: 6px 0 0;
   }
 
-  .derived-list {
+  .jurisdiction-group + .jurisdiction-group {
+    margin-top: 6px;
+  }
+
+  .jurisdiction-heading {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 7px 7px;
+    color: #fbbf24;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .jurisdiction-heading-badge {
+    width: 14px;
+    height: 14px;
+    border-radius: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    color: #fff;
+  }
+
+  .jurisdiction-heading-badge.ethereum,
+  .jurisdiction-heading-badge.sepolia {
+    background: #3b82f6;
+  }
+
+  .jurisdiction-heading-badge.base {
+    background: #0052ff;
+  }
+
+  .jurisdiction-heading-badge.tron {
+    background: #ef4444;
+  }
+
+  .jurisdiction-heading-badge.local,
+  .jurisdiction-heading-badge.generic {
+    background: #52525b;
+  }
+
+  .entity-list {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    padding: 0 6px 6px 46px;
   }
 
   .entity-row {
@@ -793,6 +890,18 @@
     background: transparent;
     color: #d6d3d1;
     text-align: left;
+  }
+
+  .entity-row,
+  .add-runtime-btn {
+    border: none;
+    cursor: pointer;
+  }
+
+  .entity-row:hover,
+  .entity-row.active,
+  .add-runtime-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
   }
 
   .menu-footer {
@@ -849,17 +958,8 @@
       display: none;
     }
 
-    .runtime-row {
-      flex-direction: column;
-    }
-
-    .runtime-delete {
-      width: 100%;
-      min-height: 36px;
-    }
-
-    .derived-list {
-      padding-left: 8px;
+    .jurisdiction-heading {
+      padding-left: 4px;
     }
   }
 </style>

@@ -263,6 +263,8 @@ describe('remote runtime import manager utilities', () => {
     const runtimeCreation = readFileSync('frontend/src/lib/components/Views/RuntimeCreation.svelte', 'utf8');
     const runtimeStore = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
     const vaultStore = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+    const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+    const importFlow = readFileSync('frontend/src/lib/utils/remoteRuntimeImportFlow.ts', 'utf8');
 
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
     expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");
@@ -270,6 +272,13 @@ describe('remote runtime import manager utilities', () => {
     expect(runtimeCreation).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString())');
     expect(vaultStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports();');
     expect(runtimeStore).toContain('validateRemoteRuntimeEntry(entry, { index, importedAt })');
+    expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
+    expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
+    expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
+    expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');
+    expect(appLayout).not.toContain('redirectRemoteRuntimeImportToManager');
+    expect(importFlow).toContain('export const importRemoteRuntimeEntries = async');
+    expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
     expect(runtimeStore).not.toContain('/api/hubs');
   });
 });

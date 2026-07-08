@@ -7,11 +7,9 @@
   export let userModeHeader = false;
   export let resettingEverything = false;
   export let allowHeaderAddRuntime = false;
-  export let allowHeaderDeleteRuntime = false;
   export let headerRuntimeAddLabel = '+ Add Runtime';
   export let handleResetEverything: () => void | Promise<void> = () => {};
   export let handleHeaderAddRuntime: () => void = () => {};
-  export let handleHeaderDeleteRuntime: (event: CustomEvent<{ runtimeId: string }>) => void = () => {};
   export let handleHeaderAddJurisdiction: () => void = () => {};
   export let handleHeaderAddEntity: () => void = () => {};
   export let handleEntitySelect: (event: CustomEvent) => void = () => {};
@@ -23,12 +21,10 @@
       <ContextSwitcher
         {tab}
         allowAddRuntime={allowHeaderAddRuntime}
-        allowDeleteRuntime={allowHeaderDeleteRuntime}
         allowAddJurisdiction={true}
         allowAddEntity={true}
         addRuntimeLabel={headerRuntimeAddLabel}
         on:addRuntime={handleHeaderAddRuntime}
-        on:deleteRuntime={handleHeaderDeleteRuntime}
         on:addJurisdiction={handleHeaderAddJurisdiction}
         on:addEntity={handleHeaderAddEntity}
         on:entitySelect={handleEntitySelect}

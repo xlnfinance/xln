@@ -1,23 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import {
     connectRuntimeAdapter,
     disconnectRuntimeAdapter,
     runtimeControllerHandle,
   } from '$lib/stores/runtimeControllerStore';
   import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
-  import {
-    readStoredRemoteRuntimeImports,
-    resolveStoredRemoteRuntimeAuthKey,
-  } from '$lib/utils/remoteRuntimeImport';
   import { makeQaSeveritySignal, type QaSeveritySignal } from '@xln/runtime/qa/severity';
-
-  type Props = {
-    fullPage?: boolean;
-    autoConnect?: boolean;
-  };
-
-  let { fullPage = false, autoConnect = false }: Props = $props();
 
   let wsUrl = $state('');
   let authKey = $state('');
@@ -83,12 +71,6 @@
       evidence: [{ label: 'status', value: $runtimeControllerHandle.status }],
     });
   });
-
-  function defaultWsUrl(): string {
-    if (typeof window === 'undefined') return '';
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/rpc`;
-  }
 
   function errorMessage(value: unknown): string {
     return value instanceof Error ? value.message : String(value || 'Runtime adapter error');
@@ -160,70 +142,16 @@
     await refresh();
   }
 
-  function readStoredActiveRemote(): { wsUrl: string; authKey: string } | null {
-    if (typeof localStorage === 'undefined') return null;
-    const mode = localStorage.getItem('xln-runtime-adapter-mode') || '';
-    const storedWs = localStorage.getItem('xln-runtime-adapter-ws') || '';
-    if (mode !== 'remote' || !storedWs) return null;
-    const storedAccess = localStorage.getItem('xln-runtime-adapter-access') === 'admin' ? 'admin' : 'read';
-    const token = resolveStoredRemoteRuntimeAuthKey(storedWs, { requiredAccess: storedAccess });
-    return token ? { wsUrl: storedWs, authKey: token } : null;
-  }
-
-  function hydrateFromLocation(): boolean {
-    if (typeof window === 'undefined') return false;
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const explicitWsUrl = params.get('ws') || '';
-      const explicitAuthKey = params.get('token') || params.get('key') || params.get('auth') || '';
-      if (explicitWsUrl) {
-        wsUrl = explicitWsUrl;
-        authKey = explicitAuthKey || resolveStoredRemoteRuntimeAuthKey(explicitWsUrl);
-      } else {
-        const stored = readStoredActiveRemote();
-        wsUrl = stored?.wsUrl || readStoredRemoteRuntimeImports()[0]?.wsUrl || defaultWsUrl();
-        authKey = stored?.authKey || '';
-      }
-      if (params.has('token') || params.has('key') || params.has('auth')) {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('token');
-        url.searchParams.delete('key');
-        url.searchParams.delete('auth');
-        history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-      }
-      return Boolean(explicitWsUrl || authKey);
-    } catch (err) {
-      error = errorMessage(err);
-      wsUrl = defaultWsUrl();
-      authKey = '';
-      return false;
-    }
-  }
-
-  onMount(() => {
-    const shouldAutoConnect = hydrateFromLocation();
-    if (autoConnect && shouldAutoConnect) void connect();
-  });
 </script>
 
-<section id="runtime-adapter" class:full-page={fullPage} class="runtime-adapter-panel">
-  {#if fullPage}
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">xln admin</p>
-        <h1>Runtime Adapter Inspector</h1>
-      </div>
-      <a href="/health">Health admin</a>
-    </header>
-  {:else}
-    <div class="panel-head">
-      <div>
-        <h2>Runtime Adapter</h2>
-        <p class="sub">Frontend-only inspector for remote runtime snapshots</p>
-      </div>
-      <a class="panel-link" href="/radapter">Open inspector</a>
+<section id="runtime-adapter" class="runtime-adapter-panel">
+  <div class="panel-head">
+    <div>
+      <h2>Runtime Adapter</h2>
+      <p class="sub">Remote runtime frame reader for health debugging</p>
     </div>
-  {/if}
+    <a class="panel-link" href="/app">Open app</a>
+  </div>
 
   <div class="status-line">
     <span class:ok={adapterSeverity.severity === 'OK'} class:bad={adapterSeverity.severity === 'FAIL'}>{adapterSeverity.severity}</span>
@@ -390,17 +318,6 @@
     padding: 16px;
   }
 
-  .runtime-adapter-panel.full-page {
-    min-height: 100vh;
-    box-sizing: border-box;
-    border: 0;
-    border-radius: 0;
-    background: #0d1117;
-    color: #e6edf3;
-    padding: 28px;
-  }
-
-  .topbar,
   .panel-head,
   .status-line,
   .detail-head {
@@ -410,11 +327,6 @@
     gap: 16px;
   }
 
-  .topbar {
-    margin-bottom: 18px;
-  }
-
-  .topbar a,
   .panel-link {
     color: #dbeafe;
     text-decoration: none;
@@ -431,15 +343,10 @@
     text-transform: uppercase;
   }
 
-  h1,
   h2,
   h3 {
     margin: 0;
     letter-spacing: 0;
-  }
-
-  h1 {
-    font-size: 28px;
   }
 
   h2 {
@@ -728,7 +635,6 @@
       grid-template-columns: 1fr;
     }
 
-    .topbar,
     .panel-head,
     .detail-head {
       align-items: flex-start;

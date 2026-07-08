@@ -1,7 +1,5 @@
 import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
 
-export type EntityWorkspaceLensId = 'wallet' | 'ops' | 'liquidity' | 'audit';
-
 export type RuntimeWorkspaceMode = 'embedded' | 'remote';
 export type RuntimeWorkspaceAuthLevel = 'inspect' | 'admin' | null;
 
@@ -31,24 +29,10 @@ export type EntityWorkspaceProjection = Pick<
   runtimeId?: string | null;
 };
 
-export type EntityWorkspaceLens = {
-  id: EntityWorkspaceLensId;
-  enabled: boolean;
-  canWrite: boolean;
-  reason: string | null;
-};
-
 export type EntityWorkspaceCapabilities = {
   entityId: string;
   canRead: boolean;
-  canWrite: boolean;
-  readOnlyReason: string | null;
-  lenses: EntityWorkspaceLens[];
 };
-
-export const entityWorkspaceLensOrder: readonly EntityWorkspaceLensId[] = ['wallet', 'ops', 'liquidity', 'audit'];
-
-const hasCount = (value: unknown): boolean => Number(value || 0) > 0;
 
 const normalizeId = (value: string | null | undefined): string => String(value || '').trim().toLowerCase();
 
@@ -93,60 +77,14 @@ export const buildEntityWorkspaceView = (
   };
 };
 
-export const canMutateRuntime = (runtime: EntityWorkspaceRuntime): boolean =>
-  runtime.mode === 'embedded' || runtime.authLevel === 'admin';
-
 export const resolveEntityWorkspaceCapabilities = (
-  runtime: EntityWorkspaceRuntime,
+  _runtime: EntityWorkspaceRuntime,
   entity: EntityWorkspaceEntity,
 ): EntityWorkspaceCapabilities => {
   const entityId = String(entity.entityId || '').trim().toLowerCase();
   const canRead = entityId.length > 0;
-  const canWrite = canRead && canMutateRuntime(runtime);
-  const readOnlyReason = canRead && !canWrite
-    ? 'Remote runtime is connected with inspect access.'
-    : null;
-  const inspectOnly = canRead && !canWrite;
-  const hasAccounts = hasCount(entity.accountCount);
-  const hasBooks = hasCount(entity.bookCount);
-  const hasOpsSurface = entity.isHub === true || hasAccounts || hasCount(entity.proposalCount) || hasCount(entity.reserveCount);
-  const hasLiquiditySurface = entity.isHub === true || hasBooks;
-  const auditEnabled = canRead && (runtime.mode === 'remote' || runtime.authLevel === 'inspect' || runtime.authLevel === 'admin');
-  const inspectOnlyReason = 'Inspect access exposes audit surfaces only.';
-
   return {
     entityId,
     canRead,
-    canWrite,
-    readOnlyReason,
-    lenses: [
-      { id: 'wallet', enabled: canRead && !inspectOnly, canWrite, reason: canRead ? (inspectOnly ? inspectOnlyReason : null) : 'Select an entity.' },
-      { id: 'ops', enabled: canRead && !inspectOnly && hasOpsSurface, canWrite, reason: inspectOnly ? inspectOnlyReason : hasOpsSurface ? null : 'No operational surface detected.' },
-      { id: 'liquidity', enabled: canRead && !inspectOnly && hasLiquiditySurface, canWrite, reason: inspectOnly ? inspectOnlyReason : hasLiquiditySurface ? null : 'No liquidity surface detected.' },
-      { id: 'audit', enabled: auditEnabled, canWrite: false, reason: auditEnabled ? null : 'Audit lens requires a selected remote/runtime view.' },
-    ],
   };
-};
-
-export const defaultLensForCapabilities = (capabilities: EntityWorkspaceCapabilities): EntityWorkspaceLensId => {
-  for (const id of entityWorkspaceLensOrder) {
-    if (capabilities.lenses.find((lens) => lens.id === id && lens.enabled)) return id;
-  }
-  return 'wallet';
-};
-
-export const entityWorkspaceTabForLens = (
-  lens: EntityWorkspaceLensId,
-): { activeTab: 'assets' | 'accounts' | 'settings'; accountWorkspaceTab?: string; settingsSubview?: string } => {
-  switch (lens) {
-    case 'ops':
-      return { activeTab: 'accounts', accountWorkspaceTab: 'activity' };
-    case 'liquidity':
-      return { activeTab: 'accounts', accountWorkspaceTab: 'swap' };
-    case 'audit':
-      return { activeTab: 'accounts', accountWorkspaceTab: 'activity' };
-    case 'wallet':
-    default:
-      return { activeTab: 'assets' };
-  }
 };

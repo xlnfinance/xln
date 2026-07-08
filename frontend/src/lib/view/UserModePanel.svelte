@@ -12,7 +12,7 @@
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
-  import { activeRuntime as activeRuntimeStore, vaultOperations, allRuntimes } from '$lib/stores/vaultStore';
+  import { activeRuntime as activeRuntimeStore, vaultOperations } from '$lib/stores/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import {
     entityPositions,
@@ -873,33 +873,6 @@
     }
   }
 
-  async function handleRemoveRuntime(event: CustomEvent<{ runtimeId: string }>) {
-    const runtimeId = event.detail.runtimeId;
-    const runtime = get(allRuntimes).find(v => v.id === runtimeId);
-    const runtimeLabel = runtime?.label || runtimeId;
-
-    const isLast = get(runtimes).size <= 1;
-    const msg = isLast
-      ? `Delete "${runtimeLabel}"? This is the last runtime — all data will be wiped and you'll return to the setup screen.`
-      : `Delete "${runtimeLabel}"? This will remove all entities and data.`;
-
-    if (!confirm(msg)) return;
-
-    // Full cleanup: P2P, loop, stores
-    await vaultOperations.deleteRuntime(runtimeId);
-
-    // Delete runtime from runtimeStore
-    runtimes.update(r => {
-      r.delete(runtimeId);
-      return r;
-    });
-
-    // If last runtime, open creation screen
-    if (isLast) {
-      vaultUiOperations.requestDeriveNewVault();
-    }
-  }
-
   function handleAddJurisdiction() {
     activeInlinePanel = 'add-jmachine';
   }
@@ -998,7 +971,6 @@
     showJurisdiction={false}
     selectedJurisdiction={selectedJurisdictionName}
     allowHeaderAddRuntime={true}
-    allowHeaderDeleteRuntime={true}
     headerRuntimeAddLabel="+ Add Runtime"
     runtimeFrameContext={workspaceRuntimeFrameContext}
     embeddedRuntimeContext={workspaceEmbeddedRuntimeContext}
@@ -1009,7 +981,6 @@
     on:addJurisdiction={handleAddJurisdiction}
     on:addEntity={handleAddEntity}
     on:addRuntime={handleAddRuntime}
-    on:deleteRuntime={handleRemoveRuntime}
   />
 {:else if viewMode === 'entity'}
   <main class="panel-content"></main>

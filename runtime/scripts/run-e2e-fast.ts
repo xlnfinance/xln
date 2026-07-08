@@ -21,7 +21,7 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
-    title: 'context dropdown switches across H1 H2 H3 remote runtimes',
+    title: 'context dropdown groups H1 H2 H3 remote runtimes',
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',

@@ -7,13 +7,21 @@ test('ContextSwitcher hydrates the shared remote runtime registry before showing
   expect(source).toContain('onMount');
   expect(source).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
   expect(source).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
-  expect(source).toContain("import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore'");
+  expect(source).toContain("from '$lib/stores/runtimeViewStore'");
+  expect(source).toContain('setRuntimeViewActiveEntityId');
   expect(source).toContain('controllerRuntimeId = normalizeId($runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id)');
   expect(source.indexOf('normalizeId(group.runtimeId) === controllerRuntimeId'))
     .toBeLessThan(source.indexOf('group.runtimeId === $activeStoreRuntimeId'));
   expect(source).toContain('$runtimeEntries.values()');
   expect(source).toContain('projectionSummariesForRuntime(');
+  expect(source).toContain('runtimeMenuGroups = buildRuntimeMenuGroups(runtimeGroups)');
+  expect(source).toContain('data-testid="context-runtime-group"');
+  expect(source).toContain('data-testid="context-runtime-source"');
+  expect(source).toContain('{runtimeGroup.source}');
+  expect(source).toContain('`${normalizeId(entity.runtimeId)}:${normalizeId(entity.entityId)}`');
+  expect(source).toContain('data-testid="context-jurisdiction-group"');
   expect(source).toContain('data-testid="context-entity-row"');
+  expect(source).not.toContain('class="runtime-main"');
   expect(source).not.toContain('runtime.env');
   expect(source).not.toContain('eReplicas');
 });
@@ -21,36 +29,28 @@ test('ContextSwitcher hydrates the shared remote runtime registry before showing
 test('ContextSwitcher closes menu synchronously before remote runtime switch awaits', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
   const entityStart = source.indexOf('async function selectRuntimeEntity');
-  const selfStart = source.indexOf('async function selectRuntimeSelf');
-  const addStart = source.indexOf('function handleAddRuntime', selfStart);
+  const addStart = source.indexOf('function handleAddRuntime', entityStart);
   expect(entityStart).toBeGreaterThan(0);
-  expect(selfStart).toBeGreaterThan(entityStart);
-  expect(addStart).toBeGreaterThan(selfStart);
+  expect(addStart).toBeGreaterThan(entityStart);
 
-  const entitySource = source.slice(entityStart, selfStart);
-  const selfSource = source.slice(selfStart, addStart);
+  const entitySource = source.slice(entityStart, addStart);
   expect(entitySource.indexOf('open = false;')).toBeLessThan(entitySource.indexOf('await selectRemoteRuntime'));
-  expect(selfSource.indexOf('open = false;')).toBeLessThan(selfSource.indexOf('await selectRemoteRuntime'));
 });
 
-test('ContextSwitcher remote rows switch runtime without dispatching stale metadata entity ids', () => {
+test('ContextSwitcher remote rows switch runtime and selected projected entity together', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
   const entityStart = source.indexOf('async function selectRuntimeEntity');
-  const selfStart = source.indexOf('async function selectRuntimeSelf');
-  const addStart = source.indexOf('function handleAddRuntime', selfStart);
-  const entitySource = source.slice(entityStart, selfStart);
-  const selfSource = source.slice(selfStart, addStart);
+  const addStart = source.indexOf('function handleAddRuntime', entityStart);
+  const entitySource = source.slice(entityStart, addStart);
 
-  expect(source).toContain('async function selectRemoteRuntime(runtimeId: string): Promise<void>');
-  expect(source).toContain('await refreshRuntimeView({});');
+  expect(source).toContain("async function selectRemoteRuntime(runtimeId: string, entityId = ''): Promise<void>");
+  expect(source).toContain('setRuntimeViewActiveEntityId(normalizedEntityId)');
+  expect(source).toContain('await refreshRuntimeView(normalizedEntityId ? { entityId: normalizedEntityId } : {})');
   expect(entitySource).toContain("if (group?.source === 'remote') {");
-  expect(entitySource).toContain('await selectRemoteRuntime(runtimeId);');
-  expect(entitySource).toContain('return;');
-  expect(entitySource.indexOf('return;')).toBeLessThan(entitySource.indexOf("dispatch('entitySelect'"));
-  expect(selfSource).toContain("if (group.source === 'remote') {");
-  expect(selfSource).toContain('await selectRemoteRuntime(group.runtimeId);');
-  expect(selfSource).toContain('return;');
-  expect(selfSource.indexOf('return;')).toBeLessThan(selfSource.indexOf("dispatch('entitySelect'"));
+  expect(entitySource).toContain('await selectRemoteRuntime(runtimeId, entity.entityId);');
+  expect(entitySource).toContain("dispatch('entitySelect'");
+  expect(entitySource.indexOf("dispatch('entitySelect'")).toBeLessThan(entitySource.indexOf('return;'));
+  expect(source).not.toContain('async function selectRuntimeSelf');
 });
 
 test('ContextSwitcher labels projection-only remote runtimes instead of saying no runtime selected', () => {

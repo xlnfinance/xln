@@ -132,7 +132,6 @@ export const buildCanonicalRuntimeStateSnapshot = (
 ): Record<string, unknown> => ({
   height: env.height,
   timestamp: env.timestamp,
-  ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
   ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
   ...(env.dbNamespace ? { dbNamespace: env.dbNamespace } : {}),
   ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
@@ -178,7 +177,6 @@ export const buildCanonicalEnvSnapshot = (
   const core = buildCanonicalRuntimeStateSnapshot(env, { browserVMState: options.browserVMState }) as {
     height: number;
     timestamp: number;
-    runtimeSeed?: string;
     runtimeId?: string;
     browserVMState?: Env['browserVMState'];
     eReplicas: Array<[string, EntityReplica]>;
@@ -189,7 +187,6 @@ export const buildCanonicalEnvSnapshot = (
   return {
     height: core.height,
     timestamp: core.timestamp,
-    ...(core.runtimeSeed !== undefined && core.runtimeSeed !== null ? { runtimeSeed: core.runtimeSeed } : {}),
     ...(core.runtimeId ? { runtimeId: core.runtimeId } : {}),
     eReplicas: new Map(core.eReplicas),
     jReplicas: new Map(core.jReplicas),

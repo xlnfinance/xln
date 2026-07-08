@@ -3,23 +3,22 @@
   import { goto, replaceState } from '$app/navigation';
   import { createEventDispatcher } from 'svelte';
   import { Check, Link, Upload } from 'lucide-svelte';
-  import { runtimeOperations } from '$lib/stores/runtimeStore';
   import {
     MAX_REMOTE_RUNTIME_IMPORTS,
     REMOTE_RUNTIME_IMPORT_HASH_PARAM,
-    REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY,
     REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM,
     describeRemoteRuntimeImportError,
     formatRemoteRuntimeImportLines,
     normalizeRemoteRuntimeWsUrl,
     parseRemoteRuntimeImportPayload,
-    parseRemoteRuntimeImportSourcePayload,
     parseRemoteRuntimeImportText,
     type RemoteRuntimeImportAccess,
     type RemoteRuntimeImportEntry,
-    type StoredRemoteRuntimeImportEntry,
   } from '$lib/utils/remoteRuntimeImport';
-  import { validateRemoteRuntimeEntry } from '$lib/utils/remoteRuntimeValidation';
+  import {
+    fetchRemoteRuntimeImportSource,
+    importRemoteRuntimeEntries,
+  } from '$lib/utils/remoteRuntimeImportFlow';
 
   type ImportMode = 'single' | 'bulk';
 
@@ -31,12 +30,6 @@
     status: 'pending' | 'checking' | 'connected' | 'error';
     detail: string;
   };
-
-  type ImportValidationResult =
-    | { ok: true; index: number; entry: RemoteRuntimeImportEntry; stored: StoredRemoteRuntimeImportEntry }
-    | { ok: false; index: number; entry: RemoteRuntimeImportEntry; reason: string };
-
-  const REMOTE_RUNTIME_IMPORT_CONCURRENCY = 4;
 
   const dispatch = createEventDispatcher<{ imported: { runtimeId: string; count: number } }>();
 
@@ -109,77 +102,9 @@
     return String(params.get(REMOTE_RUNTIME_IMPORT_SOURCE_HASH_PARAM) || '').trim();
   };
 
-  const fetchImportSource = async (source: string): Promise<RemoteRuntimeImportEntry[]> => {
-    const url = new URL(source, window.location.href);
-    if (url.origin !== window.location.origin) {
-      throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_ORIGIN_INVALID:${url.origin}`);
-    }
-    const response = await fetch(url, { cache: 'no-store' });
-    if (!response.ok) throw new Error(`REMOTE_RUNTIME_IMPORT_SOURCE_FAILED:${response.status}`);
-    return parseRemoteRuntimeImportSourcePayload(await response.json());
-  };
-
   const scrubImportHash = (): void => {
     if (typeof window === 'undefined' || !window.location.hash) return;
     replaceState(`${window.location.pathname}${window.location.search}`, {});
-  };
-
-  const writeImportSummary = (
-    validated: StoredRemoteRuntimeImportEntry[],
-    total: number,
-    importedAt: number,
-  ): void => {
-    if (typeof sessionStorage === 'undefined') return;
-    sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY, JSON.stringify({
-      ok: true,
-      importedAt,
-      count: validated.length,
-      total,
-      entries: validated.map(entry => ({
-        label: entry.label,
-        access: entry.access,
-        wsUrl: entry.wsUrl,
-        runtimeId: entry.runtimeId,
-        height: entry.height,
-        entityCount: entry.entityCount,
-      })),
-    }));
-  };
-
-  const validateImportEntries = async (
-    entries: RemoteRuntimeImportEntry[],
-    importedAt: number,
-  ): Promise<ImportValidationResult[]> => {
-    const results: ImportValidationResult[] = new Array(entries.length);
-    let nextIndex = 0;
-    const workerCount = Math.min(REMOTE_RUNTIME_IMPORT_CONCURRENCY, entries.length);
-    const workers = Array.from({ length: workerCount }, async () => {
-      while (nextIndex < entries.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        const entry = entries[index]!;
-        status = `Checking ${entry.label || entry.wsUrl}`;
-        try {
-          results[index] = {
-            ok: true,
-            index,
-            entry,
-            stored: await validateRemoteRuntimeEntry(entry, {
-              index,
-              importedAt,
-              onProgress: (progress) => setRow(progress.index, {
-                status: progress.status,
-                detail: progress.detail,
-              }),
-            }),
-          };
-        } catch (err) {
-          results[index] = { ok: false, index, entry, reason: errorMessage(err, entry) };
-        }
-      }
-    });
-    await Promise.allSettled(workers);
-    return results;
   };
 
   const prefillFromHash = async (): Promise<void> => {
@@ -191,7 +116,7 @@
       loadingImportSource = Boolean(source);
       status = source ? 'Loading import list' : status;
       const entries = source
-        ? await fetchImportSource(source)
+        ? await fetchRemoteRuntimeImportSource(source)
         : parseRemoteRuntimeImportPayload(payload);
       bulkText = formatRemoteRuntimeImportLines(entries);
       resetRows(entries);
@@ -216,24 +141,20 @@
     status = `Checking ${entries.length} remote runtime${entries.length === 1 ? '' : 's'}`;
     resetRows(entries);
     try {
-      const importedAt = Date.now();
-      const results = await validateImportEntries(entries, importedAt);
-      const validated = results.flatMap((result) => result.ok ? [result.stored] : []);
-      const failed = results.flatMap((result) => result.ok ? [] : [{ entry: result.entry, reason: result.reason }]);
-      lastFailedEntries = failed.map(item => item.entry);
-      if (validated.length === 0) {
-        throw new Error(failed[0]?.reason || 'REMOTE_RUNTIME_IMPORT_EMPTY');
-      }
-      const persisted = runtimeOperations.upsertRemoteRuntimeImports(validated);
-      writeImportSummary(validated, entries.length, importedAt);
-      status = failed.length === 0
-        ? `Imported ${validated.length} remote runtime${validated.length === 1 ? '' : 's'}`
-        : `Imported ${validated.length}/${entries.length}; ${failed.length} failed`;
-      error = failed.length > 0 ? failed.map(item => item.reason).join('\n') : '';
-      const first = validated[0]!;
-      dispatch('imported', { runtimeId: first.runtimeId, count: validated.length });
-      const activated = await runtimeOperations.activateRemoteRuntime(first.runtimeId, { href: '/app' });
-      if (!activated) throw new Error(`${first.label}: connected but could not activate the runtime`);
+      const result = await importRemoteRuntimeEntries(entries, {
+        activateFirst: true,
+        onProgress: (progress) => setRow(progress.index, {
+          status: progress.status,
+          detail: progress.detail,
+        }),
+      });
+      lastFailedEntries = result.failed.map(item => item.entry);
+      status = result.failed.length === 0
+        ? `Imported ${result.validated.length} remote runtime${result.validated.length === 1 ? '' : 's'}`
+        : `Imported ${result.validated.length}/${entries.length}; ${result.failed.length} failed`;
+      error = result.failed.length > 0 ? result.failed.map(item => item.reason).join('\n') : '';
+      const first = result.validated[0]!;
+      dispatch('imported', { runtimeId: first.runtimeId, count: result.validated.length });
       if (typeof window !== 'undefined' && window.location.pathname !== '/app') {
         await goto('/app');
       }

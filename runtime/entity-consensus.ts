@@ -520,8 +520,8 @@ const validateEntityInput = (input: EntityInput): boolean => {
         log.error(`❌ EntityTxs must be array, got: ${typeof input.entityTxs}`);
         return false;
       }
-      if (input.entityTxs.length > 1000) {
-        log.error(`❌ Too many transactions: ${input.entityTxs.length} > 1000`);
+      if (input.entityTxs.length > LIMITS.MEMPOOL_SIZE) {
+        log.error(`❌ Too many transactions: ${input.entityTxs.length} > ${LIMITS.MEMPOOL_SIZE}`);
         return false;
       }
       for (const tx of input.entityTxs) {
@@ -597,6 +597,23 @@ const validateEntityReplica = (replica: EntityReplica): boolean => {
     log.error(`❌ Replica validation error: ${error}`);
     return false;
   }
+};
+
+const getEntityMempoolAdmissionError = (
+  replica: EntityReplica,
+  input: EntityInput,
+): string | null => {
+  if (!Array.isArray(input.entityTxs) || input.entityTxs.length === 0) return null;
+  const existing = Array.isArray(replica.mempool) ? replica.mempool.length : 0;
+  const incoming = input.entityTxs.length;
+  if (incoming > LIMITS.MEMPOOL_SIZE) {
+    return `entityTxs overflow: ${incoming} > ${LIMITS.MEMPOOL_SIZE}`;
+  }
+  const next = existing + incoming;
+  if (next > LIMITS.MEMPOOL_SIZE) {
+    return `entity mempool admission overflow: ${existing} + ${incoming} > ${LIMITS.MEMPOOL_SIZE}`;
+  }
+  return null;
 };
 
 /**
@@ -1029,6 +1046,12 @@ export const applyEntityInput = async (
   entityReplica: EntityReplica,
   entityInput: EntityInput,
 ): Promise<ApplyEntityInputResult> => {
+  const admissionError = getEntityMempoolAdmissionError(entityReplica, entityInput);
+  if (admissionError) {
+    log.error(`❌ Entity mempool admission rejected for ${entityInput.entityId}: ${admissionError}`);
+    return { newState: entityReplica.state, outputs: [], jOutputs: [], workingReplica: entityReplica };
+  }
+
   // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
   // Prevents state mutations from escaping function scope
   const workingReplica = cloneEntityReplica(entityReplica);

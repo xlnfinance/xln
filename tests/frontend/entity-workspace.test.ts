@@ -2,12 +2,10 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
   buildEntityWorkspaceView,
-  defaultLensForCapabilities,
-  entityWorkspaceTabForLens,
   resolveEntityWorkspaceCapabilities,
 } from '../../frontend/src/lib/components/Entity/entity-workspace';
 
-test('entity workspace exposes capability lenses without fake frontend roles', () => {
+test('entity workspace exposes one wallet app surface without fake frontend roles', () => {
   const capabilities = resolveEntityWorkspaceCapabilities({
     mode: 'remote',
     authLevel: 'inspect',
@@ -19,14 +17,7 @@ test('entity workspace exposes capability lenses without fake frontend roles', (
   });
 
   expect(capabilities.canRead).toBe(true);
-  expect(capabilities.canWrite).toBe(false);
-  expect(capabilities.readOnlyReason).toContain('inspect');
-  expect(capabilities.lenses.map((lens) => lens.id)).toEqual(['wallet', 'ops', 'liquidity', 'audit']);
-  expect(capabilities.lenses.find((lens) => lens.id === 'wallet')?.enabled).toBe(false);
-  expect(capabilities.lenses.find((lens) => lens.id === 'ops')?.enabled).toBe(false);
-  expect(capabilities.lenses.find((lens) => lens.id === 'liquidity')?.enabled).toBe(false);
-  expect(capabilities.lenses.find((lens) => lens.id === 'audit')?.enabled).toBe(true);
-  expect(defaultLensForCapabilities(capabilities)).toBe('audit');
+  expect(Object.keys(capabilities).sort()).toEqual(['canRead', 'entityId']);
 });
 
 test('entity workspace treats admin remote and embedded runtimes as writable command surfaces', () => {
@@ -39,20 +30,8 @@ test('entity workspace treats admin remote and embedded runtimes as writable com
     accountCount: 1,
   });
 
-  expect(admin.canWrite).toBe(true);
-  expect(embedded.canWrite).toBe(true);
-  expect(admin.lenses.find((lens) => lens.id === 'wallet')?.enabled).toBe(true);
-  expect(admin.lenses.find((lens) => lens.id === 'ops')?.enabled).toBe(true);
-  expect(embedded.lenses.find((lens) => lens.id === 'wallet')?.enabled).toBe(true);
-  expect(embedded.lenses.find((lens) => lens.id === 'ops')?.enabled).toBe(true);
-  expect(admin.lenses.find((lens) => lens.id === 'audit')?.canWrite).toBe(false);
-});
-
-test('entity workspace maps lenses onto existing panel surfaces', () => {
-  expect(entityWorkspaceTabForLens('wallet')).toEqual({ activeTab: 'assets' });
-  expect(entityWorkspaceTabForLens('ops')).toEqual({ activeTab: 'accounts', accountWorkspaceTab: 'activity' });
-  expect(entityWorkspaceTabForLens('liquidity')).toEqual({ activeTab: 'accounts', accountWorkspaceTab: 'swap' });
-  expect(entityWorkspaceTabForLens('audit')).toEqual({ activeTab: 'accounts', accountWorkspaceTab: 'activity' });
+  expect(admin.canRead).toBe(true);
+  expect(embedded.canRead).toBe(true);
 });
 
 test('entity workspace shell consumes a projected workspace view instead of traversing replicas inline', () => {
@@ -65,7 +44,9 @@ test('entity workspace shell consumes a projected workspace view instead of trav
   expect(source).toContain('? (tabEntityId || runtimeActiveEntityId)');
   expect(source).not.toContain('tabEntityId && tabEntityId === runtimeActiveEntityId ? tabEntityId : runtimeActiveEntityId');
   expect(source).toContain(': tabEntityId;');
-  expect(source).toContain('${handle.id}|${handle.status}|${handle.authLevel ?? \'\'}|${entityId}');
+  expect(source).toContain('${handle.id}|${handle.status}|${entityId}');
+  expect(source).not.toContain('entity-workspace-readonly');
+  expect(source).not.toContain('readOnlyReason');
   expect(source).not.toContain("if (handle.mode !== 'remote')");
   expect(source).not.toContain('${handle.height}|${$runtimeView.height}|${envRevision}|${entityId}');
   expect(source).toContain('accountsLimit: WORKSPACE_VIEW_PAGE_SIZE');
@@ -75,12 +56,14 @@ test('entity workspace shell consumes a projected workspace view instead of trav
   expect(source).toContain('buildEntityWorkspaceView(');
   expect(source).toContain('workspaceProjectionFrame ? { ...workspaceProjectionFrame, runtimeId: $runtimeControllerHandle.id } : null');
   expect(source).toContain('entity-workspace-projection-error');
-  expect(source).toContain('lensNavigationVersion += 1');
-  expect(source).toContain('workspaceLensNavigationVersion={lensNavigationVersion}');
-  expect(source).toContain('<EntityAuditPanel');
-  expect(source).toContain("{#if selectedLens === 'audit'}");
-  expect(source).toContain("userModeHeader && selectedLens === 'audit'");
-  expect(source).toContain('<ContextSwitcher');
+  expect(source).not.toContain('lensNavigationVersion');
+  expect(source).not.toContain('workspaceLensNavigationVersion');
+  expect(source).not.toContain('<EntityAuditPanel');
+  expect(source).not.toContain("selectedLens === 'audit'");
+  expect(source).not.toContain('entity-lens-ops');
+  expect(source).not.toContain('entity-lens-liquidity');
+  expect(source).not.toContain('class="lens-button"');
+  expect(source).not.toContain('<ContextSwitcher');
   expect(source).toContain('on:entitySelect');
   expect(source).not.toContain('buildEntityWorkspaceView(env');
   expect(source).not.toContain('source?.eReplicas');
@@ -88,31 +71,19 @@ test('entity workspace shell consumes a projected workspace view instead of trav
   expect(source).not.toContain('workspaceReplica');
 });
 
-test('audit lens is a typed projection surface and does not route to settings Env ownership', () => {
+test('entity workspace has no separate audit ops or liquidity projection lenses in app flow', () => {
   const workspace = readFileSync('frontend/src/lib/components/Entity/EntityWorkspace.svelte', 'utf8');
   const model = readFileSync('frontend/src/lib/components/Entity/entity-workspace.ts', 'utf8');
-  const audit = readFileSync('frontend/src/lib/components/Entity/EntityAuditPanel.svelte', 'utf8');
 
-  expect(model).not.toContain("case 'audit':\n      return { activeTab: 'settings'");
-  expect(workspace).toContain('<EntityAuditPanel');
-  expect(workspace).not.toContain("workspaceLens={selectedLens || 'audit'}");
-  expect(audit).toContain("from '$lib/stores/runtimeViewStore'");
-  expect(audit).toContain('refreshRuntimeView({');
-  expect(audit).toContain('$runtimeView.head');
-  expect(audit).toContain('$runtimeView.frame');
-  expect(audit).toContain('runtimeQueryClient.readActivity');
-  expect(audit).toContain('data-testid="entity-audit-accounts-shown"');
-  expect(audit).toContain('data-testid="entity-audit-accounts-total"');
-  expect(audit).toContain('data-testid="entity-audit-books-shown"');
-  expect(audit).toContain('data-testid="entity-audit-books-total"');
-  expect(audit).toContain('data-testid="entity-audit-activity-scanned"');
-  expect(audit).toContain('data-testid="entity-audit-activity-latest"');
-  expect(audit).not.toContain('runtimeQueryClient.readHead');
-  expect(audit).not.toContain('runtimeQueryClient.readViewFrame');
-  expect(audit).not.toContain('xlnEnvironment');
-  expect(audit).not.toContain('$xlnEnvironment');
-  expect(audit).not.toContain('runtimeFrameEnv');
-  expect(audit).not.toContain('EntitySettingsPanel');
+  expect(model).not.toContain("'audit'");
+  expect(model).not.toContain("'ops'");
+  expect(model).not.toContain("'liquidity'");
+  expect(workspace).not.toContain('EntityAuditPanel');
+  expect(workspace).not.toContain('entity-lens-audit');
+  expect(workspace).not.toContain('entity-lens-ops');
+  expect(workspace).not.toContain('entity-lens-liquidity');
+  expect(workspace).not.toContain('data-lens');
+  expect(workspace).toContain('<EntityPanelTabs');
 });
 
 test('entity settings workspace is a projection command surface, not the legacy Env panel', () => {
@@ -149,13 +120,11 @@ test('entity settings workspace is a projection command surface, not the legacy 
   expect(settings).not.toContain('GossipPanel');
 });
 
-test('default workspace lens does not override explicit entity panel hash routes', () => {
+test('entity panel routing is owned by the existing wallet app tabs', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');
-  expect(source).toContain('export let workspaceLensNavigationVersion');
-  expect(source).toContain('function hasExplicitEntityPanelHashRoute()');
-  expect(source).toContain('canonicalizeEntityPanelRoute(getLocationHashRoute(window.location)) !== null');
-  expect(source).toContain("shouldApplyDefaultLensRoute = !hasExplicitEntityPanelHashRoute() && workspaceLens !== 'wallet'");
-  expect(source).toContain('userTriggeredLensNavigation || shouldApplyDefaultLensRoute');
+  expect(source).not.toContain('workspaceLens');
+  expect(source).not.toContain('workspaceLensNavigationVersion');
+  expect(source).not.toContain('entityWorkspaceTabForLens');
   expect(source).toContain('routeSyncSignature = [');
   expect(source).toContain('routeSyncSignature;');
 });
@@ -259,7 +228,7 @@ test('user mode remote workspace mounts from RuntimeView instead of Env replica 
 
   expect(workspace).toContain('export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext');
   expect(workspace).toContain('export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext');
-  expect(workspace).toContain('{:else if runtimeFrameEnv || workspaceProjectionFrame}');
+  expect(workspace).toContain('{#if runtimeFrameEnv || workspaceProjectionFrame}');
   expect(workspace).toContain('runtimeFrameContext={frameContext}');
   expect(workspace).toContain('embeddedRuntimeContext={embeddedFrameContext}');
   expect(workspace).not.toContain('env={runtimeFrameEnv}');

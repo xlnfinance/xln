@@ -281,14 +281,17 @@ test('runtime adapter health panel uses shared RuntimeView store instead of owni
   expect(source).not.toContain('runtimeAdapterHeight');
 });
 
-test('runtime adapter inspector does not auto-connect to default /rpc without explicit or saved remote access', () => {
-  const source = readFileSync('frontend/src/lib/components/Health/RuntimeAdapterPanel.svelte', 'utf8');
+test('radapter page redirects remote users into the canonical app workspace', () => {
+  const route = readFileSync('frontend/src/routes/radapter/+page.ts', 'utf8');
+  const panel = readFileSync('frontend/src/lib/components/Health/RuntimeAdapterPanel.svelte', 'utf8');
 
-  expect(source).toContain('function hydrateFromLocation(): boolean');
-  expect(source).toContain('readStoredActiveRemote()');
-  expect(source).toContain('return Boolean(explicitWsUrl || authKey)');
-  expect(source).toContain('if (autoConnect && shouldAutoConnect) void connect();');
-  expect(source).not.toContain('if (autoConnect) void connect();');
+  expect(route).toContain("new URL('/app', url.origin)");
+  expect(route).toContain("target.searchParams.set('runtime', 'remote')");
+  expect(route).toContain("target.hash = 'accounts'");
+  expect(route).toContain('throw redirect(307');
+  expect(panel).toContain('href="/app"');
+  expect(panel).not.toContain('Runtime Adapter Inspector');
+  expect(panel).not.toContain('autoConnect');
 });
 
 test('remote Time Machine scan reads historical frames through history-frame-batch only', () => {
