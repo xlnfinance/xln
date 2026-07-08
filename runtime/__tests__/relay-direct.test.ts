@@ -287,6 +287,61 @@ describe('relay direct entity delivery', () => {
     });
   });
 
+  test('falls back with typed delivery event when the target runtime encryption key is absent', () => {
+    const sourceSeed = 'relay-direct-missing-target-source';
+    const sourceRuntimeId = deriveSignerAddressSync(sourceSeed, '1').toLowerCase();
+    const targetRuntimeId = deriveSignerAddressSync('relay-direct-missing-target', '1').toLowerCase();
+    const store = createRelayStore(sourceRuntimeId);
+    const targetSocket = makeSocket();
+    const logs: string[] = [];
+
+    cacheEncryptionKey(store, sourceRuntimeId, pubKeyToHex(deriveEncryptionKeyPair(sourceSeed).publicKey));
+    expect(registerClient(store, targetRuntimeId, targetSocket.ws)).toBe(true);
+    expect(hasConnectedEncryptedRelayClient(store, targetRuntimeId)).toBe(false);
+
+    const input: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: `0x${'de'.repeat(32)}`,
+      entityTxs: [],
+    };
+
+    const delivery = sendEntityInputDirectViaRelaySocketDelivery(
+      store,
+      { runtimeId: sourceRuntimeId } as Env,
+      targetRuntimeId,
+      input,
+      (_key, message) => logs.push(message),
+    );
+
+    expect(delivery).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_TARGET_KEY_MISSING',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+    });
+    expect(targetSocket.sent).toEqual([]);
+    expect(logs[0]).toContain('missing encryption key');
+    expect(store.debugEvents.at(-1)).toMatchObject({
+      event: 'delivery',
+      from: sourceRuntimeId,
+      to: targetRuntimeId,
+      status: 'direct-miss-fallback',
+      reason: 'ROUTE_DIRECT_TARGET_KEY_MISSING',
+      delivery: {
+        outcome: 'deferred',
+        code: 'ROUTE_DIRECT_TARGET_KEY_MISSING',
+        retryable: true,
+        fatal: false,
+        terminal: false,
+      },
+      details: {
+        entityId: input.entityId,
+        txs: 0,
+      },
+    });
+  });
+
   test('falls back when the source runtime encryption key is absent', () => {
     const sourceRuntimeId = deriveSignerAddressSync('relay-direct-missing-source', '1').toLowerCase();
     const targetSeed = 'relay-direct-missing-source-target';
@@ -321,5 +376,23 @@ describe('relay direct entity delivery', () => {
     });
     expect(targetSocket.sent).toEqual([]);
     expect(logs[0]).toContain('missing source encryption key');
+    expect(store.debugEvents.at(-1)).toMatchObject({
+      event: 'delivery',
+      from: sourceRuntimeId,
+      to: targetRuntimeId,
+      status: 'direct-miss-fallback',
+      reason: 'ROUTE_DIRECT_SOURCE_KEY_MISSING',
+      delivery: {
+        outcome: 'deferred',
+        code: 'ROUTE_DIRECT_SOURCE_KEY_MISSING',
+        retryable: true,
+        fatal: false,
+        terminal: false,
+      },
+      details: {
+        entityId: input.entityId,
+        txs: 0,
+      },
+    });
   });
 });

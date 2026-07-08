@@ -344,6 +344,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: relay router direct socket forwarding now returns a typed
      delivery result internally, so `send()` false is reported as `send-failed`
      instead of being conflated with stale target sockets.
+   - Partial: process-local relay direct dispatch now emits typed delivery
+     debug metadata for missing source/target runtime encryption keys instead
+     of silently returning only a deferred result to the caller.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 
