@@ -23,6 +23,11 @@
     buildRecoveryTowerStatuses,
     buildRuntimeRecoveryCoverage,
   } from '$lib/utils/recoveryCoverage';
+  import {
+    readRuntimeRecoveryDiscoveryStatus,
+    type RuntimeRecoveryDiscoveryStatus,
+  } from '$lib/utils/recoveryDiscoveryStatus';
+  import { buildRemoteRuntimeRecoveryPeerSources } from '$lib/utils/remoteRuntimeValidation';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
@@ -83,6 +88,8 @@
   let recoveryMessage = '';
   let recoveryMessageTone: 'neutral' | 'error' | 'ok' = 'neutral';
   let recoverySaving = false;
+  let recoveryDiscoveryStatus: RuntimeRecoveryDiscoveryStatus | null = null;
+  let recoveryDiscoveryLoadedFor = '';
 
   const themeOptions: Array<{ value: ThemeName; label: string }> = [
     { value: 'dark', label: 'Dark' },
@@ -136,6 +143,13 @@
   $: canImportJMachine = activeIsLive && runtimeCanWrite && !importingJMachine;
   $: recoveryOfficialUrl = resolveOfficialRecoveryTowerUrl();
   $: recoveryRuntimeSyncKey = `${$activeRuntime?.id || 'none'}:${JSON.stringify($activeRuntime?.recovery?.towers || [])}:${$activeRuntime?.recovery?.useDefaultTowers === true}`;
+  $: activeRecoveryRuntimeId = normalizeText($activeRuntime?.id || runtimeId || '').toLowerCase();
+  $: {
+    if (recoveryDiscoveryLoadedFor !== activeRecoveryRuntimeId) {
+      recoveryDiscoveryStatus = readRuntimeRecoveryDiscoveryStatus(activeRecoveryRuntimeId);
+      recoveryDiscoveryLoadedFor = activeRecoveryRuntimeId;
+    }
+  }
   $: saveDisabledReason = !normalizedEntityId
     ? 'Select an entity'
     : !activeIsLive
@@ -156,10 +170,13 @@
         ? 'Admin access required'
         : '';
   $: canSaveRecovery = !recoveryDisabledReason && !recoverySaving;
+  $: recoveryPeerSourceCount = buildRemoteRuntimeRecoveryPeerSources({ runtimeId: activeRecoveryRuntimeId }).length;
   $: recoveryCoverageItems = buildRuntimeRecoveryCoverage({
     runtime: $activeRuntime,
     towers: recoveryTowerDraft,
     runtimeHeight,
+    peerSourceCount: recoveryPeerSourceCount,
+    discovery: recoveryDiscoveryStatus,
   });
   $: recoveryTowerStatuses = buildRecoveryTowerStatuses($activeRuntime, recoveryTowerDraft);
   $: recoveryTowerStatusByUrl = new Map(recoveryTowerStatuses.map((status) => [status.url, status]));

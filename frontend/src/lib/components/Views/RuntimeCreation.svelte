@@ -300,6 +300,7 @@
   let recoveryErrors: string[] = [];
   let recoveryCheckedTowers = 0;
   let recoveryCheckedPeers = 0;
+  let recoveryPeerBackupCount = 0;
   let selectedRecoveryCandidateId = '';
   let localRuntimeAvailable = false;
   let backupFileInput: HTMLInputElement | null = null;
@@ -347,6 +348,7 @@
     recoveryErrors = [];
     recoveryCheckedTowers = 0;
     recoveryCheckedPeers = 0;
+    recoveryPeerBackupCount = 0;
     selectedRecoveryCandidateId = '';
     localRuntimeAvailable = false;
   }
@@ -362,6 +364,7 @@
     recoveryErrors = [];
     recoveryCheckedTowers = 0;
     recoveryCheckedPeers = 0;
+    recoveryPeerBackupCount = 0;
     selectedRecoveryCandidateId = '';
     localRuntimeAvailable = vaultOperations.runtimeExists(recoveryRuntimeId);
 
@@ -373,6 +376,7 @@
       recoveryErrors = discovery.errors;
       recoveryCheckedTowers = discovery.checkedTowers;
       recoveryCheckedPeers = discovery.checkedPeers;
+      recoveryPeerBackupCount = recoveryCandidates.filter((candidate) => candidate.source === 'peer').length;
       selectedRecoveryCandidateId = recoveryCandidates[0]?.id || '';
       if (recoveryCandidates.length > 0) {
         phase = 'recovery';
@@ -391,6 +395,7 @@
       runtimeId: recoveryRuntimeId || ethereumAddress,
       checkedTowers: recoveryCheckedTowers,
       checkedPeers: recoveryCheckedPeers,
+      peerBackupCount: recoveryPeerBackupCount,
       backupCount: recoveryCandidates.length,
       errors: recoveryErrors,
       checkedAt: Date.now(),

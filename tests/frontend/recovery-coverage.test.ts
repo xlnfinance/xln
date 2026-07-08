@@ -6,6 +6,11 @@ import {
   buildRuntimeRecoveryCoverage,
   formatRecoveryBytes,
 } from '../../frontend/src/lib/utils/recoveryCoverage';
+import {
+  clearRuntimeRecoveryDiscoveryStatus,
+  readRuntimeRecoveryDiscoveryStatus,
+  writeRuntimeRecoveryDiscoveryStatus,
+} from '../../frontend/src/lib/utils/recoveryDiscoveryStatus';
 import type { Runtime } from '../../frontend/src/lib/stores/vaultStore';
 
 const runtimeFixture = (recovery: Runtime['recovery'] = {}): Runtime => ({
@@ -20,6 +25,23 @@ const runtimeFixture = (recovery: Runtime['recovery'] = {}): Runtime => ({
 
 const byId = (items: ReturnType<typeof buildRuntimeRecoveryCoverage>) =>
   Object.fromEntries(items.map((item) => [item.id, item]));
+
+const installMemoryLocalStorage = (): void => {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+      clear: () => values.clear(),
+      key: (index: number) => Array.from(values.keys())[index] ?? null,
+      get length() {
+        return values.size;
+      },
+    } as Storage,
+  });
+};
 
 test('runtime recovery coverage shows local state and missing remote coverage honestly', () => {
   const coverage = byId(buildRuntimeRecoveryCoverage({
@@ -44,6 +66,62 @@ test('runtime recovery coverage shows local state and missing remote coverage ho
     status: 'missing',
     statusLabel: 'Not available',
   });
+});
+
+test('runtime recovery coverage reports saved remote runtime peer refresh sources', () => {
+  const configured = byId(buildRuntimeRecoveryCoverage({
+    runtime: runtimeFixture(),
+    peerSourceCount: 2,
+  }));
+
+  expect(configured.peer_refresh).toMatchObject({
+    status: 'configured',
+    statusLabel: 'Configured',
+    detail: '2 saved remote runtimes available for restore checks',
+  });
+
+  const observed = byId(buildRuntimeRecoveryCoverage({
+    runtime: runtimeFixture(),
+    peerSourceCount: 2,
+    discovery: {
+      checkedPeers: 2,
+      peerBackupCount: 1,
+    },
+  }));
+
+  expect(observed.peer_refresh).toMatchObject({
+    status: 'ready',
+    statusLabel: 'Backup observed',
+    detail: '1 peer backup from 2 remote runtimes',
+  });
+});
+
+test('runtime recovery discovery status persists peer refresh counters', () => {
+  installMemoryLocalStorage();
+  const runtimeId = '0x1111111111111111111111111111111111111111';
+
+  writeRuntimeRecoveryDiscoveryStatus({
+    runtimeId,
+    checkedTowers: 1,
+    checkedPeers: 2,
+    peerBackupCount: 1,
+    backupCount: 3,
+    errors: ['peer-a:timeout'],
+    checkedAt: 123,
+  });
+
+  expect(readRuntimeRecoveryDiscoveryStatus(runtimeId)).toEqual({
+    runtimeId,
+    checkedTowers: 1,
+    checkedPeers: 2,
+    peerBackupCount: 1,
+    backupCount: 3,
+    errors: ['peer-a:timeout'],
+    checkedAt: 123,
+  });
+
+  clearRuntimeRecoveryDiscoveryStatus(runtimeId);
+  expect(readRuntimeRecoveryDiscoveryStatus(runtimeId)).toBeNull();
 });
 
 test('runtime recovery coverage distinguishes configured towers from observed receipts', () => {
@@ -179,6 +257,10 @@ test('recovery settings panel renders the coverage grid inside existing recovery
   const source = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
   expect(source).toContain('buildRuntimeRecoveryCoverage');
   expect(source).toContain('buildRecoveryTowerStatuses');
+  expect(source).toContain('readRuntimeRecoveryDiscoveryStatus(activeRecoveryRuntimeId)');
+  expect(source).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: activeRecoveryRuntimeId }).length');
+  expect(source).toContain('peerSourceCount: recoveryPeerSourceCount');
+  expect(source).toContain('discovery: recoveryDiscoveryStatus');
   expect(source).toContain('data-testid="recovery-coverage-grid"');
   expect(source).toContain('data-testid={`recovery-coverage-${item.id}`}');
   expect(source).toContain('class="recovery-service-status"');

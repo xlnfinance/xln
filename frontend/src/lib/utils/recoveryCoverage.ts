@@ -22,6 +22,11 @@ type RecoveryCoverageInput = {
   runtime: Runtime | null | undefined;
   towers?: RecoveryTowerConfig[];
   runtimeHeight?: number | null | undefined;
+  peerSourceCount?: number | null | undefined;
+  discovery?: {
+    checkedPeers?: number | null | undefined;
+    peerBackupCount?: number | null | undefined;
+  } | null | undefined;
 };
 
 const plural = (count: number, one: string, many: string): string =>
@@ -85,6 +90,19 @@ export function buildRuntimeRecoveryCoverage(input: RecoveryCoverageInput): Reco
   const quotaWarning = positiveInt(runtime?.recovery?.lastQuotaWarningAt) > 0;
   const latestBackupHeight = Math.max(0, ...backupReceipts.map((receipt) => positiveInt(receipt.height)));
   const latestLastResortHeight = Math.max(0, ...lastResortReceipts.map((receipt) => positiveInt(receipt.height)));
+  const peerSourceCount = positiveInt(input.peerSourceCount);
+  const checkedPeerCount = positiveInt(input.discovery?.checkedPeers);
+  const peerBackupCount = positiveInt(input.discovery?.peerBackupCount);
+  const effectivePeerCount = Math.max(peerSourceCount, checkedPeerCount);
+  const peerRefreshStatus: RecoveryCoverageStatus =
+    peerBackupCount > 0 ? 'ready' : effectivePeerCount > 0 ? 'configured' : 'missing';
+  const peerRefreshStatusLabel =
+    peerBackupCount > 0 ? 'Backup observed' : effectivePeerCount > 0 ? 'Configured' : 'Not available';
+  const peerRefreshDetail = peerBackupCount > 0
+    ? `${plural(peerBackupCount, 'peer backup', 'peer backups')} from ${plural(checkedPeerCount || effectivePeerCount, 'remote runtime', 'remote runtimes')}`
+    : effectivePeerCount > 0
+      ? `${plural(effectivePeerCount, 'saved remote runtime', 'saved remote runtimes')} available for restore checks`
+      : 'Restore currently depends on local state or tower backup';
 
   return [
     {
@@ -127,9 +145,9 @@ export function buildRuntimeRecoveryCoverage(input: RecoveryCoverageInput): Reco
     {
       id: 'peer_refresh',
       label: 'Peer refresh',
-      status: 'missing',
-      statusLabel: 'Not available',
-      detail: 'Restore currently depends on local state or tower backup',
+      status: peerRefreshStatus,
+      statusLabel: peerRefreshStatusLabel,
+      detail: peerRefreshDetail,
     },
   ];
 }
