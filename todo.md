@@ -453,6 +453,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: account-level cross-j fill ACK validation now relies on the shared
      exact progress validator for both source and target cumulative amounts
      instead of a duplicate source-only exact-ratio check.
+   - Partial: quantized-claim projection now fail-fast validates incomplete or
+     out-of-range exact ratio fields instead of silently falling back to the
+     lossy uint16 projection.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

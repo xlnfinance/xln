@@ -336,13 +336,26 @@ export function projectCrossJurisdictionQuantizedClaim(
     cumulativeFillRatio: number;
     fillNumerator?: bigint | undefined;
     fillDenominator?: bigint | undefined;
+    orderId?: string | undefined;
   },
 ): { exactClaim: bigint; quantizedClaim: bigint; roundingDelta: bigint } {
   const ratio = clampFillRatio(input.cumulativeFillRatio);
   const quantizedClaim = ratio >= CROSS_J_MAX_FILL_RATIO
     ? total
     : (total * BigInt(ratio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
-  const hasExact = input.fillNumerator !== undefined && input.fillDenominator !== undefined;
+  const hasExact = input.fillNumerator !== undefined || input.fillDenominator !== undefined;
+  if (hasExact && (input.fillNumerator === undefined || input.fillDenominator === undefined)) {
+    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${input.orderId || 'quantized-claim'}`);
+  }
+  if (hasExact && (
+    input.fillDenominator! <= 0n ||
+    input.fillNumerator! < 0n ||
+    input.fillNumerator! > input.fillDenominator!
+  )) {
+    throw new Error(
+      `CROSS_J_EXACT_FILL_RATIO_INVALID:${input.orderId || 'quantized-claim'}:${input.fillNumerator}/${input.fillDenominator}`,
+    );
+  }
   const exactClaim = hasExact
     ? scaleByExactRatio(total, input.fillNumerator!, input.fillDenominator!)
     : quantizedClaim;

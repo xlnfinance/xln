@@ -1408,6 +1408,16 @@ describe('cross-jurisdiction hashledger swap', () => {
       cumulativeSourceAmount: projected.exactClaim,
       cumulativeTargetAmount: projected.exactClaim,
     })).toContain('source quantization dust');
+    expect(() => projectCrossJurisdictionQuantizedClaim(route.source.amount, {
+      cumulativeFillRatio,
+      fillNumerator,
+    })).toThrow('CROSS_J_EXACT_FILL_RATIO_INCOMPLETE');
+    expect(() => projectCrossJurisdictionQuantizedClaim(route.source.amount, {
+      cumulativeFillRatio,
+      fillNumerator: fillDenominator + 1n,
+      fillDenominator,
+      orderId: route.orderId,
+    })).toThrow(`CROSS_J_EXACT_FILL_RATIO_INVALID:${route.orderId}`);
   });
 
   test('cross-j register enforces participant and explicit lifecycle transitions', async () => {
