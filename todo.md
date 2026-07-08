@@ -310,6 +310,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: `RuntimeWsClient` entity-input send is now explicitly named
      `sendEntityInputRaw()` and is only consumed inside P2P's typed delivery
      adapter.
+   - Partial: delivery validation, delivered detection, and retry retention now
+     live in shared `delivery-result` helpers instead of per-call-site logic.
    - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
      `dispatchEntityOutputs()` requires it, with no high-level boolean wrapper.
    - Exit: callers receive one typed delivery result and no longer reimplement

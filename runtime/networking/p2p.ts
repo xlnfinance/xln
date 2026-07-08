@@ -32,6 +32,8 @@ import {
 import {
   deliveryAccepted,
   deliveryFailure,
+  isDeliveryDelivered,
+  shouldRetryDelivery,
   type DeliveryResult,
 } from '../delivery-result';
 
@@ -195,9 +197,6 @@ const p2pPendingExpiredResult = (
     }),
     transport,
   );
-
-const shouldRetainPendingEntityInput = (delivery: EntityInputDeliveryResult): boolean =>
-  delivery.outcome !== 'delivered' && !delivery.terminal;
 
 const normalizeId = (value: string): string => value.toLowerCase();
 const getReplicaSignerId = (replicaKey: string): string => {
@@ -576,7 +575,7 @@ export class RuntimeP2P {
     if (client && client.isOpen()) {
       try {
         delivery = this.deliverEntityInput(client, normalizedTargetRuntimeId, input, ingressTimestamp, transport);
-        if (delivery.outcome === 'delivered') return delivery;
+        if (isDeliveryDelivered(delivery)) return delivery;
         this.env.warn('network', 'P2P_SEND_FAILED', {
           targetRuntimeId: normalizedTargetRuntimeId,
           entityId: input.entityId,
@@ -734,7 +733,7 @@ export class RuntimeP2P {
         }
         try {
           const delivery = this.deliverEntityInput(client, targetRuntimeId, entry.input, entry.ingressTimestamp, transport);
-          if (delivery.outcome !== 'delivered') {
+          if (!isDeliveryDelivered(delivery)) {
             this.sendDebugEvent({
               level: delivery.terminal ? 'error' : 'warn',
               code: delivery.terminal ? 'P2P_PENDING_DELIVERY_DROPPED' : 'P2P_PENDING_DELIVERY_RETRY',
@@ -745,7 +744,7 @@ export class RuntimeP2P {
               delivery,
             });
           }
-          if (shouldRetainPendingEntityInput(delivery)) remaining.push(entry);
+          if (shouldRetryDelivery(delivery)) remaining.push(entry);
         } catch (error) {
           const message = String((error as Error)?.message || error || '');
           const delivery = p2pSendThrowResult(transport, message);
@@ -761,7 +760,7 @@ export class RuntimeP2P {
           if (message.includes('P2P_NO_PUBKEY')) {
             this.refreshGossip();
           }
-          if (shouldRetainPendingEntityInput(delivery)) remaining.push(entry);
+          if (shouldRetryDelivery(delivery)) remaining.push(entry);
         }
       }
       if (remaining.length > 0) {

@@ -12,6 +12,7 @@ import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryQueued,
+  requireDeliveryResult,
   type DeliveryResult,
 } from './delivery-result';
 
@@ -138,20 +139,6 @@ const buildRoutingDeliveryResult = (input: {
     });
   }
   return deliveryAccepted('ROUTE_NOOP');
-};
-
-const isDeliveryResult = (value: unknown): value is DeliveryResult =>
-  typeof value === 'object' &&
-  value !== null &&
-  typeof (value as DeliveryResult).outcome === 'string' &&
-  typeof (value as DeliveryResult).code === 'string' &&
-  typeof (value as DeliveryResult).retryable === 'boolean' &&
-  typeof (value as DeliveryResult).fatal === 'boolean' &&
-  typeof (value as DeliveryResult).terminal === 'boolean';
-
-const requireDeliveryResult = (value: unknown, code: string): DeliveryResult => {
-  if (isDeliveryResult(value)) return value;
-  throw new Error(`${code}: expected DeliveryResult`);
 };
 
 const enqueueP2PEntityInputDelivery = (

@@ -15,6 +15,26 @@ export type DeliveryResult = {
   failure?: RuntimeFailureSignal;
 };
 
+export const isDeliveryResult = (value: unknown): value is DeliveryResult =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as DeliveryResult).outcome === 'string' &&
+  typeof (value as DeliveryResult).code === 'string' &&
+  typeof (value as DeliveryResult).retryable === 'boolean' &&
+  typeof (value as DeliveryResult).fatal === 'boolean' &&
+  typeof (value as DeliveryResult).terminal === 'boolean';
+
+export const requireDeliveryResult = (value: unknown, code: string): DeliveryResult => {
+  if (isDeliveryResult(value)) return value;
+  throw new Error(`${code}: expected DeliveryResult`);
+};
+
+export const isDeliveryDelivered = (delivery: DeliveryResult): boolean =>
+  delivery.outcome === 'delivered';
+
+export const shouldRetryDelivery = (delivery: DeliveryResult): boolean =>
+  !isDeliveryDelivered(delivery) && !delivery.terminal;
+
 export const deliveryAccepted = (code = 'DELIVERY_ACCEPTED'): DeliveryResult => ({
   outcome: 'delivered',
   code,
