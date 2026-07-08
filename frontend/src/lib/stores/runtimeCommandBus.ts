@@ -1,6 +1,10 @@
 import { get, writable } from 'svelte/store';
 import type { RuntimeInput } from '@xln/runtime/xln-api';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
+import {
+  classifyRuntimeFailure,
+  type RuntimeFailureKind,
+} from '$lib/utils/runtimeFailure';
 
 export type RuntimeCommandStatus = 'pending' | 'accepted' | 'observed' | 'committed' | 'error';
 
@@ -20,6 +24,8 @@ export type RuntimeCommandStatus = 'pending' | 'accepted' | 'observed' | 'commit
 	  committedAtHeight: number | null;
 	  statusUrl: string | null;
 	  error: string | null;
+  failureKind: RuntimeFailureKind | null;
+  failureRetryable: boolean;
 	};
 
 export type RuntimeCommandProgress = {
@@ -60,9 +66,6 @@ const normalizeHeight = (height: number | null | undefined): number | null => {
   return Number.isFinite(normalized) && normalized >= 0 ? normalized : null;
 };
 
-const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error || 'Runtime command failed');
-
 export const summarizeRuntimeInput = (input: RuntimeInput): CommandReceipt['inputSummary'] => ({
   runtimeTxs: Array.isArray(input.runtimeTxs) ? input.runtimeTxs.length : 0,
   jInputs: Array.isArray(input.jInputs) ? input.jInputs.length : 0,
@@ -82,6 +85,8 @@ export const createRuntimeCommandReceipt = (options: RuntimeCommandSubmitOptions
 	  committedAtHeight: null,
 	  statusUrl: null,
 	  error: null,
+  failureKind: null,
+  failureRetryable: false,
 	});
 
 const publishReceipt = (receipt: CommandReceipt): void => {
@@ -138,9 +143,12 @@ export const submitRuntimeCommand = async <T>(
     const result = await executor(progress, receipt);
     return { receipt, result };
   } catch (error) {
+    const failure = classifyRuntimeFailure(error);
     receipt = updateReceipt(receipt, {
       status: 'error',
-      error: errorMessage(error),
+      error: failure.message,
+      failureKind: failure.kind,
+      failureRetryable: failure.retryable,
     });
     throw error;
   }
@@ -154,6 +162,9 @@ export const recordRuntimeIngressReceipt = (options: {
 }): CommandReceipt => {
   const counts = options.receipt.counts ?? {};
   const upstreamStatus = String(options.receipt.status || 'pending');
+  const expiredFailure = upstreamStatus === 'expired'
+    ? classifyRuntimeFailure(options.receipt.note || 'Runtime ingress receipt expired')
+    : null;
   const status: RuntimeCommandStatus =
     upstreamStatus === 'observed' ? 'observed' :
     upstreamStatus === 'expired' ? 'error' :
@@ -173,9 +184,9 @@ export const recordRuntimeIngressReceipt = (options: {
     acceptedAtHeight: normalizeHeight(options.receipt.enqueuedHeight),
     committedAtHeight: normalizeHeight(options.receipt.observedHeight),
     statusUrl: options.statusUrl ?? null,
-    error: upstreamStatus === 'expired'
-      ? options.receipt.note || 'Runtime ingress receipt expired'
-      : null,
+    error: expiredFailure?.message ?? null,
+    failureKind: expiredFailure?.kind ?? null,
+    failureRetryable: expiredFailure?.retryable ?? false,
   };
   publishReceipt(receipt);
   return receipt;

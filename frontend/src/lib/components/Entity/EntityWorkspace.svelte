@@ -122,8 +122,11 @@
 	        class={`command-pill ${$runtimeCommandLatestReceipt.status}`}
 	        data-testid="runtime-command-receipt"
 	        title={$runtimeCommandLatestReceipt.error || $runtimeCommandLatestReceipt.upstreamReceiptId || $runtimeCommandLatestReceipt.statusUrl || $runtimeCommandLatestReceipt.receiptId}
-	      >
+      >
         {$runtimeCommandLatestReceipt.status}
+        {#if $runtimeCommandLatestReceipt.failureKind}
+          · {$runtimeCommandLatestReceipt.failureKind}
+        {/if}
         {#if $runtimeCommandLatestReceipt.committedAtHeight !== null}
           h{$runtimeCommandLatestReceipt.committedAtHeight}
         {:else if $runtimeCommandLatestReceipt.acceptedAtHeight !== null}

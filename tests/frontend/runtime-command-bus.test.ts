@@ -38,6 +38,8 @@ test('runtime command bus records pending accepted observed committed error rece
 	  expect(source).toContain('statusUrl');
 	  expect(source).not.toContain('commitAcceptedRuntimeCommands');
   expect(source).toContain('recordRuntimeIngressReceipt');
+  expect(source).toContain('classifyRuntimeFailure');
+  expect(source).toContain('failureKind: RuntimeFailureKind | null');
   expect(source).toContain("status: receipt.mode === 'remote' ? 'observed' : 'committed'");
   expect(source).toContain("upstreamStatus === 'observed' ? 'observed'");
   expect(source).toContain("registerDebugSurface('commands'");
@@ -136,6 +138,20 @@ test('runtime command bus transitions receipts from pending to accepted committe
   expect(latest?.status).toBe('error');
   expect(latest?.acceptedAtHeight).toBe(2);
   expect(latest?.error).toBe('boom');
+  expect(latest?.failureKind).toBe('fatal');
+  expect(latest?.failureRetryable).toBe(false);
+
+  await expect(submitRuntimeCommand({
+    input,
+    runtimeId: 'runtime-d',
+    mode: 'remote',
+    initialHeight: 1,
+  }, async () => {
+    throw new Error('fetch failed: ECONNREFUSED');
+  })).rejects.toThrow('fetch failed');
+  const retryable = readStore(runtimeCommandLatestReceipt);
+  expect(retryable?.failureKind).toBe('defer');
+  expect(retryable?.failureRetryable).toBe(true);
 });
 
 test('runtime command bus records server ingress receipts without fake RuntimeInput', () => {
@@ -166,6 +182,8 @@ test('runtime command bus records server ingress receipts without fake RuntimeIn
     entityTxs: 0,
   });
   expect(readStore(runtimeCommandLatestReceipt)).toEqual(receipt);
+  expect(receipt.failureKind).toBeNull();
+  expect(receipt.failureRetryable).toBe(false);
 
   const observed = recordRuntimeIngressReceipt({
     runtimeId: 'server-runtime',
@@ -182,6 +200,22 @@ test('runtime command bus records server ingress receipts without fake RuntimeIn
   expect(observed.status).toBe('observed');
   expect(observed.acceptedAtHeight).toBe(12);
   expect(observed.committedAtHeight).toBe(13);
+
+  const expired = recordRuntimeIngressReceipt({
+    runtimeId: 'server-runtime',
+    mode: 'remote',
+    receipt: {
+      id: 'credit-expired',
+      status: 'expired',
+      note: 'Runtime ingress receipt expired',
+      enqueuedHeight: 14,
+    },
+    statusUrl: '/api/control/runtime-input/credit-expired/status',
+  });
+  expect(expired.status).toBe('error');
+  expect(expired.error).toBe('Runtime ingress receipt expired');
+  expect(expired.failureKind).toBe('drop');
+  expect(expired.failureRetryable).toBe(false);
 });
 
 test('xlnStore routes RuntimeInput mutations through RuntimeCommandBus', () => {
@@ -330,6 +364,7 @@ test('entity workspace renders latest runtime command receipt status', () => {
 
   expect(source).toContain('runtimeCommandLatestReceipt');
   expect(source).toContain('data-testid="runtime-command-receipt"');
+  expect(source).toContain('failureKind');
 	  expect(source).toContain('committedAtHeight');
 	  expect(source).toContain('acceptedAtHeight');
 	  expect(source).toContain('upstreamReceiptId');
