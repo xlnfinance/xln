@@ -97,4 +97,15 @@ for (const marker of [
   assertIncludes(flowCoverage, marker, flowCoveragePath);
 }
 
+const opsRunbookPath = 'docs/deployment/ops-runbook.md';
+const opsRunbook = readText(opsRunbookPath);
+for (const marker of [
+  'bun run debug:disk',
+  'Test runners clean old generated artifacts by default before new runs.',
+  'XLN_KEEP_TEST_ARTIFACTS=1',
+  'XLN_TEST_WORKSPACE_MAX_BYTES',
+]) {
+  assertIncludes(opsRunbook, marker, opsRunbookPath);
+}
+
 console.log('✅ security audit pack check passed');

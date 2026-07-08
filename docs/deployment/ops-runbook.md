@@ -45,10 +45,16 @@ bun run prod:health
 3. Check storage pressure:
 
    ```bash
+   bun run debug:disk
    jq '.disk, .storage.tracked[] | {name, kind, currentBytes, bytesPerHour, scanTruncated}' /tmp/xln-health.json
    df -h /
    du -sh logs .logs playwright-report test-results db 2>/dev/null || true
    ```
+
+   Test runners clean old generated artifacts by default before new runs.
+   Use `XLN_KEEP_TEST_ARTIFACTS=1` only when preserving traces/videos/logs is
+   intentional. Generated test artifacts are budgeted at 50 GiB by default via
+   `XLN_TEST_WORKSPACE_MAX_BYTES`.
 
 4. If a hub is down but the orchestrator is healthy, prefer an orchestrator-managed restart over killing child PIDs manually:
 

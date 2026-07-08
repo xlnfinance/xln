@@ -2037,6 +2037,7 @@ const runShard = async (
         E2E_FAST: process.env['E2E_FAST'] ?? '1',
         E2E_ISOLATED_STACK: '1',
         E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
+        XLN_TEST_ARTIFACT_CLEANUP_DONE: '1',
         XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
         XLN_INCLUDE_CUSTODY: task.requireCustody ? '1' : '0',
       },

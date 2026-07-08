@@ -58,6 +58,7 @@ const projects = PW_PROFILE === 'webkit-mobile'
 
 export default defineConfig({
   // testDir is relative to this config file's directory
+  globalSetup: './tests/playwright-global-setup.ts',
   reporter: PW_REPORTER
     ? [[PW_REPORTER]]
     : PW_SIMPLE_REPORTER

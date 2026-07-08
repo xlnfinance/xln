@@ -916,6 +916,14 @@ describe('production startup wiring', () => {
     expect(allTestsFast).toContain('const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);');
     expect(allTestsFast).toContain('e2eEnv,');
     expect(runner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'e2e', scope: 'e2e', skipIfAlreadyDone: false })");
+    expect(runner).toContain("XLN_TEST_ARTIFACT_CLEANUP_DONE: '1'");
+    expect(readFileSync(join(repoRoot, 'playwright.config.ts'), 'utf8')).toContain(
+      "globalSetup: './tests/playwright-global-setup.ts'",
+    );
+    const playwrightGlobalSetup = readFileSync(join(repoRoot, 'tests/playwright-global-setup.ts'), 'utf8');
+    expect(playwrightGlobalSetup).toContain('cleanupTestArtifactsBeforeRun({');
+    expect(playwrightGlobalSetup).toContain("reason: 'playwright'");
+    expect(playwrightGlobalSetup).toContain("scope: 'e2e'");
   });
 
   test('fatal log monitor reports the concrete marker line and last 80 log lines', () => {
