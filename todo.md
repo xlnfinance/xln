@@ -447,6 +447,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: cross-j fill validation, pull-resolve followups, and claim
      progress now all derive committed proof ratio through the shared
      exact-aware helper when legacy coarse ratio is absent.
+   - Partial: committed exact-only terminal fill ACK followup now routes through
+     clear handling instead of falling back into book-progress repair when
+     legacy coarse ratio is absent.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

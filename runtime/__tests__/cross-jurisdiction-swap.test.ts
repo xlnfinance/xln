@@ -843,6 +843,75 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(updated?.claimedRatio).toBe(0x8000);
   });
 
+  test('committed exact-only terminal fill ack routes clear without book progress fallback', () => {
+    const seed = 'cross-exact-only-terminal-fill-followup-seed';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('b1');
+    const sourceHubSigner = registerTestSigner(env, seed, '1');
+    const sourceHub = generateLazyEntityId([sourceHubSigner], 1n).toLowerCase();
+    const targetHub = entity('b3');
+    const targetUser = entity('b4');
+    const sourceHubState = makeState(sourceHub, sourceHubSigner, eth, sourceUser);
+    addReplica(env, sourceHubState, sourceHubSigner);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-exact-only-terminal-fill-followup',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: seed, sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    sourceHubState.crossJurisdictionSwaps?.set(route.orderId, { ...route, status: 'resting' });
+    const ackTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: route.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: 1_000n,
+        incrementalTargetAmount: 900n,
+        cumulativeSourceAmount: 1_000n,
+        cumulativeTargetAmount: 900n,
+        cumulativeFillRatio: 0,
+        fillNumerator: 1n,
+        fillDenominator: 1n,
+        executionSourceAmount: 1_000n,
+        executionTargetAmount: 900n,
+        priceImprovementMode: 'source_savings',
+        cancelRemainder: false,
+        pairId: route.venueId || '',
+      },
+    };
+    const outputs: EntityInput[] = [];
+
+    expect(applyCommittedCrossJurisdictionAccountTxFollowup(
+      env,
+      sourceHubState,
+      sourceUser,
+      ackTx,
+      outputs,
+    )).toBe(true);
+
+    const updated = sourceHubState.crossJurisdictionSwaps?.get(route.orderId);
+    expect(updated?.status).toBe('clear_requested');
+    expect(updated?.cumulativeFillRatio).toBe(65_535);
+    expect(updated?.fillNumerator).toBe(1n);
+    expect(updated?.fillDenominator).toBe(1n);
+    expect(outputs.some(output =>
+      output.entityId === sourceHub &&
+      output.entityTxs?.some(tx => tx.type === 'requestCrossJurisdictionClear'),
+    )).toBe(true);
+    expect(outputs.some(output =>
+      output.entityTxs?.some(tx => tx.type === 'applyCrossJurisdictionBookProgress'),
+    )).toBe(false);
+  });
+
   test('target pull settle routes canonical book removal even when owner is remote', () => {
     const env = createEmptyEnv('cross-target-remote-book-owner');
     env.timestamp = 10_000;

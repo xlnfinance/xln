@@ -30,9 +30,6 @@ const crossJFollowupLog = createStructuredLogger('crossj.followup');
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
-const clampFillRatio = (value: unknown): number =>
-  Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
-
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   getCrossJurisdictionCommittedProofRatio(route);
 
@@ -533,7 +530,12 @@ const applyFillAckFollowup = (
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
   outputs: EntityInput[],
 ): boolean => {
-  const ratio = clampFillRatio(accountTx.data.cumulativeFillRatio);
+  const ratio = getCrossJurisdictionCommittedProofRatio({
+    orderId: accountTx.data.offerId,
+    cumulativeFillRatio: accountTx.data.cumulativeFillRatio,
+    fillNumerator: accountTx.data.fillNumerator,
+    fillDenominator: accountTx.data.fillDenominator,
+  });
   const route = newState.crossJurisdictionSwaps?.get(accountTx.data.offerId);
   if (!route) {
     // A committed account ACK is canonical money progress. If the entity route
