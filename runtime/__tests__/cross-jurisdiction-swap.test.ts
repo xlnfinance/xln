@@ -1678,6 +1678,7 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const remaining = getCrossJurisdictionRouteRemainingAmounts(ratioOnlyExactRoute);
     const cancelAck = buildCrossJurisdictionCancelAck(ratioOnlyExactRoute.orderId, ratioOnlyExactRoute);
+    const closeProof = buildCrossJurisdictionCloseProof(ratioOnlyExactRoute, '0x');
 
     expect(remaining.filledSourceAmount).toBe(10_000_000_000_000_000n);
     expect(remaining.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
@@ -1687,7 +1688,91 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(cancelAck.data.cumulativeTargetAmount).toBe(25_000_000_000_000_000_000n);
     expect(cancelAck.data.fillNumerator).toBe(1n);
     expect(cancelAck.data.fillDenominator).toBe(4n);
+    expect(closeProof.cumulativeSourceAmount).toBe(10_000_000_000_000_000n);
+    expect(closeProof.cumulativeTargetAmount).toBe(25_000_000_000_000_000_000n);
     expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(remaining.filledSourceAmount);
+  });
+
+  test('cross-j next fill validates against exact previous ratio fields before uint16 fallback', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('8d');
+    const sourceHub = entity('8e');
+    const targetHub = entity('8f');
+    const targetUser = entity('90');
+    const account = makeAccount(sourceHub, sourceUser);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-exact-quarter-next-fill',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: {
+        jurisdiction: jref(eth),
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 2,
+        amount: 40_000_000_000_000_000n,
+      },
+      target: {
+        jurisdiction: jref(base),
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 100_000_000_000_000_000_000n,
+      },
+      priceImprovementMode: 'source_savings',
+      status: 'partially_filled',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-exact-quarter-next-fill-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const ratioOnlyExactRoute = {
+      ...route,
+      fillSeq: 1,
+      cumulativeFillRatio: 16_384,
+      fillNumerator: 1n,
+      fillDenominator: 4n,
+    };
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 2,
+      giveAmount: 40_000_000_000_000_000n,
+      wantTokenId: 1,
+      wantAmount: 100_000_000_000_000_000_000n,
+      priceTicks: 2_500n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: ratioOnlyExactRoute,
+    });
+
+    const result = await applyAccountTx(account, {
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: route.orderId,
+        previousFillSeq: 1,
+        fillSeq: 2,
+        incrementalSourceAmount: 10_000_000_000_000_000n,
+        incrementalTargetAmount: 25_000_000_000_000_000_000n,
+        cumulativeSourceAmount: 20_000_000_000_000_000n,
+        cumulativeTargetAmount: 50_000_000_000_000_000_000n,
+        cumulativeFillRatio: 32_768,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
+        executionSourceAmount: 10_000_000_000_000_000n,
+        executionTargetAmount: 25_000_000_000_000_000_000n,
+        priceImprovementMode: 'source_savings',
+        cancelRemainder: false,
+        pairId: 'cross:ethereum:2/base:1',
+      },
+    }, account.leftEntity === sourceHub, 3_000, 2);
+
+    const updatedRoute = account.swapOffers.get(route.orderId)?.crossJurisdiction;
+    expect(result.success).toBe(true);
+    expect(updatedRoute?.fillSeq).toBe(2);
+    expect(updatedRoute?.filledSourceAmount).toBe(20_000_000_000_000_000n);
+    expect(updatedRoute?.filledTargetAmount).toBe(50_000_000_000_000_000_000n);
+    expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(10_000_000_000_000_000n);
   });
 
   test('cross-j fill closes sub-lot remainder instead of leaving a zombie order', async () => {

@@ -14,7 +14,10 @@ import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
-import { cleanupTestArtifactsBeforeRun } from '../scripts/test-artifact-cleanup';
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+} from '../scripts/test-artifact-cleanup';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -205,7 +208,7 @@ type ParallelResult = {
 };
 
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
-  cleanupTestArtifactsBeforeRun({ reason: 'scenarios' });
+  cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) });
   const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
   const selectedSet = set === 'smoke'
     ? SMOKE_PARALLEL_SET
@@ -276,6 +279,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
+          [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
           JADAPTER_MODE: mode,
           ANVIL_RPC: rpcUrl,
           XLN_DB_PATH: dbPath,
@@ -396,6 +400,9 @@ async function main() {
     console.error(`Unknown scenario: "${scenario}". Available: ${Object.keys(SCENARIOS).join(', ')}`);
     process.exit(1);
   }
+
+  cleanupTestArtifactsBeforeRun({ reason: 'scenario', argv: process.argv.slice(2) });
+  process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
 
   // Set env vars — scenarios read these via getJAdapterMode() / ensureJAdapter()
   if (mode) process.env['JADAPTER_MODE'] = mode;

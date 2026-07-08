@@ -423,6 +423,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: cross-j orderbook remaining amounts, cancel ACKs, and fill-notice
      idempotency now share exact committed fill amount resolution before using
      legacy uint16 ratio fallback.
+   - Partial: cross-j close proofs and subsequent fill validation now also use
+     shared exact committed fill resolution, so exact-only partial route state
+     cannot drift when the next ACK or close proof is built.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

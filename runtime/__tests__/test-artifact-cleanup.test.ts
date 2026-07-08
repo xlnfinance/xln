@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import {
   cleanupTestArtifactsBeforeRun,
+  DEFAULT_TEST_WORKSPACE_MAX_BYTES,
   KEEP_TEST_ARTIFACTS_ENV,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   TEST_WORKSPACE_MAX_BYTES_ENV,
@@ -47,6 +48,7 @@ describe('test artifact cleanup', () => {
       });
 
       expect(summary.skipped).toBe(false);
+      expect(summary.maxBytes).toBe(DEFAULT_TEST_WORKSPACE_MAX_BYTES);
       expect(summary.estimatedWorkspaceBytes).toBeGreaterThanOrEqual(0);
       expect(summary.estimatedBudgetedBytes).toBeLessThan(1024 * 1024);
       expect(summary.removed).toContain('.logs/e2e-parallel');
@@ -241,6 +243,10 @@ describe('test artifact cleanup', () => {
     }
   });
 
+  test('default workspace budget is the agreed 50 GiB repo cap', () => {
+    expect(DEFAULT_TEST_WORKSPACE_MAX_BYTES).toBe(50 * 1024 * 1024 * 1024);
+  });
+
   test('run-with-test-cleanup keeps cleanup flags out of the child command', () => {
     const parsed = parseRunWithTestCleanupArgs([
       '--reason=frontend-playwright',
@@ -268,12 +274,18 @@ describe('test artifact cleanup', () => {
     const rootPackage = readFileSync(join(repoRoot, 'package.json'), 'utf8');
     const frontendPackage = readFileSync(join(repoRoot, 'frontend/package.json'), 'utf8');
     const contractsPackage = readFileSync(join(repoRoot, 'jurisdictions/package.json'), 'utf8');
+    const scenarioRunner = readFileSync(join(repoRoot, 'runtime/scenarios/run.ts'), 'utf8');
 
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=e2e-payment-smoke --scope=e2e');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=e2e-prod-payment --scope=e2e');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=governance --child-cwd=jurisdictions');
     expect(rootPackage).toContain('run-with-test-cleanup.ts --reason=entity --child-cwd=jurisdictions');
+    expect(rootPackage).toContain('"test:scenarios:parallel:isolated": "bun runtime/scenarios/run.ts"');
+    expect(rootPackage).toContain('"test:feedback:20": "bun runtime/scenarios/run.ts --set=smoke --workers=2"');
+    expect(scenarioRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) })");
+    expect(scenarioRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'scenario', argv: process.argv.slice(2) })");
+    expect(scenarioRunner).toContain("[TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1'");
     expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e');
     expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e');
     expect(contractsPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts');

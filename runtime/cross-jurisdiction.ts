@@ -382,14 +382,9 @@ export function validateCrossJurisdictionFillProgress(
     return { ok: false, error: 'invalid route amount' };
   }
 
-  const previousSourceAmount =
-    route.filledSourceAmount ??
-    route.sourceClaimed ??
-    ((sourceTotal * BigInt(previousRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const previousTargetAmount =
-    route.filledTargetAmount ??
-    route.targetClaimed ??
-    ((targetTotal * BigInt(previousRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
+  const previousSourceAmount = committedFill.filledSourceAmount;
+  const previousTargetAmount = committedFill.filledTargetAmount;
   // Runtime order progress is exact. `cumulativeFillRatio` is the coarse
   // uint16 projection used by hash-ladder/dispute plumbing; it must not round
   // economic amounts inside the committed orderbook path.
@@ -703,23 +698,11 @@ export function buildCrossJurisdictionCloseProof(
   if (!canonical.sourcePull || !canonical.targetPull) {
     throw new Error(`CROSS_J_CLOSE_PROOF_PULLS_MISSING:${canonical.orderId}`);
   }
-  const fillRatio = Math.max(
-    0,
-    Math.min(
-      CROSS_J_MAX_FILL_RATIO,
-      Math.floor(Number(canonical.cumulativeFillRatio ?? canonical.claimedRatio ?? 0) || 0),
-    ),
-  );
-  const sourceTotal = BigInt(canonical.source.amount);
-  const targetTotal = BigInt(canonical.target.amount);
-  const cumulativeSourceAmount =
-    canonical.filledSourceAmount ??
-    canonical.sourceClaimed ??
-    ((sourceTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const cumulativeTargetAmount =
-    canonical.filledTargetAmount ??
-    canonical.targetClaimed ??
-    ((targetTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const {
+    filledSourceAmount: cumulativeSourceAmount,
+    filledTargetAmount: cumulativeTargetAmount,
+    fillRatio,
+  } = getCrossJurisdictionCommittedFillAmounts(canonical);
   return cloneCrossJurisdictionCloseProof({
     orderId: canonical.orderId,
     routeHash: canonical.routeHash || deriveCrossJurisdictionRouteHash(canonical),
