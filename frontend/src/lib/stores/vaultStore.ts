@@ -53,6 +53,27 @@ export interface RecoveryTowerConfig {
   enabled?: boolean;
 }
 
+export interface RuntimeRecoveryTowerReceiptSummary {
+  towerUrl: string;
+  towerMode: TowerModeV1;
+  height: number;
+  bundleHash: string;
+  sequence: number;
+  receivedAt: number;
+  slot?: number;
+  storedBytes?: number;
+  maxStoredBytes?: number;
+  expiresAt?: number;
+  appointmentSequence?: number | null;
+}
+
+export interface RuntimeRecoveryTowerFailureSummary {
+  towerUrl: string;
+  towerMode: TowerModeV1;
+  checkedAt: number;
+  error: string;
+}
+
 export interface RuntimeRecoveryConfig {
   towers?: RecoveryTowerConfig[];
   useDefaultTowers?: boolean;
@@ -60,6 +81,10 @@ export interface RuntimeRecoveryConfig {
   maxStoredBytes?: number;
   lastKnownStoredBytes?: number;
   lastQuotaWarningAt?: number;
+  lastTowerUploadAttemptAt?: number;
+  lastTowerUploadAttemptHeight?: number;
+  lastTowerReceipts?: RuntimeRecoveryTowerReceiptSummary[];
+  lastTowerFailures?: RuntimeRecoveryTowerFailureSummary[];
 }
 
 export interface Runtime {
@@ -200,6 +225,7 @@ const RECOVERY_TOWER_INFO_TTL_MS = 60_000;
 const DEFAULT_DISPUTE_WINDOW_BLOCKS = 5760;
 const WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS = Math.max(1, Math.ceil(DEFAULT_DISPUTE_WINDOW_BLOCKS * 0.2));
 const WATCHTOWER_SAFETY_MARGIN_BLOCKS = 12;
+const RECOVERY_TOWER_STATUS_LIMIT = 16;
 
 export const shouldSkipRuntimeRecoveryUploadAtHeight = (
   previous: { lastUploadedHeight: number; lastBundleHash: string | null } | undefined,
@@ -501,6 +527,76 @@ const normalizeRecoveryTowerConfigs = (towers: RecoveryTowerConfig[] | undefined
     });
   }
   return [...deduped.values()];
+};
+
+const nonNegativeInteger = (value: unknown): number => {
+  const parsed = Math.floor(Number(value ?? 0));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+};
+
+const optionalNonNegativeInteger = (value: unknown): number | undefined => {
+  if (value === null || value === undefined || value === '') return undefined;
+  return nonNegativeInteger(value);
+};
+
+const compactRecoveryError = (error: unknown): string => {
+  const text = error instanceof Error ? error.message : String(error || 'unknown');
+  return text.replace(/\s+/g, ' ').trim().slice(0, 240) || 'unknown';
+};
+
+export const summarizeRuntimeRecoveryTowerReceipt = (
+  tower: RecoveryTowerConfig,
+  receipt: TowerReceiptV1,
+): RuntimeRecoveryTowerReceiptSummary => {
+  const towerUrl = normalizeTowerBaseUrl(tower.url || receipt.towerId || '');
+  const storedBytes = optionalNonNegativeInteger(receipt.storedBytes);
+  const maxStoredBytes = optionalNonNegativeInteger(receipt.maxStoredBytes);
+  const expiresAt = optionalNonNegativeInteger(receipt.expiresAt);
+  return {
+    towerUrl,
+    towerMode: normalizeRecoveryTowerMode(receipt.towerMode || tower.towerMode),
+    height: nonNegativeInteger(receipt.height),
+    bundleHash: String(receipt.bundleHash || '').trim().toLowerCase(),
+    sequence: nonNegativeInteger(receipt.sequence),
+    receivedAt: nonNegativeInteger(receipt.receivedAt),
+    ...(receipt.slot !== undefined ? { slot: nonNegativeInteger(receipt.slot) } : {}),
+    ...(storedBytes !== undefined ? { storedBytes } : {}),
+    ...(maxStoredBytes !== undefined ? { maxStoredBytes } : {}),
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(receipt.appointmentSequence !== undefined ? { appointmentSequence: receipt.appointmentSequence } : {}),
+  };
+};
+
+export const summarizeRuntimeRecoveryTowerFailure = (
+  tower: RecoveryTowerConfig,
+  error: unknown,
+  checkedAt: number,
+): RuntimeRecoveryTowerFailureSummary => ({
+  towerUrl: normalizeTowerBaseUrl(tower.url),
+  towerMode: normalizeRecoveryTowerMode(tower.towerMode),
+  checkedAt: nonNegativeInteger(checkedAt),
+  error: compactRecoveryError(error),
+});
+
+const receiptSummaryKey = (receipt: RuntimeRecoveryTowerReceiptSummary): string =>
+  `${receipt.towerUrl}|${receipt.towerMode}|${receipt.slot ?? 0}`;
+
+export const mergeRuntimeRecoveryTowerReceipts = (
+  previous: RuntimeRecoveryTowerReceiptSummary[] | undefined,
+  current: RuntimeRecoveryTowerReceiptSummary[],
+): RuntimeRecoveryTowerReceiptSummary[] => {
+  const deduped = new Map<string, RuntimeRecoveryTowerReceiptSummary>();
+  for (const receipt of [...current, ...(previous || [])]) {
+    const key = receiptSummaryKey(receipt);
+    if (!deduped.has(key)) deduped.set(key, receipt);
+  }
+  return [...deduped.values()]
+    .sort((left, right) =>
+      right.receivedAt - left.receivedAt ||
+      right.height - left.height ||
+      right.sequence - left.sequence
+    )
+    .slice(0, RECOVERY_TOWER_STATUS_LIMIT);
 };
 
 const buildDefaultRecoveryTowerConfigs = (): RecoveryTowerConfig[] =>
@@ -960,6 +1056,47 @@ const persistRuntimeMetadataSnapshot = (): void => {
   }
 };
 
+const updateRuntimeRecoveryMetadata = (
+  runtimeId: string,
+  update: (previous: RuntimeRecoveryConfig) => RuntimeRecoveryConfig,
+): Runtime | null => {
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+  if (!normalizedRuntimeId) return null;
+  let updatedRuntime: Runtime | null = null;
+  runtimesState.update((state) => {
+    const runtime = state.runtimes[normalizedRuntimeId];
+    if (!runtime) return state;
+    const nextRecovery = update(runtime.recovery || {});
+    updatedRuntime = {
+      ...runtime,
+      recovery: {
+        ...nextRecovery,
+        towers: normalizeRecoveryTowerConfigs(nextRecovery.towers),
+        useDefaultTowers: nextRecovery.useDefaultTowers === true,
+      },
+    };
+    return {
+      ...state,
+      runtimes: {
+        ...state.runtimes,
+        [normalizedRuntimeId]: updatedRuntime,
+      },
+    };
+  });
+  if (!updatedRuntime) return null;
+  persistRuntimeMetadataSnapshot();
+  const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
+  const entryEnv = runtimeEntry?.env || null;
+  if (entryEnv) {
+    runtimes.update((currentRuntimes) => {
+      const updated = new Map(currentRuntimes);
+      updated.set(normalizedRuntimeId, runtimeToEntry(updatedRuntime!, entryEnv));
+      return updated;
+    });
+  }
+  return updatedRuntime;
+};
+
 export async function tryRestoreRuntimeEnvFromTower(
   runtime: Runtime,
   xln: XLNModule,
@@ -1105,6 +1242,9 @@ async function uploadRuntimeRecoverySnapshot(
   let maxObservedStoredBytes = runtime.recovery?.lastKnownStoredBytes ?? 0;
   const delayedTowers = towers.filter((tower) => tower.towerMode === 'delayed_last_resort');
   const activeTowerErrors: string[] = [];
+  const uploadCheckedAt = Date.now();
+  const receiptSummaries: RuntimeRecoveryTowerReceiptSummary[] = [];
+  const failureSummaries: RuntimeRecoveryTowerFailureSummary[] = [];
 
   for (const tower of towers) {
     try {
@@ -1118,20 +1258,30 @@ async function uploadRuntimeRecoverySnapshot(
       if (!response.ok || !payload.ok) {
         const errorText = String(payload.error || `HTTP_${response.status}`);
         errors.push(`${tower.url}:${errorText}`);
+        failureSummaries.push(summarizeRuntimeRecoveryTowerFailure(tower, errorText, uploadCheckedAt));
         if (errorText.startsWith('TOWER_QUOTA_EXCEEDED')) {
-          const nextRecovery = runtime.recovery || {};
-          runtime.recovery = {
-            ...nextRecovery,
+          updateRuntimeRecoveryMetadata(normalizedRuntimeId, (previousRecovery) => ({
+            ...previousRecovery,
             lastQuotaWarningAt: Date.now(),
-          };
+          }));
           toasts.warning('Recovery backup quota exceeded. Runtime state is larger than the free tower allowance.', 8_000);
         }
         continue;
       }
+      if (!payload.receipt) {
+        const errorText = 'TOWER_RECEIPT_MISSING';
+        errors.push(`${tower.url}:${errorText}`);
+        failureSummaries.push(summarizeRuntimeRecoveryTowerFailure(tower, errorText, uploadCheckedAt));
+        continue;
+      }
+      const receiptSummary = summarizeRuntimeRecoveryTowerReceipt(tower, payload.receipt);
+      receiptSummaries.push(receiptSummary);
       successfulTowers += 1;
-      maxObservedStoredBytes = Math.max(maxObservedStoredBytes, Number(payload.receipt?.storedBytes || 0));
+      maxObservedStoredBytes = Math.max(maxObservedStoredBytes, Number(payload.receipt.storedBytes || 0));
     } catch (error) {
-      errors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
+      const errorText = error instanceof Error ? error.message : String(error);
+      errors.push(`${tower.url}:${errorText}`);
+      failureSummaries.push(summarizeRuntimeRecoveryTowerFailure(tower, errorText, uploadCheckedAt));
     }
   }
 
@@ -1161,26 +1311,36 @@ async function uploadRuntimeRecoverySnapshot(
         if (!response.ok || !payload.ok) {
           const errorText = String(payload.error || `HTTP_${response.status}`);
           if (errorText.startsWith('TOWER_QUOTA_EXCEEDED')) {
-            runtime.recovery = {
-              ...(runtime.recovery || {}),
+            updateRuntimeRecoveryMetadata(normalizedRuntimeId, (previousRecovery) => ({
+              ...previousRecovery,
               lastQuotaWarningAt: Date.now(),
-            };
+            }));
             toasts.warning('Watchtower dispute backup quota exceeded. Last-resort coverage is incomplete until the runtime state shrinks or quota is raised.', 8_000);
           }
           throw new Error(`${upload.triggerHint}:${errorText}`);
         }
-        maxObservedStoredBytes = Math.max(maxObservedStoredBytes, Number(payload.receipt?.storedBytes || 0));
+        if (!payload.receipt) {
+          throw new Error(`${upload.triggerHint}:TOWER_RECEIPT_MISSING`);
+        }
+        receiptSummaries.push(summarizeRuntimeRecoveryTowerReceipt(tower, payload.receipt));
+        maxObservedStoredBytes = Math.max(maxObservedStoredBytes, Number(payload.receipt.storedBytes || 0));
       }
     } catch (error) {
-      activeTowerErrors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
+      const errorText = error instanceof Error ? error.message : String(error);
+      activeTowerErrors.push(`${tower.url}:${errorText}`);
+      failureSummaries.push(summarizeRuntimeRecoveryTowerFailure(tower, errorText, uploadCheckedAt));
     }
   }
 
-  runtime.recovery = {
-    ...(runtime.recovery || {}),
+  updateRuntimeRecoveryMetadata(normalizedRuntimeId, (previousRecovery) => ({
+    ...previousRecovery,
     towers,
     lastKnownStoredBytes: maxObservedStoredBytes,
-  };
+    lastTowerUploadAttemptAt: uploadCheckedAt,
+    lastTowerUploadAttemptHeight: encrypted.height,
+    lastTowerReceipts: mergeRuntimeRecoveryTowerReceipts(previousRecovery.lastTowerReceipts, receiptSummaries),
+    lastTowerFailures: failureSummaries.slice(0, RECOVERY_TOWER_STATUS_LIMIT),
+  }));
   if (successfulTowers < minSuccessfulTowers) {
     throw new Error(`[VaultStore] Tower appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${errors.join(' | ') || 'no tower accepted backup'}`);
   }

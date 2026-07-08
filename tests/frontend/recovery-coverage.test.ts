@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'fs';
 
 import {
+  buildRecoveryTowerStatuses,
   buildRuntimeRecoveryCoverage,
   formatRecoveryBytes,
 } from '../../frontend/src/lib/utils/recoveryCoverage';
@@ -66,7 +67,28 @@ test('runtime recovery coverage distinguishes configured towers from observed re
   });
 
   const observed = byId(buildRuntimeRecoveryCoverage({
-    runtime: runtimeFixture({ lastKnownStoredBytes: 4096 }),
+    runtime: runtimeFixture({
+      lastKnownStoredBytes: 4096,
+      lastTowerReceipts: [
+        {
+          towerUrl: 'https://tower.example.com',
+          towerMode: 'blind_backup',
+          height: 10,
+          bundleHash: `0x${'11'.repeat(32)}`,
+          sequence: 1,
+          receivedAt: 100,
+          storedBytes: 4096,
+        },
+        {
+          towerUrl: 'https://tower.example.com',
+          towerMode: 'delayed_last_resort',
+          height: 10,
+          bundleHash: `0x${'22'.repeat(32)}`,
+          sequence: 2,
+          receivedAt: 101,
+        },
+      ],
+    }),
     towers: [{
       id: 'tower-1',
       url: 'https://tower.example.com/',
@@ -79,6 +101,7 @@ test('runtime recovery coverage distinguishes configured towers from observed re
     status: 'ready',
     statusLabel: 'Receipt observed',
   });
+  expect(observed.tower_backup?.detail).toContain('h10');
   expect(observed.tower_backup?.detail).toContain('4.0 KB stored');
   expect(observed.last_resort).toMatchObject({
     status: 'ready',
@@ -101,11 +124,64 @@ test('runtime recovery coverage dedupes disabled and duplicate towers', () => {
   expect(coverage.last_resort?.detail).toContain('quota warning');
 });
 
+test('recovery tower statuses prefer current failures over stale receipts', () => {
+  const statuses = buildRecoveryTowerStatuses(runtimeFixture({
+    lastTowerReceipts: [{
+      towerUrl: 'https://tower.example.com',
+      towerMode: 'blind_backup',
+      height: 8,
+      bundleHash: `0x${'11'.repeat(32)}`,
+      sequence: 1,
+      receivedAt: 100,
+      storedBytes: 2048,
+    }],
+    lastTowerFailures: [{
+      towerUrl: 'https://tower.example.com',
+      towerMode: 'blind_backup',
+      checkedAt: 110,
+      error: 'HTTP_500',
+    }],
+  }), [{ url: 'https://tower.example.com/', towerMode: 'delayed_last_resort' }]);
+
+  expect(statuses).toEqual([{
+    url: 'https://tower.example.com',
+    status: 'failure',
+    label: 'Last upload failed',
+    detail: 'HTTP_500',
+  }]);
+
+  const recovered = buildRecoveryTowerStatuses(runtimeFixture({
+    lastTowerReceipts: [{
+      towerUrl: 'https://tower.example.com',
+      towerMode: 'blind_backup',
+      height: 9,
+      bundleHash: `0x${'22'.repeat(32)}`,
+      sequence: 2,
+      receivedAt: 120,
+      storedBytes: 2048,
+    }],
+    lastTowerFailures: [{
+      towerUrl: 'https://tower.example.com',
+      towerMode: 'blind_backup',
+      checkedAt: 110,
+      error: 'HTTP_500',
+    }],
+  }), [{ url: 'https://tower.example.com/', towerMode: 'delayed_last_resort' }]);
+
+  expect(recovered[0]).toMatchObject({
+    status: 'receipt',
+    label: 'Receipt observed',
+    detail: 'h9 · seq 2 · 2.0 KB',
+  });
+});
+
 test('recovery settings panel renders the coverage grid inside existing recovery UI', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/EntitySettingsProjectionPanel.svelte', 'utf8');
   expect(source).toContain('buildRuntimeRecoveryCoverage');
+  expect(source).toContain('buildRecoveryTowerStatuses');
   expect(source).toContain('data-testid="recovery-coverage-grid"');
   expect(source).toContain('data-testid={`recovery-coverage-${item.id}`}');
+  expect(source).toContain('class="recovery-service-status"');
 });
 
 test('formatRecoveryBytes keeps recovery coverage labels compact', () => {

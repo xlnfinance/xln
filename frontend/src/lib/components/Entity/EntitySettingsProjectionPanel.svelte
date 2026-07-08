@@ -19,7 +19,10 @@
     resolveOfficialRecoveryTowerUrl,
     type RecoveryServiceMode,
   } from '$lib/utils/recoverySettings';
-  import { buildRuntimeRecoveryCoverage } from '$lib/utils/recoveryCoverage';
+  import {
+    buildRecoveryTowerStatuses,
+    buildRuntimeRecoveryCoverage,
+  } from '$lib/utils/recoveryCoverage';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
@@ -158,6 +161,8 @@
     towers: recoveryTowerDraft,
     runtimeHeight,
   });
+  $: recoveryTowerStatuses = buildRecoveryTowerStatuses($activeRuntime, recoveryTowerDraft);
+  $: recoveryTowerStatusByUrl = new Map(recoveryTowerStatuses.map((status) => [status.url, status]));
 
   function inferRecoveryMode(): RecoveryTowerSetupMode {
     const runtime = $activeRuntime;
@@ -418,10 +423,17 @@
         {:else}
           {#each recoveryTowerDraft as tower (tower.url)}
             {@const isOfficial = isOfficialRecoveryTower(tower, recoveryOfficialUrl)}
+            {@const towerStatus = recoveryTowerStatusByUrl.get(String(tower.url || '').replace(/\/+$/, ''))}
             <div class="recovery-service-row">
               <div class="recovery-service-main">
                 <strong>{isOfficial ? 'Official xln tower' : 'Manual service'}</strong>
                 <code>{tower.url}</code>
+                {#if towerStatus}
+                  <small class="recovery-service-status" data-status={towerStatus.status}>
+                    <span>{towerStatus.label}</span>
+                    <span>{towerStatus.detail}</span>
+                  </small>
+                {/if}
               </div>
               <div class="recovery-service-actions">
                 <select
@@ -994,6 +1006,41 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .recovery-service-status {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 7px;
+  }
+
+  .recovery-service-status span:first-child {
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+    font-size: 10px;
+    font-weight: 900;
+    line-height: 1;
+    padding: 4px 6px;
+    text-transform: uppercase;
+  }
+
+  .recovery-service-status span:last-child {
+    color: var(--theme-text-muted, #71717a);
+    font-size: 11px;
+  }
+
+  .recovery-service-status[data-status='receipt'] span:first-child {
+    color: #34d399;
+  }
+
+  .recovery-service-status[data-status='failure'] span:first-child {
+    color: #fb7185;
+  }
+
+  .recovery-service-status[data-status='pending'] span:first-child {
+    color: var(--theme-text-muted, #71717a);
   }
 
   .recovery-service-actions {

@@ -1,13 +1,17 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'fs';
 import { AbiCoder, HDNodeWallet, Mnemonic, ParamType, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 
 import {
   buildDelayedLastResortAppointmentsForTower,
   buildRuntimeRecoveryConfigForMode,
   discoverRuntimeRecoveryCandidates,
+  mergeRuntimeRecoveryTowerReceipts,
   parseRuntimeRecoveryCandidateFile,
   resolveDefaultRecoveryTowerUrls,
   shouldSkipRuntimeRecoveryUploadAtHeight,
+  summarizeRuntimeRecoveryTowerFailure,
+  summarizeRuntimeRecoveryTowerReceipt,
   tryRestoreRuntimeEnvFromTower,
 } from '../../frontend/src/lib/stores/vaultStore';
 import * as xln from '../../runtime/runtime';
@@ -79,6 +83,65 @@ test('runtime recovery upload skips already uploaded height instead of building 
     lastUploadedHeight: 8,
     lastBundleHash: null,
   }, 8)).toBe(false);
+});
+
+test('runtime recovery tower status summaries are bounded, compact, and fail-fast guarded', () => {
+  const tower = { url: 'https://tower.example.com/', towerMode: 'delayed_last_resort' as const };
+  const receipt = summarizeRuntimeRecoveryTowerReceipt(tower, {
+    type: 'tower_receipt',
+    version: 1,
+    towerId: 'tower-a',
+    lookupKey: `0x${'99'.repeat(32)}`,
+    runtimeId: deriveTestAddress(0),
+    height: 12,
+    bundleHash: `0x${'11'.repeat(32)}`,
+    towerMode: 'blind_backup',
+    slot: 0,
+    receivedAt: 1234,
+    sequence: 7,
+    retainedSlots: 1,
+    storedBytes: 4096,
+    maxStoredBytes: 65536,
+  });
+
+  expect(receipt).toMatchObject({
+    towerUrl: 'https://tower.example.com',
+    towerMode: 'blind_backup',
+    height: 12,
+    sequence: 7,
+    storedBytes: 4096,
+  });
+
+  const failure = summarizeRuntimeRecoveryTowerFailure(
+    tower,
+    new Error('HTTP_500 '.repeat(80)),
+    4321,
+  );
+  expect(failure).toMatchObject({
+    towerUrl: 'https://tower.example.com',
+    towerMode: 'delayed_last_resort',
+    checkedAt: 4321,
+  });
+  expect(failure.error.length).toBeLessThanOrEqual(240);
+
+  const merged = mergeRuntimeRecoveryTowerReceipts(
+    Array.from({ length: 20 }, (_, index) => ({
+      towerUrl: `https://old-${index}.example.com`,
+      towerMode: 'blind_backup' as const,
+      height: index,
+      bundleHash: `0x${String(index + 1).padStart(64, '0')}`,
+      sequence: index,
+      receivedAt: index,
+    })),
+    [receipt],
+  );
+  expect(merged).toHaveLength(16);
+  expect(merged[0]).toEqual(receipt);
+
+  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  expect(source).toContain('TOWER_RECEIPT_MISSING');
+  expect(source).toContain('lastTowerFailures');
+  expect(source).toContain('updateRuntimeRecoveryMetadata(normalizedRuntimeId');
 });
 
 const testMnemonic = 'test test test test test test test test test test test junk';
