@@ -19,6 +19,8 @@ import {
 } from '../../frontend/src/lib/utils/remoteRuntimeImport';
 import {
   buildRemoteRuntimeRecoveryPeerSources,
+  buildRuntimeWsRecoveryPeerSource,
+  buildRuntimeWsRecoveryPeerSources,
   selectPrimaryRemoteHubSummary,
 } from '../../frontend/src/lib/utils/remoteRuntimeValidation';
 
@@ -313,6 +315,132 @@ describe('remote runtime import manager utilities', () => {
     });
     expect(reads).toEqual([{ path: 'recovery/bundles/lookup%2Fkey', query: undefined }]);
     expect(disconnected).toBe(true);
+  });
+
+  test('runtime websocket recovery peer source requests correlated bundles from live peer', async () => {
+    const requesterRuntimeId = `0x${'56'.repeat(20)}`;
+    const peerRuntimeId = `0x${'78'.repeat(20)}`;
+    const lookupKey = 'lookup/key';
+    const clientOptions: unknown[] = [];
+    const requests: Array<{ to: string; lookupKey: string; timeoutMs?: number }> = [];
+    let closed = false;
+    let opened = false;
+
+    const source = buildRuntimeWsRecoveryPeerSource({
+      requesterRuntimeId,
+      requesterSeed: 'test test test test test test test test test test test junk',
+      requesterSignerId: '7',
+      requestTimeoutMs: 1234,
+      endpoint: {
+        id: 'peer-h1',
+        label: 'Peer H1',
+        peerRuntimeId,
+        wsUrl: 'ws://127.0.0.1:8092/ws',
+      },
+      createClient: (options) => {
+        clientOptions.push(options);
+        return {
+          async connect() {
+            opened = true;
+          },
+          isOpen() {
+            return opened;
+          },
+          async requestRecoveryBundles<T = unknown>(to: string, key: string, timeoutMs?: number): Promise<T> {
+            requests.push({ to, lookupKey: key, timeoutMs });
+            return { ok: true, bundles: [{ version: 1 }], lookupKey: key } as T;
+          },
+          close() {
+            closed = true;
+          },
+        };
+      },
+    });
+
+    const payload = await source.fetchBundles({ runtimeId: requesterRuntimeId, lookupKey });
+
+    expect(source.id).toBe('peer-h1');
+    expect(source.label).toBe('Peer H1');
+    expect(payload).toMatchObject({ ok: true, lookupKey });
+    expect(requests).toEqual([{ to: peerRuntimeId, lookupKey, timeoutMs: 1234 }]);
+    expect(clientOptions[0]).toMatchObject({
+      url: 'ws://127.0.0.1:8092/ws',
+      runtimeId: requesterRuntimeId,
+      signerId: '7',
+      seed: 'test test test test test test test test test test test junk',
+      useHelloAuth: true,
+      maxReconnectAttempts: 1,
+    });
+    expect((clientOptions[0] as { encryptionKeyPair?: { publicKey?: Uint8Array; privateKey?: Uint8Array } })
+      .encryptionKeyPair?.publicKey?.length).toBe(32);
+    expect(closed).toBe(true);
+  });
+
+  test('runtime websocket recovery peer source rejects runtime mismatches before opening sockets', async () => {
+    const requesterRuntimeId = `0x${'90'.repeat(20)}`;
+    const peerRuntimeId = `0x${'91'.repeat(20)}`;
+    let created = 0;
+
+    const source = buildRuntimeWsRecoveryPeerSource({
+      requesterRuntimeId,
+      requesterSeed: 'test test test test test test test test test test test junk',
+      endpoint: {
+        label: 'Peer H2',
+        peerRuntimeId,
+        wsUrl: 'ws://127.0.0.1:8093/ws',
+      },
+      createClient: () => {
+        created += 1;
+        throw new Error('socket should not be created');
+      },
+    });
+
+    await expect(source.fetchBundles({
+      runtimeId: `0x${'92'.repeat(20)}`,
+      lookupKey: 'lookup/key',
+    })).rejects.toThrow('RUNTIME_WS_RECOVERY_RUNTIME_MISMATCH');
+    expect(created).toBe(0);
+  });
+
+  test('runtime websocket recovery peer sources dedupe repeated endpoints', () => {
+    const requesterRuntimeId = `0x${'93'.repeat(20)}`;
+    const peerRuntimeId = `0x${'94'.repeat(20)}`;
+
+    const sources = buildRuntimeWsRecoveryPeerSources({
+      requesterRuntimeId,
+      requesterSeed: 'test test test test test test test test test test test junk',
+      endpoints: [
+        { label: 'Peer H3', peerRuntimeId, wsUrl: 'ws://127.0.0.1:8094/ws' },
+        { label: 'Peer H3 duplicate', peerRuntimeId, wsUrl: 'ws://127.0.0.1:8094/ws' },
+      ],
+      createClient: () => {
+        throw new Error('socket should not be created while building sources');
+      },
+    });
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0]?.id).toBe(peerRuntimeId);
+    expect(sources[0]?.label).toBe('Peer H3');
+  });
+
+  test('runtime websocket recovery peer sources fail fast on invalid endpoints', () => {
+    const requesterRuntimeId = `0x${'95'.repeat(20)}`;
+
+    expect(() => buildRuntimeWsRecoveryPeerSources({
+      requesterRuntimeId,
+      requesterSeed: 'test test test test test test test test test test test junk',
+      endpoints: [
+        { label: 'Invalid runtime', peerRuntimeId: 'bad', wsUrl: 'ws://127.0.0.1:8095/ws' },
+      ],
+    })).toThrow('RUNTIME_WS_RECOVERY_PEER_RUNTIME_INVALID');
+
+    expect(() => buildRuntimeWsRecoveryPeerSources({
+      requesterRuntimeId,
+      requesterSeed: 'test test test test test test test test test test test junk',
+      endpoints: [
+        { label: 'Invalid url', peerRuntimeId: `0x${'96'.repeat(20)}`, wsUrl: '' },
+      ],
+    })).toThrow('RUNTIME_WS_RECOVERY_PEER_WS_URL_MISSING');
   });
 
   test('restores the active admin token by normalized endpoint after reload', () => {

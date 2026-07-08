@@ -737,7 +737,8 @@ Current repo status:
   after `DisputeStarted`, and plaintext last-resort remedies are rejected by
   tower HTTP and store insertion;
 - browser/runtime upload paths exist for configured recovery towers;
-- PSR, recovery relay, and recovery coverage UI remain separate open work.
+- PSR account-level materialization, recovery relay complaints/reputation, and
+  production recovery monitoring remain separate open work.
 
 ### Phase D: Multi-tower and Incentives
 
@@ -767,6 +768,10 @@ active backlog.
      when the target runtime is offline.
    - done: `RuntimeWsClient.requestRecoveryBundles()` provides a correlated
      request/response Promise API with timeout and offline-peer rejection.
+   - done: recovery discovery can wrap explicit runtime websocket peer
+     endpoints as `RuntimeRecoveryPeerSource` entries, rejects runtime
+     mismatches before socket open, and does not infer `/ws` from stored `/rpc`
+     imports.
    - open: account-level `PeerStateRequestV1` / `PeerStateResponseV1`
      materialization and restore selection remain broader PSR work.
 5. partial: add recovery discovery endpoint:
@@ -784,7 +789,8 @@ active backlog.
    - try local DB;
    - if missing or strict restore fails, enter recovery discovery instead of creating empty state silently;
    - only create a fresh env after explicit user confirmation when no recoverable accounts exist.
-10. open: add UI state for recovery coverage and account recovery status.
+10. partial: add UI state for recovery coverage and account recovery status;
+    runtime coverage grid exists, account-level PSR status remains open.
 11. done: add contract support for dispute update/challenge if missing.
 12. done: add contract-enforced delayed tower action:
    - `lastResortWindowBlocks`;
@@ -810,7 +816,9 @@ Current `0.1.5` status:
 - tower encrypted backup restore is implemented;
 - delayed-last-resort counter-dispute infrastructure is implemented;
 - wiped-browser tower restore is covered by E2E;
-- PSR, recovery relay complaints/reputation, and coverage UI are still open.
+- runtime recovery coverage UI is implemented;
+- PSR account materialization and recovery relay complaints/reputation are
+  still open.
 
 MVP should not include yet:
 
