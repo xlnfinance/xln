@@ -289,6 +289,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      callers to parse status/reason strings.
    - Partial: health relay timeline severity now reads `delivery` metadata
      first and only falls back to legacy status strings for old events.
+   - Partial: P2P entity-input send and pending flush now use the same typed
+     delivery result shape internally while preserving the public boolean API.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

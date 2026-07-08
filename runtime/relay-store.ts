@@ -9,11 +9,16 @@ import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
 import { canonicalizeProfile, type Profile } from './networking/gossip';
 import { safeStringify } from './serialization-utils';
 import {
-  buildRuntimeFailureSignal,
   normalizeRuntimeFailureCode,
   type RuntimeFailureCategory,
-  type RuntimeFailureSignal,
 } from './failure-taxonomy';
+import {
+  deliveryAccepted,
+  deliveryDeferred,
+  deliveryFailure,
+  type DeliveryOutcome,
+  type DeliveryResult,
+} from './delivery-result';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
@@ -54,16 +59,9 @@ export type RelayDebugEvent = {
   details?: unknown;
 };
 
-export type RelayDeliveryOutcome = 'delivered' | 'queued' | 'deferred' | 'failed';
+export type RelayDeliveryOutcome = DeliveryOutcome;
 
-export type RelayDeliveryResult = {
-  outcome: RelayDeliveryOutcome;
-  code: string;
-  retryable: boolean;
-  fatal: boolean;
-  terminal: boolean;
-  failure?: RuntimeFailureSignal;
-};
+export type RelayDeliveryResult = DeliveryResult;
 
 export type RelayStore = {
   serverId: string;
@@ -205,25 +203,20 @@ export const classifyRelayDeliveryEvent = (event: {
   const code = deliveryCodeFor(status, reason);
 
   if (DELIVERY_ACCEPTED_STATUSES.has(status)) {
-    return { outcome: 'delivered', code, retryable: false, fatal: false, terminal: true };
+    return deliveryAccepted(code);
   }
   if (DELIVERY_DEFERRED_STATUSES.has(status)) {
-    return { outcome: status === 'queued' ? 'queued' : 'deferred', code, retryable: true, fatal: false, terminal: false };
+    return deliveryDeferred({
+      outcome: status === 'queued' ? 'queued' : 'deferred',
+      code,
+    });
   }
 
-  const failure = buildRuntimeFailureSignal({
+  return deliveryFailure({
     category: deliveryFailureCategory(status, code, reason),
     code,
     message: reason || status,
   });
-  return {
-    outcome: 'failed',
-    code: failure.code,
-    retryable: failure.retryable,
-    fatal: failure.fatal,
-    terminal: failure.fatal,
-    failure,
-  };
 };
 
 // ---------------------------------------------------------------------------

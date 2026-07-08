@@ -29,6 +29,11 @@ import {
   sameWsUrl,
   uniqueTransportValues,
 } from './p2p-endpoints';
+import {
+  deliveryAccepted,
+  deliveryFailure,
+  type DeliveryResult,
+} from '../delivery-result';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -69,6 +74,8 @@ type GossipResponsePayload = {
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
+type EntityInputDeliveryTransport = 'direct' | 'relay';
+type EntityInputDeliveryResult = DeliveryResult & { transport: EntityInputDeliveryTransport };
 
 const normalizeGossipPollMs = (value: number | undefined): number => {
   if (!Number.isFinite(Number(value))) return GOSSIP_POLL_MS;
@@ -124,6 +131,55 @@ const sanitizeIncomingProfile = (rawProfile: unknown): SanitizedIncomingProfile 
       error: error instanceof Error ? error.message : String(error),
     };
   }
+};
+
+const p2pDeliveryResult = (
+  delivery: DeliveryResult,
+  transport: EntityInputDeliveryTransport,
+): EntityInputDeliveryResult => ({
+  ...delivery,
+  transport,
+});
+
+const p2pSendFalseDelivery = (transport: EntityInputDeliveryTransport): EntityInputDeliveryResult =>
+  p2pDeliveryResult(
+    deliveryFailure({
+      category: 'TransientRace',
+      code: 'P2P_SEND_RETURNED_FALSE',
+      message: 'Transport send returned false',
+      terminal: false,
+    }),
+    transport,
+  );
+
+const p2pNotDeliveredResult = (
+  transport: EntityInputDeliveryTransport,
+  message: string,
+): EntityInputDeliveryResult =>
+  p2pDeliveryResult(
+    deliveryFailure({
+      category: 'TransientRace',
+      code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
+      message,
+      terminal: false,
+    }),
+    transport,
+  );
+
+const p2pSendThrowResult = (
+  transport: EntityInputDeliveryTransport,
+  message: string,
+): EntityInputDeliveryResult => {
+  const code = message.includes('P2P_NO_PUBKEY') ? 'P2P_NO_PUBKEY' : 'P2P_SEND_THROW';
+  return p2pDeliveryResult(
+    deliveryFailure({
+      category: code === 'P2P_NO_PUBKEY' ? 'TransientRace' : 'Contradiction',
+      code,
+      message,
+      terminal: code !== 'P2P_NO_PUBKEY',
+    }),
+    transport,
+  );
 };
 
 const normalizeId = (value: string): string => value.toLowerCase();
@@ -459,6 +515,19 @@ export class RuntimeP2P {
     return rows.sort((left, right) => compareStableText(left.runtimeId, right.runtimeId));
   }
 
+  private deliverEntityInput(
+    client: Pick<RuntimeWsClient, 'sendEntityInput'>,
+    targetRuntimeId: string,
+    input: RoutedEntityInput,
+    ingressTimestamp: number | undefined,
+    transport: EntityInputDeliveryTransport,
+  ): EntityInputDeliveryResult {
+    const sent = client.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
+    return sent
+      ? p2pDeliveryResult(deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED'), transport)
+      : p2pSendFalseDelivery(transport);
+  }
+
   enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
     try {
       failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
@@ -486,17 +555,20 @@ export class RuntimeP2P {
       { targetRuntimeId },
     );
     const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
+    let delivery: EntityInputDeliveryResult | null = null;
     if (client && client.isOpen()) {
       try {
-        const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
-        if (sent) return true;
+        delivery = this.deliverEntityInput(client, normalizedTargetRuntimeId, input, ingressTimestamp, transport);
+        if (delivery.outcome === 'delivered') return true;
         this.env.warn('network', 'P2P_SEND_FAILED', {
           targetRuntimeId: normalizedTargetRuntimeId,
           entityId: input.entityId,
           transport,
+          delivery,
         });
       } catch (error) {
         const message = (error as Error).message || String(error);
+        const delivery = p2pSendThrowResult(transport, message);
         if (message.includes('P2P_NO_PUBKEY')) {
           this.sendDebugEvent({
             level: 'error',
@@ -505,6 +577,7 @@ export class RuntimeP2P {
             targetRuntimeId: normalizedTargetRuntimeId,
             entityId: input.entityId,
             transport,
+            delivery,
           });
           this.refreshGossip();
         } else {
@@ -515,6 +588,7 @@ export class RuntimeP2P {
             targetRuntimeId: normalizedTargetRuntimeId,
             entityId: input.entityId,
             transport,
+            delivery,
           });
         }
         throw new Error(
@@ -524,15 +598,18 @@ export class RuntimeP2P {
       }
     }
 
+    const finalMessage = delivery?.failure?.message ?? 'No open transport for entity input';
+    const finalDelivery = delivery ?? p2pNotDeliveredResult(transport, finalMessage);
     this.sendDebugEvent({
       level: 'error',
       code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
-      message: 'No open transport for entity input',
+      message: finalMessage,
       targetRuntimeId: normalizedTargetRuntimeId,
       entityId: input.entityId,
       transport,
       relayConnected: Boolean(this.getActiveClient()),
       directPeers: this.getDirectPeerState(),
+      delivery: finalDelivery,
     });
     throw new Error(
       `P2P_ENTITY_INPUT_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entity=${input.entityId} ` +
@@ -619,7 +696,7 @@ export class RuntimeP2P {
 
   private flushPending() {
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      const { client } = this.resolveTransportClient(targetRuntimeId);
+      const { client, transport } = this.resolveTransportClient(targetRuntimeId);
       if (!client || !client.isOpen()) continue;
       const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
@@ -635,8 +712,8 @@ export class RuntimeP2P {
           continue;
         }
         try {
-          const sent = client.sendEntityInput(targetRuntimeId, entry.input, entry.ingressTimestamp);
-          if (!sent) remaining.push(entry);
+          const delivery = this.deliverEntityInput(client, targetRuntimeId, entry.input, entry.ingressTimestamp, transport);
+          if (delivery.outcome !== 'delivered') remaining.push(entry);
         } catch (error) {
           if (String((error as Error)?.message || error || '').includes('P2P_NO_PUBKEY')) {
             this.refreshGossip();

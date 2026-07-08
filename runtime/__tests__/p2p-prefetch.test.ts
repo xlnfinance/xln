@@ -47,6 +47,105 @@ test('enqueueEntityInput starts profile prefetch before transport resolution', (
   expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length || 0).toBe(0);
 });
 
+test('enqueueEntityInput reports typed delivery result when no transport is open', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const debugEvents: unknown[] = [];
+
+  p2p.env = {
+    warn: () => undefined,
+  };
+  p2p.sendDebugEvent = (payload: unknown) => {
+    debugEvents.push(payload);
+    return true;
+  };
+  p2p.ensureRelayConnectionsForEntity = () => undefined;
+  p2p.prefetchProfilesForInput = () => undefined;
+  p2p.resolveTransportClient = () => ({ client: null, transport: 'relay' });
+  p2p.clients = [];
+  p2p.directClients = new Map();
+  p2p.directClientUrls = new Map();
+  p2p.directClientErrors = new Map();
+  p2p.pendingByRuntime = new Map();
+
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+
+  expect(() => p2p.enqueueEntityInput(TARGET_RUNTIME_ID, input)).toThrow(/P2P_ENTITY_INPUT_NOT_DELIVERED/);
+  expect(debugEvents.at(-1)).toMatchObject({
+    code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
+    delivery: {
+      outcome: 'failed',
+      code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+      transport: 'relay',
+      failure: {
+        category: 'TransientRace',
+      },
+    },
+  });
+});
+
+test('enqueueEntityInput reports typed delivery result when transport send returns false', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const debugEvents: unknown[] = [];
+  const warnings: unknown[][] = [];
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInput: () => false,
+  };
+
+  p2p.env = {
+    warn: (...args: unknown[]) => {
+      warnings.push(args);
+    },
+  };
+  p2p.sendDebugEvent = (payload: unknown) => {
+    debugEvents.push(payload);
+    return true;
+  };
+  p2p.ensureRelayConnectionsForEntity = () => undefined;
+  p2p.prefetchProfilesForInput = () => undefined;
+  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
+  p2p.clients = [relayClient];
+  p2p.directClients = new Map();
+  p2p.directClientUrls = new Map();
+  p2p.directClientErrors = new Map();
+  p2p.pendingByRuntime = new Map();
+
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+
+  expect(() => p2p.enqueueEntityInput(TARGET_RUNTIME_ID, input)).toThrow(/P2P_ENTITY_INPUT_NOT_DELIVERED/);
+  expect(warnings[0]?.[2]).toMatchObject({
+    delivery: {
+      outcome: 'failed',
+      code: 'P2P_SEND_RETURNED_FALSE',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+      transport: 'relay',
+    },
+  });
+  expect(debugEvents.at(-1)).toMatchObject({
+    code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
+    delivery: {
+      code: 'P2P_SEND_RETURNED_FALSE',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+      transport: 'relay',
+    },
+  });
+});
+
 test('enqueueEntityInput uses official relay when advertised hub direct endpoint is not open', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const sent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
