@@ -69,6 +69,10 @@ file and older docs disagree, prefer code and tests first, then this file.
 - Refreshed current mainnet/security status docs and re-ran
   `bun run security:audit-pack`; this prepares the internal audit handoff pack
   but does not replace an independent external audit.
+- Published the GitHub Release object for pushed tag `v0.1.5`:
+  https://github.com/xlnfinance/xln/releases/tag/v0.1.5. The release is marked
+  prerelease and explicitly says it is public-testnet/pre-mainnet evidence, not
+  mainnet approval.
 
 ## P0 - Release And Mainnet Readiness
 
@@ -176,12 +180,7 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
     isolated names are source-guarded by
     `tests/frontend/runtime-store-hot-swap.test.ts`.
 
-1. **Publish the GitHub Release object for `v0.1.5`.**
-   - Tag `v0.1.5` is pushed.
-   - `gh release create` is blocked until `gh auth login` or `GH_TOKEN` is
-     available in this workspace.
-
-2. **Finish release-duration soak before any mainnet-candidate claim.**
+1. **Finish release-duration soak before any mainnet-candidate claim.**
    - Already passed for `0.1.5`: `gate:ci`, full browser E2E, prod payment E2E,
      prod health.
    - Passed on current `main`: `bun run gate:release`.
@@ -192,21 +191,21 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      one-hour `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak`
      from a clean tree.
 
-3. **Make real mainnet ops explicit.**
+2. **Make real mainnet ops explicit.**
    - Chain/RPC endpoints selected and documented.
    - Funded operator/tower accounts and gas policy documented.
    - Backup/restore and incident drills run against production-like data.
    - Monitoring and alert thresholds cover runtime, relay, storage, market
      maker, and watchtower.
 
-4. **Keep admin cockpit green before handoff.**
+3. **Keep admin cockpit green before handoff.**
    - Exit: focused QA cockpit e2e covers verdict explanations, four user-story
      videos, screenshot gallery/slideshow, run ledger, history DB controls, and
      read/admin disabled states.
    - Exit: remote-runtime bulk import reports every checked row, imports
      successful rows, and shows retryable diagnostics for failed rows.
 
-5. **External audit handoff.**
+4. **External audit handoff.**
    - Refresh `docs/security/external-audit-brief.md`.
    - Produce the current audit pack with `bun run security:audit-pack`.
    - Do not treat internal E2E success as a substitute for audit on real funds.

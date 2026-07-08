@@ -112,35 +112,33 @@ When docs disagree, use this order:
 
 ### P0 - release and mainnet readiness
 
-1. Publish the GitHub Release object for `v0.1.5`; the tag is pushed, but the
-   release object is blocked by missing `gh` auth or `GH_TOKEN`.
-2. Complete the current one-hour
+1. Complete the current one-hour
    `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak` before
    calling any build a mainnet candidate. `bun run gate:release` already passed
    on the release line; the soak has only partial historical evidence so far.
-3. Document real mainnet chain/RPC, operator keys, tower gas policy,
+2. Document real mainnet chain/RPC, operator keys, tower gas policy,
    backup/restore drills, last-resort dispute drills, and monitoring
    thresholds.
-4. Keep the external audit pack current and treat independent external audit as
+3. Keep the external audit pack current and treat independent external audit as
    required for real user funds.
 
 ### P1 - protocol and runtime
 
-5. Implement Peer State Refresh so a wiped client can recover from honest peers
+4. Implement Peer State Refresh so a wiped client can recover from honest peers
    even when a tower is unavailable.
-6. Add account-level recovery coverage UI and tower receipt/failure visibility.
-7. Classify runtime exceptions as `drop`, `defer`, `debug-assert`, or `fatal`.
-8. Re-check current consensus/Hanko production semantics against the current
+5. Add account-level recovery coverage UI and tower receipt/failure visibility.
+6. Classify runtime exceptions as `drop`, `defer`, `debug-assert`, or `fatal`.
+7. Re-check current consensus/Hanko production semantics against the current
    code, not old audit snapshots.
-9. Re-run a current contract governance/access-control scan before external
+8. Re-run a current contract governance/access-control scan before external
    audit.
-10. Keep destructive reset/clearDB/dev actions strongly gated.
+9. Keep destructive reset/clearDB/dev actions strongly gated.
 
 ### P2 - product clarity
 
-11. Make the token support boundary explicit: prove multi-token E2E or keep
+10. Make the token support boundary explicit: prove multi-token E2E or keep
     the current release line visibly single-token/USDC-first.
-12. Clean up custody/fee UX, settlement flow consistency, and activity/account
+11. Clean up custody/fee UX, settlement flow consistency, and activity/account
     cards enough for support/debug use.
 
 ## Workstreams
