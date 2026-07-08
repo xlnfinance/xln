@@ -462,6 +462,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: cross-j account ACK, entity fill notice, and clear handlers now
      use `CROSS_J_MAX_FILL_RATIO` for terminal/full-fill decisions and display
      instead of local `65_535` / `MAX_SWAP_FILL_RATIO` constants.
+   - Partial: remaining cross-j and pull event strings plus swap-offer
+     `minFillRatio` validation now use the shared fill-ratio constants instead
+     of embedding `65535`.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

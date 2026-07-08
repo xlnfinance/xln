@@ -22,6 +22,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
 import { getCrossJurisdictionBookReceiptError } from '../../cross-jurisdiction-orderbook';
+import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 
@@ -96,7 +97,7 @@ export async function handleSwapOffer(
       return { success: false, error: `Cross-j swap must be prepared before entering the book`, events };
     }
   }
-  if (minFillRatio < 0 || minFillRatio > 65535) {
+  if (minFillRatio < 0 || minFillRatio > MAX_SWAP_FILL_RATIO) {
     return { success: false, error: `Invalid minFillRatio: ${minFillRatio}`, events };
   }
   if (timeInForce !== undefined && timeInForce !== 0 && timeInForce !== 1 && timeInForce !== 2) {

@@ -396,7 +396,7 @@ const applyPullResolveFollowup = (
           binary: accountTx.data.binary,
           proof,
           route: cloneCrossJurisdictionRoute(route),
-          description: `Cross-j ${route.orderId} target close ${fillRatio}/65535`,
+          description: `Cross-j ${route.orderId} target close ${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
         },
       }];
       outputs.push(buildCrossJurisdictionEntityOutput(
@@ -487,7 +487,7 @@ const applyCrossPullCloseFollowup = (
               binary: accountTx.data.binary,
               proof: accountTx.data.proof,
               route: cloneCrossJurisdictionRoute(route),
-              description: `Cross-j ${route.orderId} target close ${fillRatio}/65535`,
+              description: `Cross-j ${route.orderId} target close ${fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
             },
           }],
           route.targetSignerId,

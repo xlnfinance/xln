@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import {
+  CROSS_J_MAX_FILL_RATIO,
   getCrossJurisdictionCommittedProofRatio,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteTransitionAllowed,
@@ -116,7 +117,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
           pullId: route.targetPull.pullId,
           binary,
           description:
-            `Cross-j salvage resolve ${routeId} fill=${verifiedFillRatio}/65535 ` +
+            `Cross-j salvage resolve ${routeId} fill=${verifiedFillRatio}/${CROSS_J_MAX_FILL_RATIO} ` +
             `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}`,
         },
       },
@@ -126,7 +127,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
           counterpartyEntityId: targetHubEntityId,
           starterInitialArguments: buildCrossJurisdictionStarterPullArguments(binary),
           description:
-            `Cross-j salvage ${routeId} fill=${verifiedFillRatio}/65535 ` +
+            `Cross-j salvage ${routeId} fill=${verifiedFillRatio}/${CROSS_J_MAX_FILL_RATIO} ` +
             `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}` +
             (observedAt ? ` observed=${observedAt}` : ''),
         },

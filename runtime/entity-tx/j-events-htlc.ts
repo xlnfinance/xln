@@ -7,7 +7,7 @@ import type {
 } from '../types';
 import { addMessage } from '../state-helpers';
 import { decodeHashLadderBinary } from '../hashladder';
-import { isCrossJurisdictionTerminalStatus } from '../cross-jurisdiction';
+import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../cross-jurisdiction';
 import { createStructuredLogger, shortHash, shortId, shortOrder } from '../logger';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import type { JEventMempoolOp } from './j-events-types';
@@ -335,7 +335,7 @@ export function applyKnownHtlcSecret(
           counterpartyEntityId: relay.targetCounterpartyEntityId,
           lockId: relay.targetLockId,
           secret,
-          description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/65535`,
+          description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
         },
       }], relay.targetSignerId);
   }

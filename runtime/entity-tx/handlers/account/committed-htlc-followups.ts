@@ -18,6 +18,7 @@ import { getTokenCapacity } from '../../../routing/capacity';
 import { markStorageEntityDirty } from '../../../env-events';
 import { scheduleHook as scheduleCrontabHook, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity-crontab';
 import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
+import { CROSS_J_MAX_FILL_RATIO } from '../../../cross-jurisdiction';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
@@ -372,7 +373,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcFollowupContext, revealedSecre
             counterpartyEntityId: relay.targetCounterpartyEntityId,
             lockId: relay.targetLockId,
             secret,
-            description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/65535`,
+            description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
           },
         }], relay.targetSignerId);
     }

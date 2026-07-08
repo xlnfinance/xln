@@ -1,6 +1,7 @@
 import {
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
+  CROSS_J_MAX_FILL_RATIO,
   getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
   isCrossJurisdictionRouteTransitionAllowed,
@@ -200,7 +201,7 @@ const validateCrossTargetResolve = (
   if (decodedRatio !== sourceProof.fillRatio) {
     return fail(
       result,
-      `❌ Cross-j target pull ${shortPull} resolve blocked: ratio ${decodedRatio}/65535 != source proof ${sourceProof.fillRatio}/65535`,
+      `❌ Cross-j target pull ${shortPull} resolve blocked: ratio ${decodedRatio}/${CROSS_J_MAX_FILL_RATIO} != source proof ${sourceProof.fillRatio}/${CROSS_J_MAX_FILL_RATIO}`,
     );
   }
   const binaryHash = hashCrossJurisdictionCloseBinary(binary);
@@ -208,7 +209,7 @@ const validateCrossTargetResolve = (
     return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: binary hash != source proof`);
   }
   if (committedRatio > 0 && decodedRatio > committedRatio) {
-    return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: ratio ${decodedRatio}/65535 exceeds committed ${committedRatio}/65535`);
+    return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: ratio ${decodedRatio}/${CROSS_J_MAX_FILL_RATIO} exceeds committed ${committedRatio}/${CROSS_J_MAX_FILL_RATIO}`);
   }
   if (!isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
     return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: route ${route.status}->clearing`);

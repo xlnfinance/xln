@@ -241,7 +241,7 @@ export async function handlePullResolve(
   const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(decoded.fillRatio) || 0)));
   const previousRatio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0) || 0)));
   if (ratio <= previousRatio) {
-    events.push(`🪝 Pull resolve ignored: ${pullId.slice(0, 8)}... fill ${ratio}/65535 already claimed ${previousRatio}/65535`);
+    events.push(`🪝 Pull resolve ignored: ${pullId.slice(0, 8)}... fill ${ratio}/${HASHLADDER_MAX_FILL_RATIO} already claimed ${previousRatio}/${HASHLADDER_MAX_FILL_RATIO}`);
     return { success: true, events, pullResolved: { pullId, fillRatio: previousRatio } };
   }
   if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
@@ -285,7 +285,7 @@ export async function handlePullResolve(
     pull.claimedRatio = ratio;
     pull.claimedAmount = cumulativeClaimed;
   }
-  events.push(`🪝 Pull resolved: ${pullId.slice(0, 8)}... fill ${ratio}/65535 amount ${applied}`);
+  events.push(`🪝 Pull resolved: ${pullId.slice(0, 8)}... fill ${ratio}/${HASHLADDER_MAX_FILL_RATIO} amount ${applied}`);
   return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
 }
 
@@ -373,7 +373,7 @@ export async function handleCrossPullClose(
   }
 
   accountMachine.pulls?.delete(pullId);
-  events.push(`🪝 Cross-j pull closed: ${pullId.slice(0, 8)}... ratio ${ratio}/65535 claimed ${applied} released ${remainingHold}`);
+  events.push(`🪝 Cross-j pull closed: ${pullId.slice(0, 8)}... ratio ${ratio}/${HASHLADDER_MAX_FILL_RATIO} claimed ${applied} released ${remainingHold}`);
   return {
     success: true,
     events,
