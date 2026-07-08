@@ -27,13 +27,20 @@ const recordArrayOf = (record: PublicHealthRecord, key: string): PublicHealthRec
   return Array.isArray(value) ? value.filter(isRecord) : [];
 };
 
+const publicFailureSignal = (value: unknown): Record<string, unknown> | null => {
+  if (!isRecord(value)) return null;
+  return {
+    category: valueOf(value, 'category'),
+    code: valueOf(value, 'code'),
+    retryable: valueOf(value, 'retryable') === true,
+    fatal: valueOf(value, 'fatal') === true,
+  };
+};
+
 const publicFailureSignals = (record: PublicHealthRecord): Array<Record<string, unknown>> =>
-  recordArrayOf(record, 'failures').map((failure) => ({
-    category: valueOf(failure, 'category'),
-    code: valueOf(failure, 'code'),
-    retryable: valueOf(failure, 'retryable') === true,
-    fatal: valueOf(failure, 'fatal') === true,
-  }));
+  recordArrayOf(record, 'failures')
+    .map(publicFailureSignal)
+    .filter((value): value is Record<string, unknown> => value !== null);
 
 const readyCount = (record: PublicHealthRecord, key: string): number =>
   recordArrayOf(record, key).filter(item => valueOf(item, 'ready') === true).length;
@@ -304,6 +311,7 @@ const publicBootstrapTimeline = (timeline: PublicHealthRecord): Record<string, u
       label: valueOf(stage, 'label'),
       status: valueOf(stage, 'status'),
       reason: valueOf(stage, 'reason'),
+      failure: publicFailureSignal(valueOf(stage, 'failure')),
       budgetMs: valueOf(stage, 'budgetMs'),
       actualMs: valueOf(stage, 'actualMs'),
       startedAt: valueOf(stage, 'startedAt'),

@@ -102,8 +102,15 @@ test('public aggregated health keeps bootstrap timeline evidence without state h
       stages: [{
         key: 'health-poll',
         label: 'Health Poll',
-        status: 'done',
+        status: 'blocked',
         reason: 'Latest /api/health child refresh window',
+        failure: {
+          category: 'TransientRace',
+          code: 'BOOTSTRAP_HEALTH_POLL_NOT_READY',
+          message: 'internal child pid 123 timed out',
+          retryable: true,
+          fatal: false,
+        },
         budgetMs: 1500,
         actualMs: 42,
         evidence: [{ label: 'actual', value: 42, unit: 'ms' }],
@@ -116,8 +123,11 @@ test('public aggregated health keeps bootstrap timeline evidence without state h
   expect(body).toContain('Health Poll');
   expect(body).toContain('actualMs');
   expect(body).toContain('queuedEntityTxCount');
+  expect(body).toContain('BOOTSTRAP_HEALTH_POLL_NOT_READY');
+  expect(body).toContain('TransientRace');
   expect(body).not.toContain('runtime-state-secret');
   expect(body).not.toContain('entity-state-secret');
   expect(body).not.toContain('secretTx');
   expect(body).not.toContain('entityId');
+  expect(body).not.toContain('internal child pid');
 });

@@ -50,6 +50,17 @@ const FAUCET_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
   FAUCET_USER_ENTITY_ID_REQUIRED: 'Contradiction',
 };
 
+const BOOTSTRAP_STAGE_CODES: Record<string, string> = {
+  preflight: 'BOOTSTRAP_PREFLIGHT_NOT_READY',
+  'hub-mesh': 'BOOTSTRAP_HUB_MESH_NOT_READY',
+  'same-chain': 'BOOTSTRAP_SAME_CHAIN_BOOKS_NOT_READY',
+  'cross-chain': 'BOOTSTRAP_CROSS_CHAIN_ROUTES_NOT_READY',
+  'market-maker': 'BOOTSTRAP_MARKET_MAKER_NOT_READY',
+  custody: 'BOOTSTRAP_CUSTODY_NOT_READY',
+  'health-poll': 'BOOTSTRAP_HEALTH_POLL_NOT_READY',
+  'ready-hash': 'BOOTSTRAP_READY_HASH_NOT_READY',
+};
+
 export const normalizeRuntimeFailureCode = (value: unknown): string => {
   const raw = String(value || '').trim();
   const token = raw.split(/[\s:]/)[0] || 'UNKNOWN';
@@ -120,5 +131,19 @@ export const classifyRuntimeFaucetFailure = (code: string, message?: string): Ru
     category,
     code: normalizedCode,
     message: message ?? normalizedCode,
+  });
+};
+
+export const classifyRuntimeBootstrapStageFailure = (
+  stageKey: string,
+  status: string,
+  reason?: string,
+): RuntimeFailureSignal | null => {
+  if (status === 'done' || status === 'disabled') return null;
+  const code = BOOTSTRAP_STAGE_CODES[String(stageKey || '').trim()] ?? `BOOTSTRAP_${normalizeRuntimeFailureCode(stageKey)}_NOT_READY`;
+  return buildRuntimeFailureSignal({
+    category: 'TransientRace',
+    code,
+    message: reason ?? code,
   });
 };

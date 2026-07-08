@@ -111,7 +111,7 @@ import {
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
-import { buildRuntimeHealthFailures } from '../failure-taxonomy';
+import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../failure-taxonomy';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -1401,6 +1401,13 @@ const stageStatus = (
   return 'pending';
 };
 
+const withBootstrapStageFailure = (
+  stage: Omit<AggregatedHealth['bootstrapTimeline']['stages'][number], 'failure'>,
+): AggregatedHealth['bootstrapTimeline']['stages'][number] => ({
+  ...stage,
+  failure: classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason),
+});
+
 const buildBootstrapTimeline = (params: {
   storageOk: boolean;
   resetOk: boolean;
@@ -1580,7 +1587,7 @@ const buildBootstrapTimeline = (params: {
           { label: 'reserve targets', value: params.bootstrapReservesOk && params.bootstrapReserveTargetsMet },
         ],
       },
-    ],
+    ].map(withBootstrapStageFailure),
   };
 };
 

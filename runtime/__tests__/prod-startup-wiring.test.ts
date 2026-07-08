@@ -989,6 +989,19 @@ describe('production startup wiring', () => {
     expect(healthRoute).not.toContain('includeMarketSnapshots');
   });
 
+  test('bootstrap timeline stages expose typed failure metadata', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const types = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-types.ts'), 'utf8');
+    const healthRedaction = readFileSync(join(repoRoot, 'runtime/health-redaction.ts'), 'utf8');
+
+    expect(types).toContain('failure: RuntimeFailureSignal | null;');
+    expect(orchestrator).toContain('classifyRuntimeBootstrapStageFailure');
+    expect(orchestrator).toContain('const withBootstrapStageFailure = (');
+    expect(orchestrator).toContain('failure: classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)');
+    expect(orchestrator).toContain('].map(withBootstrapStageFailure),');
+    expect(healthRedaction).toContain("failure: publicFailureSignal(valueOf(stage, 'failure'))");
+  });
+
   test('market maker quote hot path is producer-only after runtime loop starts', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const meshCommon = readFileSync(join(repoRoot, 'runtime/orchestrator/mesh-common.ts'), 'utf8');

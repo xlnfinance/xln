@@ -5,6 +5,7 @@ import {
   classifyRuntimeHealthDegradedReason,
   classifyRuntimeImportReadinessReason,
   classifyRuntimeFaucetFailure,
+  classifyRuntimeBootstrapStageFailure,
   classifyRuntimeTransportFailure,
 } from '../failure-taxonomy';
 
@@ -82,5 +83,23 @@ describe('runtime failure taxonomy', () => {
       retryable: false,
       fatal: true,
     });
+  });
+
+  test('classifies bootstrap stage failures without parsing stage reason at callers', () => {
+    expect(classifyRuntimeBootstrapStageFailure('hub-mesh', 'blocked', 'Hub mesh is still converging')).toMatchObject({
+      category: 'TransientRace',
+      code: 'BOOTSTRAP_HUB_MESH_NOT_READY',
+      message: 'Hub mesh is still converging',
+      retryable: true,
+      fatal: false,
+    });
+    expect(classifyRuntimeBootstrapStageFailure('ready-hash', 'active', 'Ready hash is not available yet')).toMatchObject({
+      category: 'TransientRace',
+      code: 'BOOTSTRAP_READY_HASH_NOT_READY',
+      retryable: true,
+      fatal: false,
+    });
+    expect(classifyRuntimeBootstrapStageFailure('custody', 'disabled', 'Custody disabled')).toBeNull();
+    expect(classifyRuntimeBootstrapStageFailure('preflight', 'done', 'clear')).toBeNull();
   });
 });

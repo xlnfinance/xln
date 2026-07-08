@@ -43,6 +43,7 @@ export type BootstrapTimelineStage = {
   label: string;
   status: BootstrapTimelineStageStatus;
   reason: string;
+  failure: RuntimeFailureSignal | null;
   budgetMs: number | null;
   actualMs: number | null;
   startedAt: number | null;
