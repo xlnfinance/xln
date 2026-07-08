@@ -5,7 +5,6 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
-import { deliveryAccepted, deliveryDeferred } from '../delivery-result';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { deriveAccountWatchSeed } from '../account-watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account-crypto';
@@ -3555,9 +3554,7 @@ const run = async (): Promise<void> => {
   env.runtimeState.directEntityInputDispatch =
     process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'
       ? (targetRuntimeId, input, ingressTimestamp) =>
-          directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp)
-            ? deliveryAccepted('ROUTE_DIRECT_DELIVERED')
-            : deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' })
+          directRuntimeWs.sendEntityInputDelivery(targetRuntimeId, input, ingressTimestamp)
       : null;
   const handleRadapterWsMessage = (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;

@@ -1,4 +1,9 @@
 import type { RoutedEntityInput } from '../types';
+import {
+  deliveryAccepted,
+  deliveryDeferred,
+  type DeliveryResult,
+} from '../delivery-result';
 import { compareCanonicalText } from '../swap-keys';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './p2p-crypto';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
@@ -159,16 +164,29 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         .filter(session => session.runtimeId.length > 0)
         .sort((left, right) => compareCanonicalText(left.runtimeId, right.runtimeId));
     },
-    sendEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
+    sendEntityInputDelivery(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): DeliveryResult {
       const targetKey = normalizeRuntimeId(targetRuntimeId);
-      if (!targetKey) return false;
+      if (!targetKey) {
+        return deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_TARGET_RUNTIME_INVALID',
+        });
+      }
       const session = sessionsByRuntime.get(targetKey);
       if (!session || !session.handshakeDone || !isSocketOpen(session.ws)) {
         if (session && !isSocketOpen(session.ws)) forgetSession(session.ws);
-        return false;
+        return deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_MISS_FALLBACK',
+        });
       }
       const peerKey = normalizeEncryptionPubKey(session.peerEncryptionPubKey);
-      if (!peerKey) return false;
+      if (!peerKey) {
+        return deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_TARGET_KEY_MISSING',
+        });
+      }
       try {
         const payload = encryptJSON(input, hexToPubKey(peerKey));
         const msg: RuntimeWsMessage = {
@@ -188,9 +206,17 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         };
         const sent = trySend(session.ws, msg);
         if (!sent) forgetSession(session.ws);
-        return sent;
+        return sent
+          ? deliveryAccepted('ROUTE_DIRECT_DELIVERED')
+          : deliveryDeferred({
+            outcome: 'deferred',
+            code: 'ROUTE_DIRECT_SEND_FAILED',
+          });
       } catch {
-        return false;
+        return deliveryDeferred({
+          outcome: 'deferred',
+          code: 'ROUTE_DIRECT_SEND_FAILED',
+        });
       }
     },
     maybeUpgrade(request: Request, serverRef: DirectUpgradeServer): Response | undefined {

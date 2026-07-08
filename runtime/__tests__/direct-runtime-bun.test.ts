@@ -69,7 +69,13 @@ describe('direct runtime websocket route', () => {
       signerId: clientRuntimeId,
       entityTxs: [],
     };
-    expect(route.sendEntityInput(clientRuntimeId, outboundInput, 123)).toBe(true);
+    expect(route.sendEntityInputDelivery(clientRuntimeId, outboundInput, 123)).toMatchObject({
+      outcome: 'delivered',
+      code: 'ROUTE_DIRECT_DELIVERED',
+      retryable: false,
+      fatal: false,
+      terminal: true,
+    });
 
     const outbound = sent[1];
     expect(outbound?.type).toBe('entity_input');
@@ -299,8 +305,36 @@ describe('direct runtime websocket route', () => {
       signerId: clientRuntimeId,
       entityTxs: [],
     };
-    expect(route.sendEntityInput(clientRuntimeId, outboundInput)).toBe(true);
+    expect(route.sendEntityInputDelivery(clientRuntimeId, outboundInput)).toMatchObject({
+      outcome: 'delivered',
+      code: 'ROUTE_DIRECT_DELIVERED',
+    });
     expect(first.sent.at(-1)?.type).toBe('entity_input');
     expect(second.sent).toEqual([]);
+  });
+
+  test('reports typed miss delivery when target direct socket is absent', () => {
+    const serverSeed = 'direct-route-server-miss';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const targetRuntimeId = deriveSignerAddressSync('direct-route-missing-client', '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      onEntityInput: () => undefined,
+    });
+    const outboundInput: RoutedEntityInput = {
+      entityId: `0x${'44'.repeat(32)}`,
+      runtimeId: targetRuntimeId,
+      signerId: targetRuntimeId,
+      entityTxs: [],
+    };
+
+    expect(route.sendEntityInputDelivery(targetRuntimeId, outboundInput)).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_MISS_FALLBACK',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+    });
   });
 });

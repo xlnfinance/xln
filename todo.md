@@ -304,6 +304,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      through to P2P.
    - Partial: relay-socket, hub-node, and market-maker direct dispatch
      implementations now return explicit `DeliveryResult`.
+   - Partial: direct runtime websocket route now exposes typed
+     `sendEntityInputDelivery()` instead of a high-level boolean send wrapper;
+     hub and market-maker nodes use that result directly.
    - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
      `dispatchEntityOutputs()` requires it, with no high-level boolean wrapper.
    - Exit: callers receive one typed delivery result and no longer reimplement
