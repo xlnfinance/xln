@@ -1,4 +1,5 @@
 import { isLocalOperatorRequest } from '../health-redaction';
+import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../failure-taxonomy';
 import { safeStringify } from '../serialization-utils';
 import type { HubChild } from './orchestrator-types';
 
@@ -54,6 +55,25 @@ const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 const DEFAULT_HUB_API_PROXY_TIMEOUT_MS = 5_000;
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const proxyFailureBody = (input: {
+  code: string;
+  error: string;
+  success?: false;
+  extra?: Record<string, unknown>;
+}): Record<string, unknown> & { failure: RuntimeFailureSignal } => {
+  const failure = classifyRuntimeTransportFailure(input.code, input.error);
+  return {
+    ...(input.success === false ? { success: false } : {}),
+    ...(input.extra ?? {}),
+    error: input.error,
+    code: failure.code,
+    category: failure.category,
+    retryable: failure.retryable,
+    fatal: failure.fatal,
+    failure,
+  };
+};
 
 const rewriteHubRuntimeInputStatusUrl = (value: unknown, hubEntityId: string): string | null => {
   const statusUrl = String(value || '').trim();
@@ -144,7 +164,10 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
   const proxyRpc = async (request: Request, upstreamRpcUrl = deps.defaultRpcUrl): Promise<Response> => {
     if (!upstreamRpcUrl) {
       return new Response(
-        JSON.stringify({ error: 'RPC upstream is not configured' }),
+        safeStringify(proxyFailureBody({
+          code: 'RPC_UPSTREAM_NOT_CONFIGURED',
+          error: 'RPC upstream is not configured',
+        })),
         { status: 503, headers: CORS_JSON_HEADERS },
       );
     }
@@ -176,7 +199,11 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
       });
     } catch (error) {
       return new Response(
-        JSON.stringify({ error: serializeError(error), upstream: upstreamRpcUrl }),
+        safeStringify(proxyFailureBody({
+          code: 'RPC_PROXY_UPSTREAM_FAILED',
+          error: serializeError(error),
+          extra: { upstream: upstreamRpcUrl },
+        })),
         { status: 502, headers: CORS_JSON_HEADERS },
       );
     }
@@ -215,11 +242,11 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
       child = deps.getHubChildByEntityId(requestedHubId);
     }
     if (!child) {
-      return new Response(safeStringify({
+      return new Response(safeStringify(proxyFailureBody({
         success: false,
-        error: `Hub not found for hubEntityId=${requestedHubId || 'missing'}`,
         code: 'FAUCET_HUB_NOT_FOUND',
-      }), {
+        error: `Hub not found for hubEntityId=${requestedHubId || 'missing'}`,
+      })), {
         status: 404,
         headers: proxyHeaders(),
       });
@@ -244,11 +271,11 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         }),
       });
     } catch (error) {
-      return new Response(safeStringify({
+      return new Response(safeStringify(proxyFailureBody({
         success: false,
-        error: serializeError(error),
         code: 'FAUCET_PROXY_FAILED',
-      }), {
+        error: serializeError(error),
+      })), {
         status: 502,
         headers: proxyHeaders(),
       });
@@ -289,11 +316,11 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
       child = deps.getHubChildByEntityId(requestedEntityId);
     }
     if (!child) {
-      return new Response(safeStringify({
+      return new Response(safeStringify(proxyFailureBody({
         success: false,
-        error: `Entity hub not found for entityId=${requestedEntityId || 'missing'}`,
         code: 'ENTITY_HUB_PROXY_ENTITY_NOT_FOUND',
-      }), {
+        error: `Entity hub not found for entityId=${requestedEntityId || 'missing'}`,
+      })), {
         status: 404,
         headers: proxyHeaders(),
       });
@@ -318,11 +345,11 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         }),
       });
     } catch (error) {
-      return new Response(safeStringify({
+      return new Response(safeStringify(proxyFailureBody({
         success: false,
-        error: serializeError(error),
         code: 'ENTITY_HUB_PROXY_FAILED',
-      }), {
+        error: serializeError(error),
+      })), {
         status: 502,
         headers: proxyHeaders(),
       });
@@ -341,8 +368,15 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
     const child = requestedHubId ? deps.getHubChildByEntityId(requestedHubId) : deps.getHealthyHub();
     if (!child) {
       return new Response(safeStringify(requestedHubId
-        ? { error: 'Requested hub API unavailable', hubEntityId: requestedHubId }
-        : { error: 'No healthy hub API available' }), {
+        ? proxyFailureBody({
+          code: 'REQUESTED_HUB_API_UNAVAILABLE',
+          error: 'Requested hub API unavailable',
+          extra: { hubEntityId: requestedHubId },
+        })
+        : proxyFailureBody({
+          code: 'NO_HEALTHY_HUB_API_AVAILABLE',
+          error: 'No healthy hub API available',
+        })), {
         status: requestedHubId ? 404 : 503,
         headers: CORS_JSON_HEADERS,
       });
@@ -363,10 +397,11 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         },
       });
     } catch (error) {
-      return new Response(safeStringify({
+      return new Response(safeStringify(proxyFailureBody({
+        code: 'HUB_API_PROXY_FAILED',
         error: serializeError(error),
-        ...(requestedHubId ? { hubEntityId: requestedHubId, apiPort: child.apiPort } : {}),
-      }), {
+        extra: requestedHubId ? { hubEntityId: requestedHubId, apiPort: child.apiPort } : {},
+      })), {
         status: 502,
         headers: CORS_JSON_HEADERS,
       });
@@ -377,7 +412,10 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
     await deps.pollAllHubHealth();
     const child = deps.getHealthyHub();
     if (!child) {
-      return new Response(safeStringify({ error: 'No healthy hub API available' }), {
+      return new Response(safeStringify(proxyFailureBody({
+        code: 'NO_HEALTHY_HUB_API_AVAILABLE',
+        error: 'No healthy hub API available',
+      })), {
         status: 503,
         headers: CORS_JSON_HEADERS,
       });
@@ -404,7 +442,10 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         },
       });
     } catch (error) {
-      return new Response(safeStringify({ error: serializeError(error) }), {
+      return new Response(safeStringify(proxyFailureBody({
+        code: 'HUB_API_PROXY_FAILED',
+        error: serializeError(error),
+      })), {
         status: 502,
         headers: CORS_JSON_HEADERS,
       });

@@ -238,6 +238,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: aggregated runtime health now includes typed `failures[]` beside
      legacy `degraded[]`, and public health redaction exposes safe failure
      codes without leaking internal messages.
+   - Partial: orchestrator transport/proxy failures now include stable `code`,
+     `category`, `retryable`, `fatal`, and `failure` metadata while preserving
+     legacy `error` text and HTTP status.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.

@@ -1242,10 +1242,26 @@ describe('production startup wiring', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ entityId }),
     }), '/api/external-wallet/snapshot');
-    const body = await response.json() as { code?: string; error?: string };
+    const body = await response.json() as {
+      category?: string;
+      code?: string;
+      error?: string;
+      failure?: { category?: string; code?: string; retryable?: boolean; fatal?: boolean };
+      retryable?: boolean;
+      fatal?: boolean;
+    };
 
     expect(response.status).toBe(404);
     expect(body.code).toBe('ENTITY_HUB_PROXY_ENTITY_NOT_FOUND');
+    expect(body.category).toBe('ExpectedEmpty');
+    expect(body.retryable).toBe(false);
+    expect(body.fatal).toBe(false);
+    expect(body.failure).toMatchObject({
+      category: 'ExpectedEmpty',
+      code: 'ENTITY_HUB_PROXY_ENTITY_NOT_FOUND',
+      retryable: false,
+      fatal: false,
+    });
     expect(body.error).toContain(entityId);
     expect(pollCalls).toBe(1);
     expect(healthyHubCalls).toBe(0);
@@ -1302,9 +1318,26 @@ describe('production startup wiring', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id: 1, jsonrpc: '2.0', method: 'eth_chainId', params: [] }),
       }));
-      const body = await response.json() as { error?: string };
+      const body = await response.json() as {
+        category?: string;
+        code?: string;
+        error?: string;
+        failure?: { category?: string; code?: string; retryable?: boolean; fatal?: boolean };
+        retryable?: boolean;
+        fatal?: boolean;
+      };
 
       expect(response.status).toBe(502);
+      expect(body.code).toBe('RPC_PROXY_UPSTREAM_FAILED');
+      expect(body.category).toBe('TransientRace');
+      expect(body.retryable).toBe(true);
+      expect(body.fatal).toBe(false);
+      expect(body.failure).toMatchObject({
+        category: 'TransientRace',
+        code: 'RPC_PROXY_UPSTREAM_FAILED',
+        retryable: true,
+        fatal: false,
+      });
       expect(body.error).toContain('PROXY_UPSTREAM_TIMEOUT:25');
       expect(performance.now() - startedAt).toBeLessThan(1_000);
     } finally {
@@ -1316,4 +1349,45 @@ describe('production startup wiring', () => {
       await server.stop(true);
     }
   }, 2_000);
+
+  test('generic hub API proxy exposes typed no-healthy-hub failure', async () => {
+    let pollCalls = 0;
+    const handlers = createOrchestratorProxyHandlers({
+      host: '127.0.0.1',
+      defaultRpcUrl: '',
+      pollAllHubHealth: async () => {
+        pollCalls += 1;
+      },
+      getHubChildByEntityId: () => null,
+      getHealthyHub: () => null,
+    });
+
+    const response = await handlers.proxyAnyHubRequest(new Request('http://xln.local/api/faucet/gas', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ entityId: `0x${'34'.repeat(32)}` }),
+    }), '/api/faucet/gas');
+    const body = await response.json() as {
+      category?: string;
+      code?: string;
+      error?: string;
+      failure?: { category?: string; code?: string; retryable?: boolean; fatal?: boolean };
+      retryable?: boolean;
+      fatal?: boolean;
+    };
+
+    expect(response.status).toBe(503);
+    expect(body.error).toBe('No healthy hub API available');
+    expect(body.code).toBe('NO_HEALTHY_HUB_API_AVAILABLE');
+    expect(body.category).toBe('TransientRace');
+    expect(body.retryable).toBe(true);
+    expect(body.fatal).toBe(false);
+    expect(body.failure).toMatchObject({
+      category: 'TransientRace',
+      code: 'NO_HEALTHY_HUB_API_AVAILABLE',
+      retryable: true,
+      fatal: false,
+    });
+    expect(pollCalls).toBe(1);
+  });
 });

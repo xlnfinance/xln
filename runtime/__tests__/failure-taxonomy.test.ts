@@ -4,6 +4,7 @@ import {
   buildRuntimeHealthFailures,
   classifyRuntimeHealthDegradedReason,
   classifyRuntimeImportReadinessReason,
+  classifyRuntimeTransportFailure,
 } from '../failure-taxonomy';
 
 describe('runtime failure taxonomy', () => {
@@ -32,5 +33,20 @@ describe('runtime failure taxonomy', () => {
     });
     expect(buildRuntimeHealthFailures(['storage', 'hubMesh']).map(failure => failure.code))
       .toEqual(['STORAGE_NOT_READY', 'HUB_MESH_NOT_READY']);
+  });
+
+  test('classifies transport failures without parsing at callers', () => {
+    expect(classifyRuntimeTransportFailure('NO_HEALTHY_HUB_API_AVAILABLE')).toMatchObject({
+      category: 'TransientRace',
+      code: 'NO_HEALTHY_HUB_API_AVAILABLE',
+      retryable: true,
+      fatal: false,
+    });
+    expect(classifyRuntimeTransportFailure('RPC_UPSTREAM_NOT_CONFIGURED')).toMatchObject({
+      category: 'Contradiction',
+      code: 'RPC_UPSTREAM_NOT_CONFIGURED',
+      retryable: false,
+      fatal: true,
+    });
   });
 });

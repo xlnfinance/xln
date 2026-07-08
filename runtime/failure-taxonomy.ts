@@ -19,6 +19,15 @@ const HEALTH_DEGRADED_CODES: Record<string, string> = {
   bootstrapReserveTargets: 'BOOTSTRAP_RESERVE_TARGETS_NOT_READY',
 };
 
+const TRANSPORT_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
+  ENTITY_HUB_PROXY_ENTITY_NOT_FOUND: 'ExpectedEmpty',
+  FAUCET_HUB_NOT_FOUND: 'ExpectedEmpty',
+  NO_HEALTHY_HUB_API_AVAILABLE: 'TransientRace',
+  PROXY_UPSTREAM_TIMEOUT: 'TransientRace',
+  REQUESTED_HUB_API_UNAVAILABLE: 'TransientRace',
+  RPC_UPSTREAM_NOT_CONFIGURED: 'Contradiction',
+};
+
 export const normalizeRuntimeFailureCode = (value: unknown): string => {
   const raw = String(value || '').trim();
   const token = raw.split(/[\s:]/)[0] || 'UNKNOWN';
@@ -69,3 +78,13 @@ export const classifyRuntimeHealthDegradedReason = (reason: string): RuntimeFail
 
 export const buildRuntimeHealthFailures = (degraded: string[]): RuntimeFailureSignal[] =>
   degraded.map(classifyRuntimeHealthDegradedReason);
+
+export const classifyRuntimeTransportFailure = (code: string, message?: string): RuntimeFailureSignal => {
+  const normalizedCode = normalizeRuntimeFailureCode(code);
+  const category = TRANSPORT_FAILURE_CATEGORIES[normalizedCode] ?? 'TransientRace';
+  return buildRuntimeFailureSignal({
+    category,
+    code: normalizedCode,
+    message: message ?? normalizedCode,
+  });
+};
