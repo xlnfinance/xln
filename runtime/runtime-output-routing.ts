@@ -11,7 +11,6 @@ import { validateDeliverableEntityInput } from './validation-utils';
 import {
   deliveryAccepted,
   deliveryDeferred,
-  deliveryFailure,
   deliveryQueued,
   type DeliveryResult,
 } from './delivery-result';
@@ -55,8 +54,7 @@ export type PlannedRemoteOutput = {
 };
 
 type RuntimeP2PDispatch = {
-  enqueueEntityInput(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): boolean;
-  enqueueEntityInputDelivery?(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;
+  enqueueEntityInputDelivery(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;
 };
 
 export type RuntimeDirectEntityInputDispatchResult = DeliveryResult;
@@ -165,20 +163,10 @@ const enqueueP2PEntityInputDelivery = (
   output: DeliverableEntityInput,
   ingressTimestamp: number | undefined,
 ): DeliveryResult => {
-  if (typeof p2p.enqueueEntityInputDelivery === 'function') {
-    return requireDeliveryResult(
-      p2p.enqueueEntityInputDelivery(targetRuntimeId, output, ingressTimestamp),
-      'ROUTE_P2P_INVALID_DELIVERY_RESULT',
-    );
-  }
-  return p2p.enqueueEntityInput(targetRuntimeId, output, ingressTimestamp)
-    ? deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED')
-    : deliveryFailure({
-      category: 'TransientRace',
-      code: 'P2P_SEND_RETURNED_FALSE',
-      message: 'P2P enqueue returned false',
-      terminal: false,
-    });
+  return requireDeliveryResult(
+    p2p.enqueueEntityInputDelivery(targetRuntimeId, output, ingressTimestamp),
+    'ROUTE_P2P_INVALID_DELIVERY_RESULT',
+  );
 };
 
 const readBoardValidatorSignerId = (validator: unknown): string => {

@@ -300,8 +300,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      implementations now return explicit `DeliveryResult`; boolean return is
      kept only on legacy helper wrappers.
    - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
-     `dispatchEntityOutputs()` prefers it and keeps `enqueueEntityInput()` as
-     a legacy boolean compatibility wrapper.
+     `dispatchEntityOutputs()` requires it, while `enqueueEntityInput()` remains
+     only as a legacy boolean helper on RuntimeP2P itself.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

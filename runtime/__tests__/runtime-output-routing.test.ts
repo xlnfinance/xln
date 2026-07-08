@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { handleInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../runtime-entity-routing';
 import { dispatchEntityOutputs, planEntityOutputs, sendEntityInputWithRouting } from '../runtime-output-routing';
-import { deliveryDeferred } from '../delivery-result';
+import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../delivery-result';
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -35,9 +35,9 @@ describe('runtime output routing', () => {
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInput: (runtimeId, input, ingressTimestamp) => {
+        enqueueEntityInputDelivery: (runtimeId, input, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
-          return true;
+          return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
       enqueueRuntimeInputs: () => {},
@@ -57,7 +57,7 @@ describe('runtime output routing', () => {
     expect(warnings).not.toContain('ROUTE_DIRECT_SOCKET_REQUIRED');
   });
 
-  test('prefers typed P2P delivery over legacy boolean dispatch', () => {
+  test('uses typed P2P delivery dispatch', () => {
     const targetRuntimeId = runtimeId('21');
     const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
     const env = {
@@ -79,9 +79,6 @@ describe('runtime output routing', () => {
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInput: () => {
-          throw new Error('legacy boolean dispatch should not be called');
-        },
         enqueueEntityInputDelivery: (runtimeId, input, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
           return {
@@ -106,6 +103,39 @@ describe('runtime output routing', () => {
     expect(p2pCalls).toHaveLength(1);
     expect(p2pCalls[0]?.targetRuntimeId).toBe(targetRuntimeId);
     expect(p2pCalls[0]?.ingressTimestamp).toBe(4321);
+  });
+
+  test('rejects malformed typed P2P delivery results', () => {
+    const targetRuntimeId = runtimeId('2b');
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 4331,
+      runtimeState: {
+        directEntityInputDispatch: () => deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' }),
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+    const output: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: entityId('41'),
+      signerId: runtimeId('42'),
+      entityTxs: [],
+    };
+
+    expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => ({
+        enqueueEntityInputDelivery: (() => true) as any,
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    })).toThrow(/ROUTE_P2P_INVALID_DELIVERY_RESULT/);
   });
 
   test('accepts typed direct dispatch delivery without touching P2P', () => {
@@ -136,9 +166,9 @@ describe('runtime output routing', () => {
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInput: () => {
+        enqueueEntityInputDelivery: () => {
           p2pCalls.push(true);
-          return true;
+          return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
       enqueueRuntimeInputs: () => {},
@@ -176,9 +206,9 @@ describe('runtime output routing', () => {
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInput: () => {
+        enqueueEntityInputDelivery: () => {
           p2pCalls.push(true);
-          return true;
+          return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
       enqueueRuntimeInputs: () => {},
@@ -220,9 +250,9 @@ describe('runtime output routing', () => {
     const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInput: (runtimeId, input, ingressTimestamp) => {
+        enqueueEntityInputDelivery: (runtimeId, input, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
-          return true;
+          return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
       enqueueRuntimeInputs: () => {},
@@ -264,9 +294,9 @@ describe('runtime output routing', () => {
     const result = sendEntityInputWithRouting(env, input, {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInput: (runtimeId, routedInput, ingressTimestamp) => {
+        enqueueEntityInputDelivery: (runtimeId, routedInput, ingressTimestamp) => {
           p2pCalls.push({ targetRuntimeId: runtimeId, input: routedInput, ingressTimestamp });
-          return true;
+          return deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED');
         },
       }),
       enqueueRuntimeInputs: () => {},
@@ -368,7 +398,12 @@ describe('runtime output routing', () => {
     expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
-        enqueueEntityInput: () => false,
+        enqueueEntityInputDelivery: () => deliveryFailure({
+          category: 'TransientRace',
+          code: 'P2P_SEND_RETURNED_FALSE',
+          message: 'P2P enqueue returned false',
+          terminal: false,
+        }),
       }),
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
