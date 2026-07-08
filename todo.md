@@ -393,6 +393,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: browser runtime create/restore now selects the first usable
      `primary:true` jurisdiction, or the first active jurisdiction with contracts,
      instead of depending on an `arrakis` key.
+   - Partial: push-wake registration now resolves the J-replica by canonical
+     `(chainId, depositoryAddress)` stack identity and fails closed instead of
+     accepting a display-name jurisdiction match.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

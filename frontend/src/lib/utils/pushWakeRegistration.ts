@@ -121,17 +121,9 @@ const findEntityReplica = (env: unknown, entityId: string): unknown => {
   throw new Error(`PUSH_ENTITY_REPLICA_NOT_FOUND:${target}`);
 };
 
-const findJReplica = (env: unknown, jurisdictionName: string, chainId: number, depositoryAddress: string): unknown => {
+const findJReplica = (env: unknown, chainId: number, depositoryAddress: string): unknown => {
   const jReplicas = getPath(env, ['jReplicas']);
   if (!(jReplicas instanceof Map)) throw new Error('PUSH_ENV_J_REPLICAS_UNAVAILABLE');
-  const normalizedName = String(jurisdictionName || '').trim().toLowerCase();
-  if (normalizedName) {
-    const direct = jReplicas.get(jurisdictionName);
-    if (direct) return direct;
-    for (const replica of jReplicas.values()) {
-      if (String(getPath(replica, ['name']) || '').trim().toLowerCase() === normalizedName) return replica;
-    }
-  }
   for (const replica of jReplicas.values()) {
     const replicaChainId = Number(getPath(replica, ['chainId']) || getPath(replica, ['jadapter', 'chainId']) || 0);
     const replicaDepository = String(
@@ -205,8 +197,7 @@ export const resolvePushWakeTarget = (
 
   const chainId = normalizeChainId(jurisdiction['chainId']);
   const depositoryAddress = normalizeAddress(jurisdiction['depositoryAddress'], 'PUSH_DEPOSITORY');
-  const jurisdictionName = String(options.jurisdictionName || jurisdiction['name'] || getPath(env, ['activeJurisdiction']) || '').trim();
-  const jReplica = findJReplica(env, jurisdictionName, chainId, depositoryAddress);
+  const jReplica = findJReplica(env, chainId, depositoryAddress);
   const rpcUrl = resolvePushWakeRpcOverride(chainId, depositoryAddress) || firstHttpRpc(jReplica, jurisdiction['address']);
 
   return { runtimeId, entityId, chainId, depositoryAddress, rpcUrl };

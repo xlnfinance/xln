@@ -44,8 +44,10 @@ const makeEnv = (
   targetEntityId: string,
   overrides: {
     jurisdictionAddress?: string;
+    depositoryAddress?: string;
     rpcs?: string[];
     adapterRpcs?: string[];
+    jReplicas?: Map<string, unknown>;
   } = {},
 ): unknown => ({
   runtimeId,
@@ -59,12 +61,12 @@ const makeEnv = (
           name: 'Local',
           address: overrides.jurisdictionAddress ?? 'jreplica://Local',
           chainId: 31337,
-          depositoryAddress: '0x000000000000000000000000000000000000dead',
+          depositoryAddress: overrides.depositoryAddress ?? '0x000000000000000000000000000000000000dead',
         },
       },
     },
   }]]),
-  jReplicas: new Map([['Local', {
+  jReplicas: overrides.jReplicas ?? new Map([['Local', {
     name: 'Local',
     chainId: 31337,
     rpcs: overrides.rpcs ?? ['http://127.0.0.1:8545'],
@@ -123,6 +125,52 @@ describe('push wake registration frontend contract', () => {
       jurisdictionName: 'Local',
     });
     expect(target.rpcUrl).toBe('http://127.0.0.1:18545');
+  });
+
+  test('resolves jurisdiction by stack identity before display name', () => {
+    const runtimeId = Wallet.createRandom().address.toLowerCase();
+    const targetEntityId = entityId(8);
+    const targetDepository = '0x000000000000000000000000000000000000babe';
+    const target = resolvePushWakeTarget(makeEnv(runtimeId, targetEntityId, {
+      depositoryAddress: targetDepository,
+      jReplicas: new Map([
+        ['Local', {
+          name: 'Local',
+          chainId: 31337,
+          rpcs: ['http://127.0.0.1:8545'],
+          depositoryAddress: '0x000000000000000000000000000000000000dead',
+        }],
+        ['Renamed', {
+          name: 'Local',
+          chainId: 31337,
+          rpcs: ['http://127.0.0.1:9545'],
+          depositoryAddress: targetDepository,
+        }],
+      ]),
+    }), {
+      runtimeId,
+      entityId: targetEntityId,
+      jurisdictionName: 'Local',
+    });
+    expect(target.rpcUrl).toBe('http://127.0.0.1:9545');
+  });
+
+  test('does not fall back to display-name jurisdiction match for push wake', () => {
+    const runtimeId = Wallet.createRandom().address.toLowerCase();
+    const targetEntityId = entityId(10);
+    expect(() => resolvePushWakeTarget(makeEnv(runtimeId, targetEntityId, {
+      depositoryAddress: '0x000000000000000000000000000000000000babe',
+      jReplicas: new Map([['Local', {
+        name: 'Local',
+        chainId: 31337,
+        rpcs: ['http://127.0.0.1:8545'],
+        depositoryAddress: '0x000000000000000000000000000000000000dead',
+      }]]),
+    }), {
+      runtimeId,
+      entityId: targetEntityId,
+      jurisdictionName: 'Local',
+    })).toThrow('PUSH_JURISDICTION_REPLICA_NOT_FOUND');
   });
 
   test('accepts explicit push wake RPC override from desktop shell', () => {
