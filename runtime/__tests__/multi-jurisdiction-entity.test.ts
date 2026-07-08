@@ -5,7 +5,7 @@ import { applyEntityTx } from '../entity-tx/apply';
 import {
   assertSameJurisdictionAccount,
   getJurisdictionIdentityRef,
-  sameJurisdictionIdentityOrNameOnlyFallback,
+  sameJurisdictionIdentity,
 } from '../jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
@@ -71,10 +71,10 @@ describe('multi-jurisdiction entity binding', () => {
     const conflicting = makeJurisdiction('Testnet', 31338, '21', '22');
 
     expect(getJurisdictionIdentityRef(canonical)).toBe(`stack:31337:${addr('11')}`);
-    expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, relabeled)).toBe(true);
-    expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, { name: canonical.name })).toBe(false);
-    expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, conflicting)).toBe(false);
-    expect(sameJurisdictionIdentityOrNameOnlyFallback({ name: canonical.name }, { name: 'testnet' })).toBe(true);
+    expect(sameJurisdictionIdentity(canonical, relabeled)).toBe(true);
+    expect(sameJurisdictionIdentity(canonical, { name: canonical.name })).toBe(false);
+    expect(sameJurisdictionIdentity(canonical, conflicting)).toBe(false);
+    expect(sameJurisdictionIdentity({ name: canonical.name }, { name: 'testnet' })).toBe(false);
   });
 
   const importEntity = async (

@@ -45,7 +45,6 @@ import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   isJurisdictionStackRef,
-  sameJurisdictionIdentityOrNameOnlyFallback,
 } from '../jurisdiction-runtime';
 import {
   attachRuntimeAdapterTicker,
@@ -151,6 +150,7 @@ type SupportPeerIdentity = {
   jurisdictionName: string;
   chainId?: number;
   depositoryAddress?: string;
+  jurisdictionRef: string;
   creditAmount: bigint;
 };
 
@@ -296,6 +296,12 @@ const resolveJReplicaForJurisdictionName = (
   return resolveJReplicaForJurisdictionIdentity(env, { name: jurisdictionName });
 };
 
+const sameJurisdictionRef = (left: unknown, right: unknown): boolean => {
+  const leftRef = getJurisdictionIdentityRef(left);
+  const rightRef = getJurisdictionIdentityRef(right);
+  return Boolean(leftRef && rightRef && leftRef === rightRef);
+};
+
 const resolveJReplicaForJurisdictionIdentity = (
   env: Env,
   jurisdiction: unknown,
@@ -313,7 +319,7 @@ const resolveJReplicaForJurisdictionIdentity = (
       if (getJurisdictionIdentityRef(candidate) === targetRef) return { name, replica };
       continue;
     }
-    if (sameJurisdictionIdentityOrNameOnlyFallback(jurisdiction, candidate)) {
+    if (targetName && normalizeJurisdictionKey(candidate.name || name) === targetName) {
       return { name, replica };
     }
   }
@@ -322,10 +328,6 @@ const resolveJReplicaForJurisdictionIdentity = (
 
 const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>
   Boolean(resolveJReplicaForJurisdictionName(env, jurisdictionName)?.replica?.jadapter);
-
-const sameJurisdictionRefOrNameFallback = (left: unknown, right: unknown): boolean => {
-  return sameJurisdictionIdentityOrNameOnlyFallback(left, right);
-};
 
 type JurisdictionImportDiagnostics = {
   name: string;
@@ -421,6 +423,7 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
       const rawChainId = Number(entry?.chainId);
       const chainId = Number.isFinite(rawChainId) && rawChainId > 0 ? Math.floor(rawChainId) : null;
       const depositoryAddress = String(entry?.depositoryAddress || '').trim();
+      const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });
       return {
         name: String(entry?.name || '').trim(),
         entityId: String(entry?.entityId || '').trim().toLowerCase(),
@@ -428,6 +431,7 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
         jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || ''),
         ...(chainId !== null ? { chainId } : {}),
         ...(depositoryAddress ? { depositoryAddress } : {}),
+        jurisdictionRef,
         creditAmount: BigInt(String(entry?.creditAmount || HUB_MESH_CREDIT_AMOUNT)),
       };
     }).filter((entry) =>
@@ -435,6 +439,7 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
       entry.entityId &&
       entry.signerId &&
       entry.jurisdictionName &&
+      entry.jurisdictionRef &&
       entry.creditAmount > 0n,
     );
   } catch {
@@ -1122,7 +1127,7 @@ const ensurePeerBootstrapReserves = async (
         `known=${Array.from(env.jReplicas?.keys?.() || []).join(',')}`,
       );
     }
-    const catalog = sameJurisdictionRefOrNameFallback(jurisdiction, activeJurisdiction)
+    const catalog = sameJurisdictionRef(jurisdiction, activeJurisdiction)
       ? tokenCatalog
       : await ensureTokenCatalog(jadapter, true, replicaName);
     const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });
@@ -1261,11 +1266,8 @@ const readVisibleHubProfiles = (env: Env, jurisdiction: unknown): VisibleHubProf
     .filter(profile => profile.metadata?.isHub === true)
     .filter(profile => {
       const targetRef = getJurisdictionIdentityRef(jurisdiction);
-      const targetName = normalizeJurisdictionKey(typeof jurisdiction === 'string'
-        ? jurisdiction
-        : (jurisdiction as { name?: unknown } | null | undefined)?.name);
-      if (!targetRef && !targetName) return true;
-      return sameJurisdictionIdentityOrNameOnlyFallback(jurisdiction, profile.metadata?.jurisdiction);
+      if (!targetRef) return true;
+      return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;
     })
     .map(profile => {
       const chainId = Number(profile.metadata?.jurisdiction?.chainId || 0);
@@ -1318,7 +1320,7 @@ const visibleDirectSupportPeers = (
     .map((identity) => {
       const entityId = identity.entityId.toLowerCase();
       if (entityId === selfEntityId.toLowerCase()) return null;
-      if (!sameJurisdictionIdentityOrNameOnlyFallback(identity, jurisdiction)) return null;
+      if (!sameJurisdictionRef(identity, jurisdiction)) return null;
       const profile = profilesByEntityId.get(entityId);
       const runtimeId = normalizeRuntimeId(profile?.runtimeId || '');
       if (!runtimeId) return null;

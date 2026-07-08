@@ -173,7 +173,11 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || \'\')');
     expect(hubNode).not.toContain("normalized === 'arrakis'");
     expect(hubNode).not.toContain("normalized === 'wakanda'");
-    expect(hubNode).toContain('sameJurisdictionIdentityOrNameOnlyFallback(identity, jurisdiction)');
+    expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
+    expect(hubNode).toContain('entry.jurisdictionRef &&');
+    expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');
+    expect(hubNode).toContain('if (!sameJurisdictionRef(identity, jurisdiction)) return null;');
+    expect(hubNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');
     expect(hubNode).toContain('for (const hubBootstrap of hubBootstraps)');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');
@@ -1120,7 +1124,8 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).toContain('const bootstrapTokens = tokenCatalogForHubJurisdiction(catalog, { jurisdictionName });');
     expect(reserveBootstrap).toContain('profile.jurisdictionRef || jurisdictionName');
     expect(reserveBootstrap).toContain('resolveJReplicaForJurisdictionIdentity(env, jurisdiction.jurisdictionRef || jurisdiction)');
-    expect(reserveBootstrap).toContain('sameJurisdictionRefOrNameFallback(jurisdiction, activeJurisdiction)');
+    expect(reserveBootstrap).toContain('sameJurisdictionRef(jurisdiction, activeJurisdiction)');
+    expect(reserveBootstrap).not.toContain('sameJurisdictionRefOrNameFallback');
     expect(reserveBootstrap).not.toContain('profilesByJurisdiction.has(jurisdictionName)');
     expect(reserveBootstrap).not.toContain('tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');

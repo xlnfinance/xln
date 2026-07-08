@@ -375,6 +375,11 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: market-maker jurisdiction import/adaptor detection now compares
      canonical jurisdiction refs only and no longer treats matching display
      names as imported jurisdiction identity.
+   - Partial: hub support-peer identities, visible hub filtering, and peer
+     reserve catalog selection now require canonical jurisdiction refs instead
+     of falling back to matching display names.
+   - Partial: deleted the remaining runtime jurisdiction name-fallback helper;
+     tests now assert name-only jurisdiction objects are not identity matches.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

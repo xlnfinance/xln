@@ -40,13 +40,6 @@ type JurisdictionIdentitySource = {
   jadapter?: { chainId?: unknown; addresses?: { depository?: unknown } | null } | null;
 };
 
-const readJurisdictionIdentityName = (jurisdiction: unknown): string => {
-  if (typeof jurisdiction === 'string') return jurisdiction.trim();
-  if (!jurisdiction || typeof jurisdiction !== 'object') return '';
-  const source = jurisdiction as JurisdictionIdentitySource;
-  return String(source.name || source.jurisdictionName || '').trim();
-};
-
 export const getJurisdictionIdentityRef = (jurisdiction: unknown): string => {
   if (!jurisdiction || typeof jurisdiction !== 'object') return '';
   const source = jurisdiction as JurisdictionIdentitySource;
@@ -66,15 +59,6 @@ export const sameJurisdictionIdentity = (left: unknown, right: unknown): boolean
   const leftRef = getJurisdictionIdentityRef(left);
   const rightRef = getJurisdictionIdentityRef(right);
   return Boolean(leftRef && rightRef && leftRef === rightRef);
-};
-
-export const sameJurisdictionIdentityOrNameOnlyFallback = (left: unknown, right: unknown): boolean => {
-  const leftRef = getJurisdictionIdentityRef(left);
-  const rightRef = getJurisdictionIdentityRef(right);
-  if (leftRef || rightRef) return Boolean(leftRef && rightRef && leftRef === rightRef);
-  const leftName = normalizeJurisdictionName(readJurisdictionIdentityName(left));
-  const rightName = normalizeJurisdictionName(readJurisdictionIdentityName(right));
-  return Boolean(leftName && rightName && leftName === rightName);
 };
 
 const getJReplicaStackId = (replica: JReplica | undefined): string => {
