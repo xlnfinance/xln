@@ -408,6 +408,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: market-maker visible hub discovery now drops name-only
      jurisdiction profiles before readiness/health planning instead of carrying
      unmatched display-name hubs through the bootstrap loop.
+   - Partial: market-maker bootstrap role ordering and fingerprints now use
+     canonical jurisdiction refs instead of mutable jurisdiction display names.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

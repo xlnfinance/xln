@@ -561,8 +561,24 @@ test('market maker bootstrap fingerprint is stable across repeated and shuffled 
     shuffledTokenIdsByContext,
     shuffledHealth,
   );
+  const renamedContexts = contexts.map((context) => ({
+    ...context,
+    jurisdictionName: `${context.jurisdictionName} renamed`,
+  }));
+  const renamedHubs = visibleHubs.map((hub) => ({
+    ...hub,
+    jurisdictionName: `${hub.jurisdictionName} renamed`,
+  }));
+  const renamed = buildMarketMakerBootstrapFingerprint(
+    env,
+    renamedContexts,
+    renamedHubs,
+    tokenIdsByContext,
+    health,
+  );
 
   expect(first.hash).toMatch(/^[0-9a-f]{64}$/);
   expect(second.hash).toBe(first.hash);
   expect(shuffled.hash).toBe(first.hash);
+  expect(renamed.hash).toBe(first.hash);
 });

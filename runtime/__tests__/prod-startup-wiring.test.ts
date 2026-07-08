@@ -356,6 +356,10 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] => {');
     expect(mmNode).toContain('let bootstrapSameCursor = 0;');
     expect(mmNode).toContain('const isAllSameQuoteDepthReady = (visibleHubs: HubProfile[]): boolean => {');
+    expect(mmNode).toContain('compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef)');
+    expect(mmNode).toContain("jurisdictionRef: String(context.jurisdictionRef || '').trim().toLowerCase()");
+    expect(mmNode).not.toContain('compareStableText(left.context.jurisdictionName, right.context.jurisdictionName)');
+    expect(mmNode).not.toContain("jurisdictionName: String(context.jurisdictionName || '').trim().toLowerCase()");
     expect(mmNode).not.toContain('const isAllSameQuoteReady = (visibleHubs: HubProfile[]): boolean => {');
     expect(mmNode).not.toContain('const isAllSameQuoteCovered = (visibleHubs: HubProfile[]): boolean => {');
     expect(mmNode).toContain('const isBootstrapDepthComplete = (health: MarketMakerHealth | null): boolean =>');

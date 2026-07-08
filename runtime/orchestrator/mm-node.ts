@@ -2825,11 +2825,10 @@ const isMarketMakerSameDepthComplete = (health: MarketMakerHealth | null): boole
   Boolean(health?.enabled && health.hubs.length > 0 && health.hubs.every((hub) => hub.depthReady));
 
 const canonicalJurisdictionRole = (
-  value: Pick<MarketMakerEntityContext | HubProfile, 'chainId' | 'jurisdictionName'>,
+  value: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionRef'>,
 ): string => {
-  const chainId = Number(value.chainId || 0);
-  const name = String(value.jurisdictionName || '').trim().toLowerCase() || 'unknown';
-  return `j:${chainId}:${name}`;
+  const ref = String(value.jurisdictionRef || '').trim().toLowerCase() || 'unknown';
+  return `j:${ref}`;
 };
 
 const canonicalMarketMakerRole = (context: MarketMakerEntityContext): string =>
@@ -3011,7 +3010,7 @@ export const buildMarketMakerBootstrapFingerprint = (
       .map(context => ({
         role: requireCanonicalRole(contextRoles, context.entityId, 'MM'),
         chainId: Number(context.chainId || 0),
-        jurisdictionName: String(context.jurisdictionName || '').trim().toLowerCase(),
+        jurisdictionRef: String(context.jurisdictionRef || '').trim().toLowerCase(),
         tokenIds: getMarketMakerTokenIds(tokenIdsByContext, context),
       }))
       .sort((left, right) => compareStableText(left.role, right.role)),
@@ -3800,7 +3799,7 @@ const run = async (): Promise<void> => {
     visibleHubs
       .filter(profile => sameJurisdiction(context, profile))
       .sort((left, right) =>
-        compareStableText(left.jurisdictionName || '', right.jurisdictionName || '') ||
+        compareStableText(left.jurisdictionRef, right.jurisdictionRef) ||
         compareStableText(left.entityId, right.entityId),
       );
   const buildSameQuoteJobs = (visibleHubs: HubProfile[]): SameQuoteJob[] => {
@@ -3812,7 +3811,7 @@ const run = async (): Promise<void> => {
       }
     }
     return jobs.sort((left, right) =>
-      compareStableText(left.context.jurisdictionName, right.context.jurisdictionName) ||
+      compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef) ||
       compareStableText(left.context.entityId, right.context.entityId) ||
       compareStableText(left.hub.entityId, right.hub.entityId),
     );
@@ -3950,7 +3949,7 @@ const run = async (): Promise<void> => {
           }
           const groupedEntries = Array.from(jobsByContext.values())
             .sort((left, right) =>
-              compareStableText(left.context.jurisdictionName, right.context.jurisdictionName) ||
+              compareStableText(left.context.jurisdictionRef, right.context.jurisdictionRef) ||
               compareStableText(left.context.entityId, right.context.entityId),
             );
           const runnableHubEntityIdsFor = (entry: { context: MarketMakerEntityContext; jobs: SameQuoteJob[] }): string[] =>
