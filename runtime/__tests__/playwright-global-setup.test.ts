@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -20,9 +20,13 @@ describe('playwright global setup cleanup', () => {
       writeFile(root, '.logs/e2e-parallel/old-run/log.txt');
       writeFile(root, 'frontend/.svelte-kit-e2e/old-run/output.txt');
       writeFile(root, 'frontend/build/index.html');
+      writeFile(root, 'frontend/playwright-report/index.html');
 
-      const result = spawnSync('bun', ['-e', `import globalSetup from ${JSON.stringify(globalSetupPath)}; await globalSetup();`], {
-        cwd: root,
+      const result = spawnSync('bun', ['-e', [
+        `const mod = await import(${JSON.stringify(globalSetupPath)});`,
+        `mod.runPlaywrightArtifactCleanup(${JSON.stringify(root)});`,
+      ].join(' ')], {
+        cwd: join(repoRoot, 'frontend'),
         env: {
           ...process.env,
           XLN_MIN_DISK_FREE_BYTES: '1',
@@ -37,8 +41,20 @@ describe('playwright global setup cleanup', () => {
       expect(existsSync(join(root, '.logs/e2e-parallel'))).toBe(false);
       expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
       expect(existsSync(join(root, 'frontend/build'))).toBe(false);
+      expect(existsSync(join(root, 'frontend/playwright-report'))).toBe(false);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('root and frontend Playwright configs share the cleanup setup', () => {
+    const rootConfig = readFileSync(join(repoRoot, 'playwright.config.ts'), 'utf8');
+    const frontendConfig = readFileSync(join(repoRoot, 'frontend/playwright.config.ts'), 'utf8');
+    const globalSetup = readFileSync(globalSetupPath, 'utf8');
+
+    expect(rootConfig).toContain("globalSetup: './tests/playwright-global-setup.ts'");
+    expect(frontendConfig).toContain("globalSetup: '../tests/playwright-global-setup.ts'");
+    expect(globalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_CWD');
+    expect(globalSetup).toContain("resolve(import.meta.dir, '..')");
   });
 });

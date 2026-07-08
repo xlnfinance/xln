@@ -920,8 +920,12 @@ describe('production startup wiring', () => {
     expect(readFileSync(join(repoRoot, 'playwright.config.ts'), 'utf8')).toContain(
       "globalSetup: './tests/playwright-global-setup.ts'",
     );
+    expect(readFileSync(join(repoRoot, 'frontend/playwright.config.ts'), 'utf8')).toContain(
+      "globalSetup: '../tests/playwright-global-setup.ts'",
+    );
     const playwrightGlobalSetup = readFileSync(join(repoRoot, 'tests/playwright-global-setup.ts'), 'utf8');
     expect(playwrightGlobalSetup).toContain('cleanupTestArtifactsBeforeRun({');
+    expect(playwrightGlobalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_CWD');
     expect(playwrightGlobalSetup).toContain("reason: 'playwright'");
     expect(playwrightGlobalSetup).toContain("scope: 'e2e'");
   });

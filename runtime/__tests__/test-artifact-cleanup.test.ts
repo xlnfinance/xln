@@ -28,6 +28,7 @@ describe('test artifact cleanup', () => {
       writeFile(root, 'frontend/.svelte-kit-e2e/old-run/output.txt');
       writeFile(root, '.logs/bootstrap-soundcheck/probe.log');
       writeFile(root, 'frontend/build/index.html');
+      writeFile(root, 'frontend/playwright-report/index.html');
       writeFile(root, 'native/dist/xln.dmg');
       writeFile(root, 'tests/test-results/old.png');
       writeFile(root, '.logs/soak/old.json');
@@ -48,6 +49,7 @@ describe('test artifact cleanup', () => {
       expect(summary.removed).toContain('.logs/scenarios-parallel');
       expect(summary.removed).toContain('frontend/.svelte-kit-e2e');
       expect(summary.removed).toContain('frontend/build');
+      expect(summary.removed).toContain('frontend/playwright-report');
       expect(summary.removed).toContain('native/dist');
       expect(summary.removed).toContain('tests/test-results');
       expect(summary.removed).toContain('.logs/soak');
@@ -58,6 +60,7 @@ describe('test artifact cleanup', () => {
       expect(existsSync(join(root, '.logs/scenarios-parallel'))).toBe(false);
       expect(existsSync(join(root, 'frontend/.svelte-kit-e2e'))).toBe(false);
       expect(existsSync(join(root, 'frontend/build'))).toBe(false);
+      expect(existsSync(join(root, 'frontend/playwright-report'))).toBe(false);
       expect(existsSync(join(root, 'native/dist'))).toBe(false);
       expect(existsSync(join(root, 'tests/test-results'))).toBe(false);
       expect(existsSync(join(root, '.logs/soak'))).toBe(false);
