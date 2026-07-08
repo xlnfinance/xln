@@ -64,12 +64,31 @@ test('package capped soak script matches the agreed one-hour policy', () => {
 });
 
 test('capped testnet gate arg parser supports preflight and dry run', () => {
-  const parsed = parseCappedGateArgs(['--skip-soak', '--dry-run', '--allow-dirty', '--policy', 'ops/x.json', '--out=out.json']);
+  const parsed = parseCappedGateArgs([
+    '--skip-soak',
+    '--dry-run',
+    '--allow-dirty',
+    '--keep-test-artifacts',
+    '--policy',
+    'ops/x.json',
+    '--out=out.json',
+  ]);
   expect(parsed).toEqual({
     policyPath: 'ops/x.json',
     skipSoak: true,
     dryRun: true,
     allowDirty: true,
+    keepTestArtifacts: true,
     outPath: 'out.json',
   });
+});
+
+test('capped testnet gate starts from cleanup before writing run artifacts', () => {
+  const source = readFileSync('runtime/scripts/run-capped-testnet-gate.ts', 'utf8');
+  expect(source).toContain('cleanupTestArtifactsBeforeRun({');
+  expect(source).toContain("reason: 'capped-testnet'");
+  expect(source).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
+  expect(source.indexOf('cleanupTestArtifactsBeforeRun({')).toBeLessThan(
+    source.indexOf('writeReport(args.outPath, baseReport)'),
+  );
 });

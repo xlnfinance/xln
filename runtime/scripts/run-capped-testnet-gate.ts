@@ -6,6 +6,10 @@ import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 
 import { MAINNET_GATE, MAINNET_GATE_LABELS } from './mainnet-gate-constants';
+import {
+  cleanupTestArtifactsBeforeRun,
+  TEST_ARTIFACT_CLEANUP_DONE_ENV,
+} from './test-artifact-cleanup';
 
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
 
@@ -35,6 +39,7 @@ export type CappedGateArgs = {
   skipSoak: boolean;
   dryRun: boolean;
   allowDirty: boolean;
+  keepTestArtifacts: boolean;
   outPath: string;
 };
 
@@ -64,6 +69,7 @@ export const parseCappedGateArgs = (argv = process.argv.slice(2)): CappedGateArg
   let skipSoak = false;
   let dryRun = false;
   let allowDirty = false;
+  let keepTestArtifacts = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -78,6 +84,10 @@ export const parseCappedGateArgs = (argv = process.argv.slice(2)): CappedGateArg
     }
     if (arg === '--allow-dirty') {
       allowDirty = true;
+      continue;
+    }
+    if (arg === '--keep-test-artifacts' || arg === '--no-cleanup') {
+      keepTestArtifacts = true;
       continue;
     }
     if (arg.startsWith('--policy=')) {
@@ -101,7 +111,7 @@ export const parseCappedGateArgs = (argv = process.argv.slice(2)): CappedGateArg
     throw new Error(`Unknown capped-testnet gate argument: ${arg}`);
   }
 
-  return { policyPath, skipSoak, dryRun, allowDirty, outPath };
+  return { policyPath, skipSoak, dryRun, allowDirty, keepTestArtifacts, outPath };
 };
 
 const asFiniteNumber = (value: unknown): number | null => {
@@ -240,6 +250,14 @@ const main = async (): Promise<void> => {
   if (dirty.code !== 0) throw new Error(`GIT_STATUS_UNAVAILABLE:${dirty.stderr || dirty.stdout}`);
   if (dirty.stdout.trim() && !args.allowDirty) {
     throw new Error(`CAPPED_TESTNET_DIRTY_WORKTREE:\n${dirty.stdout}`);
+  }
+
+  if (!args.dryRun) {
+    cleanupTestArtifactsBeforeRun({
+      reason: 'capped-testnet',
+      argv: args.keepTestArtifacts ? ['--keep-test-artifacts'] : process.argv.slice(2),
+    });
+    process.env[TEST_ARTIFACT_CLEANUP_DONE_ENV] = '1';
   }
 
   const steps = buildCappedTestnetGateSteps(policy, { skipSoak: args.skipSoak });
