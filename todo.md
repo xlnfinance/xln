@@ -257,6 +257,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: settlement/J-batch submission failures now classify transient RPC
      failures separately from terminal protocol failures on the existing
      `sentBatch` lifecycle metadata.
+   - Partial: prod health smoke and e2e baseline readiness now treat typed
+     `fatal:true` health failures as authoritative readiness blockers while
+     preserving legacy `degraded[]` checks.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.

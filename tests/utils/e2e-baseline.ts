@@ -67,9 +67,17 @@ export type E2EMarketMakerCrossHealth = {
   routes?: E2EMarketMakerCrossRouteHealth[];
 };
 
+export type E2EFailureSignal = {
+  category?: string | null;
+  code?: string;
+  retryable?: boolean;
+  fatal?: boolean;
+};
+
 export type E2EMarketMakerHealth = {
   enabled?: boolean;
   ok?: boolean;
+  failure?: E2EFailureSignal | null;
   entityId?: string | null;
   startupPhase?: string | null;
   expectedOffersPerHub?: number;
@@ -118,6 +126,7 @@ export type E2EHealthResponse = {
   systemOk?: boolean;
   degraded?: string[];
   degradedComponents?: string[];
+  failures?: E2EFailureSignal[];
   reset?: E2EResetHealth;
   hubMesh?: E2EHubMeshHealth;
   marketMaker?: E2EMarketMakerHealth;
@@ -203,6 +212,13 @@ const readText = async (response: APIResponse): Promise<string> => {
   }
 };
 
+const hasFatalFailure = (failures: unknown): boolean =>
+  Array.isArray(failures) && failures.some((failure) => (
+    typeof failure === 'object' &&
+    failure !== null &&
+    (failure as { fatal?: unknown }).fatal === true
+  ));
+
 const getHealthWithApi = async (
   api: APIRequestContext,
   apiBaseUrl = API_BASE_URL,
@@ -227,6 +243,12 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
       timestamp: health.timestamp ?? null,
       systemOk: health.systemOk ?? null,
       degraded: health.degraded ?? health.degradedComponents ?? [],
+      failures: (health.failures ?? []).map((failure) => ({
+        category: failure.category ?? null,
+        code: failure.code ?? null,
+        retryable: failure.retryable === true,
+        fatal: failure.fatal === true,
+      })),
       reset: health.reset ?? null,
       hubMesh: {
         ok: health.hubMesh?.ok ?? false,
@@ -244,6 +266,14 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
       marketMaker: {
         enabled: health.marketMaker?.enabled ?? false,
         ok: health.marketMaker?.ok ?? false,
+        failure: health.marketMaker?.failure
+          ? {
+              category: health.marketMaker.failure.category ?? null,
+              code: health.marketMaker.failure.code ?? null,
+              retryable: health.marketMaker.failure.retryable === true,
+              fatal: health.marketMaker.failure.fatal === true,
+            }
+          : null,
         entityId: health.marketMaker?.entityId ?? null,
         startupPhase: health.marketMaker?.startupPhase ?? null,
         expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? 0,
@@ -333,6 +363,8 @@ export const isBaselineReady = (health: E2EHealthResponse | null, options: Requi
   if (!health) return false;
   if (typeof health.timestamp !== 'number') return false;
   if (health.reset?.inProgress === true) return false;
+  if (hasFatalFailure(health.failures)) return false;
+  if (health.marketMaker?.failure?.fatal === true) return false;
   if (options.requireHubMesh) {
     if (health.hubMesh?.ok !== true) return false;
     if (reportedHubMeshHubCount(health) < options.minHubCount) return false;

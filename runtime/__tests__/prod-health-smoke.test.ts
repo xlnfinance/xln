@@ -4,6 +4,7 @@ import {
   buildProdHealthFailureSummary,
   buildTowerHealthUrl,
   getFatalDegradedReasons,
+  getFatalHealthFailures,
   validateHubTopology,
 } from '../scripts/prod-health-smoke';
 
@@ -15,11 +16,30 @@ test('prod health smoke still fails on real degraded subsystems', () => {
   expect(getFatalDegradedReasons(['storage', 'bootstrapReserveTargets', 'hubMesh'])).toEqual(['storage', 'hubMesh']);
 });
 
+test('prod health smoke treats typed fatal failures as authoritative', () => {
+  expect(getFatalHealthFailures([
+    { category: 'TransientRace', code: 'HUBS_NOT_READY', retryable: true, fatal: false, message: 'internal retry' },
+    { category: 'Contradiction', code: 'STORAGE_CORRUPT', retryable: false, fatal: true, message: 'secret path' },
+  ])).toEqual([{
+    category: 'Contradiction',
+    code: 'STORAGE_CORRUPT',
+    retryable: false,
+    fatal: true,
+  }]);
+});
+
 test('prod health smoke reports hub relay-presence diagnostics', () => {
   const summary = JSON.parse(buildProdHealthFailureSummary({
     coreOk: false,
     systemOk: false,
     degraded: ['hubs'],
+    failures: [{
+      category: 'Contradiction',
+      code: 'STORAGE_CORRUPT',
+      retryable: false,
+      fatal: true,
+      message: 'internal secret path',
+    }],
     relay: { clientCount: 0 },
     hubMesh: { ok: true },
     marketMaker: { ok: true, startupPhase: 'offers-ready' },
@@ -34,16 +54,24 @@ test('prod health smoke reports hub relay-presence diagnostics', () => {
     'irrelevant_metric 123',
   ].join('\n'))) as {
     degraded: string[];
+    failures: Array<{ category: string; code: string; retryable: boolean; fatal: boolean }>;
     relayClientCount: number;
     hubs: Array<{ name: string; online: boolean; selfRelayPresence: boolean }>;
     diagnosticMetrics: string[];
   };
 
   expect(summary.degraded).toEqual(['hubs']);
+  expect(summary.failures).toEqual([{
+    category: 'Contradiction',
+    code: 'STORAGE_CORRUPT',
+    retryable: false,
+    fatal: true,
+  }]);
   expect(summary.relayClientCount).toBe(0);
   expect(summary.hubs[0]).toEqual({ name: 'H1', online: true, selfRelayPresence: false });
   expect(summary.diagnosticMetrics).toContain('xln_child_online{role="hub",name="H1"} 1');
   expect(summary.diagnosticMetrics).not.toContain('irrelevant_metric 123');
+  expect(JSON.stringify(summary)).not.toContain('internal secret path');
 });
 
 test('prod health smoke validates exact capped-testnet hub topology', () => {

@@ -14,6 +14,41 @@ const ADVISORY_DEGRADED_REASONS = new Set([
   'bootstrapReserveTargets',
 ]);
 
+type HealthFailureSignal = {
+  category?: unknown;
+  code?: unknown;
+  message?: unknown;
+  retryable?: unknown;
+  fatal?: unknown;
+};
+
+type PublicHealthFailureSignal = {
+  category: string | null;
+  code: string;
+  retryable: boolean;
+  fatal: boolean;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const publicHealthFailureSignal = (value: unknown): PublicHealthFailureSignal | null => {
+  if (!isRecord(value)) return null;
+  const code = String(value['code'] || '').trim();
+  if (!code) return null;
+  return {
+    category: typeof value['category'] === 'string' ? value['category'] : null,
+    code,
+    retryable: value['retryable'] === true,
+    fatal: value['fatal'] === true,
+  };
+};
+
+const publicHealthFailureSignals = (failures: unknown): PublicHealthFailureSignal[] =>
+  Array.isArray(failures)
+    ? failures.map(publicHealthFailureSignal).filter((value): value is PublicHealthFailureSignal => value !== null)
+    : [];
+
 const splitUrlList = (value: string | undefined): string[] =>
   String(value || '')
     .split(',')
@@ -181,6 +216,7 @@ export const buildProdHealthFailureSummary = (
     coreOk?: boolean;
     systemOk?: boolean;
     degraded?: unknown[];
+    failures?: HealthFailureSignal[];
     relay?: { clientCount?: number; activeClientCount?: number };
     storage?: { ok?: boolean };
     hubMesh?: { ok?: boolean };
@@ -193,6 +229,7 @@ export const buildProdHealthFailureSummary = (
   coreOk: health.coreOk,
   systemOk: health.systemOk,
   degraded: health.degraded,
+  failures: publicHealthFailureSignals(health.failures),
   relayClientCount: health.relay?.clientCount ?? health.relay?.activeClientCount ?? null,
   storageOk: health.storage?.ok ?? null,
   hubMeshOk: health.hubMesh?.ok ?? null,
@@ -223,6 +260,9 @@ export const getFatalDegradedReasons = (degraded: unknown): string[] => {
     .filter((reason) => !ADVISORY_DEGRADED_REASONS.has(reason));
 };
 
+export const getFatalHealthFailures = (failures: unknown): PublicHealthFailureSignal[] =>
+  publicHealthFailureSignals(failures).filter(failure => failure.fatal === true);
+
 const main = async (): Promise<void> => {
   const args = parseArgs();
   const healthRes = await fetchWithTimeout(`${args.baseUrl}/api/health`, args.timeoutMs);
@@ -231,6 +271,7 @@ const main = async (): Promise<void> => {
     coreOk?: boolean;
     systemOk?: boolean;
     degraded?: unknown[];
+    failures?: HealthFailureSignal[];
     storage?: { ok?: boolean };
     hubMesh?: { ok?: boolean };
     marketMaker?: { ok?: boolean; startupPhase?: string | null };
@@ -252,6 +293,11 @@ const main = async (): Promise<void> => {
 
   requireCondition(health.coreOk === true, `health.coreOk is not true: ${healthSummary}`);
   requireCondition(health.systemOk === true, `health.systemOk is not true: ${healthSummary}`);
+  const fatalFailures = getFatalHealthFailures(health.failures);
+  requireCondition(
+    fatalFailures.length === 0,
+    `health.failures has fatal entries: ${JSON.stringify(fatalFailures)} ${healthSummary}`,
+  );
   if (!args.allowDegraded) {
     const fatalDegraded = getFatalDegradedReasons(health.degraded);
     requireCondition(
@@ -293,6 +339,7 @@ const main = async (): Promise<void> => {
     coreOk: health.coreOk,
     systemOk: health.systemOk,
     degraded: health.degraded,
+    failures: publicHealthFailureSignals(health.failures),
     storageOk: health.storage?.ok ?? null,
     hubMeshOk: health.hubMesh?.ok ?? null,
     marketMakerOk: health.marketMaker?.ok ?? null,

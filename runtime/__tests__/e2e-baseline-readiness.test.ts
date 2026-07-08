@@ -45,7 +45,22 @@ describe('e2e baseline readiness', () => {
     expect(isBaselineReady({ ...readyHealth, systemOk: false, degraded: ['marketMaker'] }, readyOptions)).toBe(false);
     expect(isBaselineReady({
       ...readyHealth,
+      failures: [{ category: 'TransientRace', code: 'HUBS_NOT_READY', retryable: true, fatal: false }],
+    }, readyOptions)).toBe(true);
+    expect(isBaselineReady({
+      ...readyHealth,
+      failures: [{ category: 'Contradiction', code: 'STORAGE_CORRUPT', retryable: false, fatal: true }],
+    }, readyOptions)).toBe(false);
+    expect(isBaselineReady({
+      ...readyHealth,
       marketMaker: { ...readyHealth.marketMaker, startupPhase: 'bootstrap-cross' },
+    }, readyOptions)).toBe(false);
+    expect(isBaselineReady({
+      ...readyHealth,
+      marketMaker: {
+        ...readyHealth.marketMaker,
+        failure: { category: 'Contradiction', code: 'MARKET_MAKER_CONFIG_INVALID', retryable: false, fatal: true },
+      },
     }, readyOptions)).toBe(false);
   });
 
