@@ -1,4 +1,5 @@
 import type { AggregatedHealth, MarketMakerHealthPayload } from './orchestrator-types';
+import { classifyRuntimeMarketMakerFailure, type RuntimeFailureSignal } from '../failure-taxonomy';
 
 type AggregatedMarketMakerHealth = AggregatedHealth['marketMaker'];
 
@@ -10,6 +11,58 @@ type BuildAggregatedMarketMakerHealthParams = {
   expectedHubCount: number;
   entityId: string | null;
   startupPhase: string | null;
+};
+
+type ResolveMarketMakerFailureParams = {
+  mmEnabled: boolean;
+  marketMakerActive: boolean;
+  marketMakerHealth: MarketMakerHealthPayload | null;
+  childReady: boolean;
+  startupPhase: string | null;
+  hubs: AggregatedMarketMakerHealth['hubs'];
+  expectedHubCount: number;
+  crossReady: boolean;
+};
+
+const resolveMarketMakerFailure = ({
+  mmEnabled,
+  marketMakerActive,
+  marketMakerHealth,
+  childReady,
+  startupPhase,
+  hubs,
+  expectedHubCount,
+  crossReady,
+}: ResolveMarketMakerFailureParams): RuntimeFailureSignal | null => {
+  if (!mmEnabled) return null;
+  if (!marketMakerActive) {
+    return classifyRuntimeMarketMakerFailure('MARKET_MAKER_CHILD_INACTIVE', 'market-maker child process is not active');
+  }
+  if (!marketMakerHealth?.marketMaker) {
+    return classifyRuntimeMarketMakerFailure('MARKET_MAKER_HEALTH_MISSING', 'market-maker health payload is missing');
+  }
+  if (startupPhase !== 'offers-ready') {
+    return classifyRuntimeMarketMakerFailure(
+      'MARKET_MAKER_STARTUP_PHASE_NOT_READY',
+      `market-maker startup phase is ${startupPhase || 'unknown'}`,
+    );
+  }
+  if (!childReady) {
+    return classifyRuntimeMarketMakerFailure('MARKET_MAKER_CHILD_NOT_READY', 'market-maker child health is not ready');
+  }
+  if (hubs.length !== expectedHubCount) {
+    return classifyRuntimeMarketMakerFailure(
+      'MARKET_MAKER_HUB_COUNT_MISMATCH',
+      `market-maker sees ${hubs.length} hubs, expected ${expectedHubCount}`,
+    );
+  }
+  if (!hubs.every((hub) => hub.depthReady === true)) {
+    return classifyRuntimeMarketMakerFailure('MARKET_MAKER_HUB_DEPTH_NOT_READY', 'market-maker hub offer depth is not ready');
+  }
+  if (!crossReady) {
+    return classifyRuntimeMarketMakerFailure('MARKET_MAKER_CROSS_NOT_READY', 'market-maker cross routes are not ready');
+  }
+  return null;
 };
 
 export const buildAggregatedMarketMakerHealth = ({
@@ -109,17 +162,22 @@ export const buildAggregatedMarketMakerHealth = ({
 
   const childReady = marketMakerHealth?.marketMaker?.ok === true;
   const crossReady = Boolean(rawCross) && cross.ok;
-  const ok = !mmEnabled
-    ? true
-    : marketMakerActive &&
-      childReady &&
-      hubs.length === expectedHubCount &&
-      hubs.every((hub) => hub.depthReady) &&
-      crossReady;
+  const failure = resolveMarketMakerFailure({
+    mmEnabled,
+    marketMakerActive,
+    marketMakerHealth,
+    expectedHubCount,
+    startupPhase,
+    childReady,
+    hubs,
+    crossReady,
+  });
+  const ok = !mmEnabled || failure === null;
 
   return {
     enabled: mmEnabled,
     ok,
+    failure,
     entityId,
     startupPhase,
     expectedOffersPerHub,

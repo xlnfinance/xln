@@ -254,6 +254,7 @@ const publicHubMeshHealth = (hubMesh: PublicHealthRecord): Record<string, unknow
 const publicMarketMakerHealth = (marketMaker: PublicHealthRecord): Record<string, unknown> => ({
   enabled: valueOf(marketMaker, 'enabled') === true,
   ok: valueOf(marketMaker, 'ok') === true,
+  failure: publicFailureSignal(valueOf(marketMaker, 'failure')),
   startupPhase: valueOf(marketMaker, 'startupPhase'),
   expectedOffersPerHub: valueOf(marketMaker, 'expectedOffersPerHub'),
   hubCount: arrayOf(marketMaker, 'hubs')?.length,

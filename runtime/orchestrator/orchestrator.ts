@@ -1746,7 +1746,11 @@ const computeAggregatedHealth = (options: {
     bootstrapReservesOk ? null : 'bootstrapReserves',
     bootstrapReserveTargetsMet ? null : 'bootstrapReserveTargets',
   ].filter((value): value is string => Boolean(value));
-  const failures = buildRuntimeHealthFailures(degraded);
+  const failures = buildRuntimeHealthFailures(degraded).map(failure =>
+    failure.code === 'MARKET_MAKER_NOT_READY' && aggregatedMarketMakerHealth.failure
+      ? aggregatedMarketMakerHealth.failure
+      : failure
+  );
   const sourceHeights = [
     ...hubChildren.map(child => Number(child.lastHealth?.height || 0)),
     Number(marketMakerHealth?.height || 0),

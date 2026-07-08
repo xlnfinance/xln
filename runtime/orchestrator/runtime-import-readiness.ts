@@ -33,8 +33,11 @@ export const resolveRuntimeImportReadiness = (
   >,
 ): RuntimeImportReadinessDecision => {
   const degraded = Array.isArray(health.degraded) ? health.degraded : [];
-  const fail = (reason: string): RuntimeImportReadinessDecision => {
-    const failure = classifyRuntimeImportReadinessReason(reason);
+  const fail = (
+    reason: string,
+    sourceFailure?: RuntimeFailureSignal | null,
+  ): RuntimeImportReadinessDecision => {
+    const failure = sourceFailure ?? classifyRuntimeImportReadinessReason(reason);
     return {
       ok: false,
       status: 503,
@@ -52,10 +55,13 @@ export const resolveRuntimeImportReadiness = (
   if (health.reset?.inProgress === true) return fail('reset-in-progress');
   if (health.systemOk !== true) return fail('system-not-ok');
   if (health.coreOk !== true) return fail('core-not-ok');
-  if (degraded.length > 0) return fail(`degraded:${degraded.join(',')}`);
+  if (degraded.length > 0) {
+    const componentFailure = degraded.includes('marketMaker') ? health.marketMaker?.failure : null;
+    return fail(`degraded:${degraded.join(',')}`, componentFailure);
+  }
   if (health.hubMesh?.ok !== true) return fail('hub-mesh-not-ready');
   if (health.marketMaker?.enabled === true) {
-    if (health.marketMaker.ok !== true) return fail('market-maker-not-ready');
+    if (health.marketMaker.ok !== true) return fail('market-maker-not-ready', health.marketMaker.failure);
     if (health.marketMaker.startupPhase !== 'offers-ready') return fail('market-maker-offers-not-ready');
     if (health.marketMaker.cross?.applicable !== false && health.marketMaker.cross?.ok !== true) {
       return fail('market-maker-cross-not-ready');

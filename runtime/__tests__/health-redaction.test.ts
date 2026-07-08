@@ -65,6 +65,17 @@ test('public aggregated health strips child process ids and hub runtime ids', ()
       ownerId: 'owner-secret',
       children: [{ pid: 999, dbPath: '/secret/db' }],
     },
+    marketMaker: {
+      enabled: true,
+      ok: false,
+      failure: {
+        category: 'TransientRace',
+        code: 'MARKET_MAKER_CROSS_NOT_READY',
+        message: 'internal route 0xsecret is still empty',
+        retryable: true,
+        fatal: false,
+      },
+    },
     hubs: [{ name: 'H1', runtimeId: 'runtime-secret', entityId: '0xhub', accounts: 100, online: true }],
   });
   const body = JSON.stringify(publicPayload);
@@ -74,7 +85,9 @@ test('public aggregated health strips child process ids and hub runtime ids', ()
   expect(body).not.toContain('/secret/db');
   expect(body).not.toContain('accounts');
   expect(body).not.toContain('internal hub pid');
+  expect(body).not.toContain('internal route');
   expect(body).toContain('HUBS_NOT_READY');
+  expect(body).toContain('MARKET_MAKER_CROSS_NOT_READY');
   expect(body).toContain('TransientRace');
   expect(body).toContain('childCount');
 });

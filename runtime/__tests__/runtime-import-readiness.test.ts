@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { classifyRuntimeImportReadinessReason } from '../failure-taxonomy';
+import {
+  classifyRuntimeImportReadinessReason,
+  classifyRuntimeMarketMakerFailure,
+} from '../failure-taxonomy';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 import type { AggregatedHealth } from '../orchestrator/orchestrator-types';
 
@@ -22,6 +25,7 @@ const baseReadyHealth = (): Pick<AggregatedHealth,
   marketMaker: {
     enabled: true,
     ok: true,
+    failure: null,
     entityId: '0xmm',
     startupPhase: 'offers-ready',
     expectedOffersPerHub: 3,
@@ -120,6 +124,38 @@ describe('runtime import readiness gate', () => {
         fatal: false,
       },
       degraded: [],
+    });
+  });
+
+  test('uses specific market maker failure when degraded only names the component', () => {
+    const health = baseReadyHealth();
+    health.degraded = ['marketMaker'];
+    health.marketMaker = {
+      ...health.marketMaker,
+      ok: false,
+      failure: classifyRuntimeMarketMakerFailure(
+        'MARKET_MAKER_CROSS_NOT_READY',
+        'internal route 0xsecret is still empty',
+      ),
+    };
+
+    const decision = resolveRuntimeImportReadiness(health);
+    expect(decision).toMatchObject({
+      ok: false,
+      status: 503,
+      reason: 'degraded:marketMaker',
+      category: 'TransientRace',
+      code: 'MARKET_MAKER_CROSS_NOT_READY',
+      retryable: true,
+      fatal: false,
+      degraded: ['marketMaker'],
+      failure: {
+        category: 'TransientRace',
+        code: 'MARKET_MAKER_CROSS_NOT_READY',
+        message: 'internal route 0xsecret is still empty',
+        retryable: true,
+        fatal: false,
+      },
     });
   });
 

@@ -399,6 +399,7 @@ export type AggregatedHealth = {
   marketMaker: {
     enabled: boolean;
     ok: boolean;
+    failure: RuntimeFailureSignal | null;
     entityId: string | null;
     startupPhase: string | null;
     expectedOffersPerHub: number;

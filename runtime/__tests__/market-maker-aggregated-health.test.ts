@@ -69,6 +69,12 @@ describe('aggregated market maker health', () => {
     });
 
     expect(aggregated.ok).toBe(false);
+    expect(aggregated.failure).toMatchObject({
+      category: 'TransientRace',
+      code: 'MARKET_MAKER_CHILD_NOT_READY',
+      retryable: true,
+      fatal: false,
+    });
     expect(aggregated.hubs[0]?.depthReady).toBe(false);
     expect(aggregated.hubs[0]?.blockers).toEqual([{ reason: 'pending-frame', height: 7 }]);
     expect(aggregated.hubs[0]?.pairs[0]?.expectedOffers).toBe(3);
@@ -94,5 +100,56 @@ describe('aggregated market maker health', () => {
 
     expect(aggregated.enabled).toBe(true);
     expect(aggregated.ok).toBe(false);
+    expect(aggregated.failure).toMatchObject({
+      category: 'TransientRace',
+      code: 'MARKET_MAKER_CHILD_INACTIVE',
+      retryable: true,
+      fatal: false,
+    });
+  });
+
+  test('blocks readiness on startup phase before offer checks look healthy', () => {
+    const health: MarketMakerHealthPayload = {
+      marketMaker: {
+        enabled: true,
+        ok: true,
+        entityId: '0xmm',
+        expectedOffersPerHub: 1,
+        hubs: [{
+          hubEntityId: '0xhub1',
+          offers: 1,
+          ready: true,
+          depthReady: true,
+          pairs: [],
+        }],
+        cross: {
+          applicable: true,
+          ok: true,
+          expectedRoutes: 1,
+          expectedOffersPerRoute: 1,
+          expectedOffersPerPair: 1,
+          routeCount: 1,
+          routes: [],
+        },
+      },
+    };
+
+    const aggregated = buildAggregatedMarketMakerHealth({
+      mmEnabled: true,
+      marketMakerActive: true,
+      marketMakerHealth: health,
+      hubEntityIds: ['0xhub1'],
+      expectedHubCount: 1,
+      entityId: '0xmm',
+      startupPhase: 'bootstrap-cross',
+    });
+
+    expect(aggregated.ok).toBe(false);
+    expect(aggregated.failure).toMatchObject({
+      category: 'TransientRace',
+      code: 'MARKET_MAKER_STARTUP_PHASE_NOT_READY',
+      retryable: true,
+      fatal: false,
+    });
   });
 });

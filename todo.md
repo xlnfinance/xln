@@ -250,6 +250,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: bootstrap timeline stages now expose typed per-stage `failure`
      metadata, with public health redaction preserving codes/categories while
      hiding internal messages.
+   - Partial: aggregated market-maker health now exposes a typed component
+     `failure` for inactive child process, missing child health, startup phase,
+     hub depth, hub count, and cross-route readiness; public health redaction
+     keeps only safe code/category/retryability metadata.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.

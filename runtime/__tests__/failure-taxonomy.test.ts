@@ -6,6 +6,7 @@ import {
   classifyRuntimeImportReadinessReason,
   classifyRuntimeFaucetFailure,
   classifyRuntimeBootstrapStageFailure,
+  classifyRuntimeMarketMakerFailure,
   classifyRuntimeTransportFailure,
 } from '../failure-taxonomy';
 
@@ -101,5 +102,20 @@ describe('runtime failure taxonomy', () => {
     });
     expect(classifyRuntimeBootstrapStageFailure('custody', 'disabled', 'Custody disabled')).toBeNull();
     expect(classifyRuntimeBootstrapStageFailure('preflight', 'done', 'clear')).toBeNull();
+  });
+
+  test('classifies market maker failures without parsing health strings at callers', () => {
+    expect(classifyRuntimeMarketMakerFailure('MARKET_MAKER_CHILD_INACTIVE')).toMatchObject({
+      category: 'TransientRace',
+      code: 'MARKET_MAKER_CHILD_INACTIVE',
+      retryable: true,
+      fatal: false,
+    });
+    expect(classifyRuntimeMarketMakerFailure('MARKET_MAKER_DISABLED')).toMatchObject({
+      category: 'ExpectedEmpty',
+      code: 'MARKET_MAKER_DISABLED',
+      retryable: false,
+      fatal: false,
+    });
   });
 });

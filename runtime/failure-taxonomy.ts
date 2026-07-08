@@ -61,6 +61,17 @@ const BOOTSTRAP_STAGE_CODES: Record<string, string> = {
   'ready-hash': 'BOOTSTRAP_READY_HASH_NOT_READY',
 };
 
+const MARKET_MAKER_FAILURE_CATEGORIES: Record<string, RuntimeFailureCategory> = {
+  MARKET_MAKER_DISABLED: 'ExpectedEmpty',
+  MARKET_MAKER_CHILD_INACTIVE: 'TransientRace',
+  MARKET_MAKER_HEALTH_MISSING: 'TransientRace',
+  MARKET_MAKER_STARTUP_PHASE_NOT_READY: 'TransientRace',
+  MARKET_MAKER_CHILD_NOT_READY: 'TransientRace',
+  MARKET_MAKER_HUB_COUNT_MISMATCH: 'TransientRace',
+  MARKET_MAKER_HUB_DEPTH_NOT_READY: 'TransientRace',
+  MARKET_MAKER_CROSS_NOT_READY: 'TransientRace',
+};
+
 export const normalizeRuntimeFailureCode = (value: unknown): string => {
   const raw = String(value || '').trim();
   const token = raw.split(/[\s:]/)[0] || 'UNKNOWN';
@@ -145,5 +156,18 @@ export const classifyRuntimeBootstrapStageFailure = (
     category: 'TransientRace',
     code,
     message: reason ?? code,
+  });
+};
+
+export const classifyRuntimeMarketMakerFailure = (
+  code: string,
+  message?: string,
+): RuntimeFailureSignal => {
+  const normalizedCode = normalizeRuntimeFailureCode(code);
+  const category = MARKET_MAKER_FAILURE_CATEGORIES[normalizedCode] ?? 'TransientRace';
+  return buildRuntimeFailureSignal({
+    category,
+    code: normalizedCode,
+    message: message ?? normalizedCode,
   });
 };
