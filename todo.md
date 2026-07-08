@@ -359,6 +359,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      `stack:<chainId>:<depository>` refs and hub/MM bootstrap readiness compares
      those refs before falling back to legacy display names for incomplete
      fixtures.
+   - Partial: orchestrator now passes chain/depository in market-maker support
+     identities, and hub/MM matching refuses name-only fallback when either
+     side already carries a canonical jurisdiction ref.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

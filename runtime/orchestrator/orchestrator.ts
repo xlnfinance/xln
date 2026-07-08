@@ -885,6 +885,8 @@ type MarketMakerSupportPeerIdentity = {
   entityId: string;
   signerId: string;
   jurisdictionName: string;
+  chainId: number;
+  depositoryAddress: string;
   creditAmount: string;
 };
 
@@ -927,6 +929,8 @@ const buildMarketMakerIdentity = (
     entityId,
     signerId,
     jurisdictionName: jurisdiction.name,
+    chainId: Number(jurisdiction.chainId || 0),
+    depositoryAddress: jurisdiction.contracts.depository,
     creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString(),
   };
 };

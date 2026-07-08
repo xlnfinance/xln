@@ -45,6 +45,7 @@ import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   sameJurisdictionIdentityOrNameFallback,
+  sameJurisdictionIdentityOrNameOnlyFallback,
 } from '../jurisdiction-runtime';
 import {
   attachRuntimeAdapterTicker,
@@ -148,6 +149,8 @@ type SupportPeerIdentity = {
   entityId: string;
   signerId: string;
   jurisdictionName: string;
+  chainId?: number;
+  depositoryAddress?: string;
   creditAmount: bigint;
 };
 
@@ -406,13 +409,20 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map((entry) => ({
-      name: String(entry?.name || '').trim(),
-      entityId: String(entry?.entityId || '').trim().toLowerCase(),
-      signerId: String(entry?.signerId || '').trim().toLowerCase(),
-      jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || ''),
-      creditAmount: BigInt(String(entry?.creditAmount || HUB_MESH_CREDIT_AMOUNT)),
-    })).filter((entry) =>
+    return parsed.map((entry) => {
+      const rawChainId = Number(entry?.chainId);
+      const chainId = Number.isFinite(rawChainId) && rawChainId > 0 ? Math.floor(rawChainId) : null;
+      const depositoryAddress = String(entry?.depositoryAddress || '').trim();
+      return {
+        name: String(entry?.name || '').trim(),
+        entityId: String(entry?.entityId || '').trim().toLowerCase(),
+        signerId: String(entry?.signerId || '').trim().toLowerCase(),
+        jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || ''),
+        ...(chainId !== null ? { chainId } : {}),
+        ...(depositoryAddress ? { depositoryAddress } : {}),
+        creditAmount: BigInt(String(entry?.creditAmount || HUB_MESH_CREDIT_AMOUNT)),
+      };
+    }).filter((entry) =>
       entry.name &&
       entry.entityId &&
       entry.signerId &&
@@ -1238,7 +1248,7 @@ const readVisibleHubProfiles = (env: Env, jurisdiction: unknown): VisibleHubProf
         ? jurisdiction
         : (jurisdiction as { name?: unknown } | null | undefined)?.name);
       if (!targetRef && !targetName) return true;
-      return sameJurisdictionIdentityOrNameFallback(jurisdiction, profile.metadata?.jurisdiction);
+      return sameJurisdictionIdentityOrNameOnlyFallback(jurisdiction, profile.metadata?.jurisdiction);
     })
     .map(profile => ({
       name: String(profile.name || '').trim(),
@@ -1284,7 +1294,7 @@ const visibleDirectSupportPeers = (
     .map((identity) => {
       const entityId = identity.entityId.toLowerCase();
       if (entityId === selfEntityId.toLowerCase()) return null;
-      if (!sameJurisdictionIdentityOrNameFallback(identity.jurisdictionName, jurisdiction)) return null;
+      if (!sameJurisdictionIdentityOrNameOnlyFallback(identity, jurisdiction)) return null;
       const profile = profilesByEntityId.get(entityId);
       const runtimeId = normalizeRuntimeId(profile?.runtimeId || '');
       if (!runtimeId) return null;

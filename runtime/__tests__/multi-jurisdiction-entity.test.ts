@@ -6,6 +6,7 @@ import {
   assertSameJurisdictionAccount,
   getJurisdictionIdentityRef,
   sameJurisdictionIdentityOrNameFallback,
+  sameJurisdictionIdentityOrNameOnlyFallback,
 } from '../jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
@@ -73,6 +74,9 @@ describe('multi-jurisdiction entity binding', () => {
     expect(getJurisdictionIdentityRef(canonical)).toBe(`stack:31337:${addr('11')}`);
     expect(sameJurisdictionIdentityOrNameFallback(canonical, relabeled)).toBe(true);
     expect(sameJurisdictionIdentityOrNameFallback(canonical, conflicting)).toBe(false);
+    expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, relabeled)).toBe(true);
+    expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, { name: canonical.name })).toBe(false);
+    expect(sameJurisdictionIdentityOrNameOnlyFallback({ name: canonical.name }, { name: 'testnet' })).toBe(true);
   });
 
   const importEntity = async (

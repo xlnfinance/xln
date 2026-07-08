@@ -143,6 +143,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('resolveSecondaryJurisdictions<MarketMakerJurisdictionConfig>(primary.rpc)');
     expect(orchestrator).toContain('`${marketMakerChild.signerLabel}:${secondaryName}`');
     expect(orchestrator).toContain('jurisdictionName: jurisdiction.name');
+    expect(orchestrator).toContain('chainId: Number(jurisdiction.chainId || 0)');
+    expect(orchestrator).toContain('depositoryAddress: jurisdiction.contracts.depository');
     expect(orchestrator).toContain("'--support-peer-identities-json', JSON.stringify(getMarketMakerIdentities())");
     expect(orchestrator).not.toContain('JSON.stringify([getMarketMakerIdentity()])');
     expect(orchestrator).toContain('const getExitedHubChild = (): HubChild | null =>');
@@ -169,7 +171,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(hubNode).toContain('jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || \'\')');
-    expect(hubNode).toContain('sameJurisdictionIdentityOrNameFallback(identity.jurisdictionName, jurisdiction)');
+    expect(hubNode).toContain('sameJurisdictionIdentityOrNameOnlyFallback(identity, jurisdiction)');
     expect(hubNode).toContain('for (const hubBootstrap of hubBootstraps)');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
     expect(hubNode).toContain('entityAdapter = getEntityJAdapter(env, entityId);');

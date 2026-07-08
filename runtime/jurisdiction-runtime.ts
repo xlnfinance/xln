@@ -33,6 +33,7 @@ export const getJurisdictionConfigName = (jurisdiction?: Pick<JurisdictionConfig
 
 type JurisdictionIdentitySource = {
   name?: unknown;
+  jurisdictionName?: unknown;
   chainId?: unknown;
   depositoryAddress?: unknown;
   contracts?: { depository?: unknown } | null;
@@ -42,7 +43,8 @@ type JurisdictionIdentitySource = {
 const readJurisdictionIdentityName = (jurisdiction: unknown): string => {
   if (typeof jurisdiction === 'string') return jurisdiction.trim();
   if (!jurisdiction || typeof jurisdiction !== 'object') return '';
-  return String((jurisdiction as JurisdictionIdentitySource).name || '').trim();
+  const source = jurisdiction as JurisdictionIdentitySource;
+  return String(source.name || source.jurisdictionName || '').trim();
 };
 
 export const getJurisdictionIdentityRef = (jurisdiction: unknown): string => {
@@ -70,6 +72,15 @@ export const sameJurisdictionIdentityOrNameFallback = (left: unknown, right: unk
   const leftRef = getJurisdictionIdentityRef(left);
   const rightRef = getJurisdictionIdentityRef(right);
   if (leftRef && rightRef) return leftRef === rightRef;
+  const leftName = normalizeJurisdictionName(readJurisdictionIdentityName(left));
+  const rightName = normalizeJurisdictionName(readJurisdictionIdentityName(right));
+  return Boolean(leftName && rightName && leftName === rightName);
+};
+
+export const sameJurisdictionIdentityOrNameOnlyFallback = (left: unknown, right: unknown): boolean => {
+  const leftRef = getJurisdictionIdentityRef(left);
+  const rightRef = getJurisdictionIdentityRef(right);
+  if (leftRef || rightRef) return Boolean(leftRef && rightRef && leftRef === rightRef);
   const leftName = normalizeJurisdictionName(readJurisdictionIdentityName(left));
   const rightName = normalizeJurisdictionName(readJurisdictionIdentityName(right));
   return Boolean(leftName && rightName && leftName === rightName);

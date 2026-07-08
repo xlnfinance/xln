@@ -82,7 +82,7 @@ import {
 import { resolveCrossJurisdictionRuntimeTopology } from '../cross-jurisdiction-boundary';
 import { crossJurisdictionBookOwnerRef } from '../cross-jurisdiction-orderbook';
 import { getJurisdictionStackId } from '../jurisdiction-stack';
-import { sameJurisdictionIdentityOrNameFallback } from '../jurisdiction-runtime';
+import { sameJurisdictionIdentityOrNameOnlyFallback } from '../jurisdiction-runtime';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import {
@@ -599,7 +599,7 @@ const toEntityJurisdictionConfig = (jurisdiction: JurisdictionConfig): MarketMak
 });
 
 const sameImportedJurisdiction = (target: JurisdictionConfig, existingName: string, replica: unknown): boolean =>
-  sameJurisdictionIdentityOrNameFallback(target, {
+  sameJurisdictionIdentityOrNameOnlyFallback(target, {
     ...(replica && typeof replica === 'object' ? replica : {}),
     name: (replica as { name?: unknown } | null | undefined)?.name || existingName,
   });
