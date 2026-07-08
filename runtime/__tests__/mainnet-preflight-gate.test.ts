@@ -73,12 +73,15 @@ test('mainnet and release gates check disk before expensive browser/runtime gate
   const mainnetGate = readFileSync(join(repoRoot, 'runtime/scripts/run-mainnet-preflight-gate.ts'), 'utf8');
   const releaseGate = readFileSync(join(repoRoot, 'runtime/scripts/run-release-gate.ts'), 'utf8');
 
-  expect(mainnetGate).toContain("import { assertMinDiskFree } from '../orchestrator/storage-monitor';");
+  expect(mainnetGate).toContain("import { assertMinDiskFree, getMinDiskFreeBytes } from '../orchestrator/storage-monitor';");
+  expect(mainnetGate).toContain('minDiskFreeBytes: getMinDiskFreeBytes(),');
+  expect(mainnetGate).toContain('console.log(`minDiskFreeBytes=${getMinDiskFreeBytes()}`);');
   expect(mainnetGate.indexOf('cleanupTestArtifactsBeforeRun({')).toBeLessThan(
     mainnetGate.indexOf('assertMinDiskFree();'),
   );
   expect(mainnetGate.indexOf('assertMinDiskFree();')).toBeLessThan(mainnetGate.indexOf('printPlan(steps);'));
-  expect(releaseGate).toContain("import { assertMinDiskFree } from '../orchestrator/storage-monitor';");
+  expect(releaseGate).toContain("import { assertMinDiskFree, getMinDiskFreeBytes } from '../orchestrator/storage-monitor';");
+  expect(releaseGate).toContain('Disk guard: minFreeBytes=${getMinDiskFreeBytes()}');
   expect(releaseGate).toContain("if (profile !== 'quick') assertMinDiskFree();");
   expect(releaseGate.indexOf('cleanupTestArtifactsBeforeRun({ reason: `release-gate:${profile}` })')).toBeLessThan(
     releaseGate.indexOf("if (profile !== 'quick') assertMinDiskFree();"),

@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Readable } from 'node:stream';
 
-import { assertMinDiskFree } from '../orchestrator/storage-monitor';
+import { assertMinDiskFree, getMinDiskFreeBytes } from '../orchestrator/storage-monitor';
 import { MAINNET_GATE } from './mainnet-gate-constants';
 import {
   cleanupTestArtifactsBeforeRun,
@@ -234,6 +234,7 @@ const main = async (): Promise<void> => {
       expectedHubs: MAINNET_GATE.expectedHubs,
       expectedTowers: MAINNET_GATE.expectedTowers,
       cappedRiskUsd: MAINNET_GATE.cappedRiskUsd,
+      minDiskFreeBytes: getMinDiskFreeBytes(),
     },
     args,
     steps,
@@ -242,6 +243,7 @@ const main = async (): Promise<void> => {
   writeReport(args.outPath, report);
   printPlan(steps);
   console.log(`gitHead=${gitHead.slice(0, 12)}${dirty.stdout.trim() ? ' dirty' : ''}`);
+  console.log(`minDiskFreeBytes=${getMinDiskFreeBytes()}`);
   console.log(`report=${args.outPath}`);
   if (args.dryRun) return;
 

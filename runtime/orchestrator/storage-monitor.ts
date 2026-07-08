@@ -87,6 +87,8 @@ export const assertDiskFreeAtLeast = (freeBytes: number, requiredBytes = MIN_DIS
   }
 };
 
+export const getMinDiskFreeBytes = (): number => MIN_DISK_FREE_BYTES;
+
 type PathByteScan = {
   bytes: number;
   entries: number;

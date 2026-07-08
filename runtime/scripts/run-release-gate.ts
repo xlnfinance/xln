@@ -3,7 +3,7 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 
-import { assertMinDiskFree } from '../orchestrator/storage-monitor';
+import { assertMinDiskFree, getMinDiskFreeBytes } from '../orchestrator/storage-monitor';
 import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
@@ -153,6 +153,9 @@ function printPlan(profile: GateProfile, steps: GateStep[]): void {
   console.log('='.repeat(76));
   console.log(`XLN release gate: ${profile}`);
   console.log('='.repeat(76));
+  if (profile !== 'quick') {
+    console.log(`Disk guard: minFreeBytes=${getMinDiskFreeBytes()}`);
+  }
   steps.forEach((step, index) => {
     console.log(`${index + 1}. ${step.name}`);
     console.log(`   ${step.command}`);
