@@ -29,6 +29,7 @@ describe('playwright global setup cleanup', () => {
         cwd: join(repoRoot, 'frontend'),
         env: {
           ...process.env,
+          XLN_TEST_ARTIFACT_CLEANUP_DONE: undefined,
           XLN_MIN_DISK_FREE_BYTES: '1',
         },
         encoding: 'utf8',

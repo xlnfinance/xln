@@ -134,6 +134,28 @@ describe('test artifact cleanup', () => {
       });
 
       expect(summary.skipped).toBe(true);
+      expect(summary.estimatedWorkspaceBytes).toBeGreaterThan(0);
+      expect(existsSync(join(root, '.logs/e2e-parallel/current-parent-run/log.txt'))).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('child-runner skip still enforces the workspace budget', () => {
+    const root = makeTempWorkspace();
+    try {
+      writeFile(root, '.logs/e2e-parallel/current-parent-run/log.txt', 'too-large-for-budget');
+
+      expect(() => cleanupTestArtifactsBeforeRun({
+        cwd: root,
+        env: {
+          [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
+          [TEST_WORKSPACE_MAX_BYTES_ENV]: '1',
+        },
+        argv: [],
+        reason: 'unit-child-budget',
+        log: () => undefined,
+      })).toThrow('TEST_WORKSPACE_BUDGET_EXCEEDED');
       expect(existsSync(join(root, '.logs/e2e-parallel/current-parent-run/log.txt'))).toBe(true);
     } finally {
       rmSync(root, { recursive: true, force: true });

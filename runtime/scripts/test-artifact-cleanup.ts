@@ -197,7 +197,10 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
   const maxBytes = parseMaxBytes(env);
 
   if (options.skipIfAlreadyDone !== false && env[TEST_ARTIFACT_CLEANUP_DONE_ENV] === '1') {
-    return { skipped: true, removed: [], estimatedBudgetedBytes: 0, estimatedWorkspaceBytes: 0, maxBytes };
+    const { estimatedBudgetedBytes, estimatedWorkspaceBytes } = assertWorkspaceBudget(cwd, maxBytes, options.reason);
+    log(`test artifact cleanup (${options.reason}): already completed by parent runner`);
+    logWorkspaceBudget(options.reason, maxBytes, estimatedBudgetedBytes, estimatedWorkspaceBytes, log);
+    return { skipped: true, removed: [], estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes };
   }
   if (shouldKeepArtifacts(argv, env)) {
     const { estimatedBudgetedBytes, estimatedWorkspaceBytes } = assertWorkspaceBudget(cwd, maxBytes, options.reason);
