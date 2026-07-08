@@ -1,4 +1,5 @@
 import {
+  getCrossJurisdictionCommittedFillAmounts,
   requireCrossJurisdictionFillProgress,
 } from '../../cross-jurisdiction';
 import { cloneEntityState, addMessage } from '../../state-helpers';
@@ -14,34 +15,20 @@ type CrossJurisdictionFillResult = {
   mempoolOps?: MempoolOp[];
 };
 
-const clampFillRatio = (value: unknown): number =>
-  Math.max(0, Math.min(65_535, Math.floor(Number(value) || 0)));
-
-const committedSourceAmount = (route: CrossJurisdictionSwapRoute): bigint => {
-  const ratio = clampFillRatio(route.cumulativeFillRatio ?? route.claimedRatio);
-  return route.filledSourceAmount ??
-    route.sourceClaimed ??
-    ((BigInt(route.source.amount) * BigInt(ratio)) / 65_535n);
-};
-
-const committedTargetAmount = (route: CrossJurisdictionSwapRoute): bigint => {
-  const ratio = clampFillRatio(route.cumulativeFillRatio ?? route.claimedRatio);
-  return route.filledTargetAmount ??
-    route.targetClaimed ??
-    ((BigInt(route.target.amount) * BigInt(ratio)) / 65_535n);
-};
-
 const sameCommittedFillNotice = (
   route: CrossJurisdictionSwapRoute,
   data: CrossJurisdictionFillNoticeTx['data'],
-): boolean => (
-  Math.floor(Number(route.fillSeq ?? 0)) === Math.floor(Number(data.fillSeq)) &&
-  clampFillRatio(route.cumulativeFillRatio ?? route.claimedRatio) === clampFillRatio(data.cumulativeFillRatio) &&
-  committedSourceAmount(route) === data.cumulativeSourceAmount &&
-  committedTargetAmount(route) === data.cumulativeTargetAmount &&
-  (route.fillNumerator ?? undefined) === (data.fillNumerator ?? undefined) &&
-  (route.fillDenominator ?? undefined) === (data.fillDenominator ?? undefined)
-);
+): boolean => {
+  const committed = getCrossJurisdictionCommittedFillAmounts(route);
+  return (
+    Math.floor(Number(route.fillSeq ?? 0)) === Math.floor(Number(data.fillSeq)) &&
+    committed.fillRatio === Math.max(0, Math.min(65_535, Math.floor(Number(data.cumulativeFillRatio) || 0))) &&
+    committed.filledSourceAmount === data.cumulativeSourceAmount &&
+    committed.filledTargetAmount === data.cumulativeTargetAmount &&
+    (route.fillNumerator ?? undefined) === (data.fillNumerator ?? undefined) &&
+    (route.fillDenominator ?? undefined) === (data.fillDenominator ?? undefined)
+  );
+};
 
 export const handleCrossJurisdictionFillNoticeEntityTx = (
   entityState: EntityState,

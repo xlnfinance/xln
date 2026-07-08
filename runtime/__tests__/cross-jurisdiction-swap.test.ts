@@ -36,8 +36,10 @@ import {
 } from '../cross-jurisdiction';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
+  buildCrossJurisdictionCancelAck,
   buildCrossJurisdictionFillAck,
   buildCrossJurisdictionMarketOffer,
+  getCrossJurisdictionRouteRemainingAmounts,
 } from '../cross-jurisdiction-orderbook';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../cross-jurisdiction-market';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
@@ -1637,6 +1639,55 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(claimed.filledSourceAmount).toBe(10_000_000_000_000_000n);
     expect(claimed.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
     expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(claimed.filledSourceAmount);
+  });
+
+  test('cross-j orderbook remaining and cancel ack use exact ratio fields before uint16 fallback', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-exact-quarter-cancel',
+      makerEntityId: entity('89'),
+      hubEntityId: entity('8a'),
+      source: {
+        jurisdiction: jref(eth),
+        entityId: entity('89'),
+        counterpartyEntityId: entity('8a'),
+        tokenId: 2,
+        amount: 40_000_000_000_000_000n,
+      },
+      target: {
+        jurisdiction: jref(base),
+        entityId: entity('8b'),
+        counterpartyEntityId: entity('8c'),
+        tokenId: 1,
+        amount: 100_000_000_000_000_000_000n,
+      },
+      priceImprovementMode: 'source_savings',
+      status: 'partially_filled',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+      expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-exact-quarter-cancel-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const ratioOnlyExactRoute = {
+      ...route,
+      fillSeq: 1,
+      cumulativeFillRatio: 16_384,
+      fillNumerator: 1n,
+      fillDenominator: 4n,
+    };
+
+    const remaining = getCrossJurisdictionRouteRemainingAmounts(ratioOnlyExactRoute);
+    const cancelAck = buildCrossJurisdictionCancelAck(ratioOnlyExactRoute.orderId, ratioOnlyExactRoute);
+
+    expect(remaining.filledSourceAmount).toBe(10_000_000_000_000_000n);
+    expect(remaining.filledTargetAmount).toBe(25_000_000_000_000_000_000n);
+    expect(remaining.sourceRemaining).toBe(30_000_000_000_000_000n);
+    expect(remaining.targetRemaining).toBe(75_000_000_000_000_000_000n);
+    expect(cancelAck.data.cumulativeSourceAmount).toBe(10_000_000_000_000_000n);
+    expect(cancelAck.data.cumulativeTargetAmount).toBe(25_000_000_000_000_000_000n);
+    expect(cancelAck.data.fillNumerator).toBe(1n);
+    expect(cancelAck.data.fillDenominator).toBe(4n);
+    expect((40_000_000_000_000_000n * 16_384n) / 65_535n).not.toBe(remaining.filledSourceAmount);
   });
 
   test('cross-j fill closes sub-lot remainder instead of leaving a zombie order', async () => {

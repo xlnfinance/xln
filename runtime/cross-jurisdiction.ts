@@ -153,6 +153,44 @@ const clampFillRatio = (value: unknown): number =>
 const scaleByExactRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
   numerator >= denominator ? total : (total * numerator) / denominator;
 
+export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictionSwapRoute): {
+  sourceTotal: bigint;
+  targetTotal: bigint;
+  filledSourceAmount: bigint;
+  filledTargetAmount: bigint;
+  fillRatio: number;
+} {
+  const sourceTotal = BigInt(route.source.amount);
+  const targetTotal = BigInt(route.target.amount);
+  const fillRatio = Math.max(clampFillRatio(route.cumulativeFillRatio), clampFillRatio(route.claimedRatio));
+  const hasExactFillRatio = route.fillNumerator !== undefined || route.fillDenominator !== undefined;
+  let exactSourceAmount: bigint | undefined;
+  let exactTargetAmount: bigint | undefined;
+  if (hasExactFillRatio) {
+    if (route.fillNumerator === undefined || route.fillDenominator === undefined) {
+      throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${route.orderId}`);
+    }
+    if (route.fillDenominator <= 0n || route.fillNumerator < 0n || route.fillNumerator > route.fillDenominator) {
+      throw new Error(`CROSS_J_EXACT_FILL_RATIO_INVALID:${route.orderId}:${route.fillNumerator}/${route.fillDenominator}`);
+    }
+    exactSourceAmount = scaleByExactRatio(sourceTotal, route.fillNumerator, route.fillDenominator);
+    exactTargetAmount = scaleByExactRatio(targetTotal, route.fillNumerator, route.fillDenominator);
+  }
+  const quantizedSourceAmount = fillRatio >= CROSS_J_MAX_FILL_RATIO
+    ? sourceTotal
+    : (sourceTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  const quantizedTargetAmount = fillRatio >= CROSS_J_MAX_FILL_RATIO
+    ? targetTotal
+    : (targetTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  return {
+    sourceTotal,
+    targetTotal,
+    filledSourceAmount: route.filledSourceAmount ?? exactSourceAmount ?? route.sourceClaimed ?? quantizedSourceAmount,
+    filledTargetAmount: route.filledTargetAmount ?? exactTargetAmount ?? route.targetClaimed ?? quantizedTargetAmount,
+    fillRatio,
+  };
+}
+
 const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
   if (denominator <= 0n) throw new Error(`CROSS_J_CEIL_DIV_DENOMINATOR_INVALID:${denominator.toString()}`);
   return numerator <= 0n ? 0n : (numerator + denominator - 1n) / denominator;

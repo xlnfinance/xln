@@ -4,6 +4,7 @@ import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import { SWAP_LOT_SCALE } from '../../orderbook';
 import {
   buildCommittedCrossJurisdictionPullBinding,
+  getCrossJurisdictionCommittedFillAmounts,
   requireCrossJurisdictionFillProgress,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionFillProgress,
@@ -76,10 +77,8 @@ export async function handleCrossSwapFillAck(
   ) {
     return { success: false, error: `Cross-j route hash mismatch: ${routeHash} != ${route.routeHash}`, events };
   }
-  const currentRatio = Math.max(
-    0,
-    Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
-  );
+  const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
+  const currentRatio = committedFill.fillRatio;
   const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
   if (
     previousFillSeq !== undefined &&
@@ -93,10 +92,8 @@ export async function handleCrossSwapFillAck(
     };
   }
   if (cancelRemainder && Math.max(0, Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(cumulativeFillRatio) || 0))) === currentRatio) {
-    const sourceTotal = BigInt(route.source.amount);
-    const targetTotal = BigInt(route.target.amount);
-    const currentSource = route.filledSourceAmount ?? route.sourceClaimed ?? ((sourceTotal * BigInt(currentRatio)) / BigInt(MAX_SWAP_FILL_RATIO));
-    const currentTarget = route.filledTargetAmount ?? route.targetClaimed ?? ((targetTotal * BigInt(currentRatio)) / BigInt(MAX_SWAP_FILL_RATIO));
+    const currentSource = committedFill.filledSourceAmount;
+    const currentTarget = committedFill.filledTargetAmount;
     if (cumulativeSourceAmount === undefined || cumulativeSourceAmount !== currentSource) {
       return { success: false, error: `Cross-j cancel source mismatch: expected ${currentSource}, got ${cumulativeSourceAmount}`, events };
     }

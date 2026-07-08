@@ -5,6 +5,7 @@ import {
   cloneCrossJurisdictionRoute,
   compareCrossJurisdictionRouteStatus,
   deriveCanonicalCrossJurisdictionMarket,
+  getCrossJurisdictionCommittedFillAmounts,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
@@ -376,9 +377,6 @@ export type CrossOrderbookFill = {
   weightedCost: bigint;
 };
 
-const clampCrossJurisdictionFillRatio = (value: unknown): number =>
-  Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
-
 const scaleByExactFillRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
   numerator >= denominator ? total : (total * numerator) / denominator;
 
@@ -398,18 +396,8 @@ export const getCrossJurisdictionRouteRemainingAmounts = (
   if (sourceTotal <= 0n || targetTotal <= 0n) {
     throw new Error(`CROSS_J_ROUTE_AMOUNT_INVALID: order=${route.orderId}`);
   }
-  const fillRatio = Math.max(
-    clampCrossJurisdictionFillRatio(route.cumulativeFillRatio),
-    clampCrossJurisdictionFillRatio(route.claimedRatio),
-  );
-  const filledSourceAmount =
-    route.filledSourceAmount ??
-    route.sourceClaimed ??
-    ((sourceTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const filledTargetAmount =
-    route.filledTargetAmount ??
-    route.targetClaimed ??
-    ((targetTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const { filledSourceAmount, filledTargetAmount, fillRatio } =
+    getCrossJurisdictionCommittedFillAmounts(route);
   if (
     filledSourceAmount < 0n ||
     filledTargetAmount < 0n ||
@@ -494,24 +482,13 @@ export const buildCrossJurisdictionFillAck = (
   const targetAmount = meta.side === 1 ? executionQuoteWei : executionBaseWei;
   if (sourceAmount <= 0n || targetAmount <= 0n) return null;
 
-  const previousRatio = Math.max(0, Math.min(
-    CROSS_J_MAX_FILL_RATIO,
-    Math.floor(Number(meta.route.claimedRatio ?? 0) || 0),
-  ));
-  const previousCumulativeRatio = Math.max(
-    previousRatio,
-    Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(meta.route.cumulativeFillRatio ?? 0) || 0))),
-  );
-  const sourceTotal = BigInt(meta.route.source.amount);
-  const targetTotal = BigInt(meta.route.target.amount);
-  const previousSourceClaimed =
-    meta.route.filledSourceAmount ??
-    meta.route.sourceClaimed ??
-    ((sourceTotal * BigInt(previousCumulativeRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const previousTargetClaimed =
-    meta.route.filledTargetAmount ??
-    meta.route.targetClaimed ??
-    ((targetTotal * BigInt(previousCumulativeRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const {
+    sourceTotal,
+    targetTotal,
+    filledSourceAmount: previousSourceClaimed,
+    filledTargetAmount: previousTargetClaimed,
+    fillRatio: previousCumulativeRatio,
+  } = getCrossJurisdictionCommittedFillAmounts(meta.route);
   const priceImprovementMode = meta.route.priceImprovementMode ?? 'source_savings';
   // Hash-ledger ratio is the committed order-progress ratio. Price improvement
   // is execution economics only: source_savings preserves target progress and
@@ -621,20 +598,11 @@ export const buildCrossJurisdictionCancelAck = (
   offerId: string,
   route: CrossJurisdictionSwapRoute,
 ): CrossSwapFillAckTx => {
-  const currentRatio = Math.max(
-    0,
-    Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
-  );
-  const sourceTotal = BigInt(route.source.amount);
-  const targetTotal = BigInt(route.target.amount);
-  const cumulativeSourceAmount =
-    route.filledSourceAmount ??
-    route.sourceClaimed ??
-    ((sourceTotal * BigInt(currentRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const cumulativeTargetAmount =
-    route.filledTargetAmount ??
-    route.targetClaimed ??
-    ((targetTotal * BigInt(currentRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const {
+    filledSourceAmount: cumulativeSourceAmount,
+    filledTargetAmount: cumulativeTargetAmount,
+    fillRatio: currentRatio,
+  } = getCrossJurisdictionCommittedFillAmounts(route);
   return {
     type: 'cross_swap_fill_ack',
     data: {
@@ -647,6 +615,8 @@ export const buildCrossJurisdictionCancelAck = (
       cumulativeSourceAmount,
       cumulativeTargetAmount,
       cumulativeFillRatio: currentRatio,
+      ...(route.fillNumerator !== undefined ? { fillNumerator: route.fillNumerator } : {}),
+      ...(route.fillDenominator !== undefined ? { fillDenominator: route.fillDenominator } : {}),
       ackKind: 'cancel',
       executionSourceAmount: 0n,
       executionTargetAmount: 0n,

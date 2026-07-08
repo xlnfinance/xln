@@ -420,6 +420,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: cross-j claim progress now preserves exact committed
      `filledSourceAmount`/`filledTargetAmount` and exact claim totals instead
      of rehydrating them from the uint16 hash-ladder ratio during pull close.
+   - Partial: cross-j orderbook remaining amounts, cancel ACKs, and fill-notice
+     idempotency now share exact committed fill amount resolution before using
+     legacy uint16 ratio fallback.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
