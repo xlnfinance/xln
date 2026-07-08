@@ -2556,13 +2556,8 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     const signerAddress = normalizeRuntimeId(signer?.address);
     if (!entityId || !signerAddress) continue;
 
-    let preferredJurisdictionName = String(signer.jurisdiction || primaryJurisdictionName).trim();
-    let jReplica = findJReplicaByName(env, preferredJurisdictionName);
-    if (!jReplica && normalizeJurisdictionKey(preferredJurisdictionName) === 'testnet') {
-      preferredJurisdictionName = primaryJurisdictionName;
-      signer.jurisdiction = primaryJurisdictionName;
-      jReplica = findJReplicaByName(env, preferredJurisdictionName);
-    }
+    const preferredJurisdictionName = String(signer.jurisdiction || primaryJurisdictionName).trim();
+    const jReplica = findJReplicaByName(env, preferredJurisdictionName);
     if (!jReplica) {
       const message =
         `[VaultStore] Missing signer jurisdiction ${preferredJurisdictionName} for entity ${entityId.slice(0, 12)}`;

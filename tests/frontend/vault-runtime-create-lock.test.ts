@@ -51,4 +51,18 @@ describe('vault runtime creation lock', () => {
     expect(functionSource.indexOf('runtimeCreationInFlight.set(id, runtimeCreationBarrier);'))
       .toBeLessThan(functionSource.indexOf('newEnv = xln.createEmptyEnv(seed);'));
   });
+
+  test('runtime restore does not rewrite legacy signer jurisdiction labels', () => {
+    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const restoreStart = source.indexOf('async function buildOrRestoreRuntimeEnv(runtime: Runtime');
+    const restoreEnd = source.indexOf('\nfunction registerRuntimeResumeListener', restoreStart);
+    expect(restoreStart).toBeGreaterThan(0);
+    expect(restoreEnd).toBeGreaterThan(restoreStart);
+    const restoreSource = source.slice(restoreStart, restoreEnd);
+
+    expect(restoreSource).toContain('const preferredJurisdictionName = String(signer.jurisdiction || primaryJurisdictionName).trim();');
+    expect(restoreSource).toContain('const jReplica = findJReplicaByName(env, preferredJurisdictionName);');
+    expect(restoreSource).not.toContain("normalizeJurisdictionKey(preferredJurisdictionName) === 'testnet'");
+    expect(restoreSource).not.toContain('signer.jurisdiction = primaryJurisdictionName');
+  });
 });

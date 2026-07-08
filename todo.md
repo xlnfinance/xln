@@ -396,6 +396,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: push-wake registration now resolves the J-replica by canonical
      `(chainId, depositoryAddress)` stack identity and fails closed instead of
      accepting a display-name jurisdiction match.
+   - Partial: browser runtime restore no longer rewrites a missing legacy
+     `testnet` signer jurisdiction to the current primary jurisdiction; missing
+     signer jurisdiction now remains explicit.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**
