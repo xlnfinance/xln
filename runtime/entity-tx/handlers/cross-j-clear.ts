@@ -1,4 +1,5 @@
 import {
+  CROSS_J_MAX_FILL_RATIO,
   buildCrossJurisdictionCloseProof,
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
@@ -206,7 +207,7 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
       `CROSS_J_CLEAR_REVEAL_FAILED: order=${orderId} ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const closeRemainder = cancelRemainder || ratio < 65_535;
+  const closeRemainder = cancelRemainder || ratio < CROSS_J_MAX_FILL_RATIO;
   const proof = buildCrossJurisdictionCloseProof(canonicalRoute, reveal.binary);
   syncSourcePullBinding(account, canonicalRoute);
   mempoolOps.push({
@@ -242,10 +243,10 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
   const requestedAt = deterministicEntityTimestamp(newState, env);
   transitionCrossJurisdictionRouteStatus(canonicalRoute, 'clearing', requestedAt);
   canonicalRoute.pendingClearRequestedAt = requestedAt;
-  canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= 65_535 ? 'full_fill' : 'manual';
+  canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= CROSS_J_MAX_FILL_RATIO ? 'full_fill' : 'manual';
   newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-  addMessage(newState, `🌉 Cross-j clear ${orderId} queued ratio=${ratio}/65535`);
+  addMessage(newState, `🌉 Cross-j clear ${orderId} queued ratio=${ratio}/${CROSS_J_MAX_FILL_RATIO}`);
   return { newState, outputs, mempoolOps };
 };

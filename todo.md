@@ -459,6 +459,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: proof-ratio, committed-amount, quantized-claim, and fill-progress
      validation now share one exact ratio parser/error code instead of four
      manual numerator/denominator checks.
+   - Partial: cross-j account ACK, entity fill notice, and clear handlers now
+     use `CROSS_J_MAX_FILL_RATIO` for terminal/full-fill decisions and display
+     instead of local `65_535` / `MAX_SWAP_FILL_RATIO` constants.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

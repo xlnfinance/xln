@@ -1,4 +1,5 @@
 import {
+  CROSS_J_MAX_FILL_RATIO,
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionCommittedProofRatio,
   requireCrossJurisdictionFillProgress,
@@ -152,7 +153,7 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
         ...(priceImprovementMode ? { priceImprovementMode } : {}),
         ...(priceImprovementAmount !== undefined ? { priceImprovementAmount } : {}),
         ...(priceImprovementTokenId !== undefined ? { priceImprovementTokenId } : {}),
-        cancelRemainder: Boolean(cancelRemainder) || fill.nextRatio >= 65_535,
+        cancelRemainder: Boolean(cancelRemainder) || fill.nextRatio >= CROSS_J_MAX_FILL_RATIO,
         ...(priceTicks !== undefined ? { priceTicks } : {}),
         pairId,
         comment: `cross-j-fill-notice:${fill.nextRatio}`,
@@ -162,6 +163,6 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
 
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-  addMessage(newState, `🌉 Cross-j fill notice ${orderId} queued account ack ${fill.nextRatio}/65535`);
+  addMessage(newState, `🌉 Cross-j fill notice ${orderId} queued account ack ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}`);
   return { newState, outputs, mempoolOps };
 };

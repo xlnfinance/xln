@@ -1,8 +1,8 @@
 import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../types';
 import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
-import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import { SWAP_LOT_SCALE } from '../../orderbook';
 import {
+  CROSS_J_MAX_FILL_RATIO,
   buildCommittedCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionCommittedProofRatio,
@@ -127,7 +127,7 @@ export async function handleCrossSwapFillAck(
     });
     accountMachine.swapOffers?.delete(offerId);
     recordSwapClosedLifecycle(accountMachine, offerId);
-    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} cancel requested at ${currentRatio}/65535`);
+    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} cancel requested at ${currentRatio}/${CROSS_J_MAX_FILL_RATIO}`);
     return {
       success: true,
       events,
@@ -196,7 +196,7 @@ export async function handleCrossSwapFillAck(
   if (pairId) route.venueId ||= pairId;
 
   const targetTotal = BigInt(route.target.amount);
-  const full = fill.nextRatio >= MAX_SWAP_FILL_RATIO ||
+  const full = fill.nextRatio >= CROSS_J_MAX_FILL_RATIO ||
     fill.cumulativeSourceAmount >= sourceTotal ||
     fill.cumulativeTargetAmount >= targetTotal;
   const shouldClose = full || cancelRemainder;
@@ -212,7 +212,7 @@ export async function handleCrossSwapFillAck(
   if (terminalClose) {
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', deterministicAccountTimestamp(accountMachine));
     route.clearingPolicy =
-      cancelRemainder || closedByDust || fill.nextRatio < MAX_SWAP_FILL_RATIO
+      cancelRemainder || closedByDust || fill.nextRatio < CROSS_J_MAX_FILL_RATIO
         ? 'cancel_and_clear'
         : 'full_fill';
   }
@@ -244,7 +244,7 @@ export async function handleCrossSwapFillAck(
     accountMachine.swapOffers?.delete(offerId);
     recordSwapClosedLifecycle(accountMachine, offerId);
     events.push(shouldClose
-      ? `🌉 Cross-j offer ${offerId.slice(0, 8)} closed at ${fill.nextRatio}/65535`
+      ? `🌉 Cross-j offer ${offerId.slice(0, 8)} closed at ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}`
       : `🌉 Cross-j offer ${offerId.slice(0, 8)} closed after dust remainder`);
   } else {
     offer.giveAmount = remainingSource;
@@ -269,7 +269,7 @@ export async function handleCrossSwapFillAck(
       minFillRatio: offer.minFillRatio,
       crossJurisdiction: offer.crossJurisdiction,
     };
-    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} filled to ${fill.nextRatio}/65535, ${remainingSource} source remaining`);
+    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} filled to ${fill.nextRatio}/${CROSS_J_MAX_FILL_RATIO}, ${remainingSource} source remaining`);
   }
 
   return {
