@@ -765,6 +765,8 @@ active backlog.
    - done: relay routes `recovery_bundle_request` /
      `recovery_bundle_response` as live, non-queued messages and fails closed
      when the target runtime is offline.
+   - done: `RuntimeWsClient.requestRecoveryBundles()` provides a correlated
+     request/response Promise API with timeout and offline-peer rejection.
    - open: account-level `PeerStateRequestV1` / `PeerStateResponseV1`
      materialization and restore selection remain broader PSR work.
 5. partial: add recovery discovery endpoint:

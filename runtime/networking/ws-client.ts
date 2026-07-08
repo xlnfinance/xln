@@ -133,6 +133,14 @@ const readRecoveryLookupKey = (payload: unknown): string => {
   return String((payload as { lookupKey?: unknown }).lookupKey || '').trim();
 };
 
+const DEFAULT_RECOVERY_BUNDLE_REQUEST_TIMEOUT_MS = 5_000;
+
+type PendingRecoveryBundleRequest = {
+  timer: ReturnType<typeof setTimeout>;
+  resolve: (payload: unknown) => void;
+  reject: (error: Error) => void;
+};
+
 export class RuntimeWsClient {
   private static readonly BACKOFF_BASE_MS = 1000;
   private static readonly BACKOFF_MAX_MS = 30000;
@@ -147,6 +155,7 @@ export class RuntimeWsClient {
   private nextReconnectAt: number = 0;
   private suppressNextClose = false;
   private readonly maxReconnectAttempts: number;
+  private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
   constructor(options: RuntimeWsClientOptions) {
     failfastAssert(!!options.url, 'WS_INIT_URL_MISSING', 'RuntimeWsClient url is required');
@@ -200,6 +209,7 @@ export class RuntimeWsClient {
       this.ws.on('message', (data: Buffer) => this.handleMessage(data));
       this.ws.on('close', (code: number, reasonBuf: Buffer) => {
         this.connecting = false;
+        this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
         if (this.suppressNextClose) {
           this.suppressNextClose = false;
           return;
@@ -240,6 +250,7 @@ export class RuntimeWsClient {
       this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
       this.ws.onclose = (event: CloseEvent) => {
         this.connecting = false;
+        this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
         if (this.suppressNextClose) {
           this.suppressNextClose = false;
           return;
@@ -333,6 +344,34 @@ export class RuntimeWsClient {
     return null;
   }
 
+  private rejectPendingRecoveryBundleRequests(error: Error): void {
+    if (this.pendingRecoveryBundleRequests.size === 0) return;
+    const pending = Array.from(this.pendingRecoveryBundleRequests.values());
+    this.pendingRecoveryBundleRequests.clear();
+    for (const request of pending) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+  }
+
+  private settlePendingRecoveryBundleRequest(
+    id: string | undefined,
+    payload: unknown,
+    error?: string,
+  ): boolean {
+    if (!id) return false;
+    const pending = this.pendingRecoveryBundleRequests.get(id);
+    if (!pending) return false;
+    this.pendingRecoveryBundleRequests.delete(id);
+    clearTimeout(pending.timer);
+    if (error) {
+      pending.reject(new Error(error));
+    } else {
+      pending.resolve(payload);
+    }
+    return true;
+  }
+
   private sendHello(): boolean {
     const encryptionKeyPair = this.options.encryptionKeyPair;
     if (!encryptionKeyPair) {
@@ -390,6 +429,9 @@ export class RuntimeWsClient {
       return;
     }
     if (msg.type === 'error') {
+      if (this.settlePendingRecoveryBundleRequest(msg.inReplyTo, undefined, msg.error || 'Unknown error')) {
+        return;
+      }
       this.options.onError?.(new Error(msg.error || 'Unknown error'));
       return;
     }
@@ -482,6 +524,9 @@ export class RuntimeWsClient {
       return;
     }
     if (msg.type === 'recovery_bundle_response' && msg.from) {
+      if (this.settlePendingRecoveryBundleRequest(msg.inReplyTo, msg.payload, msg.error)) {
+        return;
+      }
       if (msg.error) {
         this.options.onError?.(new Error(msg.error));
         return;
@@ -567,6 +612,10 @@ export class RuntimeWsClient {
   }
 
   sendRecoveryBundleRequest(to: string, lookupKey: string): boolean {
+    return this.sendRecoveryBundleRequestWithId(to, lookupKey, makeMessageId());
+  }
+
+  private sendRecoveryBundleRequestWithId(to: string, lookupKey: string, id: string): boolean {
     const key = String(lookupKey || '').trim();
     if (!key) {
       this.options.onError?.(new Error('RECOVERY_LOOKUP_KEY_MISSING'));
@@ -574,11 +623,44 @@ export class RuntimeWsClient {
     }
     return this.sendRaw({
       type: 'recovery_bundle_request',
-      id: makeMessageId(),
+      id,
       from: this.options.runtimeId,
       to,
       timestamp: nextTimestamp(),
       payload: { lookupKey: key },
+    });
+  }
+
+  requestRecoveryBundles<T = unknown>(
+    to: string,
+    lookupKey: string,
+    timeoutMs = DEFAULT_RECOVERY_BUNDLE_REQUEST_TIMEOUT_MS,
+  ): Promise<T> {
+    const key = String(lookupKey || '').trim();
+    if (!key) return Promise.reject(new Error('RECOVERY_LOOKUP_KEY_MISSING'));
+    const targetRuntimeId = normalizeRuntimeId(to);
+    if (!targetRuntimeId) return Promise.reject(new Error('RECOVERY_TARGET_RUNTIME_INVALID'));
+    const waitMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? Math.floor(timeoutMs)
+      : DEFAULT_RECOVERY_BUNDLE_REQUEST_TIMEOUT_MS;
+    const id = makeMessageId();
+
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingRecoveryBundleRequests.delete(id);
+        reject(new Error(`RECOVERY_REQUEST_TIMEOUT: target=${targetRuntimeId} lookupKey=${key.slice(0, 12)}`));
+      }, waitMs);
+      this.pendingRecoveryBundleRequests.set(id, {
+        timer,
+        resolve: (payload: unknown) => resolve(payload as T),
+        reject,
+      });
+      const sent = this.sendRecoveryBundleRequestWithId(targetRuntimeId, key, id);
+      if (!sent) {
+        this.pendingRecoveryBundleRequests.delete(id);
+        clearTimeout(timer);
+        reject(new Error(`RECOVERY_REQUEST_SEND_FAILED: target=${targetRuntimeId}`));
+      }
     });
   }
 
@@ -670,6 +752,7 @@ export class RuntimeWsClient {
 
   pause() {
     this.connecting = false;
+    this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_PAUSED'));
     this.suppressNextClose = true;
     this.reconnectAttempts = 0;
     this.nextReconnectAt = 0;
@@ -684,6 +767,7 @@ export class RuntimeWsClient {
   close() {
     this.closed = true;
     this.connecting = false;
+    this.rejectPendingRecoveryBundleRequests(new Error('RECOVERY_REQUEST_SOCKET_CLOSED'));
     this.suppressNextClose = true;
     this.reconnectAttempts = 0;
     this.nextReconnectAt = 0;
