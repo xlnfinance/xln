@@ -8,6 +8,12 @@ import { createStructuredLogger, shortId } from './logger';
 import { normalizeRuntimeId } from './networking/runtime-id';
 import { txFingerprint } from './state-helpers';
 import { validateDeliverableEntityInput } from './validation-utils';
+import {
+  deliveryAccepted,
+  deliveryDeferred,
+  deliveryQueued,
+  type DeliveryResult,
+} from './delivery-result';
 
 const routeLog = createStructuredLogger('network.route');
 
@@ -49,6 +55,13 @@ export type PlannedRemoteOutput = {
 
 type RuntimeP2PDispatch = {
   enqueueEntityInput(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): boolean;
+};
+
+export type RuntimeEntityInputRoutingResult = {
+  sent: boolean;
+  deferred: boolean;
+  queuedLocal: boolean;
+  delivery: DeliveryResult;
 };
 
 export type RuntimeOutputRoutingDeps = {
@@ -100,6 +113,33 @@ const isTriggerOnlyOutput = (output: RoutedEntityInput): boolean =>
 
 const isTxBearingOutput = (output: RoutedEntityInput): boolean =>
   (output.entityTxs?.length ?? 0) > 0;
+
+const buildRoutingDeliveryResult = (input: {
+  remoteCount: number;
+  localCount: number;
+  pendingCount: number;
+}): DeliveryResult => {
+  if (input.pendingCount > 0) {
+    return deliveryDeferred({
+      outcome: 'deferred',
+      code: 'ROUTE_DEFERRED_OUTPUTS',
+    });
+  }
+  if (input.remoteCount > 0 && input.localCount > 0) {
+    return deliveryAccepted('ROUTE_REMOTE_AND_LOCAL_ACCEPTED');
+  }
+  if (input.remoteCount > 0) {
+    return deliveryAccepted('ROUTE_REMOTE_DELIVERED');
+  }
+  if (input.localCount > 0) {
+    return deliveryQueued({
+      code: 'ROUTE_LOCAL_QUEUED',
+      retryable: false,
+      terminal: true,
+    });
+  }
+  return deliveryAccepted('ROUTE_NOOP');
+};
 
 const readBoardValidatorSignerId = (validator: unknown): string => {
   if (typeof validator === 'string') return validator.trim();
@@ -404,7 +444,7 @@ export const sendEntityInputWithRouting = (
   env: Env,
   input: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
-): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
+): RuntimeEntityInputRoutingResult => {
   const state = deps.ensureRuntimeState(env);
   const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
   if (pendingBeforePlan.length > 0) {
@@ -438,5 +478,10 @@ export const sendEntityInputWithRouting = (
     sent: remoteOutputs.length > 0 && deferred.length === 0,
     deferred: env.pendingNetworkOutputs.length > 0,
     queuedLocal: localOutputs.length > 0,
+    delivery: buildRoutingDeliveryResult({
+      remoteCount: remoteOutputs.length,
+      localCount: localOutputs.length,
+      pendingCount: env.pendingNetworkOutputs.length,
+    }),
   };
 };

@@ -34,6 +34,18 @@ export const deliveryDeferred = (input: {
   terminal: false,
 });
 
+export const deliveryQueued = (input: {
+  code: string;
+  retryable?: boolean;
+  terminal?: boolean;
+}): DeliveryResult => ({
+  outcome: 'queued',
+  code: input.code,
+  retryable: input.retryable ?? true,
+  fatal: false,
+  terminal: input.terminal ?? false,
+});
+
 export const deliveryFailure = (input: {
   category: RuntimeFailureCategory;
   code: string;

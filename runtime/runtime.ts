@@ -170,6 +170,7 @@ import {
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting,
   splitPendingOutputsByRetryWindow,
+  type RuntimeEntityInputRoutingResult,
   type RuntimeOutputRoutingDeps,
 } from './runtime-output-routing';
 import {
@@ -1500,7 +1501,7 @@ function getRuntimeP2PLifecycleDeps(): RuntimeP2PLifecycleDeps {
 export const sendEntityInput = (
   env: Env,
   input: RoutedEntityInput,
-): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
+): RuntimeEntityInputRoutingResult => {
   return sendEntityInputWithRouting(env, input, getRuntimeOutputRoutingDeps());
 };
 

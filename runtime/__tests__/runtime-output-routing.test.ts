@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { handleInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../runtime-entity-routing';
-import { dispatchEntityOutputs, planEntityOutputs } from '../runtime-output-routing';
+import { dispatchEntityOutputs, planEntityOutputs, sendEntityInputWithRouting } from '../runtime-output-routing';
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -54,6 +54,107 @@ describe('runtime output routing', () => {
     expect(p2pCalls[0]?.input.entityId).toBe(output.entityId);
     expect(p2pCalls[0]?.ingressTimestamp).toBe(1234);
     expect(warnings).not.toContain('ROUTE_DIRECT_SOCKET_REQUIRED');
+  });
+
+  test('sendEntityInputWithRouting exposes typed remote delivery result', () => {
+    const targetRuntimeId = runtimeId('23');
+    const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 2345,
+      runtimeState: {
+        directEntityInputDispatch: () => false,
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+    const input: RoutedEntityInput = {
+      entityId: entityId('35'),
+      signerId: runtimeId('36'),
+      entityTxs: [{
+        type: 'openAccount',
+        data: { targetEntityId: entityId('37') },
+      } as any],
+    };
+
+    const result = sendEntityInputWithRouting(env, input, {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => ({
+        enqueueEntityInput: (runtimeId, routedInput, ingressTimestamp) => {
+          p2pCalls.push({ targetRuntimeId: runtimeId, input: routedInput, ingressTimestamp });
+          return true;
+        },
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    });
+
+    expect(result).toMatchObject({
+      sent: true,
+      deferred: false,
+      queuedLocal: false,
+      delivery: {
+        outcome: 'delivered',
+        code: 'ROUTE_REMOTE_DELIVERED',
+        retryable: false,
+        fatal: false,
+        terminal: true,
+      },
+    });
+    expect(p2pCalls).toHaveLength(1);
+    expect(p2pCalls[0]?.input.runtimeId).toBe(targetRuntimeId);
+  });
+
+  test('sendEntityInputWithRouting exposes typed local queue result', () => {
+    const queued: RoutedEntityInput[] = [];
+    const localEntityId = entityId('38');
+    const localSignerId = runtimeId('39');
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 3456,
+      runtimeState: {},
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+    const input: RoutedEntityInput = {
+      entityId: localEntityId,
+      signerId: localSignerId,
+      entityTxs: [],
+    };
+
+    const result = sendEntityInputWithRouting(env, input, {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => null,
+      enqueueRuntimeInputs: (_env, entityInputs) => {
+        queued.push(...entityInputs);
+      },
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => true,
+      hasLocalSignerForEntitySigner: (_env, entity, signer) => entity === localEntityId && signer === localSignerId,
+      resolveSoleLocalSignerForEntity: () => localSignerId,
+      resolveRuntimeIdForEntity: () => null,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => null,
+    });
+
+    expect(result).toMatchObject({
+      sent: false,
+      deferred: false,
+      queuedLocal: true,
+      delivery: {
+        outcome: 'queued',
+        code: 'ROUTE_LOCAL_QUEUED',
+        retryable: false,
+        fatal: false,
+        terminal: true,
+      },
+    });
+    expect(queued).toHaveLength(1);
+    expect(queued[0]?.entityId).toBe(localEntityId);
   });
 
   test('fails fast when P2P does not confirm delivery', () => {

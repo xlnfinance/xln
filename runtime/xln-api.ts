@@ -87,6 +87,8 @@ export type {
   MppReceipt,
 } from './agent-payments/mpp';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
+export type { DeliveryOutcome, DeliveryResult } from './delivery-result';
+export type { RuntimeEntityInputRoutingResult } from './runtime-output-routing';
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -175,6 +177,7 @@ import type { PersistedFrameJournal } from './wal/store';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
 import type { RuntimeActivityFilters } from './activity-history';
+import type { RuntimeEntityInputRoutingResult } from './runtime-output-routing';
 import type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
@@ -624,7 +627,7 @@ export interface XLNModule {
   getBrowserVMInstance: (env?: Env) => unknown | null;
 
   // Networking helpers
-  sendEntityInput: (env: Env, input: EntityInput) => { sent: boolean; deferred: boolean; queuedLocal: boolean };
+  sendEntityInput: (env: Env, input: EntityInput) => RuntimeEntityInputRoutingResult;
   resolveEntityProposerId: (env: Env, entityId: string, context: string) => string;
   ensureGossipProfiles?: (env: Env, entityIds: string[]) => Promise<boolean>;
 
