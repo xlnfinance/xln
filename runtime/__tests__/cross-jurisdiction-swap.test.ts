@@ -30,6 +30,7 @@ import {
   hasCrossJurisdictionCommittedFill,
   isCrossJurisdictionRouteTransitionAllowed,
   projectCrossJurisdictionQuantizedClaim,
+  validateCrossJurisdictionFillProgress,
   validateCrossJurisdictionQuantization,
   withCanonicalCrossJurisdictionRouteHash,
   withCrossJurisdictionClaimProgress,
@@ -1418,6 +1419,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       fillDenominator,
       orderId: route.orderId,
     })).toThrow(`CROSS_J_EXACT_FILL_RATIO_INVALID:${route.orderId}`);
+    const invalidProgress = validateCrossJurisdictionFillProgress(route, {
+      cumulativeFillRatio,
+      fillNumerator,
+    });
+    expect(invalidProgress.ok).toBe(false);
+    if (!invalidProgress.ok) {
+      expect(invalidProgress.error).toBe(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${route.orderId}`);
+    }
   });
 
   test('cross-j register enforces participant and explicit lifecycle transitions', async () => {

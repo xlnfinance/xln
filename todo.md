@@ -456,6 +456,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: quantized-claim projection now fail-fast validates incomplete or
      out-of-range exact ratio fields instead of silently falling back to the
      lossy uint16 projection.
+   - Partial: proof-ratio, committed-amount, quantized-claim, and fill-progress
+     validation now share one exact ratio parser/error code instead of four
+     manual numerator/denominator checks.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

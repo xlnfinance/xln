@@ -154,6 +154,36 @@ const clampFillRatio = (value: unknown): number =>
 const scaleByExactRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
   numerator >= denominator ? total : (total * numerator) / denominator;
 
+type CrossJurisdictionExactFillRatioInput = {
+  fillNumerator?: bigint | undefined;
+  fillDenominator?: bigint | undefined;
+  orderId?: string | undefined;
+};
+
+type CrossJurisdictionExactFillRatio = {
+  numerator: bigint;
+  denominator: bigint;
+};
+
+const readCrossJurisdictionExactFillRatio = (
+  input: CrossJurisdictionExactFillRatioInput,
+  fallbackOrderId: string,
+): CrossJurisdictionExactFillRatio | undefined => {
+  const hasExactFillRatio = input.fillNumerator !== undefined || input.fillDenominator !== undefined;
+  if (!hasExactFillRatio) return undefined;
+  const orderId = input.orderId || fallbackOrderId;
+  if (input.fillNumerator === undefined || input.fillDenominator === undefined) {
+    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${orderId}`);
+  }
+  if (input.fillDenominator <= 0n || input.fillNumerator < 0n || input.fillNumerator > input.fillDenominator) {
+    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INVALID:${orderId}:${input.fillNumerator}/${input.fillDenominator}`);
+  }
+  return {
+    numerator: input.fillNumerator,
+    denominator: input.fillDenominator,
+  };
+};
+
 type CrossJurisdictionCommittedProofRatioInput = {
   cumulativeFillRatio?: number | undefined;
   claimedRatio?: number | undefined;
@@ -164,19 +194,9 @@ type CrossJurisdictionCommittedProofRatioInput = {
 
 export function getCrossJurisdictionCommittedProofRatio(input: CrossJurisdictionCommittedProofRatioInput): number {
   const coarseFillRatio = Math.max(clampFillRatio(input.cumulativeFillRatio), clampFillRatio(input.claimedRatio));
-  const hasExactFillRatio = input.fillNumerator !== undefined || input.fillDenominator !== undefined;
-  if (!hasExactFillRatio) return coarseFillRatio;
-  const orderId = input.orderId || 'unknown';
-  if (input.fillNumerator === undefined || input.fillDenominator === undefined) {
-    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${orderId}`);
-  }
-  if (input.fillDenominator <= 0n || input.fillNumerator < 0n || input.fillNumerator > input.fillDenominator) {
-    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INVALID:${orderId}:${input.fillNumerator}/${input.fillDenominator}`);
-  }
-  return Math.max(coarseFillRatio, exactFillRatioToUint16({
-    numerator: input.fillNumerator,
-    denominator: input.fillDenominator,
-  }));
+  const exactFillRatio = readCrossJurisdictionExactFillRatio(input, 'unknown');
+  if (!exactFillRatio) return coarseFillRatio;
+  return Math.max(coarseFillRatio, exactFillRatioToUint16(exactFillRatio));
 }
 
 export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictionSwapRoute): {
@@ -188,19 +208,13 @@ export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictio
 } {
   const sourceTotal = BigInt(route.source.amount);
   const targetTotal = BigInt(route.target.amount);
-  const hasExactFillRatio = route.fillNumerator !== undefined || route.fillDenominator !== undefined;
-  let exactSourceAmount: bigint | undefined;
-  let exactTargetAmount: bigint | undefined;
-  if (hasExactFillRatio) {
-    if (route.fillNumerator === undefined || route.fillDenominator === undefined) {
-      throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${route.orderId}`);
-    }
-    if (route.fillDenominator <= 0n || route.fillNumerator < 0n || route.fillNumerator > route.fillDenominator) {
-      throw new Error(`CROSS_J_EXACT_FILL_RATIO_INVALID:${route.orderId}:${route.fillNumerator}/${route.fillDenominator}`);
-    }
-    exactSourceAmount = scaleByExactRatio(sourceTotal, route.fillNumerator, route.fillDenominator);
-    exactTargetAmount = scaleByExactRatio(targetTotal, route.fillNumerator, route.fillDenominator);
-  }
+  const exactFillRatio = readCrossJurisdictionExactFillRatio(route, route.orderId);
+  const exactSourceAmount = exactFillRatio
+    ? scaleByExactRatio(sourceTotal, exactFillRatio.numerator, exactFillRatio.denominator)
+    : undefined;
+  const exactTargetAmount = exactFillRatio
+    ? scaleByExactRatio(targetTotal, exactFillRatio.numerator, exactFillRatio.denominator)
+    : undefined;
   const fillRatio = getCrossJurisdictionCommittedProofRatio(route);
   const quantizedSourceAmount = fillRatio >= CROSS_J_MAX_FILL_RATIO
     ? sourceTotal
@@ -343,21 +357,9 @@ export function projectCrossJurisdictionQuantizedClaim(
   const quantizedClaim = ratio >= CROSS_J_MAX_FILL_RATIO
     ? total
     : (total * BigInt(ratio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
-  const hasExact = input.fillNumerator !== undefined || input.fillDenominator !== undefined;
-  if (hasExact && (input.fillNumerator === undefined || input.fillDenominator === undefined)) {
-    throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${input.orderId || 'quantized-claim'}`);
-  }
-  if (hasExact && (
-    input.fillDenominator! <= 0n ||
-    input.fillNumerator! < 0n ||
-    input.fillNumerator! > input.fillDenominator!
-  )) {
-    throw new Error(
-      `CROSS_J_EXACT_FILL_RATIO_INVALID:${input.orderId || 'quantized-claim'}:${input.fillNumerator}/${input.fillDenominator}`,
-    );
-  }
-  const exactClaim = hasExact
-    ? scaleByExactRatio(total, input.fillNumerator!, input.fillDenominator!)
+  const exactFillRatio = readCrossJurisdictionExactFillRatio(input, 'quantized-claim');
+  const exactClaim = exactFillRatio
+    ? scaleByExactRatio(total, exactFillRatio.numerator, exactFillRatio.denominator)
     : quantizedClaim;
   return {
     exactClaim,
@@ -384,8 +386,14 @@ export function validateCrossJurisdictionQuantization(
     return `target fill below minimum ${input.cumulativeTargetAmount} < ${policy.minTargetFillAmount}`;
   }
 
-  const source = projectCrossJurisdictionQuantizedClaim(BigInt(route.source.amount), input);
-  const target = projectCrossJurisdictionQuantizedClaim(BigInt(route.target.amount), input);
+  const source = projectCrossJurisdictionQuantizedClaim(BigInt(route.source.amount), {
+    ...input,
+    orderId: route.orderId,
+  });
+  const target = projectCrossJurisdictionQuantizedClaim(BigInt(route.target.amount), {
+    ...input,
+    orderId: route.orderId,
+  });
   if (source.exactClaim !== input.cumulativeSourceAmount) {
     return `source exact claim mismatch ${source.exactClaim} != ${input.cumulativeSourceAmount}`;
   }
@@ -411,14 +419,11 @@ export function validateCrossJurisdictionFillProgress(
     return { ok: false, error: `bad seq ${input.fillSeq}, expected ${previousSeq + 1}` };
   }
 
-  if ((input.fillNumerator === undefined) !== (input.fillDenominator === undefined)) {
-    return { ok: false, error: 'exact fill ratio must include numerator and denominator' };
-  }
-  if (input.fillNumerator !== undefined && input.fillDenominator !== undefined) {
-    if (input.fillDenominator <= 0n) return { ok: false, error: 'exact fill denominator must be positive' };
-    if (input.fillNumerator < 0n || input.fillNumerator > input.fillDenominator) {
-      return { ok: false, error: 'exact fill numerator out of range' };
-    }
+  let exactFillRatio: CrossJurisdictionExactFillRatio | undefined;
+  try {
+    exactFillRatio = readCrossJurisdictionExactFillRatio(input, route.orderId);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
   const previousRatio = getCrossJurisdictionCommittedProofRatio(route);
   const nextRatio = getCrossJurisdictionCommittedProofRatio({
@@ -443,12 +448,11 @@ export function validateCrossJurisdictionFillProgress(
   // Runtime order progress is exact. `cumulativeFillRatio` is the coarse
   // uint16 projection used by hash-ladder/dispute plumbing; it must not round
   // economic amounts inside the committed orderbook path.
-  const useExactRatio = input.fillNumerator !== undefined && input.fillDenominator !== undefined;
-  const cumulativeSourceAmount = useExactRatio
-    ? scaleByExactRatio(sourceTotal, input.fillNumerator!, input.fillDenominator!)
+  const cumulativeSourceAmount = exactFillRatio
+    ? scaleByExactRatio(sourceTotal, exactFillRatio.numerator, exactFillRatio.denominator)
     : (sourceTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
-  const cumulativeTargetAmount = useExactRatio
-    ? scaleByExactRatio(targetTotal, input.fillNumerator!, input.fillDenominator!)
+  const cumulativeTargetAmount = exactFillRatio
+    ? scaleByExactRatio(targetTotal, exactFillRatio.numerator, exactFillRatio.denominator)
     : (targetTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
   const incrementalSourceAmount = cumulativeSourceAmount - previousSourceAmount;
   const incrementalTargetAmount = cumulativeTargetAmount - previousTargetAmount;
@@ -461,7 +465,7 @@ export function validateCrossJurisdictionFillProgress(
       ok: false,
       error: `cumulative source mismatch: expected ${cumulativeSourceAmount}, got ${input.cumulativeSourceAmount} ` +
         `(previous=${previousSourceAmount}, total=${sourceTotal}, ratio=${nextRatio}, ` +
-        `exact=${useExactRatio ? `${input.fillNumerator}/${input.fillDenominator}` : 'none'})`,
+        `exact=${exactFillRatio ? `${exactFillRatio.numerator}/${exactFillRatio.denominator}` : 'none'})`,
     };
   }
   if (input.cumulativeTargetAmount !== undefined && input.cumulativeTargetAmount !== cumulativeTargetAmount) {
