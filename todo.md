@@ -296,6 +296,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: process-local direct entity dispatch can now return typed
      delivery results; legacy boolean direct dispatch remains accepted only as
      a compatibility adapter.
+   - Partial: relay-socket, hub-node, and market-maker direct dispatch
+     implementations now return explicit `DeliveryResult`; boolean return is
+     kept only on legacy helper wrappers.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

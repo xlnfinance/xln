@@ -4,7 +4,7 @@ import { deriveEncryptionKeyPair, decryptJSON, pubKeyToHex } from '../networking
 import { cacheEncryptionKey, createRelayStore, registerClient } from '../relay-store';
 import {
   hasConnectedEncryptedRelayClient,
-  sendEntityInputDirectViaRelaySocket,
+  sendEntityInputDirectViaRelaySocketDelivery,
 } from '../server/relay-direct';
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
 
@@ -65,7 +65,7 @@ describe('relay direct entity delivery', () => {
       }],
     };
 
-    const sent = sendEntityInputDirectViaRelaySocket(
+    const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
@@ -74,7 +74,13 @@ describe('relay direct entity delivery', () => {
       12345,
     );
 
-    expect(sent).toBe(true);
+    expect(delivery).toMatchObject({
+      outcome: 'delivered',
+      code: 'ROUTE_DIRECT_DELIVERED',
+      retryable: false,
+      fatal: false,
+      terminal: true,
+    });
     expect(logs).toEqual([]);
     expect(targetSocket.sent).toHaveLength(1);
     const packet = targetSocket.sent[0]!;
@@ -127,7 +133,7 @@ describe('relay direct entity delivery', () => {
       entityTxs: [],
     };
 
-    const sent = sendEntityInputDirectViaRelaySocket(
+    const delivery = sendEntityInputDirectViaRelaySocketDelivery(
       store,
       { runtimeId: sourceRuntimeId } as Env,
       targetRuntimeId,
@@ -135,7 +141,13 @@ describe('relay direct entity delivery', () => {
       (_key, message) => logs.push(message),
     );
 
-    expect(sent).toBe(false);
+    expect(delivery).toMatchObject({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SOURCE_KEY_MISSING',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+    });
     expect(targetSocket.sent).toEqual([]);
     expect(logs[0]).toContain('missing source encryption key');
   });

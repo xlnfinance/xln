@@ -31,6 +31,7 @@ import { createHttpDrainTracker, stopServerGracefully } from './graceful-server'
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import { createRelayStore } from '../relay-store';
 import { safeStringify } from '../serialization-utils';
+import { deliveryAccepted, deliveryDeferred } from '../delivery-result';
 import { createStructuredLogger } from '../logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import { getTokenIdsForJurisdiction } from '../account-utils';
@@ -1480,6 +1481,8 @@ const run = async (): Promise<void> => {
     process.env['XLN_ENABLE_DIRECT_ENTITY_INPUT_DISPATCH'] === '1'
       ? (targetRuntimeId, input, ingressTimestamp) =>
           directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp)
+            ? deliveryAccepted('ROUTE_DIRECT_DELIVERED')
+            : deliveryDeferred({ outcome: 'deferred', code: 'ROUTE_DIRECT_MISS_FALLBACK' })
       : null;
   const handleRadapterWsMessage = (ws: HubServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;

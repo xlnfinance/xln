@@ -9,6 +9,11 @@ import {
   type RelayStore,
 } from '../relay-store';
 import { safeStringify } from '../serialization-utils';
+import {
+  deliveryAccepted,
+  deliveryDeferred,
+  type DeliveryResult,
+} from '../delivery-result';
 
 export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 export type RelaySocket = ServerWebSocket<RelaySocketData>;
@@ -38,9 +43,31 @@ export const sendEntityInputDirectViaRelaySocket = (
   input: DeliverableEntityInput,
   logOneShot: (key: string, message: string) => void,
   ingressTimestamp?: number,
-): boolean => {
+): boolean =>
+  sendEntityInputDirectViaRelaySocketDelivery(
+    relayStore,
+    env,
+    targetRuntimeId,
+    input,
+    logOneShot,
+    ingressTimestamp,
+  ).outcome === 'delivered';
+
+export const sendEntityInputDirectViaRelaySocketDelivery = (
+  relayStore: RelayStore,
+  env: Env,
+  targetRuntimeId: string,
+  input: DeliverableEntityInput,
+  logOneShot: (key: string, message: string) => void,
+  ingressTimestamp?: number,
+): DeliveryResult => {
   const fromRuntimeId = String(env.runtimeId || '');
-  if (!fromRuntimeId) return false;
+  if (!fromRuntimeId) {
+    return deliveryDeferred({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SOURCE_RUNTIME_MISSING',
+    });
+  }
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
   const targetPubKeyHex = resolveEncryptionPublicKeyHex(relayStore, targetKey);
   if (!targetPubKeyHex) {
@@ -48,7 +75,10 @@ export const sendEntityInputDirectViaRelaySocket = (
       `direct-dispatch-missing-key:${targetRuntimeId}`,
       `[RELAY] Direct dispatch missing encryption key for runtime ${targetRuntimeId.slice(0, 10)}`,
     );
-    return false;
+    return deliveryDeferred({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_TARGET_KEY_MISSING',
+    });
   }
   const fromPubKeyHex = resolveEncryptionPublicKeyHex(relayStore, fromRuntimeId);
   if (!fromPubKeyHex) {
@@ -56,7 +86,10 @@ export const sendEntityInputDirectViaRelaySocket = (
       `direct-dispatch-missing-source-key:${fromRuntimeId}`,
       `[RELAY] Direct dispatch missing source encryption key for runtime ${fromRuntimeId.slice(0, 10)}`,
     );
-    return false;
+    return deliveryDeferred({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SOURCE_KEY_MISSING',
+    });
   }
 
   try {
@@ -91,7 +124,7 @@ export const sendEntityInputDirectViaRelaySocket = (
           txs: input.entityTxs?.length ?? 0,
         },
       });
-      return true;
+      return deliveryAccepted('ROUTE_DIRECT_DELIVERED');
     }
 
     // No local WS client for target runtime in this process.
@@ -109,12 +142,18 @@ export const sendEntityInputDirectViaRelaySocket = (
         txs: input.entityTxs?.length ?? 0,
       },
     });
-    return false;
+    return deliveryDeferred({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_MISS_FALLBACK',
+    });
   } catch (error) {
     logOneShot(
       `direct-dispatch-send-failed:${targetRuntimeId}`,
       `[RELAY] Direct dispatch send failed for runtime ${targetRuntimeId.slice(0, 10)}: ${(error as Error).message}`,
     );
-    return false;
+    return deliveryDeferred({
+      outcome: 'deferred',
+      code: 'ROUTE_DIRECT_SEND_FAILED',
+    });
   }
 };

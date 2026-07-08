@@ -71,7 +71,7 @@ import {
   getRelayClientIp,
   hasConnectedEncryptedRelayClient as hasConnectedEncryptedRelayClientInStore,
   resolveRequestClientIp,
-  sendEntityInputDirectViaRelaySocket as sendEntityInputDirectViaRelaySocketInStore,
+  sendEntityInputDirectViaRelaySocketDelivery as sendEntityInputDirectViaRelaySocketDeliveryInStore,
   type RelaySocket,
 } from './server/relay-direct';
 import { createServerRpcMessageHandler } from './server/rpc-ws';
@@ -246,7 +246,7 @@ const sendEntityInputDirectViaRelaySocket = (
   targetRuntimeId: string,
   input: DeliverableEntityInput,
   ingressTimestamp?: number,
-): boolean => sendEntityInputDirectViaRelaySocketInStore(relayStore, env, targetRuntimeId, input, logOneShot, ingressTimestamp);
+) => sendEntityInputDirectViaRelaySocketDeliveryInStore(relayStore, env, targetRuntimeId, input, logOneShot, ingressTimestamp);
 
 const hasConnectedEncryptedRelayClient = (targetRuntimeId: string): boolean =>
   hasConnectedEncryptedRelayClientInStore(relayStore, targetRuntimeId);
