@@ -299,6 +299,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: relay-socket, hub-node, and market-maker direct dispatch
      implementations now return explicit `DeliveryResult`; boolean return is
      kept only on legacy helper wrappers.
+   - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
+     `dispatchEntityOutputs()` prefers it and keeps `enqueueEntityInput()` as
+     a legacy boolean compatibility wrapper.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

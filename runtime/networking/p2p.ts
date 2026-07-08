@@ -74,8 +74,8 @@ type GossipResponsePayload = {
 };
 
 type GossipRefreshMode = 'incremental' | 'full';
-type EntityInputDeliveryTransport = 'direct' | 'relay';
-type EntityInputDeliveryResult = DeliveryResult & { transport: EntityInputDeliveryTransport };
+export type EntityInputDeliveryTransport = 'direct' | 'relay';
+export type EntityInputDeliveryResult = DeliveryResult & { transport: EntityInputDeliveryTransport };
 
 const normalizeGossipPollMs = (value: number | undefined): number => {
   if (!Number.isFinite(Number(value))) return GOSSIP_POLL_MS;
@@ -528,7 +528,7 @@ export class RuntimeP2P {
       : p2pSendFalseDelivery(transport);
   }
 
-  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
+  enqueueEntityInputDelivery(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): EntityInputDeliveryResult {
     try {
       failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
       failfastAssert(typeof input?.entityId === 'string' && input.entityId.length > 0, 'P2P_ENTITY_INPUT_INVALID', 'entity_input missing entityId', { targetRuntimeId });
@@ -559,7 +559,7 @@ export class RuntimeP2P {
     if (client && client.isOpen()) {
       try {
         delivery = this.deliverEntityInput(client, normalizedTargetRuntimeId, input, ingressTimestamp, transport);
-        if (delivery.outcome === 'delivered') return true;
+        if (delivery.outcome === 'delivered') return delivery;
         this.env.warn('network', 'P2P_SEND_FAILED', {
           targetRuntimeId: normalizedTargetRuntimeId,
           entityId: input.entityId,
@@ -615,6 +615,10 @@ export class RuntimeP2P {
       `P2P_ENTITY_INPUT_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entity=${input.entityId} ` +
       `transport=${transport}`,
     );
+  }
+
+  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
+    return this.enqueueEntityInputDelivery(targetRuntimeId, input, ingressTimestamp).outcome === 'delivered';
   }
 
   requestGossip(runtimeId: string) {

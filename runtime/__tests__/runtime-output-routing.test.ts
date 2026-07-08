@@ -56,6 +56,57 @@ describe('runtime output routing', () => {
     expect(warnings).not.toContain('ROUTE_DIRECT_SOCKET_REQUIRED');
   });
 
+  test('prefers typed P2P delivery over legacy boolean dispatch', () => {
+    const targetRuntimeId = runtimeId('21');
+    const p2pCalls: Array<{ targetRuntimeId: string; input: DeliverableEntityInput; ingressTimestamp?: number }> = [];
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 4321,
+      runtimeState: {
+        directEntityInputDispatch: () => false,
+      },
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+    const output: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: entityId('31'),
+      signerId: runtimeId('32'),
+      entityTxs: [],
+    };
+
+    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => ({
+        enqueueEntityInput: () => {
+          throw new Error('legacy boolean dispatch should not be called');
+        },
+        enqueueEntityInputDelivery: (runtimeId, input, ingressTimestamp) => {
+          p2pCalls.push({ targetRuntimeId: runtimeId, input, ingressTimestamp });
+          return {
+            outcome: 'delivered',
+            code: 'P2P_ENTITY_INPUT_DELIVERED',
+            retryable: false,
+            fatal: false,
+            terminal: true,
+          };
+        },
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    });
+
+    expect(deferred).toEqual([]);
+    expect(p2pCalls).toHaveLength(1);
+    expect(p2pCalls[0]?.targetRuntimeId).toBe(targetRuntimeId);
+    expect(p2pCalls[0]?.ingressTimestamp).toBe(4321);
+  });
+
   test('accepts typed direct dispatch delivery without touching P2P', () => {
     const targetRuntimeId = runtimeId('24');
     const p2pCalls: unknown[] = [];
@@ -262,7 +313,7 @@ describe('runtime output routing', () => {
         data: { targetEntityId: entityId('80') },
       } as any],
     };
-    const errors: Array<{ code: string; entityId?: string; runtimeId?: string; error?: string }> = [];
+    const errors: Array<{ code: string; entityId?: string; runtimeId?: string; error?: string; delivery?: unknown }> = [];
     const env = {
       runtimeId: runtimeId('11'),
       timestamp: 9012,
@@ -289,7 +340,15 @@ describe('runtime output routing', () => {
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     })).toThrow(/ROUTE_SEND_NOT_DELIVERED/);
 
-    expect(errors.some(entry => entry.code === 'ROUTE_SEND_FAILED')).toBe(true);
+    const routeError = errors.find(entry => entry.code === 'ROUTE_SEND_FAILED');
+    expect(routeError).toBeDefined();
+    expect(routeError?.delivery).toMatchObject({
+      outcome: 'failed',
+      code: 'P2P_SEND_RETURNED_FALSE',
+      retryable: true,
+      fatal: false,
+      terminal: false,
+    });
   });
 
   test('fails fast when neither direct dispatch nor P2P is available', () => {

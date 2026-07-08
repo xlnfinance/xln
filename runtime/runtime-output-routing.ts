@@ -11,6 +11,7 @@ import { validateDeliverableEntityInput } from './validation-utils';
 import {
   deliveryAccepted,
   deliveryDeferred,
+  deliveryFailure,
   deliveryQueued,
   type DeliveryResult,
 } from './delivery-result';
@@ -55,6 +56,7 @@ export type PlannedRemoteOutput = {
 
 type RuntimeP2PDispatch = {
   enqueueEntityInput(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): boolean;
+  enqueueEntityInputDelivery?(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;
 };
 
 export type RuntimeDirectEntityInputDispatchResult = boolean | DeliveryResult;
@@ -161,6 +163,25 @@ const normalizeDirectDispatchDelivery = (
     : deliveryDeferred({
       outcome: 'deferred',
       code: 'ROUTE_DIRECT_MISS_FALLBACK',
+    });
+};
+
+const enqueueP2PEntityInputDelivery = (
+  p2p: RuntimeP2PDispatch,
+  targetRuntimeId: string,
+  output: DeliverableEntityInput,
+  ingressTimestamp: number | undefined,
+): DeliveryResult => {
+  if (typeof p2p.enqueueEntityInputDelivery === 'function') {
+    return p2p.enqueueEntityInputDelivery(targetRuntimeId, output, ingressTimestamp);
+  }
+  return p2p.enqueueEntityInput(targetRuntimeId, output, ingressTimestamp)
+    ? deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED')
+    : deliveryFailure({
+      category: 'TransientRace',
+      code: 'P2P_SEND_RETURNED_FALSE',
+      message: 'P2P enqueue returned false',
+      terminal: false,
     });
 };
 
@@ -445,12 +466,13 @@ export const dispatchEntityOutputs = (
       entity: shortId(output.entityId),
       txs: output.entityTxs?.length || 0,
     });
+    let p2pDelivery: DeliveryResult | null = null;
     try {
-      const delivered = p2p.enqueueEntityInput(targetRuntimeId, output, env.timestamp);
-      if (delivered !== true) {
+      p2pDelivery = enqueueP2PEntityInputDelivery(p2p, targetRuntimeId, output, env.timestamp);
+      if (p2pDelivery.outcome !== 'delivered') {
         throw new Error(
           `ROUTE_SEND_NOT_DELIVERED: entity=${output.entityId} runtime=${targetRuntimeId} ` +
-          `txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
+          `code=${p2pDelivery.code} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
         );
       }
     } catch (error) {
@@ -458,6 +480,7 @@ export const dispatchEntityOutputs = (
         entityId: output.entityId,
         runtimeId: targetRuntimeId,
         error: (error as Error).message,
+        ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
       });
       throw error;
     }

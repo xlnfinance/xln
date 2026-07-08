@@ -204,6 +204,48 @@ test('enqueueEntityInput uses official relay when advertised hub direct endpoint
   expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length || 0).toBe(0);
 });
 
+test('enqueueEntityInputDelivery returns typed success with transport', () => {
+  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  const sent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
+  const relayClient = {
+    isOpen: () => true,
+    sendEntityInput: (to: string, input: RoutedEntityInput, timestamp?: number) => {
+      sent.push({ to, input, timestamp });
+      return true;
+    },
+  };
+
+  p2p.env = {
+    warn: () => undefined,
+  };
+  p2p.sendDebugEvent = () => true;
+  p2p.ensureRelayConnectionsForEntity = () => undefined;
+  p2p.prefetchProfilesForInput = () => undefined;
+  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
+  p2p.clients = [relayClient];
+  p2p.directClients = new Map();
+  p2p.directClientUrls = new Map();
+  p2p.directClientErrors = new Map();
+  p2p.pendingByRuntime = new Map();
+
+  const input: RoutedEntityInput = {
+    entityId: SOURCE_ENTITY_ID,
+    signerId: '0x2222222222222222222222222222222222222222',
+    entityTxs: [],
+  };
+
+  expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 2345)).toMatchObject({
+    outcome: 'delivered',
+    code: 'P2P_ENTITY_INPUT_DELIVERED',
+    retryable: false,
+    fatal: false,
+    terminal: true,
+    transport: 'relay',
+  });
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.timestamp).toBe(2345);
+});
+
 test('enqueueEntityInput prefers open direct transport over relay', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const relaySent: unknown[] = [];
