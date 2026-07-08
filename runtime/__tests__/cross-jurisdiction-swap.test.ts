@@ -42,6 +42,7 @@ import {
   buildCrossJurisdictionMarketOffer,
   getCrossJurisdictionRouteRemainingAmounts,
 } from '../cross-jurisdiction-orderbook';
+import { buildCrossJurisdictionPendingFillFromAck } from '../cross-jurisdiction-fill-ack';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../cross-jurisdiction-market';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
 import { normalizeEntitySwapTradingPairs } from '../runtime-swap-pairs';
@@ -1821,6 +1822,25 @@ describe('cross-jurisdiction hashledger swap', () => {
     const closeProof = buildCrossJurisdictionCloseProof(ratioOnlyExactRoute, '0x');
     const sourceBinding = buildCrossJurisdictionPullBinding(ratioOnlyExactRoute, 'source');
     const targetBinding = buildCrossJurisdictionPullBinding(ratioOnlyExactRoute, 'target');
+    const pendingFromExactAck = buildCrossJurisdictionPendingFillFromAck({
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: ratioOnlyExactRoute.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: 10_000_000_000_000_000n,
+        incrementalTargetAmount: 25_000_000_000_000_000_000n,
+        cumulativeSourceAmount: 10_000_000_000_000_000n,
+        cumulativeTargetAmount: 25_000_000_000_000_000_000n,
+        cumulativeFillRatio: 0,
+        fillNumerator: 1n,
+        fillDenominator: 4n,
+        ackKind: 'fill',
+        executionSourceAmount: 10_000_000_000_000_000n,
+        executionTargetAmount: 25_000_000_000_000_000_000n,
+        cancelRemainder: false,
+        pairId: ratioOnlyExactRoute.venueId || '',
+      },
+    }, 2_000);
 
     expect(hasCrossJurisdictionCommittedFill(route)).toBe(false);
     expect(hasCrossJurisdictionCommittedFill(ratioOnlyExactRoute)).toBe(true);
@@ -1834,6 +1854,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(cancelAck.data.fillNumerator).toBe(1n);
     expect(cancelAck.data.fillDenominator).toBe(4n);
     expect(closeProof.fillRatio).toBe(16_384);
+    expect(pendingFromExactAck?.cumulativeFillRatio).toBe(16_384);
+    expect(pendingFromExactAck?.fillNumerator).toBe(1n);
+    expect(pendingFromExactAck?.fillDenominator).toBe(4n);
     expect(closeProof.cumulativeSourceAmount).toBe(10_000_000_000_000_000n);
     expect(closeProof.cumulativeTargetAmount).toBe(25_000_000_000_000_000_000n);
     expect(sourceBinding.fillNumerator).toBe(1n);
@@ -2165,6 +2188,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       updatedAt: 1_000,
       expiresAt: 61_000,
     }, { runtimeSeed: 'cross-terminal-cancel-binding-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const committedRoute = {
+      ...route,
+      status: 'partially_filled' as const,
+      fillSeq: 1,
+      fillNumerator: BigInt(fillRatio),
+      fillDenominator: 65_535n,
+      filledSourceAmount: cumulativeSource,
+      filledTargetAmount: cumulativeTarget,
+    };
     account.swapOffers.set(route.orderId, {
       offerId: route.orderId,
       giveTokenId: 1,
@@ -2176,7 +2208,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       minFillRatio: 0,
       makerIsLeft: account.leftEntity === sourceUser,
       createdHeight: 0,
-      crossJurisdiction: { ...route, status: 'resting' },
+      crossJurisdiction: committedRoute,
     });
     account.pulls = new Map([[
       route.sourcePull!.pullId,
@@ -2189,7 +2221,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
         fullHash: route.sourcePull!.fullHash,
         partialRoot: route.sourcePull!.partialRoot,
-        crossJurisdiction: buildCrossJurisdictionPullBinding({ ...route, status: 'resting' }, 'source'),
+        crossJurisdiction: buildCrossJurisdictionPullBinding(committedRoute, 'source'),
         createdHeight: 0,
         createdTimestamp: 1_000,
       },
@@ -2204,7 +2236,9 @@ describe('cross-jurisdiction hashledger swap', () => {
         incrementalTargetAmount: cumulativeTarget,
         cumulativeSourceAmount: cumulativeSource,
         cumulativeTargetAmount: cumulativeTarget,
-        cumulativeFillRatio: fillRatio,
+        cumulativeFillRatio: 0,
+        fillNumerator: BigInt(fillRatio),
+        fillDenominator: 65_535n,
         executionSourceAmount: cumulativeSource,
         executionTargetAmount: cumulativeTarget,
         cancelRemainder: true,
@@ -2216,6 +2250,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.swapOffers.has(route.orderId)).toBe(false);
     expect(account.pulls.get(route.sourcePull!.pullId)?.crossJurisdiction?.status).toBe('clear_requested');
     expect(account.pulls.get(route.sourcePull!.pullId)?.crossJurisdiction?.clearingPolicy).toBe('cancel_and_clear');
+    expect(account.pulls.get(route.sourcePull!.pullId)?.crossJurisdiction?.filledSourceAmount).toBe(cumulativeSource);
+    expect(account.pulls.get(route.sourcePull!.pullId)?.crossJurisdiction?.filledTargetAmount).toBe(cumulativeTarget);
   });
 
   test('payer can cancel expired pull and releases only remaining hold', async () => {
@@ -3041,8 +3077,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       }, { runtimeSeed: 'cross-fill-notice-idempotent', sourceDisputeDelayMs: 5_000, now: env.timestamp }),
       status: 'partially_filled' as const,
       fillSeq: 1,
-      cumulativeFillRatio: 32_768,
-      claimedRatio: 32_768,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
       filledSourceAmount: 500n,
       filledTargetAmount: 450n,
       sourceClaimed: 500n,
@@ -3061,7 +3097,9 @@ describe('cross-jurisdiction hashledger swap', () => {
         incrementalTargetAmount: 450n,
         cumulativeSourceAmount: 500n,
         cumulativeTargetAmount: 450n,
-        cumulativeFillRatio: 32_768,
+        cumulativeFillRatio: 0,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
         pairId: route.venueId || '',
       },
     });
@@ -3080,7 +3118,9 @@ describe('cross-jurisdiction hashledger swap', () => {
         incrementalTargetAmount: 451n,
         cumulativeSourceAmount: 500n,
         cumulativeTargetAmount: 451n,
-        cumulativeFillRatio: 32_768,
+        cumulativeFillRatio: 0,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
         pairId: route.venueId || '',
       },
     })).rejects.toThrow(/CROSS_J_FILL_NOTICE_STALE_CONFLICT/);

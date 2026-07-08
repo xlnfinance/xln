@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { getCrossJurisdictionCommittedProofRatio } from './cross-jurisdiction';
 import type { AccountTx } from './types';
 import type { CrossJurisdictionPendingFill } from './types/cross-jurisdiction';
 
@@ -21,16 +22,31 @@ export const buildCrossJurisdictionFillId = (input: {
   offerId: string;
   fillSeq?: number;
   cumulativeFillRatio: number;
+  fillNumerator?: bigint | undefined;
+  fillDenominator?: bigint | undefined;
   cumulativeSourceAmount?: bigint;
   cumulativeTargetAmount?: bigint;
 }): string => ethers.keccak256(ethers.toUtf8Bytes([
   input.routeHash || '',
   input.offerId,
   Math.max(0, Math.floor(Number(input.fillSeq ?? 0) || 0)),
-  Math.max(0, Math.floor(Number(input.cumulativeFillRatio ?? 0) || 0)),
+  getCrossJurisdictionCommittedProofRatio({
+    orderId: input.offerId,
+    cumulativeFillRatio: input.cumulativeFillRatio,
+    fillNumerator: input.fillNumerator,
+    fillDenominator: input.fillDenominator,
+  }),
   (input.cumulativeSourceAmount ?? 0n).toString(),
   (input.cumulativeTargetAmount ?? 0n).toString(),
 ].join('|'))).toLowerCase();
+
+const getCrossJurisdictionFillAckProofRatio = (tx: CrossSwapFillAckTx): number =>
+  getCrossJurisdictionCommittedProofRatio({
+    orderId: tx.data.offerId,
+    cumulativeFillRatio: tx.data.cumulativeFillRatio,
+    fillNumerator: tx.data.fillNumerator,
+    fillDenominator: tx.data.fillDenominator,
+  });
 
 export const buildCrossJurisdictionFillReceiptHash = (tx: CrossSwapFillAckTx): string =>
   ethers.keccak256(ethers.toUtf8Bytes([
@@ -59,7 +75,7 @@ export const buildCrossJurisdictionPendingFillFromAck = (
   updatedAt: number,
 ): CrossJurisdictionPendingFill | null => {
   const fillSeq = Math.max(0, Math.floor(Number(tx.data.fillSeq ?? 0) || 0));
-  const cumulativeFillRatio = Math.max(0, Math.floor(Number(tx.data.cumulativeFillRatio ?? 0) || 0));
+  const cumulativeFillRatio = getCrossJurisdictionFillAckProofRatio(tx);
   const cumulativeSourceAmount = tx.data.cumulativeSourceAmount ?? 0n;
   const cumulativeTargetAmount = tx.data.cumulativeTargetAmount ?? 0n;
   if (cumulativeFillRatio <= 0 && normalizeAckKind(tx) !== 'cancel') return null;
@@ -71,6 +87,8 @@ export const buildCrossJurisdictionPendingFillFromAck = (
       offerId: tx.data.offerId,
       fillSeq,
       cumulativeFillRatio,
+      fillNumerator: tx.data.fillNumerator,
+      fillDenominator: tx.data.fillDenominator,
       cumulativeSourceAmount,
       cumulativeTargetAmount,
   });

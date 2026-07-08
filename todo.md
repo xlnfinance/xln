@@ -438,6 +438,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: account/entity pull close, pull resolve, and cross-j salvage
      proof-boundary checks now use the same exact-aware committed proof-ratio
      helper instead of local `cumulativeFillRatio/claimedRatio` math.
+   - Partial: cross-j fill ACK cancel handling, duplicate fill-notice
+     idempotency, and pending-fill metadata now derive their proof ratio from
+     exact numerator/denominator when the legacy coarse field is absent.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

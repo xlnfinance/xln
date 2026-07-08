@@ -154,10 +154,13 @@ const clampFillRatio = (value: unknown): number =>
 const scaleByExactRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
   numerator >= denominator ? total : (total * numerator) / denominator;
 
-type CrossJurisdictionCommittedProofRatioInput = Pick<
-  CrossJurisdictionPullBinding | CrossJurisdictionSwapRoute,
-  'cumulativeFillRatio' | 'claimedRatio' | 'fillNumerator' | 'fillDenominator'
-> & { orderId?: string };
+type CrossJurisdictionCommittedProofRatioInput = {
+  cumulativeFillRatio?: number | undefined;
+  claimedRatio?: number | undefined;
+  fillNumerator?: bigint | undefined;
+  fillDenominator?: bigint | undefined;
+  orderId?: string | undefined;
+};
 
 export function getCrossJurisdictionCommittedProofRatio(input: CrossJurisdictionCommittedProofRatioInput): number {
   const coarseFillRatio = Math.max(clampFillRatio(input.cumulativeFillRatio), clampFillRatio(input.claimedRatio));

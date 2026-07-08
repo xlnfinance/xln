@@ -5,6 +5,7 @@ import { SWAP_LOT_SCALE } from '../../orderbook';
 import {
   buildCommittedCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedFillAmounts,
+  getCrossJurisdictionCommittedProofRatio,
   requireCrossJurisdictionFillProgress,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionFillProgress,
@@ -79,11 +80,17 @@ export async function handleCrossSwapFillAck(
   }
   const committedFill = getCrossJurisdictionCommittedFillAmounts(route);
   const currentRatio = committedFill.fillRatio;
+  const ackProofRatio = getCrossJurisdictionCommittedProofRatio({
+    orderId: offerId,
+    cumulativeFillRatio,
+    fillNumerator,
+    fillDenominator,
+  });
   const currentFillSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
   if (
     previousFillSeq !== undefined &&
     Math.floor(Number(previousFillSeq)) !== currentFillSeq &&
-    !(cancelRemainder && Math.max(0, Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(cumulativeFillRatio) || 0))) === currentRatio)
+    !(cancelRemainder && ackProofRatio === currentRatio)
   ) {
     return {
       success: false,
@@ -91,7 +98,7 @@ export async function handleCrossSwapFillAck(
       events,
     };
   }
-  if (cancelRemainder && Math.max(0, Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(cumulativeFillRatio) || 0))) === currentRatio) {
+  if (cancelRemainder && ackProofRatio === currentRatio) {
     const currentSource = committedFill.filledSourceAmount;
     const currentTarget = committedFill.filledTargetAmount;
     if (cumulativeSourceAmount === undefined || cumulativeSourceAmount !== currentSource) {
