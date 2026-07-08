@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import {
+  classifyUndeliveredDelivery,
   deliveryAccepted,
   deliveryDeferred,
   deliveryFailure,
@@ -34,6 +35,37 @@ test('delivered assertion centralizes hard delivery requirements', () => {
     deferred,
     (delivery) => `MUST_DELIVER: code=${delivery.code}`,
   )).toThrow('MUST_DELIVER: code=DEFERRED');
+});
+
+test('undelivered disposition centralizes retry/drop event decisions', () => {
+  const deferred = deliveryDeferred({ outcome: 'deferred', code: 'DEFERRED' });
+  expect(classifyUndeliveredDelivery(deferred, {
+    retry: 'RETRY',
+    terminal: 'DROP',
+  })).toEqual({
+    retry: true,
+    level: 'warn',
+    code: 'RETRY',
+  });
+
+  const terminalFailure = deliveryFailure({
+    category: 'TransientRace',
+    code: 'EXPIRED',
+    terminal: true,
+  });
+  expect(classifyUndeliveredDelivery(terminalFailure, {
+    retry: 'RETRY',
+    terminal: 'DROP',
+  })).toEqual({
+    retry: false,
+    level: 'error',
+    code: 'DROP',
+  });
+
+  expect(() => classifyUndeliveredDelivery(deliveryAccepted('DELIVERED'), {
+    retry: 'RETRY',
+    terminal: 'DROP',
+  })).toThrow('DELIVERY_DISPOSITION_DELIVERED: code=DELIVERED');
 });
 
 test('delivery retry helper retains only non-terminal delivery attempts', () => {

@@ -317,6 +317,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: route dispatch now uses shared delivered-check helpers for direct
      fast-path acceptance and P2P hard-delivery assertions instead of raw
      `outcome` comparisons.
+   - Partial: P2P pending flush now gets retry/drop event disposition from the
+     shared delivery helper instead of mapping `terminal` to event level/code
+     locally.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 

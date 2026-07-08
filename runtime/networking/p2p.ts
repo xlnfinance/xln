@@ -30,10 +30,10 @@ import {
   uniqueTransportValues,
 } from './p2p-endpoints';
 import {
+  classifyUndeliveredDelivery,
   deliveryAccepted,
   deliveryFailure,
   isDeliveryDelivered,
-  shouldRetryDelivery,
   type DeliveryResult,
 } from '../delivery-result';
 
@@ -197,6 +197,12 @@ const p2pPendingExpiredResult = (
     }),
     transport,
   );
+
+const p2pPendingDeliveryDisposition = (delivery: EntityInputDeliveryResult) =>
+  classifyUndeliveredDelivery(delivery, {
+    retry: 'P2P_PENDING_DELIVERY_RETRY',
+    terminal: 'P2P_PENDING_DELIVERY_DROPPED',
+  });
 
 const normalizeId = (value: string): string => value.toLowerCase();
 const getReplicaSignerId = (replicaKey: string): string => {
@@ -734,23 +740,25 @@ export class RuntimeP2P {
         try {
           const delivery = this.deliverEntityInput(client, targetRuntimeId, entry.input, entry.ingressTimestamp, transport);
           if (!isDeliveryDelivered(delivery)) {
+            const disposition = p2pPendingDeliveryDisposition(delivery);
             this.sendDebugEvent({
-              level: delivery.terminal ? 'error' : 'warn',
-              code: delivery.terminal ? 'P2P_PENDING_DELIVERY_DROPPED' : 'P2P_PENDING_DELIVERY_RETRY',
+              level: disposition.level,
+              code: disposition.code,
               message: delivery.failure?.message ?? delivery.code,
               targetRuntimeId,
               entityId: entry.input.entityId,
               transport,
               delivery,
             });
+            if (disposition.retry) remaining.push(entry);
           }
-          if (shouldRetryDelivery(delivery)) remaining.push(entry);
         } catch (error) {
           const message = String((error as Error)?.message || error || '');
           const delivery = p2pSendThrowResult(transport, message);
+          const disposition = p2pPendingDeliveryDisposition(delivery);
           this.sendDebugEvent({
-            level: delivery.terminal ? 'error' : 'warn',
-            code: delivery.terminal ? 'P2P_PENDING_DELIVERY_DROPPED' : 'P2P_PENDING_DELIVERY_RETRY',
+            level: disposition.level,
+            code: disposition.code,
             message,
             targetRuntimeId,
             entityId: entry.input.entityId,
@@ -760,7 +768,7 @@ export class RuntimeP2P {
           if (message.includes('P2P_NO_PUBKEY')) {
             this.refreshGossip();
           }
-          if (shouldRetryDelivery(delivery)) remaining.push(entry);
+          if (disposition.retry) remaining.push(entry);
         }
       }
       if (remaining.length > 0) {

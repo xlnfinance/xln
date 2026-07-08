@@ -15,6 +15,12 @@ export type DeliveryResult = {
   failure?: RuntimeFailureSignal;
 };
 
+export type UndeliveredDeliveryDisposition = {
+  retry: boolean;
+  level: 'warn' | 'error';
+  code: string;
+};
+
 export const isDeliveryResult = (value: unknown): value is DeliveryResult =>
   typeof value === 'object' &&
   value !== null &&
@@ -41,6 +47,24 @@ export const requireDeliveryDelivered = (
 ): DeliveryResult => {
   if (isDeliveryDelivered(delivery)) return delivery;
   throw new Error(typeof message === 'function' ? message(delivery) : message);
+};
+
+export const classifyUndeliveredDelivery = (
+  delivery: DeliveryResult,
+  codes: {
+    retry: string;
+    terminal: string;
+  },
+): UndeliveredDeliveryDisposition => {
+  if (isDeliveryDelivered(delivery)) {
+    throw new Error(`DELIVERY_DISPOSITION_DELIVERED: code=${delivery.code}`);
+  }
+  const retry = shouldRetryDelivery(delivery);
+  return {
+    retry,
+    level: retry ? 'warn' : 'error',
+    code: retry ? codes.retry : codes.terminal,
+  };
 };
 
 export const deliveryAccepted = (code = 'DELIVERY_ACCEPTED'): DeliveryResult => ({
