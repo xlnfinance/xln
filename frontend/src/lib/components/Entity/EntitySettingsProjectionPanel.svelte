@@ -19,6 +19,7 @@
     resolveOfficialRecoveryTowerUrl,
     type RecoveryServiceMode,
   } from '$lib/utils/recoverySettings';
+  import { buildRuntimeRecoveryCoverage } from '$lib/utils/recoveryCoverage';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import type { JMachineCreateDetail } from '$lib/components/Jurisdiction/import-jmachine-runtime';
   import PushWakePanel from '$lib/components/Settings/PushWakePanel.svelte';
@@ -152,6 +153,11 @@
         ? 'Admin access required'
         : '';
   $: canSaveRecovery = !recoveryDisabledReason && !recoverySaving;
+  $: recoveryCoverageItems = buildRuntimeRecoveryCoverage({
+    runtime: $activeRuntime,
+    towers: recoveryTowerDraft,
+    runtimeHeight,
+  });
 
   function inferRecoveryMode(): RecoveryTowerSetupMode {
     const runtime = $activeRuntime;
@@ -351,6 +357,22 @@
       <div class="panel-title">
         <ShieldCheck size={15} />
         <span>Recovery Services</span>
+      </div>
+
+      <div class="recovery-coverage-grid" data-testid="recovery-coverage-grid">
+        {#each recoveryCoverageItems as item (item.id)}
+          <div
+            class="recovery-coverage-card"
+            data-testid={`recovery-coverage-${item.id}`}
+            data-status={item.status}
+          >
+            <div class="coverage-card-head">
+              <strong>{item.label}</strong>
+              <span class="coverage-status">{item.statusLabel}</span>
+            </div>
+            <p>{item.detail}</p>
+          </div>
+        {/each}
       </div>
 
       <div class="recovery-mode-grid" role="radiogroup" aria-label="Runtime recovery mode">
@@ -842,6 +864,69 @@
     gap: 12px;
   }
 
+  .recovery-coverage-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .recovery-coverage-card {
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, #27272a) 82%, transparent);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 94px;
+    min-width: 0;
+    padding: 11px;
+  }
+
+  .coverage-card-head {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .coverage-card-head strong {
+    color: var(--theme-text-primary, #f4f4f5);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .coverage-status {
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+    color: var(--theme-text-muted, #71717a);
+    display: inline-flex;
+    font-size: 10px;
+    font-weight: 900;
+    letter-spacing: 0;
+    line-height: 1;
+    padding: 5px 7px;
+    text-transform: uppercase;
+  }
+
+  .recovery-coverage-card[data-status='ready'] .coverage-status {
+    color: #34d399;
+  }
+
+  .recovery-coverage-card[data-status='configured'] .coverage-status {
+    color: var(--theme-accent, #fbbf24);
+  }
+
+  .recovery-coverage-card[data-status='missing'] .coverage-status {
+    color: #fb7185;
+  }
+
+  .recovery-coverage-card p {
+    color: var(--theme-text-muted, #71717a);
+    font-size: 12px;
+    line-height: 1.35;
+    margin: 0;
+  }
+
   .recovery-mode-grid,
   .manual-recovery-grid {
     display: grid;
@@ -962,6 +1047,7 @@
   @media (max-width: 760px) {
     .settings-head,
     .settings-grid,
+    .recovery-coverage-grid,
     .recovery-mode-grid,
     .manual-recovery-grid,
     .profile-panel,
