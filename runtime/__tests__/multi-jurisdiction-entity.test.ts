@@ -5,7 +5,6 @@ import { applyEntityTx } from '../entity-tx/apply';
 import {
   assertSameJurisdictionAccount,
   getJurisdictionIdentityRef,
-  sameJurisdictionIdentityOrNameFallback,
   sameJurisdictionIdentityOrNameOnlyFallback,
 } from '../jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -72,10 +71,9 @@ describe('multi-jurisdiction entity binding', () => {
     const conflicting = makeJurisdiction('Testnet', 31338, '21', '22');
 
     expect(getJurisdictionIdentityRef(canonical)).toBe(`stack:31337:${addr('11')}`);
-    expect(sameJurisdictionIdentityOrNameFallback(canonical, relabeled)).toBe(true);
-    expect(sameJurisdictionIdentityOrNameFallback(canonical, conflicting)).toBe(false);
     expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, relabeled)).toBe(true);
     expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, { name: canonical.name })).toBe(false);
+    expect(sameJurisdictionIdentityOrNameOnlyFallback(canonical, conflicting)).toBe(false);
     expect(sameJurisdictionIdentityOrNameOnlyFallback({ name: canonical.name }, { name: 'testnet' })).toBe(true);
   });
 

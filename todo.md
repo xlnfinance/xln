@@ -365,6 +365,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: hub peer reserve bootstrap now groups visible peer hubs by
      canonical jurisdiction ref and resolves the funding J-adapter by that ref
      before using legacy names.
+   - Partial: removed the permissive one-ref-vs-name jurisdiction matcher; the
+     remaining fallback only matches display names when both sides lack refs.
+   - Partial: removed the runtime hub-node display alias allowlist that rewrote
+     Arrakis/Wakanda/shared-anvil labels to Testnet.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
 8. **Canonical fill and amount representation.**

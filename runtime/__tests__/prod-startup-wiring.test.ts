@@ -171,6 +171,8 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
     expect(hubNode).toContain('jurisdictionName: normalizeJurisdictionDisplayName(entry?.jurisdictionName || \'\')');
+    expect(hubNode).not.toContain("normalized === 'arrakis'");
+    expect(hubNode).not.toContain("normalized === 'wakanda'");
     expect(hubNode).toContain('sameJurisdictionIdentityOrNameOnlyFallback(identity, jurisdiction)');
     expect(hubNode).toContain('for (const hubBootstrap of hubBootstraps)');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');

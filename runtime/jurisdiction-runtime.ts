@@ -68,15 +68,6 @@ export const sameJurisdictionIdentity = (left: unknown, right: unknown): boolean
   return Boolean(leftRef && rightRef && leftRef === rightRef);
 };
 
-export const sameJurisdictionIdentityOrNameFallback = (left: unknown, right: unknown): boolean => {
-  const leftRef = getJurisdictionIdentityRef(left);
-  const rightRef = getJurisdictionIdentityRef(right);
-  if (leftRef && rightRef) return leftRef === rightRef;
-  const leftName = normalizeJurisdictionName(readJurisdictionIdentityName(left));
-  const rightName = normalizeJurisdictionName(readJurisdictionIdentityName(right));
-  return Boolean(leftName && rightName && leftName === rightName);
-};
-
 export const sameJurisdictionIdentityOrNameOnlyFallback = (left: unknown, right: unknown): boolean => {
   const leftRef = getJurisdictionIdentityRef(left);
   const rightRef = getJurisdictionIdentityRef(right);

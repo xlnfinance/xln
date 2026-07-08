@@ -283,19 +283,8 @@ type JurisdictionsFile = {
 
 const PRIMARY_TESTNET_JURISDICTION_NAME = 'Testnet';
 
-const normalizeJurisdictionDisplayName = (value: unknown): string => {
-  const name = String(value || '').trim();
-  const normalized = name.toLowerCase();
-  if (
-    normalized === 'arrakis'
-    || normalized === 'arrakis (shared anvil)'
-    || normalized === 'shared anvil'
-    || normalized === 'wakanda'
-  ) {
-    return PRIMARY_TESTNET_JURISDICTION_NAME;
-  }
-  return name;
-};
+const normalizeJurisdictionDisplayName = (value: unknown): string =>
+  String(value || '').trim();
 
 const normalizeJurisdictionKey = (value: unknown): string =>
   normalizeJurisdictionDisplayName(value).trim().toLowerCase();
