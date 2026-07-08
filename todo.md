@@ -431,6 +431,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      checks do not fall back to uint16-derived economics.
    - Partial: committed-fill detection now uses the shared exact-aware resolver
      instead of bespoke ratio/amount predicates.
+   - Partial: exact fill numerator/denominator now project the coarse
+     hash-ladder proof ratio inside the shared resolver when legacy
+     `cumulativeFillRatio` is absent, and source clear uses that resolver
+     instead of treating exact-only committed fills as empty.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

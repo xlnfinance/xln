@@ -29,6 +29,7 @@ import {
   deriveCanonicalCrossJurisdictionBookOwner,
   deriveCanonicalCrossJurisdictionVenueId,
 } from './cross-jurisdiction-market';
+import { exactFillRatioToUint16 } from './swap-execution';
 
 export {
   deriveCanonicalCrossJurisdictionBookOwner,
@@ -162,10 +163,11 @@ export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictio
 } {
   const sourceTotal = BigInt(route.source.amount);
   const targetTotal = BigInt(route.target.amount);
-  const fillRatio = Math.max(clampFillRatio(route.cumulativeFillRatio), clampFillRatio(route.claimedRatio));
+  const coarseFillRatio = Math.max(clampFillRatio(route.cumulativeFillRatio), clampFillRatio(route.claimedRatio));
   const hasExactFillRatio = route.fillNumerator !== undefined || route.fillDenominator !== undefined;
   let exactSourceAmount: bigint | undefined;
   let exactTargetAmount: bigint | undefined;
+  let exactProofFillRatio = 0;
   if (hasExactFillRatio) {
     if (route.fillNumerator === undefined || route.fillDenominator === undefined) {
       throw new Error(`CROSS_J_EXACT_FILL_RATIO_INCOMPLETE:${route.orderId}`);
@@ -175,7 +177,12 @@ export function getCrossJurisdictionCommittedFillAmounts(route: CrossJurisdictio
     }
     exactSourceAmount = scaleByExactRatio(sourceTotal, route.fillNumerator, route.fillDenominator);
     exactTargetAmount = scaleByExactRatio(targetTotal, route.fillNumerator, route.fillDenominator);
+    exactProofFillRatio = exactFillRatioToUint16({
+      numerator: route.fillNumerator,
+      denominator: route.fillDenominator,
+    });
   }
+  const fillRatio = Math.max(coarseFillRatio, exactProofFillRatio);
   const quantizedSourceAmount = fillRatio >= CROSS_J_MAX_FILL_RATIO
     ? sourceTotal
     : (sourceTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);

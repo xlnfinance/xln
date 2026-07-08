@@ -493,6 +493,65 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(isCrossJurisdictionRouteTransitionAllowed('clear_requested', 'settled')).toBe(false);
   });
 
+  test('cross-j clear treats exact-only committed fill as pending before live offer cancel', async () => {
+    const env = createEmptyEnv('cross-clear-exact-only-pending');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('a7');
+    const sourceHub = entity('a8');
+    const targetHub = entity('a9');
+    const targetUser = entity('aa');
+    const sourceHubSigner = addr('ab');
+    const state = makeState(sourceHub, sourceHubSigner, eth, sourceUser);
+    const prepared = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-clear-exact-only-pending',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: env.runtimeSeed, sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const route = {
+      ...prepared,
+      status: 'partially_filled' as const,
+      fillSeq: 1,
+      fillNumerator: 1n,
+      fillDenominator: 2n,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const account = state.accounts.get(sourceUser)!;
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: Number(route.source.tokenId),
+      giveAmount: BigInt(route.source.amount),
+      wantTokenId: Number(route.target.tokenId),
+      wantAmount: BigInt(route.target.amount),
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route },
+    });
+
+    const result = await applyEntityTx(env, state, {
+      type: 'requestCrossJurisdictionClear',
+      data: { orderId: route.orderId },
+    });
+
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    expect((result.mempoolOps?.[0]?.tx as any).data.cumulativeFillRatio).toBe(32_768);
+    expect((result.mempoolOps?.[0]?.tx as any).data.cumulativeSourceAmount).toBe(500n);
+    expect((result.mempoolOps?.[0]?.tx as any).data.cumulativeTargetAmount).toBe(450n);
+    expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
+    expect(result.newState.messages.at(-1)).not.toContain('no pending fill');
+  });
+
   test('source hub committed pull resolve relays hash-ladder binary to target user', () => {
     const env = createEmptyEnv('cross-source-hub-relay');
     env.timestamp = 10_000;
@@ -1672,7 +1731,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     const ratioOnlyExactRoute = {
       ...route,
       fillSeq: 1,
-      cumulativeFillRatio: 16_384,
       fillNumerator: 1n,
       fillDenominator: 4n,
     };
@@ -1691,8 +1749,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(remaining.targetRemaining).toBe(75_000_000_000_000_000_000n);
     expect(cancelAck.data.cumulativeSourceAmount).toBe(10_000_000_000_000_000n);
     expect(cancelAck.data.cumulativeTargetAmount).toBe(25_000_000_000_000_000_000n);
+    expect(cancelAck.data.cumulativeFillRatio).toBe(16_384);
     expect(cancelAck.data.fillNumerator).toBe(1n);
     expect(cancelAck.data.fillDenominator).toBe(4n);
+    expect(closeProof.fillRatio).toBe(16_384);
     expect(closeProof.cumulativeSourceAmount).toBe(10_000_000_000_000_000n);
     expect(closeProof.cumulativeTargetAmount).toBe(25_000_000_000_000_000_000n);
     expect(sourceBinding.fillNumerator).toBe(1n);

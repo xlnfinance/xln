@@ -3,6 +3,7 @@ import {
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionPullReveal,
   cloneCrossJurisdictionRoute,
+  getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionPrivateSeed,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
@@ -110,10 +111,8 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     throw new Error(`CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
   }
 
-  const ratio = Math.max(
-    0,
-    Math.min(65_535, Math.floor(Number(canonicalRoute.cumulativeFillRatio ?? canonicalRoute.claimedRatio ?? 0) || 0)),
-  );
+  const committedFill = getCrossJurisdictionCommittedFillAmounts(canonicalRoute);
+  const ratio = committedFill.fillRatio;
   const accountId = findAccountKey(newState, canonicalRoute.source.entityId);
   const account = accountId ? newState.accounts.get(accountId) : undefined;
   const liveOffer = account?.swapOffers?.get(orderId);
