@@ -78,6 +78,22 @@ type GossipResponsePayload = {
 type GossipRefreshMode = 'incremental' | 'full';
 export type EntityInputDeliveryTransport = 'direct' | 'relay';
 export type EntityInputDeliveryResult = DeliveryResult & { transport: EntityInputDeliveryTransport };
+type PendingEntityInputEntry = {
+  input: RoutedEntityInput;
+  enqueuedAt: number;
+  ingressTimestamp?: number;
+};
+type PendingEntityInputFlushResult = {
+  delivery: EntityInputDeliveryResult;
+  retain: boolean;
+  refreshGossip: boolean;
+  event?: {
+    level: 'warn' | 'error';
+    code: string;
+    message: string;
+    ageMs?: number;
+  };
+};
 
 const normalizeGossipPollMs = (value: number | undefined): number => {
   if (!Number.isFinite(Number(value))) return GOSSIP_POLL_MS;
@@ -210,6 +226,45 @@ const p2pPendingDeliveryDisposition = (delivery: EntityInputDeliveryResult) =>
     terminal: 'P2P_PENDING_DELIVERY_DROPPED',
   });
 
+const p2pPendingFlushResult = (
+  delivery: EntityInputDeliveryResult,
+  message: string,
+): PendingEntityInputFlushResult => {
+  if (isDeliveryDelivered(delivery)) {
+    return {
+      delivery,
+      retain: false,
+      refreshGossip: false,
+    };
+  }
+  const disposition = p2pPendingDeliveryDisposition(delivery);
+  return {
+    delivery,
+    retain: disposition.retry,
+    refreshGossip: p2pShouldRefreshGossip(delivery),
+    event: {
+      level: disposition.level,
+      code: disposition.code,
+      message,
+    },
+  };
+};
+
+const p2pPendingExpiredFlushResult = (
+  delivery: EntityInputDeliveryResult,
+  ageMs: number,
+): PendingEntityInputFlushResult => ({
+  delivery,
+  retain: false,
+  refreshGossip: false,
+  event: {
+    level: 'warn',
+    code: 'P2P_PENDING_EXPIRED',
+    message: delivery.failure?.message ?? delivery.code,
+    ageMs,
+  },
+});
+
 const normalizeId = (value: string): string => value.toLowerCase();
 const getReplicaSignerId = (replicaKey: string): string => {
   const idx = replicaKey.lastIndexOf(':');
@@ -250,7 +305,7 @@ export class RuntimeP2P {
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
   private directClientErrors = new Map<string, { at: number; error: string }>();
-  private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[]>();
+  private pendingByRuntime = new Map<string, PendingEntityInputEntry[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private retryInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
@@ -712,60 +767,56 @@ export class RuntimeP2P {
     };
   }
 
+  private flushPendingEntry(
+    client: Pick<RuntimeWsClient, 'sendEntityInputRaw'>,
+    targetRuntimeId: string,
+    entry: PendingEntityInputEntry,
+    transport: EntityInputDeliveryTransport,
+  ): PendingEntityInputFlushResult {
+    const ageMs = Date.now() - entry.enqueuedAt;
+    if (ageMs > PENDING_ENTITY_INPUT_MAX_AGE_MS) {
+      return p2pPendingExpiredFlushResult(p2pPendingExpiredResult(transport, ageMs), ageMs);
+    }
+    try {
+      const delivery = this.deliverEntityInput(client, targetRuntimeId, entry.input, entry.ingressTimestamp, transport);
+      return p2pPendingFlushResult(delivery, delivery.failure?.message ?? delivery.code);
+    } catch (error) {
+      const message = String((error as Error)?.message || error || '');
+      return p2pPendingFlushResult(p2pSendThrowResult(transport, message), message);
+    }
+  }
+
+  private emitPendingFlushEvent(
+    targetRuntimeId: string,
+    entry: PendingEntityInputEntry,
+    transport: EntityInputDeliveryTransport,
+    result: PendingEntityInputFlushResult,
+  ): void {
+    if (!result.event) return;
+    this.sendDebugEvent({
+      level: result.event.level,
+      code: result.event.code,
+      message: result.event.message,
+      targetRuntimeId,
+      entityId: entry.input.entityId,
+      transport,
+      ...(result.event.ageMs !== undefined ? { ageMs: result.event.ageMs } : {}),
+      delivery: result.delivery,
+    });
+    if (result.refreshGossip) {
+      this.refreshGossip();
+    }
+  }
+
   private flushPending() {
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
       const { client, transport } = this.resolveTransportClient(targetRuntimeId);
       if (!client || !client.isOpen()) continue;
-      const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
+      const remaining: PendingEntityInputEntry[] = [];
       for (const entry of queue) {
-        const ageMs = Date.now() - entry.enqueuedAt;
-        if (ageMs > PENDING_ENTITY_INPUT_MAX_AGE_MS) {
-          const delivery = p2pPendingExpiredResult(transport, ageMs);
-          this.sendDebugEvent({
-            level: 'warn',
-            code: 'P2P_PENDING_EXPIRED',
-            message: delivery.failure?.message ?? delivery.code,
-            targetRuntimeId,
-            entityId: entry.input.entityId,
-            transport,
-            ageMs,
-            delivery,
-          });
-          continue;
-        }
-        try {
-          const delivery = this.deliverEntityInput(client, targetRuntimeId, entry.input, entry.ingressTimestamp, transport);
-          if (!isDeliveryDelivered(delivery)) {
-            const disposition = p2pPendingDeliveryDisposition(delivery);
-            this.sendDebugEvent({
-              level: disposition.level,
-              code: disposition.code,
-              message: delivery.failure?.message ?? delivery.code,
-              targetRuntimeId,
-              entityId: entry.input.entityId,
-              transport,
-              delivery,
-            });
-            if (disposition.retry) remaining.push(entry);
-          }
-        } catch (error) {
-          const message = String((error as Error)?.message || error || '');
-          const delivery = p2pSendThrowResult(transport, message);
-          const disposition = p2pPendingDeliveryDisposition(delivery);
-          this.sendDebugEvent({
-            level: disposition.level,
-            code: disposition.code,
-            message,
-            targetRuntimeId,
-            entityId: entry.input.entityId,
-            transport,
-            delivery,
-          });
-          if (p2pShouldRefreshGossip(delivery)) {
-            this.refreshGossip();
-          }
-          if (disposition.retry) remaining.push(entry);
-        }
+        const result = this.flushPendingEntry(client, targetRuntimeId, entry, transport);
+        this.emitPendingFlushEvent(targetRuntimeId, entry, transport, result);
+        if (result.retain) remaining.push(entry);
       }
       if (remaining.length > 0) {
         this.pendingByRuntime.set(targetRuntimeId, remaining);

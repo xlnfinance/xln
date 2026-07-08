@@ -329,6 +329,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      return values.
    - Partial: P2P no-pubkey debug and gossip-refresh decisions now read
      `delivery.code` instead of reparsing thrown error text at call sites.
+   - Partial: P2P pending queue flush now produces one typed per-entry
+     flush result (`delivery`, retain/drop, optional event, gossip refresh)
+     before mutating the queue.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 
