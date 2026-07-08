@@ -33,6 +33,7 @@ export type StorageTrackedHealth = {
 export type StorageHealth = {
   ok: boolean;
   minFreeBytes: number;
+  shortfallBytes: number;
   disk: {
     totalBytes: number;
     usedBytes: number;
@@ -82,12 +83,15 @@ const statDiskBytes = (): { totalBytes: number; usedBytes: number; freeBytes: nu
 export const assertDiskFreeAtLeast = (freeBytes: number, requiredBytes = MIN_DISK_FREE_BYTES): void => {
   if (freeBytes < requiredBytes) {
     throw new Error(
-      `INSUFFICIENT_DISK_FREE: free=${String(freeBytes)} required=${String(requiredBytes)}`,
+      `INSUFFICIENT_DISK_FREE: free=${String(freeBytes)} required=${String(requiredBytes)} shortfall=${String(requiredBytes - freeBytes)}`,
     );
   }
 };
 
 export const getMinDiskFreeBytes = (): number => MIN_DISK_FREE_BYTES;
+
+export const getDiskFreeShortfallBytes = (freeBytes: number, requiredBytes = MIN_DISK_FREE_BYTES): number =>
+  Math.max(0, requiredBytes - freeBytes);
 
 type PathByteScan = {
   bytes: number;
@@ -242,6 +246,7 @@ const buildStorageHealth = (): StorageHealth => {
   return {
     ok: disk.freeBytes >= MIN_DISK_FREE_BYTES,
     minFreeBytes: MIN_DISK_FREE_BYTES,
+    shortfallBytes: getDiskFreeShortfallBytes(disk.freeBytes),
     disk,
     tracked,
     sampledAt,

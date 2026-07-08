@@ -373,9 +373,11 @@ export type AggregatedHealth = {
   disk: {
     ok: boolean;
     minFreeBytes: number;
+    shortfallBytes: number;
     freeBytes: number;
     usedBytes: number;
     totalBytes: number;
+    shortfallGiB: number;
     freeGiB: number;
     usedGiB: number;
     totalGiB: number;

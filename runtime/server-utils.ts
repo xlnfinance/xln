@@ -50,13 +50,16 @@ export const buildDiskSummary = (storage: StorageHealth) => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
   const usedBytes = Number(storage.disk.usedBytes || 0);
   const freeBytes = Number(storage.disk.freeBytes || 0);
+  const shortfallBytes = Number(storage.shortfallBytes || 0);
   const toGiB = (value: number): number => Math.round((value / 1024 ** 3) * 100) / 100;
   return {
     ok: storage.ok,
     minFreeBytes: storage.minFreeBytes,
+    shortfallBytes,
     freeBytes,
     usedBytes,
     totalBytes,
+    shortfallGiB: toGiB(shortfallBytes),
     freeGiB: toGiB(freeBytes),
     usedGiB: toGiB(usedBytes),
     totalGiB: toGiB(totalBytes),

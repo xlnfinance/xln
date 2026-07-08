@@ -1144,9 +1144,11 @@ const QA_ADMIN_HEALTH = {
   disk: {
     ok: true,
     minFreeBytes: 5 * 1024 ** 3,
+    shortfallBytes: 0,
     freeBytes: 24 * 1024 ** 3,
     usedBytes: 76 * 1024 ** 3,
     totalBytes: 100 * 1024 ** 3,
+    shortfallGiB: 0,
     freeGiB: 24,
     usedGiB: 76,
     totalGiB: 100,
@@ -1155,6 +1157,7 @@ const QA_ADMIN_HEALTH = {
   storage: {
     ok: true,
     minFreeBytes: 5 * 1024 ** 3,
+    shortfallBytes: 0,
     disk: {
       totalBytes: 100 * 1024 ** 3,
       usedBytes: 76 * 1024 ** 3,
