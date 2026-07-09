@@ -41,6 +41,9 @@ warnings.
 - Runtime entity-input replay/profile diagnostics use the structured
   `runtime.entity_inputs` logger and are guarded against direct `console.*`
   noise in core.
+- Runtime storage DB open/close/block/recovery diagnostics use the structured
+  `runtime.storage` logger and are guarded against direct `console.*` /
+  `[storage-epoch]` noise in core.
 - Browser jurisdiction discovery treats missing `/api/jurisdictions` as a
   structured debug fallback, but malformed browser config fails loud with
   `JURISDICTIONS_BROWSER_CONFIG_INVALID`; the loader is guarded against direct

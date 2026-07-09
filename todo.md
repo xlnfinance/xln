@@ -607,6 +607,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime solvency invariant diagnostics now use structured
      `runtime.solvency` logging instead of direct `console.*`; behavior/source
      tests and the failure-taxonomy scan guard the helper.
+   - Partial: runtime storage DB open/close/block/recovery diagnostics now use
+     the structured `runtime.storage` logger instead of direct `console.*` /
+     `[storage-epoch]` output; source tests and the failure-taxonomy scan guard
+     the boundary.
    - Partial: browser jurisdiction discovery now treats missing
      `/api/jurisdictions` as structured debug fallback, while malformed browser
      config fails loud with `JURISDICTIONS_BROWSER_CONFIG_INVALID`; source and

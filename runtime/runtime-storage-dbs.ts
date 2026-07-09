@@ -1,5 +1,6 @@
 import { Level } from 'level';
 import { deriveSignerAddressSync } from './account-crypto';
+import { createStructuredLogger } from './logger';
 import { dbRootPath, nodeProcess } from './runtime-platform';
 import type { Env } from './types';
 import {
@@ -10,6 +11,11 @@ import {
 import { assertStorageSafetyOverridesAllowed } from './storage/safety';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
+
+const storageLog = createStructuredLogger('runtime.storage');
+
+const formatStorageError = (error: unknown): string =>
+  error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
 export type RuntimeStorageDbDeps = {
   ensureRuntimeState(env: Env): RuntimeState;
@@ -25,7 +31,7 @@ export const deriveRuntimeIdFromSeed = (seed?: string | null): string | null => 
   try {
     return deriveSignerAddressSync(seed, '1').toLowerCase();
   } catch (error) {
-    console.warn('Failed to derive runtimeId for DB namespace:', error);
+    storageLog.warn('namespace.derive_runtime_id_failed', { error: formatStorageError(error) });
     return null;
   }
 };
@@ -233,7 +239,7 @@ export const closeStorageDb = async (
   try {
     await db.close();
   } catch (error) {
-    console.warn(`Failed to close storage ${role} DB:`, error instanceof Error ? error.message : error);
+    storageLog.warn('storage_db.close_failed', { role, error: formatStorageError(error) });
   } finally {
     state[fields.dbField] = null;
     state[fields.openField] = null;
@@ -297,7 +303,7 @@ const readStorageRotationMarker = async (env: Env): Promise<StorageEpochRotation
     }
   } catch (error) {
     if (!isFsNotFound(error)) {
-      console.warn('[storage-epoch] failed to read rotation marker:', error instanceof Error ? error.message : error);
+      storageLog.warn('storage_epoch.marker_read_failed', { error: formatStorageError(error) });
     }
   }
   return null;
@@ -335,15 +341,15 @@ const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
     const previousExists = await storagePathExists(marker.previousPath);
 
     if (!currentExists && nextExists) {
-      console.warn(`[storage-epoch] completing interrupted rotation snapshot=${marker.snapshotHeight}: next -> current`);
+      storageLog.warn('storage_epoch.recover_complete_interrupted', { snapshotHeight: marker.snapshotHeight });
       await fs.rename(marker.nextPath, marker.currentPath);
       await fsyncParentDir(marker.currentPath);
     } else if (!currentExists && previousExists) {
-      console.warn(`[storage-epoch] rolling back interrupted rotation snapshot=${marker.snapshotHeight}: previous -> current`);
+      storageLog.warn('storage_epoch.recover_rollback_interrupted', { snapshotHeight: marker.snapshotHeight });
       await fs.rename(marker.previousPath, marker.currentPath);
       await fsyncParentDir(marker.currentPath);
     } else if (currentExists && nextExists) {
-      console.warn(`[storage-epoch] aborting interrupted rotation snapshot=${marker.snapshotHeight}: removing stale next DB`);
+      storageLog.warn('storage_epoch.recover_remove_stale_next', { snapshotHeight: marker.snapshotHeight });
       await fs.rm(marker.nextPath, { recursive: true, force: true });
       await fsyncParentDir(marker.nextPath);
     }
@@ -353,7 +359,7 @@ const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
   }
 
   if (!(await storagePathExists(currentPath)) && (await storagePathExists(previousPath))) {
-    console.warn('[storage-epoch] current DB missing while previous exists; restoring previous as current');
+    storageLog.warn('storage_epoch.recover_previous_as_current');
     await fs.rename(previousPath, currentPath);
     await fsyncParentDir(currentPath);
   }
@@ -424,7 +430,7 @@ export const tryOpenStorageDb = async (
           error instanceof Error &&
           (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
-          console.log(`storage ${role} DB blocked - skipping`);
+          storageLog.warn('storage_db.blocked', { role, error: formatStorageError(error) });
           return false;
         }
         state[fields.openField] = null;
@@ -435,7 +441,7 @@ export const tryOpenStorageDb = async (
   try {
     return await (state[fields.openField] as Promise<boolean>);
   } catch (error) {
-    console.error(`Failed to open storage ${role} DB:`, error);
+    storageLog.error('storage_db.open_failed', { role, error: formatStorageError(error) });
     throw error;
   }
 };
@@ -547,7 +553,7 @@ export const closeFrameDb = async (env: Env): Promise<void> => {
   try {
     await db.close();
   } catch (error) {
-    console.warn('Failed to close runtime frame DB:', error instanceof Error ? error.message : error);
+    storageLog.warn('frame_db.close_failed', { error: formatStorageError(error) });
   } finally {
     state!.frameDb = null;
     state!.frameDbOpenPromise = null;
@@ -561,7 +567,7 @@ export const closeInfraDb = async (env: Env): Promise<void> => {
   try {
     await state.infraDb.close();
   } catch (error) {
-    console.warn('Failed to close infra DB:', error instanceof Error ? error.message : error);
+    storageLog.warn('infra_db.close_failed', { error: formatStorageError(error) });
   } finally {
     state.infraDb = null;
     state.infraDbOpenPromise = null;
@@ -584,7 +590,7 @@ export async function tryOpenDb(
           error instanceof Error &&
           (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
-          console.log('IndexedDB blocked (incognito/private mode) - running in-memory');
+          storageLog.warn('runtime_db.blocked', { error: formatStorageError(error) });
           return false;
         }
         // Non-blocked open errors are fatal for persistence.
@@ -596,7 +602,7 @@ export async function tryOpenDb(
   try {
     return await state.dbOpenPromise;
   } catch (error) {
-    console.error('Failed to open runtime DB:', error);
+    storageLog.error('runtime_db.open_failed', { error: formatStorageError(error) });
     throw error;
   }
 }
@@ -622,7 +628,7 @@ export async function tryOpenFrameDb(
           error instanceof Error &&
           (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
-          console.log('Runtime frame DB blocked - frame logs disabled');
+          storageLog.warn('frame_db.blocked', { error: formatStorageError(error) });
           return false;
         }
         state.frameDbOpenPromise = null;
@@ -633,7 +639,7 @@ export async function tryOpenFrameDb(
   try {
     return await state.frameDbOpenPromise;
   } catch (error) {
-    console.error('Failed to open runtime frame DB:', error);
+    storageLog.error('frame_db.open_failed', { error: formatStorageError(error) });
     throw error;
   }
 }
