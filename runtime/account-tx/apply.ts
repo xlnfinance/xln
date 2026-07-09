@@ -22,6 +22,9 @@ import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
 import { canProcessAccountTxForDisputeStatus } from '../account-dispute-policy';
+import { createStructuredLogger } from '../logger';
+
+const accountTxLog = createStructuredLogger('account.tx');
 
 type ApplyAccountTxResult = {
   success: boolean;
@@ -299,7 +302,10 @@ export async function applyAccountTx(
 
     case 'account_frame':
       // This should never be called - frames are handled by frame-level consensus
-      console.error(`❌ FATAL: account_frame should not be in accountTxs array!`);
+      accountTxLog.debug('account_frame.rejected', {
+        account: counterparty,
+        nonce: accountMachine.proofHeader.nonce,
+      });
       return { success: false, error: 'account_frame is not a transaction type', events: [] };
 
     default:
