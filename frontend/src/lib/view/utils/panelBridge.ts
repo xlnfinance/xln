@@ -50,13 +50,20 @@ class PanelBridge {
   emit<K extends keyof EventMap>(event: K, data: EventMap[K]) {
     const handlers = this.listeners.get(event);
     if (handlers) {
+      const errors: unknown[] = [];
       handlers.forEach(handler => {
         try {
           handler(data);
         } catch (error) {
-          console.error(`Error in panel bridge handler for ${event}:`, error);
+          errors.push(error);
         }
       });
+      if (errors.length > 0) {
+        const details = errors.map((error) =>
+          error instanceof Error ? error.message : String(error)
+        ).join('; ');
+        throw new Error(`PANEL_BRIDGE_HANDLER_FAILED:${String(event)}:${details}`);
+      }
     }
   }
 
