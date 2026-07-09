@@ -59,7 +59,7 @@ import {
   type RawJEventArgs,
 } from './watcher';
 import { DEV_CHAIN_IDS } from './index';
-import { decodeJBatch, preflightBatchForE2 } from '../j-batch';
+import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../j-batch';
 import { requireUsableContractAddress } from '../contract-address';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
@@ -1520,8 +1520,6 @@ export async function createRpcAdapter(
       }
 
       if (jTx.type === 'batch') {
-        const { isBatchEmpty, getBatchSize } = await import('../j-batch');
-        const { normalizeEntityId } = await import('../entity-id-utils');
         const batchData = jTx.data;
         const batch = batchData.batch;
         const effectiveTimestamp = typeof timestamp === 'number' ? timestamp : env.timestamp;
