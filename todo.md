@@ -521,6 +521,8 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
     - Staged now: runtime typecheck uses the pinned TS7 native compiler through
       `@typescript/native`, while `typescript@5.9` remains installed for tools
       that import the compiler API.
+    - Partial: TS7 runtime typecheck pins `--checkers 4` so developer and CI
+      runs use the same native compiler parallelism.
     - Defer full switch until Svelte, ESLint, Hardhat, TypeChain, and ts-node
       paths are proven compatible with TS7's API/tooling story.
     - Exit: all repo typecheck, lint, contract, frontend, and editor tooling use

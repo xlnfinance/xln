@@ -137,7 +137,7 @@
     "check:frontend": "cd frontend && bun run check",
     "check:frontend-file-size": "bun runtime/scripts/check-frontend-file-size.ts",
     "check:runtime-types": "bun run check:runtime-types:ts7",
-    "check:runtime-types:ts7": "bunx --package @typescript/native tsc -p tsconfig.runtime.json --noEmit",
+    "check:runtime-types:ts7": "bunx --package @typescript/native tsc -p tsconfig.runtime.json --noEmit --checkers 4",
     "check:runtime-types:ts5": "bun node_modules/typescript/bin/tsc -p tsconfig.runtime.json --noEmit",
     "check:single-live-todo": "bun runtime/scripts/check-single-live-todo.ts",
     "check:no-weak-collections": "bun runtime/scripts/check-no-weak-collections.ts",
