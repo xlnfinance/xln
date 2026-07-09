@@ -663,7 +663,7 @@ const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): P
   // deploy a fresh stack; ensureRpcStackReady writes the resulting addresses
   // back for H2/H3/MM.
   console.log(
-    `[${resolvedArgs.name}] RPC contracts have no code; deploying fresh stack instead of using stale addresses: ` +
+    'RPC contracts have no code; deploying fresh stack instead of using stale addresses: ' +
       missingCode.join(', '),
   );
   jurisdictionImportDiagnostics.usedContracts = false;
@@ -860,7 +860,7 @@ const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> 
   if (!resolvedArgs.deployTokens) {
     throw new Error('RPC_STACK_ADDRESSES_MISSING');
   }
-  console.log(`[${resolvedArgs.name}] deploying fresh RPC contract stack`);
+  console.log('Deploying fresh RPC contract stack');
   if (jurisdictionImportDiagnostics) {
     jurisdictionImportDiagnostics.usedContracts = false;
     jurisdictionImportDiagnostics.mode = 'deploy-fresh';
@@ -888,7 +888,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = '
     name: jurisdictionName,
     chainId: Number((jadapter as { chainId?: number }).chainId),
   });
-  console.log(`[${resolvedArgs.name}] deploying default tokens on dev chain: ${desiredTokens.map(token => token.symbol).join(',')}`);
+  console.log(`Deploying default tokens on dev chain: ${desiredTokens.map(token => token.symbol).join(',')}`);
   const signer = jadapter.signer as unknown as JurisdictionSigner;
   const erc20Factory = new ERC20Mock__factory(signer);
   for (const token of desiredTokens) {
@@ -911,7 +911,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter, jurisdictionName = '
       amount: TOKEN_REGISTRATION_AMOUNT,
     });
     await registerTx.wait();
-    console.log(`[${resolvedArgs.name}] token registered ${token.symbol} -> ${tokenAddress}`);
+    console.log(`Token registered ${token.symbol} -> ${tokenAddress}`);
   }
 };
 
@@ -2050,7 +2050,7 @@ const run = async (): Promise<void> => {
     if (!secondaryName) continue;
     const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
     if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {
-      console.log(`[${resolvedArgs.name}] Importing sibling hub jurisdiction ${secondaryName} (${secondary.rpc})`);
+      console.log(`Importing sibling hub jurisdiction ${secondaryName} (${secondary.rpc})`);
       enqueueRuntimeInput(env, {
         runtimeTxs: [{
           type: 'importJ',
@@ -2067,7 +2067,7 @@ const run = async (): Promise<void> => {
       });
       await runtimeProcess(env);
     } else {
-      console.log(`[${resolvedArgs.name}] Reusing sibling hub jurisdiction ${secondaryName}`);
+      console.log(`Reusing sibling hub jurisdiction ${secondaryName}`);
     }
 
     const priorActiveJurisdiction = env.activeJurisdiction;
@@ -2106,9 +2106,7 @@ const run = async (): Promise<void> => {
       primary: false,
     });
     await ensureOrderbook(env, sibling.entityId, sibling.signerId);
-    console.log(
-      `[${resolvedArgs.name}] Sibling hub ready jurisdiction=${secondaryName} entity=${sibling.entityId.slice(0, 12)}`,
-    );
+    console.log(`Sibling hub ready jurisdiction=${secondaryName} entity=${sibling.entityId.slice(0, 12)}`);
   }
   env.activeJurisdiction = primaryJurisdictionName;
 

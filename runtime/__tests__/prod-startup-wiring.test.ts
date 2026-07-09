@@ -177,6 +177,14 @@ describe('production startup wiring', () => {
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime-tx-handlers.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
     const rpcAdapter = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
+    expect(hubNode).toContain('RPC contracts have no code; deploying fresh stack instead of using stale addresses:');
+    expect(hubNode).not.toContain('`[${resolvedArgs.name}] RPC contracts have no code');
+    expect(hubNode).toContain('Importing sibling hub jurisdiction ${secondaryName}');
+    expect(hubNode).toContain('Sibling hub ready jurisdiction=${secondaryName}');
+    expect(hubNode).not.toContain('`[${resolvedArgs.name}] Importing sibling hub jurisdiction');
+    expect(hubNode).not.toContain('`[${resolvedArgs.name}] Sibling hub ready');
+    expect(hubNode).not.toContain('`[${resolvedArgs.name}] deploying fresh RPC contract stack');
+    expect(hubNode).not.toContain('`[${resolvedArgs.name}] token registered');
     for (const [marker, nextMarker] of [
       ["if (pathname === '/api/lending/offer'", "if (pathname === '/api/lending/borrow'"],
       ["if (pathname === '/api/lending/borrow'", "if (pathname === '/api/lending/repay'"],
