@@ -28,6 +28,7 @@ import { safeStringify } from '../serialization-utils.js';
 import { getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
 import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../j-batch';
+import { setDeltaTransformerAddress } from '../proof-builder.js';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
 import { DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
@@ -330,7 +331,6 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] DeltaTransformer deployed at: ${this.deltaTransformerAddress?.toString() ?? 'null'}`);
 
     // Update proof-builder with deployed address
-    const { setDeltaTransformerAddress } = await import('../proof-builder.js');
     setDeltaTransformerAddress(this.deltaTransformerAddress?.toString() ?? '');
   }
 
