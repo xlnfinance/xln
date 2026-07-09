@@ -291,6 +291,7 @@ for (const [path, markers] of [
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   ['runtime/runtime-infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'browservm.restore_failed']],
   ['runtime/runtime-infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
+  ['runtime/jurisdiction-config.ts', ["createStructuredLogger('runtime.jurisdiction_config')", 'browser_api_unavailable', 'JURISDICTIONS_BROWSER_CONFIG_INVALID']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -337,6 +338,10 @@ const runtimeInfraGossipPath = 'runtime/runtime-infra-gossip-store.ts';
 const runtimeInfraGossip = readText(runtimeInfraGossipPath);
 assertNotIncludes(runtimeInfraGossip, 'console.', runtimeInfraGossipPath);
 assertNotIncludes(runtimeInfraGossip, '[infra-db]', runtimeInfraGossipPath);
+
+const jurisdictionConfigPath = 'runtime/jurisdiction-config.ts';
+const jurisdictionConfig = readText(jurisdictionConfigPath);
+assertNotIncludes(jurisdictionConfig, 'console.', jurisdictionConfigPath);
 
 const runtimeInputQueuePath = 'runtime/runtime-input-queue.ts';
 const runtimeInputQueue = readText(runtimeInputQueuePath);
@@ -472,6 +477,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/debt-ledger.test.ts', ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE']],
   ['runtime/__tests__/relay-router.test.ts', ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery']],
   ['runtime/__tests__/solvency-logging.test.ts', ['solvency diagnostics use structured logging only', 'runtime.solvency']],
+  ['runtime/__tests__/jurisdiction-config-logging.test.ts', ['jurisdiction config loader uses structured logging without direct console output', 'runtime.jurisdiction_config']],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);

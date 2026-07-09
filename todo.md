@@ -607,6 +607,11 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime solvency invariant diagnostics now use structured
      `runtime.solvency` logging instead of direct `console.*`; behavior/source
      tests and the failure-taxonomy scan guard the helper.
+   - Partial: browser jurisdiction discovery now treats missing
+     `/api/jurisdictions` as structured debug fallback, while malformed browser
+     config fails loud with `JURISDICTIONS_BROWSER_CONFIG_INVALID`; source and
+     quiet-load tests plus the failure-taxonomy scan guard against raw console
+     regression.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.
