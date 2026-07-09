@@ -100,6 +100,10 @@
       .trim();
   }
 
+  function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error || 'Unknown error');
+  }
+
   function getDocById(docId: string): DocEntry | null {
     if (!manifest) return null;
     return manifest.items.find((item) => item.id === docId) || null;
@@ -238,8 +242,7 @@
       if (!response.ok) throw new Error(`manifest request failed: ${response.status}`);
       manifest = await response.json() as DocsManifest;
     } catch (error) {
-      console.error('Failed to load docs manifest', error);
-      loadError = `Failed to load docs catalog: ${error}`;
+      loadError = `Failed to load docs catalog: ${errorMessage(error)}`;
     } finally {
       isLoadingManifest = false;
     }
@@ -266,8 +269,7 @@
       headings = extractHeadings(markdown);
       renderedHtml = await renderMarkdown(doc, markdown);
     } catch (error) {
-      console.error('Failed to load doc', error);
-      loadError = `Failed to load document: ${error}`;
+      loadError = `Failed to load document: ${errorMessage(error)}`;
       renderedHtml = '';
       currentDocContent = '';
       headings = [];
