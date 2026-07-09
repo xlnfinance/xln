@@ -576,6 +576,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      `entity.debt` logger instead of direct `console.warn`; operator-visible
      state messages are preserved, with Bun behavior coverage and the
      failure-taxonomy scan guarding regressions.
+   - Partial: `deriveDelta` account math debug output now uses the existing
+     `ACCOUNT_STATE` logger instead of direct `console.log`; deriveDelta
+     property/invariant tests and the failure-taxonomy scan guard regressions.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

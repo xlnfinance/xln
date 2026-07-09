@@ -8,6 +8,7 @@ import { PERFORMANCE } from './constants';
 import { validateDelta } from './validation-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { defaultTokensForJurisdiction } from './jadapter/default-tokens';
+import { logDebug } from './logger';
 
 /**
  * Determine if an entity is the "left" party in a bilateral account (like old_src Channel.ts)
@@ -173,7 +174,12 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     ']';
 
   if (PERFORMANCE.DEBUG_ACCOUNTS) {
-    console.log(`✅ deriveDelta RETURN: isLeft=${isLeft}, inCap=${inCapacity}, outCap=${outCapacity}, SUM=${inCapacity + outCapacity}`);
+    logDebug('ACCOUNT_STATE', 'deriveDelta.return', {
+      isLeft,
+      inCapacity,
+      outCapacity,
+      capacitySum: inCapacity + outCapacity,
+    });
   }
 
   return {

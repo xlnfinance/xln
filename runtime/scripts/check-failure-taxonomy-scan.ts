@@ -284,6 +284,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/dispute.ts', ["createStructuredLogger('entity.dispute')"]],
   ['runtime/entity-tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/entity-tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
+  ['runtime/account-utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
