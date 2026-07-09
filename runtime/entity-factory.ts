@@ -230,7 +230,7 @@ export const createLazyEntity = (
   };
 
   const executionTimeMs = 0;
-  console.log(`⚡ Lazy entity creation: ${executionTimeMs.toFixed(3)}ms (pure in-memory)`);
+  if (DEBUG) console.log(`⚡ Lazy entity creation: ${executionTimeMs.toFixed(3)}ms (pure in-memory)`);
 
   return { config, executionTimeMs };
 };
@@ -309,7 +309,7 @@ export const createNumberedEntitiesBatch = async (
     throw new Error('Jurisdiction required for numbered entity registration');
   }
 
-  console.log(`🔢 Batch creating ${entities.length} numbered entities in ONE transaction`);
+  if (DEBUG) console.log(`🔢 Batch creating ${entities.length} numbered entities in ONE transaction`);
 
   // Build configs for all entities
   const configs: ConsensusConfig[] = entities.map(e => ({
@@ -336,7 +336,7 @@ export const createNumberedEntitiesBatch = async (
     const config = configs[i];
     if (!config) throw new Error(`Missing config for entity ${i}`);
 
-    console.log(`  ✅ Entity ${i + 1}/${entities.length}: #${entityNumber} (${entityId.slice(0, 10)}...)`);
+    if (DEBUG) console.log(`  ✅ Entity ${i + 1}/${entities.length}: #${entityNumber} (${entityId.slice(0, 10)}...)`);
 
     return { config, entityNumber, entityId };
   });
