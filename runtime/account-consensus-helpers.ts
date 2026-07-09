@@ -3,6 +3,7 @@ import { createStructuredLogger, shortHash, shortId } from './logger';
 import { txFingerprint } from './state-helpers';
 import { getJurisdictionConfigName } from './jurisdiction-runtime';
 import { getReplicaByEntityId } from './replica-utils';
+import { checkAutoRebalance } from './account-tx/handlers/request-collateral';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
@@ -222,7 +223,6 @@ export async function runPostFrameAutoRebalanceCheck(
   frameHeight: number,
 ): Promise<AccountTx[]> {
   try {
-    const { checkAutoRebalance } = await import('./account-tx/handlers/request-collateral');
     const p2p = env.runtimeState?.p2p;
     const emitRebalanceDebug = (payload: Record<string, unknown>) => {
       if (isDebugEventEmitter(p2p)) {
