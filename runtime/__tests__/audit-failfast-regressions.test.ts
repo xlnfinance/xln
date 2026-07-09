@@ -958,9 +958,32 @@ describe('audit fail-fast regressions', () => {
     const env = createEmptyEnv(seed);
     const { signerId, entityId } = registerLazySigner(seed, '1');
     const counterpartyId = `0x${'42'.repeat(32)}`;
-    const state = makeEntityState(entityId);
+    let state = makeEntityState(entityId);
     state.config = makeSingleSignerConfigFor(signerId);
-    state.reserves.set(1, 777n);
+    const initialReserveEvent: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: {
+        entity: entityId,
+        tokenId: 1,
+        newBalance: '777',
+      },
+    };
+    const initialCommon = {
+      from: signerId,
+      observedAt: 1_000,
+      blockNumber: 3,
+      blockHash: `0x${'15'.repeat(32)}`,
+      transactionHash: `0x${'18'.repeat(32)}`,
+      event: initialReserveEvent,
+    };
+    const initialSigned = signJEventObservation(env, entityId, signerId, {
+      blockNumber: initialCommon.blockNumber,
+      blockHash: initialCommon.blockHash,
+      transactionHash: initialCommon.transactionHash,
+      events: [initialReserveEvent],
+    });
+    state = (await applyJEvent(state, { ...initialCommon, ...initialSigned }, env)).newState;
+    expect(state.reserves.get(1)).toBe(777n);
     const event: JurisdictionEvent = {
       type: 'AccountSettled',
       data: {

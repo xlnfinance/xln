@@ -74,6 +74,7 @@
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
   $: runtimeGroups = buildRuntimeGroups();
   $: runtimeMenuGroups = buildRuntimeMenuGroups(runtimeGroups);
+  $: mutatingLocalControlsEnabled = $runtimeControllerHandle.mode !== 'remote';
   $: controllerRuntimeId = normalizeId($runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id);
   $: currentGroup = runtimeGroups.find((group) => normalizeId(group.runtimeId) === controllerRuntimeId)
     || runtimeGroups.find((group) => group.runtimeId === $activeStoreRuntimeId)
@@ -574,16 +575,18 @@
 		    </div>
 
 	    <div class="menu-footer">
-      {#if allowAddJurisdiction}
+      {#if mutatingLocalControlsEnabled && allowAddJurisdiction}
         <button class="add-runtime-btn" on:click={handleAddJurisdiction}>+ Add Jurisdiction</button>
       {/if}
-      {#if allowAddEntity}
+      {#if mutatingLocalControlsEnabled && allowAddEntity}
         <button class="add-runtime-btn secondary-action" on:click={handleAddEntity}>+ Add Entity</button>
       {/if}
-      {#if allowAddRuntime}
+      {#if mutatingLocalControlsEnabled && allowAddRuntime}
         <button class="add-runtime-btn" on:click={handleAddRuntime}>{addRuntimeLabel}</button>
       {/if}
-      <button class="reset-btn" on:click={handleReset}>Reset All Data</button>
+      {#if mutatingLocalControlsEnabled}
+        <button class="reset-btn" on:click={handleReset}>Reset All Data</button>
+      {/if}
     </div>
   </div>
 </Dropdown>

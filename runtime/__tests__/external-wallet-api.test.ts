@@ -4,6 +4,7 @@ import {
   createExternalWalletApi,
   type ExternalWalletApiContext,
 } from '../api/external-wallet-api';
+import { createXlnJsonRpcProvider } from '../jadapter';
 import type { JAdapter } from '../jadapter/types';
 
 const USER_ADDRESS = new ethers.Wallet(`0x${'22'.repeat(32)}`).address;
@@ -30,6 +31,9 @@ const makeBrowserVmAdapter = (provider: ethers.JsonRpcProvider): JAdapter => ({
     deltaTransformer: '0x0000000000000000000000000000000000000004',
   },
 } as unknown as JAdapter);
+
+const makeTestProvider = (): ethers.JsonRpcProvider =>
+  createXlnJsonRpcProvider('http://127.0.0.1:0', 31337);
 
 const makeContext = (
   adapter: JAdapter,
@@ -86,7 +90,7 @@ const createBlockingFaucetFund = () => {
 
 describe('external wallet API faucet transaction gate', () => {
   test('serializes faucet funding across API instances sharing one faucet signer', async () => {
-    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    const provider = makeTestProvider();
     const adapter = makeBrowserVmAdapter(provider);
     const blockingFund = createBlockingFaucetFund();
 
@@ -113,7 +117,7 @@ describe('external wallet API faucet transaction gate', () => {
   });
 
   test('serializes startup provision and user faucet through the same gate', async () => {
-    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    const provider = makeTestProvider();
     const adapter = makeBrowserVmAdapter(provider);
     const blockingFund = createBlockingFaucetFund();
 
@@ -140,7 +144,7 @@ describe('external wallet API faucet transaction gate', () => {
   });
 
   test('wallet snapshot endpoint emits canonical external wallet observation', async () => {
-    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    const provider = makeTestProvider();
     Object.assign(provider, {
       getBlockNumber: async () => 77,
       getBlock: async (blockTag: number) => {
@@ -238,7 +242,7 @@ describe('external wallet API faucet transaction gate', () => {
   });
 
   test('wallet snapshot endpoint rejects incomplete adapter snapshots instead of zero-filling', async () => {
-    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    const provider = makeTestProvider();
     Object.assign(provider, {
       getBlockNumber: async () => 88,
       getBlock: async () => ({ hash: `0x${'88'.repeat(32)}` }),
@@ -298,7 +302,7 @@ describe('external wallet API faucet transaction gate', () => {
   });
 
   test('wallet snapshot endpoint returns structured token errors without applying fake zero balances', async () => {
-    const provider = new ethers.JsonRpcProvider('http://127.0.0.1:0', 31337, { staticNetwork: true });
+    const provider = makeTestProvider();
     Object.assign(provider, {
       getBlockNumber: async () => 99,
       getBlock: async () => ({ hash: `0x${'99'.repeat(32)}` }),

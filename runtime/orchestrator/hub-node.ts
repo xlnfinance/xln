@@ -1048,7 +1048,7 @@ const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]
   };
 };
 
-const syncReserveSnapshotFromChain = async (
+const refreshReserveStateFromWatcher = async (
   env: Env,
   entityId: string,
   tokenCatalog: JTokenInfo[],
@@ -1058,13 +1058,9 @@ const syncReserveSnapshotFromChain = async (
   if (!replica?.state) {
     throw new Error(`HUB_REPLICA_MISSING_FOR_RESERVE_SYNC: ${entityId}`);
   }
-  for (const token of tokenCatalogForHubJurisdiction(tokenCatalog, {
-    jurisdictionName: getEntityJurisdictionName(env, entityId),
-  })) {
-    const tokenId = Number(token.tokenId);
-    if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-    const current = await jadapter.getReserves(entityId, tokenId);
-    replica.state.reserves.set(tokenId, current);
+  if (jadapter.isWatching()) {
+    await jadapter.pollNow?.();
+    await settleRuntimeFor(env, 10);
   }
   return getReserveHealth(env, entityId, tokenCatalog);
 };
@@ -1080,7 +1076,7 @@ const ensureBootstrapReserves = async (
   const bootstrapTokens = tokenCatalogForHubJurisdiction(tokenCatalog, {
     jurisdictionName: getEntityJurisdictionName(env, entityId),
   });
-  await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
+  await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
   if (!resolvedArgs.deployTokens) {
     const reserveHealth = getReserveHealth(env, entityId, tokenCatalog);
     finishTiming('reserve_funding', startedAt);
@@ -1088,28 +1084,39 @@ const ensureBootstrapReserves = async (
   }
   const replica = getEntityReplicaById(env, entityId);
 
-  const mints = bootstrapTokens
-    .map(token => {
-      const tokenId = Number(token.tokenId);
-      if (!Number.isFinite(tokenId) || tokenId <= 0) return null;
-      const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
-      const target = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
-      const current = replica?.state?.reserves?.get(tokenId) ?? 0n;
-      if (current >= target) return null;
-      return {
-        entityId,
-        tokenId,
-        amount: target - current,
-      };
-    })
-    .filter((mint): mint is { entityId: string; tokenId: number; amount: bigint } => mint !== null);
+  const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
+  const reserveMismatches: string[] = [];
+  for (const token of bootstrapTokens) {
+    const tokenId = Number(token.tokenId);
+    if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
+    const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
+    const target = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
+    const localCurrent = replica?.state?.reserves?.get(tokenId) ?? 0n;
+    const chainCurrent = await jadapter.getReserves(entityId, tokenId);
+    if (chainCurrent !== localCurrent) {
+      reserveMismatches.push(`token=${tokenId} local=${localCurrent.toString()} chain=${chainCurrent.toString()}`);
+      continue;
+    }
+    if (localCurrent >= target) continue;
+    mints.push({
+      entityId,
+      tokenId,
+      amount: target - localCurrent,
+    });
+  }
+  if (reserveMismatches.length > 0) {
+    throw new Error(
+      `HUB_RESERVE_STATE_MISMATCH: entity=${entityId} ${reserveMismatches.join('; ')}; ` +
+      'runtime reserve state must be replayed from canonical J-events before bootstrap funding',
+    );
+  }
 
   if (mints.length > 0) {
     const events = await jadapter.debugFundReservesBatch(mints);
     await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`);
     await settleRuntimeFor(env, 30);
   }
-  const reserveHealth = await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);
+  const reserveHealth = await refreshReserveStateFromWatcher(env, entityId, tokenCatalog);
 
   finishTiming('reserve_funding', startedAt);
   return reserveHealth;
