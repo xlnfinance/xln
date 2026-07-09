@@ -31,6 +31,8 @@ warnings.
   invariant errors instead of console output plus no-op returns.
 - Direct payment debug traces use the structured `entity.payment` logger; the
   handler is guarded against raw `console.log` noise in core.
+- R2C debug traces use the structured `entity.r2c` logger; the handler is
+  guarded against raw `console.log` noise in core.
 
 ## Open Manual Review
 

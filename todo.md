@@ -515,6 +515,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: entity direct-payment debug traces now use the structured
      `entity.payment` logger instead of raw `console.log`, and the
      failure-taxonomy scan guards against reintroducing core console noise.
+   - Partial: entity R2C debug traces now use the structured `entity.r2c`
+     logger instead of raw `console.log`, with both Bun source tests and the
+     failure-taxonomy scan guarding against regressions.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

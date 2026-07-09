@@ -20,8 +20,11 @@ import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../.
 import { QUOTE_EXPIRY_MS } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { batchAddReserveToCollateral, getEffectiveDraftReserveBalance, initJBatch } from '../../j-batch';
+import { createStructuredLogger, formatAmount, shortId } from '../../logger';
 
 type MempoolOp = { accountId: string; tx: AccountTx };
+
+const r2cLog = createStructuredLogger('entity.r2c');
 
 export async function handleR2C(
   entityState: EntityState,
@@ -31,7 +34,14 @@ export async function handleR2C(
   const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
   const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
   const isLocalReceivingEntity = receivingEntity === String(entityState.entityId || '').trim().toLowerCase();
-  console.log(`🔍 r2c: counterpartyId=${counterpartyId}, receivingEntity=${receivingEntity.slice(-4)}, tokenId=${tokenId}, amount=${amount}, quoteId=${rebalanceQuoteId}`);
+  r2cLog.debug('start', {
+    entity: shortId(entityState.entityId),
+    counterparty: shortId(counterpartyId),
+    receivingEntity: shortId(receivingEntity),
+    tokenId,
+    amount: formatAmount(amount),
+    rebalanceQuoteId,
+  });
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -44,7 +54,12 @@ export async function handleR2C(
     tokenId,
   );
   if (currentReserve < amount) {
-    console.log(`❌ r2c: Insufficient reserve ${currentReserve} < ${amount}`);
+    r2cLog.debug('reserve.insufficient', {
+      entity: shortId(entityState.entityId),
+      tokenId,
+      currentReserve: formatAmount(currentReserve),
+      amount: formatAmount(amount),
+    });
     addMessage(newState,
       `❌ Insufficient reserve for collateral deposit: have ${currentReserve}, need ${amount} token ${tokenId}`
     );
@@ -53,7 +68,10 @@ export async function handleR2C(
 
   // Validate: Does account exist?
   if (isLocalReceivingEntity && !entityState.accounts.has(counterpartyId)) {
-    console.log(`❌ r2c: No account with ${counterpartyId}`);
+    r2cLog.debug('account.missing', {
+      entity: shortId(entityState.entityId),
+      counterparty: shortId(counterpartyId),
+    });
     addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId?.slice(-4)}`
     );
@@ -68,15 +86,32 @@ export async function handleR2C(
     }
     const account = newState.accounts.get(counterpartyId);
     const quote = account?.activeRebalanceQuote;
-    console.log(`🔍 r2c: quote validation - hasAccount=${!!account}, quote=${JSON.stringify(quote ? { quoteId: quote.quoteId, accepted: quote.accepted, feeAmount: String(quote.feeAmount) } : null)}`);
+    r2cLog.debug('quote.validate', {
+      entity: shortId(entityState.entityId),
+      counterparty: shortId(counterpartyId),
+      hasAccount: Boolean(account),
+      quote: quote
+        ? {
+          quoteId: quote.quoteId,
+          accepted: quote.accepted,
+          feeTokenId: quote.feeTokenId,
+          feeAmount: formatAmount(quote.feeAmount),
+        }
+        : null,
+    });
 
     if (!quote) {
-      console.log(`❌ r2c: no active quote`);
+      r2cLog.debug('quote.missing', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyId) });
       addMessage(newState, `❌ Rebalance fee: no active quote for ${counterpartyId.slice(-4)}`);
       return { newState, outputs };
     }
     if (quote.quoteId !== rebalanceQuoteId) {
-      console.log(`❌ r2c: quoteId mismatch ${quote.quoteId} !== ${rebalanceQuoteId}`);
+      r2cLog.debug('quote.id_mismatch', {
+        entity: shortId(entityState.entityId),
+        counterparty: shortId(counterpartyId),
+        expected: quote.quoteId,
+        actual: rebalanceQuoteId,
+      });
       addMessage(newState, `❌ Rebalance fee: quoteId mismatch (expected ${quote.quoteId}, got ${rebalanceQuoteId})`);
       return { newState, outputs };
     }
@@ -120,7 +155,14 @@ export async function handleR2C(
     // Clear the quote (consumed)
     delete account!.activeRebalanceQuote;
 
-    console.log(`💰 Rebalance fee collected: ${rebalanceFeeAmount} token ${rebalanceFeeTokenId} (quoteId: ${rebalanceQuoteId})`);
+    r2cLog.debug('fee.collected', {
+      entity: shortId(entityState.entityId),
+      counterparty: shortId(counterpartyId),
+      feeTokenId: rebalanceFeeTokenId,
+      feeAmount: formatAmount(rebalanceFeeAmount),
+      rebalanceQuoteId,
+      mempoolOps: mempoolOps.length,
+    });
   }
 
   // CRITICAL: Do NOT update state here - wait for SettlementProcessed event from j-watcher
@@ -144,9 +186,13 @@ export async function handleR2C(
     `📦 Queued R→C: ${amount} token ${tokenId} to ${receivingEntity.slice(-4)}↔${counterpartyId.slice(-4)} (use j_broadcast to commit)`
   );
 
-  console.log(`✅ r2c: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Counterparty: ${counterpartyId.slice(-4)}`);
-  console.log(`   Token: ${tokenId}, Amount: ${amount}`);
+  r2cLog.debug('jbatch.queued', {
+    entity: shortId(entityState.entityId),
+    receivingEntity: shortId(receivingEntity),
+    counterparty: shortId(counterpartyId),
+    tokenId,
+    amount: formatAmount(amount),
+  });
 
   return { newState, outputs, mempoolOps };
 }
