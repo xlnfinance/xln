@@ -18,8 +18,10 @@ export type MeshJurisdictionConfig = {
 const hasRequiredContracts = (entry: unknown): entry is MeshJurisdictionConfig => {
   const jurisdiction = entry as MeshJurisdictionConfig | null | undefined;
   return Boolean(
-    jurisdiction?.contracts?.depository &&
-    jurisdiction.contracts.entityProvider,
+    jurisdiction?.contracts?.account &&
+    jurisdiction.contracts.depository &&
+    jurisdiction.contracts.entityProvider &&
+    jurisdiction.contracts.deltaTransformer,
   );
 };
 
@@ -87,7 +89,7 @@ export const resolveSecondaryJurisdictions = <T extends MeshJurisdictionConfig =
   const data = loadJurisdictions();
   const entries = Object.entries(data.jurisdictions ?? {});
   return entries
-    .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && jurisdiction?.contracts?.depository && jurisdiction?.contracts?.entityProvider))
+    .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && hasRequiredContracts(jurisdiction)))
     .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction as MeshJurisdictionConfig, primaryRpc))
     .map(([, jurisdiction]) => jurisdiction as unknown as T);
 };

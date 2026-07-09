@@ -86,7 +86,7 @@ const cloneCrossJurisdictionRoutesInState = (state: EntityState, source: EntityS
 };
 
 const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine, source: AccountMachine = account): void => {
-  account.mempool = source.mempool.map(cloneAccountTxForState);
+  account.mempool = (source.mempool ?? []).map(cloneAccountTxForState);
   account.currentFrame = cloneCrossJurisdictionAccountFrameRoute(source.currentFrame);
   if (source.pendingFrame) account.pendingFrame = cloneCrossJurisdictionAccountFrameRoute(source.pendingFrame);
   if (source.pendingAccountInput) {

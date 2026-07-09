@@ -62,6 +62,7 @@
   let remoteRuntimeAuthInput = $state('');
   let remoteRuntimeAuthError = $state('');
   let claimingActiveTabLock = $state(false);
+  let runtimeImportLocationInFlight = false;
   let releaseActiveTabLock: (() => void) | null = null;
   const pageSearch = $derived(browser ? $page.url.search : '');
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
@@ -197,6 +198,27 @@
       stripRemoteRuntimeParams();
     }
     return 'continue';
+  }
+
+  async function processRuntimeImportLocationChange(): Promise<void> {
+    if (runtimeImportLocationInFlight || !hasActiveTabLock || isInactiveTabStandby()) return;
+    const importPayload = readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash();
+    const importSource = readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash();
+    if (!importPayload && !importSource) return;
+    runtimeImportLocationInFlight = true;
+    try {
+      await importRemoteRuntimesIntoApp({
+        payload: importPayload,
+        source: importSource,
+      });
+      await activateAppAfterRuntimeChoice();
+    } catch (err) {
+      logAppShellDiagnostic('Remote runtime import failed', err);
+      error.set((err as Error)?.message || 'Remote runtime import failed');
+      isLoading.set(false);
+    } finally {
+      runtimeImportLocationInFlight = false;
+    }
   }
 
   async function bootAfterActiveTabClaim(options: {
@@ -425,7 +447,10 @@
 
     const handleLocationChange = () => {
       syncHashLocation();
-      void maybeHandleResetHash();
+      void (async () => {
+        if (await maybeHandleResetHash()) return;
+        await processRuntimeImportLocationChange();
+      })();
     };
 
     syncHashLocation();

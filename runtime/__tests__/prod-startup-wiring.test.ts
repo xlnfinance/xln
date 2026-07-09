@@ -570,7 +570,7 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain('await stopProcess(api, 120_000);');
   });
 
-  test('managed runtime quiesce stops network IO before waiting for teardown drain', () => {
+  test('managed runtime teardown drains the runtime loop before stopping network IO', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     const sources = [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
@@ -585,11 +585,14 @@ describe('production startup wiring', () => {
         "if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {",
         'return new Response(safeStringify({ ok: true, runtimeDrained: drained',
       );
-      expect(quiesceBlock.indexOf('stopP2P(env);')).toBeLessThan(
-        quiesceBlock.indexOf('waitForRuntimeWorkDrained(env, 20_000, 750)'),
+      expect(quiesceBlock.indexOf('waitForRuntimeWorkDrained(env, 20_000, 750)')).toBeLessThan(
+        quiesceBlock.indexOf('stopRuntimeLoopAndWait(env, 5_000)'),
       );
-      expect(quiesceBlock.indexOf('stopJurisdictionWatchers(env);')).toBeLessThan(
-        quiesceBlock.indexOf('waitForRuntimeWorkDrained(env, 20_000, 750)'),
+      expect(quiesceBlock.indexOf('stopRuntimeLoopAndWait(env, 5_000)')).toBeLessThan(
+        quiesceBlock.indexOf('stopP2P(env);'),
+      );
+      expect(quiesceBlock.indexOf('stopP2P(env);')).toBeLessThan(
+        quiesceBlock.indexOf('stopJurisdictionWatchers(env);'),
       );
 
       const shutdownBlock = extractSourceBlock(
@@ -597,11 +600,11 @@ describe('production startup wiring', () => {
         'const shutdown = async',
         'const stopParentWatch = startParentLivenessWatch',
       );
-      expect(shutdownBlock.indexOf('stopP2P(env);')).toBeLessThan(
-        shutdownBlock.indexOf('stopRuntimeLoopAndWait(env, 10_000)'),
+      expect(shutdownBlock.indexOf('stopRuntimeLoopAndWait(env, 10_000)')).toBeLessThan(
+        shutdownBlock.indexOf('stopP2P(env);'),
       );
-      expect(shutdownBlock.indexOf('stopJurisdictionWatchers(env);')).toBeLessThan(
-        shutdownBlock.indexOf('stopRuntimeLoopAndWait(env, 10_000)'),
+      expect(shutdownBlock.indexOf('stopP2P(env);')).toBeLessThan(
+        shutdownBlock.indexOf('stopJurisdictionWatchers(env);'),
       );
     }
   });
@@ -647,6 +650,7 @@ describe('production startup wiring', () => {
     const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
     const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const isolatedRunner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
 
     expect(baseline).toContain('allowAutoReset?: boolean;');
     expect(baseline).toContain('if (!resolved.allowAutoReset) {');
@@ -677,6 +681,8 @@ describe('production startup wiring', () => {
     expect(appLayout).toContain('const result = await importRemoteRuntimeEntries(entries)');
     expect(importFlow).toContain('await Promise.allSettled(workers)');
     expect(importFlow).toContain('writeRemoteRuntimeImportSummary(results, entries.length, importedAt)');
+    expect(isolatedRunner).toContain("'--wallet-url',\n        `${webUrl}/app`,\n        '--allow-reset'");
+    expect(isolatedRunner).not.toContain("'--custody-db-root',\n          join(dbPath, 'custody'),\n          '--wallet-url'");
   });
 
   test('prod diagnose accepts the market maker terminal startup phase', () => {
@@ -1020,6 +1026,8 @@ describe('production startup wiring', () => {
     expect(fatalHelper).toContain('/PENDING[-_]FRAME[-_]STALE/');
     expect(fatalHelper).toContain('/MM_READY_TIMEOUT/');
     expect(fatalHelper).toContain('/CROSS_J_[A-Z0-9_:-]*/');
+    expect(fatalHelper).toContain('/ROUTE_NO_P2P/');
+    expect(fatalHelper).toContain('/child\\.unexpected_exit/');
     expect(fatalHelper).toContain('export const E2E_FATAL_LOG_TAIL_LINES = 80;');
     expect(runner).toContain('const startFailFastLogMonitor = (');
     expect(runner).toContain("import { assertMinDiskFree } from '../orchestrator/storage-monitor';");
@@ -1043,7 +1051,7 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"test:persistence:cli": "bun runtime/scripts/test-artifact-cleanup.ts --reason=persistence-cli && bun runtime/scripts/persistence-wal-smoke.ts"');
     expect(packageJson).toContain('"test:watchtower:smoke": "bun runtime/scripts/test-artifact-cleanup.ts --reason=watchtower-smoke && bun runtime/scripts/watchtower-smoke.ts"');
     expect(packageJson).toContain('"test:rpc-settlement": "bun runtime/scripts/test-artifact-cleanup.ts --reason=rpc-settlement && bun runtime/scripts/rpc-settlement-parity.ts"');
-    expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- bunx hardhat test test/*.ts test/*.cjs"');
+    expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'");
@@ -1079,6 +1087,7 @@ describe('production startup wiring', () => {
     expect(e2eCoreRunner).toContain('env: sanitizeChildProcessEnv(process.env)');
     expect(runner).toContain("import { sanitizeChildProcessEnv } from '../child-process-env';");
     expect(runner).toContain('env: sanitizeChildProcessEnv(process.env)');
+    expect(runner).toContain("XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1'");
     expect(allTestsFast).toContain('env: sanitizeChildProcessEnv(env)');
     expect(allTestsFast).toContain('const e2eEnv = withoutTestArtifactCleanupDoneEnv(childEnv);');
     expect(allTestsFast).toContain('e2eEnv,');

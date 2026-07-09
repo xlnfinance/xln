@@ -167,6 +167,10 @@ async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
   if (proc.exitCode === null) proc.kill('SIGKILL');
 }
 
+function isRelayReadyLogText(text: string): boolean {
+  return text.includes('listening on') || text.includes('service.listen');
+}
+
 async function waitRelayReady(proc: PipedChildProcess, timeoutMs: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -178,7 +182,7 @@ async function waitRelayReady(proc: PipedChildProcess, timeoutMs: number): Promi
 
     const onData = (chunk: Buffer) => {
       const text = chunk.toString();
-      if (text.includes('listening on')) {
+      if (isRelayReadyLogText(text)) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);

@@ -299,6 +299,7 @@ describe('test artifact cleanup', () => {
     expect(scenarioRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'scenarios', argv: process.argv.slice(2) })");
     expect(scenarioRunner).toContain("cleanupTestArtifactsBeforeRun({ reason: 'scenario', argv: process.argv.slice(2) })");
     expect(scenarioRunner).toContain("[TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1'");
+    expect(scenarioRunner).toContain("text.includes('service.listen')");
     expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-playwright --scope=e2e');
     expect(frontendPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=frontend-ui --scope=e2e');
     expect(contractsPackage).toContain('../runtime/scripts/run-with-test-cleanup.ts --cwd=.. --reason=contracts');

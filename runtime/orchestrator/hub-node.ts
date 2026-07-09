@@ -713,7 +713,12 @@ const readCurrentNetworkVersion = (): string => {
 };
 
 const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): Promise<void> => {
-  if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
+  if (
+    !jadapter.addresses?.account ||
+    !jadapter.addresses?.depository ||
+    !jadapter.addresses?.entityProvider ||
+    !jadapter.addresses?.deltaTransformer
+  ) {
     throw new Error('JURISDICTION_WRITE_ADDRESSES_MISSING');
   }
   const publicRpcUrl = toPublicRpcUrl(rpcUrl);
@@ -811,11 +816,13 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
   if (!replica) return null;
 
   const addresses = replica.jadapter?.addresses ?? {};
+  const account = String(addresses.account || replica.contracts?.account || '').trim();
   const depository =
     String(addresses.depository || replica.depositoryAddress || replica.contracts?.depository || '').trim();
   const entityProvider =
     String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
-  if (!depository || !entityProvider) return null;
+  const deltaTransformer = String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || '').trim();
+  if (!account || !depository || !entityProvider || !deltaTransformer) return null;
 
   const version = readCurrentJurisdictionsVersion();
   const networkVersion = readCurrentNetworkVersion();
@@ -837,10 +844,10 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
         chainId: Number(replica.chainId || 31337),
         rpc: toPublicRpcUrl(String(replica.rpcs?.[0] || resolvedArgs.rpcUrl || '/rpc')),
         contracts: {
-          account: String(addresses.account || replica.contracts?.account || ''),
+          account,
           depository,
           entityProvider,
-          deltaTransformer: String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || ''),
+          deltaTransformer,
         },
       },
     },
@@ -849,7 +856,12 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
 
 const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> => {
   if (jadapter.mode === 'browservm') return;
-  const hasAddresses = Boolean(jadapter.addresses?.depository && jadapter.addresses?.entityProvider);
+  const hasAddresses = Boolean(
+    jadapter.addresses?.account &&
+    jadapter.addresses?.depository &&
+    jadapter.addresses?.entityProvider &&
+    jadapter.addresses?.deltaTransformer,
+  );
   if (hasAddresses) {
     if (jurisdictionImportDiagnostics) {
       jurisdictionImportDiagnostics.usedContracts = true;
@@ -1714,13 +1726,14 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
         shuttingDown = true;
         if (meshLoop) clearInterval(meshLoop);
-        stopP2P(env);
-        stopJurisdictionWatchers(env);
         const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
         if (!drained) {
           console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
         }
-        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: true }), { headers });
+        const idle = await stopRuntimeLoopAndWait(env, 5_000);
+        stopP2P(env);
+        stopJurisdictionWatchers(env);
+        return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), { headers });
       }
 
       if (pathname === '/api/control/runtime/persist-ready-snapshot' && request.method === 'POST') {
@@ -2441,13 +2454,13 @@ const run = async (): Promise<void> => {
     shutdownStarted = true;
     shuttingDown = true;
     if (meshLoop) clearInterval(meshLoop);
-    stopP2P(env);
-    stopJurisdictionWatchers(env);
     try {
       const idle = await stopRuntimeLoopAndWait(env, 10_000);
       if (!idle) {
         console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
       }
+      stopP2P(env);
+      stopJurisdictionWatchers(env);
       await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
       await closeRuntimeDb(env);
       await closeInfraDb(env);

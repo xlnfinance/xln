@@ -263,7 +263,9 @@ export function collectOfferLifecyclesFrom(
         giveTokenId?: unknown;
         wantTokenId?: unknown;
         giveAmount?: unknown;
+        originalGiveAmount?: unknown;
         wantAmount?: unknown;
+        originalWantAmount?: unknown;
         priceTicks?: unknown;
         createdHeight?: unknown;
         cancelRequested?: unknown;
@@ -271,8 +273,12 @@ export function collectOfferLifecyclesFrom(
       };
       const giveTokenId = Number(entry.giveTokenId || 0);
       const wantTokenId = Number(entry.wantTokenId || 0);
-      const giveAmount = toBigIntSafe(entry.giveAmount) ?? 0n;
-      const wantAmount = toBigIntSafe(entry.wantAmount) ?? 0n;
+      const liveGiveAmount = toBigIntSafe(entry.giveAmount) ?? 0n;
+      const liveWantAmount = toBigIntSafe(entry.wantAmount) ?? 0n;
+      const originalGiveAmount = toBigIntSafe(entry.originalGiveAmount);
+      const originalWantAmount = toBigIntSafe(entry.originalWantAmount);
+      const giveAmount = originalGiveAmount && originalGiveAmount > 0n ? originalGiveAmount : liveGiveAmount;
+      const wantAmount = originalWantAmount && originalWantAmount > 0n ? originalWantAmount : liveWantAmount;
       if (!Number.isFinite(giveTokenId) || !Number.isFinite(wantTokenId) || giveTokenId <= 0 || wantTokenId <= 0) continue;
       if (giveAmount <= 0n || wantAmount <= 0n) continue;
       const priceTicks = toBigIntSafe(entry.priceTicks) ?? computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount);

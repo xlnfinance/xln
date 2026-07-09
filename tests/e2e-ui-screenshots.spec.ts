@@ -434,6 +434,14 @@ test('ui screenshot smoke captures operator admin surfaces', async ({ page }, te
     tags: ['health', 'admin'],
   });
 
+  await ensureE2EBaseline(page, {
+    timeoutMs: 120_000,
+    requireHubMesh: true,
+    requireMarketMaker: true,
+    requireCustody: true,
+    minHubCount: 3,
+  });
+
   const importUrl = await resolveRuntimeImportAppUrl(page, {
     appBaseUrl: APP_BASE_URL,
     apiBaseUrl: API_BASE_URL,

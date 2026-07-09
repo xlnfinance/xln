@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { updateJurisdictionsJson } from '../server/jurisdictions';
+import { buildRuntimeJurisdictionsJson, updateJurisdictionsJson } from '../server/jurisdictions';
 
 const tempRoots: string[] = [];
 
@@ -58,5 +58,51 @@ describe('server jurisdiction writer', () => {
     expect(written.jurisdictions['renamedPrimary']?.contracts?.['depository'])
       .toBe('0x0000000000000000000000000000000000000004');
     expect(written.jurisdictions['arrakis']).toBeUndefined();
+  });
+
+  test('runtime jurisdiction export waits for the full contract set', async () => {
+    const partialEnv = {
+      activeJurisdiction: 'Testnet',
+      jReplicas: new Map([
+        ['Testnet', {
+          name: 'Testnet',
+          chainId: 31337,
+          rpcs: ['http://127.0.0.1:8545'],
+          contracts: {
+            depository: '0x0000000000000000000000000000000000000001',
+            entityProvider: '0x0000000000000000000000000000000000000002',
+          },
+        }],
+      ]),
+    };
+
+    await expect(buildRuntimeJurisdictionsJson(partialEnv as never)).resolves.toBeNull();
+
+    const completeEnv = {
+      activeJurisdiction: 'Testnet',
+      jReplicas: new Map([
+        ['Testnet', {
+          name: 'Testnet',
+          chainId: 31337,
+          rpcs: ['http://127.0.0.1:8545'],
+          contracts: {
+            account: '0x0000000000000000000000000000000000000003',
+            depository: '0x0000000000000000000000000000000000000004',
+            entityProvider: '0x0000000000000000000000000000000000000005',
+            deltaTransformer: '0x0000000000000000000000000000000000000006',
+          },
+        }],
+      ]),
+    };
+
+    const json = await buildRuntimeJurisdictionsJson(completeEnv as never);
+    expect(json).toBeTruthy();
+    const parsed = JSON.parse(String(json));
+    expect(parsed.jurisdictions.testnet.contracts).toEqual({
+      account: '0x0000000000000000000000000000000000000003',
+      depository: '0x0000000000000000000000000000000000000004',
+      entityProvider: '0x0000000000000000000000000000000000000005',
+      deltaTransformer: '0x0000000000000000000000000000000000000006',
+    });
   });
 });

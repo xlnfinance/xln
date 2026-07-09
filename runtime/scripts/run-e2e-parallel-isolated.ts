@@ -1881,6 +1881,8 @@ const runShard = async (
         rpc2Url,
         '--db-root',
         dbPath,
+        '--wallet-url',
+        `${webUrl}/app`,
         '--allow-reset',
         ...(args.prewaitHealth === 'reset' ? ['--defer-initial-reset'] : []),
         ...(task.requireMarketMaker ? ['--mm'] : []),
@@ -1892,8 +1894,6 @@ const runShard = async (
           String(custodyDaemonPort),
           '--custody-db-root',
           join(dbPath, 'custody'),
-          '--wallet-url',
-          `${webUrl}/app`,
         ] : []),
       ],
       {
@@ -1907,6 +1907,7 @@ const runShard = async (
           XLN_SKIP_STALE_REAP: '1',
           XLN_RUNTIME_IMPORT_MANIFEST_PATH: runtimeImportManifestPath,
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
+          XLN_AUTO_PROVISION_EXTERNAL_FAUCET: process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] ?? '1',
           ...(process.env['XLN_MIN_DISK_FREE_BYTES']
             ? { XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] }
             : {}),
@@ -2074,6 +2075,38 @@ const runShard = async (
     const runtimeFatalLines = findRuntimeFatalLogLines(logPath);
     if (runtimeFatalLines.length > 0) {
       teardownReason = `E2E_FATAL_RUNTIME_LOG:\n${runtimeFatalLines.join('\n')}`;
+      await captureShardFailureForensics({
+        logsDir,
+        shard,
+        apiUrl,
+        log,
+      });
+      return finishResult({
+        shard,
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        logPath,
+        target: task.pwTargets[0] || `shard-${task.shard}`,
+        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
+        requireMarketMaker: task.requireMarketMaker,
+        requireCustody: task.requireCustody,
+        scenario: task.scenario,
+        phaseMs,
+        error: teardownReason,
+      });
+    }
+
+    await flushLog(log, '[runner] playwright passed; stopping api before final runtime fatal scan\n');
+    await stopProcess(api, 35_000);
+    await stopShardRuntimePorts(apiPort, log);
+    await delay(250);
+    await flushLog(log, '[runner] api stopped; scanning runtime fatal markers\n');
+    const postTeardownFatalLines = findRuntimeFatalLogLines(logPath);
+    const monitorFatalReason = String(teardownReason || '').startsWith('E2E_FATAL_RUNTIME_LOG')
+      ? String(teardownReason)
+      : null;
+    if (monitorFatalReason || postTeardownFatalLines.length > 0) {
+      teardownReason = monitorFatalReason ?? `E2E_FATAL_RUNTIME_LOG:\n${postTeardownFatalLines.join('\n')}`;
       await captureShardFailureForensics({
         logsDir,
         shard,

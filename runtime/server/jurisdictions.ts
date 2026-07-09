@@ -153,11 +153,13 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
   if (!replica) return null;
 
   const addresses = replica.jadapter?.addresses ?? {};
+  const account = String(addresses.account || replica.contracts?.account || '').trim();
   const depository =
     String(addresses.depository || replica.depositoryAddress || replica.contracts?.depository || '').trim();
   const entityProvider =
     String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
-  if (!depository || !entityProvider) return null;
+  const deltaTransformer = String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || '').trim();
+  if (!account || !depository || !entityProvider || !deltaTransformer) return null;
 
   const version = await readCanonicalJurisdictionsVersion();
   const networkVersion = await readCanonicalNetworkVersion();
@@ -179,10 +181,10 @@ export const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<s
         chainId: Number(replica.chainId || 31337),
         rpc: toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || replica.rpcs?.[0] || '/rpc')),
         contracts: {
-          account: String(addresses.account || replica.contracts?.account || ''),
+          account,
           depository,
           entityProvider,
-          deltaTransformer: String(addresses.deltaTransformer || replica.contracts?.deltaTransformer || ''),
+          deltaTransformer,
         },
       },
     },

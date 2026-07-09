@@ -20,6 +20,7 @@ import {
   startDisputeFromManageUi,
 } from './utils/e2e-account-workspace';
 import { capturePageScreenshot } from './utils/e2e-screenshots';
+import { getJurisdictionStackId } from '../runtime/jurisdiction-stack';
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -149,20 +150,28 @@ async function readOnchainReserveViaAnvil(
   const apiBase = await getActiveApiBase(page);
   const jurisdiction = await page.evaluate(({ entityId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return '';
+    if (!env?.eReplicas) return null;
     const entityLower = String(entityId || '').toLowerCase();
     for (const [key, rep] of env.eReplicas.entries()) {
       const [eid] = String(key).split(':');
       if (String(eid || '').toLowerCase() !== entityLower) continue;
-      return String(rep?.state?.config?.jurisdiction?.name || rep?.position?.jurisdiction || '').trim();
+      const config = rep?.state?.config?.jurisdiction || null;
+      if (config && typeof config === 'object') {
+        return {
+          chainId: Number(config.chainId),
+          depositoryAddress: String(config.depositoryAddress || '').trim(),
+        };
+      }
+      return null;
     }
-    return '';
-  }, { entityId }).catch(() => '');
+    return null;
+  }, { entityId }).catch(() => null);
+  const jurisdictionRef = getJurisdictionStackId(jurisdiction);
   const params = new URLSearchParams({
     entityId,
     tokenId: '1',
   });
-  if (jurisdiction) params.set('jurisdiction', jurisdiction);
+  if (jurisdictionRef) params.set('jurisdiction', jurisdictionRef);
   if (opts?.hubEntityId) params.set('hubEntityId', opts.hubEntityId);
   const response = await page.request.get(
     `${apiBase}/api/debug/reserve?${params.toString()}`,

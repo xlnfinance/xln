@@ -92,6 +92,15 @@ describe('mesh jurisdiction config resolution', () => {
           rpc: '/rpc',
           contracts: { depository: '0x1' },
         },
+        legacyPartial: {
+          name: 'Legacy Partial',
+          chainId: 1,
+          rpc: '/rpc',
+          contracts: {
+            depository: '0x0000000000000000000000000000000000000001',
+            entityProvider: '0x0000000000000000000000000000000000000002',
+          },
+        },
       },
     }, () => {
       expect(() => resolveMeshJurisdictionConfig('/rpc')).toThrow('JURISDICTION_NOT_FOUND');

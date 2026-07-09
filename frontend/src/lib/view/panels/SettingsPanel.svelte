@@ -109,24 +109,32 @@
   let layoutJson = '';
   let layoutError = '';
   let layoutSuccess = '';
+  let settingsStorageError = '';
+
+  function formatSettingsError(action: string, err: unknown): string {
+    const message = err instanceof Error ? err.message : String(err);
+    return `Settings ${action} failed: ${message}`;
+  }
 
   // Load settings from localStorage on mount
   async function loadSettings() {
     try {
       const stored = localStorage.getItem('xln-view-settings');
+      const storedSettings = stored ? JSON.parse(stored) : null;
       if (stored) {
-        settings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+        settings = { ...DEFAULT_SETTINGS, ...storedSettings };
       }
+      settingsStorageError = '';
 
       // Auto-detect WebGPU if not explicitly set by user
-      if (!stored || !JSON.parse(stored).rendererMode) {
+      if (!storedSettings?.rendererMode) {
         if (typeof navigator !== 'undefined' && navigator.gpu) {
           settings.rendererMode = 'webgpu';
           saveSettings();
         }
       }
     } catch (err) {
-      console.error('[Settings] Failed to load:', err);
+      settingsStorageError = formatSettingsError('load', err);
     }
   }
 
@@ -151,8 +159,9 @@
   function saveSettings() {
     try {
       localStorage.setItem('xln-view-settings', JSON.stringify(settings));
+      settingsStorageError = '';
     } catch (err) {
-      console.error('[Settings] Failed to save:', err);
+      settingsStorageError = formatSettingsError('save', err);
     }
   }
 
@@ -287,9 +296,6 @@
       layoutError = `Load failed: ${err}`;
     }
   }
-
-  // Load on mount
-  loadSettings();
 </script>
 
 <div class="settings-panel">
@@ -297,6 +303,12 @@
     <h3> Settings</h3>
     <button class="reset-btn" on:click={resetToDefaults}>Reset All</button>
   </div>
+
+  {#if settingsStorageError}
+    <div class="status-message error" data-testid="settings-storage-error" role="alert" aria-live="assertive">
+      {settingsStorageError}
+    </div>
+  {/if}
 
   <div class="category-tabs">
     <button

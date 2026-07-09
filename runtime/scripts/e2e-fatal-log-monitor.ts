@@ -15,6 +15,9 @@ export const RUNTIME_FATAL_LOG_PATTERNS: RegExp[] = [
   /processBatch failed/,
   /batch from .* FAILED/,
   /Runtime loop error/,
+  /\[ERROR\]\[runtime\] loop\.error/,
+  /ROUTE_NO_P2P/,
+  /child\.unexpected_exit/,
   /ENTITY_FRAME_TX_FAILED/,
 ];
 

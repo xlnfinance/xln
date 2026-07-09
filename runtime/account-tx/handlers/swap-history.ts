@@ -20,6 +20,24 @@ function ensureSwapClosedOrders(accountMachine: AccountMachine): Map<string, Swa
   return accountMachine.swapClosedOrders;
 }
 
+const sameOptionalBigint = (left: bigint | undefined, right: bigint | undefined): boolean =>
+  (left ?? null) === (right ?? null);
+
+const sameResolveHistoryEntry = (
+  left: SwapOrderResolveHistoryEntry,
+  right: SwapOrderResolveHistoryEntry,
+): boolean =>
+  left.fillRatio === right.fillRatio &&
+  sameOptionalBigint(left.fillNumerator, right.fillNumerator) &&
+  sameOptionalBigint(left.fillDenominator, right.fillDenominator) &&
+  left.cancelRemainder === right.cancelRemainder &&
+  left.height === right.height &&
+  sameOptionalBigint(left.executionGiveAmount, right.executionGiveAmount) &&
+  sameOptionalBigint(left.executionWantAmount, right.executionWantAmount) &&
+  left.feeTokenId === right.feeTokenId &&
+  sameOptionalBigint(left.feeAmount, right.feeAmount) &&
+  (left.comment ?? '') === (right.comment ?? '');
+
 export function recordSwapOfferLifecycle(
   accountMachine: AccountMachine,
   offer: SwapOffer,
@@ -30,8 +48,10 @@ export function recordSwapOfferLifecycle(
     offerId: offer.offerId,
     giveTokenId: offer.giveTokenId,
     giveAmount: offer.giveAmount,
+    originalGiveAmount: offer.giveAmount,
     wantTokenId: offer.wantTokenId,
     wantAmount: offer.wantAmount,
+    originalWantAmount: offer.wantAmount,
     ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
     createdHeight: offer.createdHeight,
     ...(offer.crossJurisdiction ? { crossJurisdiction: cloneCrossJurisdictionRoute(offer.crossJurisdiction) } : {}),
@@ -74,8 +94,10 @@ export function recordSwapResolveLifecycle(
       offerId,
       giveTokenId: fallbackOffer.giveTokenId,
       giveAmount: fallbackOffer.giveAmount,
+      originalGiveAmount: fallbackOffer.giveAmount,
       wantTokenId: fallbackOffer.wantTokenId,
       wantAmount: fallbackOffer.wantAmount,
+      originalWantAmount: fallbackOffer.wantAmount,
       ...(fallbackOffer.priceTicks !== undefined ? { priceTicks: fallbackOffer.priceTicks } : {}),
       createdHeight: fallbackOffer.createdHeight ?? currentHeight,
       cancelRequested: false,
@@ -84,7 +106,10 @@ export function recordSwapResolveLifecycle(
     };
     history.set(offerId, entry);
   }
+  entry.originalGiveAmount ??= entry.giveAmount;
+  entry.originalWantAmount ??= entry.wantAmount;
   entry.lastUpdatedHeight = currentHeight;
+  if (entry.resolves.some((existing) => sameResolveHistoryEntry(existing, resolve))) return;
   entry.resolves.push(resolve);
 }
 

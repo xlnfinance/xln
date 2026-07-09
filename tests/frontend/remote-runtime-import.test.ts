@@ -644,6 +644,9 @@ describe('remote runtime import manager utilities', () => {
     expect(runtimeStore).toContain('validateRemoteRuntimeEntry(entry, { index, importedAt })');
     expect(runtimeStore).toContain('readStoredRemoteRuntimeImports({ dropExpired: true, dropInvalid: true })');
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
+    expect(appLayout).toContain('let runtimeImportLocationInFlight = false;');
+    expect(appLayout).toContain('async function processRuntimeImportLocationChange()');
+    expect(appLayout).toContain('await processRuntimeImportLocationChange();');
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
     expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
     expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');

@@ -97,8 +97,10 @@ export interface SwapOrderHistoryEntry {
   offerId: string;
   giveTokenId: number;
   giveAmount: bigint;
+  originalGiveAmount?: bigint;
   wantTokenId: number;
   wantAmount: bigint;
+  originalWantAmount?: bigint;
   priceTicks?: bigint;
   createdHeight: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
