@@ -165,10 +165,11 @@ const entryFromUnknown = (value: unknown, index: number): RemoteRuntimeImportEnt
 };
 
 const rawImportEntriesFromUnknown = (value: unknown): unknown[] => {
-  const entries = Array.isArray(value)
-    ? value
-    : isRecord(value) && Array.isArray(value['entries'])
-      ? value['entries']
+  const source = isRecord(value) && isRecord(value['manifest']) ? value['manifest'] : value;
+  const entries = Array.isArray(source)
+    ? source
+    : isRecord(source) && Array.isArray(source['entries'])
+      ? source['entries']
       : [];
   if (entries.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_ENTRIES_MISSING');
   return entries;
@@ -399,7 +400,7 @@ export const writeStoredRemoteRuntimeImports = (entries: StoredRemoteRuntimeImpo
 };
 
 export const readStoredRemoteRuntimeImports = (
-  options: { dropExpired?: boolean } = {},
+  options: { dropExpired?: boolean; dropInvalid?: boolean } = {},
 ): StoredRemoteRuntimeImportEntry[] => {
   const storage = remoteRuntimePersistentStorage();
   const session = remoteRuntimeSessionStorage();
@@ -408,8 +409,19 @@ export const readStoredRemoteRuntimeImports = (
   const sessionRaw = String(session?.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY) || '').trim();
   const raw = persistentRaw || sessionRaw;
   if (!raw) return [];
-  const parsed = JSON.parse(raw) as unknown;
-  const rawEntries = rawImportEntriesFromUnknown(parsed);
+  let parsed: unknown;
+  let rawEntries: unknown[];
+  try {
+    parsed = JSON.parse(raw) as unknown;
+    rawEntries = rawImportEntriesFromUnknown(parsed);
+  } catch (error) {
+    if (options.dropInvalid === true) {
+      storage?.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
+      session?.removeItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY);
+      return [];
+    }
+    throw error;
+  }
   const entries: StoredRemoteRuntimeImportEntry[] = [];
   for (const [index, rawEntry] of rawEntries.entries()) {
     let entry: RemoteRuntimeImportEntry;
@@ -471,7 +483,7 @@ export const persistRemoteRuntimeImports = (
   options: { merge?: boolean } = {},
 ): StoredRemoteRuntimeImportEntry[] => {
   const next = options.merge
-    ? mergeStoredRemoteRuntimeImports(readStoredRemoteRuntimeImports({ dropExpired: true }), entries)
+    ? mergeStoredRemoteRuntimeImports(readStoredRemoteRuntimeImports({ dropExpired: true, dropInvalid: true }), entries)
     : limitRemoteRuntimeImportEntries(entries);
   writeStoredRemoteRuntimeImports(next);
   return next;

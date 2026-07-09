@@ -11,4 +11,6 @@ test('account frame proposal path uses structured logging only', () => {
   expect(source).toContain("accountLog.debug('proposal.profile'");
   expect(source).toContain("accountLog.warn('proposal.profile'");
   expect(source).not.toContain('console.');
+  expect(source).not.toContain('markProfile');
+  expect(source).not.toContain('profileMarks');
 });

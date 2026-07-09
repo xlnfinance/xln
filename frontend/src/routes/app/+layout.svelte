@@ -169,9 +169,40 @@
     }
   }
 
+  type RemoteRuntimeBootstrapResult = 'continue' | 'pending-auth';
+
+  function showInactiveTabStandby(): void {
+    hasActiveTabLock = false;
+    activeTabLockReady = true;
+    isLoading.set(false);
+    error.set(null);
+  }
+
+  async function processRemoteRuntimeBootstrapFromLocation(): Promise<RemoteRuntimeBootstrapResult> {
+    const importPayload = readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash();
+    const importSource = readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash();
+    const remoteRequest = readRemoteRuntimeRequestFromUrl();
+    await importRemoteRuntimesIntoApp({
+      payload: importPayload,
+      source: importSource,
+    });
+    if (remoteRequest && (remoteRequest.requiresAuthPaste || (!remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest)))) {
+      pendingRemoteRuntime = remoteRequest;
+      stripRemoteRuntimeParams();
+      showInactiveTabStandby();
+      return 'pending-auth';
+    }
+    if (remoteRequest) {
+      persistRemoteRuntimeRequest(remoteRequest);
+      stripRemoteRuntimeParams();
+    }
+    return 'continue';
+  }
+
   async function bootAfterActiveTabClaim(options: {
     replaceExistingLock?: boolean;
     persistDeployVersionAfterBoot?: boolean;
+    processLocationRemoteBootstrap?: boolean;
     errorLabel: string;
   }): Promise<void> {
     activeTabLockReady = false;
@@ -190,6 +221,10 @@
       }
       hasActiveTabLock = true;
       activeTabLockReady = true;
+      if (options.processLocationRemoteBootstrap) {
+        const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation();
+        if (bootstrapResult === 'pending-auth') return;
+      }
       if (lockTestMode) {
         isLoading.set(false);
         error.set(null);
@@ -230,6 +265,7 @@
     try {
       await bootAfterActiveTabClaim({
         replaceExistingLock: true,
+        processLocationRemoteBootstrap: true,
         errorLabel: 'Active tab lock claim failed',
       });
     } finally {
@@ -401,31 +437,13 @@
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
       if (await maybeHandleResetHash()) return;
       const hasExplicitRemoteRuntimeBootstrap = Boolean(importPayload || importSource || remoteRequest);
-      if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;
-      await importRemoteRuntimesIntoApp({
-        payload: importPayload,
-        source: importSource,
-      });
-      if (remoteRequest?.requiresAuthPaste || (remoteRequest && !remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest))) {
-        pendingRemoteRuntime = remoteRequest;
-        stripRemoteRuntimeParams();
-        activeTabLockReady = true;
-        hasActiveTabLock = false;
-        isLoading.set(false);
-        error.set(null);
-        return;
-      }
-      if (remoteRequest) {
-        persistRemoteRuntimeRequest(remoteRequest);
-        stripRemoteRuntimeParams();
-      }
       if (isInactiveTabStandby()) {
-        hasActiveTabLock = false;
-        activeTabLockReady = true;
-        isLoading.set(false);
-        error.set(null);
+        showInactiveTabStandby();
         return;
       }
+      if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;
+      const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation();
+      if (bootstrapResult === 'pending-auth') return;
       releaseActiveTabLock = await initializeActiveTabLock(async () => {
         await deactivateThisTab();
       });

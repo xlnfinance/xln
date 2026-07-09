@@ -279,6 +279,39 @@ describe('remote runtime import manager utilities', () => {
     expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['H1']);
   });
 
+  test('fresh import merge migrates legacy source-wrapper storage', () => {
+    const legacy = makeStored('legacy H1', 8092, 1);
+    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({
+      ok: true,
+      ready: true,
+      manifest: {
+        entries: [legacy],
+      },
+    }));
+
+    expect(readStoredRemoteRuntimeImports()[0]?.label).toBe('legacy H1');
+    const fresh = makeStored('MM', 8095, 2);
+    const merged = persistRemoteRuntimeImports([fresh], { merge: true });
+
+    expect(merged.map(entry => entry.label)).toEqual(['legacy H1', 'MM']);
+    expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['legacy H1', 'MM']);
+  });
+
+  test('fresh import merge drops invalid remote-runtime cache without weakening strict reads', () => {
+    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({ ok: true, ready: false }));
+
+    expect(() => readStoredRemoteRuntimeImports()).toThrow('REMOTE_RUNTIME_IMPORT_ENTRIES_MISSING');
+    expect(readStoredRemoteRuntimeImports({ dropInvalid: true })).toEqual([]);
+    expect(localStorage.getItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY)).toBeNull();
+
+    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify({ ok: true, ready: false }));
+    const fresh = makeStored('Custody', 8088, 2);
+    const merged = persistRemoteRuntimeImports([fresh], { merge: true });
+
+    expect(merged.map(entry => entry.label)).toEqual(['Custody']);
+    expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['Custody']);
+  });
+
   test('persists remote runtime capabilities in local storage across reloads', () => {
     const admin = makeStored('H1 admin', 8092, 1, 'admin');
     persistRemoteRuntimeImports([admin]);
@@ -609,6 +642,7 @@ describe('remote runtime import manager utilities', () => {
     expect(runtimeCreation).not.toContain('console.info');
     expect(vaultStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports();');
     expect(runtimeStore).toContain('validateRemoteRuntimeEntry(entry, { index, importedAt })');
+    expect(runtimeStore).toContain('readStoredRemoteRuntimeImports({ dropExpired: true, dropInvalid: true })');
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
     expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
@@ -632,6 +666,24 @@ describe('remote runtime import manager utilities', () => {
     expect(runtimeStore).not.toContain('Remote runtime import source hydration failed');
     expect(runtimeStore).not.toContain('console.warn');
     expect(runtimeStore).not.toContain('/api/hubs');
+  });
+
+  test('inactive app tabs preserve runtime import links until active-lock claim', () => {
+    const appLayout = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+    const mountStart = appLayout.indexOf('onMount(() => {');
+    const mountSource = appLayout.slice(mountStart);
+    const inactiveCheck = mountSource.indexOf('if (isInactiveTabStandby())');
+    const importBootstrap = mountSource.indexOf('const bootstrapResult = await processRemoteRuntimeBootstrapFromLocation()');
+    const claimStart = appLayout.indexOf('async function claimActiveTabLockInPlace');
+    const claimEnd = appLayout.indexOf('async function acceptRemoteRuntime', claimStart);
+    const claimSource = appLayout.slice(claimStart, claimEnd);
+
+    expect(mountStart).toBeGreaterThan(0);
+    expect(inactiveCheck).toBeGreaterThan(0);
+    expect(importBootstrap).toBeGreaterThan(inactiveCheck);
+    expect(claimSource).toContain('processLocationRemoteBootstrap: true');
+    expect(appLayout).toContain('async function processRemoteRuntimeBootstrapFromLocation()');
+    expect(appLayout).toContain('showInactiveTabStandby()');
   });
 
   test('remote projection refresh keeps imported non-hub runtime identity instead of first hub', () => {

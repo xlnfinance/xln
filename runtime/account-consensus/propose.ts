@@ -67,10 +67,6 @@ export async function proposeAccountFrame(
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
 ): Promise<ProposeAccountFrameResult> {
   const profileStartMs = getPerfMs();
-  const profileMarks: Record<string, number> = {};
-  const markProfile = (name: string): void => {
-    profileMarks[name] = Math.round(getPerfMs() - profileStartMs);
-  };
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -231,8 +227,6 @@ export async function proposeAccountFrame(
       for (const { tx, result } of optimisticResults) collectSuccessfulTx(tx, result);
     }
   }
-  markProfile('validated');
-
   if (!canOptimisticallyValidateBatch || optimisticBatchFailed) {
     if (optimisticBatchFailed) {
       clonedMachine = cloneAccountMachine(accountMachine);
@@ -353,7 +347,6 @@ export async function proposeAccountFrame(
   };
 
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
-  markProfile('frameHash');
 
   let newFrame: AccountFrame;
   try {
@@ -429,7 +422,6 @@ export async function proposeAccountFrame(
       events,
     };
   }
-  markProfile('proof');
 
   // Build both hankos in one signer-key/precheck pass. They remain separate
   // hankos over separate hashes; batching here only removes duplicated local
@@ -438,7 +430,6 @@ export async function proposeAccountFrame(
     newFrame.stateHash,
     disputeHash,
   ]);
-  markProfile('sign');
   if (!frameHanko) {
     return { success: false, error: 'Failed to build frame hanko', events };
   }
@@ -553,7 +544,6 @@ export async function proposeAccountFrame(
       txTypes: Array.from(new Set(newFrame.accountTxs.map((tx) => tx.type))).sort(),
       optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
       totalMs: profileTotalMs,
-      marks: profileMarks,
     };
     if (ACCOUNT_PROPOSAL_PROFILE) accountLog.warn('proposal.profile', profile);
     else accountLog.debug('proposal.profile', profile);

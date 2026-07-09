@@ -362,7 +362,7 @@ export const runtimeOperations = {
   },
 
   hydrateRemoteRuntimeImports() {
-    const entries = readStoredRemoteRuntimeImports({ dropExpired: true });
+    const entries = readStoredRemoteRuntimeImports({ dropExpired: true, dropInvalid: true });
     if (entries.length === 0) return;
     runtimes.update((current) => entries.reduce(upsertRemoteImportEntry, current));
   },
