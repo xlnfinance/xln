@@ -86,6 +86,10 @@ file and older docs disagree, prefer code and tests first, then this file.
   security:contract-governance` passed on 2026-07-09, is part of
   `bun run security:audit-pack`, and documents open manual-review questions in
   `docs/security/contract-governance-scan.md`.
+- Closed current consensus/Hanko source-shape scan: `bun run
+  security:consensus-hanko` passed on 2026-07-09, is part of
+  `bun run security:audit-pack`, and documents open manual-review questions in
+  `docs/security/consensus-hanko-scan.md`.
 
 ## P0 - Release And Mainnet Readiness
 
@@ -296,12 +300,7 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Exit: orchestrator/health can explain why a component is degraded without
      guessing from logs or swallowing real contradictions.
 
-4. **Consensus and Hanko production review.**
-   - Re-check current account commit semantics, settlement hankos,
-     chain/contract domain separation, J-event finalization, and mempoolOps
-     against the current code instead of old audit snapshots.
-
-5. **One delivery abstraction.**
+4. **One delivery abstraction.**
    - Collapse direct-vs-relay send logic, pending queues, TTLs, retries, and
      ACK interpretation into one transport boundary.
    - Relay is the official baseline; direct delivery is an opportunistic fast
@@ -372,7 +371,7 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Exit: callers receive one typed delivery result and no longer reimplement
      retry/defer/fatal decisions per call site.
 
-6. **Canonical identity refs.**
+5. **Canonical identity refs.**
    - Treat jurisdiction/entity/account refs as protocol identity and display
      names as cosmetic only.
    - Delete alias allowlists and name-based matching from runtime, market maker,
@@ -430,7 +429,7 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      canonical jurisdiction refs instead of mutable jurisdiction display names.
    - Exit: adding a new testnet label cannot break hub/MM matching.
 
-7. **Canonical fill and amount representation.**
+6. **Canonical fill and amount representation.**
    - Exact bigint amounts are the source of truth.
    - `uint16` fill ratios are a one-way lossy projection for on-chain
      hash-ladder proofs only; never round-trip ratio data back into exact
@@ -498,14 +497,14 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
-8. **Bootstrap lifecycle as an explicit state machine.**
+7. **Bootstrap lifecycle as an explicit state machine.**
    - Model startup phases and barriers the same way protocol state is modeled:
      P2P, relay, hubs, custody, MM same-chain offers, MM cross offers,
      watchtower, health.
    - A send/seed/quote action should be impossible before its barrier is met.
    - Exit: production health can show the exact blocked phase and dependency.
 
-9. **Cold system fixture for fast tests.**
+8. **Cold system fixture for fast tests.**
     - Build a verified cold fixture/template for the whole system: anvil
       chains, hub mesh, custody, MM same-chain books, MM cross books, watchtower,
       and runtime import manifest.
@@ -514,20 +513,20 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
     - Exit: local browser/radapter tests can start from a known full-ready
       state without weakening production readiness semantics.
 
-10. **Orchestrator blast-radius boundaries.**
+9. **Orchestrator blast-radius boundaries.**
     - Decouple child process supervision from whole-tree failure.
     - Ancillary feature failure degrades that feature and keeps diagnostics
       queryable; protocol contradiction remains a loud fatal stop.
     - Exit: faucet/demo/MM/watchtower failure cannot take down the health
       endpoint needed to debug the node.
 
-11. **Settlement conservation proof.**
+10. **Settlement conservation proof.**
     - Prove fund conservation across `pull_lock -> resolve -> on-chain release`
       on both legs, including debt/collateral and dispute finalization.
     - Cover `_disputeFinalizeInternal` line-by-line with adversarial fixtures.
     - Exit: external audit gets executable invariants, not just E2E success.
 
-12. **Economics and scale validation.**
+11. **Economics and scale validation.**
     - Document fee design, collateral ratios, market-maker incentives, and
       griefing costs for swaps and disputes.
     - Profile runtime/orderbook/MM under contention before raising real-money
@@ -535,7 +534,7 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
     - Exit: mainnet limits are backed by measured capacity and explicit
       incentive assumptions.
 
-13. **Full TypeScript 7 tooling migration.**
+12. **Full TypeScript 7 tooling migration.**
     - Staged now: runtime typecheck uses the pinned TS7 native compiler through
       `@typescript/native`, while `typescript@5.9` remains installed for tools
       that import the compiler API.

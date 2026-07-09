@@ -22,6 +22,7 @@ const packageJson = JSON.parse(readText('package.json')) as { scripts?: Record<s
 const scripts = packageJson.scripts ?? {};
 for (const name of [
   'security:contract-governance',
+  'security:consensus-hanko',
   'gate:ci',
   'gate:release',
   'gate:mainnet-preflight',
@@ -43,6 +44,14 @@ if (governanceScan.status !== 0) {
   throw new Error(`contract governance scan failed with exit ${governanceScan.status ?? governanceScan.signal}`);
 }
 
+const consensusHankoScan = spawnSync('bun', ['runtime/scripts/check-consensus-hanko-scan.ts'], {
+  stdio: 'inherit',
+});
+if (consensusHankoScan.error) throw consensusHankoScan.error;
+if (consensusHankoScan.status !== 0) {
+  throw new Error(`consensus hanko scan failed with exit ${consensusHankoScan.status ?? consensusHankoScan.signal}`);
+}
+
 const auditBriefPath = 'docs/security/external-audit-brief.md';
 const auditBrief = readText(auditBriefPath);
 for (const heading of [
@@ -58,6 +67,7 @@ for (const heading of [
 }
 for (const command of [
   'bun run security:contract-governance',
+  'bun run security:consensus-hanko',
   'bun run gate:ci',
   'bun run test:e2e:coverage',
   'bun run gate:release',

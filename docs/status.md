@@ -25,8 +25,8 @@ What is true now:
 - `bun run gate:release` passed on the current release line;
 - `bun run test:all:fast` passed on 2026-07-08 with scenarios green and
   95/95 isolated browser shards green;
-- `bun run security:contract-governance` and `bun run security:audit-pack`
-  passed on 2026-07-09;
+- `bun run security:contract-governance`, `bun run security:consensus-hanko`,
+  and `bun run security:audit-pack` passed on 2026-07-09;
 - test runners now clean old generated artifacts by default and enforce a
   50GiB generated-workspace budget unless an operator explicitly keeps
   artifacts;
@@ -95,9 +95,10 @@ When docs disagree, use this order:
   E2E, RPC system scenarios, hub10k benchmark, and production health smoke.
 - On 2026-07-08, `bun run test:all:fast` passed end to end: scenarios exited
   `0`, E2E exited `0`, and all 95 isolated browser shards passed.
-- On 2026-07-09, `bun run check`, `bun run security:contract-governance`, and
-  `bun run security:audit-pack` passed after the runtime hardening,
-  remote-runtime import cleanup, and test-artifact cleanup pass.
+- On 2026-07-09, `bun run check`, `bun run security:contract-governance`,
+  `bun run security:consensus-hanko`, and `bun run security:audit-pack` passed
+  after the runtime hardening, remote-runtime import cleanup, and test-artifact
+  cleanup pass.
 - The capped-testnet soak policy is one hour in `MAINNET_GATE.soakMinutes`, the
   capped policy file, gate builders, and the `soak:capped-testnet` package
   script.
@@ -129,8 +130,8 @@ When docs disagree, use this order:
    even when a tower is unavailable.
 5. Add account-level recovery coverage UI and tower receipt/failure visibility.
 6. Classify runtime exceptions as `drop`, `defer`, `debug-assert`, or `fatal`.
-7. Re-check current consensus/Hanko production semantics against the current
-   code, not old audit snapshots.
+7. Keep consensus/Hanko source-shape scan green and hand its documented
+   manual-review questions to the external auditor.
 8. Keep contract governance/access-control scan green and hand its documented
    manual-review questions to the external auditor.
 9. Keep destructive reset/clearDB/dev actions strongly gated.
