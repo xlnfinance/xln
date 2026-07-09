@@ -17,6 +17,7 @@ import { deriveDelta, isLeft } from '../account-utils';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKey, getSignerPublicKey } from '../account-crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
+import { UINT16_MAX } from '../constants';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
 
@@ -24,7 +25,7 @@ const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);
   if (!Number.isFinite(raw)) return fallback;
   if (raw <= 0) return 0;
-  return Math.min(65535, Math.floor(raw));
+  return Math.min(UINT16_MAX, Math.floor(raw));
 };
 
 const normalizeX25519Hex = (raw: unknown): string | null => {

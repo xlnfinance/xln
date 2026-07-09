@@ -494,6 +494,11 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: remaining cross-j and pull event strings plus swap-offer
      `minFillRatio` validation now use the shared fill-ratio constants instead
      of embedding `65535`.
+   - Partial: debug/proof/gossip surfaces now use named uint16/hash-ladder/swap
+     constants instead of raw fill-ratio literals.
+   - Current executable scan: `bun run security:canonical-fill` passed on
+     2026-07-09, is part of `bun run security:audit-pack`, and documents open
+     manual-review questions in `docs/security/canonical-fill-scan.md`.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

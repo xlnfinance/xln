@@ -26,6 +26,7 @@ for (const name of [
   'security:failure-taxonomy',
   'security:delivery-boundary',
   'security:canonical-identity',
+  'security:canonical-fill',
   'gate:ci',
   'gate:release',
   'gate:mainnet-preflight',
@@ -52,6 +53,7 @@ runScan('consensus hanko scan', 'runtime/scripts/check-consensus-hanko-scan.ts')
 runScan('runtime failure taxonomy scan', 'runtime/scripts/check-failure-taxonomy-scan.ts');
 runScan('runtime delivery boundary scan', 'runtime/scripts/check-delivery-boundary-scan.ts');
 runScan('canonical identity scan', 'runtime/scripts/check-canonical-identity-scan.ts');
+runScan('canonical fill scan', 'runtime/scripts/check-canonical-fill-scan.ts');
 
 const auditBriefPath = 'docs/security/external-audit-brief.md';
 const auditBrief = readText(auditBriefPath);
@@ -72,6 +74,7 @@ for (const command of [
   'bun run security:failure-taxonomy',
   'bun run security:delivery-boundary',
   'bun run security:canonical-identity',
+  'bun run security:canonical-fill',
   'bun run gate:ci',
   'bun run test:e2e:coverage',
   'bun run gate:release',

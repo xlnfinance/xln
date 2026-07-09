@@ -12,6 +12,9 @@
 // SYSTEM LIMITS
 // ═══════════════════════════════════════════════════════════════
 
+/** Maximum unsigned 16-bit value. Domain-specific ratio code should expose a named alias. */
+export const UINT16_MAX = 0xffff;
+
 export const LIMITS = {
   /** Maximum messages stored per entity (memory limit) */
   MESSAGE_HISTORY: 1000,

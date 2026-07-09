@@ -9,6 +9,7 @@ import { logDebug } from '../logger';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
 import { compareCanonicalText } from '../swap-keys';
+import { UINT16_MAX } from '../constants';
 import type { PaymentRoute } from '../routing/pathfinding';
 
 export type BoardValidator = {
@@ -286,7 +287,7 @@ const parseUint16 = (raw: unknown, field: string, entityId: string): number => {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${field}: entity=${entityId}`);
   }
-  return Math.min(65535, Math.floor(value));
+  return Math.min(UINT16_MAX, Math.floor(value));
 };
 
 const parseBigIntValue = (raw: unknown, field: string, entityId: string): bigint => {

@@ -1,8 +1,9 @@
 import { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey } from './swap-keys.ts';
 import { deriveSide } from './orderbook/types.ts';
 import type { CrossJurisdictionSwapRoute } from './types';
+import { UINT16_MAX } from './constants.ts';
 
-export const MAX_SWAP_FILL_RATIO = 65535;
+export const MAX_SWAP_FILL_RATIO = UINT16_MAX;
 
 export interface SwapOfferLike {
   giveTokenId: number;

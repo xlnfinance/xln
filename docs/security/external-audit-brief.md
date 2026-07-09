@@ -6,9 +6,9 @@ Last refreshed: 2026-07-09. Current internal evidence includes green
 `bun run security:audit-pack` and green `bun run check` on 2026-07-09, focused
 remote-runtime import/switch browser coverage on 2026-07-09, green
 `bun run security:contract-governance`, `bun run security:consensus-hanko`, and
-`bun run security:failure-taxonomy`, and `bun run security:delivery-boundary`
-and `bun run security:canonical-identity` on 2026-07-09, and a green
-`bun run test:all:fast` run on 2026-07-08 with
+`bun run security:failure-taxonomy`, `bun run security:delivery-boundary`,
+`bun run security:canonical-identity`, and `bun run security:canonical-fill`
+on 2026-07-09, and a green `bun run test:all:fast` run on 2026-07-08 with
 scenarios exiting `0` and 95/95 isolated browser shards passing. The required
 current mainnet evidence is the operator-facing preflight gate plus its
 one-hour soak. This is handoff evidence only; it is not external audit sign-off.
@@ -48,6 +48,8 @@ Out of scope unless a scoped issue depends on it:
 - `runtime_input` and plaintext `entity_input` cannot enter runtime state from any network ingress.
 - J-events are authenticated validator observations over the canonical event set, and real RPC settlement logs normalize to the same event hash consumed by runtime.
 - Jurisdiction identity is stack identity (`chainId` plus depository address), never a text alias.
+- Exact bigint fill amounts are settlement truth; uint16 fill ratios are
+  one-way hash-ladder/dispute proof projections only.
 - Cross-j routes are written by the route lifecycle only; direct account tx helpers cannot bypass filled-route clearing rules.
 - Direct same-chain and direct cross-j swaps are the executable swap surface.
   Multihop is a manual route recommendation only unless a future executable
@@ -68,6 +70,7 @@ bun run security:consensus-hanko
 bun run security:failure-taxonomy
 bun run security:delivery-boundary
 bun run security:canonical-identity
+bun run security:canonical-fill
 bun run test:e2e:coverage
 bun run test:rpc-settlement
 bun run soak:quick

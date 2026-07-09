@@ -28,6 +28,7 @@ import type { DeltaTransformer } from '../jurisdictions/typechain-types/contract
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.ts';
 import { sortTransformerEntries } from './transformer-ordering.ts';
 import { normalizeAccountWatchSeed } from './account-watch-seed.ts';
+import { HASHLADDER_MAX_FILL_RATIO } from './hashladder.ts';
 
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
 
@@ -205,7 +206,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     pulls.push({
       deltaIndex,
       amount: pull.amount,
-      claimedRatio: Math.max(0, Math.min(65_535, Math.floor(Number(pull.claimedRatio ?? 0)))),
+      claimedRatio: Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0)))),
       revealedUntilTimestamp: pull.revealedUntilTimestamp,
       fullHash: pull.fullHash,
       partialRoot: pull.partialRoot,
