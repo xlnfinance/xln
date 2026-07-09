@@ -45,6 +45,9 @@ warnings.
   structured debug fallback, but malformed browser config fails loud with
   `JURISDICTIONS_BROWSER_CONFIG_INVALID`; the loader is guarded against direct
   `console.*` noise in core.
+- Node jurisdiction config loading uses structured `runtime.jurisdiction_loader`
+  diagnostics, keeps the missing-file default deterministic, and is guarded
+  against direct `console.*` / `new Date()` fallback noise in core.
 - Entity input merge conflict/dedup diagnostics use the structured
   `entity.input.merge` logger and are guarded against direct `console.*` noise
   in core.

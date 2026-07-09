@@ -612,6 +612,11 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      config fails loud with `JURISDICTIONS_BROWSER_CONFIG_INVALID`; source and
      quiet-load tests plus the failure-taxonomy scan guard against raw console
      regression.
+   - Partial: Node jurisdiction config loading now uses structured
+     `runtime.jurisdiction_loader` diagnostics, and the missing-file fallback
+     is quiet and deterministic instead of printing raw console output with a
+     wall-clock `lastUpdated`; source/behavior tests plus the failure-taxonomy
+     scan guard it.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

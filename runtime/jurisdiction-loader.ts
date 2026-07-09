@@ -7,6 +7,10 @@
 // Browser-compatible: Use isBrowser check instead of fs
 import { isBrowser } from './utils';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
+import { createStructuredLogger } from './logger';
+
+const jurisdictionLoaderLog = createStructuredLogger('runtime.jurisdiction_loader');
+const DEFAULT_LAST_UPDATED = '1970-01-01T00:00:00.000Z';
 
 interface JurisdictionConfig {
   name: string;
@@ -51,6 +55,10 @@ const readNodeEnvFlag = (name: string): boolean =>
 const shouldLogJurisdictionLoaderDebug = (): boolean =>
   readNodeEnvFlag('XLN_JURISDICTIONS_DEBUG');
 
+const logJurisdictionLoaderDebug = (message: string, fields: Record<string, unknown> = {}): void => {
+  if (shouldLogJurisdictionLoaderDebug()) jurisdictionLoaderLog.info(message, fields);
+};
+
 /**
  * Load jurisdictions.json once and cache the result
  * All parts of the system should use this function
@@ -68,7 +76,7 @@ export function loadJurisdictions(): JurisdictionsData {
 
   const defaultJurisdictions: JurisdictionsData = {
     version: '1',
-    lastUpdated: new Date().toISOString(),
+    lastUpdated: DEFAULT_LAST_UPDATED,
     jurisdictions: {},
     defaults: {
       timeout: 30000,
@@ -89,7 +97,9 @@ export function loadJurisdictions(): JurisdictionsData {
     filePath = candidates.find((candidate: string) => fs.existsSync(candidate)) ?? '';
 
     if (!fs.existsSync(filePath)) {
-      console.warn('INFO: jurisdictions.json not found at canonical path; using defaults');
+      logJurisdictionLoaderDebug('config_missing_using_defaults', {
+        path: resolveJurisdictionsJsonPath(),
+      });
       cachedJurisdictions = defaultJurisdictions;
       return cachedJurisdictions;
     }
@@ -97,12 +107,12 @@ export function loadJurisdictions(): JurisdictionsData {
     const jurisdictionsContent = fs.readFileSync(filePath, 'utf8');
     cachedJurisdictions = JSON.parse(jurisdictionsContent);
 
-    if (shouldLogJurisdictionLoaderDebug()) {
-      console.log('Jurisdictions loaded from file (cached for future use)');
-      console.log(`  version=${cachedJurisdictions?.version}`);
-      console.log(`  lastUpdated=${cachedJurisdictions?.lastUpdated}`);
-      console.log(`  keys=${Object.keys(cachedJurisdictions?.jurisdictions || {}).join(', ')}`);
-    }
+    logJurisdictionLoaderDebug('config_loaded', {
+      path: filePath,
+      version: cachedJurisdictions?.version,
+      lastUpdated: cachedJurisdictions?.lastUpdated,
+      keys: Object.keys(cachedJurisdictions?.jurisdictions || {}),
+    });
 
     return cachedJurisdictions!;
   } catch (error) {
@@ -116,9 +126,7 @@ export function loadJurisdictions(): JurisdictionsData {
  */
 export function clearJurisdictionsCache(): void {
   cachedJurisdictions = null;
-  if (shouldLogJurisdictionLoaderDebug()) {
-    console.log('Jurisdictions cache cleared');
-  }
+  logJurisdictionLoaderDebug('cache_cleared');
 }
 
 /**
