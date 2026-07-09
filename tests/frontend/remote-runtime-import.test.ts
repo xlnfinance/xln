@@ -21,6 +21,7 @@ import {
   buildRemoteRuntimeRecoveryPeerSources,
   buildRuntimeWsRecoveryPeerSource,
   buildRuntimeWsRecoveryPeerSources,
+  selectPrimaryRemoteEntitySummary,
   selectPrimaryRemoteHubSummary,
 } from '../../frontend/src/lib/utils/remoteRuntimeValidation';
 
@@ -331,6 +332,29 @@ describe('remote runtime import manager utilities', () => {
     expect(selectPrimaryRemoteHubSummary([h1, h2], 'missing', h2.runtimeId)?.entityId).toBe(h2.entityId);
   });
 
+  test('remote validation uses non-hub runtime entity before visible gossip hub fallback', () => {
+    const mmRuntimeId = `0x${'95'.repeat(20)}`;
+    const visibleHub = {
+      entityId: `0x${'33'.repeat(32)}`,
+      runtimeId: mmRuntimeId,
+      label: 'H3',
+      height: 30,
+    };
+    const marketMaker = {
+      entityId: `0x${'55'.repeat(32)}`,
+      runtimeId: mmRuntimeId,
+      label: 'MM',
+      height: 40,
+    };
+
+    expect(selectPrimaryRemoteEntitySummary([visibleHub, marketMaker], 'MM', mmRuntimeId)?.entityId)
+      .toBe(marketMaker.entityId);
+    expect(selectPrimaryRemoteEntitySummary([visibleHub, marketMaker], 'missing', mmRuntimeId))
+      .toBeNull();
+    expect(selectPrimaryRemoteHubSummary([visibleHub], 'MM', mmRuntimeId)?.entityId)
+      .toBe(visibleHub.entityId);
+  });
+
   test('saved remote runtime imports become recovery peer sources for matching runtime ids', async () => {
     const runtimeId = `0x${'12'.repeat(20)}`;
     const matching = { ...makeStored('H1', 8092, 1), runtimeId };
@@ -574,5 +598,16 @@ describe('remote runtime import manager utilities', () => {
     expect(importFlow).toContain('export const importRemoteRuntimeEntries = async');
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
     expect(runtimeStore).not.toContain('/api/hubs');
+  });
+
+  test('remote projection refresh keeps imported non-hub runtime identity instead of first hub', () => {
+    const xlnStore = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+
+    expect(xlnStore).toContain('const entitySummaries = remoteEntitySummariesFromEntities(entities)');
+    expect(xlnStore).toContain('const primarySummary = selectRemoteRuntimeProjectionPrimary(');
+    expect(xlnStore).toContain('existing?.label || existing?.hubName ||');
+    expect(xlnStore).toContain('?? (existing?.hubEntityId ? null : primaryHub)');
+    expect(xlnStore).toContain('...(runtimeId ? { runtimeId } : {})');
+    expect(xlnStore).not.toContain('const primaryHub = hubEntities[0] ?? null;\n  runtimes.update');
   });
 });

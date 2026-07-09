@@ -35,7 +35,12 @@ import {
 } from './runtimeViewStore';
 import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-import { readRemoteRuntimeTokenAccess, readRemoteRuntimeTokenAudience, resolveStoredRemoteRuntimeAuthKey } from '$lib/utils/remoteRuntimeImport';
+import {
+  readRemoteRuntimeTokenAccess,
+  readRemoteRuntimeTokenAudience,
+  resolveStoredRemoteRuntimeAuthKey,
+  type RemoteRuntimeHubSummary,
+} from '$lib/utils/remoteRuntimeImport';
 import { waitForOpenAccountCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { getXLN, xlnInstance } from './xlnRuntimeLoader';
 import type {
@@ -566,15 +571,56 @@ const remoteHubSummariesFromEntities = (
   entities: RuntimeAdapterEntitySummary[],
 ) => entities.flatMap((entity) => {
   if (entity?.isHub !== true) return [];
+  const summary = remoteEntitySummaryFromEntity(entity);
+  return summary ? [summary] : [];
+});
+
+const remoteEntitySummaryFromEntity = (
+  entity: RuntimeAdapterEntitySummary,
+): RemoteRuntimeHubSummary | null => {
   const entityId = String(entity.entityId || '').trim().toLowerCase();
-  if (!entityId) return [];
-  return [{
+  if (!entityId) return null;
+  const runtimeId = String(entity.runtimeId || '').trim().toLowerCase();
+  return {
     entityId,
+    ...(runtimeId ? { runtimeId } : {}),
     label: String(entity.label || entityId).trim(),
     height: Math.max(0, Math.floor(Number(entity.height || 0))),
     ...(entity.jurisdiction ? { jurisdiction: entity.jurisdiction } : {}),
-  }];
+  };
+};
+
+const remoteEntitySummariesFromEntities = (
+  entities: RuntimeAdapterEntitySummary[],
+): RemoteRuntimeHubSummary[] => entities.flatMap((entity) => {
+  const summary = remoteEntitySummaryFromEntity(entity);
+  return summary ? [summary] : [];
 });
+
+const normalizeRemoteRuntimeEntityLabel = (value: unknown): string =>
+  String(value || '').trim().toLowerCase().replace(/^remote\s+/, '');
+
+const remoteEntityNameMatchesRuntimeLabel = (entityLabel: string, runtimeLabel: string): boolean => {
+  const entity = normalizeRemoteRuntimeEntityLabel(entityLabel);
+  const runtime = normalizeRemoteRuntimeEntityLabel(runtimeLabel);
+  if (!entity || !runtime) return false;
+  return entity === runtime || entity.startsWith(`${runtime} `) || entity.startsWith(`${runtime}(`);
+};
+
+const selectRemoteRuntimeProjectionPrimary = (
+  entities: RemoteRuntimeHubSummary[],
+  runtimeLabel: string,
+  runtimeId: string,
+): RemoteRuntimeHubSummary | null => {
+  if (entities.length === 0) return null;
+  const scoped = runtimeId
+    ? entities.filter((entity) => String(entity.runtimeId || '').trim().toLowerCase() === runtimeId)
+    : entities;
+  return scoped.find((entity) => remoteEntityNameMatchesRuntimeLabel(entity.label, runtimeLabel))
+    ?? entities.find((entity) => remoteEntityNameMatchesRuntimeLabel(entity.label, runtimeLabel))
+    ?? (scoped.length === 1 ? scoped[0]! : null)
+    ?? (entities.length === 1 ? entities[0]! : null);
+};
 
 const upsertRemoteRuntimeProjectionMetadata = (
   config: RuntimeAdapterConfig,
@@ -592,11 +638,20 @@ const upsertRemoteRuntimeProjectionMetadata = (
   if (!runtimeId) return;
   const remoteAccess = authLevel === 'admin' ? 'admin' : 'read';
   const entities = options.frame?.entities ?? [];
+  const entitySummaries = remoteEntitySummariesFromEntities(entities);
   const hubEntities = remoteHubSummariesFromEntities(entities);
-  const primaryHub = hubEntities[0] ?? null;
   runtimes.update((map) => {
     const updated = new Map(map);
     const existing = updated.get(runtimeId);
+    const primaryHub = hubEntities[0] ?? null;
+    const primarySummary = selectRemoteRuntimeProjectionPrimary(
+      entitySummaries,
+      existing?.label || existing?.hubName || '',
+      runtimeId,
+    ) ?? (existing?.hubEntityId ? null : primaryHub);
+    const hubEntityId = primarySummary?.entityId || existing?.hubEntityId || '';
+    const hubName = primarySummary?.label || existing?.hubName || '';
+    const hubJurisdiction = primarySummary?.jurisdiction ?? existing?.hubJurisdiction;
     updated.set(runtimeId, {
       ...existing,
       id: runtimeId,
@@ -611,11 +666,9 @@ const upsertRemoteRuntimeProjectionMetadata = (
       entityCount: entities.length > 0
         ? entities.length
         : Math.max(0, Math.floor(Number(existing?.entityCount || 0))),
-      ...(primaryHub ? {
-        hubEntityId: primaryHub.entityId,
-        hubName: primaryHub.label,
-        ...(primaryHub.jurisdiction ? { hubJurisdiction: primaryHub.jurisdiction } : {}),
-      } : {}),
+      ...(hubEntityId ? { hubEntityId } : {}),
+      ...(hubName ? { hubName } : {}),
+      ...(hubJurisdiction ? { hubJurisdiction } : {}),
       ...(hubEntities.length > 0 ? { hubEntities } : {}),
       ...(existing?.latencyMs !== undefined ? { latencyMs: existing.latencyMs } : {}),
       ...(options.frame ? { lastSynced: Date.now() } : {}),

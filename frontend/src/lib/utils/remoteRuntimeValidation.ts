@@ -25,6 +25,12 @@ const remoteHubSummaryFromEntity = (
   entity: Awaited<ReturnType<RuntimeQueryClient['readEntities']>>[number],
 ): RemoteRuntimeHubSummary | null => {
   if (entity?.isHub !== true) return null;
+  return remoteEntitySummaryFromEntity(entity);
+};
+
+const remoteEntitySummaryFromEntity = (
+  entity: Awaited<ReturnType<RuntimeQueryClient['readEntities']>>[number],
+): RemoteRuntimeHubSummary | null => {
   const entityId = String(entity.entityId || '').trim().toLowerCase();
   if (!entityId) return null;
   const runtimeId = String(entity.runtimeId || '').trim().toLowerCase();
@@ -67,6 +73,22 @@ export const selectPrimaryRemoteHubSummary = (
   return hubEntities.find((hub) => hubLabelMatchesImportLabel(hub.label, importLabel))
     ?? hubEntities[0]!
     ?? null;
+};
+
+export const selectPrimaryRemoteEntitySummary = (
+  entitySummaries: RemoteRuntimeHubSummary[],
+  importLabel: string,
+  runtimeId = '',
+): RemoteRuntimeHubSummary | null => {
+  if (entitySummaries.length === 0) return null;
+  const normalizedRuntimeId = String(runtimeId || '').trim().toLowerCase();
+  const runtimeScoped = normalizedRuntimeId
+    ? entitySummaries.filter((entity) => String(entity.runtimeId || '').trim().toLowerCase() === normalizedRuntimeId)
+    : entitySummaries;
+  return runtimeScoped.find((entity) => hubLabelMatchesImportLabel(entity.label, importLabel))
+    ?? entitySummaries.find((entity) => hubLabelMatchesImportLabel(entity.label, importLabel))
+    ?? (runtimeScoped.length === 1 ? runtimeScoped[0]! : null)
+    ?? (entitySummaries.length === 1 ? entitySummaries[0]! : null);
 };
 
 const normalizeRuntimeId = (value: unknown): string =>
@@ -284,11 +306,17 @@ export const validateRemoteRuntimeEntry = async (
     const entityCount = entities.length;
     if (entityCount < 1) throw new Error(`REMOTE_RUNTIME_EMPTY:${entry.label}`);
     const height = Math.max(0, Math.floor(Number(head.latestHeight ?? adapter.currentHeight ?? 0)));
+    const entitySummaries = entities.flatMap((entity) => {
+      const summary = remoteEntitySummaryFromEntity(entity);
+      return summary ? [summary] : [];
+    });
     const hubEntities = entities.flatMap((entity) => {
       const summary = remoteHubSummaryFromEntity(entity);
       return summary ? [summary] : [];
     });
     const primaryHub = selectPrimaryRemoteHubSummary(hubEntities, entry.label, runtimeId);
+    const primaryEntity = selectPrimaryRemoteEntitySummary(entitySummaries, entry.label, runtimeId)
+      ?? (entitySummaries.length <= 1 ? primaryHub : null);
     options.onProgress?.({ index, status: 'connected', detail: `${entityCount} entities at height ${height}` });
     return {
       ...entry,
@@ -297,10 +325,10 @@ export const validateRemoteRuntimeEntry = async (
       height,
       entityCount,
       importedAt,
-      ...(primaryHub ? {
-        hubEntityId: primaryHub.entityId,
-        hubName: primaryHub.label,
-        ...(primaryHub.jurisdiction ? { hubJurisdiction: primaryHub.jurisdiction } : {}),
+      ...(primaryEntity ? {
+        hubEntityId: primaryEntity.entityId,
+        hubName: primaryEntity.label,
+        ...(primaryEntity.jurisdiction ? { hubJurisdiction: primaryEntity.jurisdiction } : {}),
       } : {}),
       ...(hubEntities.length > 0 ? { hubEntities } : {}),
     };
