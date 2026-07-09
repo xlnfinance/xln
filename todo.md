@@ -474,6 +474,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: j-batch event handling, R2C, and hub rebalance crontab paths now
      statically import shared batch helpers instead of resolving them during
      event/crontab execution.
+   - Partial: account settlement action handling and DisputeStarted proof-body
+     inspection now use static imports instead of resolving helper modules in
+     account/J-event execution.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

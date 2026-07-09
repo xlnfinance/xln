@@ -16,6 +16,7 @@ import {
   applyHtlcTimeoutFollowups,
   applyPendingForwardFollowup,
 } from './account/committed-htlc-followups';
+import { processSettleAction } from './settle';
 import type { MempoolOp } from './account/orderbook-queue';
 import type {
   SwapCancelEvent,
@@ -230,7 +231,6 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
   // === SETTLEMENT WORKSPACE ACTIONS ===
   // Process settleAction before frame consensus (bilateral negotiation)
   if (input.settleAction) {
-    const { processSettleAction } = await import('./settle');
     const result = await processSettleAction(
       accountMachine,
       input.settleAction,

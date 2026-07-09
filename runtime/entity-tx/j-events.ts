@@ -28,6 +28,7 @@ import {
 } from '../j-event-observation';
 import { verifyAccountSignature } from '../account-crypto';
 import { markStorageEntityDirty } from '../env-events';
+import { buildAccountProofBody } from '../proof-builder';
 import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-events-debt';
 import { createStructuredLogger, shortHash, shortId } from '../logger';
 import {
@@ -588,7 +589,6 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
   };
   account.onChainSettlementNonce = Math.max(Number(account.onChainSettlementNonce ?? 0), onChainNonce);
 
-  const { buildAccountProofBody } = await import('../proof-builder');
   const localProof = buildAccountProofBody(account);
   const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
   const storedProofKnown = Object.keys(account.disputeProofBodiesByHash ?? {})
