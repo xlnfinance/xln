@@ -391,13 +391,16 @@
     window.addEventListener('hashchange', handleLocationChange);
 
     void (async () => {
-      if (await ensureCurrentDeployVersion()) return;
-      if (await maybeHandleResetHash()) return;
-      await importRemoteRuntimesIntoApp({
-        payload: readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash(),
-        source: readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash(),
-      });
+      const importPayload = readRemoteRuntimeImportPayloadFromUrl() || readRemoteRuntimeImportPayloadFromHash();
+      const importSource = readRemoteRuntimeImportSourceFromUrl() || readRemoteRuntimeImportSourceFromHash();
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
+      if (await maybeHandleResetHash()) return;
+      const hasExplicitRemoteRuntimeBootstrap = Boolean(importPayload || importSource || remoteRequest);
+      if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;
+      await importRemoteRuntimesIntoApp({
+        payload: importPayload,
+        source: importSource,
+      });
       if (remoteRequest?.requiresAuthPaste || (remoteRequest && !remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest))) {
         pendingRemoteRuntime = remoteRequest;
         stripRemoteRuntimeParams();

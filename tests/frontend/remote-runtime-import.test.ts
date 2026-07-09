@@ -250,6 +250,22 @@ describe('remote runtime import manager utilities', () => {
     expect(readStoredRemoteRuntimeImports()[0]?.access).toBe('admin');
   });
 
+  test('fresh import merge prunes expired stored runtimes without accepting expired active tokens', () => {
+    const expired = {
+      ...makeStored('Custody', 8088, 1),
+      token: `xlnra1.read.${Date.now() - 1}.aud.kid.jti.sig`,
+    };
+    localStorage.setItem(REMOTE_RUNTIME_IMPORT_STORAGE_KEY, JSON.stringify([expired]));
+
+    expect(() => readStoredRemoteRuntimeImports()).toThrow('REMOTE_RUNTIME_TOKEN_EXPIRED:Custody');
+
+    const fresh = makeStored('H1', 8092, 2);
+    const merged = persistRemoteRuntimeImports([fresh], { merge: true });
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.label).toBe('H1');
+    expect(readStoredRemoteRuntimeImports().map(entry => entry.label)).toEqual(['H1']);
+  });
+
   test('persists remote runtime capabilities in local storage across reloads', () => {
     const admin = makeStored('H1 admin', 8092, 1, 'admin');
     persistRemoteRuntimeImports([admin]);
@@ -549,6 +565,11 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
     expect(appLayout).toContain('parseRemoteRuntimeImportPayload(payload)');
     expect(appLayout).toContain('persistActiveRemoteRuntimeImport(first)');
+    expect(appLayout).toContain('const hasExplicitRemoteRuntimeBootstrap = Boolean(importPayload || importSource || remoteRequest);');
+    expect(appLayout).toContain('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;');
+    expect(appLayout.indexOf('const importPayload = readRemoteRuntimeImportPayloadFromUrl()')).toBeLessThan(
+      appLayout.indexOf('if (!hasExplicitRemoteRuntimeBootstrap && await ensureCurrentDeployVersion()) return;'),
+    );
     expect(appLayout).not.toContain('redirectRemoteRuntimeImportToManager');
     expect(importFlow).toContain('export const importRemoteRuntimeEntries = async');
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');

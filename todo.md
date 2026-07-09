@@ -70,6 +70,11 @@ file and older docs disagree, prefer code and tests first, then this file.
 - Aligned capped-testnet soak execution with the one-hour policy:
   `soak:capped-testnet`, `MAINNET_GATE.soakMinutes`, the capped policy file,
   and capped-gate tests now agree on 60 minutes.
+- Closed remote runtime time machine: browser UI scans historical subset
+  snapshots through RAdapter `historyFrameBatch`, uses bounded account/book
+  page sizes, caches selected past frames, and persists deeplinks for selected
+  height/entity. Guards: `tests/e2e-radapter-remote.spec.ts` admin remote
+  runtime control/time-machine flow and `runtime/__tests__/radapter.test.ts`.
 - Refreshed current mainnet/security status docs and re-ran
   `bun run security:audit-pack`; this prepares the internal audit handoff pack
   but does not replace an independent external audit.
@@ -555,28 +560,20 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Show routing, HTLC, swap, J-event, dispute, and recovery events clearly
      enough for demo and support/debug use.
 
-6. **Remote runtime time machine.**
-   - Browser UI requests historical subset snapshots through RAdapter; no local
-     browser-only replay of remote state.
-   - Paginate large entity/account/book lists by default with configurable
-     page size.
-   - Exit: operator can inspect a selected remote hub at a past height without
-     freezing the wallet.
-
-7. **UX screenshot release evidence.**
+6. **UX screenshot release evidence.**
    - Keep at least 30 curated screenshots across desktop/mobile covering
      onboarding, assets, accounts, payment, swap, cross-chain swap, disputes,
      on-chain batch/history, health, QA, RAdapter import, and time machine.
    - Exit: QA cockpit gallery opens every curated screenshot and slideshow
      navigation works from keyboard/clicks.
 
-8. **Pre-mainnet admin stories.**
+7. **Pre-mainnet admin stories.**
    - Keep four first-screen videos in QA cockpit: payment, swap, cross-chain
      swap, dispute.
    - Each story needs a short operator description and synchronized playback
      transcript.
 
-9. **AI court app after core health/QA work.**
+8. **AI court app after core health/QA work.**
    - Finish the existing AI court app with XLN token intake, challenge flow,
      adjudication, and winner-takes-all settlement.
    - Not a mainnet readiness blocker until protocol/admin gates are green.

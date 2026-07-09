@@ -164,14 +164,36 @@ const entryFromUnknown = (value: unknown, index: number): RemoteRuntimeImportEnt
   return entry;
 };
 
-const entriesFromJson = (value: unknown): RemoteRuntimeImportEntry[] => {
+const rawImportEntriesFromUnknown = (value: unknown): unknown[] => {
   const entries = Array.isArray(value)
     ? value
     : isRecord(value) && Array.isArray(value['entries'])
       ? value['entries']
       : [];
   if (entries.length === 0) throw new Error('REMOTE_RUNTIME_IMPORT_ENTRIES_MISSING');
-  return limitRemoteRuntimeImportEntries(entries.map(entryFromUnknown));
+  return entries;
+};
+
+const entriesFromJson = (
+  value: unknown,
+  options: { dropExpired?: boolean } = {},
+): RemoteRuntimeImportEntry[] => {
+  const entries: RemoteRuntimeImportEntry[] = [];
+  for (const [index, entry] of rawImportEntriesFromUnknown(value).entries()) {
+    try {
+      entries.push(entryFromUnknown(entry, index));
+    } catch (error) {
+      if (
+        options.dropExpired === true
+        && error instanceof Error
+        && error.message.startsWith('REMOTE_RUNTIME_TOKEN_EXPIRED:')
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+  return limitRemoteRuntimeImportEntries(entries);
 };
 
 const hubJurisdictionFromUnknown = (value: unknown): RemoteRuntimeHubJurisdiction | undefined => {
@@ -376,7 +398,9 @@ export const writeStoredRemoteRuntimeImports = (entries: StoredRemoteRuntimeImpo
   }
 };
 
-export const readStoredRemoteRuntimeImports = (): StoredRemoteRuntimeImportEntry[] => {
+export const readStoredRemoteRuntimeImports = (
+  options: { dropExpired?: boolean } = {},
+): StoredRemoteRuntimeImportEntry[] => {
   const storage = remoteRuntimePersistentStorage();
   const session = remoteRuntimeSessionStorage();
   if (!storage && !session) return [];
@@ -385,14 +409,24 @@ export const readStoredRemoteRuntimeImports = (): StoredRemoteRuntimeImportEntry
   const raw = persistentRaw || sessionRaw;
   if (!raw) return [];
   const parsed = JSON.parse(raw) as unknown;
-  const entries: StoredRemoteRuntimeImportEntry[] = entriesFromJson(parsed).map((entry, index): StoredRemoteRuntimeImportEntry => {
-    const rawEntry = Array.isArray(parsed)
-      ? parsed[index]
-      : isRecord(parsed) && Array.isArray(parsed['entries'])
-        ? parsed['entries'][index]
-        : null;
+  const rawEntries = rawImportEntriesFromUnknown(parsed);
+  const entries: StoredRemoteRuntimeImportEntry[] = [];
+  for (const [index, rawEntry] of rawEntries.entries()) {
+    let entry: RemoteRuntimeImportEntry;
+    try {
+      entry = entryFromUnknown(rawEntry, index);
+    } catch (error) {
+      if (
+        options.dropExpired === true
+        && error instanceof Error
+        && error.message.startsWith('REMOTE_RUNTIME_TOKEN_EXPIRED:')
+      ) {
+        continue;
+      }
+      throw error;
+    }
     const source = isRecord(rawEntry) ? rawEntry : {};
-    return {
+    entries.push({
       ...entry,
       runtimeId: String(source['runtimeId'] || remoteRuntimeIdForWsUrl(entry.wsUrl)).toLowerCase(),
       authLevel: source['authLevel'] === 'admin' ? 'admin' : 'inspect',
@@ -400,9 +434,12 @@ export const readStoredRemoteRuntimeImports = (): StoredRemoteRuntimeImportEntry
       entityCount: Math.max(0, Math.floor(Number(source['entityCount'] || 0))),
       importedAt: Math.max(0, Math.floor(Number(source['importedAt'] || 0))),
       ...storedHubFieldsFromSource(source),
-    };
-  });
+    });
+  }
   const limited = limitRemoteRuntimeImportEntries(entries);
+  if (options.dropExpired === true && limited.length !== rawEntries.length && storage) {
+    writeStoredRemoteRuntimeImports(limited);
+  }
   if (!persistentRaw && sessionRaw && storage) writeStoredRemoteRuntimeImports(limited);
   return limited;
 };
@@ -434,7 +471,7 @@ export const persistRemoteRuntimeImports = (
   options: { merge?: boolean } = {},
 ): StoredRemoteRuntimeImportEntry[] => {
   const next = options.merge
-    ? mergeStoredRemoteRuntimeImports(readStoredRemoteRuntimeImports(), entries)
+    ? mergeStoredRemoteRuntimeImports(readStoredRemoteRuntimeImports({ dropExpired: true }), entries)
     : limitRemoteRuntimeImportEntries(entries);
   writeStoredRemoteRuntimeImports(next);
   return next;

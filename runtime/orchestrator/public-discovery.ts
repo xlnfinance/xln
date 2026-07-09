@@ -210,27 +210,42 @@ export const getDebugEntityEntries = (input: {
   }
 
   for (const child of hubChildren) {
-    const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
-    if (!entityId) continue;
-    const key = entityId.toLowerCase();
+    const primaryEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
+    const hubEntities = child.lastInfo?.hubEntities?.length
+      ? child.lastInfo.hubEntities
+      : [{
+        entityId: primaryEntityId,
+        name: child.name,
+      }];
     const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '') || undefined;
     const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-    const existing = entities.get(key);
     const online = child.proc?.exitCode === null && Boolean(child.lastHealth);
-    entities.set(key, {
-      entityId,
-      runtimeId: normalizedRuntimeId || runtimeId || existing?.runtimeId,
-      name: existing?.name || child.name,
-      isHub: true,
-      online: existing?.online === true || online,
-      lastUpdated: Math.max(existing?.lastUpdated || 0, serverTime),
-      accounts: existing?.accounts || [],
-      publicAccounts: existing?.publicAccounts || [],
-      metadata: {
-        ...(existing?.metadata || {}),
+    for (const entry of hubEntities) {
+      const entityId = String(entry?.entityId || '').trim();
+      if (!entityId) continue;
+      const key = entityId.toLowerCase();
+      const existing = entities.get(key);
+      entities.set(key, {
+        entityId,
+        runtimeId: normalizedRuntimeId || runtimeId || existing?.runtimeId,
+        name: String(entry?.name || existing?.name || child.name || entityId).trim(),
         isHub: true,
-      },
-    });
+        online: existing?.online === true || online,
+        lastUpdated: Math.max(existing?.lastUpdated || 0, serverTime),
+        accounts: existing?.accounts || [],
+        publicAccounts: existing?.publicAccounts || [],
+        metadata: {
+          ...(existing?.metadata || {}),
+          isHub: true,
+          ...buildJurisdictionMetadata({
+            name: entry?.jurisdictionName,
+            chainId: entry?.chainId,
+            depositoryAddress: entry?.depositoryAddress,
+            entityProviderAddress: entry?.entityProviderAddress,
+          }),
+        },
+      });
+    }
   }
 
   return Array.from(entities.values())

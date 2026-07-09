@@ -352,7 +352,7 @@ export const runtimeOperations = {
   hydrateRemoteRuntimeImports() {
     let entries: StoredRemoteRuntimeImportEntry[] = [];
     try {
-      entries = readStoredRemoteRuntimeImports();
+      entries = readStoredRemoteRuntimeImports({ dropExpired: true });
     } catch (error) {
       console.error('[runtimeStore] Failed to hydrate remote runtime imports:', error);
       return;
