@@ -13,6 +13,7 @@ import { Interface } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import { assertWatchtowerRpcUrlAllowed } from './action';
 import { buildDisputeWakeNotification, disputeWakeCollapseKey, selectWakeTargets } from '../push/dispute-wake';
+import { createStructuredLogger } from '../logger';
 import type { DisputeWakeEvent, PushSender, StoredPushRegistration } from '../push/types';
 
 const DISPUTE_STARTED_ABI = [
@@ -23,6 +24,9 @@ const DISPUTE_STARTED_TOPIC = DISPUTE_INTERFACE.getEvent('DisputeStarted')!.topi
 
 const DEFAULT_MAX_BLOCK_RANGE = 5_000;
 const DEFAULT_MAX_BACKFILL_BLOCKS = 50_000;
+const disputeWatchLog = createStructuredLogger('watchtower.dispute_watch');
+
+const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 type WatchLog = { topics: readonly string[]; data: string; blockNumber?: number; transactionHash?: string };
 
@@ -145,10 +149,11 @@ export const runDisputeWatchSweep = async (
       }
     } catch (error) {
       errors += 1;
-      console.error(
-        `[PUSH-WATCH] target ${target.chainId}:${target.depositoryAddress} failed: ` +
-          `${error instanceof Error ? error.message : String(error)}`,
-      );
+      disputeWatchLog.error('target.failed', {
+        chainId: target.chainId,
+        depositoryAddress: target.depositoryAddress,
+        error: formatError(error),
+      });
     }
   }
 

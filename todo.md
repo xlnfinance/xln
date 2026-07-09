@@ -619,6 +619,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      structured `watchtower.standalone` logging instead of direct `[WATCHTOWER]`
      / `[PUSH-WATCH]` console sweep lines; the standalone suite and
      failure-taxonomy scan guard it.
+   - Partial: push dispute-watch target failures now use structured
+     `watchtower.dispute_watch` logging instead of direct `[PUSH-WATCH] target`
+     console lines; push-dispute source tests and the failure-taxonomy scan
+     guard it.
    - Partial: orchestrator lifecycle helper diagnostics for HTTP drain timeout,
      stale child lease cleanup, and parent-liveness loss now use structured
      orchestrator loggers instead of direct `console.*`; behavior/source tests

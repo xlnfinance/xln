@@ -294,6 +294,7 @@ for (const [path, markers] of [
   ['runtime/runtime-infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
   ['runtime/runtime-storage-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'runtime_db.open_failed']],
   ['runtime/watchtower/standalone-server.ts', ["createStructuredLogger('watchtower.standalone')", 'service.listen', 'sweep.failed', 'push_sweep.failed']],
+  ['runtime/watchtower/dispute-watch.ts', ["createStructuredLogger('watchtower.dispute_watch')", 'target.failed']],
   ['runtime/orchestrator/graceful-server.ts', ["createStructuredLogger('orchestrator.lifecycle')", 'http.shutdown_timeout']],
   ['runtime/orchestrator/managed-runtime-leases.ts', ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored']],
   ['runtime/orchestrator/parent-watch.ts', ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing']],
@@ -356,6 +357,11 @@ const standaloneWatchtower = readText(standaloneWatchtowerPath);
 assertNotIncludes(standaloneWatchtower, 'console.', standaloneWatchtowerPath);
 assertNotIncludes(standaloneWatchtower, '[WATCHTOWER] sweep', standaloneWatchtowerPath);
 assertNotIncludes(standaloneWatchtower, '[PUSH-WATCH] sweep', standaloneWatchtowerPath);
+
+const disputeWatchPath = 'runtime/watchtower/dispute-watch.ts';
+const disputeWatch = readText(disputeWatchPath);
+assertNotIncludes(disputeWatch, 'console.', disputeWatchPath);
+assertNotIncludes(disputeWatch, '[PUSH-WATCH] target', disputeWatchPath);
 
 for (const orchestratorLifecyclePath of [
   'runtime/orchestrator/graceful-server.ts',
@@ -515,6 +521,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/solvency-logging.test.ts', ['solvency diagnostics use structured logging only', 'runtime.solvency']],
   ['runtime/__tests__/runtime-storage-logging.test.ts', ['runtime storage DB boundary uses structured logging without direct console output', 'runtime.storage']],
   ['runtime/__tests__/watchtower-standalone.test.ts', ['uses structured logging without direct console output', 'watchtower.standalone']],
+  ['runtime/__tests__/push-dispute-wake.test.ts', ['uses structured logging without direct console output', 'watchtower.dispute_watch']],
   ['runtime/__tests__/orchestrator-lifecycle-logging.test.ts', ['orchestrator lifecycle helpers use structured logging without direct console output', 'orchestrator.lifecycle']],
   ['runtime/__tests__/jurisdiction-config-logging.test.ts', ['jurisdiction config loader uses structured logging without direct console output', 'runtime.jurisdiction_config']],
   ['runtime/__tests__/jurisdiction-loader-logging.test.ts', ['jurisdiction loader diagnostics', 'runtime.jurisdiction_loader']],

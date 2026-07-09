@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -205,6 +206,15 @@ describe('push registration signature', () => {
 });
 
 describe('runDisputeWatchSweep', () => {
+  test('uses structured logging without direct console output', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/watchtower/dispute-watch.ts'), 'utf8');
+
+    expect(source).toContain("createStructuredLogger('watchtower.dispute_watch')");
+    expect(source).toContain("disputeWatchLog.error('target.failed'");
+    expect(source).not.toContain('console.');
+    expect(source).not.toContain('[PUSH-WATCH] target');
+  });
+
   const buildFakeStore = (): { store: DisputeWatchStore; woken: Set<string>; cursors: Map<string, number> } => {
     const woken = new Set<string>();
     const cursors = new Map<string, number>();

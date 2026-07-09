@@ -47,6 +47,9 @@ warnings.
 - Standalone watchtower startup/sweep diagnostics use the structured
   `watchtower.standalone` logger and are guarded against direct `[WATCHTOWER]`
   / `[PUSH-WATCH]` console sweep output.
+- Push dispute-watch target failures use the structured
+  `watchtower.dispute_watch` logger and are guarded against direct
+  `[PUSH-WATCH] target` console output.
 - Orchestrator lifecycle helper diagnostics for HTTP drain timeout, stale child
   lease cleanup, and parent-liveness loss use structured orchestrator loggers
   and are guarded against direct `console.*` helper output.
