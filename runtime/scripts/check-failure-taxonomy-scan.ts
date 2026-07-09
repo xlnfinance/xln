@@ -263,6 +263,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
+  ['runtime/entity-tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
   ['runtime/entity-tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity-tx/handlers/create-settlement.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity-tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -305,6 +306,10 @@ assertNotIncludes(accountHandler, 'console.', accountHandlerPath);
 const openAccountHandlerPath = 'runtime/entity-tx/handlers/open-account.ts';
 const openAccountHandler = readText(openAccountHandlerPath);
 assertNotIncludes(openAccountHandler, 'console.', openAccountHandlerPath);
+
+const sameOrderbookMatchingPath = 'runtime/entity-tx/handlers/account/orderbook-matching-same.ts';
+const sameOrderbookMatching = readText(sameOrderbookMatchingPath);
+assertNotIncludes(sameOrderbookMatching, 'console.', sameOrderbookMatchingPath);
 
 for (const jBatchHandlerPath of [
   'runtime/entity-tx/handlers/r2r.ts',

@@ -112,10 +112,12 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
     currentOfferId: string,
     message: string,
   ): void => {
-    console.error(
-      `ORDERBOOK_PAIR_ERROR: pair=${pairId} offer=${currentOfferId} ` +
-        `account=${currentAccountId.slice(-8)} error=${message}`,
-    );
+    orderbookSameLog.debug('pair.command_failed', {
+      pair: pairId,
+      offer: shortOrder(currentOfferId, 8),
+      account: shortId(currentAccountId, 8),
+      error: message,
+    });
     if (debugRebuildProjectionOnly) {
       recordDebugProjectionReject(currentAccountId, currentOfferId, `pair-error:${message}`);
       return;
@@ -156,11 +158,14 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       }
       if (order.priceTicks < minAllowed || order.priceTicks > maxAllowed) {
         removed += 1;
-        console.warn(
-          `ORDERBOOK_SWEEP_OUT_OF_BAND: offer=${liveOffer.offerId} pair=${pairId} ` +
-            `price=${order.priceTicks.toString()} outside +/-${rejectBps / 100}% of ` +
-            `${bandLabel} ${bandAnchor.toString()}`,
-        );
+        orderbookSameLog.debug('sweep.out_of_band', {
+          offer: shortOrder(liveOffer.offerId, 8),
+          pair: pairId,
+          price: order.priceTicks.toString(),
+          rejectPct: rejectBps / 100,
+          bandLabel,
+          bandAnchor: bandAnchor.toString(),
+        });
         if (debugRebuildProjectionOnly) {
           recordDebugProjectionReject(
             liveOffer.accountId,
@@ -247,7 +252,12 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
 
     const materialized = deriveSameOrderbookMaterialization(offer, minTradeSize);
     if (materialized.kind === 'reject') {
-      console.warn(materialized.message);
+      orderbookSameLog.debug('offer.reject_materialization', {
+        offer: shortOrder(offer.offerId, 8),
+        account: shortId(currentAccountId, 8),
+        reason: materialized.reason,
+        message: materialized.message,
+      });
       rejectInvalidOffer(currentAccountId, offer.offerId, materialized.reason);
       continue;
     }
@@ -293,7 +303,12 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       hasExplicitPairPolicy,
     });
     if (priceBand.rejectReason) {
-      console.warn(`${priceBand.rejectMessage} offer=${offer.offerId}`);
+      orderbookSameLog.debug('offer.reject_price_band', {
+        offer: shortOrder(offer.offerId, 8),
+        account: shortId(currentAccountId, 8),
+        reason: priceBand.rejectReason,
+        message: priceBand.rejectMessage,
+      });
       if (debugRebuildProjectionOnly) {
         recordDebugProjectionReject(currentAccountId, offer.offerId, priceBand.rejectReason);
         continue;
@@ -306,7 +321,13 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       });
       continue;
     }
-    if (priceBand.warnMessage) console.warn(priceBand.warnMessage);
+    if (priceBand.warnMessage) {
+      orderbookSameLog.debug('offer.price_band_warning', {
+        offer: shortOrder(offer.offerId, 8),
+        account: shortId(currentAccountId, 8),
+        message: priceBand.warnMessage,
+      });
+    }
 
     orderbookOfferMeta.set(currentNamespacedOrderId, {
       ...offer,
@@ -321,18 +342,23 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
         existingOrder.qtyLots === qtyLots &&
         existingOrder.priceTicks === priceTicks
       ) {
-        console.log(
-          `ORDERBOOK-RESTING: already materialized offer=${offer.offerId} account=${currentAccountId.slice(-8)} ` +
-            `price=${priceTicks.toString()} qty=${qtyLots.toString()}`,
-        );
+        orderbookSameLog.debug('order.resting', {
+          offer: shortOrder(offer.offerId, 8),
+          account: shortId(currentAccountId, 8),
+          price: priceTicks.toString(),
+          qty: qtyLots.toString(),
+        });
         bookCache.set(bookKey, book);
         continue;
       }
-      console.warn(
-        `ORDERBOOK_CACHE_MISMATCH: live offer=${offer.offerId} account=${currentAccountId.slice(-8)} ` +
-          `storedPrice=${existingOrder.priceTicks.toString()} canonicalPrice=${priceTicks.toString()} ` +
-          `storedQty=${existingOrder.qtyLots.toString()} canonicalQty=${qtyLots.toString()}`,
-      );
+      orderbookSameLog.debug('order.cache_mismatch', {
+        offer: shortOrder(offer.offerId, 8),
+        account: shortId(currentAccountId, 8),
+        storedPrice: existingOrder.priceTicks.toString(),
+        canonicalPrice: priceTicks.toString(),
+        storedQty: existingOrder.qtyLots.toString(),
+        canonicalQty: qtyLots.toString(),
+      });
       throw new Error(`ORDERBOOK_CACHE_MISMATCH: pair=${bookKey} order=${currentNamespacedOrderId}`);
     }
     orderbookSameLog.debug('order.add', {
@@ -359,9 +385,12 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message === 'Out of order slots') {
-        console.warn(
-          `ORDERBOOK_FULL: pair=${bookKey} maxOrders=${book.params.maxOrders} offer=${offer.offerId} account=${currentAccountId.slice(-8)}`,
-        );
+        orderbookSameLog.debug('book.full', {
+          pair: bookKey,
+          maxOrders: book.params.maxOrders,
+          offer: shortOrder(offer.offerId, 8),
+          account: shortId(currentAccountId, 8),
+        });
         if (debugRebuildProjectionOnly) {
           recordDebugProjectionReject(currentAccountId, offer.offerId, `book-full:${book.params.maxOrders}`);
           continue;
@@ -402,11 +431,16 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
           .map(event => event.reason)
           .filter(Boolean)
           .join(', ');
-        console.warn(
-          `ORDERBOOK_REJECT: offer=${offer.offerId} account=${currentAccountId.slice(-8)} side=${side} ` +
-            `price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} ` +
-            `bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
-        );
+        orderbookSameLog.debug('offer.reject_post_only', {
+          offer: shortOrder(offer.offerId, 8),
+          account: shortId(currentAccountId, 8),
+          side,
+          price: priceTicks.toString(),
+          qty: qtyLots.toString(),
+          bestBid: String(bestBid),
+          bestAsk: String(bestAsk),
+          reason: rejectReasons || 'unknown',
+        });
         if (debugRebuildProjectionOnly) {
           recordDebugProjectionReject(
             currentAccountId,
