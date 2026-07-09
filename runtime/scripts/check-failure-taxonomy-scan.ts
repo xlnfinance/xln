@@ -253,6 +253,7 @@ for (const [path, markers] of [
   ['runtime/server/reserve-faucet.ts', ['faucetFailureBody']],
   ['runtime/entity-tx/invariant-errors.ts', ["'DIRECT_PAYMENT_',", "'SWAP_REQUEST_',"]],
   ['runtime/entity-tx/handlers/direct-payment.ts', [
+    "createStructuredLogger('entity.payment')",
     'DIRECT_PAYMENT_${code}:${detail}',
     "'ROUTE_START_INVALID'",
     "'ROUTE_END_INVALID'",
@@ -266,6 +267,10 @@ for (const [path, markers] of [
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
 }
+
+const directPaymentHandlerPath = 'runtime/entity-tx/handlers/direct-payment.ts';
+const directPaymentHandler = readText(directPaymentHandlerPath);
+assertNotIncludes(directPaymentHandler, 'console.log', directPaymentHandlerPath);
 
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],

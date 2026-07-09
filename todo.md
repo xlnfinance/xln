@@ -512,6 +512,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: direct payment invalid-route and missing next-hop-account paths
      now fail loud with `DIRECT_PAYMENT_*` invariant errors instead of
      `console.error` plus no-op, and the failure-taxonomy scan guards it.
+   - Partial: entity direct-payment debug traces now use the structured
+     `entity.payment` logger instead of raw `console.log`, and the
+     failure-taxonomy scan guards against reintroducing core console noise.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

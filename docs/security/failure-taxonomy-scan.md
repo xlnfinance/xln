@@ -29,6 +29,8 @@ warnings.
   runtime-import paths are all covered by a typed-failure source marker.
 - Direct payment topology contradictions use fatal `DIRECT_PAYMENT_*`
   invariant errors instead of console output plus no-op returns.
+- Direct payment debug traces use the structured `entity.payment` logger; the
+  handler is guarded against raw `console.log` noise in core.
 
 ## Open Manual Review
 

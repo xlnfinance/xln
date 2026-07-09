@@ -2,7 +2,7 @@ import { isLeftEntity } from '../../entity-id-utils';
 import { FINANCIAL } from '../../constants';
 import type { AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { formatEntityId } from '../../utils';
-import { logError } from '../../logger';
+import { createStructuredLogger, logError, shortId } from '../../logger';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import type { MempoolOp } from './account';
 
@@ -17,12 +17,16 @@ type DirectPaymentResult = {
 const directPaymentInvariant = (code: string, detail: string): Error =>
   new Error(`DIRECT_PAYMENT_${code}:${detail}`);
 
+const directPaymentLog = createStructuredLogger('entity.payment');
+
 export const handleDirectPaymentEntityTx = async (
   env: Env,
   entityState: EntityState,
   entityTx: DirectPaymentEntityTx,
 ): Promise<DirectPaymentResult> => {
-  const verbose = env.quietRuntimeLogs !== true;
+  const trace = (message: string, fields: Record<string, unknown> = {}): void => {
+    if (env.quietRuntimeLogs !== true) directPaymentLog.debug(message, fields);
+  };
   env.emit('HtlcInitiated', {
     fromEntity: entityState.entityId,
     toEntity: entityTx.data.targetEntityId,
@@ -30,20 +34,19 @@ export const handleDirectPaymentEntityTx = async (
     amount: entityTx.data.amount.toString(),
     route: entityTx.data.route,
   });
-  if (verbose) {
-    console.log(`💸 ═════════════════════════════════════════════════════════════`);
-    console.log(
-      `💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`,
-    );
-    console.log(`💸 Amount: ${entityTx.data.amount}, TokenId: ${entityTx.data.tokenId}`);
-    console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
-    console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
-  }
+  trace('start', {
+    from: shortId(entityState.entityId),
+    target: shortId(entityTx.data.targetEntityId),
+    tokenId: entityTx.data.tokenId,
+    amount: entityTx.data.amount.toString(),
+    route: entityTx.data.route?.map((entityId) => shortId(entityId)) ?? [],
+    hasDescription: Boolean(entityTx.data.description),
+  });
 
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
-  if (verbose) console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
+  trace('initialized');
 
   let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
@@ -57,10 +60,10 @@ export const handleDirectPaymentEntityTx = async (
 
   if (!route || route.length === 0) {
     if (newState.accounts.has(targetEntityId)) {
-      if (verbose) console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
+      trace('route.direct_account', { target: shortId(targetEntityId) });
       route = [entityState.entityId, targetEntityId];
     } else if (env.gossip) {
-      if (verbose) console.log(`💸 No direct account, finding route to ${formatEntityId(targetEntityId)}`);
+      trace('route.discovery_start', { target: shortId(targetEntityId) });
       const networkGraph = env.gossip.getNetworkGraph();
       const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
 
@@ -70,7 +73,7 @@ export const handleDirectPaymentEntityTx = async (
           throw new Error('ROUTE_DISCOVERY_INVARIANT: paths.length > 0 but paths[0] is missing');
         }
         route = firstPath.path;
-        if (verbose) console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
+        trace('route.discovery_found', { route: route.map((entityId) => shortId(entityId)) });
       } else {
         logError('ENTITY_TX', `❌ No route found to ${formatEntityId(targetEntityId)}`);
         addMessage(newState, `❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
@@ -98,7 +101,7 @@ export const handleDirectPaymentEntityTx = async (
   }
 
   if (route.length === 1 && route[0] === targetEntityId) {
-    if (verbose) console.log(`💸 FINAL DESTINATION: Entity ${entityState.entityId.slice(-4)} is the final recipient`);
+    trace('final_destination', { entity: shortId(entityState.entityId), tokenId, amount: amount.toString() });
     addMessage(newState, `💰 Received payment of ${amount} (token ${tokenId})`);
     return { newState, outputs: [] };
   }
@@ -132,30 +135,25 @@ export const handleDirectPaymentEntityTx = async (
   };
 
   mempoolOps.push({ accountId: nextHop, tx: accountTx });
-  if (verbose) {
-    console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
-    console.log(`💸   AccountTx type: ${accountTx.type}`);
-    console.log(`💸   Amount: ${accountTx.data.amount}`);
-    console.log(`💸   From: ${accountTx.data.fromEntityId?.slice(-4)}`);
-    console.log(`💸   To: ${accountTx.data.toEntityId?.slice(-4)}`);
-    console.log(
-      `💸   Route after slice: [${accountTx.data.route?.map((r: string) => r.slice(-4)).join(',') || 'none'}]`,
-    );
-    console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
-  }
+  trace('mempool.queued', {
+    account: shortId(nextHop),
+    tx: accountTx.type,
+    amount: accountTx.data.amount.toString(),
+    from: shortId(accountTx.data.fromEntityId),
+    to: shortId(accountTx.data.toEntityId),
+    route: accountTx.data.route?.map((entityId: string) => shortId(entityId)) ?? [],
+    mempoolOps: mempoolOps.length,
+  });
 
   const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-  if (verbose) console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
+  trace('account.state', { isLeft, hasPendingFrame: Boolean(accountMachine.pendingFrame) });
 
   addMessage(
     newState,
     `💸 Sending ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`,
   );
 
-  if (verbose) {
-    console.log(`💸 Payment queued for bilateral consensus with ${formatEntityId(nextHop)}`);
-    console.log(`💸 Account ${formatEntityId(nextHop)} will be added to proposableAccounts`);
-  }
+  trace('bilateral.queued', { nextHop: shortId(nextHop) });
 
   const firstValidator = entityState.config.validators[0];
   if (firstValidator) {
@@ -164,12 +162,9 @@ export const handleDirectPaymentEntityTx = async (
       signerId: firstValidator,
       entityTxs: [],
     });
-    if (verbose) console.log(`💸 Added processing trigger: outputs.length=${outputs.length}`);
+    trace('processing_trigger.added', { outputs: outputs.length });
   }
-  if (verbose) {
-    console.log(`💸 DIRECT-PAYMENT COMPLETE: mempoolOps=${mempoolOps.length}, outputs=${outputs.length}`);
-    console.log(`💸 ═════════════════════════════════════════════════════════════`);
-  }
+  trace('complete', { mempoolOps: mempoolOps.length, outputs: outputs.length });
 
   return { newState, outputs, mempoolOps };
 };
