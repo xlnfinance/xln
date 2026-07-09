@@ -63,6 +63,12 @@ test('package capped soak script matches the agreed one-hour policy', () => {
   );
 });
 
+test('ops runbook describes the capped gate as one hour', () => {
+  const runbook = readFileSync('docs/deployment/ops-runbook.md', 'utf8');
+  expect(runbook).toContain('one-hour capped soak');
+  expect(runbook).not.toContain('24-hour soak');
+});
+
 test('capped testnet gate arg parser supports preflight and dry run', () => {
   const parsed = parseCappedGateArgs([
     '--skip-soak',

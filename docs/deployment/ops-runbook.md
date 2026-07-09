@@ -120,5 +120,5 @@ bun run gate:capped-testnet
 ```
 
 `gate:capped-testnet` writes a JSON report under `.logs/gates/` and runs the
-24-hour soak. If any step fails, fix the root cause, commit the fix, and start
-the capped gate again from a fresh release-candidate commit.
+one-hour capped soak. If any step fails, fix the root cause, commit the fix,
+and start the capped gate again from a fresh release-candidate commit.
