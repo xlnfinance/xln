@@ -6,6 +6,7 @@
   import RuntimeAdapterPanel from '$lib/components/Health/RuntimeAdapterPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
   import { probeRpcHealth } from '$lib/health/rpcHealth';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
@@ -319,6 +320,10 @@
   let msgTypeOptions = $state<string[]>([]);
   let statusOptions = $state<string[]>([]);
 
+  function logHealthDiagnostic(message: string, details?: unknown): void {
+    errorLog.log(message, 'Health Admin', details);
+  }
+
   const BUG_PATTERNS = [
     'jsonrpcprovider failed to detect network',
     'testnet j-machine not found',
@@ -498,11 +503,7 @@
 
     rpcOk = false;
     rpcError = result.error || 'Unknown /rpc failure';
-    console.error(
-      '%c[RPC FAIL-FAST] /rpc health check failed after retries',
-      'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;',
-      result
-    );
+    logHealthDiagnostic('RPC health check failed after retries', result);
   }
 
   function formatBytes(bytes: number | null | undefined): string {
@@ -813,7 +814,7 @@
       applyFilters();
       error = null;
     } catch (err) {
-      console.error('[HealthAdmin] runtime projection health read failed', err);
+      logHealthDiagnostic('Runtime projection health read failed', err);
       error = err instanceof Error ? err.message : 'Failed to fetch health/runtime projection data';
     } finally {
       loading = false;

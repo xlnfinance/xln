@@ -415,6 +415,14 @@ test('health admin reads active runtime projections instead of debug event/entit
   expect(source).toContain('RuntimeActivityEvent');
   expect(source).toContain('RuntimeAdapterEntitySummary');
   expect(source).toContain("fetch('/api/health')");
+  expect(source).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
+  expect(source).toContain("errorLog.log(message, 'Health Admin', details)");
+  expect(source).toContain("'RPC health check failed after retries'");
+  expect(source).toContain("'Runtime projection health read failed'");
+  expect(source).not.toContain('console.error');
+  expect(source).not.toContain('console.warn');
+  expect(source).not.toContain('console.info');
+  expect(source).not.toContain('alert(');
   expect(source).not.toContain('/api/debug/events');
   expect(source).not.toContain('/api/debug/entities');
   expect(source).not.toContain('DebugResponse');
