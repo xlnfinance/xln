@@ -511,6 +511,15 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
     - Exit: mainnet limits are backed by measured capacity and explicit
       incentive assumptions.
 
+14. **Full TypeScript 7 tooling migration.**
+    - Staged now: runtime typecheck uses the pinned TS7 native compiler through
+      `@typescript/native`, while `typescript@5.9` remains installed for tools
+      that import the compiler API.
+    - Defer full switch until Svelte, ESLint, Hardhat, TypeChain, and ts-node
+      paths are proven compatible with TS7's API/tooling story.
+    - Exit: all repo typecheck, lint, contract, frontend, and editor tooling use
+      one TS7 toolchain without compatibility aliases.
+
 ## P2 - Product And UI
 
 1. **Lending tab.**
