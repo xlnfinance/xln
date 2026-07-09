@@ -246,6 +246,13 @@ const sendEntityInputSource = runtimeTs.slice(sendEntityInputStart, sendEntityIn
 assertNotIncludes(sendEntityInputSource, 'return true', 'runtime/runtime.ts');
 assertNotIncludes(sendEntityInputSource, 'return false', 'runtime/runtime.ts');
 
+const relayDirectTs = readText('runtime/server/relay-direct.ts');
+assertNotIncludes(relayDirectTs, '[RELAY] Direct dispatch', 'runtime/server/relay-direct.ts');
+assertNotIncludes(relayDirectTs, 'console.', 'runtime/server/relay-direct.ts');
+assertIncludes(relayDirectTs, 'relay.direct.target_key_missing', 'runtime/server/relay-direct.ts');
+assertIncludes(relayDirectTs, 'relay.direct.source_key_missing', 'runtime/server/relay-direct.ts');
+assertIncludes(relayDirectTs, 'relay.direct.send_failed', 'runtime/server/relay-direct.ts');
+
 for (const [path, markers] of [
   ['runtime/__tests__/delivery-result.test.ts', [
     'delivery result helpers validate the shared delivery contract',
@@ -268,6 +275,12 @@ for (const [path, markers] of [
     'relay send result predicate matches websocket failure contract',
     'relay delivery events expose typed retry and fatal semantics',
     'relay pending delivery retains current and later messages when send fails',
+  ]],
+  ['runtime/__tests__/relay-direct.test.ts', [
+    'direct relay diagnostics stay machine-readable',
+    'relay.direct.target_key_missing',
+    'relay.direct.source_key_missing',
+    'relay.direct.send_failed',
   ]],
   ['runtime/__tests__/relay-router.test.ts', [
     'delivery:',

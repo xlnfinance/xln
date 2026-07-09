@@ -19,6 +19,11 @@ import {
 
 export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 export type RelaySocket = ServerWebSocket<RelaySocketData>;
+export type RelayDirectOneShotLog = (
+  key: string,
+  message: string,
+  fields?: Record<string, unknown>,
+) => void;
 
 export const resolveRequestClientIp = (request: Request): string => {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
@@ -73,7 +78,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
   env: Env,
   targetRuntimeId: string,
   input: DeliverableEntityInput,
-  logOneShot: (key: string, message: string) => void,
+  logOneShot: RelayDirectOneShotLog,
   ingressTimestamp?: number,
 ): DeliveryResult => {
   const fromRuntimeId = String(env.runtimeId || '');
@@ -93,7 +98,8 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
   if (!targetPubKeyHex) {
     logOneShot(
       `direct-dispatch-missing-key:${targetRuntimeId}`,
-      `[RELAY] Direct dispatch missing encryption key for runtime ${targetRuntimeId.slice(0, 10)}`,
+      'relay.direct.target_key_missing',
+      { targetRuntimeId },
     );
     const delivery = deferredDirectRelayDelivery('ROUTE_DIRECT_TARGET_KEY_MISSING');
     pushDirectRelayDeliveryEvent(relayStore, {
@@ -110,7 +116,8 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
   if (!fromPubKeyHex) {
     logOneShot(
       `direct-dispatch-missing-source-key:${fromRuntimeId}`,
-      `[RELAY] Direct dispatch missing source encryption key for runtime ${fromRuntimeId.slice(0, 10)}`,
+      'relay.direct.source_key_missing',
+      { fromRuntimeId },
     );
     const delivery = deferredDirectRelayDelivery('ROUTE_DIRECT_SOURCE_KEY_MISSING');
     pushDirectRelayDeliveryEvent(relayStore, {
@@ -178,7 +185,8 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     const reason = error instanceof Error ? error.message : String(error);
     logOneShot(
       `direct-dispatch-send-failed:${targetRuntimeId}`,
-      `[RELAY] Direct dispatch send failed for runtime ${targetRuntimeId.slice(0, 10)}: ${reason}`,
+      'relay.direct.send_failed',
+      { targetRuntimeId, reason },
     );
     pushDirectRelayDeliveryEvent(relayStore, {
       fromRuntimeId,

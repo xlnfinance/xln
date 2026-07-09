@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { deriveEncryptionKeyPair, decryptJSON, pubKeyToHex } from '../networking/p2p-crypto';
@@ -37,6 +38,16 @@ const makeSocket = (options: { readyState?: number; sendResult?: boolean | numbe
 };
 
 describe('relay direct entity delivery', () => {
+  test('direct relay diagnostics stay machine-readable', () => {
+    const source = readFileSync(new URL('../server/relay-direct.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('[RELAY] Direct dispatch');
+    expect(source).not.toContain('console.');
+    expect(source).toContain('relay.direct.target_key_missing');
+    expect(source).toContain('relay.direct.source_key_missing');
+    expect(source).toContain('relay.direct.send_failed');
+  });
+
   test('sends a complete encrypted entity_input packet to a live relay client', () => {
     const sourceSeed = 'relay-direct-source';
     const targetSeed = 'relay-direct-target';
@@ -265,7 +276,7 @@ describe('relay direct entity delivery', () => {
       terminal: false,
     });
     expect(targetSocket.sent).toEqual([]);
-    expect(logs[0]).toContain('socket exploded');
+    expect(logs[0]).toBe('relay.direct.send_failed');
     expect(store.debugEvents.at(-1)).toMatchObject({
       event: 'delivery',
       from: sourceRuntimeId,
@@ -321,7 +332,7 @@ describe('relay direct entity delivery', () => {
       terminal: false,
     });
     expect(targetSocket.sent).toEqual([]);
-    expect(logs[0]).toContain('missing encryption key');
+    expect(logs[0]).toBe('relay.direct.target_key_missing');
     expect(store.debugEvents.at(-1)).toMatchObject({
       event: 'delivery',
       from: sourceRuntimeId,
@@ -375,7 +386,7 @@ describe('relay direct entity delivery', () => {
       terminal: false,
     });
     expect(targetSocket.sent).toEqual([]);
-    expect(logs[0]).toContain('missing source encryption key');
+    expect(logs[0]).toBe('relay.direct.source_key_missing');
     expect(store.debugEvents.at(-1)).toMatchObject({
       event: 'delivery',
       from: sourceRuntimeId,

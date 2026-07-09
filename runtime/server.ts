@@ -193,12 +193,12 @@ const isServerBootInProgress = (): boolean =>
 
 const oneShotLogs = new Map<string, number>();
 const ONE_SHOT_TTL_MS = 60_000;
-const logOneShot = (key: string, message: string) => {
+const logOneShot = (key: string, message: string, fields: Record<string, unknown> = {}) => {
   const nowMs = Date.now();
   const last = oneShotLogs.get(key) ?? 0;
   if (nowMs - last < ONE_SHOT_TTL_MS) return;
   oneShotLogs.set(key, nowMs);
-  serverLog.warn(message);
+  serverLog.warn(message, fields);
 };
 
 const currentRuntimeHeight = (env: Env | null): number =>
