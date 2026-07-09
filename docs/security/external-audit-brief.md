@@ -6,8 +6,8 @@ Last refreshed: 2026-07-09. Current internal evidence includes green
 `bun run security:audit-pack` and green `bun run check` on 2026-07-09, focused
 remote-runtime import/switch browser coverage on 2026-07-09, green
 `bun run security:contract-governance`, `bun run security:consensus-hanko`, and
-`bun run security:failure-taxonomy` on 2026-07-09, and a green
-`bun run test:all:fast` run on 2026-07-08 with
+`bun run security:failure-taxonomy`, and `bun run security:delivery-boundary`
+on 2026-07-09, and a green `bun run test:all:fast` run on 2026-07-08 with
 scenarios exiting `0` and 95/95 isolated browser shards passing. The required
 current mainnet evidence is the operator-facing preflight gate plus its
 one-hour soak. This is handoff evidence only; it is not external audit sign-off.
@@ -65,6 +65,7 @@ bun run gate:ci
 bun run security:contract-governance
 bun run security:consensus-hanko
 bun run security:failure-taxonomy
+bun run security:delivery-boundary
 bun run test:e2e:coverage
 bun run test:rpc-settlement
 bun run soak:quick

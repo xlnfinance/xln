@@ -24,6 +24,7 @@ for (const name of [
   'security:contract-governance',
   'security:consensus-hanko',
   'security:failure-taxonomy',
+  'security:delivery-boundary',
   'gate:ci',
   'gate:release',
   'gate:mainnet-preflight',
@@ -48,6 +49,7 @@ const runScan = (label: string, script: string): void => {
 runScan('contract governance scan', 'runtime/scripts/check-contract-governance-scan.ts');
 runScan('consensus hanko scan', 'runtime/scripts/check-consensus-hanko-scan.ts');
 runScan('runtime failure taxonomy scan', 'runtime/scripts/check-failure-taxonomy-scan.ts');
+runScan('runtime delivery boundary scan', 'runtime/scripts/check-delivery-boundary-scan.ts');
 
 const auditBriefPath = 'docs/security/external-audit-brief.md';
 const auditBrief = readText(auditBriefPath);
@@ -66,6 +68,7 @@ for (const command of [
   'bun run security:contract-governance',
   'bun run security:consensus-hanko',
   'bun run security:failure-taxonomy',
+  'bun run security:delivery-boundary',
   'bun run gate:ci',
   'bun run test:e2e:coverage',
   'bun run gate:release',

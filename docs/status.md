@@ -26,8 +26,8 @@ What is true now:
 - `bun run test:all:fast` passed on 2026-07-08 with scenarios green and
   95/95 isolated browser shards green;
 - `bun run security:contract-governance`, `bun run security:consensus-hanko`,
-  `bun run security:failure-taxonomy`, and `bun run security:audit-pack` passed
-  on 2026-07-09;
+  `bun run security:failure-taxonomy`, `bun run security:delivery-boundary`,
+  and `bun run security:audit-pack` passed on 2026-07-09;
 - test runners now clean old generated artifacts by default and enforce a
   50GiB generated-workspace budget unless an operator explicitly keeps
   artifacts;
@@ -98,9 +98,9 @@ When docs disagree, use this order:
   `0`, E2E exited `0`, and all 95 isolated browser shards passed.
 - On 2026-07-09, `bun run check`, `bun run security:contract-governance`,
   `bun run security:consensus-hanko`, `bun run security:failure-taxonomy`, and
-  `bun run security:audit-pack` passed after the runtime hardening,
-  remote-runtime import cleanup, typed failure taxonomy scan, and test-artifact
-  cleanup pass.
+  `bun run security:delivery-boundary`, and `bun run security:audit-pack`
+  passed after the runtime hardening, remote-runtime import cleanup, typed
+  failure taxonomy and delivery-boundary scans, and test-artifact cleanup pass.
 - The capped-testnet soak policy is one hour in `MAINNET_GATE.soakMinutes`, the
   capped policy file, gate builders, and the `soak:capped-testnet` package
   script.
@@ -138,7 +138,9 @@ When docs disagree, use this order:
    manual-review questions to the external auditor.
 9. Keep runtime failure taxonomy scan green so health/import/bootstrap/faucet
    regressions fail loudly instead of returning hidden string-only warnings.
-10. Keep destructive reset/clearDB/dev actions strongly gated.
+10. Keep runtime delivery boundary scan green so direct/relay/P2P callers
+    cannot regress to boolean sends or per-call-site retry parsing.
+11. Keep destructive reset/clearDB/dev actions strongly gated.
 
 ### P2 - product clarity
 
