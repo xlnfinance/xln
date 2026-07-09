@@ -468,6 +468,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.
+   - Partial: entity consensus now statically imports quorum hanko building,
+     signer hash batching, and account-frame proposal dependencies instead of
+     resolving them with `await import()` during frame commit/proposal.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 

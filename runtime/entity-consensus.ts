@@ -69,6 +69,8 @@ import {
 } from './orderbook/cross-j-orderbook';
 import { markCrossJurisdictionBookAdmissionResolving } from './cross-jurisdiction-orderbook';
 import { createEntityFrameHash } from './entity-consensus-frame';
+import { buildQuorumHanko, signEntityHashes } from './hanko/signing';
+import { proposeAccountFrame } from './account-consensus/propose';
 import {
   attachHankoWitnessToOutputs,
   buildEntityHashesToSign,
@@ -969,7 +971,6 @@ async function handleHashPrecommits(
 
   const committedHankos: HankoString[] = [];
   if (proposal.hashesToSign && proposal.collectedSigs) {
-    const { buildQuorumHanko } = await import('./hanko/signing');
     for (let i = 0; i < proposal.hashesToSign.length; i++) {
       const hashInfo = proposal.hashesToSign[i];
       if (!hashInfo) continue;
@@ -1280,7 +1281,6 @@ export const applyEntityInput = async (
       collectedHashes,
     );
 
-    const { signEntityHashes } = await import('./hanko/signing');
     const hankos = await signEntityHashes(
       env,
       workingReplica.state.entityId,
@@ -1631,7 +1631,6 @@ type ProposePendingAccountFramesContext = {
 
 async function proposePendingAccountFrames(context: ProposePendingAccountFramesContext): Promise<number> {
   const { env, currentEntityState, proposableAccounts, allOutputs, collectedHashes } = context;
-  const { proposeAccountFrame } = await import('./account-consensus');
   const accountsToProposeFrames = Array.from(proposableAccounts)
     .filter(accountId => {
       const accountMachine = currentEntityState.accounts.get(accountId);
