@@ -20,8 +20,11 @@ import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAc
 import { signEntityHashes } from '../../hanko/signing';
 import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../settlement-ops';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../dispute-arguments';
+import { createStructuredLogger, shortId } from '../../logger';
 
 import type { AccountMachine } from '../../types';
+
+const settleLog = createStructuredLogger('entity.settle');
 
 /**
  * Settlement signatures must jump past both the on-chain nonce and the latest
@@ -104,7 +107,7 @@ function createSettlementHoldOp(
   const holdDiffs = diffsToHoldFormat(diffs);
   const hasWithdrawals = holdDiffs.some(d => d.leftWithdrawing > 0n || d.rightWithdrawing > 0n);
   if (!hasWithdrawals) {
-    console.log(`⏭️ SETTLE-HOLD: No withdrawals to ${action} for workspace v${workspaceVersion}`);
+    settleLog.debug('hold.no_withdrawals', { action, workspaceVersion });
     return null;
   }
 
@@ -112,7 +115,7 @@ function createSettlementHoldOp(
     ? { type: 'settle_hold' as const, data: { workspaceVersion, diffs: holdDiffs } }
     : { type: 'settle_release' as const, data: { workspaceVersion, diffs: holdDiffs } };
 
-  console.log(`📥 SETTLE-${action.toUpperCase()} op created for frame consensus (workspace v${workspaceVersion})`);
+  settleLog.debug('hold.mempool_op_created', { action, workspaceVersion, diffs: holdDiffs.length });
   return { accountId, tx };
 }
 
@@ -149,7 +152,7 @@ export async function handleSettlePropose(
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
 
-  console.log(`⚖️ settle_propose: ${entityState.entityId.slice(-4)} → ${counterpartyEntityId.slice(-4)}`);
+  settleLog.debug('propose.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
@@ -184,7 +187,7 @@ export async function handleSettlePropose(
   const holdOp = createSettlementHoldOp(counterpartyEntityId, diffs, 1, 'set');
   if (holdOp) mempoolOps.push(holdOp);
 
-  console.log(`✅ settle_propose: Workspace created (version 1, ${ops.length} ops)`);
+  settleLog.debug('propose.created', { version: 1, ops: ops.length });
   addMessage(newState, `⚖️ Settlement proposed to ${counterpartyEntityId.slice(-4)} - awaiting response`);
 
   // Send ops to counterparty
@@ -229,7 +232,7 @@ export async function handleSettleUpdate(
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
 
-  console.log(`⚖️ settle_update: ${entityState.entityId.slice(-4)} → ${counterpartyEntityId.slice(-4)}`);
+  settleLog.debug('update.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
@@ -277,7 +280,7 @@ export async function handleSettleUpdate(
   const holdOp = createSettlementHoldOp(counterpartyEntityId, newDiffs, newVersion, 'set');
   if (holdOp) mempoolOps.push(holdOp);
 
-  console.log(`✅ settle_update: Workspace updated (version ${newVersion}, ${ops.length} ops)`);
+  settleLog.debug('update.applied', { version: newVersion, ops: ops.length });
   addMessage(newState, `⚖️ Settlement updated (v${newVersion})`);
 
   // Send update to counterparty
@@ -322,7 +325,7 @@ export async function handleSettleApprove(
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
 
-  console.log(`⚖️ settle_approve: ${entityState.entityId.slice(-4)} signing settlement with ${counterpartyEntityId.slice(-4)}`);
+  settleLog.debug('approve.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
@@ -331,7 +334,7 @@ export async function handleSettleApprove(
   const workspace = account.settlementWorkspace;
   if (workspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: workspace already submitted`);
-    console.log(`⚠️ settle_execute skipped: workspace already submitted for ${counterpartyEntityId.slice(-4)}`);
+    settleLog.debug('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
@@ -355,7 +358,11 @@ export async function handleSettleApprove(
   const signedNonce = getNextSettlementNonce(account);
   workspace.nonceAtSign = signedNonce;
 
-  console.log(`⚖️ Using settlement nonce: ${signedNonce} (onChain=${account.onChainSettlementNonce ?? 0}, proof=${account.proofHeader?.nonce ?? 0})`);
+  settleLog.debug('approve.nonce_selected', {
+    nonce: signedNonce,
+    onChainNonce: account.onChainSettlementNonce ?? 0,
+    proofNonce: account.proofHeader?.nonce ?? 0,
+  });
 
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction) throw new Error('No jurisdiction configured');
@@ -397,12 +404,12 @@ export async function handleSettleApprove(
     } else {
       workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
     }
-    console.log(`✅ Nonce+1 dispute proof signed (nonce=${disputeResult.nonce})`);
+    settleLog.debug('approve.post_settlement_dispute_signed', { nonce: disputeResult.nonce });
   }
 
   // Update status — only one signature needed (counterparty's)
   workspace.status = 'awaiting_counterparty';
-  console.log(`✅ settle_approve: Signed - awaiting executor to submit`);
+  settleLog.debug('approve.signed');
   addMessage(newState, `⚖️ Settlement signed - ready for execution`);
 
   // Send approval to counterparty
@@ -447,7 +454,7 @@ export async function handleSettleExecute(
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
 
-  console.log(`⚖️ settle_execute: ${entityState.entityId.slice(-4)} executing settlement with ${counterpartyEntityId.slice(-4)}`);
+  settleLog.debug('execute.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) {
@@ -557,7 +564,7 @@ export async function handleSettleExecute(
     throw error;
   }
 
-  console.log(`✅ settle_execute: Added to jBatch (${diffs.length} diffs)`);
+  settleLog.debug('execute.j_batch_added', { diffs: diffs.length });
 
   // Release holds
   const releaseOp = createSettlementHoldOp(counterpartyEntityId, diffs, workspace.version, 'release');
@@ -582,13 +589,13 @@ export async function handleSettleReject(
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
 
-  console.log(`⚖️ settle_reject: ${entityState.entityId.slice(-4)} rejecting settlement with ${counterpartyEntityId.slice(-4)}`);
+  settleLog.debug('reject.start', { entity: shortId(entityState.entityId), counterparty: shortId(counterpartyEntityId) });
 
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
 
   if (!account.settlementWorkspace) {
-    console.log(`⚖️ settle_reject: No workspace to reject (already cleared)`);
+    settleLog.debug('reject.no_workspace', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
 
@@ -600,7 +607,7 @@ export async function handleSettleReject(
 
   delete account.settlementWorkspace;
 
-  console.log(`✅ settle_reject: Workspace cleared`);
+  settleLog.debug('reject.cleared');
   addMessage(newState, `❌ Settlement rejected${reason ? `: ${reason}` : ''}`);
 
   const settleAction: AccountInput['settleAction'] = {
@@ -666,12 +673,12 @@ export async function processSettleAction(
 
       account.settlementWorkspace = workspace;
 
-      console.log(`📥 Received settle_propose from ${fromEntityId.slice(-4)} (${ops.length} ops)`);
+      settleLog.debug('receive.propose', { from: shortId(fromEntityId), ops: ops.length });
 
       // Auto-approve: compile then check safety
       let autoApproveOutput: EntityInput | undefined;
       if (env && entityState && canAutoApproveWorkspace(workspace, iAmLeft)) {
-        console.log(`✅ Auto-approving settlement from ${fromEntityId.slice(-4)}`);
+        settleLog.debug('receive.auto_approve.start', { from: shortId(fromEntityId) });
         try {
           const signedNonce = getNextSettlementNonce(account);
           workspace.nonceAtSign = signedNonce;
@@ -717,7 +724,7 @@ export async function processSettleAction(
                     }
                   }]
                 };
-                console.log(`✅ Auto-approve: signed settlement hanko (nonce=${signedNonce})`);
+                settleLog.debug('receive.auto_approve.signed', { nonce: signedNonce });
 
                 const disputeResult = await signPostSettlementDisputeProof(env, entityState, account, signedNonce);
                 if (disputeResult) {
@@ -782,7 +789,7 @@ export async function processSettleAction(
         account.settlementWorkspace.executorIsLeft = settleAction.executorIsLeft;
       }
 
-      console.log(`📥 Received settle_update from ${fromEntityId.slice(-4)} (v${account.settlementWorkspace.version})`);
+      settleLog.debug('receive.update', { from: shortId(fromEntityId), version: account.settlementWorkspace.version });
       return { success: true, message: `Settlement updated to v${account.settlementWorkspace.version}` };
     }
 
@@ -814,13 +821,13 @@ export async function processSettleAction(
         account.settlementWorkspace.status = 'ready_to_submit';
       }
 
-      console.log(`📥 Received settle_approve from ${fromEntityId.slice(-4)}`);
+      settleLog.debug('receive.approve', { from: shortId(fromEntityId) });
       return { success: true, message: `Counterparty signed settlement` };
     }
 
     case 'reject': {
       delete account.settlementWorkspace;
-      console.log(`📥 Received settle_reject from ${fromEntityId.slice(-4)}: ${settleAction.memo || 'no reason'}`);
+      settleLog.debug('receive.reject', { from: shortId(fromEntityId), memo: settleAction.memo || 'no reason' });
       return { success: true, message: `Settlement rejected by ${fromEntityId.slice(-4)}` };
     }
 
