@@ -93,7 +93,6 @@ const watchtower = `http://127.0.0.1:${args.watchtowerPort}`;
 
 const browserRows: LinkRow[] = webHttp ? [
   { label: 'wallet browser QA', url: `${webHttp}/app` },
-  { label: 'radapter manager QA', url: `${webHttp}/radapter/manage` },
 ] : [];
 
 const rows: LinkRow[] = [
@@ -104,8 +103,6 @@ const rows: LinkRow[] = [
   { label: 'health admin', url: `${web}/health` },
   { label: 'qa cockpit', url: `${web}/qa` },
   { label: 'runs history', url: `${web}/runs` },
-  { label: 'radapter inspector', url: `${web}/radapter` },
-  { label: 'radapter manager', url: `${web}/radapter/manage` },
   { label: 'custody dashboard', url: custody },
   { label: 'api health', url: `${api}/api/health` },
   { label: 'custody daemon health', url: `${custodyDaemon}/api/health` },
