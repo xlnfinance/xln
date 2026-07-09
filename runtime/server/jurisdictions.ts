@@ -23,6 +23,7 @@ export const updateJurisdictionsJson = async (
   contracts: JAdapter['addresses'],
   rpcUrl?: string,
   chainIdOverride?: number,
+  targetKeyOverride?: string,
 ): Promise<UpdatedRuntimeJurisdiction | null> => {
   try {
     const canonicalPath = resolveJurisdictionsJsonPath();
@@ -61,7 +62,12 @@ export const updateJurisdictionsJson = async (
     data.defaults = defaults;
     if (data['testnet']) delete data['testnet'];
     const jurisdictions: Record<string, WritableJurisdictionEntry> = data.jurisdictions ?? {};
-    const targetKey = selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpc]);
+    const rawTargetKeyOverride = String(targetKeyOverride || '').trim();
+    const requestedTargetKey = rawTargetKeyOverride ? normalizeJurisdictionKey(rawTargetKeyOverride) : '';
+    const existingRequestedKey = requestedTargetKey
+      ? Object.keys(jurisdictions).find(key => normalizeJurisdictionKey(key, '') === requestedTargetKey)
+      : '';
+    const targetKey = existingRequestedKey || requestedTargetKey || selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpc]);
     const previous = jurisdictions[targetKey] ?? {};
     const displayName = normalizeJurisdictionDisplayName(previous['name']) || targetKey;
     jurisdictions[targetKey] = {

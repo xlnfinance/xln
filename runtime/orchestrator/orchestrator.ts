@@ -2242,6 +2242,9 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
       }
     })() : null;
 
+    if (marketMakerReady) await marketMakerReady;
+    if (marketMakerBootstrapError) throw marketMakerBootstrapError;
+
     let custodyBootstrapError: unknown = null;
     if (args.custodyEnabled) {
       const custodyStartedAt = startTiming('reset_custody');
@@ -2265,14 +2268,12 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
         });
       } catch (error) {
         custodyBootstrapError = error;
-        console.error('[MESH] custody bootstrap failed; continuing market maker startup before failing reset:', serializeError(error));
+        console.error('[MESH] custody bootstrap failed:', serializeError(error));
       } finally {
         finishTiming('reset_custody', custodyStartedAt);
       }
     }
 
-    if (marketMakerReady) await marketMakerReady;
-    if (marketMakerBootstrapError) throw marketMakerBootstrapError;
     if (custodyBootstrapError) throw custodyBootstrapError;
 
     await persistHubReadySnapshots();
@@ -2495,6 +2496,35 @@ const server = Bun.serve({
       const health = await buildAggregatedHealthResponse();
       const readiness = resolveRuntimeImportReadiness(health);
       if (!readiness.ok) {
+        const allowPartial = url.searchParams.get('allowPartial') === '1' && isLocalOperatorRequest(request);
+        if (allowPartial) {
+          const access = resolveRuntimeImportAccessForRequest(
+            request,
+            url.searchParams.get('access'),
+            runtimeImportAccess,
+          );
+          if (!access.ok) {
+            return new Response(safeStringify({ error: access.error }), { status: access.status, headers });
+          }
+          const partialManifest = buildRuntimeImportManifest(access.access);
+          if (partialManifest) {
+            return new Response(safeStringify({
+              ok: true,
+              ready: false,
+              partial: true,
+              error: readiness.error,
+              reason: readiness.reason,
+              category: readiness.category,
+              code: readiness.code,
+              retryable: readiness.retryable,
+              fatal: readiness.fatal,
+              failure: readiness.failure,
+              degraded: readiness.degraded,
+              importUrl: buildRuntimeImportUrl(partialManifest),
+              manifest: partialManifest,
+            }), { headers: { ...headers, 'Retry-After': '2' } });
+          }
+        }
         return new Response(safeStringify({
           ok: false,
           ready: false,
@@ -2773,7 +2803,12 @@ console.log(
 assertMinDiskFree();
 
 if (!args.deferInitialReset) {
-  void ensureReset().catch(error => {
+  void ensureReset().catch(async (error) => {
     console.error('[MESH] initial reset failed:', serializeError(error));
+    await stopAllChildren({
+      quiesceRounds: 1,
+      quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS,
+    });
+    process.exit(1);
   });
 }

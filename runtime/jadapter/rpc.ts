@@ -194,6 +194,8 @@ export async function createRpcAdapter(
   signer: Signer
 ): Promise<JAdapter> {
   const traceEnabled = process.env['JADAPTER_TRACE'] === '1';
+  const mintDebugEnabled = process.env['XLN_JADAPTER_MINT_DEBUG'] === '1';
+  let quietLogs = false;
   const trace = (phase: string, extra?: Record<string, unknown>): void => {
     if (!traceEnabled) return;
     console.log(`[JAdapter:rpc][trace] ${phase}${extra ? ` ${JSON.stringify(extra)}` : ''}`);
@@ -1216,11 +1218,13 @@ export async function createRpcAdapter(
         throw new Error('debugFundReservesBatch only available on configured dev chains');
       }
       if (mints.length === 0) return [];
-      console.log(
-        `[JAdapter:rpc] mintToReserve loop start chainId=${config.chainId} ` +
-          `count=${mints.length} ` +
-          `first=${formatReserveMintDebug(mints[0])}`,
-      );
+      if (mintDebugEnabled && !quietLogs) {
+        console.log(
+          `[JAdapter:rpc] mintToReserve loop start chainId=${config.chainId} ` +
+            `count=${mints.length} ` +
+            `first=${formatReserveMintDebug(mints[0])}`,
+        );
+      }
       return runSerializedBatch(async () => {
         try {
           const events: JEvent[] = [];
@@ -2444,8 +2448,8 @@ export async function createRpcAdapter(
       // RPC mode follows chain timestamps from mined blocks; runtime logical time is separate.
     },
 
-    setQuietLogs(_quiet: boolean): void {
-      // no-op in RPC mode
+    setQuietLogs(quiet: boolean): void {
+      quietLogs = quiet;
     },
 
     registerEntityWallet(_entityId: string, _privateKey: string): void {

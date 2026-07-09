@@ -17,6 +17,11 @@ const hasMeaningfulEnqueuedWork = (inputs?: EntityInput[], runtimeTxs?: RuntimeT
   });
 };
 
+const shouldLogRuntimeInputDebug = (): boolean => {
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  return env?.['XLN_RUNTIME_INPUT_DEBUG'] === '1';
+};
+
 export const ensureRuntimeMempool = (env: Env): RuntimeInput => {
   if (!env.runtimeMempool) {
     const base = env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
@@ -63,23 +68,25 @@ export const enqueueRuntimeInputs = (
   if (jInputs && jInputs.length > 0) {
     mempool.jInputs = [...(mempool.jInputs ?? []), ...jInputs];
   }
-  const interestingEntityInputs = (inputs || [])
-    .map((input) => ({
-      entityId: String(input.entityId || ''),
-      signerId: String(input.signerId || ''),
-      txTypes: Array.isArray(input.entityTxs) ? input.entityTxs.map((tx) => String(tx?.type || '')) : [],
-    }))
-    .filter((input) => input.txTypes.some((type) => type.startsWith('j_') || type.startsWith('dispute')));
-  if (interestingEntityInputs.length > 0) {
-    console.log(
-      `[enqueueRuntimeInput] interesting entityInputs=${JSON.stringify({
-        runtimeId: env.runtimeId,
-        queuedAt: mempool.queuedAt,
-        totalEntityInputs: mempool.entityInputs.length,
-        totalRuntimeTxs: mempool.runtimeTxs.length,
-        inputs: interestingEntityInputs,
-      })}`,
-    );
+  if (shouldLogRuntimeInputDebug()) {
+    const interestingEntityInputs = (inputs || [])
+      .map((input) => ({
+        entityId: String(input.entityId || ''),
+        signerId: String(input.signerId || ''),
+        txTypes: Array.isArray(input.entityTxs) ? input.entityTxs.map((tx) => String(tx?.type || '')) : [],
+      }))
+      .filter((input) => input.txTypes.some((type) => type.startsWith('j_') || type.startsWith('dispute')));
+    if (interestingEntityInputs.length > 0) {
+      console.log(
+        `[enqueueRuntimeInput] interesting entityInputs=${JSON.stringify({
+          runtimeId: env.runtimeId,
+          queuedAt: mempool.queuedAt,
+          totalEntityInputs: mempool.entityInputs.length,
+          totalRuntimeTxs: mempool.runtimeTxs.length,
+          inputs: interestingEntityInputs,
+        })}`,
+      );
+    }
   }
   if (inputs?.length || runtimeTxs?.length || jInputs?.length) {
     const targetQueuedAt = normalizedTimestamp;

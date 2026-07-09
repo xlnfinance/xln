@@ -68,12 +68,27 @@ export type DebugEntitySummary = {
   isHub?: boolean;
   online?: boolean;
   name?: string;
+  metadata?: {
+    jurisdiction?: {
+      name?: string;
+      chainId?: number;
+      depositoryAddress?: string;
+      entityProviderAddress?: string;
+    };
+  };
   accounts?: unknown[];
   publicAccounts?: unknown[];
 };
 
 type DebugEntitiesResponse = {
   entities?: DebugEntitySummary[];
+};
+
+export type CustodyJurisdictionTarget = {
+  key: string;
+  name: string;
+  chainId?: number;
+  depositoryAddress?: string;
 };
 
 type DebugTokenCapacitySummary = {
@@ -350,6 +365,51 @@ const toLowerId = (value: unknown): string => {
   return trimmed ? trimmed.toLowerCase() : '';
 };
 
+const readCustodyJurisdictionTarget = async (
+  jurisdictionsPath: string,
+  key: string,
+): Promise<CustodyJurisdictionTarget> => {
+  const normalizedKey = key.trim();
+  if (!normalizedKey) throw new Error('CUSTODY_JURISDICTION_ID_MISSING');
+  const raw = await readFile(jurisdictionsPath, 'utf8');
+  const payload = JSON.parse(raw) as {
+    jurisdictions?: Record<string, {
+      name?: unknown;
+      chainId?: unknown;
+      contracts?: { depository?: unknown };
+    }>;
+  };
+  const entry = payload.jurisdictions?.[normalizedKey];
+  if (!entry) throw new Error(`CUSTODY_JURISDICTION_NOT_FOUND:${normalizedKey}`);
+  const name = String(entry.name || normalizedKey).trim();
+  const chainId = Number(entry.chainId);
+  const depositoryAddress = toLowerId(entry.contracts?.depository);
+  if (!name || !Number.isFinite(chainId) || !depositoryAddress) {
+    throw new Error(`CUSTODY_JURISDICTION_INCOMPLETE:${normalizedKey}`);
+  }
+  return {
+    key: normalizedKey,
+    name,
+    chainId,
+    depositoryAddress,
+  };
+};
+
+const isSameDebugJurisdiction = (
+  entry: DebugEntitySummary,
+  target: CustodyJurisdictionTarget,
+): boolean => {
+  const jurisdiction = entry.metadata?.jurisdiction;
+  if (!jurisdiction) return false;
+  const entryDepository = toLowerId(jurisdiction.depositoryAddress);
+  const targetDepository = toLowerId(target.depositoryAddress);
+  const entryChainId = Number(jurisdiction.chainId);
+  if (entryDepository && targetDepository && Number.isFinite(entryChainId) && Number.isFinite(target.chainId)) {
+    return entryDepository === targetDepository && entryChainId === target.chainId;
+  }
+  return String(jurisdiction.name || '').trim().toLowerCase() === target.name.trim().toLowerCase();
+};
+
 const hasPositiveCapacity = (value: unknown): boolean => {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
@@ -460,18 +520,27 @@ export const discoverHubIds = async (
   apiBaseUrl: string,
   minCount = 3,
   timeoutMs = 30_000,
+  jurisdictionTarget?: CustodyJurisdictionTarget,
 ): Promise<string[]> => {
   const deadline = Date.now() + timeoutMs;
+  let latestVisible = 0;
   while (Date.now() < deadline) {
     const entities = await fetchDebugEntities(apiBaseUrl);
+    latestVisible = entities.filter(entry => entry.isHub === true).length;
     const hubs = entities
       .filter((entry): entry is DebugEntitySummary & { entityId: string } => entry.isHub === true && typeof entry.entityId === 'string')
+      .filter(entry => !jurisdictionTarget || isSameDebugJurisdiction(entry, jurisdictionTarget))
       .map(entry => entry.entityId.toLowerCase())
       .slice(0, minCount);
     if (hubs.length >= minCount) return hubs;
     await sleep(500);
   }
-  throw new Error(`Timed out waiting for ${minCount} hub ids from ${apiBaseUrl}`);
+  throw new Error(
+    `Timed out waiting for ${minCount} hub ids from ${apiBaseUrl}` +
+    (jurisdictionTarget
+      ? ` jurisdiction=${jurisdictionTarget.name} chainId=${String(jurisdictionTarget.chainId)} visibleHubs=${latestVisible}`
+      : ''),
+  );
 };
 
 export const waitForDebugEntity = async (
@@ -500,6 +569,7 @@ export const startCustodySupport = async (
     const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
     await mkdir(options.dbRoot, { recursive: true });
     await writeFile(shardJurisdictionsPath, await readFile(resolveCustodyJurisdictionsJsonPath(), 'utf8'), 'utf8');
+    const jurisdictionTarget = await readCustodyJurisdictionTarget(shardJurisdictionsPath, options.jurisdictionId);
     const daemonAuthSeed = randomBytes(32).toString('hex');
     const daemonAuthAudience = `custody-daemon-${options.daemonPort}`;
     const deriveDaemonAdminKey = (): string => deriveRuntimeAdapterCapabilityToken(
@@ -519,6 +589,7 @@ export const startCustodySupport = async (
       {
         USE_ANVIL: 'true',
         XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
+        XLN_PREDEPLOYED_JURISDICTION_KEY: options.jurisdictionId,
         BOOTSTRAP_LOCAL_HUBS: '0',
         XLN_SKIP_SERVER_BOOTSTRAP: '1',
         XLN_EARLY_HTTP_BIND: '1',
@@ -536,7 +607,7 @@ export const startCustodySupport = async (
     );
     const [, hubIds] = await Promise.all([
       waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild, DEFAULT_CHILD_READY_TIMEOUT_MS, isDaemonHealthReady),
-      discoverHubIds(options.apiBaseUrl),
+      discoverHubIds(options.apiBaseUrl, 3, 30_000, jurisdictionTarget),
     ]);
     const controlResult = await runDaemonControl(
       [

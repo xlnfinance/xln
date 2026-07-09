@@ -175,13 +175,17 @@ type ClearableDb = {
   clear: () => Promise<void> | void;
 };
 
+const shouldLogDatabaseClear = (): boolean =>
+  typeof process !== 'undefined' && process.env?.['XLN_DB_CLEAR_DEBUG'] === '1';
+
 export const clearDatabase = async (db?: ClearableDb) => {
-  console.log('Clearing database and resetting history...');
+  const debug = shouldLogDatabaseClear();
+  if (debug) console.log('Clearing database and resetting history...');
 
   if (db) {
     // High-level: Use the provided database instance (Level polyfill)
     await db.clear();
-    console.log('✅ Database cleared via provided instance');
+    if (debug) console.log('Database cleared via provided instance');
   } else {
     // Fallback: Clear the correct database name based on environment
     if (typeof indexedDB !== 'undefined') {
@@ -191,34 +195,32 @@ export const clearDatabase = async (db?: ClearableDb) => {
       try {
         // Clear all possible database names that Level.js might use
         const clearPromises = dbNames.map(dbName => {
-          return new Promise<void>(resolve => {
+          return new Promise<void>((resolve, reject) => {
             const deleteReq = indexedDB.deleteDatabase(dbName);
             deleteReq.onsuccess = () => {
-              console.log(`✅ Cleared IndexedDB: ${dbName}`);
+              if (debug) console.log(`Cleared IndexedDB: ${dbName}`);
               resolve();
             };
             deleteReq.onerror = () => {
-              console.log(`⚠️ Could not clear IndexedDB: ${dbName} (may not exist)`);
-              resolve(); // Don't fail if database doesn't exist
+              reject(new Error(`INDEXEDDB_CLEAR_FAILED:${dbName}`));
             };
             deleteReq.onblocked = () => {
-              console.log(`⚠️ IndexedDB deletion blocked: ${dbName}`);
-              resolve();
+              reject(new Error(`INDEXEDDB_DELETE_BLOCKED:${dbName}`));
             };
           });
         });
 
         await Promise.all(clearPromises);
-        console.log('✅ All databases cleared, re-initializing...');
+        if (debug) console.log('All databases cleared, re-initializing...');
 
         return;
       } catch (error) {
-        console.log('❌ Error clearing IndexedDB:', error);
-        return;
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`CLEAR_DATABASE_INDEXEDDB_FAILED:${message}`);
       }
     }
   }
-  console.log('Database cleared.');
+  if (debug) console.log('Database cleared.');
 };
 
 // === ENTITY DISPLAY HELPERS ===

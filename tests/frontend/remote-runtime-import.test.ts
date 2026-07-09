@@ -149,6 +149,27 @@ describe('remote runtime import manager utilities', () => {
     expect(entries[0]?.wsUrl).toBe('ws://127.0.0.1:8092/rpc');
   });
 
+  test('parses partial local runtime import payloads while the mesh baseline is still converging', () => {
+    const entries = parseRemoteRuntimeImportSourcePayload({
+      ok: true,
+      ready: false,
+      partial: true,
+      reason: 'system-not-ok',
+      manifest: {
+        entries: [
+          { label: 'H1', access: 'read', wsUrl: 'ws://localhost:8092/rpc', token },
+          { label: 'H2', access: 'read', wsUrl: 'ws://localhost:8093/rpc', token },
+        ],
+      },
+    });
+    expect(entries.map(entry => entry.label)).toEqual(['H1', 'H2']);
+    expect(entries.map(entry => entry.wsUrl)).toEqual([
+      'ws://127.0.0.1:8092/rpc',
+      'ws://127.0.0.1:8093/rpc',
+    ]);
+  });
+
+
   test('rejects more than 100 remote runtime capability lines', () => {
     const lines = Array.from({ length: MAX_REMOTE_RUNTIME_IMPORTS + 1 }, (_, index) => makeEntry(index + 1));
     expect(() => parseRemoteRuntimeImportText(lines.join('\n'))).toThrow('REMOTE_RUNTIME_IMPORT_LIMIT_EXCEEDED:101:100');
@@ -478,7 +499,9 @@ describe('remote runtime import manager utilities', () => {
 
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
     expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");
+    expect(xlnStore).toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString())');
+    expect(runtimeCreation).toContain("url.searchParams.set('allowPartial', '1')");
     expect(runtimeCreation).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString())');
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');

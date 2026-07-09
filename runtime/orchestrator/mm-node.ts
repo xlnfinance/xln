@@ -380,6 +380,8 @@ const MARKET_MAKER_MAX_LEVELS_PER_PAIR = Math.max(
 const MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL = String(
   process.env['XLN_MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL'] || '',
 ).trim();
+const MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG =
+  process.env['XLN_MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG'] === '1';
 
 const emitMarketMakerBootstrapDebugEvent = (event: string, fields: Record<string, unknown> = {}): void => {
   if (!MARKET_MAKER_BOOTSTRAP_EVENTS_JSONL) return;
@@ -4481,7 +4483,9 @@ const run = async (): Promise<void> => {
           lastBacklogLogAt = now;
           const backlog = getMarketMakerRuntimeBacklogSnapshot(env);
           emitBootstrapDebugEvent('backlog', { backlog });
-          console.warn(`[MESH-MM] BOOTSTRAP_WAIT_BACKLOG ${safeStringify(backlog)}`);
+          if (MARKET_MAKER_BOOTSTRAP_LOG_BACKLOG) {
+            console.log(`[MESH-MM] BOOTSTRAP_WAIT_BACKLOG ${safeStringify(backlog)}`);
+          }
         }
       }
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);

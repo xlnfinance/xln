@@ -146,10 +146,19 @@ const samePredeployedRpc = (left: unknown, right: unknown): boolean => {
 const selectPredeployedJurisdiction = (
   payload: unknown,
   rpcUrl: string,
+  preferredKey?: string,
 ): PredeployedJurisdictionEntry | null => {
   const jurisdictions = (payload as { jurisdictions?: unknown } | null | undefined)?.jurisdictions;
   if (!jurisdictions || typeof jurisdictions !== 'object' || Array.isArray(jurisdictions)) return null;
-  const entries = Object.values(jurisdictions).filter(hasPredeployedContracts);
+  const keyedEntries = Object.entries(jurisdictions as Record<string, unknown>);
+  const preferred = String(preferredKey || '').trim().toLowerCase();
+  if (preferred) {
+    const match = keyedEntries.find(([key]) => key.trim().toLowerCase() === preferred);
+    if (!match) throw new Error(`PREDEPLOYED_JURISDICTION_NOT_FOUND:${preferred}`);
+    if (!hasPredeployedContracts(match[1])) throw new Error(`PREDEPLOYED_JURISDICTION_INCOMPLETE:${preferred}`);
+    return match[1];
+  }
+  const entries = keyedEntries.map(([, entry]) => entry).filter(hasPredeployedContracts);
   return (
     entries.find(entry => samePredeployedRpc(entry.rpc, rpcUrl)) ??
     entries.find(entry => entry.primary === true) ??
@@ -1040,6 +1049,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (useAnvil) {
       serverLog.info('anvil.connect.start', { rpc: anvilRpc });
       const usePredeployedAddresses = process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] === 'true';
+      const predeployedJurisdictionKey = String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim();
 
     // Optional: reuse addresses from jurisdictions.json (disabled by default).
     const fs = await import('fs/promises');
@@ -1047,10 +1057,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (usePredeployedAddresses) {
       try {
         const jurisdictionsPath = resolveJurisdictionsJsonPath();
-        serverLog.info('anvil.predeployed.load', { path: jurisdictionsPath });
+        serverLog.info('anvil.predeployed.load', {
+          path: jurisdictionsPath,
+          jurisdictionKey: predeployedJurisdictionKey || null,
+        });
         const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
         const jurisdictions = JSON.parse(jurisdictionsData);
-        const predeployedConfig = selectPredeployedJurisdiction(jurisdictions, anvilRpc);
+        const predeployedConfig = selectPredeployedJurisdiction(jurisdictions, anvilRpc, predeployedJurisdictionKey);
 
         if (predeployedConfig?.contracts) {
           const contracts = predeployedConfig.contracts;
@@ -1186,7 +1199,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
       updatedRuntimeJurisdiction = await withStartupStepTimeout(
         'updateJurisdictionsJson',
-        updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId),
+        updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId, predeployedJurisdictionKey),
       );
     }
 

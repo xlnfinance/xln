@@ -123,10 +123,16 @@
       const apiBase = resolveConfiguredApiBase(window.location.origin);
       const url = new URL('/api/runtime-import', apiBase);
       url.searchParams.set('access', 'read');
+      url.searchParams.set('allowPartial', '1');
       url.searchParams.set('ts', String(Date.now()));
       const res = await fetch(url.toString(), { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const payload = await res.json() as { manifest?: { entries?: Array<Record<string, unknown>> } };
+      const payload = await res.json() as {
+        ready?: boolean;
+        reason?: string;
+        error?: string;
+        manifest?: { entries?: Array<Record<string, unknown>> };
+      };
       const next: LiveRuntime[] = [];
       for (const entry of payload.manifest?.entries ?? []) {
         const wsUrl = String(entry['wsUrl'] || '').trim();
@@ -138,6 +144,9 @@
       }
       liveRuntimes = next;
       liveRuntimesLoaded = true;
+      if (!silent && next.length === 0 && payload.ready === false) {
+        liveRuntimesError = String(payload.reason || payload.error || 'runtime import not ready');
+      }
       void runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString());
     } catch (err) {
       if (!silent) liveRuntimesError = err instanceof Error ? err.message : String(err);

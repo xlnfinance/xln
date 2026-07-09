@@ -90,6 +90,13 @@ export const handleRuntimeInputStatus = (
       ok: true,
       receipt,
       currentHeight: deps.getCurrentRuntimeHeight(env),
+      runtime: env?.runtimeState
+        ? {
+            halted: env.runtimeState.halted === true,
+            fatalDebugPayload: env.runtimeState.fatalDebugPayload ?? null,
+            latestQuarantine: env.runtimeState.quarantinedRuntimeInputs?.at(-1) ?? null,
+          }
+        : null,
     }),
     { headers },
   );

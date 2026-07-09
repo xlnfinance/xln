@@ -111,6 +111,7 @@ export const getMarketMakerHealth = (
   state: MarketMakerServerState,
   getAccountMachine: (env: Env, entityId: string, counterpartyId: string) => AccountMachine | null,
 ): {
+  applicable: boolean;
   enabled: boolean;
   ok: boolean;
   entityId: string | null;
@@ -158,11 +159,21 @@ export const getMarketMakerHealth = (
   };
 
   if (!entityId || hubs.length === 0 || expectedOffersPerHub <= 0) {
-    return { enabled: false, ok: false, entityId: entityId || null, expectedOffersPerHub: Math.max(0, expectedOffersPerHub), expectedOffersPerPair, cross, hubs: [] };
+    return {
+      applicable: false,
+      enabled: false,
+      ok: true,
+      entityId: entityId || null,
+      expectedOffersPerHub: Math.max(0, expectedOffersPerHub),
+      expectedOffersPerPair,
+      cross,
+      hubs: [],
+    };
   }
 
   if (!env) {
     return {
+      applicable: true,
       enabled: true,
       ok: false,
       entityId,
@@ -223,5 +234,14 @@ export const getMarketMakerHealth = (
     };
   });
 
-  return { enabled: true, ok: perHub.length > 0 && perHub.every(entry => entry.ready), entityId, expectedOffersPerHub, expectedOffersPerPair, cross, hubs: perHub };
+  return {
+    applicable: true,
+    enabled: true,
+    ok: perHub.length > 0 && perHub.every(entry => entry.ready),
+    entityId,
+    expectedOffersPerHub,
+    expectedOffersPerPair,
+    cross,
+    hubs: perHub,
+  };
 };

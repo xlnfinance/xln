@@ -13,18 +13,11 @@ import { createXlnJsonRpcProvider } from './jadapter';
 import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-utils';
 import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './j-batch';
+import { loadCliJurisdiction, type CliJurisdiction } from './cli-jurisdiction';
 
-const REMOTE_RPC = 'https://xln.finance/rpc';
-const LOCAL_RPC = 'http://localhost:8545';
-const CHAIN_ID = 31337;
-
-// Contract addresses from jurisdictions.json (deployed 2025-01-29)
-const CONTRACTS = {
-  account: '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9',
-  entityProvider: '0x5FC8d32690cc91D4c39d9d3abcBD16989F875707',
-  depository: '0x0165878A594ca255338adfa4d48449f69242Eb8F',
-  deltaTransformer: '0xa513E6E4b8f2a923D98304ec87F64353C4D5C853',
-};
+const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc';
+const LOCAL_RPC = process.env['XLN_CLI_LOCAL_RPC'] || 'http://localhost:8545';
+const DEFAULT_DEV_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
 type CliJAdapter = JAdapter & {
   reserveToReserve(
@@ -37,15 +30,23 @@ type CliJAdapter = JAdapter & {
 };
 
 let jAdapter: CliJAdapter;
+let activeJurisdiction: CliJurisdiction;
 
 async function init(remote: boolean) {
-  const rpcUrl = remote ? REMOTE_RPC : LOCAL_RPC;
-  console.log(`Connecting to ${rpcUrl}...`);
+  const requestedRpcUrl = remote ? REMOTE_RPC : LOCAL_RPC;
+  activeJurisdiction = await loadCliJurisdiction({
+    rpcUrl: requestedRpcUrl,
+    remote,
+    jurisdictionKey: process.env['XLN_CLI_JURISDICTION'],
+    jurisdictionsUrl: process.env['XLN_CLI_JURISDICTIONS_URL'],
+  });
+  const rpcUrl = activeJurisdiction.rpcUrl;
+  console.log(`Connecting to ${rpcUrl} (${activeJurisdiction.key})...`);
 
   // Create provider and signer directly for connecting to existing contracts
   const provider = createXlnJsonRpcProvider(rpcUrl);
   const signer = new ethers.Wallet(
-    '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', // default anvil key
+    process.env['XLN_CLI_PRIVATE_KEY'] || DEFAULT_DEV_PRIVATE_KEY,
     provider
   );
 
@@ -54,31 +55,31 @@ async function init(remote: boolean) {
 
   type DepositoryRunner = Parameters<typeof Depository__factory.connect>[1];
   const contractRunner = signer as unknown as DepositoryRunner;
-  const depository = Depository__factory.connect(CONTRACTS.depository, contractRunner);
-  const entityProvider = EntityProvider__factory.connect(CONTRACTS.entityProvider, contractRunner);
+  const depository = Depository__factory.connect(activeJurisdiction.contracts.depository, contractRunner);
+  const entityProvider = EntityProvider__factory.connect(activeJurisdiction.contracts.entityProvider, contractRunner);
 
   // Create minimal adapter object for queries
   jAdapter = {
     mode: 'rpc',
-    chainId: CHAIN_ID,
+    chainId: activeJurisdiction.chainId,
     provider,
     signer,
     depository,
     entityProvider,
-    addresses: CONTRACTS,
+    addresses: activeJurisdiction.contracts,
     async getReserves(entityId: string, tokenId: number) {
-      const entityAddress = createProviderScopedEntityId(CONTRACTS.entityProvider, normalizeEntityId(entityId));
+      const entityAddress = createProviderScopedEntityId(activeJurisdiction.contracts.entityProvider, normalizeEntityId(entityId));
       return depository._reserves(entityAddress, tokenId);
     },
     async getEntityNonce(entityId: string) {
-      const entityAddress = createProviderScopedEntityId(CONTRACTS.entityProvider, normalizeEntityId(entityId));
+      const entityAddress = createProviderScopedEntityId(activeJurisdiction.contracts.entityProvider, normalizeEntityId(entityId));
       return depository.entityNonces(entityAddress);
     },
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint, options?: { entityProvider?: string; hankoData?: string; nonce?: bigint }) {
       if (!options?.hankoData || options.nonce === undefined) {
         throw new Error('reserveToReserve requires hankoData and nonce');
       }
-      const providerAddr = options.entityProvider || CONTRACTS.entityProvider;
+      const providerAddr = options.entityProvider || activeJurisdiction.contracts.entityProvider;
       const fromAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(from));
       const toAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(to));
       console.log(`Submitting reserveToReserve from ${fromAddr} to ${toAddr}`);
@@ -98,7 +99,8 @@ async function init(remote: boolean) {
 
   const block = await provider.getBlockNumber();
   console.log(`Connected. Block: ${block}`);
-  console.log(`Depository: ${CONTRACTS.depository}`);
+  console.log(`Jurisdiction: ${activeJurisdiction.name} (${activeJurisdiction.key})`);
+  console.log(`Depository: ${activeJurisdiction.contracts.depository}`);
 }
 
 async function cmd(line: string) {
@@ -121,7 +123,8 @@ Commands:
       const block = await jAdapter.provider.getBlockNumber();
       console.log(`Block: ${block}`);
       console.log(`ChainId: ${jAdapter.chainId}`);
-      console.log(`Depository: ${jAdapter.addresses.depository || CONTRACTS.depository}`);
+      console.log(`Jurisdiction: ${activeJurisdiction.name} (${activeJurisdiction.key})`);
+      console.log(`Depository: ${jAdapter.addresses.depository}`);
       break;
 
     case 'reserves': {
@@ -139,7 +142,7 @@ Commands:
       const toId = to!.startsWith('0x') ? to! : '0x' + to!.padStart(64, '0');
       const amount = ethers.parseUnits(amountStr!, 18);
       const nonce = BigInt(nonceStr!);
-      const provider = providerAddr || CONTRACTS.entityProvider;
+      const provider = providerAddr || activeJurisdiction.contracts.entityProvider;
       console.log(`R2R: ${fromId.slice(0,10)}... -> ${toId.slice(0,10)}... : ${amountStr} USDC`);
       const events = await jAdapter.reserveToReserve(fromId, toId, 1, amount, { entityProvider: provider, hankoData: hankoData!, nonce });
       console.log(`Done. Events: ${events.length}`);
@@ -185,4 +188,6 @@ async function main() {
   });
 }
 
-main().catch(console.error);
+if (import.meta.main) {
+  main().catch(console.error);
+}

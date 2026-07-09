@@ -7,7 +7,14 @@ import type { Profile } from '../networking/gossip';
 import { isLocalOperatorRequest, publicRuntimeHealthBody } from '../health-redaction';
 import { buildDiskSummary } from '../server-utils';
 import { getReplicaAccountCount, getReplicaReserveSnapshot } from './entity-lookup';
-import { getBootstrapReserveHealth, getHubMeshHealth } from './hub-health';
+import {
+  HUB_MESH_CREDIT_AMOUNT,
+  HUB_MESH_REQUIRED_HUBS,
+  HUB_MESH_TOKEN_ID,
+  HUB_REQUIRED_TOKEN_COUNT,
+  getBootstrapReserveHealth,
+  getHubMeshHealth,
+} from './hub-health';
 import type { MarketMakerServerState } from './market-maker-health';
 import { getMarketMakerHealth } from './market-maker-health';
 
@@ -63,6 +70,7 @@ export const handleRuntimeHealth = async (
   if (!inFlight) {
     inFlight = (async () => {
       const env = deps.env;
+      const hubMeshApplicable = deps.activeHubEntityIds.length > 0;
       const health = await getHealthStatus(env);
       const storage = getStorageHealthSnapshotSync();
       const activeClientRuntimeIds = Array.from(deps.relayStore.clients.keys());
@@ -72,9 +80,12 @@ export const handleRuntimeHealth = async (
         ageMs: Math.max(0, Date.now() - client.lastSeen),
         topics: Array.from(client.topics || []),
       }));
-      const relayHubProfiles = getAllGossipProfiles(deps.relayStore).filter((profile: Profile) =>
-        profile.metadata.isHub === true,
-      );
+      const relayHubProfiles = hubMeshApplicable
+        ? getAllGossipProfiles(deps.relayStore).filter((profile: Profile) => profile.metadata.isHub === true)
+        : [];
+      if (!hubMeshApplicable) {
+        health.hubs = [];
+      }
       const existing = new Set((health.hubs || []).map((hub) => String(hub.entityId).toLowerCase()));
       for (const profile of relayHubProfiles) {
         const entityId = profile.entityId;
@@ -120,11 +131,21 @@ export const handleRuntimeHealth = async (
           accounts: env ? getReplicaAccountCount(env, entityId) ?? hub.accounts : hub.accounts,
         };
       });
-      const bootstrapReserves = await getBootstrapReserveHealth(env, {
-        activeHubEntityIds: deps.activeHubEntityIds,
-        marketMakerEntityId: deps.marketMakerState.entityId,
-        loadTokenCatalog: deps.ensureTokenCatalog,
-      });
+      const marketMaker = getMarketMakerHealth(env, deps.marketMakerState, deps.getAccountMachine);
+      const bootstrapReserves =
+        hubMeshApplicable || marketMaker.applicable
+          ? await getBootstrapReserveHealth(env, {
+              activeHubEntityIds: deps.activeHubEntityIds,
+              marketMakerEntityId: deps.marketMakerState.entityId,
+              loadTokenCatalog: deps.ensureTokenCatalog,
+            })
+          : {
+              applicable: false,
+              ok: true,
+              requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
+              entityCount: 0,
+              entities: [],
+            };
       const payload = {
         ...health,
         disk: buildDiskSummary(storage),
@@ -135,8 +156,19 @@ export const handleRuntimeHealth = async (
           completedAt: deps.boot.completedAt,
           error: deps.boot.error,
         },
-        hubMesh: getHubMeshHealth(env, deps.activeHubEntityIds),
-        marketMaker: getMarketMakerHealth(env, deps.marketMakerState, deps.getAccountMachine),
+        hubMesh: hubMeshApplicable
+          ? getHubMeshHealth(env, deps.activeHubEntityIds)
+          : {
+              applicable: false,
+              ok: true,
+              reason: 'no-active-hub-entities',
+              requiredHubCount: HUB_MESH_REQUIRED_HUBS,
+              tokenId: HUB_MESH_TOKEN_ID,
+              requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
+              hubIds: [],
+              pairs: [],
+            },
+        marketMaker,
         bootstrapReserves,
         relay: {
           activeClients: activeClientRuntimeIds,

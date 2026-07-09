@@ -493,6 +493,11 @@ const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
 if (!directWsUrl) {
   throw new Error(`[MESH-HUB] Missing required --direct-ws-url for ${resolvedArgs.name}`);
 }
+const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] === '1';
+const MESH_BOOTSTRAP_TICK_TIMEOUT_MS = Math.max(
+  5_000,
+  Math.floor(Number(process.env['XLN_MESH_BOOTSTRAP_TICK_TIMEOUT_MS'] || '30000')),
+);
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
 const HUB_RUNTIME_TICK_DELAY_MS = Math.max(
@@ -657,7 +662,7 @@ const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): P
   // hub before it can bootstrap. Drop those stale addresses and let importJ
   // deploy a fresh stack; ensureRpcStackReady writes the resulting addresses
   // back for H2/H3/MM.
-  console.warn(
+  console.log(
     `[${resolvedArgs.name}] RPC contracts have no code; deploying fresh stack instead of using stale addresses: ` +
       missingCode.join(', '),
   );
@@ -1332,10 +1337,12 @@ const visibleDirectSupportPeers = (
     .map((identity) => {
       const entityId = identity.entityId.toLowerCase();
       if (entityId === selfEntityId.toLowerCase()) return null;
-      if (!sameJurisdictionRef(identity, jurisdiction)) return null;
       const profile = profilesByEntityId.get(entityId);
-      const runtimeId = normalizeRuntimeId(profile?.runtimeId || '');
+      if (!profile) return null;
+      const runtimeId = normalizeRuntimeId(profile.runtimeId || '');
       if (!runtimeId) return null;
+      const peerJurisdiction = profile.metadata?.jurisdiction || identity;
+      if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;
       return { ...identity, runtimeId };
     })
     .filter((peer): peer is VisibleSupportPeer => peer !== null);
@@ -2136,12 +2143,29 @@ const run = async (): Promise<void> => {
   let creditReadyMarked = false;
   let reserveReadyMarked = false;
   let meshLoopInFlight = false;
+  let meshLoopStartedAt = 0;
+  let meshLoopStep = 'idle';
 
   const driveMeshBootstrap = async (): Promise<void> => {
-    if (!bootstrap || meshLoopInFlight) return;
+    if (!bootstrap) return;
+    if (meshLoopInFlight) {
+      const elapsedMs = Date.now() - meshLoopStartedAt;
+      if (elapsedMs > MESH_BOOTSTRAP_TICK_TIMEOUT_MS) {
+        throw new Error(
+          `MESH_BOOTSTRAP_TICK_TIMEOUT step=${meshLoopStep} elapsedMs=${elapsedMs} timeoutMs=${MESH_BOOTSTRAP_TICK_TIMEOUT_MS}`,
+        );
+      }
+      return;
+    }
     meshLoopInFlight = true;
+    meshLoopStartedAt = Date.now();
+    meshLoopStep = 'start';
     try {
-      const visibleHubProfiles = readVisibleHubProfiles(env, jurisdiction);
+      const bootstrapJurisdiction =
+        getEntityJurisdiction(env, bootstrap.entityId) ||
+        getEntityJurisdictionName(env, bootstrap.entityId) ||
+        jurisdiction;
+      const visibleHubProfiles = readVisibleHubProfiles(env, bootstrapJurisdiction);
       const requiredHubNames = new Set(resolvedArgs.meshHubNames.map(name => name.trim().toLowerCase()).filter(Boolean));
       const requiredHubProfiles = visibleHubProfiles.filter(profile => {
         const hubName = String(profile.hubName || profile.name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
@@ -2156,6 +2180,7 @@ const run = async (): Promise<void> => {
       }
 
       const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
+      meshLoopStep = 'direct-peers';
       if (!directHubPeersReady(env, peers)) {
         return;
       }
@@ -2262,6 +2287,7 @@ const run = async (): Promise<void> => {
       }
 
       if (openInputs.length > 0) {
+        meshLoopStep = `open-accounts:${openInputs.length}`;
         startTiming('mesh_accounts');
         enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: openInputs });
         await settleRuntimeFor(env, 35);
@@ -2279,9 +2305,28 @@ const run = async (): Promise<void> => {
       }
 
       if (creditInputs.length > 0) {
+        meshLoopStep = `extend-credit:${creditInputs.length}`;
         startTiming('mesh_credit');
         enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
         await settleRuntimeFor(env, 45);
+      }
+
+      if (!reserveReadyMarked) {
+        let peerReservesReady = true;
+        if (resolvedArgs.deployTokens) {
+          meshLoopStep = 'peer-reserve-funding';
+          const localHubEntityIds = new Set(hubBootstraps.map(entry => normalizeEntityId(entry.entityId)));
+          const allPeerProfiles = readVisibleHubProfiles(env, '')
+            .filter(profile => !localHubEntityIds.has(normalizeEntityId(profile.entityId)));
+          const expectedPeerProfiles = Math.max(0, resolvedArgs.meshHubNames.length - 1) * hubBootstraps.length;
+          peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;
+          if (peerReservesReady) {
+            await ensurePeerBootstrapReserves(env, allPeerProfiles, tokenCatalog);
+          }
+        }
+        meshLoopStep = 'local-reserve-funding';
+        const reserveHealth = await ensureHubBootstrapReserves(env, hubBootstraps);
+        reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;
       }
 
       const allCreditReady =
@@ -2293,21 +2338,13 @@ const run = async (): Promise<void> => {
         finishTiming('mesh_credit', startedAtFor('mesh_credit') ?? startTiming('mesh_credit'));
         creditReadyMarked = true;
       }
-      if (allCreditReady && !reserveReadyMarked) {
-        if (resolvedArgs.deployTokens) {
-          const localHubEntityIds = new Set(hubBootstraps.map(entry => normalizeEntityId(entry.entityId)));
-          const allPeerProfiles = readVisibleHubProfiles(env, '')
-            .filter(profile => !localHubEntityIds.has(normalizeEntityId(profile.entityId)));
-          await ensurePeerBootstrapReserves(env, allPeerProfiles, tokenCatalog);
-        }
-        const reserveHealth = await ensureHubBootstrapReserves(env, hubBootstraps);
-        reserveReadyMarked = reserveHealth.targetMet === true;
-      }
       if (allCreditReady && reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {
         finishTiming('mesh_ready_total', totalMeshStartedAt);
       }
     } finally {
       meshLoopInFlight = false;
+      meshLoopStartedAt = 0;
+      meshLoopStep = 'idle';
     }
   };
 
@@ -2331,7 +2368,7 @@ const run = async (): Promise<void> => {
   }, BOOTSTRAP_POLL_MS);
   void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
 
-  if (resolvedArgs.deployTokens) {
+  if (resolvedArgs.deployTokens && AUTO_PROVISION_EXTERNAL_FAUCET) {
     void externalWalletApi.provisionFaucetWallet()
       .then(() => {
         if (!shuttingDown) {

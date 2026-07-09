@@ -45,6 +45,12 @@ interface JurisdictionsData {
 
 let cachedJurisdictions: JurisdictionsData | null = null;
 
+const readNodeEnvFlag = (name: string): boolean =>
+  typeof process !== 'undefined' && process.env?.[name] === '1';
+
+const shouldLogJurisdictionLoaderDebug = (): boolean =>
+  readNodeEnvFlag('XLN_JURISDICTIONS_DEBUG');
+
 /**
  * Load jurisdictions.json once and cache the result
  * All parts of the system should use this function
@@ -76,10 +82,11 @@ export function loadJurisdictions(): JurisdictionsData {
     },
   };
 
+  let filePath = '';
   try {
     const fs = require('fs'); // Dynamic require for Node.js only
     const candidates = [resolveJurisdictionsJsonPath()];
-    const filePath = candidates.find((candidate: string) => fs.existsSync(candidate)) ?? '';
+    filePath = candidates.find((candidate: string) => fs.existsSync(candidate)) ?? '';
 
     if (!fs.existsSync(filePath)) {
       console.warn('INFO: jurisdictions.json not found at canonical path; using defaults');
@@ -90,16 +97,17 @@ export function loadJurisdictions(): JurisdictionsData {
     const jurisdictionsContent = fs.readFileSync(filePath, 'utf8');
     cachedJurisdictions = JSON.parse(jurisdictionsContent);
 
-    console.log('📋 Jurisdictions loaded from file (cached for future use)');
-    console.log(`  ├─ Version: ${cachedJurisdictions?.version}`);
-    console.log(`  ├─ Last updated: ${cachedJurisdictions?.lastUpdated}`);
-    console.log(`  └─ Jurisdictions: ${Object.keys(cachedJurisdictions?.jurisdictions || {}).join(', ')}`);
+    if (shouldLogJurisdictionLoaderDebug()) {
+      console.log('Jurisdictions loaded from file (cached for future use)');
+      console.log(`  version=${cachedJurisdictions?.version}`);
+      console.log(`  lastUpdated=${cachedJurisdictions?.lastUpdated}`);
+      console.log(`  keys=${Object.keys(cachedJurisdictions?.jurisdictions || {}).join(', ')}`);
+    }
 
     return cachedJurisdictions!;
   } catch (error) {
-    console.error('ERROR: Failed to load jurisdictions.json:', error);
-    cachedJurisdictions = defaultJurisdictions;
-    return cachedJurisdictions;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`JURISDICTIONS_LOAD_FAILED:path=${filePath || 'unknown'}:${message}`);
   }
 }
 
@@ -108,7 +116,9 @@ export function loadJurisdictions(): JurisdictionsData {
  */
 export function clearJurisdictionsCache(): void {
   cachedJurisdictions = null;
-  console.log('🔄 Jurisdictions cache cleared');
+  if (shouldLogJurisdictionLoaderDebug()) {
+    console.log('Jurisdictions cache cleared');
+  }
 }
 
 /**

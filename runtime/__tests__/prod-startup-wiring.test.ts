@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { discoverHubIds } from '../orchestrator/custody-bootstrap';
 import { createOrchestratorProxyHandlers } from '../orchestrator/proxy';
 import {
   E2E_FATAL_LOG_TAIL_LINES,
@@ -94,6 +95,9 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('if (!marketMakerActive) {');
     expect(marketMakerAggregation).toContain('const ok = !mmEnabled || failure === null;');
     expect(standaloneServer).toContain('const selectPredeployedJurisdiction = (');
+    expect(standaloneServer).toContain("const predeployedJurisdictionKey = String(process.env['XLN_PREDEPLOYED_JURISDICTION_KEY'] || '').trim();");
+    expect(standaloneServer).toContain('selectPredeployedJurisdiction(jurisdictions, anvilRpc, predeployedJurisdictionKey)');
+    expect(standaloneServer).toContain('updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId, predeployedJurisdictionKey)');
     expect(standaloneServer).toContain('entries.find(entry => samePredeployedRpc(entry.rpc, rpcUrl))');
     expect(standaloneServer).not.toContain('arrakisConfig');
     const waitForMarketMakerReady = orchestrator.slice(orchestrator.indexOf('const waitForMarketMakerReady = async (): Promise<void> => {'));
@@ -130,7 +134,7 @@ describe('production startup wiring', () => {
     expect(startCustodyDev).toContain('CUSTODY_JURISDICTION_ID: custodyJurisdictionId');
     expect(startCustodyDev).not.toContain("jurisdictionId: 'arrakis'");
     expect(startCustodyDev).not.toContain("CUSTODY_JURISDICTION_ID: 'arrakis'");
-    expect(cli).toContain("const REMOTE_RPC = 'https://xln.finance/rpc';");
+    expect(cli).toContain("const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc';");
     expect(cli).not.toContain('/rpc/arrakis');
     expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdictions.ts'), 'utf8'))
       .toContain('const seedPath = existsSync(canonicalPath) ? canonicalPath : resolveRepoJurisdictionsJsonPath();');
@@ -213,7 +217,8 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('entry.jurisdictionRef &&');
     expect(mmNode).toContain('.filter(profile => profile.jurisdictionRef.length > 0)');
     expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');
-    expect(hubNode).toContain('if (!sameJurisdictionRef(identity, jurisdiction)) return null;');
+    expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
+    expect(hubNode).toContain('if (!sameJurisdictionRef(peerJurisdiction, jurisdiction)) return null;');
     expect(hubNode).not.toContain('sameJurisdictionIdentityOrNameOnlyFallback');
     expect(hubNode).toContain('for (const hubBootstrap of hubBootstraps)');
     expect(hubNode).not.toContain('if (!runtimeId || !openRuntimeIds.has(runtimeId)) return null;');
@@ -581,6 +586,8 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const health = await buildAggregatedHealthResponse();');
     expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
     expect(orchestrator).toContain('if (!readiness.ok) {');
+    expect(orchestrator).toContain("const allowPartial = url.searchParams.get('allowPartial') === '1' && isLocalOperatorRequest(request);");
+    expect(orchestrator).toContain('partial: true,');
     expect(orchestrator).toContain('ready: false,');
     expect(orchestrator).toContain('category: readiness.category,');
     expect(orchestrator).toContain('failure: readiness.failure,');
@@ -1177,6 +1184,109 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).not.toContain('profilesByJurisdiction.has(jurisdictionName)');
     expect(reserveBootstrap).not.toContain('tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
+  });
+
+  test('hub mesh bootstrap uses live entity jurisdiction and does not auto-provision faucet by default', () => {
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const driveStart = hubNode.indexOf('const driveMeshBootstrap = async (): Promise<void> => {');
+    const driveEnd = hubNode.indexOf('let meshLoopFatal = false;', driveStart);
+    expect(driveStart).toBeGreaterThan(0);
+    expect(driveEnd).toBeGreaterThan(driveStart);
+    const driveMeshBootstrap = hubNode.slice(driveStart, driveEnd);
+    expect(driveMeshBootstrap).toContain('const bootstrapJurisdiction =');
+    expect(driveMeshBootstrap).toContain('getEntityJurisdiction(env, bootstrap.entityId)');
+    expect(driveMeshBootstrap).toContain('readVisibleHubProfiles(env, bootstrapJurisdiction)');
+    expect(driveMeshBootstrap).not.toContain('readVisibleHubProfiles(env, jurisdiction)');
+    expect(driveMeshBootstrap).toContain('const expectedPeerProfiles = Math.max(0, resolvedArgs.meshHubNames.length - 1) * hubBootstraps.length;');
+    expect(driveMeshBootstrap).toContain('peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;');
+    expect(driveMeshBootstrap).toContain('reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;');
+    expect(driveMeshBootstrap).toContain('MESH_BOOTSTRAP_TICK_TIMEOUT');
+    expect(hubNode).toContain("const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] === '1';");
+    expect(hubNode).toContain('if (resolvedArgs.deployTokens && AUTO_PROVISION_EXTERNAL_FAUCET)');
+    expect(hubNode).not.toContain('if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()');
+  });
+
+  test('custody bootstrap waits until market maker readiness completes', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const custodyBootstrapSource = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');
+    const marketMakerAwait = orchestrator.indexOf('if (marketMakerReady) await marketMakerReady;');
+    const custodyBootstrap = orchestrator.indexOf('custodySupport = await startCustodySupport({');
+    expect(marketMakerAwait).toBeGreaterThan(0);
+    expect(custodyBootstrap).toBeGreaterThan(marketMakerAwait);
+    expect(orchestrator).not.toContain('continuing market maker startup before failing reset');
+    expect(custodyBootstrapSource).toContain('XLN_PREDEPLOYED_JURISDICTION_KEY: options.jurisdictionId');
+    expect(custodyBootstrapSource).toContain('discoverHubIds(options.apiBaseUrl, 3, 30_000, jurisdictionTarget)');
+  });
+
+  test('custody daemon advertises on relay before opening hub accounts', () => {
+    const daemonControl = readFileSync(join(repoRoot, 'runtime/orchestrator/daemon-control.ts'), 'utf8');
+    const setupStart = daemonControl.indexOf('export const setupCustody = async (');
+    const setupEnd = daemonControl.indexOf('};', setupStart);
+    expect(setupStart).toBeGreaterThan(0);
+    expect(setupEnd).toBeGreaterThan(setupStart);
+    const setupCustody = daemonControl.slice(setupStart, setupEnd);
+    const configureIndex = setupCustody.indexOf('await configureManagedEntityP2P(client, identity, config);');
+    const profileWaitIndex = setupCustody.indexOf('await waitForGossipProfiles(client, hubEntityIds);');
+    const connectivityIndex = setupCustody.indexOf('const connectivityInput = buildCustodyConnectivityInput');
+    expect(configureIndex).toBeGreaterThan(0);
+    expect(profileWaitIndex).toBeGreaterThan(configureIndex);
+    expect(connectivityIndex).toBeGreaterThan(profileWaitIndex);
+    expect(daemonControl).toContain('CUSTODY_HUB_PROFILES_NOT_VISIBLE');
+    expect(setupCustody).toContain('CUSTODY_CONNECTIVITY_ACCOUNTS_NOT_OPEN');
+    expect(setupCustody).not.toContain('await enableRouting(client, config);');
+  });
+
+  test('custody hub discovery filters hubs by jurisdiction stack identity', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      entities: [
+        {
+          entityId: '0x' + 'a'.repeat(64),
+          isHub: true,
+          metadata: { jurisdiction: { name: 'Tron', chainId: 31338, depositoryAddress: '0x2222222222222222222222222222222222222222' } },
+        },
+        {
+          entityId: '0x' + 'b'.repeat(64),
+          isHub: true,
+          metadata: { jurisdiction: { name: 'Tron', chainId: 31338, depositoryAddress: '0x2222222222222222222222222222222222222222' } },
+        },
+        {
+          entityId: '0x' + 'c'.repeat(64),
+          isHub: true,
+          metadata: { jurisdiction: { name: 'Tron', chainId: 31338, depositoryAddress: '0x2222222222222222222222222222222222222222' } },
+        },
+        {
+          entityId: '0x' + '1'.repeat(64),
+          isHub: true,
+          metadata: { jurisdiction: { name: 'Testnet', chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' } },
+        },
+        {
+          entityId: '0x' + '2'.repeat(64),
+          isHub: true,
+          metadata: { jurisdiction: { name: 'Testnet', chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' } },
+        },
+        {
+          entityId: '0x' + '3'.repeat(64),
+          isHub: true,
+          metadata: { jurisdiction: { name: 'Testnet', chainId: 31337, depositoryAddress: '0x1111111111111111111111111111111111111111' } },
+        },
+      ],
+    }))) as typeof fetch;
+    try {
+      const hubIds = await discoverHubIds('http://127.0.0.1:8082', 3, 100, {
+        key: 'arrakis',
+        name: 'Testnet',
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+      });
+      expect(hubIds).toEqual([
+        '0x' + '1'.repeat(64),
+        '0x' + '2'.repeat(64),
+        '0x' + '3'.repeat(64),
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test('offchain faucet exposes all local hub bootstrap entities', () => {

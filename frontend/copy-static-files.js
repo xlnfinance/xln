@@ -316,6 +316,16 @@ function copyDocsAndManifest() {
 }
 
 function generateLlmsStaticFiles() {
+  const llmsPath = fromFrontend('static/llms.txt');
+  const rebuildRequested = process.env.XLN_REBUILD_LLMS === '1' || process.argv.includes('--rebuild-llms');
+  if (!rebuildRequested && existsSync(llmsPath) && statSync(llmsPath).size > 0) {
+    console.log('ℹ️  llms static context present - skipping rebuild (set XLN_REBUILD_LLMS=1 to refresh)');
+    return;
+  }
+  if (!rebuildRequested) {
+    throw new Error(`LLMS_CONTEXT_STATIC_MISSING:${llmsPath}. Run XLN_REBUILD_LLMS=1 ./scripts/sync-contract-artifacts.sh to generate it.`);
+  }
+
   const generatorPath = resolve(REPO_ROOT, 'scripts/debug/gpt.cjs');
   if (!existsSync(generatorPath)) {
     throw new Error(`LLMS_CONTEXT_GENERATOR_MISSING:${generatorPath}`);
@@ -326,7 +336,6 @@ function generateLlmsStaticFiles() {
     stdio: 'inherit',
   });
 
-  const llmsPath = fromFrontend('static/llms.txt');
   if (!existsSync(llmsPath) || statSync(llmsPath).size === 0) {
     throw new Error(`LLMS_CONTEXT_GENERATION_FAILED:${llmsPath}`);
   }
