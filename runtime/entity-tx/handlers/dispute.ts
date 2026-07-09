@@ -35,7 +35,7 @@ import {
 import { removeBookOrderById } from '../../orderbook/cross-j';
 import { swapKey } from '../../swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../cross-jurisdiction-orderbook';
-import { shouldLogFullPayloads } from '../../logger';
+import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../logger';
 import { getFirstSignerForEntity } from '../../replica-utils';
 import {
   isAccountControlTx,
@@ -43,6 +43,8 @@ import {
   isDisputeStartedByLeft,
   isDisputeEvidenceAccountTx,
 } from '../../account-dispute-policy';
+
+const disputeLog = createStructuredLogger('entity.dispute');
 
 const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   if (!value || typeof value !== 'object') return false;
@@ -484,7 +486,10 @@ export async function handleDisputeStart(
     throw new Error('DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
   }
 
-  console.log(`⚔️ disputeStart: ${entityState.entityId.slice(-4)} vs ${counterpartyEntityId.slice(-4)}`);
+  disputeLog.debug('start.begin', {
+    entity: shortId(entityState.entityId),
+    counterparty: shortId(counterpartyEntityId),
+  });
 
   // Initialize jBatch if needed
   if (!newState.jBatchState) {
@@ -560,18 +565,20 @@ export async function handleDisputeStart(
 
   if (!counterpartyDisputeHanko || counterpartyDisputeHanko === '0x' || counterpartyDisputeHanko.length <= 2) {
     addMessage(newState, `❌ Missing counterparty dispute hanko - cannot start dispute`);
-    console.error(`❌ Account ${counterpartyEntityId.slice(-4)} has empty counterpartyDisputeProofHanko`);
+    disputeLog.error('start.hanko_missing', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs };
   }
 
-  console.log(`✅ Using stored counterparty dispute hanko:`);
-  console.log(`   Length: ${counterpartyDisputeHanko.length} bytes`);
-  console.log(`   First 66 chars: ${counterpartyDisputeHanko.slice(0, 66)}`);
-  console.log(`   Sig bytes: ${(counterpartyDisputeHanko.length - 2) / 2}`);
+  disputeLog.debug('start.hanko_loaded', {
+    counterparty: shortId(counterpartyEntityId),
+    length: counterpartyDisputeHanko.length,
+    prefix: shortHash(counterpartyDisputeHanko, 18),
+    sigBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
+  });
 
   if (!storedProofBodyHash) {
     addMessage(newState, `❌ Missing stored counterparty proofBodyHash - cannot start dispute safely`);
-    console.error(`❌ disputeStart blocked: missing stored counterpartyDisputeProofBodyHash`);
+    disputeLog.error('start.proof_body_hash_missing', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs };
   }
   const proofBodyHashToUse = storedProofBodyHash;
@@ -598,7 +605,10 @@ export async function handleDisputeStart(
   )) {
     return { newState, outputs };
   }
-  console.log(`✅ Using stored counterparty proofBodyHash: ${storedProofBodyHash.slice(0, 10)}...`);
+  disputeLog.debug('start.proof_body_hash_loaded', {
+    counterparty: shortId(counterpartyEntityId),
+    proofBodyHash: shortHash(storedProofBodyHash),
+  });
 
   // Resolve the offchain nonce that matches the stored counterparty dispute signature.
   // This is the bilateral nonce at which the counterparty signed the dispute proof.
@@ -626,7 +636,7 @@ export async function handleDisputeStart(
   // ASSERT: signedNonce must be positive (bilateral frames start nonces at 1)
   if (signedNonce <= 0) {
     addMessage(newState, `❌ Invalid dispute signedNonce=${signedNonce} — must be > 0`);
-    console.error(`❌ disputeStart: signedNonce=${signedNonce} is invalid (source=${nonceSource})`);
+    disputeLog.error('start.signed_nonce_invalid', { counterparty: shortId(counterpartyEntityId), signedNonce, nonceSource });
     return { newState, outputs };
   }
 
@@ -642,14 +652,19 @@ export async function handleDisputeStart(
     5,
   );
 
-  console.log(`   signedNonce=${signedNonce} (source=${nonceSource}), onChainNonce=${onChainNonce}`);
+  disputeLog.debug('start.nonce', {
+    counterparty: shortId(counterpartyEntityId),
+    signedNonce,
+    nonceSource,
+    onChainNonce,
+  });
 
   // On-chain requires nonce > stored nonce for disputeStart.
   // If stale, caller must execute manual reopen flow first.
   if (signedNonce <= onChainNonce) {
     const msg = `❌ Stale dispute proof nonce ${signedNonce} (on-chain=${onChainNonce}) - reopen required`;
     addMessage(newState, msg);
-    console.warn(`⚠️ disputeStart blocked: ${msg}`);
+    disputeLog.warn('start.nonce_stale', { counterparty: shortId(counterpartyEntityId), signedNonce, onChainNonce });
     return { newState, outputs };
   }
 
@@ -704,37 +719,35 @@ export async function handleDisputeStart(
       const matchingClaim = hankoDebug.claims.find(
         (claim) => String(claim.entityId).toLowerCase() === String(counterpartyEntityId).toLowerCase(),
       );
-      console.log(
-        `🧾 disputeStart.debug ${JSON.stringify({
-          contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
-          entityId: entityState.entityId,
-          counterpartyEntityId,
-          signedNonce,
-          nonceSource,
-          onChainNonce,
-          proofHeaderNonce: account.proofHeader.nonce,
-          storedCounterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
-          proofBodyHash: proofBodyHashToUse,
-          disputeHashSource,
-          disputeHash: exactDisputeHash,
-          depositoryAddress,
-          hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
-          recoveredAddresses: hankoDebug.recoveredAddresses,
-          matchingClaim: matchingClaim
-            ? {
-                entityId: matchingClaim.entityId,
-                threshold: matchingClaim.threshold,
-                entityIndexes: matchingClaim.entityIndexes,
-                weights: matchingClaim.weights,
-                boardEntityIds: matchingClaim.boardEntityIds,
-                reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
-                entityMatchesBoardHash:
-                  String(matchingClaim.entityId).toLowerCase() ===
-                  String(matchingClaim.reconstructedBoardHash).toLowerCase(),
-              }
-            : null,
-        })}`,
-      );
+      disputeLog.debug('start.preflight_payload', {
+        contractGuard: 'EntityProvider.sol:469 require(entityId == boardHash)',
+        entityId: entityState.entityId,
+        counterpartyEntityId,
+        signedNonce,
+        nonceSource,
+        onChainNonce,
+        proofHeaderNonce: account.proofHeader.nonce,
+        storedCounterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
+        proofBodyHash: proofBodyHashToUse,
+        disputeHashSource,
+        disputeHash: exactDisputeHash,
+        depositoryAddress,
+        hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
+        recoveredAddresses: hankoDebug.recoveredAddresses,
+        matchingClaim: matchingClaim
+          ? {
+              entityId: matchingClaim.entityId,
+              threshold: matchingClaim.threshold,
+              entityIndexes: matchingClaim.entityIndexes,
+              weights: matchingClaim.weights,
+              boardEntityIds: matchingClaim.boardEntityIds,
+              reconstructedBoardHash: matchingClaim.reconstructedBoardHash,
+              entityMatchesBoardHash:
+                String(matchingClaim.entityId).toLowerCase() ===
+                String(matchingClaim.reconstructedBoardHash).toLowerCase(),
+            }
+          : null,
+      });
     }
     const exactDisputeVerify = await verifyHankoForHash(
       counterpartyDisputeHanko,
@@ -748,32 +761,30 @@ export async function handleDisputeStart(
         `❌ Counterparty dispute proof invalid for current account snapshot; ` +
         `nonce=${signedNonce} onChain=${onChainNonce} source=${nonceSource}`;
       addMessage(newState, msg);
-      console.error(
-        `❌ disputeStart preflight failed: ${JSON.stringify({
-          entityId: entityState.entityId,
-          counterpartyEntityId,
-          signedNonce,
-          nonceSource,
-          onChainNonce,
-          proofHeaderNonce: account.proofHeader.nonce,
-          counterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
-          storedProofBodyHash: proofBodyHashToUse,
-          storedDisputeHash,
-          currentProofBodyHash: currentProofResult.proofBodyHash,
-          storedHashMatchesCurrent: proofBodyHashToUse === currentProofResult.proofBodyHash,
-          pendingFrameHeight: account.pendingFrame?.height ?? null,
-          currentFrameHeight: account.currentFrame?.height ?? null,
-          currentHeight: account.currentHeight,
-          lockCount: account.locks?.size ?? 0,
-          swapOfferCount: account.swapOffers?.size ?? 0,
-          knownDisputeProofHashes: Object.keys(account.disputeProofNoncesByHash ?? {}),
-          disputeHashSource,
-          disputeHash: exactDisputeHash,
-          depositoryAddress,
-          recoveredEntityId: exactDisputeVerify.entityId,
-          hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
-        })}`,
-      );
+      disputeLog.error('start.preflight_failed', {
+        entityId: entityState.entityId,
+        counterpartyEntityId,
+        signedNonce,
+        nonceSource,
+        onChainNonce,
+        proofHeaderNonce: account.proofHeader.nonce,
+        counterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
+        storedProofBodyHash: proofBodyHashToUse,
+        storedDisputeHash,
+        currentProofBodyHash: currentProofResult.proofBodyHash,
+        storedHashMatchesCurrent: proofBodyHashToUse === currentProofResult.proofBodyHash,
+        pendingFrameHeight: account.pendingFrame?.height ?? null,
+        currentFrameHeight: account.currentFrame?.height ?? null,
+        currentHeight: account.currentHeight,
+        lockCount: account.locks?.size ?? 0,
+        swapOfferCount: account.swapOffers?.size ?? 0,
+        knownDisputeProofHashes: Object.keys(account.disputeProofNoncesByHash ?? {}),
+        disputeHashSource,
+        disputeHash: exactDisputeHash,
+        depositoryAddress,
+        recoveredEntityId: exactDisputeVerify.entityId,
+        hankoBytes: Math.max(counterpartyDisputeHanko.length - 2, 0) / 2,
+      });
       return { newState, outputs };
     }
   } else {
@@ -814,15 +825,15 @@ export async function handleDisputeStart(
     );
     const dropped = beforeMempool - account.mempool.length;
     if (dropped > 0) {
-      console.warn(
-        `⚠️ disputeStart: dropped ${dropped} pending account tx(s) for ${counterpartyEntityId.slice(-4)} while freezing`,
-      );
+      disputeLog.warn('start.freeze_mempool_dropped', { counterparty: shortId(counterpartyEntityId), dropped });
     }
   }
   if (account.pendingFrame || account.pendingAccountInput) {
-    console.warn(
-      `⚠️ disputeStart: clearing pending frame/input for ${counterpartyEntityId.slice(-4)} while freezing account`,
-    );
+    disputeLog.warn('start.freeze_pending_cleared', {
+      counterparty: shortId(counterpartyEntityId),
+      hadPendingFrame: Boolean(account.pendingFrame),
+      hadPendingAccountInput: Boolean(account.pendingAccountInput),
+    });
   }
   delete account.pendingFrame;
   delete account.pendingAccountInput;
@@ -846,9 +857,13 @@ export async function handleDisputeStart(
     };
   }
 
-  console.log(`✅ disputeStart: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   proofBodyHash: ${proofBodyHashToUse.slice(0, 18)}...`);
-  console.log(`   hankoLen: ${counterpartyDisputeHanko.length}, signedNonce: ${signedNonce}`);
+  disputeLog.debug('start.jbatch_queued', {
+    entity: shortId(entityState.entityId),
+    counterparty: shortId(counterpartyEntityId),
+    proofBodyHash: shortHash(proofBodyHashToUse),
+    hankoLen: counterpartyDisputeHanko.length,
+    signedNonce,
+  });
 
   // NOTE: activeDispute will be set when DisputeStarted event arrives from J-machine
   // Event handler will query on-chain state and populate:
@@ -876,8 +891,11 @@ export async function handleDisputeFinalize(
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  console.log(`⚖️ disputeFinalize: ${entityState.entityId.slice(-4)} vs ${counterpartyEntityId.slice(-4)}`);
-  console.log(`   Cooperative requested: ${cooperativeRequested}`);
+  disputeLog.debug('finalize.begin', {
+    entity: shortId(entityState.entityId),
+    counterparty: shortId(counterpartyEntityId),
+    cooperativeRequested,
+  });
 
   // Initialize jBatch if needed
   if (!newState.jBatchState) {
@@ -932,9 +950,7 @@ export async function handleDisputeFinalize(
       newState,
       `❌ disputeFinalize cooperative=true rejected for ${counterpartyEntityId.slice(-4)} (unilateral-only protocol)`,
     );
-    console.warn(
-      `⚠️ disputeFinalize rejected: cooperative=true for ${counterpartyEntityId.slice(-4)} (unilateral-only)`,
-    );
+    disputeLog.warn('finalize.cooperative_rejected', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs };
   }
 
@@ -979,7 +995,7 @@ export async function handleDisputeFinalize(
   // ASSERT: finalNonce must be positive
   if (finalNonce <= 0) {
     addMessage(newState, `❌ Invalid dispute finalNonce=${finalNonce} — must be > 0`);
-    console.error(`❌ disputeFinalize: finalNonce=${finalNonce} is invalid (source=${finalNonceSource})`);
+    disputeLog.error('finalize.nonce_invalid', { counterparty: shortId(counterpartyEntityId), finalNonce, finalNonceSource });
     return { newState, outputs };
   }
   const finalizeSig = hasCounterProof ? counterProofHanko! : '0x';
@@ -1016,7 +1032,11 @@ export async function handleDisputeFinalize(
   const shouldUseStoredProof = !shouldUseCounterProof && storedProofBody !== null;
 
   if (!shouldUseCounterProof && currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
-    console.warn(`⚠️ disputeFinalize: current proofBodyHash != initial (current=${currentProofResult.proofBodyHash.slice(0, 10)}..., initial=${account.activeDispute.initialProofbodyHash.slice(0, 10)}...)`);
+    disputeLog.warn('finalize.proof_body_hash_mismatch', {
+      counterparty: shortId(counterpartyEntityId),
+      current: shortHash(currentProofResult.proofBodyHash),
+      initial: shortHash(account.activeDispute.initialProofbodyHash),
+    });
     if (!storedProofBody) {
       throw new Error('disputeFinalize: missing stored proofBody for unilateral finalize');
     }
@@ -1101,8 +1121,14 @@ export async function handleDisputeFinalize(
     }
   }
 
-  console.log(`   Mode: ${shouldUseCounterProof ? 'counter' : 'unilateral'}, timeout=${account.activeDispute.disputeTimeout}`);
-  console.log(`   initialNonce=${finalProof.initialNonce}, finalNonce=${finalProof.finalNonce} (source=${finalNonceSource})`);
+  disputeLog.debug('finalize.proof_selected', {
+    counterparty: shortId(counterpartyEntityId),
+    mode: shouldUseCounterProof ? 'counter' : 'unilateral',
+    timeout: account.activeDispute.disputeTimeout,
+    initialNonce: finalProof.initialNonce,
+    finalNonce: finalProof.finalNonce,
+    finalNonceSource,
+  });
 
   // Protocol rule (matches Depository.sol):
   // - dispute starter must wait until timeout for unilateral finalize
@@ -1119,9 +1145,11 @@ export async function handleDisputeFinalize(
         newState,
         `❌ disputeFinalize too early for starter: currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
       );
-      console.warn(
-        `⚠️ disputeFinalize blocked (starter before timeout): currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
-      );
+      disputeLog.warn('finalize.too_early', {
+        counterparty: shortId(counterpartyEntityId),
+        currentJBlock,
+        timeout: account.activeDispute.disputeTimeout,
+      });
       return { newState, outputs };
     }
   }
@@ -1136,8 +1164,11 @@ export async function handleDisputeFinalize(
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);
   account.activeDispute.finalizeQueued = true;
 
-  console.log(`✅ disputeFinalize: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Mode: ${shouldUseCounterProof ? 'counter' : 'unilateral'}`);
+  disputeLog.debug('finalize.jbatch_queued', {
+    entity: shortId(entityState.entityId),
+    counterparty: shortId(counterpartyEntityId),
+    mode: shouldUseCounterProof ? 'counter' : 'unilateral',
+  });
 
   addMessage(newState, `⚖️ Dispute finalized vs ${counterpartyEntityId.slice(-4)} ${description ? `(${description})` : ''} - use jBroadcast to commit`);
 

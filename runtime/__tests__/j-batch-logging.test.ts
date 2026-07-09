@@ -26,3 +26,13 @@ test('htlc payment handler traces stay behind structured logging', () => {
   expect(source).toContain('htlcLog.debug');
   expect(source).toContain('htlcLog.error');
 });
+
+test('dispute handler traces stay behind structured logging', () => {
+  const source = readFileSync(join(process.cwd(), 'runtime/entity-tx/handlers/dispute.ts'), 'utf8');
+
+  expect(source).toContain("const disputeLog = createStructuredLogger('entity.dispute');");
+  expect(source).not.toContain('console.');
+  expect(source).toContain('disputeLog.debug');
+  expect(source).toContain('disputeLog.error');
+  expect(source).toContain('disputeLog.warn');
+});

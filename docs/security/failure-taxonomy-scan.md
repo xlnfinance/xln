@@ -35,6 +35,9 @@ warnings.
   guarded against raw `console.log` noise in core.
 - HTLC payment traces and failures use the structured `entity.htlc` logger; the
   handler is guarded against direct `console.*` noise in core.
+- Dispute start/finalize traces and failures use the structured
+  `entity.dispute` logger; the handler is guarded against direct `console.*`
+  noise in core.
 
 ## Open Manual Review
 
