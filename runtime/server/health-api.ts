@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import type { HubHealth } from '../health';
+import { getHealthStatus, type HubHealth } from '../health';
 import type { JTokenInfo } from '../jadapter/types';
 import { getStorageHealthSnapshotSync } from '../orchestrator/storage-monitor';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay-store';
@@ -62,7 +62,6 @@ export const handleRuntimeHealth = async (
   let inFlight = deps.cachedHealthInFlight;
   if (!inFlight) {
     inFlight = (async () => {
-      const { getHealthStatus } = await import('../health');
       const env = deps.env;
       const health = await getHealthStatus(env);
       const storage = getStorageHealthSnapshotSync();
