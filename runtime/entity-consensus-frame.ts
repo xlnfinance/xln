@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { AccountTx, EntityState, EntityTx } from './types';
 import { HEAVY_LOGS } from './utils';
-import { shortHash, shortId } from './logger';
+import { createStructuredLogger, shortHash, shortId } from './logger';
 import { safeStringify } from './serialization-utils';
 import { compareCanonicalText } from './swap-execution';
 import {
@@ -19,6 +19,7 @@ export type EntityFrameHashDebugRecord = {
 };
 
 let frameHashDebugRecorder: ((record: EntityFrameHashDebugRecord) => void) | null = null;
+const entityFrameLog = createStructuredLogger('entity.frame');
 
 export function setEntityFrameHashDebugRecorder(
   recorder: ((record: EntityFrameHashDebugRecord) => void) | null,
@@ -206,7 +207,11 @@ export async function createEntityFrameHash(
         mempoolSize: acct.mempool.length,
         pendingFrame: acct.pendingFrame?.height ?? null,
       }));
-    console.log(`🔢 FRAME-HASH-INPUT: h=${height}, prevHash=${prevFrameHash.slice(0, 12)}, accounts=${JSON.stringify(accountSnapshot)}`);
+    entityFrameLog.debug('frame_hash.input', {
+      height,
+      prevFrameHash: shortHash(prevFrameHash, 12),
+      accounts: accountSnapshot,
+    });
   }
 
   const frameData = {
