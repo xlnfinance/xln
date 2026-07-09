@@ -69,6 +69,8 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('https://localhost:8084/qa');
     expect(banner.stdout).toContain('remote import read');
     expect(banner.stdout).toContain('remote import admin');
+    expect(banner.stdout).toContain('suggested runtimes');
+    expect(banner.stdout).toContain('http://127.0.0.1:8082/api/runtime-import?access=read');
     expect(banner.stdout).toContain('/app#runtime-import-src=');
     expect(banner.stdout).not.toContain('/radapter/manage#runtime-import-src=');
     expect(banner.stdout).toContain('access%3Dread');
@@ -80,7 +82,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('http://127.0.0.1:8082/api/health');
     expect(banner.stdout).toContain('https://localhost:8087');
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');
-    expect(banner.stdout).toContain('runtime import links fetch fresh tokens into the app runtime list.');
+    expect(banner.stdout).toContain('suggested runtimes endpoint lists fresh H/MM/Custody import tokens for the app runtime list.');
     expect(banner.stdout).toContain('expected remote runtimes: H1, H2, H3, MM, Custody');
     expect(banner.stdout).toContain('status/logs below:');
     expect(banner.stdout).toContain('VITE_HTTP');

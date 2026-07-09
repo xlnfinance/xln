@@ -100,6 +100,7 @@ const rows: LinkRow[] = [
   ...browserRows,
   { label: 'remote import read', url: keys.importUrl! },
   { label: 'remote import admin', url: keys.adminImportUrl! },
+  { label: 'suggested runtimes', url: `${api}/api/runtime-import?access=read` },
   { label: 'health admin', url: `${web}/health` },
   { label: 'qa cockpit', url: `${web}/qa` },
   { label: 'runs history', url: `${web}/runs` },
@@ -125,7 +126,7 @@ for (const row of rows) {
 }
 console.log('-'.repeat(88));
 console.log(`runtime import key file: ${resolve(args.keysPath)}`);
-console.log('runtime import links fetch fresh tokens into the app runtime list.');
+console.log('suggested runtimes endpoint lists fresh H/MM/Custody import tokens for the app runtime list.');
 console.log(`expected remote runtimes: ${expectedRemoteRuntimes}`);
 console.log('status/logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
 console.log(line);
