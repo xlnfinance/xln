@@ -17,6 +17,7 @@
     xlnFunctions,
   } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
+  import { errorLog } from '../../stores/errorLogStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
   import { keccak256, AbiCoder, hexlify } from 'ethers';
@@ -142,6 +143,16 @@
   }
 
   const getGossipProfiles = (): GossipProfile[] => runtimeProfiles;
+
+  function logPaymentDiagnostic(message: string, err: unknown, details: Record<string, unknown> = {}): void {
+    errorLog.log(message, 'Payment Panel', {
+      entityId,
+      targetEntityId,
+      tokenId,
+      ...details,
+      err,
+    });
+  }
 
   $: knownRecipientEntities = paymentView.knownRecipientEntities;
 
@@ -1013,7 +1024,9 @@
             pushPath(route.path);
           }
         } catch (error) {
-          console.warn('[PaymentPanel] runtime graph route lookup failed:', error);
+          logPaymentDiagnostic('Payment runtime graph route lookup failed', error, {
+            amount: amountInSmallestUnit.toString(),
+          });
         }
 
         const localPaths = findPathsFromGraph(network.adjacency, sourceNorm, targetNorm, tokenId);
@@ -1140,7 +1153,7 @@
       }
       return routes.length > 0;
     } catch (error) {
-      console.error('[Send] Route finding failed:', error);
+      logPaymentDiagnostic('Payment route finding failed', error, { silent });
       preflightError = (error as Error)?.message || 'Unknown route preflight error';
       if (!silent) {
         toasts.error(`Route finding failed: ${preflightError}`);
@@ -1269,7 +1282,11 @@
       queued = true;
       return { queued: true, hashlock: queuedHashlock };
     } catch (error) {
-      console.error('[Send] Payment failed:', error);
+      logPaymentDiagnostic('Payment submission failed', error, {
+        manual,
+        selectedRouteIndex,
+        selectedRoutePath: routes[selectedRouteIndex]?.path || [],
+      });
       preflightError = (error as Error)?.message || 'Unknown send error';
       if (!manual) {
         stopRepeatTimer(preflightError);

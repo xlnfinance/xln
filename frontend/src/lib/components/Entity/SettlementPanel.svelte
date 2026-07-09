@@ -3,6 +3,8 @@
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica, EntityTx, AccountMachine, EntityState } from '$lib/types/ui';
   import type { Env, EnvSnapshot, Profile as GossipProfile } from '@xln/runtime/xln-api';
+  import { errorLog } from '../../stores/errorLogStore';
+  import { toasts } from '../../stores/toastStore';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
@@ -663,6 +665,26 @@
     return `${normalizeEntityId(counterparty)}:${workspace.version}:${workspace.status}:${nonceAtSign}`;
   }
 
+  function toErrorMessage(err: unknown, fallback = 'Unknown error'): string {
+    return err instanceof Error && err.message ? err.message : fallback;
+  }
+
+  function logSettlementDiagnostic(message: string, err: unknown): void {
+    errorLog.log(message, 'Settlement Panel', {
+      entityId,
+      counterpartyEntityId,
+      recipientEntityId,
+      tokenId,
+      action,
+      err,
+    });
+  }
+
+  function notifySettlementError(message: string, err: unknown, toastPrefix: string): void {
+    logSettlementDiagnostic(message, err);
+    toasts.error(`${toastPrefix}: ${toErrorMessage(err)}`);
+  }
+
   function getActionMaxAmount(): bigint {
     if (action === 'transfer' || action === 'r2c') return getReserveBalance(tokenId);
     if (action === 'c2r') return getWorkspaceWithdrawableCollateral(tokenId);
@@ -693,7 +715,7 @@
         entityTxs: [{ type: 'j_clear_batch', data: { reason: 'manual-clear-from-ui' } }],
       }]);
     } catch (err) {
-      alert(`Clear failed: ${(err as Error)?.message}`);
+      notifySettlementError('Settlement batch clear failed', err, 'Clear failed');
     } finally {
       sending = false;
     }
@@ -720,8 +742,7 @@
         entityTxs,
       }]);
     } catch (error) {
-      console.error('[On-J] Batch failed:', error);
-      alert(`Batch failed: ${(error as Error)?.message}`);
+      notifySettlementError('On-J batch broadcast failed', error, 'Batch failed');
     } finally {
       sending = false;
     }
@@ -743,8 +764,7 @@
         entityTxs: [{ type: 'j_rebroadcast', data: { gasBumpBps } }],
       }]);
     } catch (error) {
-      console.error('[On-J] Rebroadcast failed:', error);
-      alert(`Rebroadcast failed: ${(error as Error)?.message}`);
+      notifySettlementError('On-J batch rebroadcast failed', error, 'Rebroadcast failed');
     } finally {
       sending = false;
     }
@@ -780,8 +800,7 @@
       }]);
       amount = '';
     } catch (error) {
-      console.error('[On-J] Failed:', error);
-      alert(`Failed: ${(error as Error)?.message}`);
+      notifySettlementError('On-J transfer action failed', error, 'Failed');
     } finally {
       sending = false;
     }
@@ -874,7 +893,7 @@
       }]);
       autoExecuteWorkspaceKey = workspaceKey;
     } catch (error) {
-      console.error('[Settle] Auto execute into draft failed:', error);
+      logSettlementDiagnostic('Settlement auto execute into draft failed', error);
     } finally {
       autoExecutingWorkspaceKey = '';
     }
