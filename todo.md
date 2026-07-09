@@ -591,6 +591,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime infra/JAdapter restore diagnostics now use the structured
      `runtime.infra` logger instead of direct `console.*`; source tests and the
      failure-taxonomy scan guard the restore path.
+   - Partial: runtime infra gossip-profile restore diagnostics now use the
+     structured `runtime.infra_gossip` logger instead of direct `[infra-db]`
+     console lines; behavior/source tests guard malformed-profile pruning.
    - Partial: runtime input queue debug diagnostics now use the structured
      `runtime.input_queue` logger instead of direct `[enqueueRuntimeInput]`
      console JSON; behavior/source tests and the failure-taxonomy scan guard it.

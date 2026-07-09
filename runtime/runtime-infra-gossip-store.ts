@@ -2,6 +2,7 @@ import type { Level } from 'level';
 import type { Profile } from './networking/gossip';
 import { canonicalizeProfile, parseProfile } from './networking/gossip';
 import { deserializeTaggedJson, serializeTaggedJson } from './serialization-utils';
+import { createStructuredLogger, shortId } from './logger';
 import type { Env } from './types';
 
 type InfraDbAccess = {
@@ -11,6 +12,7 @@ type InfraDbAccess = {
 
 const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
 const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
+const infraGossipLog = createStructuredLogger('runtime.infra_gossip');
 
 const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
   try {
@@ -73,10 +75,10 @@ export const loadGossipProfilesFromInfraDb = async (
       const profile = parseProfile(deserializeTaggedJson<unknown>(raw.toString()));
       env.gossip.announce(profile);
     } catch (error) {
-      console.warn(
-        `[infra-db] failed to restore gossip profile ${entityId.slice(-8)}:`,
-        error instanceof Error ? error.message : String(error),
-      );
+      infraGossipLog.warn('profile.restore_failed', {
+        entityId: shortId(entityId, 8),
+        error: error instanceof Error ? error.message : String(error),
+      });
       await pruneInfraGossipProfile(db, entityId);
     }
   }

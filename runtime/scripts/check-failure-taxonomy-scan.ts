@@ -290,6 +290,7 @@ for (const [path, markers] of [
   ['runtime/account-utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   ['runtime/runtime-infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'browservm.restore_failed']],
+  ['runtime/runtime-infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -331,6 +332,11 @@ assertNotIncludes(runtimeJSubmit, '[SIDE-EFFECT]', runtimeJSubmitPath);
 const runtimeInfraPath = 'runtime/runtime-infra.ts';
 const runtimeInfra = readText(runtimeInfraPath);
 assertNotIncludes(runtimeInfra, 'console.', runtimeInfraPath);
+
+const runtimeInfraGossipPath = 'runtime/runtime-infra-gossip-store.ts';
+const runtimeInfraGossip = readText(runtimeInfraGossipPath);
+assertNotIncludes(runtimeInfraGossip, 'console.', runtimeInfraGossipPath);
+assertNotIncludes(runtimeInfraGossip, '[infra-db]', runtimeInfraGossipPath);
 
 const runtimeInputQueuePath = 'runtime/runtime-input-queue.ts';
 const runtimeInputQueue = readText(runtimeInputQueuePath);
