@@ -25,6 +25,7 @@
   let shareUrl = '';
   let submissionStatus = '';
   let superpromptText = '';
+  let superpromptError = '';
   let showInvite = true;
   let darkMode = true;
 
@@ -136,31 +137,47 @@
     expandedCard = expandedCard === index ? null : index;
   }
 
-  async function copySuperprompt() {
+  function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  async function loadSuperprompt(): Promise<string> {
+    const response = await fetch('/superprompt.txt');
+    if (!response.ok) {
+      throw new Error(`SUPERPROMPT_LOAD_FAILED:${response.status}`);
+    }
+    return await response.text();
+  }
+
+  async function copySuperprompt(event?: Event) {
     if (browser) {
-      const response = await fetch('/superprompt.txt');
-      const text = await response.text();
-      superpromptText = text;
-      await navigator.clipboard.writeText(text);
-      copiedCard = -2;
+      try {
+        const text = await loadSuperprompt();
+        superpromptText = text;
+        superpromptError = '';
+        await navigator.clipboard.writeText(text);
+        copiedCard = -2;
 
-      const btn = event?.target as HTMLElement;
-      if (btn) {
-        btn.style.animation = 'pulse 0.3s ease';
-        setTimeout(() => btn.style.animation = '', 300);
+        const btn = event?.target as HTMLElement;
+        if (btn) {
+          btn.style.animation = 'pulse 0.3s ease';
+          setTimeout(() => btn.style.animation = '', 300);
+        }
+
+        setTimeout(() => copiedCard = null, 2000);
+      } catch (error) {
+        superpromptError = errorMessage(error);
       }
-
-      setTimeout(() => copiedCard = null, 2000);
     }
   }
 
   onMount(async () => {
     if (browser) {
       try {
-        const response = await fetch('/superprompt.txt');
-        superpromptText = await response.text();
+        superpromptText = await loadSuperprompt();
+        superpromptError = '';
       } catch (error) {
-        console.error('Failed to load superprompt:', error);
+        superpromptError = errorMessage(error);
       }
 
       if (window.location.hash === '#MML') {
@@ -653,7 +670,7 @@
       <Collapsible title="AI Superprompt" bind:collapsed={comparativeCollapsed}>
         <div class="superprompt-section">
           <div class="superprompt-actions">
-            <button on:click={copySuperprompt} class="copy-super-btn">
+            <button on:click={(event) => copySuperprompt(event)} class="copy-super-btn">
               {copiedCard === -2 ? '✓ Copied' : 'Copy Superprompt'}
             </button>
             <button on:click={() => showSubmitForm = !showSubmitForm} class="submit-toggle-btn">
@@ -662,6 +679,12 @@
           </div>
 
           <p class="section-desc">Compare xln against the entire $100T finance stack — from TradFi/CEX to rollups</p>
+
+          {#if superpromptError}
+            <div class="submission-status superprompt-error" data-testid="superprompt-load-error">
+              Superprompt failed to load: {superpromptError}
+            </div>
+          {/if}
 
           {#if superpromptText}
             <div class="superprompt-preview">
@@ -2602,6 +2625,12 @@
     border-radius: 4px;
     font-size: 0.9rem;
     text-align: center;
+  }
+
+  .superprompt-error {
+    color: #ffb4a8;
+    border: 1px solid rgba(255, 155, 143, 0.38);
+    background: rgba(87, 23, 19, 0.34);
   }
 
   .submit-note {

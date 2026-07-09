@@ -25,6 +25,7 @@
 
   let results: ComparisonResult[] = [];
   let loading = true;
+  let loadError = '';
   let selectedCategory: keyof RankingRow = 'total';
 
   const categories: Array<{key: keyof RankingRow, label: string}> = [
@@ -40,10 +41,13 @@
   onMount(async () => {
     try {
       const response = await fetch('/comparative-results.json');
+      if (!response.ok) {
+        throw new Error(`COMPARATIVE_RESULTS_LOAD_FAILED:${response.status}`);
+      }
       const data = await response.json();
       results = data.results || [];
     } catch (error) {
-      console.error('Failed to load results:', error);
+      loadError = error instanceof Error ? error.message : String(error);
     } finally {
       loading = false;
     }
@@ -94,6 +98,11 @@
 
 {#if loading}
   <div class="loading">Loading evaluation results...</div>
+{:else if loadError}
+  <div class="empty load-error" data-testid="comparative-results-error">
+    <p>Evaluation results failed to load.</p>
+    <p class="hint">{loadError}</p>
+  </div>
 {:else if results.length === 0}
   <div class="empty">
     <p>No evaluations yet. Be the first to submit!</p>
@@ -182,6 +191,10 @@
   .empty .hint {
     font-size: 0.85rem;
     margin-top: 0.5rem;
+  }
+
+  .load-error {
+    color: #ff9b8f;
   }
 
   .chart-container {
@@ -388,6 +401,10 @@
   :global(.light-mode) .loading,
   :global(.light-mode) .empty {
     color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .load-error {
+    color: #b91c1c;
   }
 
   :global(.light-mode) .chart-header h3 {
