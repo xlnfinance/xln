@@ -52,9 +52,16 @@ const normalizeRuntimeId = (id: string | null | undefined): string =>
   String(id || '').trim().toLowerCase();
 
 let remoteImportSourceHydration: Promise<StoredRemoteRuntimeImportEntry[]> | null = null;
+let runtimeAdapterSwitcher: ((config: RuntimeAdapterConfig) => Promise<void>) | null = null;
 
 type RemoteRuntimeImportSourceHydrationOptions = {
   throwOnError?: boolean;
+};
+
+export const registerRuntimeAdapterSwitcher = (
+  switcher: (config: RuntimeAdapterConfig) => Promise<void>,
+): void => {
+  runtimeAdapterSwitcher = switcher;
 };
 
 export const activeRuntimeId = derived(
@@ -181,8 +188,8 @@ const persistActiveEmbeddedRuntime = (): void => {
 };
 
 const switchToRuntimeAdapter = async (config: RuntimeAdapterConfig): Promise<void> => {
-  const { switchAppRuntimeAdapter } = await import('./xlnStore');
-  await switchAppRuntimeAdapter(config);
+  if (!runtimeAdapterSwitcher) throw new Error('RUNTIME_ADAPTER_SWITCHER_NOT_REGISTERED');
+  await runtimeAdapterSwitcher(config);
 };
 
 const runtimeControllerAlreadyTargets = (runtime: Runtime, id: string): boolean => {

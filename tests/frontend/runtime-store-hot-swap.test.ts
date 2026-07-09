@@ -16,10 +16,15 @@ const collectFrontendSources = (dir: string): string[] => {
 };
 
 test('runtime selector hot-swaps adapters instead of reloading the app', () => {
-  const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
-  expect(source).toContain('switchAppRuntimeAdapter');
-  expect(source).not.toContain('window.location.reload');
-  expect(source).not.toContain('window.location.assign');
+  const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
+  const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  expect(runtimeStoreSource).toContain('registerRuntimeAdapterSwitcher');
+  expect(runtimeStoreSource).toContain('RUNTIME_ADAPTER_SWITCHER_NOT_REGISTERED');
+  expect(runtimeStoreSource).not.toContain("await import('./xlnStore')");
+  expect(xlnStoreSource).toContain('registerRuntimeAdapterSwitcher(async (config) =>');
+  expect(xlnStoreSource).toContain('await switchAppRuntimeAdapter(config)');
+  expect(runtimeStoreSource).not.toContain('window.location.reload');
+  expect(runtimeStoreSource).not.toContain('window.location.assign');
 });
 
 test('runtime controller is the single adapter lifecycle owner', () => {

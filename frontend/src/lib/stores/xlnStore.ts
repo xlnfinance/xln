@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
-import { activeEnv, activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
+import { activeEnv, activeRuntimeId, registerRuntimeAdapterSwitcher, runtimes, runtimeOperations } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment } from './embeddedRuntimeStore';
 import { toasts } from './toastStore';
 import {
@@ -894,6 +894,10 @@ export const switchAppRuntimeAdapter = async (config: RuntimeAdapterConfig): Pro
   startP2PPoll();
   return env;
 };
+
+registerRuntimeAdapterSwitcher(async (config) => {
+  await switchAppRuntimeAdapter(config);
+});
 
 export const refreshCurrentRuntimeProjection = async (): Promise<Env | null> => {
   const config = getRuntimeControllerConfig();
