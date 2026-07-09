@@ -678,6 +678,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: the pre-wallet "Connect to live runtime" list now parses
      `/api/runtime-import` with the same shared import parser as the app bulk
      import flow, with a focused test for H1/H2/H3/MM/Custody choices.
+   - Partial: the pre-wallet live runtime selector now has stable test IDs and
+     a Playwright browser test that selects suggested H1, clicks `Connect`, and
+     verifies the normal app workspace opens without any radapter manager route.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.

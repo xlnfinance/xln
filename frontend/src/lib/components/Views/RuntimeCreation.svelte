@@ -1191,7 +1191,7 @@
         </div>
 
           <!-- Connect to a live remote runtime (radapter, read-only) -->
-          <div class="live-runtime-section">
+          <div class="live-runtime-section" data-testid="live-runtime-section">
             <div class="live-runtime-header">
               <span class="ql-title">Connect to live runtime</span>
               <button
@@ -1212,6 +1212,7 @@
               <div class="live-runtime-row">
                 <select
                   class="live-runtime-select"
+                  data-testid="live-runtime-select"
                   bind:value={selectedRuntimeKey}
                   disabled={!!connectingRuntimeId}
                 >
@@ -1223,6 +1224,7 @@
                 <button
                   type="button"
                   class="live-connect-btn"
+                  data-testid="live-runtime-connect"
                   disabled={!selectedRuntimeKey || !!connectingRuntimeId}
                   on:click={connectSelectedRuntime}
                 >

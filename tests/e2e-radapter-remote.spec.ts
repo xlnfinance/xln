@@ -2503,6 +2503,66 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   expect(inspectMutationProbe.afterHeight).toBeGreaterThanOrEqual(inspectMutationProbe.beforeHeight);
 });
 
+test('pre-wallet live runtime selector connects suggested H1 runtime through the app UX', async ({ page }) => {
+  test.setTimeout(480_000);
+  const baseline = await ensureE2EBaseline(page, {
+    requireHubMesh: true,
+    requireMarketMaker: true,
+    requireCustody: true,
+    minHubCount: 3,
+    timeoutMs: 300_000,
+    allowAutoReset: false,
+  });
+  const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
+
+  await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('live-runtime-section')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  const select = page.getByTestId('live-runtime-select');
+  await expect(select).toBeVisible({ timeout: 120_000 });
+  await page.waitForFunction((expectedLabels) => {
+    const selectEl = document.querySelector('[data-testid="live-runtime-select"]') as HTMLSelectElement | null;
+    const optionTexts = Array.from(selectEl?.options ?? []).map(option => option.textContent || '');
+    return expectedLabels.every(label => optionTexts.some(text => new RegExp(`\\b${label}\\b`, 'i').test(text)));
+  }, ['H1', 'H2', 'H3', 'MM', 'Custody'], { timeout: 120_000 });
+
+  const liveRuntimeOptions = await page.evaluate(() =>
+    Array.from((document.querySelector('[data-testid="live-runtime-select"]') as HTMLSelectElement | null)?.options ?? [])
+      .map(option => ({ value: option.value, text: option.textContent?.replace(/\s+/g, ' ').trim() || '' })),
+  );
+  expect(liveRuntimeOptions.map(option => option.text).join(' | ')).toContain('H1');
+  expect(liveRuntimeOptions.map(option => option.text).join(' | ')).toContain('H2');
+  expect(liveRuntimeOptions.map(option => option.text).join(' | ')).toContain('H3');
+  expect(liveRuntimeOptions.map(option => option.text).join(' | ')).toContain('MM');
+  expect(liveRuntimeOptions.map(option => option.text).join(' | ')).toContain('Custody');
+  const h1Option = liveRuntimeOptions.find(option => /\bH1\b/i.test(option.text));
+  expect(h1Option?.value).toBe(h1Endpoint.wsUrl);
+
+  await select.selectOption(h1Endpoint.wsUrl);
+  await expect(page.getByTestId('live-runtime-connect')).toContainText(/Connect · read/i);
+  await page.getByTestId('live-runtime-connect').click();
+  await page.waitForFunction((expectedRuntimeId) => {
+    const runtimeView = (window as typeof window & { __xln?: { view?: { runtimeId?: string; height?: number } } }).__xln?.view;
+    return String(runtimeView?.runtimeId || '').toLowerCase() === String(expectedRuntimeId).toLowerCase()
+      && Number(runtimeView?.height || 0) > 0;
+  }, h1Endpoint.runtimeId, { timeout: 120_000 });
+
+  await expect(page.getByTestId('context-current')).toContainText(/\bH1\b/, { timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
+  await expect(page.locator('[data-testid="entity-workspace-readonly"]')).toHaveCount(0);
+  const activeRemote = await page.evaluate((expectedWsUrl) => ({
+    activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
+    activeMode: localStorage.getItem('xln-runtime-adapter-mode'),
+    importCount: JSON.parse(localStorage.getItem('xln-remote-runtime-imports') || '[]').length,
+    url: window.location.href,
+    expectedWsUrl,
+  }), h1Endpoint.wsUrl);
+  expect(activeRemote.activeMode).toBe('remote');
+  expect(activeRemote.activeWsUrl).toBe(h1Endpoint.wsUrl);
+  expect(activeRemote.importCount).toBeGreaterThanOrEqual(1);
+  expect(activeRemote.url).toContain('/app');
+  expect(activeRemote.url).not.toContain('/radapter/manage');
+});
+
 test('bulk remote runtime import link validates mesh, custody, and market maker runtimes in browser', async ({ browser }) => {
   test.setTimeout(480_000);
   const context = await browser.newContext({ ignoreHTTPSErrors: true });

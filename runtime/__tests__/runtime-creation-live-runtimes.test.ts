@@ -75,6 +75,8 @@ describe('runtime creation live runtime discovery', () => {
 
     expect(source).toContain('formatLiveRuntimeImportStatus(payload, next.length)');
     expect(source).toContain('const next = parseLiveRuntimeChoices(payload);');
+    expect(source).toContain('data-testid="live-runtime-select"');
+    expect(source).toContain('data-testid="live-runtime-connect"');
     expect(source).toContain('liveRuntimesLoaded && !liveRuntimesError');
     expect(source).toContain('Auto-discovery suppresses transport failures only');
     expect(source).not.toContain('swallows errors');
