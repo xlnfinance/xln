@@ -1515,7 +1515,7 @@ const waitForHttpsReady = async (url: string, timeoutMs: number): Promise<void> 
 
 const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const next: NodeJS.ProcessEnv = { ...env };
-  if (next['FORCE_COLOR'] && next['NO_COLOR']) {
+  if (Object.hasOwn(next, 'NO_COLOR')) {
     delete next['NO_COLOR'];
   }
   return next;

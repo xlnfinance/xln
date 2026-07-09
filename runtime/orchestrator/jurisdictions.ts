@@ -178,7 +178,7 @@ export const deployRpc2JurisdictionStack = async (config: OrchestratorJurisdicti
   nextPayload['deployVersion'] = networkVersion;
   nextPayload['networkVersion'] = networkVersion;
   writeFileSync(config.shardJurisdictionsPath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
-  console.log(`[MESH] rpc2 jurisdiction ready chainId=${chainId} rpc=${config.rpc2Url} ms=${Date.now() - startedAt}`);
+  console.log(`RPC2_JURISDICTION_READY chainId=${chainId} rpc=${config.rpc2Url} ms=${Date.now() - startedAt}`);
 };
 
 export const toPublicJurisdictionsPayload = (

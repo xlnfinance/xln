@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-echo "🧹 XLN clean-slate: stopping stale processes and wiping local state..."
+echo "[dev:clean] xln clean slate: stopping stale processes and wiping local state"
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
@@ -21,7 +21,7 @@ kill_by_port() {
   local pids
   pids="$(lsof -ti TCP:${port} -sTCP:LISTEN 2>/dev/null || true)"
   if [ -n "$pids" ]; then
-    echo "🔪 Killing listeners on :${port} -> ${pids}"
+    echo "[dev:clean] killing listeners on :${port} -> ${pids}"
     echo "$pids" | xargs kill -9 2>/dev/null || true
   fi
 }
@@ -38,11 +38,11 @@ wait_for_port_clear() {
     sleep 0.1
     attempts=$((attempts - 1))
   done
-  echo "❌ Port :${port} is still busy after cleanup -> ${pids}" >&2
+  echo "[dev:clean] port :${port} is still busy after cleanup -> ${pids}" >&2
   return 1
 }
 
-echo "🛑 Killing known XLN/anvil/dev processes..."
+echo "[dev:clean] killing known xln/anvil/dev processes"
 for pm2_app in anvil xln-server xln-custody; do
   pm2 delete "$pm2_app" 2>/dev/null || true
   pm2 stop "$pm2_app" 2>/dev/null || true
@@ -83,7 +83,7 @@ wait_for_port_clear "$CUSTODY_PORT"
 wait_for_port_clear "$CUSTODY_DAEMON_PORT"
 wait_for_port_clear "$WATCHTOWER_PORT"
 
-echo "🧽 Removing lock files and local runtime state..."
+echo "[dev:clean] removing lock files and local runtime state"
 find db-tmp -name LOCK -type f -delete 2>/dev/null || true
 rm -rf db-tmp 2>/dev/null || true
 rm -rf db 2>/dev/null || true
@@ -94,4 +94,4 @@ rm -rf logs/*.log 2>/dev/null || true
 mkdir -p db-tmp/runtime db/dev logs pids
 cp "$CANONICAL_J_PATH" "$DEV_J_PATH"
 
-echo "✅ Clean slate ready"
+echo "[dev:clean] clean slate ready"

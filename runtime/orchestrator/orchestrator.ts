@@ -591,6 +591,32 @@ const pushChildLogLines = (target: string[], chunk: Buffer | string): void => {
   }
 };
 
+type PrefixLogState = { pending: string };
+
+const writePrefixedLogChunk = (
+  stream: NodeJS.WritableStream,
+  prefix: string,
+  state: PrefixLogState,
+  chunk: Buffer | string,
+): void => {
+  const text = `${state.pending}${chunk.toString()}`;
+  const lines = text.split(/\r?\n/);
+  state.pending = lines.pop() ?? '';
+  for (const line of lines) {
+    stream.write(`${prefix} ${line}\n`);
+  }
+};
+
+const flushPrefixedLogChunk = (
+  stream: NodeJS.WritableStream,
+  prefix: string,
+  state: PrefixLogState,
+): void => {
+  if (!state.pending) return;
+  stream.write(`${prefix} ${state.pending}\n`);
+  state.pending = '';
+};
+
 const resolveRequestClientIp = (request: Request): string => {
   const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
   const realIp = request.headers.get('x-real-ip')?.trim();
@@ -954,7 +980,7 @@ const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
 
 const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   const next: NodeJS.ProcessEnv = { ...env };
-  if (next['FORCE_COLOR'] && next['NO_COLOR']) {
+  if (Object.hasOwn(next, 'NO_COLOR')) {
     delete next['NO_COLOR'];
   }
   return next;
@@ -1102,15 +1128,19 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
   }
   managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
+  const stdoutPrefixState: PrefixLogState = { pending: '' };
+  const stderrPrefixState: PrefixLogState = { pending: '' };
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(child.recentStdout, chunk);
-    process.stdout.write(`[${child.name}] ${chunk.toString()}`);
+    writePrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState, chunk);
   });
   proc.stderr?.on('data', chunk => {
     pushChildLogLines(child.recentStderr, chunk);
-    process.stderr.write(`[${child.name}:err] ${chunk.toString()}`);
+    writePrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState, chunk);
   });
   proc.once('exit', code => {
+    flushPrefixedLogChunk(process.stdout, `[${child.name}]`, stdoutPrefixState);
+    flushPrefixedLogChunk(process.stderr, `[${child.name}:err]`, stderrPrefixState);
     const pid = proc.pid ?? null;
     const controlledStop = consumeControlledStop(pid);
     const isCurrentProc = child.proc === proc;
@@ -1184,15 +1214,19 @@ const spawnMarketMaker = async (): Promise<void> => {
     throw new Error('MM_SPAWN_FAILED_NO_PID');
   }
   managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
+  const stdoutPrefixState: PrefixLogState = { pending: '' };
+  const stderrPrefixState: PrefixLogState = { pending: '' };
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(marketMakerChild.recentStdout, chunk);
-    process.stdout.write(`[MM] ${chunk.toString()}`);
+    writePrefixedLogChunk(process.stdout, '[MM]', stdoutPrefixState, chunk);
   });
   proc.stderr?.on('data', chunk => {
     pushChildLogLines(marketMakerChild.recentStderr, chunk);
-    process.stderr.write(`[MM:err] ${chunk.toString()}`);
+    writePrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState, chunk);
   });
   proc.once('exit', (code, signal) => {
+    flushPrefixedLogChunk(process.stdout, '[MM]', stdoutPrefixState);
+    flushPrefixedLogChunk(process.stderr, '[MM:err]', stderrPrefixState);
     const pid = proc.pid ?? null;
     const controlledStop = consumeControlledStop(pid);
     const isCurrentProc = marketMakerChild.proc === proc;
@@ -2161,7 +2195,7 @@ const persistHubReadySnapshots = async (): Promise<void> => {
         persistencePaused: payload['persistencePaused'] ?? null,
       };
     }));
-    console.log(`[MESH] HUB_READY_SNAPSHOTS_PERSISTED ${safeStringify(results)}`);
+    console.log(`HUB_READY_SNAPSHOTS_PERSISTED ${safeStringify(results)}`);
   } finally {
     finishTiming('reset_persist_ready_snapshots', startedAt);
   }
@@ -2797,7 +2831,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => { void shutdown(); });
 
 console.log(
-  `[MESH] CONTROL ready host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'} deferInitialReset=${args.deferInitialReset ? 'on' : 'off'}`,
+  `CONTROL_READY host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'} deferInitialReset=${args.deferInitialReset ? 'on' : 'off'}`,
 );
 
 assertMinDiskFree();

@@ -269,6 +269,14 @@ describe('test artifact cleanup', () => {
     expect(parsed.cleanupArgv).toContain('--keep-test-artifacts');
   });
 
+  test('run-with-test-cleanup sanitizes color env before spawning child tools', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/scripts/run-with-test-cleanup.ts'), 'utf8');
+
+    expect(source).toContain("if (Object.hasOwn(next, 'NO_COLOR'))");
+    expect(source).toContain("delete next['NO_COLOR']");
+    expect(source).toContain('env: sanitizeChildEnv({');
+  });
+
   test('package test shortcuts run through cleanup before direct browser or hardhat tests', () => {
     const repoRoot = process.cwd();
     const rootPackage = readFileSync(join(repoRoot, 'package.json'), 'utf8');

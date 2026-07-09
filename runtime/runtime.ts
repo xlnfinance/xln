@@ -1254,7 +1254,7 @@ export const startJurisdictionWatchers = (env: Env): void => {
     }
     if (adapter.isWatching()) continue;
     adapter.startWatching(env);
-    console.log(`✅ JAdapter watcher started for jReplica "${name}"`);
+    console.log(`JAdapter watcher started for jReplica "${name}"`);
   }
 };
 

@@ -40,6 +40,14 @@ const readOptionValue = (args: string[], index: number, name: string): { value: 
 const stripCleanupOnlyFlags = (args: string[]): string[] =>
   args.filter((arg) => !CLEANUP_ONLY_FLAGS.has(arg));
 
+const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const next: NodeJS.ProcessEnv = { ...env };
+  if (Object.hasOwn(next, 'NO_COLOR')) {
+    delete next['NO_COLOR'];
+  }
+  return next;
+};
+
 export const parseRunWithTestCleanupArgs = (argv: string[]): ParsedRunWithTestCleanupArgs => {
   const separatorIndex = argv.indexOf('--');
   if (separatorIndex < 0) {
@@ -113,10 +121,10 @@ const run = async (): Promise<number> => {
 
   const child: ChildProcess = spawn(parsed.command, parsed.commandArgs, {
     cwd: parsed.childCwd || process.cwd(),
-    env: {
+    env: sanitizeChildEnv({
       ...process.env,
       [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
-    },
+    }),
     stdio: 'inherit',
   });
 

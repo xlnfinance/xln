@@ -145,17 +145,17 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     });
 
     await runtimeProcess(env, []);
-    console.log('[BOOTSTRAP] ✅ Entity created');
+    console.log('[BOOTSTRAP] entity created');
   } else if (jurisdiction && env.eReplicas) {
     for (const [key, replica] of env.eReplicas.entries()) {
       if (key.startsWith(entityId)) {
         if (!replica.state.config?.jurisdiction) {
           replica.state.config.jurisdiction = jurisdiction;
-          console.log('[BOOTSTRAP] ✅ Patched existing hub jurisdiction config');
+          console.log('[BOOTSTRAP] patched existing hub jurisdiction config');
         }
       }
     }
-    console.log('[BOOTSTRAP] ✅ Hub entity already exists');
+    console.log('[BOOTSTRAP] hub entity already exists');
   }
 
   ensureRuntimeInput(env);
@@ -191,7 +191,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     console.log(`[BOOTSTRAP] Gossip verification: ${hubs?.length || 0} hubs found`);
   }
 
-  console.log('[BOOTSTRAP] ✅ Hub bootstrap complete');
+  console.log('[BOOTSTRAP] hub bootstrap complete');
   console.log(`[BOOTSTRAP]    Name: ${hubConfig.name}`);
   console.log(`[BOOTSTRAP]    EntityId: ${entityId.slice(0, 16)}...`);
   console.log(`[BOOTSTRAP]    Region: ${hubConfig.region || 'global'}`);

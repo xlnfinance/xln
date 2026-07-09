@@ -684,7 +684,7 @@ export async function createRpcAdapter(
       trace('fromReplica.setDeltaTransformer:start');
       setDeltaTransformerAddress(addresses.deltaTransformer);
       trace('fromReplica.setDeltaTransformer:done');
-      console.log('[JAdapter:rpc] Connected to existing contracts ✓');
+      console.log(`[JAdapter:rpc] connected to existing contracts chain=${config.chainId}`);
     }
   }
 
@@ -1852,7 +1852,7 @@ export async function createRpcAdapter(
     // === J-Watcher integration (RPC polling — uses shared event conversion from watcher.ts) ===
     startWatching(env: Env): void {
       if (watcherInterval) {
-        console.log(`🔭 [JAdapter:rpc] Already watching`);
+        console.log(`[JAdapter:rpc] watcher already running chain=${config.chainId}`);
         return;
       }
       type ContractListenerSource = {
@@ -1875,7 +1875,7 @@ export async function createRpcAdapter(
       const startBlock = getWatcherStartBlock(env, addresses.depository);
       lastSyncedBlock = Math.max(0, startBlock - 1);
       console.log(
-        `🔭 [JAdapter:rpc] Starting event watcher (${watchPollMs}ms polling, depth=${confirmationDepth}, fromBlock=${startBlock})...`,
+        `[JAdapter:rpc] starting event watcher chain=${config.chainId} pollMs=${watchPollMs} depth=${confirmationDepth} fromBlock=${startBlock}`,
       );
 
       // Depository ABI for queryFilter — must match CANONICAL_J_EVENTS
@@ -2122,7 +2122,7 @@ export async function createRpcAdapter(
           message: watcherFatalError,
           lastSyncedBlock,
         });
-        console.error(`🔭⛔ [JAdapter:rpc] Watcher halted after fatal error:`, watcherFatalError);
+        console.error('[JAdapter:rpc] watcher halted after fatal error:', watcherFatalError);
         return;
       }
       const doPoll = (): Promise<void> => {
@@ -2365,7 +2365,7 @@ export async function createRpcAdapter(
                 error: watcherErrorDetails(error),
               });
               console.warn(
-                `🔭⚠️ [JAdapter:rpc] transient watcher RPC unavailable ` +
+                `[JAdapter:rpc] transient watcher RPC unavailable ` +
                 `(chain=${config.chainId}, failures=${consecutiveTransientWatcherFailures}): ${message}`,
               );
             }
@@ -2402,7 +2402,7 @@ export async function createRpcAdapter(
             toBlock: pollToBlock,
             lastSyncedBlock,
           });
-          console.error(`🔭⛔ [JAdapter:rpc] Fatal watcher error; exiting:`, fatalPayload);
+          console.error('[JAdapter:rpc] fatal watcher error; exiting:', fatalPayload);
           haltProcessForFatalWatcherError(fatalPayload);
         }).finally(() => {
           pollInFlight = null;
@@ -2416,7 +2416,7 @@ export async function createRpcAdapter(
       }, watchPollMs);
       void doPoll();
 
-      console.log(`🔭 [JAdapter:rpc] Watcher started (${watchPollMs}ms polling)`);
+      console.log(`[JAdapter:rpc] watcher started chain=${config.chainId} pollMs=${watchPollMs}`);
     },
 
     async pollNow(): Promise<void> {
@@ -2436,7 +2436,7 @@ export async function createRpcAdapter(
         watcherEnv = null;
         pollInFlight = null;
         pollNowHandler = null;
-        console.log(`🔭 [JAdapter:rpc] Watcher stopped`);
+        console.log(`[JAdapter:rpc] watcher stopped chain=${config.chainId}`);
       }
     },
 

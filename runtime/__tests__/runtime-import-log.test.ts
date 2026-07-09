@@ -31,7 +31,8 @@ test('runtime import stdout log omits token-bearing import URL and capability to
     manifestPath: '/tmp/xln/runtime import=manifest.json',
   });
 
-  expect(line).toContain('[MESH] RUNTIME_IMPORT_READY');
+  expect(line).toStartWith('RUNTIME_IMPORT_READY ');
+  expect(line).not.toContain('[MESH] RUNTIME_IMPORT_READY');
   expect(line).toContain('count=2');
   expect(line).toContain('access=admin');
   expect(line).toContain('expiresAt=1797123456000');

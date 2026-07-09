@@ -1009,10 +1009,12 @@ describe('production startup wiring', () => {
       "globalSetup: '../tests/playwright-global-setup.ts'",
     );
     const playwrightGlobalSetup = readFileSync(join(repoRoot, 'tests/playwright-global-setup.ts'), 'utf8');
-    expect(playwrightGlobalSetup).toContain('cleanupTestArtifactsBeforeRun({');
+    expect(playwrightGlobalSetup).toContain("spawnSync('bun'");
+    expect(playwrightGlobalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_SCRIPT');
     expect(playwrightGlobalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_CWD');
-    expect(playwrightGlobalSetup).toContain("reason: 'playwright'");
-    expect(playwrightGlobalSetup).toContain("scope: 'e2e'");
+    expect(playwrightGlobalSetup).toContain("'playwright'");
+    expect(playwrightGlobalSetup).toContain("'e2e'");
+    expect(playwrightGlobalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_FAILED');
   });
 
   test('fatal log monitor reports the concrete marker line and last 80 log lines', () => {

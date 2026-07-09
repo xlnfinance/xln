@@ -32,7 +32,7 @@ export const buildRuntimeImportLogLine = (input: RuntimeImportLogInput): string 
   const labels = input.manifest.entries.map(entry => sanitizeLogValue(entry.label)).join(',');
   const walletUrl = redactRuntimeImportWalletUrl(input.importUrl);
   return [
-    '[MESH] RUNTIME_IMPORT_READY',
+    'RUNTIME_IMPORT_READY',
     `count=${input.manifest.entries.length}`,
     `access=${input.access}`,
     `path=${sanitizeLogValue(input.manifestPath)}`,

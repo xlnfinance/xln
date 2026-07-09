@@ -55,13 +55,13 @@ function copyContracts() {
     const destPath = fromFrontend(file.dest);
 
     if (!existsSync(srcPath)) {
-      console.log(`⚠️ Source file not found: ${file.src}`);
+      console.log(`[static] source file not found: ${file.src}`);
       continue;
     }
 
     ensureDir(dirname(destPath));
     copyFileSync(srcPath, destPath);
-    console.log(`✅ Copied ${file.src} → ${file.dest}`);
+    console.log(`[static] copied ${file.src} -> ${file.dest}`);
   }
 }
 
@@ -72,7 +72,7 @@ function copyScenarios() {
   try {
     const stats = lstatSync(scenariosDest);
     if (stats.isSymbolicLink()) {
-      console.log('ℹ️  static/scenarios is symlinked - skipping copy');
+      console.log('[static] static/scenarios is symlinked; skipping copy');
       return;
     }
   } catch {
@@ -82,7 +82,7 @@ function copyScenarios() {
   if (!existsSync(scenariosSrc)) return;
   ensureDir(scenariosDest);
   cpSync(scenariosSrc, scenariosDest, { recursive: true });
-  console.log('✅ Copied scenarios/ → static/scenarios/');
+  console.log('[static] copied scenarios/ -> static/scenarios/');
 }
 
 function walkMarkdownFiles(rootDir) {
@@ -302,7 +302,7 @@ function copyDocsAndManifest() {
   const docsSrc = fromFrontend('../docs');
   const docsDest = fromFrontend('static/docs-catalog');
   if (!existsSync(docsSrc)) {
-    console.log(`⚠️ Source directory not found: ${docsSrc}`);
+    console.log(`[static] source directory not found: ${docsSrc}`);
     return;
   }
 
@@ -312,14 +312,14 @@ function copyDocsAndManifest() {
   const manifest = buildDocsManifest(docsSrc);
   writeFileSync(join(docsDest, 'manifest.json'), JSON.stringify(manifest, null, 2));
 
-  console.log(`✅ Copied docs/ → static/docs-catalog/ (${manifest.counts.total} docs)`);
+  console.log(`[static] copied docs/ -> static/docs-catalog/ (${manifest.counts.total} docs)`);
 }
 
 function generateLlmsStaticFiles() {
   const llmsPath = fromFrontend('static/llms.txt');
   const rebuildRequested = process.env.XLN_REBUILD_LLMS === '1' || process.argv.includes('--rebuild-llms');
   if (!rebuildRequested && existsSync(llmsPath) && statSync(llmsPath).size > 0) {
-    console.log('ℹ️  llms static context present - skipping rebuild (set XLN_REBUILD_LLMS=1 to refresh)');
+    console.log('[static] llms static context present; skipping rebuild (set XLN_REBUILD_LLMS=1 to refresh)');
     return;
   }
   if (!rebuildRequested) {
@@ -346,4 +346,4 @@ copyScenarios();
 copyDocsAndManifest();
 generateLlmsStaticFiles();
 
-console.log('📦 Static files copied for build');
+console.log('[static] files copied for build');

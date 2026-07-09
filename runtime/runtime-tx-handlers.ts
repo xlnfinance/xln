@@ -163,7 +163,7 @@ const importJurisdictionRuntimeTx = async (
     }
 
     deps.onJurisdictionImported?.(env);
-    console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready`);
+    console.log(`[Runtime] JReplica "${runtimeTx.data.name}" ready`);
   } catch (error) {
     console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
     throw error;
