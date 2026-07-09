@@ -35,9 +35,22 @@ test('runtime dev startup status logs stay structured', () => {
   const localConfig = readFileSync(join(process.cwd(), 'runtime/jadapter/local-config.ts'), 'utf8');
   const logger = readFileSync(join(process.cwd(), 'runtime/logger.ts'), 'utf8');
   const devRunner = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
+  const runtimeConsoleLines = runtime
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.includes('console.'));
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
   expect(runtime).toContain("runtimeLog.debug('jadapter_watcher.started'");
+  expect(runtime).toContain("runtimeLog.warn('db.close.loop_drain_timeout'");
+  expect(runtime).toContain("runtimeLog.error('loop.error'");
+  expect(runtimeConsoleLines).toEqual([
+    "console.log(`\\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);",
+    "console.log('═'.repeat(80));",
+    'console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));',
+    "console.log('═'.repeat(80) + '\\n');",
+    "console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');",
+  ]);
 
   expect(hubNode).not.toContain('RPC contracts have no code; deploying fresh stack instead of using stale addresses:');
   expect(hubNode).toContain("nodeLog.info('jurisdiction_contracts.stale_dropped'");

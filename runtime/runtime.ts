@@ -444,7 +444,7 @@ export const tryOpenFrameDb = (env: Env): Promise<boolean> =>
 export const closeRuntimeDb = async (env: Env): Promise<void> => {
   const stopped = await stopRuntimeLoopAndWait(env, 10_000);
   if (!stopped) {
-    console.warn('Runtime loop did not drain before DB close deadline');
+    runtimeLog.warn('db.close.loop_drain_timeout');
   }
   detachRuntimeEnv(env);
   await closeStorageDb(env, 'current');
@@ -455,7 +455,7 @@ export const closeRuntimeDb = async (env: Env): Promise<void> => {
   try {
     await state.db.close();
   } catch (error) {
-    console.warn('Failed to close runtime DB:', error instanceof Error ? error.message : error);
+    runtimeLog.warn('db.close.failed', { error: error instanceof Error ? error.message : String(error) });
   } finally {
     state.db = null;
     state.dbOpenPromise = null;
@@ -604,7 +604,7 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
           error instanceof Error &&
           (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
         if (isBlocked) {
-          console.log('⚠️ Infra IndexedDB blocked (incognito/private mode) - running in-memory');
+          runtimeLog.warn('infra_db.blocked_in_memory', { error: error instanceof Error ? error.message : String(error) });
           return false;
         }
         state.infraDbOpenPromise = null;
@@ -615,7 +615,7 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
   try {
     return await state.infraDbOpenPromise;
   } catch (error) {
-    console.error('❌ Failed to open infra DB:', error);
+    runtimeLog.error('infra_db.open_failed', { error: error instanceof Error ? error.message : String(error) });
     throw error;
   }
 }
@@ -841,7 +841,7 @@ const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void
   const elapsedMs = performance.now() - startedAt;
   if (elapsedMs < 32) return;
   const suffix = extra ? ` ${extra}` : '';
-  console.warn(`[perf] slow timer ${label} ${elapsedMs.toFixed(1)}ms${suffix}`);
+  runtimeLog.warn('timer.slow', { label, elapsedMs: Number(elapsedMs.toFixed(1)), extra: suffix.trim() });
 };
 
 const ensureRuntimeWakeWatchdogStarted = (): void => {
@@ -917,7 +917,10 @@ const emitRuntimeLoopError = (
   try {
     env.error?.('system', code, payload, env.runtimeId);
   } catch (reportError) {
-    console.error(`[RUNTIME_LOOP] failed to report ${code}:`, reportError);
+    runtimeLog.error('loop.report_failed', {
+      code,
+      error: reportError instanceof Error ? reportError.message : String(reportError),
+    });
   }
 };
 
@@ -1001,7 +1004,7 @@ const quarantineLiveRuntimeInput = (
   };
   env.error?.('system', 'RUNTIME_INPUT_QUARANTINED', payload, env.runtimeId);
   if (!quietRuntimeLogs) {
-    console.error('[runtime] RUNTIME_INPUT_QUARANTINED', safeStringify(payload));
+    runtimeLog.error('input.quarantined', payload);
   }
   return true;
 };
@@ -1079,9 +1082,9 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxE
             await process(env);
           }
         } catch (error) {
-          console.error('❌ Runtime loop error:', error);
           const message = error instanceof Error ? error.message : String(error);
           const stack = error instanceof Error ? error.stack : undefined;
+          runtimeLog.error('loop.error', { message, ...(stack ? { stack } : {}) });
           state.halted = true;
           state.fatalDebugPayload = {
             message,
@@ -1245,7 +1248,7 @@ export const startJurisdictionWatchers = (env: Env): void => {
     if (owner) {
       if (owner !== adapter && adapter.isWatching()) {
         adapter.stopWatching();
-        console.warn(`⚠️ Stopped duplicate JAdapter watcher for "${name}" (${watcherKey})`);
+        runtimeLog.warn('jadapter_watcher.duplicate_stopped', { jurisdictionName: name, watcherKey });
       }
       continue;
     }
@@ -1266,10 +1269,10 @@ export const stopJurisdictionWatchers = (env: Env): void => {
     try {
       adapter.stopWatching();
     } catch (error) {
-      console.warn(
-        `⚠️ Failed to stop JAdapter watcher for "${name}":`,
-        error instanceof Error ? error.message : error,
-      );
+      runtimeLog.warn('jadapter_watcher.stop_failed', {
+        jurisdictionName: name,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 };
@@ -1298,7 +1301,7 @@ const detachRuntimeEnv = (env: Env): void => {
  */
 export const getEnv = (env?: Env | null): Env | null => {
   if (!env) {
-    console.warn('⚠️ getEnv called without env - runtime no longer keeps global env');
+    runtimeLog.warn('env.missing');
     return null;
   }
   return env;
@@ -1306,7 +1309,7 @@ export const getEnv = (env?: Env | null): Env | null => {
 
 export const setRuntimeSeed = (env: Env, seed: string | null): void => {
   if (env?.lockRuntimeSeed) {
-    console.warn('⚠️ Runtime seed update blocked (scenario lock enabled)');
+    runtimeLog.warn('runtime_seed.update_blocked');
     return;
   }
   const normalized = seed === null || seed === undefined ? '' : seed;
@@ -1317,7 +1320,7 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
       if (derivedRuntimeId) env.runtimeId = derivedRuntimeId;
       else delete env.runtimeId;
     } catch (error) {
-      console.warn('⚠️ Failed to derive runtimeId from seed:', error);
+      runtimeLog.warn('runtime_seed.derive_failed', { error: error instanceof Error ? error.message : String(error) });
       delete env.runtimeId;
     }
   } else {
@@ -1527,10 +1530,7 @@ export const clearGossip = (env: Env): void => {
   if (!env.gossip?.profiles) return;
   env.gossip.profiles.clear();
   void clearInfraGossipProfiles(env, infraGossipDbAccess).catch((error) => {
-    console.warn(
-      '[infra-db] failed to clear gossip profiles:',
-      error instanceof Error ? error.message : String(error),
-    );
+    runtimeLog.warn('infra_db.gossip_clear_failed', { error: error instanceof Error ? error.message : String(error) });
   });
   notifyEnvChange(env);
 };
@@ -1549,7 +1549,7 @@ const notifyEnvChange = (env: Env) => {
     try {
       cb(env);
     } catch (error) {
-      console.warn('⚠️ Env change callback failed:', error);
+      runtimeLog.warn('env_change.callback_failed', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 };
@@ -1834,7 +1834,7 @@ const getCurrentHistoryIndex = (env: Env) => (env.history || []).length - 1;
 
 // Clear database for a specific runtime and return a fresh env
 const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
-  console.log('🗑️ Clearing database and resetting runtime history...');
+  runtimeLog.info('db.reset.start');
   const db = getRuntimeDb(env);
   await clearDatabase(db);
   try {
@@ -1843,7 +1843,7 @@ const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
       await clearDatabase(getInfraDb(env));
     }
   } catch (error) {
-    console.warn('⚠️ Failed to clear infra DB during reset:', error instanceof Error ? error.message : error);
+    runtimeLog.warn('db.reset.infra_clear_failed', { error: error instanceof Error ? error.message : String(error) });
   }
 
   const seed = env.runtimeSeed ?? null;
@@ -1854,7 +1854,7 @@ const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
   }
   attachEventEmitters(freshEnv);
 
-  console.log('✅ Database and runtime history cleared');
+  runtimeLog.info('db.reset.done');
   return freshEnv;
 };
 
@@ -2055,10 +2055,10 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
       if (!env) return;
       if (env.runtimeState?.infraDbClosing) return;
       const persist = persistGossipProfileToInfraDb(env, infraGossipDbAccess, profile).catch((error) => {
-        console.warn(
-          `[infra-db] failed to persist gossip profile ${String(profile?.entityId || '').slice(-8)}:`,
-          error instanceof Error ? error.message : String(error),
-        );
+        runtimeLog.warn('infra_db.gossip_persist_failed', {
+          entity: String(profile?.entityId || '').slice(-8),
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
       trackInfraDbWrite(env, persist);
     },
@@ -2123,7 +2123,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     try {
       prewarmSignerKeyCache(seedText, 20);
     } catch (error) {
-      console.warn('⚠️ Failed to prewarm signer cache during env creation:', error);
+      runtimeLog.warn('signer_cache.prewarm_failed', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -3496,7 +3496,7 @@ const hydrateAccountFrameHistoryViews = async (env: Env, limit = 50): Promise<vo
       }
     }
   } catch (error) {
-    console.warn('⚠️ Failed to hydrate account frame history view:', error instanceof Error ? error.message : error);
+    runtimeLog.warn('account_frame_history.hydrate_failed', { error: error instanceof Error ? error.message : String(error) });
   }
 };
 
