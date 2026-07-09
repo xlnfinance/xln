@@ -502,6 +502,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: deferred source-hub cross-j fill ACK evidence is capped by
      `MAX_PENDING_CROSS_J_FILL_ACKS`, prunes before insertion, preserves TTL
      expiry as operator evidence, and is now guarded by the canonical-fill scan.
+   - Partial: entity-level swap cancel execution now has one canonical tx type,
+     `proposeCancelSwap`; legacy `cancelSwap` / `cancelSwapOffer` aliases stay
+     out of `EntityTx` and the dispatcher, with activity history still tolerant
+     of old journals.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

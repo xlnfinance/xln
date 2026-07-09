@@ -144,7 +144,7 @@ export const handleResolveSwapRequest = (
 
 export const handleCancelSwapRequest = (
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwap' }>,
+  entityTx: Extract<EntityTx, { type: 'proposeCancelSwap' }>,
   options?: ApplyEntityTxOptions,
 ): SwapRequestResult => {
   const newState = stateForEntityTx(entityState, options);

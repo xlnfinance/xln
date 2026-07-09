@@ -66,6 +66,7 @@
     "security:delivery-boundary": "bun runtime/scripts/check-delivery-boundary-scan.ts",
     "security:canonical-identity": "bun runtime/scripts/check-canonical-identity-scan.ts",
     "security:canonical-fill": "bun runtime/scripts/check-canonical-fill-scan.ts",
+    "security:swap-cancel-canonical": "bun runtime/scripts/check-swap-cancel-canonical-scan.ts",
     "security:audit-pack": "bun runtime/scripts/check-security-audit-pack.ts",
     "gate:quick": "bun runtime/scripts/run-release-gate.ts --profile=quick",
     "gate:ci": "bun runtime/scripts/run-release-gate.ts --profile=ci",

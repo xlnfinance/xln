@@ -549,14 +549,6 @@ export type EntityTx =
       };
     }
   | {
-      // Cancel swap offer (user cancels their own offer)
-      type: 'cancelSwap';
-      data: {
-        counterpartyEntityId: string;
-        offerId: string;
-      };
-    }
-  | {
       // Request hub/counterparty to cancel maker's open swap offer (no direct self-cancel)
       type: 'proposeCancelSwap';
       data: {
@@ -682,17 +674,6 @@ export type EntityTx =
         revealBeforeHeight: number;
         amount: bigint;
         tokenId: number;
-      };
-    }
-  // ═══════════════════════════════════════════════════════════════
-  // SWAP OPERATIONS (ALIASES)
-  // ═══════════════════════════════════════════════════════════════
-  | {
-      // Cancel swap offer (alias for cancelSwap)
-      type: 'cancelSwapOffer';
-      data: {
-        counterpartyEntityId: string;
-        offerId: string;
       };
     }
   // ═══════════════════════════════════════════════════════════════
