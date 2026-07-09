@@ -265,6 +265,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
   ['runtime/entity-tx/handlers/account/committed-frame-followups.ts', ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx']],
   ['runtime/entity-tx/handlers/account/committed-htlc-followups.ts', ["createStructuredLogger('account.followup')", 'htlc.secret_check']],
+  ['runtime/account-consensus/propose.ts', ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile']],
   ['runtime/account-tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
   ['runtime/entity-tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
   ['runtime/entity-tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -322,6 +323,10 @@ const accountTxApplyPath = 'runtime/account-tx/apply.ts';
 const accountTxApply = readText(accountTxApplyPath);
 assertNotIncludes(accountTxApply, 'console.', accountTxApplyPath);
 
+const accountProposePath = 'runtime/account-consensus/propose.ts';
+const accountPropose = readText(accountProposePath);
+assertNotIncludes(accountPropose, 'console.', accountProposePath);
+
 const sameOrderbookMatchingPath = 'runtime/entity-tx/handlers/account/orderbook-matching-same.ts';
 const sameOrderbookMatching = readText(sameOrderbookMatchingPath);
 assertNotIncludes(sameOrderbookMatching, 'console.', sameOrderbookMatchingPath);
@@ -372,6 +377,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
   ['runtime/__tests__/account-tx-apply-logging.test.ts', ['account_frame without direct console output', 'account_frame.rejected']],
   ['runtime/__tests__/account-followup-logging.test.ts', ['account committed followups use structured logging only', 'account.followup']],
+  ['runtime/__tests__/account-propose-logging.test.ts', ['account frame proposal path uses structured logging only', 'proposal.profile']],
   ['runtime/__tests__/debt-ledger.test.ts', ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE']],
 ] as const) {
   const text = readText(path);

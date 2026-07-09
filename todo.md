@@ -525,6 +525,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: account committed followup diagnostics now use the structured
      `account.followup` logger instead of direct `console.*`, with Bun source
      coverage and the failure-taxonomy scan guarding regressions.
+   - Partial: account frame proposal diagnostics and slow-profile notices now
+     use the structured `account` logger instead of direct `console.*`, with
+     Bun source coverage and the failure-taxonomy scan guarding regressions.
    - Partial: account transaction applicator now rejects impossible embedded
      `account_frame` payloads without direct `console.error`, with structured
      `account.tx` debug diagnostics and failure-taxonomy scan coverage.

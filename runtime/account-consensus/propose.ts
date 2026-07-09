@@ -6,7 +6,7 @@
 import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../types';
 import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCommittedTxsFromMempool } from '../state-helpers';
 import { isLeft } from '../account-utils';
-import { formatEntityId, getPerfMs, HEAVY_LOGS } from '../utils';
+import { getPerfMs, HEAVY_LOGS } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from '../validation-utils';
 import { applyAccountTx } from '../account-tx/apply';
@@ -126,10 +126,12 @@ export async function proposeAccountFrame(
       frameMax: MAX_ACCOUNT_FRAME_TXS,
     });
   }
-  if (HEAVY_LOGS)
-    console.log(
-      `🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`,
-    );
+  if (HEAVY_LOGS) {
+    accountLog.debug('proof.header', {
+      from: shortId(accountMachine.proofHeader.fromEntity, 8),
+      to: shortId(accountMachine.proofHeader.toEntity, 8),
+    });
+  }
 
   // Clone account machine for validation
   let clonedMachine = cloneAccountMachine(accountMachine);
@@ -146,11 +148,13 @@ export async function proposeAccountFrame(
   const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
-  if (HEAVY_LOGS)
-    console.log(
-      `🔍 MEMPOOL-BEFORE-PROCESS: proposalWindow=${proposalWindow.length}/${accountMachine.mempool.length} txs:`,
-      proposalWindow.map(tx => tx.type),
-    );
+  if (HEAVY_LOGS) {
+    accountLog.debug('mempool.before_process', {
+      proposalWindow: proposalWindow.length,
+      mempool: accountMachine.mempool.length,
+      txs: proposalWindow.map(tx => tx.type),
+    });
+  }
 
   const validTxs: typeof accountMachine.mempool = [];
   const failedHtlcLocks: Array<{ hashlock: string; reason: string }> = [];
@@ -181,10 +185,13 @@ export async function proposeAccountFrame(
     validTxs.push(accountTx);
     allEvents.push(...result.events);
 
-    if (HEAVY_LOGS)
-      console.log(
-        `🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`,
-      );
+    if (HEAVY_LOGS) {
+      accountLog.debug('tx.result', {
+        type: accountTx.type,
+        hasSecret: Boolean(result.secret),
+        hasHashlock: Boolean(result.hashlock),
+      });
+    }
     if (result.secret && result.hashlock) {
       revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
     }
@@ -211,7 +218,7 @@ export async function proposeAccountFrame(
     const optimisticMachine = cloneAccountMachine(accountMachine);
     const optimisticResults: Array<{ tx: AccountTx; result: Awaited<ReturnType<typeof applyAccountTx>> }> = [];
     for (const accountTx of proposalWindow) {
-      if (HEAVY_LOGS) console.log(`   🔍 Optimistic batch accountTx type=${accountTx.type}`);
+      if (HEAVY_LOGS) accountLog.debug('batch.optimistic_tx', { type: accountTx.type });
       const result = await processOnMachine(optimisticMachine, accountTx);
       if (!result.success) {
         optimisticBatchFailed = true;
@@ -231,7 +238,7 @@ export async function proposeAccountFrame(
       clonedMachine = cloneAccountMachine(accountMachine);
     }
     for (const accountTx of proposalWindow) {
-      if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
+      if (HEAVY_LOGS) accountLog.debug('tx.process', { type: accountTx.type });
       const txMachine = cloneAccountMachine(clonedMachine);
       const result = await processOnMachine(txMachine, accountTx);
 
@@ -314,7 +321,7 @@ export async function proposeAccountFrame(
     // Only skip if delta, limits, AND holds are all zero
     // Collateral is omitted here because j_events can set it during frame processing
     if (!shouldIncludeToken(delta, totalDelta)) {
-      if (HEAVY_LOGS) console.log(`⏭️  Skipping unused token ${tokenId} from frame (zero delta/limits/holds)`);
+      if (HEAVY_LOGS) accountLog.debug('token.skip_unused', { tokenId });
       continue;
     }
 
@@ -329,9 +336,7 @@ export async function proposeAccountFrame(
   const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
   const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
   if (frameTimestamp > env.timestamp && HEAVY_LOGS) {
-    console.log(
-      `⚡ TIMESTAMP-SYNC: Using monotonic timestamp ${frameTimestamp} (prev=${previousTimestamp}, env=${env.timestamp})`,
-    );
+    accountLog.debug('timestamp.monotonic', { frameTimestamp, previousTimestamp, envTimestamp: env.timestamp });
   }
 
   const accountTxsCopy = structuredClone([...validTxs]);
@@ -354,7 +359,7 @@ export async function proposeAccountFrame(
   try {
     newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
   } catch (error) {
-    console.warn(`⚠️ Frame validation failed: ${error instanceof Error ? error.message : String(error)}`);
+    accountLog.warn('frame.validation_failed', { error: error instanceof Error ? error.message : String(error) });
     return {
       success: false,
       error: `Frame validation failed: ${(error as Error).message}`,
@@ -364,7 +369,7 @@ export async function proposeAccountFrame(
 
   const frameSize = safeStringify(newFrame).length;
   if (frameSize > MAX_FRAME_SIZE_BYTES) {
-    console.warn(`⚠️ Frame too large: ${frameSize} bytes`);
+    accountLog.warn('frame.too_large', { frameSize, limit: MAX_FRAME_SIZE_BYTES });
     return {
       success: false,
       error: `Frame exceeds ${MAX_FRAME_SIZE_BYTES} byte limit: ${frameSize} bytes`,
@@ -540,16 +545,18 @@ export async function proposeAccountFrame(
   if (failedHtlcLocks.length > 0) finalResult.failedHtlcLocks = failedHtlcLocks;
   const profileTotalMs = Math.round(getPerfMs() - profileStartMs);
   if (ACCOUNT_PROPOSAL_PROFILE || profileTotalMs >= ACCOUNT_PROPOSAL_SLOW_MS) {
-    console.warn('[ACCOUNT-PROFILE]', safeStringify({
-      entity: signingEntityId.slice(-8),
-      counterparty: counterparty.slice(-8),
+    const profile = {
+      entity: shortId(signingEntityId, 8),
+      counterparty: shortId(counterparty, 8),
       height: newFrame.height,
       txs: newFrame.accountTxs.length,
       txTypes: Array.from(new Set(newFrame.accountTxs.map((tx) => tx.type))).sort(),
       optimisticBatch: canOptimisticallyValidateBatch && !optimisticBatchFailed,
       totalMs: profileTotalMs,
       marks: profileMarks,
-    }));
+    };
+    if (ACCOUNT_PROPOSAL_PROFILE) accountLog.warn('proposal.profile', profile);
+    else accountLog.debug('proposal.profile', profile);
   }
   return finalResult;
 }

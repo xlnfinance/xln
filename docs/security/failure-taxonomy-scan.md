@@ -37,6 +37,8 @@ warnings.
   `account.open` loggers; empty account inputs fail fast with `ACCOUNT_INPUT_EMPTY`.
 - Account committed followup diagnostics use the structured `account.followup`
   logger and are guarded against direct `console.*` noise in core.
+- Account frame proposal diagnostics and slow-profile notices use the structured
+  `account` logger and are guarded against direct `console.*` noise in core.
 - Account transaction applicator rejects impossible embedded `account_frame`
   payloads without direct console output; debug diagnostics use `account.tx`.
 - Same-jurisdiction orderbook matching diagnostics use the structured
