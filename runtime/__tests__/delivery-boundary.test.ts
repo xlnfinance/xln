@@ -31,6 +31,10 @@ const deliveryOutcomeComparisonAllowedFiles = new Set([
   'runtime/delivery-result.ts',
 ]);
 
+const deliveryFlagDecisionAllowedFiles = new Set([
+  'runtime/delivery-result.ts',
+]);
+
 test('raw entity input websocket send stays behind the P2P delivery adapter', () => {
   const offenders = collectRuntimeSourceFiles(join(repoRoot, 'runtime'))
     .map((file) => {
@@ -41,6 +45,22 @@ test('raw entity input websocket send stays behind the P2P delivery adapter', ()
       return /\bsendEntityInputRaw\s*\(/.test(source) || /['"]sendEntityInputRaw['"]/.test(source)
         ? relPath
         : null;
+    })
+    .filter((relPath): relPath is string => relPath !== null);
+
+  expect(offenders).toEqual([]);
+});
+
+test('delivery retry and terminal decisions stay behind shared helpers', () => {
+  const rawDeliveryFlagDecision =
+    /\bdelivery\.(?:retryable|fatal|terminal)\b|\bdelivery\[['"](?:retryable|fatal|terminal)['"]\]/;
+  const offenders = collectRuntimeSourceFiles(join(repoRoot, 'runtime'))
+    .map((file) => {
+      const relPath = relative(repoRoot, file);
+      if (deliveryFlagDecisionAllowedFiles.has(relPath)) return null;
+
+      const source = readFileSync(file, 'utf8');
+      return rawDeliveryFlagDecision.test(source) ? relPath : null;
     })
     .filter((relPath): relPath is string => relPath !== null);
 
