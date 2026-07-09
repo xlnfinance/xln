@@ -27,6 +27,10 @@ const rawEntityInputSendAllowedFiles = new Set([
   'runtime/networking/ws-client.ts',
 ]);
 
+const deliveredOutcomeComparisonAllowedFiles = new Set([
+  'runtime/delivery-result.ts',
+]);
+
 test('raw entity input websocket send stays behind the P2P delivery adapter', () => {
   const offenders = collectRuntimeSourceFiles(join(repoRoot, 'runtime'))
     .map((file) => {
@@ -37,6 +41,22 @@ test('raw entity input websocket send stays behind the P2P delivery adapter', ()
       return /\bsendEntityInputRaw\s*\(/.test(source) || /['"]sendEntityInputRaw['"]/.test(source)
         ? relPath
         : null;
+    })
+    .filter((relPath): relPath is string => relPath !== null);
+
+  expect(offenders).toEqual([]);
+});
+
+test('delivery delivered detection stays behind shared helpers', () => {
+  const rawDeliveredOutcomeComparison =
+    /\.outcome\s*(?:===|!==|==|!=)\s*['"]delivered['"]|['"]delivered['"]\s*(?:===|!==|==|!=)[^\n]*\.outcome/;
+  const offenders = collectRuntimeSourceFiles(join(repoRoot, 'runtime'))
+    .map((file) => {
+      const relPath = relative(repoRoot, file);
+      if (deliveredOutcomeComparisonAllowedFiles.has(relPath)) return null;
+
+      const source = readFileSync(file, 'utf8');
+      return rawDeliveredOutcomeComparison.test(source) ? relPath : null;
     })
     .filter((relPath): relPath is string => relPath !== null);
 
