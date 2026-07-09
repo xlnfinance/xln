@@ -2200,7 +2200,7 @@ export const applyEntityFrame = async (
 
   const frameElapsedMs = Math.round(getPerfMs() - frameProfileStartMs);
   if (ENTITY_FRAME_PROFILE || frameElapsedMs >= ENTITY_FRAME_SLOW_MS) {
-    console.warn('[ENTITY-FRAME-PROFILE]', safeStringify({
+    entityLog.warn('frame.profile', {
       entity: String(currentEntityState.entityId || '').slice(-8),
       elapsedMs: frameElapsedMs,
       txs: entityTxs.length,
@@ -2223,7 +2223,7 @@ export const applyEntityFrame = async (
         .map(([type, value]) => ({ type, ...value }))
         .sort((left, right) => right.elapsedMs - left.elapsedMs)
         .slice(0, 16),
-    }));
+    });
   }
 
   return {

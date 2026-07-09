@@ -33,6 +33,9 @@ warnings.
   handler is guarded against raw `console.log` noise in core.
 - Basic entity proposal/vote traces use the structured `entity.basic` logger;
   handlers are guarded against direct `console.*` noise in core.
+- Entity consensus frame diagnostics and slow-profile notices use the
+  structured `entity` logger and are guarded against direct `console.*` noise
+  in core.
 - Entity input merge conflict/dedup diagnostics use the structured
   `entity.input.merge` logger and are guarded against direct `console.*` noise
   in core.
