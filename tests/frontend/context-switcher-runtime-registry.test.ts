@@ -16,10 +16,12 @@ test('ContextSwitcher hydrates the shared remote runtime registry before showing
   expect(source).toContain('projectionSummariesForRuntime(');
   expect(source).toContain('runtimeMenuGroups = buildRuntimeMenuGroups(runtimeGroups)');
   expect(source).toContain('data-testid="context-runtime-group"');
+  expect(source).toContain('data-testid="context-runtime-label"');
   expect(source).toContain('data-testid="context-runtime-source"');
   expect(source).toContain('{runtimeGroup.source}');
   expect(source).toContain('`${normalizeId(entity.runtimeId)}:${normalizeId(entity.entityId)}`');
   expect(source).toContain('data-testid="context-jurisdiction-group"');
+  expect(source).toContain('data-testid="context-jurisdiction-label"');
   expect(source).toContain('data-testid="context-entity-row"');
   expect(source).toContain('data-entity-label={normalizeId(entity.name)}');
   expect(source).not.toContain('class="runtime-main"');

@@ -509,7 +509,7 @@
             {/if}
             <span class="runtime-heading-copy">
               <span class="runtime-heading-title">
-                <span>{runtimeGroup.runtimeLabel}</span>
+                <span data-testid="context-runtime-label">{runtimeGroup.runtimeLabel}</span>
                 <span class={`runtime-source ${runtimeGroup.source}`} data-testid="context-runtime-source">
                   {runtimeGroup.source}
                 </span>
@@ -529,7 +529,7 @@
                     {jurisdiction.badge.symbol}
                   </span>
                 {/if}
-                <span>{jurisdiction.label}</span>
+                <span data-testid="context-jurisdiction-label">{jurisdiction.label}</span>
               </div>
 
               <div class="entity-list">
