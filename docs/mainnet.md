@@ -110,8 +110,8 @@ Current evidence: `bun run gate:release` passed on the release line; `bun run
 test:all:fast` and `bun run security:audit-pack` passed on 2026-07-08. The
 historical long soak was manually stopped after 13 complete successful
 iterations, so it is useful evidence but not a completed gate. The current
-required soak evidence is the one-hour `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak`
-run from a clean tree.
+required soak evidence is the one-hour `bun run gate:mainnet` run from a clean
+tree.
 
 ### 4. Operational readiness
 

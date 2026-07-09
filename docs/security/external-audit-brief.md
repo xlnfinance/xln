@@ -5,8 +5,9 @@ This is the handoff brief for an independent reviewer before any open testnet or
 Last refreshed: 2026-07-08. Current internal evidence includes green
 `bun run security:audit-pack`, green `bun run check`, and a green
 `bun run test:all:fast` run with scenarios exiting `0` and 95/95 isolated
-browser shards passing. This is handoff evidence only; it is not external audit
-sign-off.
+browser shards passing. The required current mainnet evidence is the
+operator-facing preflight gate plus its one-hour soak. This is handoff evidence
+only; it is not external audit sign-off.
 
 ## Scope
 
@@ -69,9 +70,13 @@ Before mainnet approval, also run the full release bar:
 ```bash
 bun run gate:release
 bun run soak:release
+bun run gate:mainnet-preflight
+bun run gate:mainnet
 ```
 
-The soak release command is deliberately long. It is the operational evidence for restart/load stability, not a unit-test substitute.
+The soak release command is deliberately long. `gate:mainnet` is the current
+operator-facing mainnet preflight with the one-hour soak enabled. These are
+operational evidence for restart/load stability, not unit-test substitutes.
 
 ## High-Risk Files
 

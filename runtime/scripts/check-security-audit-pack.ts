@@ -19,7 +19,17 @@ const assertNotIncludes = (text: string, needle: string, path: string): void => 
 
 const packageJson = JSON.parse(readText('package.json')) as { scripts?: Record<string, string> };
 const scripts = packageJson.scripts ?? {};
-for (const name of ['gate:ci', 'gate:release', 'test:e2e:coverage', 'test:rpc-settlement', 'soak:quick', 'soak:release', 'prod:health']) {
+for (const name of [
+  'gate:ci',
+  'gate:release',
+  'gate:mainnet-preflight',
+  'gate:mainnet',
+  'test:e2e:coverage',
+  'test:rpc-settlement',
+  'soak:quick',
+  'soak:release',
+  'prod:health',
+]) {
   if (!scripts[name]) throw new Error(`package.json missing script: ${name}`);
 }
 
@@ -40,6 +50,8 @@ for (const command of [
   'bun run gate:ci',
   'bun run test:e2e:coverage',
   'bun run gate:release',
+  'bun run gate:mainnet-preflight',
+  'bun run gate:mainnet',
   'bun run test:rpc-settlement',
   'bun run soak:release',
   'bun run prod:health',
@@ -60,6 +72,7 @@ for (const marker of [
   'bun run test:e2e:coverage',
   'bun run test:rpc-settlement',
   'bun run soak:release',
+  'bun run gate:mainnet',
   'docs/security/external-audit-brief.md',
   'bun run prod:health',
   'direct same-chain and direct cross-j swaps are the executable swap surface',
