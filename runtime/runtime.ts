@@ -1561,7 +1561,7 @@ const notifyEnvChange = (env: Env) => {
  */
 export const processJBlockEvents = async (env: Env): Promise<void> => {
   if (!env) {
-    console.warn('⚠️ processJBlockEvents: No env available');
+    runtimeLog.warn('jblock.env_missing');
     return;
   }
 
@@ -1600,9 +1600,10 @@ const applyRuntimeInput = async (
       throw new Error(message);
     };
     if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
-      console.log(
-        `[REPLAY] applyRuntimeInput runtimeTxs=${runtimeInput.runtimeTxs.length} entityInputs=${runtimeInput.entityInputs.length}`,
-      );
+      runtimeLog.debug('input.replay.apply', {
+        runtimeTxs: runtimeInput.runtimeTxs.length,
+        entityInputs: runtimeInput.entityInputs.length,
+      });
     }
     // SECURITY: Validate runtime input
     if (!runtimeInput) {
@@ -1619,18 +1620,21 @@ const applyRuntimeInput = async (
     // These are NOT pushed to jReplica.mempool — they go to jOutbox → JAdapter post-save
     const earlyJOutbox: JInput[] = [];
     if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
-      console.log(`📥 [J-OUTBOX] Incoming jInputs: ${runtimeInput.jInputs.length} from mempool`);
+      runtimeLog.debug('joutbox.incoming', { jInputs: runtimeInput.jInputs.length });
       for (const jInput of runtimeInput.jInputs) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
-          console.error(
-            `❌ [J-OUTBOX] Jurisdiction "${jInput.jurisdictionName}" not found — dropping ${jInput.jTxs.length} jTxs`,
-          );
+          runtimeLog.error('joutbox.jurisdiction_missing', {
+            jurisdictionName: jInput.jurisdictionName,
+            jTxs: jInput.jTxs.length,
+          });
           continue;
         }
-        console.log(
-          `📥 [J-OUTBOX] Collecting ${jInput.jTxs.length} jTxs for ${jInput.jurisdictionName} (types: ${jInput.jTxs.map(t => t.type).join(',')})`,
-        );
+        runtimeLog.debug('joutbox.collect', {
+          jurisdictionName: jInput.jurisdictionName,
+          jTxs: jInput.jTxs.length,
+          types: jInput.jTxs.map(t => t.type),
+        });
         earlyJOutbox.push(jInput);
       }
     }
@@ -1717,16 +1721,16 @@ const applyRuntimeInput = async (
       // and that exact value must be used both for frame hashing and WAL journal.
     } else {
       if (env.quietRuntimeLogs !== true) {
-        console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs`);
+        runtimeLog.debug('frame.skip_empty');
       }
       // Clear env.extra even when skipping frame to prevent stale solvency expectations
       env.extra = undefined;
     }
 
     if (!env.gossip) {
-      console.log(`🚨 CRITICAL: gossip layer missing from environment, creating new one`);
+      runtimeLog.warn('gossip.missing_recreate', { height: env.height });
       env.gossip = createGossipLayer();
-      console.log(`✅ Gossip layer created and added to environment`);
+      runtimeLog.info('gossip.recreated', { height: env.height });
     }
 
     if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
@@ -1736,7 +1740,7 @@ const applyRuntimeInput = async (
     const endTime = getPerfMs();
     const applyElapsedMs = Math.round(endTime - startTime);
     if (RUNTIME_APPLY_PROFILE || applyElapsedMs >= RUNTIME_APPLY_SLOW_MS) {
-      console.warn('[RUNTIME-PROFILE]', safeStringify({
+      runtimeLog.warn('apply.profile', {
         height: env.height,
         elapsedMs: applyElapsedMs,
         runtimeTxs: mergedRuntimeTxs.length,
@@ -1744,10 +1748,13 @@ const applyRuntimeInput = async (
         entityTxs: appliedEntityInputs.reduce((sum, input) => sum + Number(input.entityTxs?.length || 0), 0),
         outputs: entityOutbox.length,
         jOutputs: jOutbox.length,
-      }));
+      });
     }
     if (DEBUG) {
-      console.log(`⏱️  Tick ${env.height - 1} completed in ${applyElapsedMs}ms`);
+      runtimeLog.debug('tick.completed', {
+        height: env.height - 1,
+        elapsedMs: applyElapsedMs,
+      });
     }
 
     const appliedRuntimeInput: RuntimeInput = {
@@ -2553,12 +2560,12 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       processProfileMetrics.jOutputs > 0 ||
       processProfileMetrics.frameAdvanced;
     if ((!RUNTIME_PROCESS_PROFILE || !hasProfileWork) && elapsedMs < RUNTIME_PROCESS_SLOW_MS) return;
-    console.warn('[RUNTIME-PROCESS-PROFILE]', safeStringify({
+    runtimeLog.warn('process.profile', {
       outcome: processProfileOutcome,
       elapsedMs,
       ...processProfileMetrics,
       marks: processProfileMarks,
-    }));
+    });
   };
 
   try {
@@ -2723,7 +2730,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           fingerprints.set(entityId, buildEntityAdvertisedStateFingerprint(replica.state, createProfileSignerResolver(env)));
         } catch (error) {
           if (!quietRuntimeLogs) {
-            console.warn(`GOSSIP_PROFILE_FINGERPRINT_SKIP: entity=${entityId.slice(-8)} error=${(error as Error).message}`);
+            runtimeLog.warn('gossip.profile_fingerprint_skip', {
+              entityId: entityId.slice(-8),
+              error: (error as Error).message,
+            });
           }
         }
       }
@@ -2740,14 +2750,15 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     };
     if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
-        console.log(
-          `📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`,
-        );
+        runtimeLog.debug('tick.input.processing', {
+          entityInputs: runtimeInput.entityInputs.length,
+          entityIds: runtimeInput.entityInputs.map(o => o.entityId.slice(-4)),
+        });
         if (jEventFramePrioritized) {
-          console.log(`📥 TICK: deferred non-J inputs behind watcher j_event frame`);
+          runtimeLog.debug('tick.input.deferred_for_j_event');
         }
         if (runtimeInput.runtimeTxs.length > 0) {
-          console.log(`📥 TICK: Processing ${runtimeInput.runtimeTxs.length} queued runtimeTxs`);
+          runtimeLog.debug('tick.runtime_txs.processing', { runtimeTxs: runtimeInput.runtimeTxs.length });
         }
       }
       try {
@@ -2755,9 +2766,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         const result = await applyRuntimeInput(env, runtimeInput);
         markProcessProfile('apply');
         if (!quietRuntimeLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {
-          console.log(
-            `🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`,
-          );
+          runtimeLog.debug('process.apply.output', {
+            entityOutbox: result.entityOutbox.length,
+            jOutbox: result.jOutbox.length,
+          });
         }
         entityOutbox = result.entityOutbox;
         jOutbox = [...jOutbox, ...result.jOutbox];
@@ -2824,9 +2836,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
       if (!quietRuntimeLogs) {
-        console.log(
-          `📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`,
-        );
+        runtimeLog.debug('tick.local_outputs.queued', {
+          localOutputs: localOutputs.length,
+          entityIds: localOutputs.map(o => o.entityId.slice(-4)),
+        });
       }
     }
     // Re-check due crontab work after apply. Hooks scheduled at the current
@@ -2862,7 +2875,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       env.history.push(snapshot);
 
       if (!quietRuntimeLogs) {
-        console.log(`📸 Snapshot: ${snapshot.meta?.title ?? `Frame ${env.height}`} (${env.history.length} total)`);
+        runtimeLog.debug('history.snapshot', {
+          title: snapshot.meta?.title ?? `Frame ${env.height}`,
+          height: env.height,
+          historyLength: env.history.length,
+        });
       }
       markProcessProfile('snapshot');
     }
@@ -2883,7 +2900,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     // tail, just like a block that executed locally but was never committed.
     if (frameAdvanced) {
       if (!quietRuntimeLogs) {
-        console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
+        runtimeLog.debug('storage.save.start', { height: env.height });
       }
       try {
         const saveOutcome = await saveEnvToDB(env, appliedRuntimeInputForPersistence, entityOutbox);
@@ -2895,7 +2912,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         flushPendingAuditEvents(env);
         env.frameLogs = [];
         if (!quietRuntimeLogs) {
-          console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
+          runtimeLog.debug('storage.save.done', { height: env.height });
         }
         markProcessProfile('save');
       } catch (error) {
@@ -2945,7 +2962,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
 
     // 1. Broadcast entity outputs via P2P (fire-and-forget)
     if (remoteOutputs.length > 0 && env.quietRuntimeLogs !== true) {
-      console.log(`📡 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
+      runtimeLog.debug('side_effect.remote_outputs.dispatch', { remoteOutputs: remoteOutputs.length });
     }
     const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs, outputRoutingDeps);
 

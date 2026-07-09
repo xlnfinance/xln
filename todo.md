@@ -579,6 +579,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: `deriveDelta` account math debug output now uses the existing
      `ACCOUNT_STATE` logger instead of direct `console.log`; deriveDelta
      property/invariant tests and the failure-taxonomy scan guard regressions.
+   - Partial: runtime apply/process hot-path diagnostics now use the structured
+     `runtime` logger instead of legacy tick/J-outbox/profile console prefixes;
+     the failure-taxonomy scan guards those prefixes against regression.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

@@ -285,6 +285,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/entity-tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
   ['runtime/account-utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
+  ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -297,6 +298,21 @@ for (const [path, markers] of [
 const directPaymentHandlerPath = 'runtime/entity-tx/handlers/direct-payment.ts';
 const directPaymentHandler = readText(directPaymentHandlerPath);
 assertNotIncludes(directPaymentHandler, 'console.log', directPaymentHandlerPath);
+
+const runtimeCorePath = 'runtime/runtime.ts';
+const runtimeCore = readText(runtimeCorePath);
+for (const legacyRuntimeLogMarker of [
+  '[RUNTIME-PROCESS-PROFILE]',
+  '[RUNTIME-PROFILE]',
+  '[J-OUTBOX]',
+  'SKIP-FRAME',
+  'GOSSIP_PROFILE_FINGERPRINT_SKIP',
+  'TICK:',
+  'local outputs queued',
+  '[SIDE-EFFECT]',
+]) {
+  assertNotIncludes(runtimeCore, legacyRuntimeLogMarker, runtimeCorePath);
+}
 
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);
