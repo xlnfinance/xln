@@ -15,6 +15,7 @@
     type CommandPaletteView,
   } from '$lib/components/shared/command-palette-view';
   import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { panelBridge } from './utils/panelBridge';
   import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
   import {
@@ -88,11 +89,15 @@
   const publishLocalEnv = (env: Env | null) => {
     const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
     if (runtimeEnv && !runtimeEnvMatchesActiveSelection(runtimeEnv)) {
-      console.error(`[View] Refusing local env publish for inactive runtime ${normalizeRuntimeId(runtimeEnv.runtimeId)}`);
+      const message = `VIEW_RUNTIME_ENV_MISMATCH: refusing local env publish for inactive runtime ${normalizeRuntimeId(runtimeEnv.runtimeId)}`;
+      errorLog.log(message, 'Runtime View', {
+        runtimeId: normalizeRuntimeId(runtimeEnv.runtimeId),
+        activeRuntimeId: normalizeRuntimeId(get(activeRuntimeId)),
+      });
       localEnvStore.set(null);
       commandPaletteView = emptyCommandPaletteView();
       localEnvRevisionStore.update((revision) => revision + 1);
-      return;
+      throw new Error(message);
     }
     const viewEnv = runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null;
     localEnvStore.set(viewEnv);
@@ -261,7 +266,7 @@
 
   const surfaceRuntimeViewError = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error || 'RuntimeView error');
-    console.error('[View] RuntimeView projection failed:', error);
+    errorLog.log('RuntimeView projection failed', 'Runtime View', error);
     toasts.error(`Runtime view failed: ${message}`, 9000);
   };
 
@@ -349,7 +354,7 @@
       });
       void refreshCurrentRuntimeView(true);
     } catch (err) {
-      console.error('[View] Failed to initialize XLN:', err);
+      errorLog.log('Failed to initialize XLN view', 'Runtime View', err);
     }
   });
 

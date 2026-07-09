@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import type { RuntimeAdapterEntitySummary } from '@xln/runtime/xln-api';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { ensureProjectionRuntimeConnected } from '$lib/utils/runtimeConnection';
@@ -62,7 +63,7 @@
       const summaries = await runtimeQueryClient.readEntities({ limit: 5000 });
       entities = summaries.map(entityFromSummary);
     } catch (err) {
-      console.error('[AddressDirectory] projection read failed', err);
+      errorLog.log('Address directory projection read failed', 'Address Directory', err);
       error = err instanceof Error ? err.message : 'Failed to load address directory';
       entities = [];
     } finally {

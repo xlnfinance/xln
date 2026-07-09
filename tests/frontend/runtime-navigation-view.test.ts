@@ -89,7 +89,12 @@ test('HierarchicalNav consumes a projected navigation view instead of reading fu
   expect(source).toContain('$runtimeView');
   expect(source).toContain('navigationView.runtimeItems');
   expect(source).toContain('runtimeOperations.selectRuntime(id)');
+  expect(source).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
+  expect(source).toContain("errorLog.log('Runtime switch failed', 'Navigation'");
   expect(source).not.toContain('activeRuntimeId.set');
+  expect(source).not.toContain('console.error');
+  expect(source).not.toContain('console.warn');
+  expect(source).not.toContain('console.info');
   expect(source).not.toContain('eReplicas');
   expect(source).not.toContain('jReplicas');
   expect(source).not.toContain('runtime.env');

@@ -3,6 +3,7 @@ import type { Env } from '@xln/runtime/xln-api';
 import { activeRuntimeId, runtimes } from './runtimeStore';
 import { createDetachedRuntimeViewEnv, createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import { registerDebugSurface } from '$lib/utils/debugSurface';
+import { errorLog } from './errorLogStore';
 
 const bootstrapEnvironment = writable<Env | null>(null);
 
@@ -40,7 +41,9 @@ export function setXlnEnvironment(env: Env | null): void {
     bootstrapEnvironment.set(viewEnv);
     localDebugEnv = createDetachedRuntimeViewEnv(runtimeEnv);
   } else {
-    console.error(`[runtime] Refusing to publish env ${envRuntimeId || '<missing>'} while runtime ${selectedRuntimeId} is selected`);
+    const message = `RUNTIME_STORE_ENV_OVERWRITE_REFUSED: refusing to publish env ${envRuntimeId || '<missing>'} while runtime ${selectedRuntimeId} is selected`;
+    errorLog.log(message, 'Runtime Env', { envRuntimeId: envRuntimeId || null, selectedRuntimeId });
+    throw new Error(message);
   }
 
   const targetRuntimeId = envRuntimeId || (canPublishActiveEnv ? selectedRuntimeId : '');

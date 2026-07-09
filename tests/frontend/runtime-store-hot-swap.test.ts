@@ -116,8 +116,14 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(embeddedSource).toContain('const bootstrapEnvironment = writable<Env | null>(null);');
   expect(derivedSource).toContain('return runtimeEntry?.env ?? null;');
   expect(derivedSource).not.toContain('if (runtimeEntry) return runtimeEntry.env ?? null;');
+  expect(embeddedSource).toContain("import { errorLog } from './errorLogStore';");
   expect(setEnvSource).toContain('const canPublishActiveEnv = !selectedRuntimeId || (envRuntimeId !== \'\' && envRuntimeId === selectedRuntimeId);');
-  expect(setEnvSource).toContain('Refusing to publish env ${envRuntimeId || \'<missing>\'} while runtime ${selectedRuntimeId} is selected');
+  expect(setEnvSource).toContain('RUNTIME_STORE_ENV_OVERWRITE_REFUSED');
+  expect(setEnvSource).toContain("errorLog.log(message, 'Runtime Env'");
+  expect(setEnvSource).toContain('throw new Error(message)');
+  expect(embeddedSource).not.toContain('console.error');
+  expect(embeddedSource).not.toContain('console.warn');
+  expect(embeddedSource).not.toContain('console.info');
   expect(switchSource).toContain('const currentRuntimeId = normalizeRuntimeConfigId(currentEnv?.runtimeId || \'\');');
   expect(switchSource).toContain('if (!selectedRuntimeId || currentRuntimeId === selectedRuntimeId)');
   expect(switchSource).toContain('env = await xln.main(selectedRuntime.seed);');
@@ -349,8 +355,14 @@ test('localhost debug env surfaces expose RuntimeView with matching live runtime
   expect(appTypes).not.toContain('__xln_env');
   expect(appTypes).not.toContain('__xln_instance');
   expect(appTypes).not.toContain('__xlnRuntimeAdapter');
+  expect(viewSource).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
+  expect(viewSource).toContain("errorLog.log('RuntimeView projection failed', 'Runtime View', error)");
+  expect(viewSource).toContain("errorLog.log('Failed to initialize XLN view', 'Runtime View', err)");
   expect(viewSource).toContain("import { getEnv, getXLN, history as runtimeHistory, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore'");
   expect(viewSource).toContain('unsubRuntimeEnv = xlnEnvironment.subscribe');
+  expect(viewSource).not.toContain('console.error');
+  expect(viewSource).not.toContain('console.warn');
+  expect(viewSource).not.toContain('console.info');
   expect(viewSource).not.toContain("import { runtimeViewFrameToEnv } from '$lib/utils/runtimeViewEnv';");
   expect(viewSource).not.toContain('runtimeViewFrameToEnv(');
 

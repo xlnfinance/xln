@@ -6,6 +6,7 @@
   import type { RuntimeAdapterEntitySummary, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
   import ActivityHistoryPanel from '$lib/components/Entity/ActivityHistoryPanel.svelte';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeAdapterHeight, runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
@@ -213,7 +214,7 @@
       if (!entity && projectionError) throw projectionError;
       if (!entity) error = 'Entity not found in runtime projection.';
     } catch (err) {
-      console.error('[EntityExplorer] projection read failed', err);
+      errorLog.log('Entity explorer projection read failed', 'Entity Explorer', { entityId: normalized, err });
       error = err instanceof Error ? err.message : 'Failed to load entity explorer';
       entity = null;
     } finally {

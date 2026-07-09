@@ -3,6 +3,7 @@
   import { appState, appStateOperations } from '$lib/stores/appStateStore';
   import { runtimes, runtimeOperations } from '$lib/stores/runtimeStore';
   import { activeRuntime, activeSigner } from '$lib/stores/vaultStore';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeView } from '$lib/stores/runtimeViewStore';
   import { buildHierarchicalNavigationView } from './runtime-navigation-view';
 
@@ -19,7 +20,7 @@
       appStateOperations.navigate('runtime', id);
     } catch (error) {
       runtimeSwitchError = error instanceof Error ? error.message : String(error || 'Runtime switch failed');
-      console.error('[HierarchicalNav] Runtime switch failed:', error);
+      errorLog.log('Runtime switch failed', 'Navigation', { id, error });
     }
   }
 
