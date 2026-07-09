@@ -264,6 +264,7 @@ for (const [path, markers] of [
   ['runtime/entity-factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed']],
   ['runtime/entity-consensus.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
   ['runtime/runtime-entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
+  ['runtime/runtime-input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
   ['runtime/entity-input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
   ['runtime/entity-tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
@@ -329,6 +330,11 @@ assertNotIncludes(runtimeJSubmit, '[SIDE-EFFECT]', runtimeJSubmitPath);
 const runtimeInfraPath = 'runtime/runtime-infra.ts';
 const runtimeInfra = readText(runtimeInfraPath);
 assertNotIncludes(runtimeInfra, 'console.', runtimeInfraPath);
+
+const runtimeInputQueuePath = 'runtime/runtime-input-queue.ts';
+const runtimeInputQueue = readText(runtimeInputQueuePath);
+assertNotIncludes(runtimeInputQueue, 'console.', runtimeInputQueuePath);
+assertNotIncludes(runtimeInputQueue, '[enqueueRuntimeInput]', runtimeInputQueuePath);
 
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);

@@ -1,6 +1,9 @@
 import { TIMING } from './constants';
 import type { EntityInput, Env, JInput, RuntimeInput, RuntimeTx } from './types';
 import { getWallClockMs } from './utils';
+import { createStructuredLogger } from './logger';
+
+const runtimeInputQueueLog = createStructuredLogger('runtime.input_queue');
 
 export type RuntimeInputQueueDeps = {
   ensureRuntimeState: (env: Env) => NonNullable<Env['runtimeState']>;
@@ -77,15 +80,13 @@ export const enqueueRuntimeInputs = (
       }))
       .filter((input) => input.txTypes.some((type) => type.startsWith('j_') || type.startsWith('dispute')));
     if (interestingEntityInputs.length > 0) {
-      console.log(
-        `[enqueueRuntimeInput] interesting entityInputs=${JSON.stringify({
-          runtimeId: env.runtimeId,
-          queuedAt: mempool.queuedAt,
-          totalEntityInputs: mempool.entityInputs.length,
-          totalRuntimeTxs: mempool.runtimeTxs.length,
-          inputs: interestingEntityInputs,
-        })}`,
-      );
+      runtimeInputQueueLog.info('interesting_entity_inputs', {
+        runtimeId: env.runtimeId,
+        queuedAt: mempool.queuedAt,
+        totalEntityInputs: mempool.entityInputs.length,
+        totalRuntimeTxs: mempool.runtimeTxs.length,
+        inputs: interestingEntityInputs,
+      });
     }
   }
   if (inputs?.length || runtimeTxs?.length || jInputs?.length) {
