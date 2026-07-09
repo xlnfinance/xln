@@ -1,6 +1,9 @@
 import type { EntityState, Proposal, ProposalAction } from '../types';
-import { createHash, DEBUG } from '../utils';
+import { createHash } from '../utils';
 import { safeStringify } from '../serialization-utils';
+import { createStructuredLogger, shortHash } from '../logger';
+
+const proposalLog = createStructuredLogger('entity.basic');
 
 export const generateProposalId = (action: ProposalAction, proposer: string, entityState: EntityState): string => {
   const proposalData = safeStringify({
@@ -17,7 +20,7 @@ export const generateProposalId = (action: ProposalAction, proposer: string, ent
 export const executeProposal = (entityState: EntityState, proposal: Proposal): EntityState => {
   if (proposal.action.type === 'collective_message') {
     const message = `[COLLECTIVE] ${proposal.action.data.message}`;
-    if (DEBUG) console.log(`    🏛️  Executing collective proposal: "${message}"`);
+    proposalLog.debug('proposal.execute_collective_message', { proposal: shortHash(proposal.id) });
 
     const newMessages = [...entityState.messages, message];
 

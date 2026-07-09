@@ -1,12 +1,15 @@
 import { calculateQuorumPower } from '../../entity-consensus';
 import { createOrderbookExtState, validateSpreadDistribution } from '../../orderbook';
 import type { EntityInput, EntityState, EntityTx, Env, Proposal } from '../../types';
-import { DEBUG, formatEntityId, log } from '../../utils';
+import { formatEntityId, log } from '../../utils';
 import { normalizeEntityName } from '../../networking/gossip';
 import { announceLocalEntityProfile } from '../../networking/gossip-helper';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { executeProposal, generateProposalId } from '../proposals';
 import { validateMessage } from '../validation';
+import { createStructuredLogger, shortHash, shortId } from '../../logger';
+
+const basicLog = createStructuredLogger('entity.basic');
 
 type BasicEntityTxResult = {
   newState: EntityState;
@@ -46,7 +49,11 @@ export const handleProposeEntityTx = (entityState: EntityState, entityTx: Entity
   const { action, proposer } = entityTx.data;
   const proposalId = generateProposalId(action, proposer, entityState);
 
-  if (DEBUG) console.log(`    📝 Creating proposal ${proposalId} by ${proposer}: ${action.data.message}`);
+  basicLog.debug('proposal.create', {
+    proposal: shortHash(proposalId),
+    proposer: shortId(proposer),
+    action: action.type,
+  });
 
   const proposal: Proposal = {
     id: proposalId,
@@ -66,15 +73,19 @@ export const handleProposeEntityTx = (entityState: EntityState, entityTx: Entity
   if (shouldExecuteImmediately) {
     proposal.status = 'executed';
     newEntityState = executeProposal(newEntityState, proposal);
-    if (DEBUG) {
-      console.log(
-        `    ⚡ Proposal executed immediately - proposer has ${proposerPower} >= ${entityState.config.threshold} threshold`,
-      );
-    }
-  } else if (DEBUG) {
-    console.log(
-      `    ⏳ Proposal pending votes - proposer has ${proposerPower} < ${entityState.config.threshold} threshold`,
-    );
+    basicLog.debug('proposal.executed_immediately', {
+      proposal: shortHash(proposalId),
+      proposer: shortId(proposer),
+      proposerPower: proposerPower.toString(),
+      threshold: entityState.config.threshold.toString(),
+    });
+  } else {
+    basicLog.debug('proposal.pending_votes', {
+      proposal: shortHash(proposalId),
+      proposer: shortId(proposer),
+      proposerPower: proposerPower.toString(),
+      threshold: entityState.config.threshold.toString(),
+    });
   }
 
   newEntityState.proposals.set(proposalId, proposal);
@@ -86,11 +97,11 @@ export const handleVoteEntityTx = (entityState: EntityState, entityTx: EntityTxO
   const proposal = entityState.proposals.get(proposalId);
 
   if (!proposal || proposal.status !== 'pending') {
-    if (DEBUG) console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
+    basicLog.debug('vote.ignored', { proposal: shortHash(proposalId), status: proposal?.status ?? 'missing' });
     return { newState: entityState, outputs: [] };
   }
 
-  if (DEBUG) console.log(`    🗳️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
+  basicLog.debug('vote.received', { proposal: shortHash(proposalId), voter: shortId(voter), choice });
 
   const newEntityState = cloneEntityState(entityState);
   const updatedProposal = {
@@ -110,13 +121,15 @@ export const handleVoteEntityTx = (entityState: EntityState, entityTx: EntityTxO
 
   const totalYesPower = calculateQuorumPower(entityState.config, yesVoters);
 
-  if (DEBUG) {
-    const totalShares = Object.values(entityState.config.shares).reduce((sum, val) => sum + val, BigInt(0));
-    const percentage = ((Number(totalYesPower) / Number(entityState.config.threshold)) * 100).toFixed(1);
-    console.log(
-      `    🔍 Proposal votes: ${totalYesPower} / ${totalShares} [${percentage}% threshold${Number(totalYesPower) >= Number(entityState.config.threshold) ? '+' : ''}]`,
-    );
-  }
+  const totalShares = Object.values(entityState.config.shares).reduce((sum, val) => sum + val, BigInt(0));
+  const percentage = ((Number(totalYesPower) / Number(entityState.config.threshold)) * 100).toFixed(1);
+  basicLog.debug('vote.tally', {
+    proposal: shortHash(proposalId),
+    totalYesPower: totalYesPower.toString(),
+    totalShares: totalShares.toString(),
+    threshold: entityState.config.threshold.toString(),
+    thresholdPercent: percentage,
+  });
 
   if (totalYesPower >= entityState.config.threshold) {
     updatedProposal.status = 'executed';

@@ -259,6 +259,8 @@ for (const [path, markers] of [
     "'ROUTE_END_INVALID'",
     "'NEXT_HOP_ACCOUNT_MISSING'",
   ]],
+  ['runtime/entity-tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
+  ['runtime/entity-tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-tx/handlers/r2c.ts', ["createStructuredLogger('entity.r2c')"]],
   ['runtime/entity-tx/handlers/htlc-payment.ts', ["createStructuredLogger('entity.htlc')"]],
   ['runtime/entity-tx/handlers/dispute.ts', ["createStructuredLogger('entity.dispute')"]],
@@ -279,6 +281,14 @@ assertNotIncludes(directPaymentHandler, 'console.log', directPaymentHandlerPath)
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);
 assertNotIncludes(r2cHandler, 'console.log', r2cHandlerPath);
+
+const basicHandlerPath = 'runtime/entity-tx/handlers/basic.ts';
+const basicHandler = readText(basicHandlerPath);
+assertNotIncludes(basicHandler, 'console.', basicHandlerPath);
+
+const proposalHandlerPath = 'runtime/entity-tx/proposals.ts';
+const proposalHandler = readText(proposalHandlerPath);
+assertNotIncludes(proposalHandler, 'console.', proposalHandlerPath);
 
 const htlcPaymentHandlerPath = 'runtime/entity-tx/handlers/htlc-payment.ts';
 const htlcPaymentHandler = readText(htlcPaymentHandlerPath);
