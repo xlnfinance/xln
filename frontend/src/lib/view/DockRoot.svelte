@@ -15,6 +15,7 @@
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import { panelBridge } from './utils/panelBridge';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { settings } from '$lib/stores/settingsStore';
   import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
@@ -118,6 +119,10 @@
     box.className = `entity-panel-status${isError ? ' error' : ''}`;
     box.textContent = message;
     target.appendChild(box);
+  }
+
+  function logDockRootDiagnostic(message: string, details?: unknown): void {
+    errorLog.log(message, 'DockRoot', details);
   }
 
   function seedFromViewFrame(
@@ -224,7 +229,7 @@
               });
             })
             .catch((error) => {
-              console.error('[DockRoot] Failed to load Dev Lab:', error);
+              logDockRootDiagnostic('Failed to load Dev Lab', error);
               const message = error instanceof Error ? error.message : String(error || 'Dev Lab load failed');
               showEntityPanelStatus(div, `Dev Lab failed: ${message}`, true);
             });
@@ -306,7 +311,7 @@
                   mountEntityPanel(resolved);
                 })
                 .catch((error) => {
-                  console.error('[DockRoot] Failed to resolve entity panel projection:', error);
+                  logDockRootDiagnostic('Failed to resolve entity panel projection', { panelId, error });
                   const message = error instanceof Error ? error.message : String(error || 'projection failed');
                   showEntityPanelStatus(div, `Entity projection failed: ${message}`, true);
                 });
@@ -417,7 +422,7 @@
           const config = JSON.parse(savedLayout);
           if (config.dockview) dockview.fromJSON(config.dockview);
         } catch (err) {
-          console.warn('[DockRoot] Layout restore failed, clearing:', err);
+          logDockRootDiagnostic('Layout restore failed; clearing saved workspace layout', err);
           localStorage.removeItem('xln-workspace-layout');
           localStorage.removeItem('xln-dockview-layout');
           localStorage.removeItem('dockview-layout');
@@ -454,7 +459,7 @@
           };
           localStorage.setItem('xln-workspace-layout', JSON.stringify(config));
         } catch (err) {
-          console.warn('[DockRoot] Failed to auto-save layout:', err);
+          logDockRootDiagnostic('Failed to auto-save workspace layout', err);
         }
       }, 500);
     });
@@ -484,7 +489,7 @@
           params: { closeable: true },
         });
       } catch (err) {
-        console.error('[DockRoot] Failed to create entity panel:', err);
+        logDockRootDiagnostic('Failed to create entity panel', { entityId, err });
         const retryPanel = dockview.panels.find((p) => p.id === panelId);
         retryPanel?.api.setActive();
       }

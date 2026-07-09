@@ -9,7 +9,12 @@ test('DockRoot resolves entity panel seeds through RuntimeView projections', () 
   expect(source).toContain('refreshRuntimeView({');
   expect(source).toContain('seedFromViewFrame');
   expect(source).toContain("showEntityPanelStatus(div, 'Loading entity projection...')");
-  expect(source).toContain("console.error('[DockRoot] Failed to resolve entity panel projection:'");
+  expect(source).toContain("import { errorLog } from '$lib/stores/errorLogStore'");
+  expect(source).toContain("errorLog.log(message, 'DockRoot', details)");
+  expect(source).toContain("logDockRootDiagnostic('Failed to resolve entity panel projection'");
+  expect(source).not.toContain('console.warn');
+  expect(source).not.toContain('console.error');
+  expect(source).not.toContain('console.info');
   expect(source).not.toContain("from '$lib/stores/runtimeQueryClient'");
   expect(source).not.toContain('runtimeQueryClient.readViewFrame');
   expect(source).not.toContain('resolveEntityPanelData(panelId)');
