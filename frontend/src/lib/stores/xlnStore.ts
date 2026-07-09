@@ -1069,7 +1069,7 @@ export function sendRuntimeDebugEvent(payload: RuntimeDebugPayload): void {
   try {
     p2p.sendDebugEvent(payload);
   } catch (error) {
-    console.warn('[VaultStore:xlnStore] Runtime debug event dispatch failed:', error);
+    errorLog.log('Runtime debug event dispatch failed', 'Runtime Debug Event', error);
   }
 }
 
@@ -1089,7 +1089,7 @@ async function fetchPaymentGossipProfiles(entityIds: string[]): Promise<GossipPr
       if (payload?.profile) profiles.push(payload.profile);
       if (Array.isArray(payload?.peers)) profiles.push(...payload.peers);
     } catch (error) {
-      console.warn('[VaultStore:xlnStore] Payment gossip profile fetch failed:', { entityId, error });
+      errorLog.log('Payment gossip profile fetch failed', 'Payment Gossip', { entityId, error });
     }
   }
   return profiles;
@@ -1104,7 +1104,7 @@ const announcePaymentGossipProfiles = (env: Env, profiles: GossipProfile[]): num
       env.gossip.announce(profile);
       announced += 1;
     } catch (error) {
-      console.warn('[VaultStore:xlnStore] Payment gossip profile announce failed:', {
+      errorLog.log('Payment gossip profile announce failed', 'Payment Gossip', {
         entityId: String(profile.entityId || ''),
         error,
       });
@@ -1148,7 +1148,7 @@ export async function refreshPaymentRuntimeGossip(options: {
   try {
     await env.runtimeState?.p2p?.syncProfiles?.();
   } catch (error) {
-    console.warn('[VaultStore:xlnStore] Payment gossip p2p sync failed:', error);
+    errorLog.log('Payment gossip p2p sync failed', 'Payment Gossip', error);
   }
 
   if (targetEntities.length > 0 && typeof xln?.ensureGossipProfiles === 'function') {
@@ -1159,7 +1159,7 @@ export async function refreshPaymentRuntimeGossip(options: {
       const resolved = await xln.ensureGossipProfiles(env, targetEntities);
       if (resolved) return { profiles: Array.from(mergedProfiles.values()), announced };
     } catch (error) {
-      console.warn('[VaultStore:xlnStore] Payment gossip targeted ensure failed:', { targetEntities, error });
+      errorLog.log('Payment gossip targeted ensure failed', 'Payment Gossip', { targetEntities, error });
     }
   }
 
@@ -1171,12 +1171,12 @@ export async function refreshPaymentRuntimeGossip(options: {
     try {
       xln?.refreshGossip?.(env);
     } catch (error) {
-      console.warn('[VaultStore:xlnStore] Payment gossip runtime refresh failed:', error);
+      errorLog.log('Payment gossip runtime refresh failed', 'Payment Gossip', error);
     }
     try {
       env.runtimeState?.p2p?.refreshGossip?.();
     } catch (error) {
-      console.warn('[VaultStore:xlnStore] Payment gossip p2p refresh failed:', error);
+      errorLog.log('Payment gossip p2p refresh failed', 'Payment Gossip', error);
     }
     await sleep(PAYMENT_GOSSIP_REFRESH_WAIT_MS);
     if (targetEntities.length > 0) {

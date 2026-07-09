@@ -701,6 +701,25 @@ test('xlnStore boot diagnostics use persistent error log instead of raw console'
   expect(`${initializeSource}\n${refreshSource}`).not.toContain('console.error');
 });
 
+test('xlnStore payment gossip diagnostics use persistent error log instead of raw console', () => {
+  const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const debugStart = source.indexOf('export function sendRuntimeDebugEvent');
+  const inputStart = source.indexOf('const hasMeaningfulEntityInput', debugStart);
+  expect(debugStart).toBeGreaterThan(0);
+  expect(inputStart).toBeGreaterThan(debugStart);
+  const gossipSource = source.slice(debugStart, inputStart);
+
+  expect(gossipSource).toContain("errorLog.log('Runtime debug event dispatch failed', 'Runtime Debug Event', error)");
+  expect(gossipSource).toContain("errorLog.log('Payment gossip profile fetch failed', 'Payment Gossip'");
+  expect(gossipSource).toContain("errorLog.log('Payment gossip profile announce failed', 'Payment Gossip'");
+  expect(gossipSource).toContain("errorLog.log('Payment gossip p2p sync failed', 'Payment Gossip', error)");
+  expect(gossipSource).toContain("errorLog.log('Payment gossip targeted ensure failed', 'Payment Gossip'");
+  expect(gossipSource).toContain("errorLog.log('Payment gossip runtime refresh failed', 'Payment Gossip', error)");
+  expect(gossipSource).toContain("errorLog.log('Payment gossip p2p refresh failed', 'Payment Gossip', error)");
+  expect(gossipSource).not.toContain('console.warn');
+  expect(gossipSource).not.toContain('console.error');
+});
+
 test('local runtime creation marks the target before bootstrap and switches controller after persistence', () => {
   const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
   const createStart = source.indexOf('async createRuntime(');

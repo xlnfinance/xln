@@ -689,6 +689,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      persistent frontend `errorLog` instead of raw `console.warn/error` in the
      initial projection, stale remote entity reset, financial restore failure,
      embedded adapter connect failure, and XLN initialization failure paths.
+   - Partial: runtime debug event and payment-gossip diagnostics in `xlnStore`
+     now use the persistent frontend `errorLog` instead of raw `console.warn`
+     while preserving the same retry/fetch/announce control flow.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.
