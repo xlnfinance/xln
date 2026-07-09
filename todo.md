@@ -518,6 +518,11 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: basic entity proposal/vote traces now use the structured
      `entity.basic` logger instead of direct `console.*`, with both Bun source
      tests and the failure-taxonomy scan guarding regressions.
+   - Partial: compact entity j-batch operation handlers (`r2r`,
+     `createSettlement`, `mintReserves`, `j_broadcast`, `j_clear_batch`,
+     `j_abort_sent_batch`) now use the structured `entity.jbatch` logger
+     instead of direct `console.*`, with Bun source tests and the
+     failure-taxonomy scan guarding regressions.
    - Partial: entity R2C debug traces now use the structured `entity.r2c`
      logger instead of raw `console.log`, with both Bun source tests and the
      failure-taxonomy scan guarding against regressions.

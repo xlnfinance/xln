@@ -26,6 +26,9 @@ import {
   requireRuntimeJurisdictionConfigByName,
 } from '../../jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
+import { createStructuredLogger, shortHash, shortId } from '../../logger';
+
+const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 export async function handleJBroadcast(
   entityState: EntityState,
@@ -119,10 +122,14 @@ export async function handleJBroadcast(
   const opCount = batchOpCount(newState.jBatchState.batch);
   const jurisdictionName = jurisdiction.name;
 
-  console.log(`📤 j_broadcast: ${entityState.entityId.slice(-4)} | ${batchSize} ops | nonce=${nextNonce} | hash=${batchHash.slice(0, 10)}...`);
-  console.log(
-    `[REB][3][J_BROADCAST_SUBMIT] entity=${entityState.entityId.slice(-8)} nonce=${nextNonce} ops=${opCount} hash=${batchHash}`,
-  );
+  jBatchActionLog.debug('broadcast.submit', {
+    entity: shortId(entityState.entityId),
+    jurisdiction: jurisdictionName,
+    batchSize,
+    opCount,
+    nonce: nextNonce.toString(),
+    batchHash: shortHash(batchHash),
+  });
 
   // ── Create JTx WITHOUT hanko (attached post-commit by entity-consensus) ──
   const jTx: JTx = {

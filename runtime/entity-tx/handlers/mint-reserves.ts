@@ -16,6 +16,9 @@ import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
 } from '../../jurisdiction-runtime';
+import { createStructuredLogger, shortId } from '../../logger';
+
+const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 export async function handleMintReserves(
   entityState: EntityState,
@@ -26,7 +29,11 @@ export async function handleMintReserves(
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  console.log(`💰 mintReserves: ${entityState.entityId.slice(-4)} minting ${amount} token ${tokenId}`);
+  jBatchActionLog.debug('mint.requested', {
+    entity: shortId(entityState.entityId),
+    tokenId,
+    amount: amount.toString(),
+  });
 
   // Create JTx for direct mint (bypasses batch - admin operation)
   const jTx: JTx = {
@@ -64,8 +71,12 @@ export async function handleMintReserves(
 
   addMessage(newState, `💰 Minting ${amount} of token ${tokenId}`);
 
-  console.log(`✅ mintReserves: Queued direct mint for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Token: ${tokenId}, Amount: ${amount}`);
+  jBatchActionLog.debug('mint.queued', {
+    entity: shortId(entityState.entityId),
+    jurisdiction: jurisdictionName,
+    tokenId,
+    amount: amount.toString(),
+  });
 
   return { newState, outputs, jOutputs };
 }

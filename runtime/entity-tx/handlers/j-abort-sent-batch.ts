@@ -1,6 +1,9 @@
 import type { EntityInput, EntityState, EntityTx, Env, JInput } from '../../types';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import { createEmptyBatch, getBatchSize, mergeBatchOps } from '../../j-batch';
+import { createStructuredLogger, shortId } from '../../logger';
+
+const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 function shouldRequeueDisputeFinalize(_state: EntityState, _counterpartyIdRaw: unknown): boolean {
   // Dispute finality is watcher-authoritative. Do not resurrect disputeFinalize from a
@@ -49,9 +52,10 @@ export async function handleJAbortSentBatch(
         return keep;
       });
       if (before !== sent.batch.disputeFinalizations.length) {
-        console.log(
-          `🧹 Filtered ${before - sent.batch.disputeFinalizations.length} stale dispute finalize op(s) from requeue`,
-        );
+        jBatchActionLog.debug('abort.filtered_dispute_finalize', {
+          entity: shortId(entityState.entityId),
+          count: before - sent.batch.disputeFinalizations.length,
+        });
       }
     }
     // Drop stale C2R ops whose signed nonce is now <= on-chain nonce (would revert E2).
@@ -64,9 +68,12 @@ export async function handleJAbortSentBatch(
         )?.[1];
         const onChainNonce = account?.onChainSettlementNonce ?? 0;
         if (c2r.nonce <= onChainNonce) {
-          console.warn(
-            `🗑️ Dropping stale C2R for ${cpId.slice(-4)}: signed nonce ${c2r.nonce} <= onChain ${onChainNonce}`,
-          );
+          jBatchActionLog.warn('abort.drop_stale_c2r', {
+            entity: shortId(entityState.entityId),
+            counterparty: shortId(cpId),
+            signedNonce: c2r.nonce,
+            onChainNonce,
+          });
           // Also clear the workspace so user can re-propose
           if (account?.settlementWorkspace) {
             delete account.settlementWorkspace;
@@ -76,7 +83,10 @@ export async function handleJAbortSentBatch(
         return true;
       });
       if (before !== sent.batch.collateralToReserve.length) {
-        console.log(`🧹 Filtered ${before - sent.batch.collateralToReserve.length} stale C2R ops from requeue`);
+        jBatchActionLog.debug('abort.filtered_c2r', {
+          entity: shortId(entityState.entityId),
+          count: before - sent.batch.collateralToReserve.length,
+        });
       }
     }
     mergeBatchOps(newState.jBatchState.batch, sent.batch);

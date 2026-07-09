@@ -14,6 +14,9 @@
 import type { EntityState, EntityTx, EntityInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddReserveToReserve, getEffectiveDraftReserveBalance } from '../../j-batch';
+import { createStructuredLogger, shortId } from '../../logger';
+
+const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 export async function handleR2R(
   entityState: EntityState,
@@ -33,7 +36,12 @@ export async function handleR2R(
   if (currentReserve < amount) {
     const msg = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
     addMessage(newState, msg);
-    console.error(`❌ R2R FAILED: ${entityState.entityId.slice(-4)} ${msg}`);
+    jBatchActionLog.error('r2r.insufficient_reserve', {
+      entity: shortId(entityState.entityId),
+      tokenId,
+      currentReserve: currentReserve.toString(),
+      amount: amount.toString(),
+    });
     throw new Error(msg);
   }
 
@@ -54,8 +62,12 @@ export async function handleR2R(
     `📦 Queued R→R: ${amount} token ${tokenId} to ${toEntityId.slice(-4)} (use jBroadcast to commit)`
   );
 
-  console.log(`✅ r2r: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   To: ${toEntityId.slice(-4)}, Token: ${tokenId}, Amount: ${amount}`);
+  jBatchActionLog.debug('r2r.queued', {
+    entity: shortId(entityState.entityId),
+    to: shortId(toEntityId),
+    tokenId,
+    amount: amount.toString(),
+  });
 
   return { newState, outputs };
 }

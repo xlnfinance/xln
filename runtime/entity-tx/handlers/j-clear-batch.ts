@@ -12,6 +12,9 @@
 import type { EntityState, EntityTx, EntityInput, Env, JInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { createEmptyBatch, getBatchSize } from '../../j-batch';
+import { createStructuredLogger, shortId } from '../../logger';
+
+const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 export async function handleJClearBatch(
   entityState: EntityState,
@@ -66,7 +69,14 @@ export async function handleJClearBatch(
   const reasonMsg = reason ? ` (${reason})` : '';
   const pendingMsg = hadSentBatch ? ` [sentBatch=${sentBatchSize} ops]` : '';
   const resetMsg = resetSubmittedMarkers > 0 ? `; reset ${resetSubmittedMarkers} submitted rebalance marker(s)` : '';
-  console.log(`🗑️ j_clear_batch: Cleared current=${oldBatchSize} ops${reasonMsg}${pendingMsg}${resetMsg}`);
+  jBatchActionLog.debug('clear.completed', {
+    entity: shortId(entityState.entityId),
+    currentOps: oldBatchSize,
+    sentOps: sentBatchSize,
+    hadSentBatch,
+    resetSubmittedMarkers,
+    reason: reason ?? '',
+  });
   addMessage(newState, `🗑️ Cleared jBatch current=${oldBatchSize}${pendingMsg}${reasonMsg}${resetMsg}`);
 
   return { newState, outputs, jOutputs };

@@ -15,6 +15,9 @@ import type { EntityState, EntityTx, EntityInput, JInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
+import { createStructuredLogger, shortId } from '../../logger';
+
+const jBatchActionLog = createStructuredLogger('entity.jbatch');
 
 export async function handleCreateSettlement(
   entityState: EntityState,
@@ -24,8 +27,11 @@ export async function handleCreateSettlement(
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  console.log(`⚖️ createSettlement: ${entityState.entityId.slice(-4)} → ${counterpartyEntityId.slice(-4)}`);
-  console.log(`   Diffs: ${diffs.length} operations`);
+  jBatchActionLog.debug('settlement.create', {
+    entity: shortId(entityState.entityId),
+    counterparty: shortId(counterpartyEntityId),
+    diffs: diffs.length,
+  });
 
   // Initialize jBatch on first use
   if (!newState.jBatchState) {
@@ -55,8 +61,12 @@ export async function handleCreateSettlement(
     entityState.entityId // initiatorEntity
   );
 
-  console.log(`✅ createSettlement: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Settlement: ${leftEntity.slice(-4)} ↔ ${rightEntity.slice(-4)}`);
+  jBatchActionLog.debug('settlement.queued', {
+    entity: shortId(entityState.entityId),
+    left: shortId(leftEntity),
+    right: shortId(rightEntity),
+    diffs: diffs.length,
+  });
 
   addMessage(newState, `⚖️ Settlement created (${diffs.length} diffs) - use jBroadcast to commit`);
 

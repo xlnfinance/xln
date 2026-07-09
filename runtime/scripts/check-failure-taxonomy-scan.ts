@@ -261,6 +261,12 @@ for (const [path, markers] of [
   ]],
   ['runtime/entity-tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
+  ['runtime/entity-tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity-tx/handlers/create-settlement.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity-tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity-tx/handlers/j-broadcast.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity-tx/handlers/j-clear-batch.ts', ["createStructuredLogger('entity.jbatch')"]],
+  ['runtime/entity-tx/handlers/j-abort-sent-batch.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity-tx/handlers/r2c.ts', ["createStructuredLogger('entity.r2c')"]],
   ['runtime/entity-tx/handlers/htlc-payment.ts', ["createStructuredLogger('entity.htlc')"]],
   ['runtime/entity-tx/handlers/dispute.ts', ["createStructuredLogger('entity.dispute')"]],
@@ -289,6 +295,17 @@ assertNotIncludes(basicHandler, 'console.', basicHandlerPath);
 const proposalHandlerPath = 'runtime/entity-tx/proposals.ts';
 const proposalHandler = readText(proposalHandlerPath);
 assertNotIncludes(proposalHandler, 'console.', proposalHandlerPath);
+
+for (const jBatchHandlerPath of [
+  'runtime/entity-tx/handlers/r2r.ts',
+  'runtime/entity-tx/handlers/create-settlement.ts',
+  'runtime/entity-tx/handlers/mint-reserves.ts',
+  'runtime/entity-tx/handlers/j-broadcast.ts',
+  'runtime/entity-tx/handlers/j-clear-batch.ts',
+  'runtime/entity-tx/handlers/j-abort-sent-batch.ts',
+]) {
+  assertNotIncludes(readText(jBatchHandlerPath), 'console.', jBatchHandlerPath);
+}
 
 const htlcPaymentHandlerPath = 'runtime/entity-tx/handlers/htlc-payment.ts';
 const htlcPaymentHandler = readText(htlcPaymentHandlerPath);
