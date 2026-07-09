@@ -513,6 +513,7 @@ const envFlagEnabled = (value: unknown): boolean => {
   const normalized = String(value ?? '').trim().toLowerCase();
   return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
 };
+const LOG_HUB_INSPECT_URL = envFlagEnabled(process.env['XLN_HUB_INSPECT_URL_LOG']);
 
 const buildLocalHubSignerLabels = (): string[] => {
   const primary = resolveMeshJurisdictionConfig(resolvedArgs.rpcUrl);
@@ -2384,15 +2385,17 @@ const run = async (): Promise<void> => {
   console.log(
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
-  try {
-    const inspectUrl = buildRuntimeInspectUrl(env);
-    if (inspectUrl) {
-      console.log(`[MESH-HUB] INSPECT_URL name=${resolvedArgs.name} url=${redactTokenBearingUrlForLog(inspectUrl)}`);
+  if (LOG_HUB_INSPECT_URL) {
+    try {
+      const inspectUrl = buildRuntimeInspectUrl(env);
+      if (inspectUrl) {
+        console.log(`[MESH-HUB] INSPECT_URL name=${resolvedArgs.name} url=${redactTokenBearingUrlForLog(inspectUrl)}`);
+      }
+    } catch (error) {
+      console.warn(
+        `[MESH-HUB] INSPECT_URL_UNAVAILABLE name=${resolvedArgs.name} error=${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-  } catch (error) {
-    console.warn(
-      `[MESH-HUB] INSPECT_URL_UNAVAILABLE name=${resolvedArgs.name} error=${error instanceof Error ? error.message : String(error)}`,
-    );
   }
 
   let shutdownStarted = false;
