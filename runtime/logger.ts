@@ -157,7 +157,10 @@ export const emitStructuredLog = (
     ? safeStringify(payload)
     : `[${level.toUpperCase()}][${scope}] ${message}${Object.keys(fields).length ? ` ${safeStringify(fields)}` : ''}`;
   if (level === 'error') console.error(line);
-  else if (level === 'warn') console.warn(line);
+  else if (level === 'warn') {
+    const warnSink = process.env['XLN_LOG_WARN_STDOUT'] === '1' ? console.log : console.warn;
+    warnSink(line);
+  }
   else console.log(line);
 };
 

@@ -33,6 +33,8 @@ test('runtime dev startup status logs stay structured', () => {
   const wsClient = readFileSync(join(process.cwd(), 'runtime/networking/ws-client.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
   const localConfig = readFileSync(join(process.cwd(), 'runtime/jadapter/local-config.ts'), 'utf8');
+  const logger = readFileSync(join(process.cwd(), 'runtime/logger.ts'), 'utf8');
+  const devRunner = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
   expect(runtime).toContain("runtimeLog.debug('jadapter_watcher.started'");
@@ -62,6 +64,9 @@ test('runtime dev startup status logs stay structured', () => {
   expect(localConfig).not.toContain('console.log(');
   expect(localConfig).toContain("const localConfigLog = createStructuredLogger('jadapter.localConfig');");
   expect(localConfig).toContain("localConfigLog.debug('default_dispute_delay.ready'");
+  expect(logger).toContain("process.env['XLN_LOG_WARN_STDOUT'] === '1' ? console.log : console.warn");
+  expect(devRunner).toContain('XLN_LOG_WARN_STDOUT="${XLN_LOG_WARN_STDOUT:-1}"');
+  expect(devRunner).toContain('RUNTIME_VERBOSE_LOGS XLN_LOG_WARN_STDOUT');
 
   for (const noisyBootstrapString of [
     '[BOOTSTRAP] Starting hub bootstrap',

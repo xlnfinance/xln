@@ -4,6 +4,7 @@
   // Runtime creation is entry only; entity capabilities are resolved in EntityWorkspace.
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { appStateOperations } from '$lib/stores/appStateStore';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import {
     discoverRuntimeRecoveryCandidates,
     parseRuntimeRecoveryCandidateFile,
@@ -54,6 +55,10 @@
   export let embedded: boolean = false;
 
   $: t = $translations$;
+
+  function logRuntimeCreationDiagnostic(message: string, details?: unknown): void {
+    errorLog.log(message, 'Runtime Creation', details);
+  }
 
   function suggestPassphrase(): void {
     // Generate 10 Base58 chars = ~58.5 bits of entropy (log2(58^10))
@@ -516,7 +521,7 @@
       }
       return true;
     } catch (err) {
-      console.error('[RuntimeCreation] Failed to create XLN wallet', err);
+      logRuntimeCreationDiagnostic('Failed to create XLN wallet', err);
       derivationError = err instanceof Error ? err.message : 'Failed to create XLN wallet';
       phase = 'input';
       return false;
@@ -677,7 +682,7 @@
     persistWorkerCap(maxWorkers);
     targetWorkerCount = Math.max(1, Math.min(targetWorkerCount, maxWorkers));
     workerLimitNotice = `Browser memory pressure detected. BrainVault is continuing with ${maxWorkers} worker${maxWorkers === 1 ? '' : 's'}.`;
-    console.warn(`[BrainVault] Wasm memory pressure; reduced worker cap to ${maxWorkers} and persisted it. ${message}`);
+    logRuntimeCreationDiagnostic('BrainVault worker cap reduced after Wasm memory pressure', { maxWorkers, message });
   }
 
   function failDerivation(message: string): void {
@@ -689,7 +694,7 @@
   function handleWorkerFailure(worker: Worker, err: unknown): void {
     const message = workerErrorMessage(err);
     const shardIndex = workerActiveShard.get(worker);
-    console.error('[BrainVault] Worker failed:', message);
+    logRuntimeCreationDiagnostic('BrainVault worker failed', { shardIndex, message });
 
     if (typeof shardIndex === 'number' && !requeueShard(shardIndex, message)) {
       failDerivation(derivationError || message);
@@ -702,7 +707,7 @@
     if (memoryError) {
       reduceWorkerCapAfterMemoryError(message);
       if (maxWorkers <= 1 && activeWorkerCount === 0 && hasPendingShardWork()) {
-        console.warn('[BrainVault] Retrying with a single worker after Wasm memory failure');
+        logRuntimeCreationDiagnostic('BrainVault retrying with a single worker after Wasm memory failure', { message });
       }
     }
 
@@ -734,7 +739,7 @@
     };
 
     worker.onerror = (e) => {
-      console.error('[BrainVault] Worker error:', e);
+      logRuntimeCreationDiagnostic('BrainVault worker error event', e);
       opts.onError?.(e);
       if (opts.handleErrors !== false) {
         handleWorkerFailure(worker, e);
@@ -759,7 +764,7 @@
         await continueAfterRecoveryDiscovery();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to import mnemonic';
-        console.error('[RuntimeCreation] Mnemonic import failed:', err);
+        logRuntimeCreationDiagnostic('Mnemonic import failed', err);
         derivationError = message;
         phase = 'input';
       }
@@ -836,7 +841,7 @@
             targetWorkerCount = Math.min(targetWorkerCount, initialWorkers);
             attempts += 1;
             workerLimitNotice = `Browser memory pressure detected. BrainVault is retrying with ${initialWorkers} worker${initialWorkers === 1 ? '' : 's'}.`;
-            console.warn(`[BrainVault] Reducing workers to ${initialWorkers} after init failure: ${message}`);
+            logRuntimeCreationDiagnostic('BrainVault reducing workers after init failure', { workerCount: initialWorkers, message });
             continue;
           }
           throw err;
@@ -853,7 +858,7 @@
       dispatchShards(name);
     } catch (err) {
       const message = workerErrorMessage(err);
-      console.error('Failed to initialize workers:', message);
+      logRuntimeCreationDiagnostic('BrainVault worker initialization failed', { message });
       terminateWorkers();
       derivationError = isBrainVaultWasmMemoryError(message)
         ? `BrainVault could not allocate browser Wasm memory. Reduce other tabs or retry with 1 worker. ${message}`

@@ -599,6 +599,14 @@ describe('remote runtime import manager utilities', () => {
     expect(runtimeCreation).toContain('liveRuntimesLoading || liveRuntimesRetrying');
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
+    expect(runtimeCreation).toContain("import { errorLog } from '$lib/stores/errorLogStore';");
+    expect(runtimeCreation).toContain("errorLog.log(message, 'Runtime Creation', details)");
+    expect(runtimeCreation).toContain("logRuntimeCreationDiagnostic('BrainVault worker failed'");
+    expect(runtimeCreation).toContain("logRuntimeCreationDiagnostic('Mnemonic import failed'");
+    expect(runtimeCreation).toContain("logRuntimeCreationDiagnostic('BrainVault worker initialization failed'");
+    expect(runtimeCreation).not.toContain('console.warn');
+    expect(runtimeCreation).not.toContain('console.error');
+    expect(runtimeCreation).not.toContain('console.info');
     expect(vaultStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports();');
     expect(runtimeStore).toContain('validateRemoteRuntimeEntry(entry, { index, importedAt })');
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
