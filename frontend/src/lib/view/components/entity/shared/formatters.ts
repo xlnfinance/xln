@@ -28,30 +28,20 @@ export function formatTokenAmount(
     throw new Error(`Invalid decimals: ${decimals}. Must be between 0 and 77`);
   }
 
-  try {
-    // Convert to string and handle sign
-    const isNegative = amount < 0n;
-    const absAmount = isNegative ? -amount : amount;
-    const amountStr = absAmount.toString().padStart(decimals + 1, '0');
+  const isNegative = amount < 0n;
+  const absAmount = isNegative ? -amount : amount;
+  const amountStr = absAmount.toString().padStart(decimals + 1, '0');
 
-    // Split into integer and fractional parts
-    const integerPart = amountStr.slice(0, -decimals) || '0';
-    const fractionalPart = amountStr.slice(-decimals);
+  const integerPart = decimals === 0 ? amountStr : amountStr.slice(0, -decimals) || '0';
+  const fractionalPart = decimals === 0 ? '' : amountStr.slice(-decimals);
+  const trimmedFractional = fractionalPart.slice(0, Math.min(decimals, 4)).replace(/0+$/, '');
 
-    // Default UI precision is 4 decimal digits unless a richer formatter is used upstream.
-    const trimmedFractional = fractionalPart.slice(0, Math.min(decimals, 4)).replace(/0+$/, '');
-
-    // Construct result
-    const sign = isNegative ? '-' : '';
-    if (trimmedFractional.length === 0) {
-      return `${sign}${integerPart}`;
-    }
-
-    return `${sign}${integerPart}.${trimmedFractional}`;
-  } catch (error) {
-    console.error('Error formatting token amount:', error);
-    return '0';
+  const sign = isNegative ? '-' : '';
+  if (trimmedFractional.length === 0) {
+    return `${sign}${integerPart}`;
   }
+
+  return `${sign}${integerPart}.${trimmedFractional}`;
 }
 
 /**
@@ -86,27 +76,20 @@ export function formatTimestamp(ms: number): string {
     return 'Invalid Date';
   }
 
-  try {
-    const date = new Date(ms);
+  const date = new Date(ms);
 
-    // Check if date is valid
-    if (Number.isNaN(date.getTime())) {
-      return 'Invalid Date';
-    }
-
-    // Format using locale-aware formatting
-    return date.toLocaleString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  } catch (error) {
-    console.error('Error formatting timestamp:', error);
+  if (Number.isNaN(date.getTime())) {
     return 'Invalid Date';
   }
+
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 /**
@@ -129,27 +112,12 @@ export function formatCurrency(value: number, currency: string = 'USD'): string 
     return 'Invalid Amount';
   }
 
-  try {
-    return new Intl.NumberFormat(undefined, {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch (error) {
-    console.error('Error formatting currency:', error);
-    // Fallback to USD if currency code is invalid
-    try {
-      return new Intl.NumberFormat(undefined, {
-        style: 'currency',
-        currency: 'USD',
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(value);
-    } catch {
-      return `${value.toFixed(2)}`;
-    }
-  }
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 /**

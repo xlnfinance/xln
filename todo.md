@@ -13,6 +13,45 @@ file and older docs disagree, prefer code and tests first, then this file.
   runtime process memory. Deferred by user on 2026-07-08 while non-signature
   mainnet blockers are closed first.
 
+## Current Handoff Open Work
+
+These items were not closed before the 2026-07-09 external-audit handoff.
+Treat them as live unless newer code/tests prove otherwise.
+
+- [ ] Run a complete uninterrupted one-hour `bun run gate:mainnet` from a clean
+  tree before any mainnet-candidate claim.
+- [ ] Complete real mainnet ops planning: chain/RPC choices, funded operator and
+  tower accounts, gas policy, backup/restore drills, incident drill, and
+  monitoring thresholds for runtime, relay, storage, market maker, and
+  watchtower.
+- [ ] Finish independent external audit review using `auditormemo.md` as the
+  reading map. Internal E2E and security scans are not a substitute for this.
+- [ ] Finish Peer State Refresh (PSR) recovery flow so a wiped client can
+  recover from honest peer/hub state when the tower is unavailable.
+- [ ] Continue typed failure taxonomy until transport, bootstrap, faucet,
+  market-maker, settlement batching, and health readiness no longer rely on
+  parsing log strings or ambiguous warning buckets.
+- [ ] Continue one-delivery-boundary cleanup until relay/direct/local delivery
+  callers all consume one typed result and do not duplicate retry/defer/fatal
+  logic.
+- [ ] Finish canonical identity cleanup: jurisdiction/entity/account identity
+  must be canonical refs only; display names stay cosmetic.
+- [ ] Finish canonical fill/amount cleanup for cross-j swaps and pull flows:
+  exact bigint amounts must never round-trip through lossy uint16 ratios.
+- [ ] Model bootstrap lifecycle as an explicit state machine with enforceable
+  barriers for P2P, relay, hubs, custody, MM books, watchtower, and health.
+- [ ] Build a verified cold-system fixture for fast browser/radapter tests
+  instead of rebuilding full mesh state for short local loops.
+- [ ] Tighten orchestrator blast-radius boundaries so ancillary feature failure
+  degrades that feature without taking down health/debug endpoints.
+- [ ] Add executable settlement conservation proof coverage for
+  `pull_lock -> resolve -> on-chain release`, debt/collateral, and dispute
+  finalization.
+- [ ] Document and validate economics/scale assumptions: fees, collateral
+  ratios, market-maker incentives, griefing costs, and contention profiles.
+- [ ] Continue raw console/fail-silent cleanup in remaining UI/periphery modules
+  after the core/runtime paths stay green.
+
 ## Closed Or Removed
 
 - Removed the stale testnet handoff whose old faucet/runtime notes were from a
