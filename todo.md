@@ -665,6 +665,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      reset failure diagnostics now use structured `mesh.orchestrator` logs
      instead of direct `[MESH]` console output; production wiring tests and the
      failure-taxonomy scan guard it.
+   - Partial: hub inspect URL diagnostics now use structured `mesh.hub` logs
+     instead of direct `[MESH-HUB] INSPECT_URL` console output; production
+     wiring tests and the failure-taxonomy scan guard it.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

@@ -254,9 +254,11 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('configureHubRuntimeLogging(env);');
     expect(hubNode).toContain("const LOG_HUB_INSPECT_URL = envFlagEnabled(process.env['XLN_HUB_INSPECT_URL_LOG']);");
     const inspectUrlLog = hubNode.slice(hubNode.indexOf('if (LOG_HUB_INSPECT_URL) {'));
-    expect(inspectUrlLog).toContain('console.log(`[MESH-HUB] INSPECT_URL');
+    expect(inspectUrlLog).toContain("nodeLog.info('inspect_url.ready'");
+    expect(inspectUrlLog).toContain("nodeLog.warn('inspect_url.unavailable'");
+    expect(inspectUrlLog).not.toContain('[MESH-HUB] INSPECT_URL');
     expect(hubNode.indexOf('if (LOG_HUB_INSPECT_URL) {')).toBeLessThan(
-      hubNode.indexOf('console.log(`[MESH-HUB] INSPECT_URL'),
+      hubNode.indexOf("nodeLog.info('inspect_url.ready'"),
     );
     expect(hubNode).toContain('persistRestoredEnvToDB');
     expect(hubNode).toContain('const configureHubBootstrapStorage = (env: Env): void => {');

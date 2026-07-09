@@ -115,6 +115,8 @@ warnings.
 - Orchestrator custody bootstrap, SIGTERM-during-reset, and initial reset
   failure diagnostics use structured `mesh.orchestrator` logs and are guarded
   against direct `[MESH]` console output.
+- Hub inspect URL diagnostics use structured `mesh.hub` logs and are guarded
+  against direct `[MESH-HUB] INSPECT_URL` console output.
 
 ## Open Manual Review
 

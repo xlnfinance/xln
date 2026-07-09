@@ -232,6 +232,18 @@ assertNotIncludes(orchestrator, '[MESH] custody bootstrap failed:', orchestrator
 assertNotIncludes(orchestrator, '[MESH] received SIGTERM from parent during reset', orchestratorPath);
 assertNotIncludes(orchestrator, '[MESH] initial reset failed:', orchestratorPath);
 
+const hubNodePath = 'runtime/orchestrator/hub-node.ts';
+const hubNode = readText(hubNodePath);
+for (const marker of [
+  "createStructuredLogger('mesh.hub'",
+  "nodeLog.info('inspect_url.ready'",
+  "nodeLog.warn('inspect_url.unavailable'",
+]) {
+  assertIncludes(hubNode, marker, hubNodePath);
+}
+assertNotIncludes(hubNode, '[MESH-HUB] INSPECT_URL', hubNodePath);
+assertNotIncludes(hubNode, '[MESH-HUB] INSPECT_URL_UNAVAILABLE', hubNodePath);
+
 const healthRedactionPath = 'runtime/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
 for (const marker of [
@@ -592,6 +604,7 @@ for (const marker of [
   'Market snapshot enrichment failures use structured',
   'Orchestrator child stop timeout and unexpected child exit diagnostics use',
   'Orchestrator custody bootstrap, SIGTERM-during-reset, and initial reset',
+  'Hub inspect URL diagnostics use structured',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }

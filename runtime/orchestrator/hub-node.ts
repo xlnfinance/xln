@@ -2415,12 +2415,16 @@ const run = async (): Promise<void> => {
     try {
       const inspectUrl = buildRuntimeInspectUrl(env);
       if (inspectUrl) {
-        console.log(`[MESH-HUB] INSPECT_URL name=${resolvedArgs.name} url=${redactTokenBearingUrlForLog(inspectUrl)}`);
+        nodeLog.info('inspect_url.ready', {
+          name: resolvedArgs.name,
+          url: redactTokenBearingUrlForLog(inspectUrl),
+        });
       }
     } catch (error) {
-      console.warn(
-        `[MESH-HUB] INSPECT_URL_UNAVAILABLE name=${resolvedArgs.name} error=${error instanceof Error ? error.message : String(error)}`,
-      );
+      nodeLog.warn('inspect_url.unavailable', {
+        name: resolvedArgs.name,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
