@@ -21,10 +21,15 @@ export type UndeliveredDeliveryDisposition = {
   code: string;
 };
 
+const DELIVERY_OUTCOMES = new Set<DeliveryOutcome>(['delivered', 'queued', 'deferred', 'failed']);
+
+const isDeliveryOutcome = (value: unknown): value is DeliveryOutcome =>
+  typeof value === 'string' && DELIVERY_OUTCOMES.has(value as DeliveryOutcome);
+
 export const isDeliveryResult = (value: unknown): value is DeliveryResult =>
   typeof value === 'object' &&
   value !== null &&
-  typeof (value as DeliveryResult).outcome === 'string' &&
+  isDeliveryOutcome((value as DeliveryResult).outcome) &&
   typeof (value as DeliveryResult).code === 'string' &&
   typeof (value as DeliveryResult).retryable === 'boolean' &&
   typeof (value as DeliveryResult).fatal === 'boolean' &&

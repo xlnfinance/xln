@@ -21,6 +21,13 @@ test('delivery result helpers validate the shared delivery contract', () => {
 
   expect(isDeliveryResult(true)).toBe(false);
   expect(isDeliveryResult({ outcome: 'delivered', code: 'PARTIAL' })).toBe(false);
+  expect(isDeliveryResult({
+    outcome: 'accepted',
+    code: 'UNKNOWN_OUTCOME',
+    retryable: false,
+    fatal: false,
+    terminal: true,
+  })).toBe(false);
   expect(() => requireDeliveryResult(true, 'TEST_INVALID')).toThrow(
     'TEST_INVALID: expected DeliveryResult',
   );
