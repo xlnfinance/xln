@@ -8,6 +8,24 @@ export type RuntimeFailureSignal = {
   fatal: boolean;
 };
 
+const RUNTIME_FAILURE_CATEGORIES = new Set<RuntimeFailureCategory>([
+  'ExpectedEmpty',
+  'TransientRace',
+  'Contradiction',
+]);
+
+export const isRuntimeFailureCategory = (value: unknown): value is RuntimeFailureCategory =>
+  typeof value === 'string' && RUNTIME_FAILURE_CATEGORIES.has(value as RuntimeFailureCategory);
+
+export const isRuntimeFailureSignal = (value: unknown): value is RuntimeFailureSignal =>
+  typeof value === 'object' &&
+  value !== null &&
+  isRuntimeFailureCategory((value as RuntimeFailureSignal).category) &&
+  typeof (value as RuntimeFailureSignal).code === 'string' &&
+  typeof (value as RuntimeFailureSignal).message === 'string' &&
+  typeof (value as RuntimeFailureSignal).retryable === 'boolean' &&
+  typeof (value as RuntimeFailureSignal).fatal === 'boolean';
+
 const HEALTH_DEGRADED_CODES: Record<string, string> = {
   storage: 'STORAGE_NOT_READY',
   hubs: 'HUBS_NOT_READY',

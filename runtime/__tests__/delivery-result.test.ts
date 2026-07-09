@@ -28,6 +28,19 @@ test('delivery result helpers validate the shared delivery contract', () => {
     fatal: false,
     terminal: true,
   })).toBe(false);
+  expect(isDeliveryResult({
+    outcome: 'failed',
+    code: 'MALFORMED_FAILURE',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    failure: {
+      category: 'TransientRace',
+      code: 'MALFORMED_FAILURE',
+      retryable: true,
+      fatal: false,
+    },
+  })).toBe(false);
   expect(() => requireDeliveryResult(true, 'TEST_INVALID')).toThrow(
     'TEST_INVALID: expected DeliveryResult',
   );

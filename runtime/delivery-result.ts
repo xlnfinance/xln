@@ -1,5 +1,6 @@
 import {
   buildRuntimeFailureSignal,
+  isRuntimeFailureSignal,
   type RuntimeFailureCategory,
   type RuntimeFailureSignal,
 } from './failure-taxonomy';
@@ -26,9 +27,15 @@ const DELIVERY_OUTCOMES = new Set<DeliveryOutcome>(['delivered', 'queued', 'defe
 const isDeliveryOutcome = (value: unknown): value is DeliveryOutcome =>
   typeof value === 'string' && DELIVERY_OUTCOMES.has(value as DeliveryOutcome);
 
+const hasValidOptionalFailure = (value: unknown): boolean => {
+  const failure = (value as { failure?: unknown }).failure;
+  return failure === undefined || isRuntimeFailureSignal(failure);
+};
+
 export const isDeliveryResult = (value: unknown): value is DeliveryResult =>
   typeof value === 'object' &&
   value !== null &&
+  hasValidOptionalFailure(value) &&
   isDeliveryOutcome((value as DeliveryResult).outcome) &&
   typeof (value as DeliveryResult).code === 'string' &&
   typeof (value as DeliveryResult).retryable === 'boolean' &&

@@ -9,9 +9,28 @@ import {
   classifyRuntimeJBatchFailure,
   classifyRuntimeMarketMakerFailure,
   classifyRuntimeTransportFailure,
+  isRuntimeFailureSignal,
 } from '../failure-taxonomy';
 
 describe('runtime failure taxonomy', () => {
+  test('validates runtime failure signal shape', () => {
+    const failure = classifyRuntimeTransportFailure('NO_HEALTHY_HUB_API_AVAILABLE', 'relay not ready');
+    expect(isRuntimeFailureSignal(failure)).toBe(true);
+    expect(isRuntimeFailureSignal({
+      category: 'TransientRace',
+      code: 'MISSING_MESSAGE',
+      retryable: true,
+      fatal: false,
+    })).toBe(false);
+    expect(isRuntimeFailureSignal({
+      category: 'Unknown',
+      code: 'UNKNOWN_CATEGORY',
+      message: 'bad category',
+      retryable: false,
+      fatal: false,
+    })).toBe(false);
+  });
+
   test('keeps runtime import readiness failures machine-readable', () => {
     expect(classifyRuntimeImportReadinessReason('NO_MANAGED_RUNTIME_IMPORTS')).toMatchObject({
       category: 'ExpectedEmpty',
