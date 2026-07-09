@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { deriveEncryptionKeyPair } from '../networking/p2p-crypto';
 import { RuntimeWsClient } from '../networking/ws-client';
@@ -62,6 +64,15 @@ afterEach(() => {
 });
 
 describe('runtime websocket recovery requests', () => {
+  test('standalone relay uses structured startup logging', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/relay/standalone-server.ts'), 'utf8');
+
+    expect(source).toContain("createStructuredLogger('relay.standalone')");
+    expect(source).toContain("relayStandaloneLog.info('service.listen'");
+    expect(source).not.toContain('console.');
+    expect(source).not.toContain('[WS] Runtime relay');
+  });
+
   test('requestRecoveryBundles resolves a correlated peer response through relay', async () => {
     const relay = startRelay();
     const url = `ws://127.0.0.1:${relay.server.port}`;

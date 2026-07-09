@@ -7,6 +7,7 @@ import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { safeStringify } from '../serialization-utils';
 import { normalizeRuntimeId } from '../networking/runtime-id';
+import { createStructuredLogger } from '../logger';
 
 type StandaloneRelayOptions = {
   host?: string;
@@ -22,6 +23,8 @@ export type StandaloneRelayServer = {
   close: () => void;
   sendToRuntime: (runtimeId: string, message: RuntimeWsMessage) => void;
 };
+
+const relayStandaloneLog = createStructuredLogger('relay.standalone');
 
 const normalizeMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage => {
   try {
@@ -85,7 +88,11 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
   });
 
   serverRef = server;
-  console.log(`[WS] Runtime relay "${options.serverId}" listening on ${options.host || '0.0.0.0'}:${server.port}`);
+  relayStandaloneLog.info('service.listen', {
+    serverId: options.serverId,
+    host: options.host || '0.0.0.0',
+    port: server.port,
+  });
 
   return {
     server,

@@ -47,6 +47,8 @@ warnings.
 - Runtime storage frame persistence telemetry uses structured
   `runtime.storage` `persist.frame` events and is guarded against direct
   `[PERSIST]` console output.
+- Standalone relay startup diagnostics use the structured `relay.standalone`
+  logger and are guarded against direct `[WS] Runtime relay` console output.
 - Standalone watchtower startup/sweep diagnostics use the structured
   `watchtower.standalone` logger and are guarded against direct `[WATCHTOWER]`
   / `[PUSH-WATCH]` console sweep output.

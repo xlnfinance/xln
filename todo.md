@@ -608,6 +608,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      structured `relay.router` / `relay.local_delivery` loggers instead of
      direct `console.log`; relay source tests and the failure-taxonomy scan
      guard both files.
+   - Partial: standalone relay startup diagnostics now use structured
+     `relay.standalone` logging instead of direct `[WS] Runtime relay` console
+     output; websocket recovery source tests and the failure-taxonomy scan
+     guard it.
    - Partial: runtime solvency invariant diagnostics now use structured
      `runtime.solvency` logging instead of direct `console.*`; behavior/source
      tests and the failure-taxonomy scan guard the helper.

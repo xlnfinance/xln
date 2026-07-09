@@ -266,6 +266,7 @@ for (const [path, markers] of [
   ['runtime/runtime-entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
   ['runtime/runtime-input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
   ['runtime/runtime-p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
+  ['runtime/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   ['runtime/entity-input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
   ['runtime/entity-tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
@@ -398,9 +399,11 @@ assertNotIncludes(runtimeP2PLifecycle, 'console.', runtimeP2PLifecyclePath);
 for (const relayLoggingPath of [
   'runtime/relay-router.ts',
   'runtime/relay-local-delivery.ts',
+  'runtime/relay/standalone-server.ts',
 ]) {
   assertNotIncludes(readText(relayLoggingPath), 'console.', relayLoggingPath);
 }
+assertNotIncludes(readText('runtime/relay/standalone-server.ts'), '[WS] Runtime relay', 'runtime/relay/standalone-server.ts');
 
 const solvencyPath = 'runtime/solvency.ts';
 const solvency = readText(solvencyPath);
@@ -524,6 +527,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/debt-ledger.test.ts', ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE']],
   ['runtime/__tests__/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
   ['runtime/__tests__/relay-router.test.ts', ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery']],
+  ['runtime/__tests__/runtime-ws-recovery.test.ts', ['standalone relay uses structured startup logging', 'relay.standalone']],
   ['runtime/__tests__/solvency-logging.test.ts', ['solvency diagnostics use structured logging only', 'runtime.solvency']],
   ['runtime/__tests__/runtime-storage-logging.test.ts', ['runtime storage DB boundary uses structured logging without direct console output', 'runtime.storage']],
   ['runtime/__tests__/watchtower-standalone.test.ts', ['uses structured logging without direct console output', 'watchtower.standalone']],
