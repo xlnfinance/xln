@@ -11,6 +11,7 @@
 
   // Internal string representation for display
   let displayValue: string = '';
+  let inputError: string | null = null;
 
   function decimalScale(decimals: number): bigint {
     return 10n ** BigInt(decimals);
@@ -45,6 +46,15 @@
     return wholePart * decimalScale(decimals) + BigInt(paddedFractional || '0');
   }
 
+  function setInputValidity(target: HTMLInputElement, error: string | null): void {
+    inputError = error;
+    target.setCustomValidity(error || '');
+  }
+
+  function errorMessage(value: unknown): string {
+    return value instanceof Error ? value.message : String(value || 'Invalid amount');
+  }
+
   // Initialize display value
   $: displayValue = bigintToDecimal(value, decimals);
 
@@ -56,6 +66,7 @@
     // Validate input (only numbers and one decimal point)
     if (!/^\d*\.?\d*$/.test(newValue)) {
       target.value = displayValue;
+      setInputValidity(target, 'Use digits and one decimal point only');
       return;
     }
 
@@ -63,22 +74,38 @@
 
     try {
       value = decimalToBigint(newValue, decimals);
+      setInputValidity(target, null);
     } catch (error) {
-      console.warn('Invalid BigInt input:', error);
+      const message = `Invalid amount: ${errorMessage(error)}`;
+      displayValue = bigintToDecimal(value, decimals);
+      target.value = displayValue;
+      setInputValidity(target, message);
     }
   }
 </script>
 
-<input
-  type="text"
-  bind:value={displayValue}
-  on:input={handleInput}
-  {placeholder}
-  {disabled}
-  class="bigint-input"
-/>
+<div class="bigint-input-shell">
+  <input
+    type="text"
+    bind:value={displayValue}
+    on:input={handleInput}
+    {placeholder}
+    {disabled}
+    class="bigint-input"
+    aria-invalid={inputError ? 'true' : 'false'}
+  />
+  {#if inputError}
+    <span class="bigint-input-error" data-testid="bigint-input-error">{inputError}</span>
+  {/if}
+</div>
 
 <style>
+  .bigint-input-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
   .bigint-input {
     font-family: 'Courier New', monospace;
     text-align: right;
@@ -97,5 +124,15 @@
   .bigint-input:disabled {
     opacity: 0.6;
     cursor: not-allowed;
+  }
+
+  .bigint-input[aria-invalid='true'] {
+    border-color: rgba(255, 68, 102, 0.65);
+  }
+
+  .bigint-input-error {
+    font-size: 11px;
+    line-height: 1.25;
+    color: rgba(255, 185, 185, 0.95);
   }
 </style>
