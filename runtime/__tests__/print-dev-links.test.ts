@@ -96,9 +96,16 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
 
 test('bun run dev does not print token-bearing runtime import URLs by default', () => {
   const runDev = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
+  const runtimeWatcher = readFileSync(join(process.cwd(), 'scripts/dev/watch-runtime-build.sh'), 'utf8');
 
   expect(runDev).not.toContain('XLN_RUNTIME_IMPORT_LOG_URL=1');
   expect(runDev).toContain('runtime/orchestrator/orchestrator.ts');
+  expect(runDev).toContain('./scripts/dev/watch-runtime-build.sh');
+  expect(runDev).not.toContain('bun build runtime/runtime.ts');
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
   expect(runDev).toContain('XLN_LOG_LEVEL=${MESH_LOG_LEVEL}');
+  expect(runtimeWatcher).toContain('set -euo pipefail');
+  expect(runtimeWatcher).toContain('bun build runtime/runtime.ts');
+  expect(runtimeWatcher).toContain('--external buffer');
+  expect(runtimeWatcher).toContain('if [[ -z "${line//[[:space:]]/}" ]]');
 });
