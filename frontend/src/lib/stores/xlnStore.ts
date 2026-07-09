@@ -955,7 +955,7 @@ export async function initializeXLN(): Promise<Env | null> {
       const importSource = new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin));
       importSource.searchParams.set('access', 'read');
       importSource.searchParams.set('allowPartial', '1');
-      void runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString());
+      void runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true });
     }
 
     const adapterConfig = resolveAppRuntimeAdapterConfig();

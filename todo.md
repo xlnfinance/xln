@@ -681,6 +681,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: the pre-wallet live runtime selector now has stable test IDs and
      a Playwright browser test that selects suggested H1, clicks `Connect`, and
      verifies the normal app workspace opens without any radapter manager route.
+   - Partial: explicit remote runtime import hydration now fails fast by
+     default; only background/silent discovery is marked optional, and
+     cross-runtime Env overwrite attempts throw `RUNTIME_STORE_ENV_OVERWRITE_REFUSED`
+     instead of logging and continuing.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.

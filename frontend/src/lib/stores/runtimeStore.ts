@@ -55,7 +55,7 @@ let remoteImportSourceHydration: Promise<StoredRemoteRuntimeImportEntry[]> | nul
 let runtimeAdapterSwitcher: ((config: RuntimeAdapterConfig) => Promise<void>) | null = null;
 
 type RemoteRuntimeImportSourceHydrationOptions = {
-  throwOnError?: boolean;
+  optional?: boolean;
 };
 
 export const registerRuntimeAdapterSwitcher = (
@@ -362,13 +362,7 @@ export const runtimeOperations = {
   },
 
   hydrateRemoteRuntimeImports() {
-    let entries: StoredRemoteRuntimeImportEntry[] = [];
-    try {
-      entries = readStoredRemoteRuntimeImports({ dropExpired: true });
-    } catch (error) {
-      console.error('[runtimeStore] Failed to hydrate remote runtime imports:', error);
-      return;
-    }
+    const entries = readStoredRemoteRuntimeImports({ dropExpired: true });
     if (entries.length === 0) return;
     runtimes.update((current) => entries.reduce(upsertRemoteImportEntry, current));
   },
@@ -378,6 +372,7 @@ export const runtimeOperations = {
     options: RemoteRuntimeImportSourceHydrationOptions = {},
   ): Promise<StoredRemoteRuntimeImportEntry[]> {
     if (typeof window === 'undefined') return [];
+    const strict = options.optional !== true;
     if (!remoteImportSourceHydration) {
       remoteImportSourceHydration = (async () => {
         const importedAt = Date.now();
@@ -398,8 +393,7 @@ export const runtimeOperations = {
         if (failed.length > 0) {
           const first = failed[0]!;
           const message = `REMOTE_RUNTIME_IMPORT_SOURCE_VALIDATION_FAILED:${validated.length}/${entries.length}:${first.reason}`;
-          if (validated.length === 0) throw new Error(message);
-          console.warn(`[runtimeStore] ${message}`);
+          if (strict || validated.length === 0) throw new Error(message);
         }
         return runtimeOperations.upsertRemoteRuntimeImports(validated);
       })().finally(() => {
@@ -408,11 +402,8 @@ export const runtimeOperations = {
     }
     const hydration = remoteImportSourceHydration;
     if (!hydration) return [];
-    if (options.throwOnError === true) return hydration;
-    return hydration.catch((error) => {
-      console.warn('[runtimeStore] Remote runtime import source hydration failed:', error);
-      return [];
-    });
+    if (strict) return hydration;
+    return hydration.catch(() => []);
   },
 
   // Disconnect runtime
@@ -474,11 +465,8 @@ export const runtimeOperations = {
             env: viewEnv,
             lastSynced: Date.now(),
           });
-        } else {
-          console.error(
-            `[runtimeStore] Refusing cross-runtime env overwrite: active=${activeId} activeEnv=${activeEnvRuntimeId} incoming=${envRuntimeId}`
-          );
         }
+        throw new Error(`RUNTIME_STORE_ENV_OVERWRITE_REFUSED:active=${activeId}:activeEnv=${activeEnvRuntimeId}:incoming=${envRuntimeId || '<missing>'}`);
       }
       return r;
     });

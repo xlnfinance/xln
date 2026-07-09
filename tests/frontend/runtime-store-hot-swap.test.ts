@@ -125,6 +125,19 @@ test('selected embedded runtime never falls back to a mismatched bootstrap env',
   expect(switchSource).not.toContain('if (!env) env = await xln.main(normalizedConfig.seed ?? null);');
 });
 
+test('runtime store fails fast on cross-runtime env overwrite', () => {
+  const source = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
+  const updateStart = source.indexOf('updateLocalEnv(env: Env)');
+  const metadataStart = source.indexOf('// Update active runtime metadata.', updateStart);
+  expect(updateStart).toBeGreaterThan(0);
+  expect(metadataStart).toBeGreaterThan(updateStart);
+  const updateSource = source.slice(updateStart, metadataStart);
+
+  expect(updateSource).toContain('RUNTIME_STORE_ENV_OVERWRITE_REFUSED');
+  expect(updateSource).not.toContain('Refusing cross-runtime env overwrite');
+  expect(updateSource).not.toContain('console.error');
+});
+
 test('remote time-machine history requires radapter batch reads', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const source = readFileSync('frontend/src/lib/stores/runtimeHistoryStore.ts', 'utf8');

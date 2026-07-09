@@ -191,7 +191,7 @@
       }
       liveRuntimesLoaded = !retrying;
       liveRuntimesError = retrying ? '' : formatLiveRuntimeImportStatus(payload, next.length);
-      await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { throwOnError: !silent });
+      await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { optional: silent });
     } catch (err) {
       if (silent) {
         liveRuntimesLoaded = !scheduleLiveRuntimeDiscoveryRetry({ retryable: true }, 0);

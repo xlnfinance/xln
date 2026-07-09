@@ -588,10 +588,10 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
     expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");
     expect(xlnStore).toContain("importSource.searchParams.set('allowPartial', '1')");
-    expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString())');
+    expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true })');
     expect(runtimeCreation).toContain("url.searchParams.set('allowPartial', '1')");
-    expect(runtimeCreation).toContain('await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { throwOnError: !silent })');
-    expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\), \{ throwOnError: !silent \}\)/g))
+    expect(runtimeCreation).toContain('await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { optional: silent })');
+    expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\), \{ optional: silent \}\)/g))
       .toHaveLength(1);
     expect(runtimeCreation).toContain('scheduleLiveRuntimeDiscoveryRetry(payload, next.length)');
     expect(runtimeCreation).toContain('setTimeout(() => {');
@@ -615,10 +615,14 @@ describe('remote runtime import manager utilities', () => {
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
     expect(importFlow).toContain('failedCount: failed.length');
     expect(importFlow).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
-    expect(runtimeStore).toContain('throwOnError?: boolean');
+    expect(runtimeStore).toContain('optional?: boolean');
     expect(runtimeStore).toContain('REMOTE_RUNTIME_IMPORT_SOURCE_VALIDATION_FAILED');
     expect(runtimeStore).toContain('const hydration = remoteImportSourceHydration');
-    expect(runtimeStore).toContain('if (options.throwOnError === true) return hydration');
+    expect(runtimeStore).toContain('const strict = options.optional !== true');
+    expect(runtimeStore).toContain('if (strict) return hydration');
+    expect(runtimeStore).not.toContain('Failed to hydrate remote runtime imports');
+    expect(runtimeStore).not.toContain('Remote runtime import source hydration failed');
+    expect(runtimeStore).not.toContain('console.warn');
     expect(runtimeStore).not.toContain('/api/hubs');
   });
 
