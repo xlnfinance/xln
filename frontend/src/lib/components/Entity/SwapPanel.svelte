@@ -15,6 +15,7 @@
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
   import { submitEntityInputs, submitRuntimeInput, xlnFunctions } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
+  import { errorLog } from '../../stores/errorLogStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
@@ -357,6 +358,24 @@
     const normalized = String(accountIdValue || '').trim().toLowerCase();
     const resolved = swapRuntimeView.entityNames.get(normalized) || '';
     return resolved || formatEntityId(accountIdValue);
+  }
+
+  function toErrorMessage(error: unknown, fallback = 'Unknown error'): string {
+    return error instanceof Error && error.message ? error.message : fallback;
+  }
+
+  function logSwapDiagnostic(message: string, error: unknown, details: Record<string, unknown> = {}): void {
+    errorLog.log(message, 'Swap Panel', {
+      entityId: sourceEntityIdValue,
+      signerId: sourceSignerIdValue,
+      accountId: activeOrderAccountId,
+      counterpartyId,
+      routeMode: swapRouteMode,
+      giveTokenId,
+      wantTokenId,
+      ...details,
+      error,
+    });
   }
 
   function jurisdictionLabelForAssetKey(assetKey: string): string {
@@ -3099,8 +3118,8 @@
       setOrderAmountInputValue('');
       priceRatioInput = '';
     } catch (error) {
-      console.error('Failed to place swap offer:', error);
-      submitError = `Failed to place swap: ${(error as Error)?.message || 'Unknown error'}`;
+      logSwapDiagnostic('Swap offer placement failed', error);
+      submitError = `Failed to place swap: ${toErrorMessage(error)}`;
     } finally {
       placingSwapOffer = false;
     }
@@ -3130,8 +3149,8 @@
       orderbookRefreshNonce += 1;
       toasts.info('Cancel request sent');
     } catch (error) {
-      console.error('Failed to cancel swap:', error);
-      const message = (error as Error)?.message || 'Unknown error';
+      logSwapDiagnostic('Swap cancel request failed', error, { offerId, cancelAccountId: accountId });
+      const message = toErrorMessage(error);
       submitError = `Failed to cancel: ${message}`;
       toasts.error(`Cancel failed: ${message}`);
     }
@@ -3161,8 +3180,8 @@
       orderbookRefreshNonce += 1;
       toasts.info(cancelRemainder ? 'Cross-j cancel + clear requested' : 'Cross-j clear requested');
     } catch (error) {
-      console.error('Failed to clear cross-j swap:', error);
-      const message = (error as Error)?.message || 'Unknown error';
+      logSwapDiagnostic('Cross-j swap clear request failed', error, { offerId, cancelRemainder });
+      const message = toErrorMessage(error);
       submitError = `Failed to clear cross-j swap: ${message}`;
       toasts.error(`Clear failed: ${message}`);
     }

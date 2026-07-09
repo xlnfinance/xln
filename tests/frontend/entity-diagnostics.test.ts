@@ -42,6 +42,11 @@ const diagnosticFiles = [
     importLine: "import { errorLog } from '../../stores/errorLogStore';",
     logLine: "errorLog.log(message, 'Settlement Panel'",
   },
+  {
+    path: 'frontend/src/lib/components/Entity/SwapPanel.svelte',
+    importLine: "import { errorLog } from '../../stores/errorLogStore';",
+    logLine: "errorLog.log(message, 'Swap Panel'",
+  },
 ] as const;
 
 test('entity action surfaces persist diagnostics instead of raw console output', () => {
@@ -68,4 +73,11 @@ test('payment and settlement panels persist every critical action failure path',
   expect(settlementSource).toContain("'On-J batch rebroadcast failed'");
   expect(settlementSource).toContain("'On-J transfer action failed'");
   expect(settlementSource).toContain("'Settlement auto execute into draft failed'");
+});
+
+test('swap panel persists every critical action failure path', () => {
+  const swapSource = readFileSync('frontend/src/lib/components/Entity/SwapPanel.svelte', 'utf8');
+  expect(swapSource).toContain("'Swap offer placement failed'");
+  expect(swapSource).toContain("'Swap cancel request failed'");
+  expect(swapSource).toContain("'Cross-j swap clear request failed'");
 });
