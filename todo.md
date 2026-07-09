@@ -522,6 +522,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      `account.handler` / `account.open` loggers instead of direct `console.*`;
      empty account inputs now fail fast with `ACCOUNT_INPUT_EMPTY` and are
      covered by Bun source/behavior tests plus the failure-taxonomy scan.
+   - Partial: account committed followup diagnostics now use the structured
+     `account.followup` logger instead of direct `console.*`, with Bun source
+     coverage and the failure-taxonomy scan guarding regressions.
    - Partial: account transaction applicator now rejects impossible embedded
      `account_frame` payloads without direct `console.error`, with structured
      `account.tx` debug diagnostics and failure-taxonomy scan coverage.

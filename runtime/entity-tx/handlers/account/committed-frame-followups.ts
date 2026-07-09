@@ -9,8 +9,10 @@ import {
   getCreditGrantedByAccountOwner,
   parseLendingPaymentMemo,
 } from '../../../lending';
+import { createStructuredLogger } from '../../../logger';
 import type { MempoolOp } from './orderbook-queue';
 
+const accountFollowupLog = createStructuredLogger('account.followup');
 const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
 
 const jurisdictionIdFor = (state: EntityState, env?: Env): string =>
@@ -160,13 +162,14 @@ export function applyCommittedAccountFrameFollowups(
   env?: Env,
 ): void {
   if (HEAVY_LOGS) {
-    console.log(
-      `FRAME-COMMIT-FOLLOWUPS: height=${committedFrame.height}, txs=${committedFrame.accountTxs.length}`,
-    );
+    accountFollowupLog.debug('frame.commit', {
+      height: committedFrame.height,
+      txs: committedFrame.accountTxs.length,
+    });
   }
 
   for (const accountTx of committedFrame.accountTxs) {
-    if (HEAVY_LOGS) console.log(`FRAME-COMMIT-FOLLOWUPS: tx type=${accountTx.type}`);
+    if (HEAVY_LOGS) accountFollowupLog.debug('frame.tx', { type: accountTx.type });
     applyCommittedLendingPaymentFollowup(newState, counterpartyId, accountTx, committedFrame, mempoolOps);
 
     // Account frames are canonical once committed; keep entity-local indexes in

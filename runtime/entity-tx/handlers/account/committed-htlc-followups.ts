@@ -23,7 +23,10 @@ import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../../../htlc-events';
+import { createStructuredLogger } from '../../../logger';
 import type { MempoolOp } from './orderbook-queue';
+
+const accountFollowupLog = createStructuredLogger('account.followup');
 
 type HtlcFollowupContext = {
   env: Env;
@@ -316,7 +319,7 @@ export function applyHtlcTimeoutFollowups(ctx: HtlcFollowupContext, timedOutHash
 
 export function applyHtlcSecretFollowups(ctx: HtlcFollowupContext, revealedSecrets: RevealedSecret[]): void {
   const { env, state, newState, outputs, mempoolOps } = ctx;
-  if (HEAVY_LOGS) console.log(`HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
+  if (HEAVY_LOGS) accountFollowupLog.debug('htlc.secret_check', { secrets: revealedSecrets.length });
 
   for (const { secret, hashlock } of revealedSecrets) {
     const route = newState.htlcRoutes.get(hashlock);
