@@ -182,7 +182,7 @@ const recordArrayOf = (record: JsonRecord, key: string): JsonRecord[] =>
 const spawnText = (cmd: string, args: string[]): string => {
   const result = spawnSync(cmd, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: 'pipe',
     encoding: 'utf8',
   });
@@ -196,7 +196,7 @@ const computeCodeFingerprint = (): QaCodeFingerprint => {
   const gitStatus = spawnText('git', ['status', '--short', '--untracked-files=all']);
   const sourceRaw = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: 'pipe',
     encoding: 'buffer',
   });
@@ -2185,14 +2185,14 @@ async function main(): Promise<void> {
       const buildLogPath = join(logsDir, 'build-runtime.log');
       const buildLog = createWriteStream(buildLogPath, { flags: 'w' });
       const buildCode = await runCmd('bash', ['-lc', './scripts/build-runtime.sh'], {
-        env: process.env,
+        env: sanitizeChildProcessEnv(process.env),
         log: buildLog,
         timeoutMs: 300000,
       });
       buildLog.write('\n=== frontend build ===\n');
       const frontendBuildCode = await runCmd('bun', ['run', 'build'], {
         cwd: resolve(process.cwd(), 'frontend'),
-        env: process.env,
+        env: sanitizeChildProcessEnv(process.env),
         log: buildLog,
         timeoutMs: 300000,
       });

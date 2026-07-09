@@ -17,6 +17,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   withoutTestArtifactCleanupDoneEnv,
 } from './test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 type CliArgs = {
   scenarioWorkers: number;
@@ -66,7 +67,7 @@ const runJob = async (
 ): Promise<JobResult> => {
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env,
+    env: sanitizeChildProcessEnv(env),
   });
 
   proc.stdout.on('data', chunk => process.stdout.write(`[${name}] ${chunk.toString()}`));

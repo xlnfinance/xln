@@ -7,6 +7,7 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from './test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 const DEFAULT_UNIT_TEST_TARGETS = [
   'runtime/__tests__',
@@ -32,10 +33,10 @@ cleanupTestArtifactsBeforeRun({
 
 const child: ChildProcess = spawn('bun', testArgs, {
   cwd: process.cwd(),
-  env: {
+  env: sanitizeChildProcessEnv({
     ...process.env,
     [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
-  },
+  }),
   stdio: 'inherit',
 });
 

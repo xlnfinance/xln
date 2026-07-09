@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 const CORE_E2E_FILES = [
   'tests/e2e-payment-smoke.spec.ts',
@@ -49,7 +50,7 @@ for (const title of CORE_E2E_TITLES) console.log(` - ${title}`);
 
 const proc: ChildProcess = spawn('bun', runnerArgs, {
   cwd: process.cwd(),
-  env: process.env,
+  env: sanitizeChildProcessEnv(process.env),
   stdio: 'inherit',
 });
 

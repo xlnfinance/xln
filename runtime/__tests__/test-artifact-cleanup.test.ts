@@ -203,10 +203,12 @@ describe('test artifact cleanup', () => {
   test('child runtime env can drop the cleanup marker before browser builds', () => {
     const env = withoutTestArtifactCleanupDoneEnv({
       [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
+      NO_COLOR: '1',
       KEEP_ME: 'yes',
     });
 
     expect(env[TEST_ARTIFACT_CLEANUP_DONE_ENV]).toBeUndefined();
+    expect(env.NO_COLOR).toBeUndefined();
     expect(env.KEEP_ME).toBe('yes');
   });
 

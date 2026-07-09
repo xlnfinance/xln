@@ -74,6 +74,9 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('access%3Dread');
     expect(banner.stdout).toContain('access%3Dadmin');
     expect(banner.stdout).not.toContain('xlnra1.');
+    expect(banner.stdout).not.toContain('\u001B]8;;');
+    expect(banner.stdout).not.toContain('[open read import]');
+    expect(banner.stdout).toContain('runtime import key file:');
     expect(banner.stdout).toContain('http://127.0.0.1:8082/api/health');
     expect(banner.stdout).toContain('https://localhost:8087');
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');

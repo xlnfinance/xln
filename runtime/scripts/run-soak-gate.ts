@@ -6,6 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { execFileSync, spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import { freemem, loadavg, totalmem } from 'node:os';
 import type { Readable } from 'node:stream';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 type SoakProfile = 'quick' | 'release' | 'swap' | 'mainnet';
 
@@ -267,7 +268,7 @@ const compareStableText = (left: string, right: string): number =>
 const spawnText = (cmd: string, args: string[]): string => {
   const result = spawnSync(cmd, args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: 'pipe',
     encoding: 'utf8',
   });
@@ -281,7 +282,7 @@ const computeCodeFingerprint = (): SoakCodeFingerprint => {
   const gitStatus = spawnText('git', ['status', '--short', '--untracked-files=all']);
   const sourceRaw = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: 'pipe',
     encoding: 'buffer',
   });
@@ -524,7 +525,7 @@ const runCommand = async (command: SoakCommand, iteration: number, streamOutput:
 
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', command.command], {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const perfSamples: SoakPerfSample[] = [];

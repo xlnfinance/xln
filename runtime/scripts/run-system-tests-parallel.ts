@@ -18,6 +18,7 @@ import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
@@ -172,7 +173,7 @@ function spawnAnvil(
     '--silent',
   ], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
   });
 
   proc.stdout.on('data', (chunk) => {
@@ -221,12 +222,12 @@ async function runScenarioOnWorker(
       `--rpc=${rpcUrl}`,
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
+      env: sanitizeChildProcessEnv({
         ...process.env,
         ANVIL_RPC: rpcUrl,
         JADAPTER_MODE: 'rpc',
         XLN_DB_PATH: workerDbPath,
-      },
+      }),
     });
 
     const activeChild = child;

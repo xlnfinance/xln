@@ -6,6 +6,7 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from './test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 const FAST_E2E_TARGETS = [
   {
@@ -106,10 +107,10 @@ const args = [
 ];
 
 const child = spawn('bun', args, {
-  env: {
+  env: sanitizeChildProcessEnv({
     ...process.env,
     [TEST_ARTIFACT_CLEANUP_DONE_ENV]: '1',
-  },
+  }),
   stdio: 'inherit',
 });
 child.on('exit', (code, signal) => {

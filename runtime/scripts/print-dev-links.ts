@@ -24,7 +24,6 @@ type Args = {
 type LinkRow = {
   label: string;
   url: string;
-  display?: string;
 };
 
 const flags = new Map<string, string>();
@@ -94,11 +93,6 @@ const custody = `https://localhost:${args.custodyPort}`;
 const custodyDaemon = `http://127.0.0.1:${args.custodyDaemonPort}`;
 const watchtower = `http://127.0.0.1:${args.watchtowerPort}`;
 
-const hyperlink = (label: string, url: string): string => {
-  if (process.env['XLN_DEV_LINKS_PLAIN'] === '1') return url;
-  return `\u001B]8;;${url}\u0007${label}\u001B]8;;\u0007`;
-};
-
 const browserRows: LinkRow[] = webHttp ? [
   { label: 'wallet browser QA', url: `${webHttp}/app` },
   { label: 'radapter manager QA', url: `${webHttp}/radapter/manage` },
@@ -107,8 +101,8 @@ const browserRows: LinkRow[] = webHttp ? [
 const rows: LinkRow[] = [
   { label: 'wallet', url: `${web}/app` },
   ...browserRows,
-  { label: 'remote import read', url: keys.importUrl!, display: '[open read import]' },
-  { label: 'remote import admin', url: keys.adminImportUrl!, display: '[open admin import]' },
+  { label: 'remote import read', url: keys.importUrl! },
+  { label: 'remote import admin', url: keys.adminImportUrl! },
   { label: 'health admin', url: `${web}/health` },
   { label: 'qa cockpit', url: `${web}/qa` },
   { label: 'runs history', url: `${web}/runs` },
@@ -131,11 +125,10 @@ console.log('XLN DEV CONTROL PANEL');
 console.log('Open any subsystem from here; service logs stream below this block.');
 console.log(line);
 for (const row of rows) {
-  const value = row.display ? hyperlink(row.display, row.url) : row.url;
-  console.log(`${row.label.padEnd(labelWidth)}  ${value}`);
+  console.log(`${row.label.padEnd(labelWidth)}  ${row.url}`);
 }
 console.log('-'.repeat(88));
-console.log(`plain import URLs: ${resolve(args.keysPath)}`);
+console.log(`runtime import key file: ${resolve(args.keysPath)}`);
 console.log('runtime import links fetch fresh tokens into the manager; press Confirm in the browser.');
 console.log('logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
 console.log(line);

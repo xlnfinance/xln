@@ -10,6 +10,7 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from './test-artifact-cleanup';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
 
@@ -188,7 +189,7 @@ export const buildCappedTestnetGateSteps = (
 const runTextCommand = async (command: string): Promise<{ code: number | null; stdout: string; stderr: string }> => {
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', command], {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stdout = '';
@@ -210,7 +211,7 @@ const runStep = async (step: GateStep): Promise<StepResult> => {
   const startedAt = Date.now();
   const proc: ChildProcessByStdio<null, Readable, Readable> = spawn('sh', ['-lc', step.command], {
     cwd: process.cwd(),
-    env: process.env,
+    env: sanitizeChildProcessEnv(process.env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const prefix = `[capped:${step.name}]`;

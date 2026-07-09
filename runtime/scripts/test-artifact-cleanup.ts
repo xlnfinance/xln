@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 export const TEST_ARTIFACT_CLEANUP_DONE_ENV = 'XLN_TEST_ARTIFACT_CLEANUP_DONE';
 export const KEEP_TEST_ARTIFACTS_ENV = 'XLN_KEEP_TEST_ARTIFACTS';
@@ -91,7 +92,7 @@ export type TestArtifactCleanupSummary = {
 export const withoutTestArtifactCleanupDoneEnv = (
   env: Record<string, string | undefined> = process.env,
 ): Record<string, string | undefined> => {
-  const next = { ...env };
+  const next = sanitizeChildProcessEnv(env);
   delete next[TEST_ARTIFACT_CLEANUP_DONE_ENV];
   return next;
 };

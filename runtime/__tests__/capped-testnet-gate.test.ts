@@ -88,6 +88,8 @@ test('capped testnet gate starts from cleanup before writing run artifacts', () 
   expect(source).toContain('cleanupTestArtifactsBeforeRun({');
   expect(source).toContain("reason: 'capped-testnet'");
   expect(source).toContain('TEST_ARTIFACT_CLEANUP_DONE_ENV');
+  expect(source).toContain("import { sanitizeChildProcessEnv } from '../child-process-env';");
+  expect(source).toContain('env: sanitizeChildProcessEnv(process.env)');
   expect(source.indexOf('cleanupTestArtifactsBeforeRun({')).toBeLessThan(
     source.indexOf('writeReport(args.outPath, baseReport)'),
   );
