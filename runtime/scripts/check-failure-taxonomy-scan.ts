@@ -293,6 +293,7 @@ for (const [path, markers] of [
   ['runtime/runtime-infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'browservm.restore_failed']],
   ['runtime/runtime-infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
   ['runtime/runtime-storage-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'runtime_db.open_failed']],
+  ['runtime/storage/index.ts', ["createStructuredLogger('runtime.storage')", 'persist.frame']],
   ['runtime/watchtower/standalone-server.ts', ["createStructuredLogger('watchtower.standalone')", 'service.listen', 'sweep.failed', 'push_sweep.failed']],
   ['runtime/watchtower/dispute-watch.ts', ["createStructuredLogger('watchtower.dispute_watch')", 'target.failed']],
   ['runtime/orchestrator/graceful-server.ts', ["createStructuredLogger('orchestrator.lifecycle')", 'http.shutdown_timeout']],
@@ -351,6 +352,11 @@ const runtimeStorageDbsPath = 'runtime/runtime-storage-dbs.ts';
 const runtimeStorageDbs = readText(runtimeStorageDbsPath);
 assertNotIncludes(runtimeStorageDbs, 'console.', runtimeStorageDbsPath);
 assertNotIncludes(runtimeStorageDbs, '[storage-epoch]', runtimeStorageDbsPath);
+
+const runtimeStoragePath = 'runtime/storage/index.ts';
+const runtimeStorage = readText(runtimeStoragePath);
+assertNotIncludes(runtimeStorage, 'console.', runtimeStoragePath);
+assertNotIncludes(runtimeStorage, '[PERSIST]', runtimeStoragePath);
 
 const standaloneWatchtowerPath = 'runtime/watchtower/standalone-server.ts';
 const standaloneWatchtower = readText(standaloneWatchtowerPath);

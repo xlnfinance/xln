@@ -44,6 +44,9 @@ warnings.
 - Runtime storage DB open/close/block/recovery diagnostics use the structured
   `runtime.storage` logger and are guarded against direct `console.*` /
   `[storage-epoch]` noise in core.
+- Runtime storage frame persistence telemetry uses structured
+  `runtime.storage` `persist.frame` events and is guarded against direct
+  `[PERSIST]` console output.
 - Standalone watchtower startup/sweep diagnostics use the structured
   `watchtower.standalone` logger and are guarded against direct `[WATCHTOWER]`
   / `[PUSH-WATCH]` console sweep output.

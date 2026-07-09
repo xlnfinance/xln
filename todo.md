@@ -615,6 +615,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      the structured `runtime.storage` logger instead of direct `console.*` /
      `[storage-epoch]` output; source tests and the failure-taxonomy scan guard
      the boundary.
+   - Partial: runtime storage frame persistence telemetry now uses structured
+     `runtime.storage` `persist.frame` events instead of direct `[PERSIST]`
+     console output; source tests and the failure-taxonomy scan guard it.
    - Partial: standalone watchtower startup/sweep diagnostics now use
      structured `watchtower.standalone` logging instead of direct `[WATCHTOWER]`
      / `[PUSH-WATCH]` console sweep lines; the standalone suite and

@@ -51,6 +51,7 @@ import {
   keyLiveReplicaMeta,
   normalizeEntityId,
 } from './keys';
+import { createStructuredLogger } from '../logger';
 import type { Env, RuntimeInput, RuntimeFrameDbRecord } from '../types';
 import type {
   PerfDeps,
@@ -128,6 +129,8 @@ export type {
   StorageRuntimeConfig,
   StorageSnapshotManifest,
 } from './types';
+
+const storageLog = createStructuredLogger('runtime.storage');
 
 const parseStorageBoolean = (value: unknown): boolean => {
   const normalized = String(value ?? '').trim().toLowerCase();
@@ -603,16 +606,36 @@ export const saveRuntimeFrameToStorage = async (options: {
     String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === '1' ||
     String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === 'true';
   if (verboseStorageLogs && options.env.quietRuntimeLogs !== true) {
-    console.log(
-      `[PERSIST] runtime=${String(options.env.runtimeId || '').slice(0, 12)} frame=${options.env.height} puts=${diff.puts.length} dels=${diff.dels.length} ` +
-        `frameBytes=${frameBuffer.byteLength} diffBytes=${diffBuffer.byteLength} ` +
-        `frameDbBytes=${frameDbBytes} frameDbRetained=${frameDbRetainedBytes} frameDbPruned=${frameDbPrunedBytes}/${frameDbPrunedKeys}@${frameDbLatestPrunedHeight} ` +
-        `snapshotBytes=${snapshotBytes} historyBytes=${retainedHistoryBytes} ` +
-        `entities=${frameTouched.touchedEntities.size} accounts=${frameTouched.touchedAccounts.size} books=${frameTouched.touchedBookEntities.size} materialized=${shouldMaterialize ? 1 : 0} overlay=${overlayRecords.length} ` +
-        `highSignals=${highSignalEvents.join(',') || 'none'} ` +
-        `snapDocs=${snapDocs} epoch=${epochRotated ? 1 : 0} epochDb=${epochDbRotated ? 1 : 0} ` +
-        `ms(open=${options.formatPerfMs(openMs)},diff=${options.formatPerfMs(diffBuildMs)},write=${options.formatPerfMs(writeMs)},snap=${options.formatPerfMs(snapshotMs)})`,
-    );
+    storageLog.info('persist.frame', {
+      runtimeId: String(options.env.runtimeId || '').slice(0, 12),
+      frame: options.env.height,
+      puts: diff.puts.length,
+      dels: diff.dels.length,
+      frameBytes: frameBuffer.byteLength,
+      diffBytes: diffBuffer.byteLength,
+      frameDbBytes,
+      frameDbRetainedBytes,
+      frameDbPrunedBytes,
+      frameDbPrunedKeys,
+      frameDbLatestPrunedHeight,
+      snapshotBytes,
+      retainedHistoryBytes,
+      entities: frameTouched.touchedEntities.size,
+      accounts: frameTouched.touchedAccounts.size,
+      books: frameTouched.touchedBookEntities.size,
+      materialized: shouldMaterialize,
+      overlayRecords: overlayRecords.length,
+      highSignals: highSignalEvents,
+      snapDocs,
+      epochRotated,
+      epochDbRotated,
+      perfMs: {
+        open: options.formatPerfMs(openMs),
+        diff: options.formatPerfMs(diffBuildMs),
+        write: options.formatPerfMs(writeMs),
+        snap: options.formatPerfMs(snapshotMs),
+      },
+    });
   }
   return {
     materialized: shouldMaterialize,

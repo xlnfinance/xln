@@ -16,6 +16,15 @@ test('runtime storage DB boundary uses structured logging without direct console
   expect(source).not.toContain('IndexedDB blocked (incognito/private mode)');
 });
 
+test('runtime storage persistence telemetry uses structured logging', () => {
+  const source = readFileSync(join(process.cwd(), 'runtime/storage/index.ts'), 'utf8');
+
+  expect(source).toContain("const storageLog = createStructuredLogger('runtime.storage');");
+  expect(source).toContain("storageLog.info('persist.frame'");
+  expect(source).not.toContain('console.');
+  expect(source).not.toContain('[PERSIST]');
+});
+
 test('runtime DB namespace normalization stays pure for explicit ids', () => {
   expect(normalizeDbNamespace('  0xABCDef  ')).toBe('0xabcdef');
   expect(resolveDbNamespace({ runtimeId: '  Runtime-A  ' })).toBe('runtime-a');
