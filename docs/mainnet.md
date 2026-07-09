@@ -19,7 +19,8 @@ The current branch materially raised the floor: watchtower recovery is live,
 encrypted, scheduled, covered by browser E2E, direct same-chain/cross-j swaps
 and lending are in the fast E2E gate, `bun run gate:release` passed on the
 release line, `bun run test:all:fast` passed on 2026-07-08 with 95/95 isolated
-browser shards, `bun run security:audit-pack` passed on 2026-07-09, and a
+browser shards, `bun run security:contract-governance` and
+`bun run security:audit-pack` passed on 2026-07-09, and a
 historical release soak completed 13 full gate/benchmark iterations before
 being stopped manually. That is enough for serious public-testnet hardening. It
 is not enough for real funds because the full uninterrupted current
@@ -148,6 +149,7 @@ Required:
 External audit handoff:
 
 ```bash
+bun run security:contract-governance
 bun run security:audit-pack
 ```
 

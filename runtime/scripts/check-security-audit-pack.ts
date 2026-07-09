@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const readText = (path: string): string =>
   readFileSync(path, 'utf8');
@@ -20,6 +21,7 @@ const assertNotIncludes = (text: string, needle: string, path: string): void => 
 const packageJson = JSON.parse(readText('package.json')) as { scripts?: Record<string, string> };
 const scripts = packageJson.scripts ?? {};
 for (const name of [
+  'security:contract-governance',
   'gate:ci',
   'gate:release',
   'gate:mainnet-preflight',
@@ -31,6 +33,14 @@ for (const name of [
   'prod:health',
 ]) {
   if (!scripts[name]) throw new Error(`package.json missing script: ${name}`);
+}
+
+const governanceScan = spawnSync('bun', ['runtime/scripts/check-contract-governance-scan.ts'], {
+  stdio: 'inherit',
+});
+if (governanceScan.error) throw governanceScan.error;
+if (governanceScan.status !== 0) {
+  throw new Error(`contract governance scan failed with exit ${governanceScan.status ?? governanceScan.signal}`);
 }
 
 const auditBriefPath = 'docs/security/external-audit-brief.md';
@@ -47,6 +57,7 @@ for (const heading of [
   assertIncludes(auditBrief, heading, auditBriefPath);
 }
 for (const command of [
+  'bun run security:contract-governance',
   'bun run gate:ci',
   'bun run test:e2e:coverage',
   'bun run gate:release',

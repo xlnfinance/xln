@@ -300,6 +300,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
 5. **Contract governance/access-control scan.**
    - Re-run a current pass over `EntityProvider`/`Depository` for permission
      checks, gas bounds, and public debug surfaces before external audit.
+   - Current executable scan: `bun run security:contract-governance` passed on
+     2026-07-09 and is now part of `bun run security:audit-pack`.
+   - Current scan artifact: `docs/security/contract-governance-scan.md`.
 
 6. **One delivery abstraction.**
    - Collapse direct-vs-relay send logic, pending queues, TTLs, retries, and

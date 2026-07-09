@@ -60,6 +60,7 @@
     "prod:bootstrap:hydrate": "bun runtime/scripts/test-artifact-cleanup.ts --reason=bootstrap-hydrate && bun runtime/scripts/bootstrap-soundcheck.ts --mode=hydrate",
     "prod:bootstrap:soundcheck": "bun runtime/scripts/test-artifact-cleanup.ts --reason=bootstrap-soundcheck && bun runtime/scripts/bootstrap-soundcheck.ts --mode=all",
     "prod:diagnose": "./scripts/prod-diagnose.sh",
+    "security:contract-governance": "bun runtime/scripts/check-contract-governance-scan.ts",
     "security:audit-pack": "bun runtime/scripts/check-security-audit-pack.ts",
     "gate:quick": "bun runtime/scripts/run-release-gate.ts --profile=quick",
     "gate:ci": "bun runtime/scripts/run-release-gate.ts --profile=ci",
