@@ -95,4 +95,6 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
 
   expect(runDev).not.toContain('XLN_RUNTIME_IMPORT_LOG_URL=1');
   expect(runDev).toContain('runtime/orchestrator/orchestrator.ts');
+  expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
+  expect(runDev).toContain('XLN_LOG_LEVEL=${MESH_LOG_LEVEL}');
 });

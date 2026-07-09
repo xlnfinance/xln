@@ -16,6 +16,7 @@ CUSTODY_DAEMON_PORT="$(xln_custody_daemon_port)"
 WATCHTOWER_PORT="$(xln_watchtower_port)"
 ANVIL_BLOCK_TIME="${XLN_ANVIL_BLOCK_TIME:-1}"
 DEV_LOG_DIR="${XLN_DEV_LOG_DIR:-$REPO_ROOT/.logs/dev}"
+MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"
 
 export XLN_JURISDICTIONS_PATH="${XLN_JURISDICTIONS_PATH:-./db/dev/jurisdictions.json}"
 
@@ -60,7 +61,7 @@ exec concurrently \
   -c 'magenta,cyan,blue,red,yellow,green,white' \
   "$ANVIL_CMD" \
   "$ANVIL2_CMD" \
-  "USE_ANVIL=true RUNTIME_VERBOSE_LOGS=${RUNTIME_VERBOSE_LOGS:-0} ANVIL_RPC=http://localhost:${RPC_PORT} ANVIL_RPC2=http://localhost:${RPC2_PORT} XLN_MESH_RESET_ALLOWED=1 bun runtime/orchestrator/orchestrator.ts --host 127.0.0.1 --port ${API_PORT} --public-ws-base-url ws://127.0.0.1:${API_PORT} --rpc-url http://127.0.0.1:${RPC_PORT} --rpc2-url http://127.0.0.1:${RPC2_PORT} --db-root ./db/dev/mesh --mm --custody --allow-reset --custody-port ${CUSTODY_PORT} --custody-daemon-port ${CUSTODY_DAEMON_PORT} --wallet-url http://localhost:${WEB_HTTP_PORT}/app" \
+  "USE_ANVIL=true RUNTIME_VERBOSE_LOGS=${RUNTIME_VERBOSE_LOGS:-0} XLN_LOG_LEVEL=${MESH_LOG_LEVEL} ANVIL_RPC=http://localhost:${RPC_PORT} ANVIL_RPC2=http://localhost:${RPC2_PORT} XLN_MESH_RESET_ALLOWED=1 bun runtime/orchestrator/orchestrator.ts --host 127.0.0.1 --port ${API_PORT} --public-ws-base-url ws://127.0.0.1:${API_PORT} --rpc-url http://127.0.0.1:${RPC_PORT} --rpc2-url http://127.0.0.1:${RPC2_PORT} --db-root ./db/dev/mesh --mm --custody --allow-reset --custody-port ${CUSTODY_PORT} --custody-daemon-port ${CUSTODY_DAEMON_PORT} --wallet-url http://localhost:${WEB_HTTP_PORT}/app" \
   "bun runtime/watchtower/standalone-server.ts --host 127.0.0.1 --port ${WATCHTOWER_PORT} --db ./db/dev/watchtower --quota-bytes 4194304 --max-bundles 3" \
   "bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util --watch" \
   "cd frontend && VITE_DEV_PORT=${WEB_PORT} VITE_API_PROXY_TARGET=http://127.0.0.1:${API_PORT} VITE_XLN_WATCHTOWER_URL=http://127.0.0.1:${WATCHTOWER_PORT} ANVIL_RPC=http://localhost:${RPC_PORT} ANVIL_RPC2=http://localhost:${RPC2_PORT} RPC_ETHEREUM=http://localhost:${RPC_PORT} RPC_TRON=http://localhost:${RPC2_PORT} vite dev --logLevel warn" \
