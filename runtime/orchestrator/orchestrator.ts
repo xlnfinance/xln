@@ -2246,6 +2246,10 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
     if (args.custodyEnabled) {
       const custodyStartedAt = startTiming('reset_custody');
       try {
+        const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);
+        if (!primaryJurisdiction?.key) {
+          throw new Error('CUSTODY_PRIMARY_JURISDICTION_MISSING');
+        }
         custodySupport = await startCustodySupport({
           apiBaseUrl: `http://${args.host}:${args.port}`,
           daemonPort: args.custodyDaemonPort,
@@ -2257,7 +2261,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
           seed: 'xln-mesh-custody-seed',
           signerLabel: 'custody-mesh-1',
           profileName: 'Custody',
-          jurisdictionId: 'arrakis',
+          jurisdictionId: primaryJurisdiction.key,
         });
       } catch (error) {
         custodyBootstrapError = error;

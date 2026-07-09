@@ -56,6 +56,8 @@ describe('production startup wiring', () => {
     const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime-entity-routing.ts'), 'utf8');
     const runtimeMainSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     const standaloneServer = readFileSync(join(repoRoot, 'runtime/server.ts'), 'utf8');
+    const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-dev.ts'), 'utf8');
+    const cli = readFileSync(join(repoRoot, 'runtime/cli.ts'), 'utf8');
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
     expect(orchestratorConfig).toContain("const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;");
     expect(orchestratorConfig).toContain("readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
@@ -120,6 +122,16 @@ describe('production startup wiring', () => {
     expect(marketMakerAggregation).toContain('expectedOffers: Number(pair.expectedOffers || 0)');
     expect(orchestrator).toContain('health.marketMaker.hubs.every(hub => hub.depthReady)');
     expect(orchestrator).toContain('syncCanonicalJurisdictionsFromShard(jurisdictionsConfig)');
+    expect(orchestrator).toContain('const primaryJurisdiction = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);');
+    expect(orchestrator).toContain('jurisdictionId: primaryJurisdiction.key');
+    expect(orchestrator).not.toContain("jurisdictionId: 'arrakis'");
+    expect(startCustodyDev).toContain('const custodyJurisdictionId = await resolveCustodyJurisdictionId();');
+    expect(startCustodyDev).toContain('jurisdictionId: custodyJurisdictionId');
+    expect(startCustodyDev).toContain('CUSTODY_JURISDICTION_ID: custodyJurisdictionId');
+    expect(startCustodyDev).not.toContain("jurisdictionId: 'arrakis'");
+    expect(startCustodyDev).not.toContain("CUSTODY_JURISDICTION_ID: 'arrakis'");
+    expect(cli).toContain("const REMOTE_RPC = 'https://xln.finance/rpc';");
+    expect(cli).not.toContain('/rpc/arrakis');
     expect(readFileSync(join(repoRoot, 'runtime/orchestrator/jurisdictions.ts'), 'utf8'))
       .toContain('const seedPath = existsSync(canonicalPath) ? canonicalPath : resolveRepoJurisdictionsJsonPath();');
     expect(orchestrator).toContain('const buildSecondaryRpcArgs = (): string[] => {');

@@ -4,9 +4,11 @@ import { watch } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnBunChild, startCustodySupport, stopManagedChild, waitForHttpReady } from '../orchestrator/custody-bootstrap';
+import { selectPrimaryHubJurisdiction } from '../orchestrator/jurisdiction-select';
 
 const API_BASE_URL = process.env['DEV_API_BASE_URL'] || 'http://127.0.0.1:8082';
 const ANVIL_RPC = process.env['DEV_ANVIL_RPC'] || 'http://127.0.0.1:8545';
+const ANVIL_RPC2 = process.env['DEV_ANVIL_RPC2'] || process.env['RPC_TRON'] || '';
 const RELAY_URL = process.env['DEV_RELAY_URL'] || 'ws://127.0.0.1:8082/relay';
 const WALLET_PORT = Number(process.env['VITE_DEV_PORT'] || process.env['DEV_WALLET_PORT'] || '8080');
 const WALLET_BASE_URL = process.env['DEV_WALLET_BASE_URL'] || `https://localhost:${WALLET_PORT}`;
@@ -32,6 +34,7 @@ const RESET_DB_ON_START = isTrueLike(process.env['DEV_CUSTODY_RESET'], false);
 const SEED = process.env['DEV_CUSTODY_SEED'] || 'xln-dev-custody-seed';
 const SIGNER_LABEL = process.env['DEV_CUSTODY_SIGNER_LABEL'] || 'custody-dev-1';
 const PROFILE_NAME = process.env['DEV_CUSTODY_NAME'] || 'Custody';
+const CONFIGURED_JURISDICTION_ID = String(process.env['DEV_CUSTODY_JURISDICTION_ID'] || process.env['CUSTODY_JURISDICTION_ID'] || '').trim();
 const VERBOSE = isTrueLike(process.env['DEV_VERBOSE'], false);
 
 let shuttingDown = false;
@@ -55,6 +58,16 @@ const mirrorChildLogs = (prefix: string, child: { proc: { stdout: NodeJS.Readabl
   });
 };
 
+const resolveCustodyJurisdictionId = async (): Promise<string> => {
+  if (CONFIGURED_JURISDICTION_ID) return CONFIGURED_JURISDICTION_ID;
+  const url = new URL('/api/jurisdictions', API_BASE_URL).toString();
+  const response = await fetch(url, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`DEV_CUSTODY_JURISDICTIONS_HTTP_${response.status}`);
+  const primary = selectPrimaryHubJurisdiction(await response.json(), { rpc2Url: ANVIL_RPC2 });
+  if (!primary?.key) throw new Error('DEV_CUSTODY_PRIMARY_JURISDICTION_MISSING');
+  return primary.key;
+};
+
 const main = async (): Promise<void> => {
   if (RESET_DB_ON_START) {
     await rm(DB_ROOT, { recursive: true, force: true });
@@ -64,6 +77,7 @@ const main = async (): Promise<void> => {
 
   console.log(`[dev-custody] waiting for shared dev API ${API_BASE_URL}`);
   await waitForHttpReady(`${API_BASE_URL}/api/health`, null, 120_000);
+  const custodyJurisdictionId = await resolveCustodyJurisdictionId();
 
   const support = await startCustodySupport({
     apiBaseUrl: API_BASE_URL,
@@ -76,7 +90,7 @@ const main = async (): Promise<void> => {
     seed: SEED,
     signerLabel: SIGNER_LABEL,
     profileName: PROFILE_NAME,
-    jurisdictionId: 'arrakis',
+    jurisdictionId: custodyJurisdictionId,
   });
 
   if (VERBOSE) {
@@ -99,7 +113,7 @@ const main = async (): Promise<void> => {
         CUSTODY_ENTITY_ID: support.identity.entityId,
         CUSTODY_SIGNER_ID: support.identity.signerId,
         CUSTODY_PROFILE_NAME: PROFILE_NAME,
-        CUSTODY_JURISDICTION_ID: 'arrakis',
+        CUSTODY_JURISDICTION_ID: custodyJurisdictionId,
         CUSTODY_DB_PATH: `${DB_ROOT}/custody.sqlite`,
       },
     );

@@ -4,21 +4,17 @@ import { createJAdapter } from '../jadapter';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../jurisdictions-version';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
+import {
+  isRpc2Jurisdiction,
+  selectPrimaryHubJurisdiction,
+  type HubJurisdictionEntry as ShardJurisdictionEntry,
+  type PrimaryHubJurisdiction,
+} from './jurisdiction-select';
 
 export type OrchestratorJurisdictionsConfig = {
   shardJurisdictionsPath: string;
   rpc2Url: string;
   rpcUrls?: Record<number, string>;
-};
-
-type ShardJurisdictionEntry = Record<string, unknown> & {
-  name?: string;
-  chainId?: number;
-  rpc?: unknown;
-  contracts?: Record<string, unknown> & {
-    depository?: string;
-    entityProvider?: string;
-  };
 };
 
 type ShardJurisdictionsFile = Record<string, unknown> & {
@@ -30,19 +26,6 @@ type ShardJurisdictionsFile = Record<string, unknown> & {
 const resolveRepoJurisdictionsJsonPath = (): string => {
   const repoUrl = new URL('../../jurisdictions/jurisdictions.json', import.meta.url);
   return resolve(decodeURIComponent(repoUrl.pathname));
-};
-
-const isRpc2Jurisdiction = (
-  config: OrchestratorJurisdictionsConfig,
-  key: string,
-  jurisdiction: ShardJurisdictionEntry,
-): boolean => {
-  const normalizedKey = String(key || '').trim().toLowerCase();
-  if (normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedKey === 'localhost2') return true;
-  const name = String(jurisdiction.name || '').trim().toLowerCase();
-  if (name.includes('tron')) return true;
-  const rpc = String(jurisdiction.rpc || '').trim();
-  return Boolean(config.rpc2Url && normalizeLoopbackUrl(rpc) === normalizeLoopbackUrl(config.rpc2Url));
 };
 
 const rpcPublicPath = (index: number): string => index <= 1 ? '/rpc' : `/rpc${index}`;
@@ -120,27 +103,11 @@ export const hasShardRpc2Jurisdiction = (config: OrchestratorJurisdictionsConfig
   }
 };
 
-export const resolvePrimaryHubJurisdictionFallback = (config: OrchestratorJurisdictionsConfig): {
-  name: string;
-  chainId?: number;
-  depositoryAddress?: string;
-  entityProviderAddress?: string;
-} | null => {
+export const resolvePrimaryHubJurisdictionFallback = (config: OrchestratorJurisdictionsConfig): PrimaryHubJurisdiction | null => {
   if (!existsSync(config.shardJurisdictionsPath)) return null;
   try {
     const payload = JSON.parse(readFileSync(config.shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
-    const entries = Object.entries(payload.jurisdictions ?? {});
-    const match = entries.find(([key, jurisdiction]) => !isRpc2Jurisdiction(config, key, jurisdiction)) ?? entries[0];
-    if (!match) return null;
-    const [, jurisdiction] = match;
-    const name = String(jurisdiction.name || '').trim();
-    if (!name) return null;
-    return {
-      name,
-      ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-      ...(jurisdiction.contracts?.depository ? { depositoryAddress: jurisdiction.contracts.depository } : {}),
-      ...(jurisdiction.contracts?.entityProvider ? { entityProviderAddress: jurisdiction.contracts.entityProvider } : {}),
-    };
+    return selectPrimaryHubJurisdiction(payload, config);
   } catch {
     return null;
   }

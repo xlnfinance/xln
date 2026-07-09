@@ -21,6 +21,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
 import { deriveDelta } from '../runtime/account-utils';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
+import { selectPrimaryHubJurisdiction } from '../runtime/orchestrator/jurisdiction-select';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 import {
   getRenderedOutboundForAccount,
@@ -142,6 +143,16 @@ const getFreePort = async (): Promise<number> => {
 };
 
 const apiUrl = (pathname: string): string => new URL(pathname, API_BASE_URL).toString();
+
+const resolvePrimaryCustodyJurisdictionId = async (): Promise<string> => {
+  const response = await fetch(apiUrl('/api/jurisdictions'), { cache: 'no-store' });
+  if (!response.ok) throw new Error(`E2E_CUSTODY_JURISDICTIONS_HTTP_${response.status}`);
+  const primary = selectPrimaryHubJurisdiction(await response.json(), {
+    rpc2Url: process.env.E2E_ANVIL_RPC2 ?? process.env.RPC_TRON ?? '',
+  });
+  if (!primary?.key) throw new Error('E2E_CUSTODY_PRIMARY_JURISDICTION_MISSING');
+  return primary.key;
+};
 
 async function getApiTokenId(page: Page, symbol: string): Promise<number> {
   const response = await page.request.get(`${API_BASE_URL}/api/tokens`);
@@ -917,6 +928,10 @@ test.describe('E2E Custody Flow', () => {
         }));
       }
 
+      const custodyJurisdictionId = await timedStep(
+        'custody.resolve_jurisdiction',
+        resolvePrimaryCustodyJurisdictionId,
+      );
       const custodySupport = await timedStep('custody.start_support', () => startCustodySupport({
         apiBaseUrl: API_BASE_URL,
         daemonPort,
@@ -928,7 +943,7 @@ test.describe('E2E Custody Flow', () => {
         seed: 'xln-e2e-custody-seed',
         signerLabel: 'custody-e2e-1',
         profileName: 'Custody',
-        jurisdictionId: 'arrakis',
+        jurisdictionId: custodyJurisdictionId,
       }));
       daemonChild = custodySupport.daemonChild;
       custodyChild = custodySupport.custodyChild;

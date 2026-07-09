@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { toPublicJurisdictionsPayload } from '../orchestrator/jurisdictions';
+import { selectPrimaryHubJurisdiction } from '../orchestrator/jurisdiction-select';
 import { resolveRpcProxyIndex } from '../orchestrator/proxy';
 
 describe('orchestrator public RPC routes', () => {
@@ -67,5 +68,34 @@ describe('orchestrator public RPC routes', () => {
     expect(payload.jurisdictions.rpc3.rpc).toBe('/rpc3');
     expect(payload.jurisdictions.custom8.rpc).toBe('/rpc8');
     expect(payload.jurisdictions.external.rpc).toBe('https://example.invalid/rpc');
+  });
+
+  test('selects the custody primary jurisdiction key without arrakis coupling', () => {
+    const primary = selectPrimaryHubJurisdiction({
+      version: '3',
+      jurisdictions: {
+        tron: {
+          name: 'Tron',
+          chainId: 31338,
+          rpc: 'http://127.0.0.1:8546',
+          contracts: { depository: '0x3', entityProvider: '0x4' },
+        },
+        base: {
+          name: 'Base',
+          primary: true,
+          chainId: 8453,
+          rpc: 'http://127.0.0.1:8545',
+          contracts: { depository: '0x5', entityProvider: '0x6' },
+        },
+      },
+    }, { rpc2Url: 'http://127.0.0.1:8546' });
+
+    expect(primary).toEqual({
+      key: 'base',
+      name: 'Base',
+      chainId: 8453,
+      depositoryAddress: '0x5',
+      entityProviderAddress: '0x6',
+    });
   });
 });

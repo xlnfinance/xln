@@ -4,7 +4,7 @@
  *
  * Usage:
  *   bun runtime/cli.ts                    # local anvil
- *   bun runtime/cli.ts remote             # xln.finance/rpc/arrakis
+ *   bun runtime/cli.ts remote             # xln.finance/rpc
  */
 
 import * as readline from 'readline';
@@ -14,7 +14,7 @@ import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-utils';
 import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './j-batch';
 
-const REMOTE_RPC = 'https://xln.finance/rpc/arrakis';
+const REMOTE_RPC = 'https://xln.finance/rpc';
 const LOCAL_RPC = 'http://localhost:8545';
 const CHAIN_ID = 31337;
 
