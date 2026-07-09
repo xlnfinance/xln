@@ -211,7 +211,12 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       const dropMsg =
         `🛑 Frozen account input dropped for ${counterpartyId.slice(-4)} ` +
         `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
-      console.error(dropMsg);
+      accountHandlerLog.error('input.dropped_frozen_account', {
+        counterparty: shortId(counterpartyId),
+        height: input.height ?? input.newAccountFrame?.height ?? null,
+        txs: frameTxTypes,
+        ack: Boolean(input.prevHanko),
+      });
       addMessage(newState, dropMsg);
       return {
         newState,
@@ -248,7 +253,10 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
         outputs.push(result.autoApproveOutput);
       }
     } else {
-      console.warn(`⚠️ settleAction failed: ${result.message}`);
+      accountHandlerLog.warn('settle_action.failed', {
+        from: shortId(input.fromEntityId),
+        message: result.message,
+      });
       addMessage(newState, `⚠️ Settlement: ${result.message}`);
     }
   }
@@ -425,15 +433,23 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
         });
       }
     } else {
-      console.error(`❌ Frame consensus failed: ${result.error}`);
+      accountHandlerLog.error('frame.consensus_failed', {
+        from: shortId(input.fromEntityId),
+        error: result.error,
+      });
       addMessage(newState, `❌ ${result.error}`);
       throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
     }
   } else if (!input.settleAction) {
     // Only error if there was no settleAction either
     // Settlement workspace actions (propose/update/approve/reject) don't require frames
-    console.error(`❌ Received AccountInput without frames - invalid!`);
-    addMessage(newState, `❌ Invalid AccountInput from ${input.fromEntityId.slice(-4)}`);
+    const error = `ACCOUNT_INPUT_EMPTY: from=${shortId(input.fromEntityId)} to=${shortId(input.toEntityId)}`;
+    accountHandlerLog.error('input.empty', {
+      from: shortId(input.fromEntityId),
+      to: shortId(input.toEntityId),
+    });
+    addMessage(newState, `❌ ${error}`);
+    throw new Error(error);
   }
 
   return {

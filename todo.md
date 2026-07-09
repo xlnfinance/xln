@@ -518,6 +518,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: basic entity proposal/vote traces now use the structured
      `entity.basic` logger instead of direct `console.*`, with both Bun source
      tests and the failure-taxonomy scan guarding regressions.
+   - Partial: account input/open-account failure paths now use structured
+     `account.handler` / `account.open` loggers instead of direct `console.*`;
+     empty account inputs now fail fast with `ACCOUNT_INPUT_EMPTY` and are
+     covered by Bun source/behavior tests plus the failure-taxonomy scan.
    - Partial: compact entity j-batch operation handlers (`r2r`,
      `createSettlement`, `mintReserves`, `j_broadcast`, `j_clear_batch`,
      `j_abort_sent_batch`) now use the structured `entity.jbatch` logger

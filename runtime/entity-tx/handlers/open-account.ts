@@ -10,6 +10,7 @@ import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../default-account-tokens';
 import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../account-watch-seed';
+import { createStructuredLogger, shortId } from '../../logger';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -20,6 +21,7 @@ type OpenAccountResult = {
 
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
+const openAccountLog = createStructuredLogger('account.open');
 
 const USD_SCALE = 10n ** 18n;
 const toUsdWei = (value: number): bigint => BigInt(Math.max(0, Math.floor(value))) * USD_SCALE;
@@ -77,7 +79,10 @@ export const handleOpenAccountEntityTx = (
     const error =
       `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${formatEntityId(entityState.entityId)} ` +
       `counterparty=${formatEntityId(counterpartyId)}`;
-    console.error(`❌ ${error}`);
+    openAccountLog.error('already_exists', {
+      entity: shortId(entityState.entityId),
+      counterparty: shortId(counterpartyId),
+    });
     throw new Error(error);
   }
 

@@ -33,6 +33,8 @@ warnings.
   handler is guarded against raw `console.log` noise in core.
 - Basic entity proposal/vote traces use the structured `entity.basic` logger;
   handlers are guarded against direct `console.*` noise in core.
+- Account input/open-account failures use structured `account.handler` and
+  `account.open` loggers; empty account inputs fail fast with `ACCOUNT_INPUT_EMPTY`.
 - Entity j-batch operation traces use the structured `entity.jbatch` logger;
   compact batch handlers are guarded against direct `console.*` noise in core.
 - R2C debug traces use the structured `entity.r2c` logger; the handler is

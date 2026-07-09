@@ -261,6 +261,8 @@ for (const [path, markers] of [
   ]],
   ['runtime/entity-tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
+  ['runtime/entity-tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
+  ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
   ['runtime/entity-tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity-tx/handlers/create-settlement.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity-tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -295,6 +297,14 @@ assertNotIncludes(basicHandler, 'console.', basicHandlerPath);
 const proposalHandlerPath = 'runtime/entity-tx/proposals.ts';
 const proposalHandler = readText(proposalHandlerPath);
 assertNotIncludes(proposalHandler, 'console.', proposalHandlerPath);
+
+const accountHandlerPath = 'runtime/entity-tx/handlers/account.ts';
+const accountHandler = readText(accountHandlerPath);
+assertNotIncludes(accountHandler, 'console.', accountHandlerPath);
+
+const openAccountHandlerPath = 'runtime/entity-tx/handlers/open-account.ts';
+const openAccountHandler = readText(openAccountHandlerPath);
+assertNotIncludes(openAccountHandler, 'console.', openAccountHandlerPath);
 
 for (const jBatchHandlerPath of [
   'runtime/entity-tx/handlers/r2r.ts',
