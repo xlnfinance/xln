@@ -644,6 +644,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      is quiet and deterministic instead of printing raw console output with a
      wall-clock `lastUpdated`; source/behavior tests plus the failure-taxonomy
      scan guard it.
+   - Partial: external wallet/faucet provision, ERC20, gas, and snapshot
+     diagnostics now use the structured `server.external_wallet` logger instead
+     of direct `[EXT-FAUCET]` / `[EXT-WALLET]` console output; source tests and
+     the failure-taxonomy scan guard this boundary.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

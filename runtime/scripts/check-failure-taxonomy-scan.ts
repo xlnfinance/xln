@@ -251,6 +251,12 @@ for (const [path, markers] of [
   ['runtime/server/faucet-failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
   ['runtime/server/offchain-faucet.ts', ['faucetFailureBody']],
   ['runtime/server/reserve-faucet.ts', ['faucetFailureBody']],
+  ['runtime/api/external-wallet-api.ts', [
+    "createStructuredLogger('server.external_wallet')",
+    "faucet.erc20.failed",
+    "snapshot.failed",
+    "faucet.gas.failed",
+  ]],
   ['runtime/entity-tx/invariant-errors.ts', ["'DIRECT_PAYMENT_',", "'SWAP_REQUEST_',"]],
   ['runtime/entity-tx/handlers/direct-payment.ts', [
     "createStructuredLogger('entity.payment')",
@@ -473,6 +479,12 @@ const settlementOps = readText(settlementOpsPath);
 assertIncludes(settlementOps, 'SETTLEMENT_UNKNOWN_OP_TYPE', settlementOpsPath);
 assertNotIncludes(settlementOps, 'console.', settlementOpsPath);
 
+const externalWalletApiPath = 'runtime/api/external-wallet-api.ts';
+const externalWalletApi = readText(externalWalletApiPath);
+assertNotIncludes(externalWalletApi, 'console.', externalWalletApiPath);
+assertNotIncludes(externalWalletApi, '[EXT-FAUCET/', externalWalletApiPath);
+assertNotIncludes(externalWalletApi, '[EXT-WALLET/', externalWalletApiPath);
+
 for (const jBatchHandlerPath of [
   'runtime/entity-tx/handlers/r2r.ts',
   'runtime/entity-tx/handlers/create-settlement.ts',
@@ -535,6 +547,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/orchestrator-lifecycle-logging.test.ts', ['orchestrator lifecycle helpers use structured logging without direct console output', 'orchestrator.lifecycle']],
   ['runtime/__tests__/jurisdiction-config-logging.test.ts', ['jurisdiction config loader uses structured logging without direct console output', 'runtime.jurisdiction_config']],
   ['runtime/__tests__/jurisdiction-loader-logging.test.ts', ['jurisdiction loader diagnostics', 'runtime.jurisdiction_loader']],
+  ['runtime/__tests__/external-wallet-api.test.ts', ['external wallet API uses structured logging instead of raw console output', 'server.external_wallet']],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
@@ -550,6 +563,7 @@ for (const marker of [
   '`TransientRace` is retryable',
   '`ExpectedEmpty` is non-fatal',
   'Public health redaction exposes code/category/retryability/fatality',
+  'External wallet/faucet diagnostics use the structured',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }

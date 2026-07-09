@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   createExternalWalletApi,
   type ExternalWalletApiContext,
@@ -89,6 +91,18 @@ const createBlockingFaucetFund = () => {
 };
 
 describe('external wallet API faucet transaction gate', () => {
+  test('external wallet API uses structured logging instead of raw console output', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/api/external-wallet-api.ts'), 'utf8');
+    expect(source).toContain("createStructuredLogger('server.external_wallet')");
+    expect(source).toContain("externalWalletLog.debug('faucet.provision.token_balance'");
+    expect(source).toContain("externalWalletLog.error('faucet.erc20.failed'");
+    expect(source).toContain("externalWalletLog.error('snapshot.failed'");
+    expect(source).toContain("externalWalletLog.error('faucet.gas.failed'");
+    expect(source).not.toContain('console.log');
+    expect(source).not.toContain('console.warn');
+    expect(source).not.toContain('console.error');
+  });
+
   test('serializes faucet funding across API instances sharing one faucet signer', async () => {
     const provider = makeTestProvider();
     const adapter = makeBrowserVmAdapter(provider);

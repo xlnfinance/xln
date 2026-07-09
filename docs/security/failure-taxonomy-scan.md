@@ -99,6 +99,9 @@ warnings.
 - Account delta validation now fails loud with `ACCOUNT_DELTAS_*` errors for
   missing/malformed inputs instead of returning partial maps after `console.*`
   warnings.
+- External wallet/faucet diagnostics use the structured `server.external_wallet`
+  logger and are guarded against direct `[EXT-FAUCET]` / `[EXT-WALLET]`
+  console output.
 
 ## Open Manual Review
 

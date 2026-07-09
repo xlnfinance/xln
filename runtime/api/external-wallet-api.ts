@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { deriveSignerKeySync } from '../account-crypto';
 import type { JAdapter, JEvent, JTokenInfo, JWalletAllowanceRead } from '../jadapter/types';
+import { createStructuredLogger } from '../logger';
 import { safeStringify } from '../serialization-utils';
 
 type Erc20ContractRunner = NonNullable<Parameters<typeof ERC20Mock__factory.connect>[1]>;
@@ -72,6 +73,7 @@ const FAUCET_REFILL_THRESHOLD_BPS = Math.min(
   10_000,
   readPositiveIntEnv('XLN_FAUCET_REFILL_THRESHOLD_BPS', 5_000),
 );
+const externalWalletLog = createStructuredLogger('server.external_wallet');
 
 const createJsonResponse = (
   headers: Record<string, string>,
@@ -341,18 +343,26 @@ const provisionFaucetWalletFunding = async (
         const currentBalance = await tokenContract.balanceOf(faucetAddress);
         const targetBalance = context.faucetTokenTargetUnits * 10n ** BigInt(token.decimals);
         const refillThreshold = refillThresholdFor(targetBalance);
-        console.log(
-          `[EXT-FAUCET/PROVISION] token=${token.symbol} faucet=${faucetAddress} current=${currentBalance.toString()} threshold=${refillThreshold.toString()} target=${targetBalance.toString()}`,
-        );
+        externalWalletLog.debug('faucet.provision.token_balance', {
+          token: token.symbol,
+          faucetAddress,
+          currentBalance: currentBalance.toString(),
+          refillThreshold: refillThreshold.toString(),
+          targetBalance: targetBalance.toString(),
+        });
         if (currentBalance >= refillThreshold) continue;
-        console.log(
-          `[EXT-FAUCET/PROVISION] token-transfer-start token=${token.symbol} deployer=${deployerAddress || 'unknown'}`,
-        );
+        externalWalletLog.debug('faucet.provision.token_transfer_start', {
+          token: token.symbol,
+          deployerAddress: deployerAddress || 'unknown',
+        });
         const refillTx = await tokenContract.transfer(
           faucetAddress,
           targetBalance - currentBalance,
         );
-        console.log(`[EXT-FAUCET/PROVISION] token-transfer-tx token=${token.symbol} hash=${refillTx.hash}`);
+        externalWalletLog.debug('faucet.provision.token_transfer_tx', {
+          token: token.symbol,
+          txHash: refillTx.hash,
+        });
         await waitForFaucetProvisionTx(refillTx, 'token-transfer', {
           token: token.symbol,
           tokenAddress: token.address,
@@ -362,25 +372,31 @@ const provisionFaucetWalletFunding = async (
           refillThreshold: refillThreshold.toString(),
           targetBalance: targetBalance.toString(),
         });
-        console.log(`[EXT-FAUCET/PROVISION] token-transfer-mined token=${token.symbol} hash=${refillTx.hash}`);
+        externalWalletLog.debug('faucet.provision.token_transfer_mined', {
+          token: token.symbol,
+          txHash: refillTx.hash,
+        });
       }
     }
 
     if (options.ensureEth) {
       const currentEth = await adapter.provider.getBalance(faucetAddress);
       const refillThreshold = refillThresholdFor(context.faucetWalletEthTarget);
-      console.log(
-        `[EXT-FAUCET/PROVISION] eth faucet=${faucetAddress} current=${currentEth.toString()} threshold=${refillThreshold.toString()} target=${context.faucetWalletEthTarget.toString()}`,
-      );
+      externalWalletLog.debug('faucet.provision.eth_balance', {
+        faucetAddress,
+        currentEth: currentEth.toString(),
+        refillThreshold: refillThreshold.toString(),
+        targetEth: context.faucetWalletEthTarget.toString(),
+      });
       if (currentEth < refillThreshold) {
-        console.log(
-          `[EXT-FAUCET/PROVISION] eth-topup-start deployer=${deployerAddress || 'unknown'}`,
-        );
+        externalWalletLog.debug('faucet.provision.eth_topup_start', {
+          deployerAddress: deployerAddress || 'unknown',
+        });
         const topupTx = await adapter.signer.sendTransaction({
           to: faucetAddress,
           value: context.faucetWalletEthTarget - currentEth,
         });
-        console.log(`[EXT-FAUCET/PROVISION] eth-topup-tx hash=${topupTx.hash}`);
+        externalWalletLog.debug('faucet.provision.eth_topup_tx', { txHash: topupTx.hash });
         await waitForFaucetProvisionTx(topupTx, 'eth-topup', {
           faucetAddress,
           deployerAddress,
@@ -388,7 +404,7 @@ const provisionFaucetWalletFunding = async (
           refillThreshold: refillThreshold.toString(),
           targetEth: context.faucetWalletEthTarget.toString(),
         });
-        console.log(`[EXT-FAUCET/PROVISION] eth-topup-mined hash=${topupTx.hash}`);
+        externalWalletLog.debug('faucet.provision.eth_topup_mined', { txHash: topupTx.hash });
       }
     }
 
@@ -467,7 +483,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
 
       const requestId = crypto.randomUUID();
       const { userAddress, tokenSymbol, amount } = await readFaucetBody(request);
-      console.log(`[EXT-FAUCET/ERC20 ${requestId}] request to=${userAddress} token=${tokenSymbol} amount=${amount}`);
+      externalWalletLog.debug('faucet.erc20.request', { requestId, userAddress, tokenSymbol, amount });
       if (!ethers.isAddress(userAddress)) {
         return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
       }
@@ -483,7 +499,10 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       if (adapter.mode === 'browservm') {
         return await withFaucetWalletLock(context, adapter, async () => {
           const amountWei = ethers.parseUnits(amount, 18);
-          console.log(`[EXT-FAUCET/ERC20 ${requestId}] browservm fund amountWei=${amountWei}`);
+          externalWalletLog.debug('faucet.erc20.browservm_fund', {
+            requestId,
+            amountWei: amountWei.toString(),
+          });
           const funded = await context.fundBrowserVmWallet(userAddress, amountWei);
           if (!funded) {
             return createJsonResponse(context.jsonHeaders, { error: 'BrowserVM faucet unavailable' }, 503);
@@ -508,7 +527,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
 
       return await withFaucetWalletLock(context, adapter, async () => {
         const tokens = await context.getTokenCatalog();
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] token catalog size=${tokens.length}`);
+        externalWalletLog.debug('faucet.erc20.token_catalog', { requestId, tokenCount: tokens.length });
         const tokenInfo = tokens.find((token) => token.symbol.toUpperCase() === tokenSymbol);
         if (!tokenInfo) {
           return createJsonResponse(context.jsonHeaders, { error: `Token ${tokenSymbol} not found` }, 404);
@@ -521,32 +540,39 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         const targetBalance = ethers.parseEther('0.1');
         const userTopupAmount = userEth < minBalance ? targetBalance - userEth : 0n;
 
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] checking faucet wallet balances`);
+        externalWalletLog.debug('faucet.erc20.balance_check', { requestId });
         const faucetWallet = await requireFaucetWalletBalances(context, adapter, tokens, {
           requiredEth: ethers.parseEther('0.02') + userTopupAmount,
           requiredTokenAddress: tokenInfo.address,
           requiredTokenAmount: amountWei,
         });
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer token=${tokenInfo.symbol} amountWei=${amountWei}`);
+        externalWalletLog.debug('faucet.erc20.transfer_start', {
+          requestId,
+          token: tokenInfo.symbol,
+          amountWei: amountWei.toString(),
+        });
         const tokenContract = ERC20Mock__factory.connect(
           tokenInfo.address,
           toErc20ContractRunner(faucetWallet, 'faucetWallet'),
         );
         const transferTx = await tokenContract.transfer(userAddress, amountWei);
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer tx=${transferTx.hash} waiting`);
+        externalWalletLog.debug('faucet.erc20.transfer_tx', { requestId, txHash: transferTx.hash });
         await transferTx.wait();
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer mined`);
+        externalWalletLog.debug('faucet.erc20.transfer_mined', { requestId, txHash: transferTx.hash });
 
         if (userEth < minBalance) {
-          console.log(`[EXT-FAUCET/ERC20 ${requestId}] topping up gas currentEth=${userEth}`);
+          externalWalletLog.debug('faucet.erc20.gas_topup_start', {
+            requestId,
+            currentEth: userEth.toString(),
+          });
           const topupTx = await faucetWallet.sendTransaction({
             to: userAddress,
             value: targetBalance - userEth,
           });
-          console.log(`[EXT-FAUCET/ERC20 ${requestId}] topup tx=${topupTx.hash} waiting`);
+          externalWalletLog.debug('faucet.erc20.gas_topup_tx', { requestId, txHash: topupTx.hash });
           await topupTx.wait();
           ethTxHash = topupTx.hash;
-          console.log(`[EXT-FAUCET/ERC20 ${requestId}] topup mined`);
+          externalWalletLog.debug('faucet.erc20.gas_topup_mined', { requestId, txHash: topupTx.hash });
         }
 
         context.emitDebugEvent({
@@ -576,7 +602,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('[EXT-FAUCET/ERC20] failed:', message);
+      externalWalletLog.error('faucet.erc20.failed', { error: message });
       context.emitDebugEvent({
         event: 'error',
         runtimeId: context.getRuntimeId(),
@@ -706,7 +732,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('[EXT-WALLET/SNAPSHOT] failed:', message);
+      externalWalletLog.error('snapshot.failed', { error: message });
       return createJsonResponse(context.jsonHeaders, { error: message }, 500);
     }
   };
@@ -720,7 +746,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
 
       const requestId = crypto.randomUUID();
       const { userAddress, amount } = await readGasFaucetBody(request);
-      console.log(`[EXT-FAUCET/GAS ${requestId}] request to=${userAddress} amount=${amount}`);
+      externalWalletLog.debug('faucet.gas.request', { requestId, userAddress, amount });
       if (!ethers.isAddress(userAddress)) {
         return createJsonResponse(context.jsonHeaders, { error: 'Invalid userAddress' }, 400);
       }
@@ -730,14 +756,17 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         const faucetWallet = await requireFaucetWalletBalances(context, adapter, [], {
           requiredEth: topupAmount + ethers.parseEther('0.01'),
         });
-        console.log(`[EXT-FAUCET/GAS ${requestId}] sending topup wei=${topupAmount}`);
+        externalWalletLog.debug('faucet.gas.topup_start', {
+          requestId,
+          topupWei: topupAmount.toString(),
+        });
         const tx = await faucetWallet.sendTransaction({
           to: userAddress,
           value: topupAmount,
         });
-        console.log(`[EXT-FAUCET/GAS ${requestId}] tx=${tx.hash} waiting`);
+        externalWalletLog.debug('faucet.gas.topup_tx', { requestId, txHash: tx.hash });
         await tx.wait();
-        console.log(`[EXT-FAUCET/GAS ${requestId}] mined`);
+        externalWalletLog.debug('faucet.gas.topup_mined', { requestId, txHash: tx.hash });
         return createJsonResponse(context.jsonHeaders, {
           success: true,
           type: 'gas',
@@ -749,7 +778,7 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('[EXT-FAUCET/GAS] failed:', message);
+      externalWalletLog.error('faucet.gas.failed', { error: message });
       return createJsonResponse(context.jsonHeaders, { error: message }, 500);
     }
   };
