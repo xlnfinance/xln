@@ -6,6 +6,7 @@ import {
   waitForNamedHubs,
 } from './utils/e2e-baseline';
 import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
+import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 
 const REMOTE_RUNTIME_IMPORT_STORAGE_KEY = 'xln-remote-runtime-imports';
 const REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY = 'xln-remote-runtime-import-last-result';
@@ -2335,15 +2336,19 @@ test('admin remote runtime control advances live state and exposes past frames',
   await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
 });
 
-test('runtime dropdown manager attaches a remote radapter by token', async ({ page }) => {
-  const baseline = await ensureE2EBaseline(page, { requireHubMesh: true, minHubCount: 3 });
+test('runtime dropdown switches app-imported remote runtimes without manager route', async ({ page }) => {
+  const baseline = await ensureE2EBaseline(page, {
+    requireHubMesh: true,
+    minHubCount: 3,
+    timeoutMs: 300_000,
+    allowAutoReset: false,
+  });
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
   const h2Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H2');
   const h1WsUrl = h1Endpoint.wsUrl;
   const h2WsUrl = h2Endpoint.wsUrl;
 
   const h1Key = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
-  const h2Key = (await resolveRuntimeImportCapability(page, h2Endpoint, 'read')).token;
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(h1WsUrl)}&token=${encodeURIComponent(h1Key)}`, {
     waitUntil: 'domcontentloaded',
   });
@@ -2356,17 +2361,40 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
   await page.getByTestId('context-current').click();
   await expect(page.getByTestId('remote-runtime-manager')).toHaveCount(0);
   await expect(page.locator('.remote-manager-link')).toHaveCount(0);
-  await page.goto(`${APP_BASE_URL}/radapter/manage`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('remote-runtime-manager')).toBeVisible({ timeout: 10_000 });
-  await page.getByRole('button', { name: 'Attach' }).click();
-  await page.getByTestId('remote-runtime-label').fill('H2');
-  await page.getByTestId('remote-runtime-ws').fill(h2WsUrl);
-  await page.getByTestId('remote-runtime-token').fill(h2Key);
-  const reloadAfterAttach = page.waitForEvent('framenavigated', { timeout: 90_000 }).catch(() => null);
-  await page.getByTestId('remote-runtime-attach').click();
-  await reloadAfterAttach;
-  await page.waitForLoadState('domcontentloaded');
-  await expect.poll(() => new URL(page.url()).pathname, { timeout: REMOTE_E2E_WAIT_MS }).toBe('/app');
+  await page.keyboard.press('Escape');
+
+  const importUrl = await resolveRuntimeImportAppUrl(page, {
+    appBaseUrl: APP_BASE_URL,
+    apiBaseUrl: API_BASE_URL,
+    access: 'read',
+  });
+  expect(importUrl).toContain('/app#runtime-import');
+  expect(importUrl).not.toContain('/radapter/manage');
+  await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
+  const importSummary = await readRuntimeImportSummary(page, 120_000);
+  expect(importSummary.entries.some(entry => entry.runtimeId === h2Endpoint.runtimeId)).toBe(true);
+  expect(importSummary.failedCount ?? 0).toBe(0);
+
+  await page.getByTestId('context-current').click();
+  await page.waitForFunction(({ targetRuntimeId }) => {
+    const group = document.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
+    return Array.from(group?.querySelectorAll('[data-testid="context-entity-row"]') ?? [])
+      .some((row) =>
+        row.getAttribute('data-runtime-id') === targetRuntimeId &&
+        row.getAttribute('data-entity-label') === 'h2',
+      );
+  }, { targetRuntimeId: h2Endpoint.runtimeId }, { timeout: REMOTE_E2E_WAIT_MS });
+  await page.evaluate(({ targetRuntimeId }) => {
+    const group = document.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
+    if (!group) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
+    const row = Array.from(group.querySelectorAll('[data-testid="context-entity-row"]'))
+      .find((candidate) =>
+        candidate.getAttribute('data-runtime-id') === targetRuntimeId &&
+        candidate.getAttribute('data-entity-label') === 'h2',
+      ) as HTMLElement | undefined;
+    if (!row) throw new Error(`REMOTE_RUNTIME_ENTITY_ROW_MISSING:${targetRuntimeId}:h2`);
+    row.click();
+  }, { targetRuntimeId: h2Endpoint.runtimeId });
 
   await page.waitForFunction(
     (expectedWsUrl) => localStorage.getItem('xln-runtime-adapter-ws') === expectedWsUrl,
@@ -2387,7 +2415,7 @@ test('runtime dropdown manager attaches a remote radapter by token', async ({ pa
 
   expect(managerState.activeWsUrl).toBe(h2WsUrl);
   expect(managerState.sessionRegistryPresent).toBe(false);
-  expect(managerState.imports.length).toBeGreaterThanOrEqual(1);
+  expect(managerState.imports.length).toBeGreaterThanOrEqual(5);
   expect(managerState.imports.length).toBeLessThanOrEqual(100);
   expect(managerState.h2Import?.label).toBe('H2');
   expect(managerState.h2Import?.access).toBe('read');

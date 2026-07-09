@@ -1,11 +1,11 @@
 {
   "title": "desktop remote runtime import",
   "group": "Remote Runtime Import",
-  "description": "Dedicated remote runtime manager for bulk URL and token imports.",
+  "description": "Wallet app after same-origin remote runtime import adds H1/H2/H3/MM/Custody to the runtime list.",
   "platform": "desktop",
   "tags": [
     "remote-runtime",
-    "radapter",
+    "wallet",
     "bulk-import"
   ],
   "sourceTest": "ui screenshot smoke captures operator admin surfaces",

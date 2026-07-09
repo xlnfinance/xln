@@ -1,7 +1,8 @@
 import { devices, expect, test, type BrowserContext, type Page } from './global-setup';
-import { ensureE2EBaseline, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
+import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { resolveRuntimeImportAppUrl } from './utils/e2e-runtime-import';
 import { captureLocatorScreenshot, capturePageScreenshot } from './utils/e2e-screenshots';
 
 const SWAP_CONNECT_TOKEN_IDS = [1, 2, 3] as const;
@@ -433,17 +434,30 @@ test('ui screenshot smoke captures operator admin surfaces', async ({ page }, te
     tags: ['health', 'admin'],
   });
 
-  await page.goto(`${APP_BASE_URL}/radapter/manage`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByText('Remote runtimes')).toBeVisible({ timeout: 30_000 });
+  const importUrl = await resolveRuntimeImportAppUrl(page, {
+    appBaseUrl: APP_BASE_URL,
+    apiBaseUrl: API_BASE_URL,
+    access: 'read',
+  });
+  expect(importUrl).toContain('/app#runtime-import');
+  expect(importUrl).not.toContain('/radapter/manage');
+  await page.goto(importUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => {
+    const raw = sessionStorage.getItem('xln-remote-runtime-import-last-result');
+    if (!raw) return false;
+    const summary = JSON.parse(raw) as { ok?: boolean; count?: number; failedCount?: number };
+    return summary.ok === true && Number(summary.count || 0) >= 5 && Number(summary.failedCount || 0) === 0;
+  }, null, { timeout: 120_000 });
+  await expect(page.getByTestId('context-current')).toBeVisible({ timeout: 30_000 });
   await captureUxPage(page, testInfo, 'desktop-remote-runtime-import.png', {
     title: 'desktop remote runtime import',
     group: 'Remote Runtime Import',
-    description: uxDescription('Dedicated remote runtime manager for bulk URL and token imports.'),
+    description: uxDescription('Wallet app after same-origin remote runtime import adds H1/H2/H3/MM/Custody to the runtime list.'),
     platform: 'desktop',
-    tags: ['remote-runtime', 'radapter', 'bulk-import'],
+    tags: ['remote-runtime', 'wallet', 'bulk-import'],
   });
 
-  await page.evaluate(() => {
+  await page.addInitScript(() => {
     localStorage.setItem('xln-settings', JSON.stringify({ showTimeMachine: true }));
   });
   await page.goto(`${APP_BASE_URL}/embed`, { waitUntil: 'domcontentloaded' });

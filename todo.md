@@ -210,8 +210,12 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Exit: focused QA cockpit e2e covers verdict explanations, four user-story
      videos, screenshot gallery/slideshow, run ledger, history DB controls, and
      read/admin disabled states.
-   - Exit: remote-runtime bulk import reports every checked row, imports
-     successful rows, and shows retryable diagnostics for failed rows.
+   - Closed: remote-runtime bulk import reports every checked row, imports
+     successful rows, and shows retryable diagnostics for failed rows through
+     the app-native `/app#runtime-import-src=...` flow. Guards:
+     `tests/frontend/remote-runtime-import.test.ts`,
+     `tests/frontend/runtime-store-hot-swap.test.ts`, and focused
+     `tests/e2e-radapter-remote.spec.ts` bulk import coverage.
 
 4. **External audit handoff.**
    - Refresh `docs/security/external-audit-brief.md`.
