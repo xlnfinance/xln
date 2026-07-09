@@ -262,6 +262,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-consensus.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
+  ['runtime/runtime-entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
   ['runtime/entity-input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
   ['runtime/entity-tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
@@ -314,6 +315,10 @@ assertNotIncludes(entityInputMerge, 'console.', entityInputMergePath);
 const entityConsensusPath = 'runtime/entity-consensus.ts';
 const entityConsensus = readText(entityConsensusPath);
 assertNotIncludes(entityConsensus, 'console.', entityConsensusPath);
+
+const runtimeEntityInputsPath = 'runtime/runtime-entity-inputs.ts';
+const runtimeEntityInputs = readText(runtimeEntityInputsPath);
+assertNotIncludes(runtimeEntityInputs, 'console.', runtimeEntityInputsPath);
 
 const accountHandlerPath = 'runtime/entity-tx/handlers/account.ts';
 const accountHandler = readText(accountHandlerPath);
@@ -390,6 +395,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
   ['runtime/__tests__/entity-consensus-logging.test.ts', ['entity consensus core uses structured logging only', 'frame.profile']],
+  ['runtime/__tests__/runtime-entity-input-logging.test.ts', ['runtime entity input j-output collection logs stay behind structured debug logging', 'inputs.profile']],
   ['runtime/__tests__/entity-input-merge.test.ts', ['uses structured logging without direct console output', 'entity.input.merge']],
   ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
   ['runtime/__tests__/account-tx-apply-logging.test.ts', ['account_frame without direct console output', 'account_frame.rejected']],

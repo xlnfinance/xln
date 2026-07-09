@@ -36,6 +36,9 @@ warnings.
 - Entity consensus frame diagnostics and slow-profile notices use the
   structured `entity` logger and are guarded against direct `console.*` noise
   in core.
+- Runtime entity-input replay/profile diagnostics use the structured
+  `runtime.entity_inputs` logger and are guarded against direct `console.*`
+  noise in core.
 - Entity input merge conflict/dedup diagnostics use the structured
   `entity.input.merge` logger and are guarded against direct `console.*` noise
   in core.

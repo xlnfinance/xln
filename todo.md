@@ -521,6 +521,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: entity consensus frame diagnostics and slow-profile notices now
      use the structured `entity` logger instead of direct `console.*`, with Bun
      source coverage and the failure-taxonomy scan guarding regressions.
+   - Partial: runtime entity-input replay/profile diagnostics now use the
+     structured `runtime.entity_inputs` logger instead of direct `console.*`,
+     with Bun source coverage and the failure-taxonomy scan guarding
+     regressions.
    - Partial: entity input merge conflict/dedup diagnostics now use the
      structured `entity.input.merge` logger instead of direct `console.*`, with
      Bun source/behavior tests and the failure-taxonomy scan guarding

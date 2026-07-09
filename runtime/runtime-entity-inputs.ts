@@ -69,11 +69,12 @@ export const applyMergedEntityInputs = async (
   for (const entityInput of mergedInputs) {
     const inputProfileStartedAt = getPerfMs();
     if (isReplay) {
-      console.log(
-        `[REPLAY][RUNTIME] merged input entity=${String(entityInput.entityId).slice(-8)} ` +
-          `signer=${String(entityInput.signerId ?? '')} txs=${entityInput.entityTxs?.length ?? 0} ` +
-          `types=${(entityInput.entityTxs ?? []).map(tx => tx.type).join(',')}`,
-      );
+      entityInputLog.debug('replay.merged_input', {
+        entity: shortId(entityInput.entityId, 8),
+        signer: shortId(entityInput.signerId ?? '', 8),
+        txs: entityInput.entityTxs?.length ?? 0,
+        types: (entityInput.entityTxs ?? []).map(tx => tx.type),
+      });
     }
 
     if (
@@ -275,7 +276,7 @@ export const applyMergedEntityInputs = async (
 
   const elapsedMs = Math.round(getPerfMs() - profileStartedAt);
   if (ENTITY_INPUT_PROFILE || elapsedMs >= ENTITY_INPUT_SLOW_MS) {
-    console.warn('[ENTITY-INPUTS-PROFILE]', safeStringify({
+    entityInputLog.warn('inputs.profile', {
       height: env.height,
       elapsedMs,
       mergedInputs: mergedInputs.length,
@@ -285,7 +286,7 @@ export const applyMergedEntityInputs = async (
       slowInputs: profiledInputs
         .sort((left, right) => Number(right['elapsedMs'] || 0) - Number(left['elapsedMs'] || 0))
         .slice(0, 16),
-    }));
+    });
   }
 
   return { entityOutbox, appliedEntityInputs, jOutbox };
@@ -305,10 +306,12 @@ const applyEntityInputToReplica = async (
   jOutputs: JInput[];
 }> => {
   if (DEBUG) {
-    console.log(`Processing input for ${replicaKey}:`);
-    if (entityInput.entityTxs?.length) console.log(`  → ${entityInput.entityTxs.length} transactions`);
-    if (entityInput.proposedFrame) console.log(`  → Proposed frame: ${entityInput.proposedFrame.hash}`);
-    if (entityInput.hashPrecommits?.size) console.log(`  → ${entityInput.hashPrecommits.size} precommits`);
+    entityInputLog.debug('input.processing', {
+      replica: shortId(replicaKey, 10),
+      txs: entityInput.entityTxs?.length ?? 0,
+      proposedFrame: entityInput.proposedFrame?.hash ?? '',
+      hashPrecommits: entityInput.hashPrecommits?.size ?? 0,
+    });
   }
 
   const normalizedInput: EntityInput = {
@@ -323,10 +326,10 @@ const applyEntityInputToReplica = async (
     signerId: actualSignerId,
   };
   if (isReplay) {
-    console.log(
-      `[REPLAY][RUNTIME] applyEntityInput replica=${replicaKey.slice(0, 20)} ` +
-        `txs=${normalizedInput.entityTxs?.length ?? 0}`,
-    );
+    entityInputLog.debug('replay.apply_input', {
+      replica: shortId(replicaKey, 10),
+      txs: normalizedInput.entityTxs?.length ?? 0,
+    });
   }
 
   const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
