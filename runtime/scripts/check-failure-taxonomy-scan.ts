@@ -212,11 +212,13 @@ for (const marker of [
   'fatal: readiness.fatal',
   'failure: readiness.failure',
   "meshLog.warn('runtime_import_manifest.refresh_failed'",
+  "meshLog.warn('market_snapshot.enrichment_unavailable'",
   'classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)',
 ]) {
   assertIncludes(orchestrator, marker, orchestratorPath);
 }
 assertNotIncludes(orchestrator, '[MESH] runtime import manifest refresh failed', orchestratorPath);
+assertNotIncludes(orchestrator, '[MESH] market snapshot enrichment unavailable', orchestratorPath);
 
 const healthRedactionPath = 'runtime/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
@@ -575,6 +577,7 @@ for (const marker of [
   'External wallet/faucet diagnostics use the structured',
   'Runtime adapter oversized-response diagnostics use the structured',
   'Runtime-import manifest refresh failures use structured',
+  'Market snapshot enrichment failures use structured',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }

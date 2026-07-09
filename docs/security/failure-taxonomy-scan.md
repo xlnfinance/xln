@@ -107,6 +107,8 @@ warnings.
   console output.
 - Runtime-import manifest refresh failures use structured `mesh.orchestrator`
   warnings and are guarded against direct `[MESH]` console output.
+- Market snapshot enrichment failures use structured `mesh.orchestrator`
+  warnings and are guarded against direct `[MESH]` console output.
 
 ## Open Manual Review
 

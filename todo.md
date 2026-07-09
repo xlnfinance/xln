@@ -654,6 +654,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime-import manifest refresh failures now use structured
      `mesh.orchestrator` warnings instead of direct `[MESH]` console output;
      startup logging tests and the failure-taxonomy scan guard it.
+   - Partial: market snapshot enrichment failures now use structured
+     `mesh.orchestrator` warnings instead of direct `[MESH]` console output;
+     health source tests and the failure-taxonomy scan guard it.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

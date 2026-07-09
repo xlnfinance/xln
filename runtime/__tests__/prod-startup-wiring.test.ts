@@ -1128,6 +1128,8 @@ describe('production startup wiring', () => {
     expect(buildHealth).toContain('const health = options.includeMarketSnapshots');
     expect(buildHealth).toContain('? await enrichMarketMakerCrossFromHubSnapshots(baseHealth)');
     expect(buildHealth).toContain(': baseHealth;');
+    expect(orchestrator).toContain("meshLog.warn('market_snapshot.enrichment_unavailable'");
+    expect(orchestrator).not.toContain('[MESH] market snapshot enrichment unavailable');
 
     const fullHealthRouteStart = orchestrator.indexOf("if (pathname === '/api/health/full' || (pathname === '/api/health' && url.searchParams.get('full') === '1'))");
     const healthRouteStart = orchestrator.indexOf("if (pathname === '/api/health')", fullHealthRouteStart + 1);

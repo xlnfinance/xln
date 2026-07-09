@@ -1897,7 +1897,10 @@ const fetchRouteMarketSnapshots = async (
   try {
     snapshots = await fetchHubMarketSnapshots(child, hubEntityId, pairIds, 20);
   } catch (error) {
-    console.warn(`[MESH] market snapshot enrichment unavailable hub=${hubEntityId}: ${serializeError(error)}`);
+    meshLog.warn('market_snapshot.enrichment_unavailable', {
+      hubEntityId,
+      error: serializeError(error),
+    });
     return new Map();
   }
   return new Map(snapshots.map((snapshot) => [snapshot.pairId, countSnapshotOrders(snapshot)]));
