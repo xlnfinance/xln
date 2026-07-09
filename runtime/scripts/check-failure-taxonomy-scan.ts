@@ -216,6 +216,9 @@ for (const marker of [
   "meshLog.warn('child.stop_timeout_sigkill'",
   "meshLog.error('child.unexpected_exit'",
   "meshLog.error('child.unexpected_exit.stop_failed'",
+  "meshLog.error('custody.bootstrap_failed'",
+  "meshLog.warn('reset.sigterm_during_reset'",
+  "meshLog.error('reset.initial_failed'",
   'classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)',
 ]) {
   assertIncludes(orchestrator, marker, orchestratorPath);
@@ -225,6 +228,9 @@ assertNotIncludes(orchestrator, '[MESH] market snapshot enrichment unavailable',
 assertNotIncludes(orchestrator, '[MESH] child pid=', orchestratorPath);
 assertNotIncludes(orchestrator, 'failed while stopping children after fatal exit', orchestratorPath);
 assertNotIncludes(orchestrator, 'shutting down instead of restarting', orchestratorPath);
+assertNotIncludes(orchestrator, '[MESH] custody bootstrap failed:', orchestratorPath);
+assertNotIncludes(orchestrator, '[MESH] received SIGTERM from parent during reset', orchestratorPath);
+assertNotIncludes(orchestrator, '[MESH] initial reset failed:', orchestratorPath);
 
 const healthRedactionPath = 'runtime/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
@@ -585,6 +591,7 @@ for (const marker of [
   'Runtime-import manifest refresh failures use structured',
   'Market snapshot enrichment failures use structured',
   'Orchestrator child stop timeout and unexpected child exit diagnostics use',
+  'Orchestrator custody bootstrap, SIGTERM-during-reset, and initial reset',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }

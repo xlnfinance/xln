@@ -69,9 +69,15 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("meshLog.warn('child.stop_timeout_sigkill'");
     expect(orchestrator).toContain("meshLog.error('child.unexpected_exit'");
     expect(orchestrator).toContain("meshLog.error('child.unexpected_exit.stop_failed'");
+    expect(orchestrator).toContain("meshLog.error('custody.bootstrap_failed'");
+    expect(orchestrator).toContain("meshLog.warn('reset.sigterm_during_reset'");
+    expect(orchestrator).toContain("meshLog.error('reset.initial_failed'");
     expect(orchestrator).not.toContain('[MESH] child pid=');
     expect(orchestrator).not.toContain('failed while stopping children after fatal exit');
     expect(orchestrator).not.toContain('shutting down instead of restarting');
+    expect(orchestrator).not.toContain('[MESH] custody bootstrap failed:');
+    expect(orchestrator).not.toContain('[MESH] received SIGTERM from parent during reset');
+    expect(orchestrator).not.toContain('[MESH] initial reset failed:');
     expect(orchestrator).toContain('await stopAllChildren({');
     expect(orchestrator).toContain('quiesceRounds: 1');
     expect(orchestrator).toContain('quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS');

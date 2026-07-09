@@ -2303,7 +2303,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
         });
       } catch (error) {
         custodyBootstrapError = error;
-        console.error('[MESH] custody bootstrap failed:', serializeError(error));
+        meshLog.error('custody.bootstrap_failed', { error: serializeError(error) });
       } finally {
         finishTiming('reset_custody', custodyStartedAt);
       }
@@ -2825,7 +2825,7 @@ const shutdown = async (): Promise<void> => {
 
 process.on('SIGTERM', () => {
   if (resetState.inProgress) {
-    console.warn('[MESH] received SIGTERM from parent during reset');
+    meshLog.warn('reset.sigterm_during_reset');
   }
   void shutdown();
 });
@@ -2839,7 +2839,7 @@ assertMinDiskFree();
 
 if (!args.deferInitialReset) {
   void ensureReset().catch(async (error) => {
-    console.error('[MESH] initial reset failed:', serializeError(error));
+    meshLog.error('reset.initial_failed', { error: serializeError(error) });
     await stopAllChildren({
       quiesceRounds: 1,
       quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS,

@@ -112,6 +112,9 @@ warnings.
 - Orchestrator child stop timeout and unexpected child exit diagnostics use
   structured `mesh.orchestrator` logs and are guarded against direct `[MESH]`
   console output.
+- Orchestrator custody bootstrap, SIGTERM-during-reset, and initial reset
+  failure diagnostics use structured `mesh.orchestrator` logs and are guarded
+  against direct `[MESH]` console output.
 
 ## Open Manual Review
 
