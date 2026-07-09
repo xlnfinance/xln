@@ -4,10 +4,10 @@ import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage, runtimeAd
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
 import type { StorageAccountDoc, StorageEntityViewPage } from '../storage';
 import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../server/ingress-receipts';
-import { safeStringify } from '../serialization-utils';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
+import { createStructuredLogger } from '../logger';
 import type {
   RuntimeAdapterAuthLevel,
   RuntimeAdapterActivityPage,
@@ -70,6 +70,7 @@ const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
 let attachedEnv: Env | null = null;
 let detachEnvChange: (() => void) | null = null;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
+const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
 
 const readPositiveNumberEnv = (name: string, fallback: number): number => {
   const raw = typeof process !== 'undefined' ? process.env[name] : undefined;
@@ -170,10 +171,12 @@ const emitRuntimeAdapterResponseTooLarge = (
     try {
       env.emit('RuntimeAdapterResponseTooLarge', event);
     } catch (error) {
-      console.warn(`[RADAPTER] RESPONSE_TOO_LARGE_EMIT_FAILED ${error instanceof Error ? error.message : String(error)}`);
+      runtimeAdapterLog.warn('response_too_large.emit_failed', {
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   }
-  console.warn(`[RADAPTER] RESPONSE_TOO_LARGE ${safeStringify(event)}`);
+  runtimeAdapterLog.warn('response_too_large', event);
 };
 
 const getClientState = (ws: RuntimeAdapterSocket): AdapterClientState => {

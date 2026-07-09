@@ -102,6 +102,9 @@ warnings.
 - External wallet/faucet diagnostics use the structured `server.external_wallet`
   logger and are guarded against direct `[EXT-FAUCET]` / `[EXT-WALLET]`
   console output.
+- Runtime adapter oversized-response diagnostics use the structured
+  `runtime.radapter` logger and are guarded against direct `[RADAPTER]`
+  console output.
 
 ## Open Manual Review
 

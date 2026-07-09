@@ -648,6 +648,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      diagnostics now use the structured `server.external_wallet` logger instead
      of direct `[EXT-FAUCET]` / `[EXT-WALLET]` console output; source tests and
      the failure-taxonomy scan guard this boundary.
+   - Partial: runtime adapter oversized-response diagnostics now use the
+     structured `runtime.radapter` logger instead of direct `[RADAPTER]`
+     console output; the radapter suite and failure-taxonomy scan guard it.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

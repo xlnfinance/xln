@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from 'bun:test';
 import { createHmac } from 'crypto';
 
@@ -384,6 +385,15 @@ const oldStaticAuthKey = (seed: string, level: 'inspect' | 'admin'): string =>
     .digest('hex');
 
 const inspectToken = (): string => deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 60_000);
+
+test('runtime adapter server diagnostics use structured logging only', () => {
+  const source = readFileSync(new URL('../radapter/server.ts', import.meta.url), 'utf8');
+
+  expect(source).toContain("createStructuredLogger('runtime.radapter')");
+  expect(source).toContain('response_too_large');
+  expect(source).not.toContain('[RADAPTER] RESPONSE_TOO_LARGE');
+  expect(source).not.toContain('console.');
+});
 
 test('runtime adapter capability tokens are scoped by level', () => {
   const readToken = deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 60_000);
@@ -2554,7 +2564,9 @@ test('runtime adapter drops expired clients before broadcasting ticks', async ()
 
 test('runtime adapter caps outgoing responses and closes oversized sockets', async () => {
   const previous = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
+  const previousLogLevel = process.env['XLN_LOG_LEVEL'];
   process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = '512';
+  process.env['XLN_LOG_LEVEL'] = 'error';
   const messages: unknown[] = [];
   let closeCode: number | undefined;
   const socket = {
@@ -2581,6 +2593,11 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
       delete process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
     } else {
       process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = previous;
+    }
+    if (previousLogLevel === undefined) {
+      delete process.env['XLN_LOG_LEVEL'];
+    } else {
+      process.env['XLN_LOG_LEVEL'] = previousLogLevel;
     }
   }
 });

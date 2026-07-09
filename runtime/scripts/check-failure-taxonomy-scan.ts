@@ -308,6 +308,7 @@ for (const [path, markers] of [
   ['runtime/orchestrator/parent-watch.ts', ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing']],
   ['runtime/jurisdiction-config.ts', ["createStructuredLogger('runtime.jurisdiction_config')", 'browser_api_unavailable', 'JURISDICTIONS_BROWSER_CONFIG_INVALID']],
   ['runtime/jurisdiction-loader.ts', ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED']],
+  ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -485,6 +486,11 @@ assertNotIncludes(externalWalletApi, 'console.', externalWalletApiPath);
 assertNotIncludes(externalWalletApi, '[EXT-FAUCET/', externalWalletApiPath);
 assertNotIncludes(externalWalletApi, '[EXT-WALLET/', externalWalletApiPath);
 
+const runtimeAdapterServerPath = 'runtime/radapter/server.ts';
+const runtimeAdapterServer = readText(runtimeAdapterServerPath);
+assertNotIncludes(runtimeAdapterServer, 'console.', runtimeAdapterServerPath);
+assertNotIncludes(runtimeAdapterServer, '[RADAPTER] RESPONSE_TOO_LARGE', runtimeAdapterServerPath);
+
 for (const jBatchHandlerPath of [
   'runtime/entity-tx/handlers/r2r.ts',
   'runtime/entity-tx/handlers/create-settlement.ts',
@@ -548,6 +554,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/jurisdiction-config-logging.test.ts', ['jurisdiction config loader uses structured logging without direct console output', 'runtime.jurisdiction_config']],
   ['runtime/__tests__/jurisdiction-loader-logging.test.ts', ['jurisdiction loader diagnostics', 'runtime.jurisdiction_loader']],
   ['runtime/__tests__/external-wallet-api.test.ts', ['external wallet API uses structured logging instead of raw console output', 'server.external_wallet']],
+  ['runtime/__tests__/radapter.test.ts', ['runtime adapter server diagnostics use structured logging only', 'runtime.radapter']],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
@@ -564,6 +571,7 @@ for (const marker of [
   '`ExpectedEmpty` is non-fatal',
   'Public health redaction exposes code/category/retryability/fatality',
   'External wallet/faucet diagnostics use the structured',
+  'Runtime adapter oversized-response diagnostics use the structured',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }
