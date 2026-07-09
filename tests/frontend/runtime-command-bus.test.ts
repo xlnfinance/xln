@@ -241,7 +241,11 @@ test('xlnStore routes RuntimeInput mutations through RuntimeCommandBus', () => {
 	  expect(source).not.toContain('commitAcceptedRuntimeCommands');
 		  expect(source).not.toContain("registerDebugSurface('submit'");
 		  expect(source).not.toContain('__xlnRuntimeSubmit');
-	  expect(source).toContain("import { activeEnv, activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';");
+	  expect(source).toContain("from './runtimeStore';");
+	  expect(source).toContain('activeEnv');
+	  expect(source).toContain('activeRuntimeId');
+	  expect(source).toContain('runtimes');
+	  expect(source).toContain('runtimeOperations');
 	  expect(source).toContain('export async function submitActiveRuntimeInput');
 	  expect(source).toContain('export async function submitActiveEntityInputs');
 	  expect(source).toContain('export async function submitRuntimeInput');

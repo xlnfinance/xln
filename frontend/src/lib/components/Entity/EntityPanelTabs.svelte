@@ -28,6 +28,7 @@
 import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
 import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
 import { toasts } from '../../stores/toastStore';
+import { errorLog } from '../../stores/errorLogStore';
 import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
 import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -758,6 +759,9 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     if (error instanceof Error && error.message) return error.message;
     return fallback;
   }
+  function logEntityPanelDiagnostic(message: string, details?: unknown): void {
+    errorLog.log(message, 'Entity Panel', details);
+  }
   function recordServerIngressReceipt(result: Pick<FaucetApiResult, 'receipt' | 'statusUrl'> & { runtimeId?: string | null }): void {
     if (!result.receipt) return;
     recordRuntimeIngressReceipt({
@@ -768,7 +772,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     });
   }
   function notifyUserActionError(context: string, message: string): void {
-    console.error(`[EntityPanel] ${context}: ${message}`);
+    logEntityPanelDiagnostic(message, { context });
     toasts.error(message);
   }
   function formatHubDiscoveryRawProfile(profile: unknown): string {
@@ -792,7 +796,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         if (copiedMetaField === field) copiedMetaField = '';
       }, 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      logEntityPanelDiagnostic('Failed to copy entity metadata', { field, error: toErrorMessage(err, 'Copy failed') });
     }
   }
   // Get avatar URL without tripping early boot fail-fast guards.
@@ -1240,7 +1244,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     const minNativeBalance = parseEther('0.01');
     const currentBalance = await jadapter.provider.getBalance(owner);
     if (currentBalance >= minNativeBalance) return;
-    console.warn('[Move] external allowance gas low', {
+    logEntityPanelDiagnostic('Move external allowance gas low', {
       owner,
       nativeBalance: currentBalance.toString(),
       minNativeBalance: minNativeBalance.toString(),
@@ -1251,7 +1255,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     while (Date.now() < deadline) {
       const nextBalance = await jadapter.provider.getBalance(owner);
       if (nextBalance >= minNativeBalance) {
-        console.info('[Move] external allowance gas topped up', {
+        logEntityPanelDiagnostic('Move external allowance gas topped up', {
           owner,
           nativeBalance: nextBalance.toString(),
         });
@@ -1310,7 +1314,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
           : `Approved ${formatAmount(approvalAmount, token.decimals)} ${token.symbol}`,
       );
     } catch (error) {
-      console.error('[Move] approve allowance failed', {
+      logEntityPanelDiagnostic('Move approve allowance failed', {
         owner,
         token: token.address,
         spender,
@@ -1399,8 +1403,13 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         baselineReserve: onchainReserves.get(tokenId) ?? 0n,
       };
     } catch (err) {
-      console.error('[EntityPanel] Reserve withdraw failed:', err);
       const message = err instanceof Error ? err.message : String(err);
+      logEntityPanelDiagnostic('Reserve withdraw failed', {
+        tokenId,
+        amountOverride: amountOverride?.toString() ?? null,
+        amountInput: reserveToExternalAmount,
+        error: message,
+      });
       toasts.error(`Reserve withdraw failed: ${message}`);
       withdrawingExternalToken = null;
     } finally {
@@ -1466,7 +1475,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       }];
       toasts.info(`Reserve faucet requested for ${tokenMeta.symbol}. Waiting for on-chain update...`);
     } catch (err) {
-      console.error('[EntityPanel] Reserve faucet failed:', err);
+      logEntityPanelDiagnostic('Reserve faucet failed', {
+        tokenId,
+        symbol: symbolHint,
+        error: toErrorMessage(err, 'Reserve faucet failed'),
+      });
       toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
     }
   }
@@ -1537,7 +1550,7 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       if (!response?.ok || !result?.success) {
         const status = response ? response.status : 'fetch-error';
         const code = typeof result?.code === 'string' ? result.code : '';
-        console.error('[EntityPanel] Offchain faucet rejected:', {
+        logEntityPanelDiagnostic('Offchain faucet rejected', {
           status,
           code,
           error: result?.error || null,
@@ -1556,7 +1569,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         : 'Faucet payment queued.';
       toasts.info(`${queueLabel} ${result?.requestId ? `Receipt ${result.requestId}` : ''}`.trim());
     } catch (err) {
-      console.error('[EntityPanel] Offchain faucet failed:', err);
+      logEntityPanelDiagnostic('Offchain faucet failed', {
+        hubEntityId,
+        tokenId,
+        error: toErrorMessage(err, 'Offchain faucet failed'),
+      });
       pendingOffchainFaucets = removeOffchainFaucet(pendingOffchainFaucets, hubEntityId, tokenId);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
     }
@@ -1582,7 +1599,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       ])]);
       toasts.info('Withdrawal signature sent');
     } catch (err) {
-      console.error('[EntityPanel] Quick settle approve failed:', err);
+      logEntityPanelDiagnostic('Quick settle approve failed', {
+        counterpartyId: event.detail.counterpartyId,
+        error: toErrorMessage(err, 'Settlement signature failed'),
+      });
       toasts.error(`Settlement signature failed: ${(err as Error).message}`);
     }
   }
@@ -1716,7 +1736,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
                 : `Collateral → Reserve added to draft batch for ${pending.symbol}.`,
             );
           } catch (err) {
-            console.error('[EntityPanel] Asset C→R auto-execute failed:', err);
+            logEntityPanelDiagnostic('Asset C→R auto-execute failed', {
+              tokenId: pending.tokenId,
+              counterpartyEntityId: pending.counterpartyEntityId,
+              error: toErrorMessage(err, 'Unknown error'),
+            });
             toasts.error(`Collateral → Reserve failed: ${toErrorMessage(err, 'Unknown error')}`);
           } finally {
             pendingAssetAutoC2Rs = pendingAssetAutoC2Rs.filter((entry) => entry !== pending);
@@ -2403,9 +2427,9 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
           return;
         }
         if (isExternalWalletSnapshotTransportFailure(message)) {
-          console.warn('[EntityPanel] External token snapshot unavailable:', err);
+          logEntityPanelDiagnostic('External token snapshot unavailable', { error: message });
         } else {
-          console.error('[EntityPanel] Failed to fetch external tokens:', err);
+          logEntityPanelDiagnostic('Failed to fetch external tokens', { error: message });
         }
         externalWalletSnapshotSource = null;
         if (moveAllowanceRouteEnabled) {
@@ -2507,7 +2531,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       refreshPendingCollateralFundingToken();
       toasts.info(`Collateral → Reserve proposed for ${info.symbol}. Waiting for counterparty signature...`);
     } catch (err) {
-      console.error('[EntityPanel] Collateral → Reserve failed:', err);
+      logEntityPanelDiagnostic('Collateral → Reserve failed', {
+        tokenId,
+        counterpartyEntityId,
+        error: toErrorMessage(err, 'Collateral to reserve failed'),
+      });
       toasts.error(`Collateral → Reserve failed: ${(err as Error).message}`);
     }
   }
@@ -2936,7 +2964,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         ])]);
       toasts.info(`R→C pending on-chain confirmation for ${info.symbol}.`);
     } catch (err) {
-      console.error('[EntityPanel] Reserve → Collateral failed:', err);
+      logEntityPanelDiagnostic('Reserve → Collateral failed', {
+        tokenId,
+        counterpartyEntityId,
+        error: toErrorMessage(err, 'Reserve to collateral failed'),
+      });
       toasts.error(`Reserve → Collateral failed: ${(err as Error).message}`);
     } finally {
       collateralFundingToken = null;
@@ -2991,7 +3023,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       openAccountEntityId = '';
       toasts.success('Account request sent');
     } catch (err) {
-      console.error('[EntityPanel] Open account failed:', err);
+      logEntityPanelDiagnostic('Open account failed', {
+        targetEntityId: trimmed,
+        error: toErrorMessage(err, 'Open account failed'),
+      });
       toasts.error(`Open account failed: ${(err as Error).message}`);
     }
   }
@@ -3070,7 +3105,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       ])]);
       toasts.success('Dispute prepared — orderbook exposure removed');
     } catch (err) {
-      console.error('[EntityPanel] Dispute prepare failed:', err);
+      logEntityPanelDiagnostic('Dispute prepare failed', {
+        counterpartyEntityId,
+        error: toErrorMessage(err, 'Dispute prepare failed'),
+      });
       toasts.error(`Dispute prepare failed: ${(err as Error).message}`);
     }
   }
@@ -3096,7 +3134,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       ])]);
       toasts.success('Dispute queued — will be submitted on next batch broadcast');
     } catch (err) {
-      console.error('[EntityPanel] Dispute start failed:', err);
+      logEntityPanelDiagnostic('Dispute start failed', {
+        counterpartyEntityId,
+        error: toErrorMessage(err, 'Dispute start failed'),
+      });
       toasts.error(`Dispute failed: ${(err as Error).message}`);
     }
   }
@@ -3121,7 +3162,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       ])]);
       toasts.success('Dispute finalize queued — will be submitted on next batch broadcast');
     } catch (err) {
-      console.error('[EntityPanel] Dispute finalize failed:', err);
+      logEntityPanelDiagnostic('Dispute finalize failed', {
+        counterpartyEntityId,
+        error: toErrorMessage(err, 'Dispute finalize failed'),
+      });
       toasts.error(`Dispute finalize failed: ${(err as Error).message}`);
     }
   }
@@ -3146,7 +3190,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       ])]);
       toasts.success('Reopen disputed account queued');
     } catch (err) {
-      console.error('[EntityPanel] Reopen disputed account failed:', err);
+      logEntityPanelDiagnostic('Reopen disputed account failed', {
+        counterpartyEntityId,
+        error: toErrorMessage(err, 'Reopen disputed account failed'),
+      });
       toasts.error(`Reopen failed: ${(err as Error).message}`);
     }
   }
@@ -3187,7 +3234,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         `Drain submitted: ${amountLabel} payable now, ${openCount} open debts, ${totalLabel} outstanding, ${reserveLabel} reserve, next ${nextDebtIndex === null ? '—' : `#${nextDebtIndex}`}.`,
       );
     } catch (err) {
-      console.error('[EntityPanel] Enforce debt failed:', err);
+      logEntityPanelDiagnostic('Enforce debt failed', {
+        tokenId,
+        maxIterations,
+        error: toErrorMessage(err, 'Debt enforcement failed'),
+      });
       toasts.error(`Debt enforcement failed: ${(err as Error).message}`);
     } finally {
       debtEnforcingTokenId = null;
@@ -3224,7 +3275,11 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
       const symbol = getTokenInfo(configureTokenId).symbol || `TKN${configureTokenId}`;
       toasts.success(`Token ${symbol} added to account`);
     } catch (err) {
-      console.error('[EntityPanel] Add token failed:', err);
+      logEntityPanelDiagnostic('Add token failed', {
+        counterpartyEntityId,
+        tokenId: configureTokenId,
+        error: toErrorMessage(err, 'Add token failed'),
+      });
       toasts.error(`Add token failed: ${(err as Error).message}`);
     }
   }
@@ -3255,7 +3310,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
         void fetchExternalTokens(true);
       }
     } catch (err) {
-      console.error('[EntityPanel] External faucet failed:', err);
+      logEntityPanelDiagnostic('External faucet failed', {
+        tokenSymbol,
+        error: toErrorMessage(err, 'External faucet failed'),
+      });
       toasts.error(`External faucet failed: ${(err as Error).message}`);
     }
   }

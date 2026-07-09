@@ -703,6 +703,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      localStorage load/save, runtime creation cleanup, signer entity creation,
      balance, and send diagnostics now use persistent frontend `errorLog`; a
      focused source guard rejects any raw `console.warn/error/info` in the store.
+   - Partial: `EntityPanelTabs` money-action, external wallet snapshot, move
+     allowance, dispute, debt, faucet, and copy diagnostics now use persistent
+     frontend `errorLog` instead of raw `console.warn/error/info`; external
+     wallet snapshot tests guard the full component against raw console output.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.
