@@ -33,6 +33,9 @@ warnings.
   handler is guarded against raw `console.log` noise in core.
 - Basic entity proposal/vote traces use the structured `entity.basic` logger;
   handlers are guarded against direct `console.*` noise in core.
+- Entity input merge conflict/dedup diagnostics use the structured
+  `entity.input.merge` logger and are guarded against direct `console.*` noise
+  in core.
 - Account input/open-account failures use structured `account.handler` and
   `account.open` loggers; empty account inputs fail fast with `ACCOUNT_INPUT_EMPTY`.
 - Account committed followup diagnostics use the structured `account.followup`

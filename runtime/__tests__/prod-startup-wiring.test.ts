@@ -538,10 +538,12 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('isCanonicalAccountOpener(bootstrap.entityId, peer.entityId)');
   });
 
-  test('prod runtime child logs keep merge debug output behind explicit heavy logging', () => {
+  test('prod runtime child keeps merge debug output structured and gated', () => {
     const mergeSource = readFileSync(join(repoRoot, 'runtime/entity-input-merge.ts'), 'utf8');
-    expect(mergeSource).toContain('if (HEAVY_LOGS) {\n          console.log(\n            `🔍 MERGE-PRECOMMITS:');
-    expect(mergeSource).toContain('if (HEAVY_LOGS) {\n        console.log(\n          `    🔄 Merging inputs for');
+    expect(mergeSource).toContain("const entityInputMergeLog = createStructuredLogger('entity.input.merge');");
+    expect(mergeSource).toContain("entityInputMergeLog.debug('precommits.merge'");
+    expect(mergeSource).toContain("entityInputMergeLog.debug('input.merged'");
+    expect(mergeSource).not.toContain('console.');
   });
 
   test('isolated e2e runner bounds green-path MM teardown and cleans child ports', () => {

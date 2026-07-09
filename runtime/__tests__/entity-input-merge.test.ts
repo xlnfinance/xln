@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { mergeEntityInputs } from '../entity-input-merge';
 import type { RoutedEntityInput } from '../types';
 
@@ -38,5 +40,15 @@ describe('mergeEntityInputs', () => {
 
     expect(merged.map((input) => input.entityId)).toEqual([entityId('1'), entityId('2'), entityId('3')]);
     expect(merged[1]?.entityTxs?.map((tx) => (tx.data as { name: string }).name)).toEqual(['a', 'b']);
+  });
+
+  test('uses structured logging without direct console output', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/entity-input-merge.ts'), 'utf8');
+
+    expect(source).toContain("createStructuredLogger('entity.input.merge')");
+    expect(source).toContain("entityInputMergeLog.warn('frame.conflict'");
+    expect(source).toContain("entityInputMergeLog.debug('precommits.merge'");
+    expect(source).toContain("entityInputMergeLog.debug('duplicates.deduped'");
+    expect(source).not.toContain('console.');
   });
 });

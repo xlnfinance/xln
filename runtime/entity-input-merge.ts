@@ -2,6 +2,9 @@ import type { EntityTx, JurisdictionEvent, JurisdictionEventData, RoutedEntityIn
 import { signatureMapSize } from './consensus-signatures';
 import { compareStableText, safeStringify } from './serialization-utils';
 import { HEAVY_LOGS } from './utils';
+import { createStructuredLogger, shortHash, shortId } from './logger';
+
+const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 
 const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   const merged: EntityTx[] = [];
@@ -64,9 +67,11 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
     }
 
     if (HEAVY_LOGS) {
-      console.log(
-        `🔍 MERGE-J-EVENTS: block ${blockNumber} ${blockHash?.slice(0, 10)}... now ${mergedEvents.length} events`,
-      );
+      entityInputMergeLog.debug('j_events.merged', {
+        blockNumber,
+        blockHash: typeof blockHash === 'string' ? shortHash(blockHash) : blockHash,
+        events: mergedEvents.length,
+      });
     }
   }
 
@@ -112,9 +117,14 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
       if (existingFrameHash && incomingFrameHash && existingFrameHash !== incomingFrameHash) {
         const existingHasPrecommits = !!existing.hashPrecommits && existing.hashPrecommits.size > 0;
         const incomingHasPrecommits = !!input.hashPrecommits && input.hashPrecommits.size > 0;
-        console.warn(
-          `⚠️  MERGE-CONFLICT: ${key} has different proposedFrame hashes (${existingFrameHash.slice(0, 10)} vs ${incomingFrameHash.slice(0, 10)}) - keeping both inputs`,
-        );
+        entityInputMergeLog.warn('frame.conflict', {
+          entity: shortId(input.entityId),
+          signer: shortId(input.signerId || ''),
+          existing: shortHash(existingFrameHash),
+          incoming: shortHash(incomingFrameHash),
+          existingHasPrecommits,
+          incomingHasPrecommits,
+        });
         if (incomingHasPrecommits && !existingHasPrecommits) {
           merged.set(key, { ...input });
           conflicts.push(existing);
@@ -124,29 +134,43 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
         continue;
       }
 
-      if (HEAVY_LOGS) console.log(`🔍 DUPLICATE-FOUND: Merging duplicate input ${duplicateCount} for ${entityShort}:${input.signerId || ''}`);
+      if (HEAVY_LOGS) {
+        entityInputMergeLog.debug('duplicate.found', {
+          duplicateCount,
+          entity: entityShort,
+          signer: shortId(input.signerId || ''),
+        });
+      }
 
       if (input.entityTxs) {
         existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
         if (existing.entityTxs) {
           existing.entityTxs = mergeJEventTxs(existing.entityTxs);
         }
-        if (HEAVY_LOGS) console.log(`🔍 MERGE-TXS: Added ${input.entityTxs.length} transactions`);
+        if (HEAVY_LOGS) entityInputMergeLog.debug('txs.added', { count: input.entityTxs.length });
       }
 
       if (input.hashPrecommits) {
         const existingPrecommits = existing.hashPrecommits || new Map<string, string[]>();
         if (HEAVY_LOGS) {
-          console.log(
-            `🔍 MERGE-PRECOMMITS: Merging ${input.hashPrecommits.size} hashPrecommits into existing ${existingPrecommits.size} for ${entityShort}:${input.signerId || ''}`,
-          );
+          entityInputMergeLog.debug('precommits.merge', {
+            incoming: input.hashPrecommits.size,
+            existing: existingPrecommits.size,
+            entity: entityShort,
+            signer: shortId(input.signerId || ''),
+          });
         }
         input.hashPrecommits.forEach((sigs, signerId) => {
-          if (HEAVY_LOGS) console.log(`🔍 MERGE-DETAIL: Adding hashPrecommit from ${signerId} (${sigs.length} sigs)`);
+          if (HEAVY_LOGS) {
+            entityInputMergeLog.debug('precommit.added', {
+              signer: shortId(signerId),
+              signatures: sigs.length,
+            });
+          }
           existingPrecommits.set(signerId, sigs);
         });
         existing.hashPrecommits = existingPrecommits;
-        if (HEAVY_LOGS) console.log(`🔍 MERGE-RESULT: Total ${existingPrecommits.size} hashPrecommits after merge`);
+        if (HEAVY_LOGS) entityInputMergeLog.debug('precommits.result', { total: existingPrecommits.size });
       }
 
       if (input.proposedFrame) {
@@ -158,9 +182,13 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
       }
 
       if (HEAVY_LOGS) {
-        console.log(
-          `    🔄 Merging inputs for ${key}: txs=${input.entityTxs?.length || 0}, hashPrecommits=${input.hashPrecommits?.size || 0}, frame=${!!input.proposedFrame}`,
-        );
+        entityInputMergeLog.debug('input.merged', {
+          entity: shortId(input.entityId),
+          signer: shortId(input.signerId || ''),
+          txs: input.entityTxs?.length || 0,
+          hashPrecommits: input.hashPrecommits?.size || 0,
+          frame: Boolean(input.proposedFrame),
+        });
       }
     } else {
       merged.set(key, { ...input });
@@ -168,7 +196,11 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
   }
 
   if (HEAVY_LOGS && duplicateCount > 0) {
-    console.log(`    deduped ${duplicateCount} duplicate inputs (${inputs.length} -> ${merged.size})`);
+    entityInputMergeLog.debug('duplicates.deduped', {
+      duplicates: duplicateCount,
+      inputs: inputs.length,
+      merged: merged.size,
+    });
   }
 
   const mergedInputs = Array.from(merged.values());

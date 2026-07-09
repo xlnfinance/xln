@@ -261,6 +261,7 @@ for (const [path, markers] of [
   ]],
   ['runtime/entity-tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
+  ['runtime/entity-input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
   ['runtime/entity-tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
   ['runtime/entity-tx/handlers/account/committed-frame-followups.ts', ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx']],
@@ -304,6 +305,10 @@ assertNotIncludes(basicHandler, 'console.', basicHandlerPath);
 const proposalHandlerPath = 'runtime/entity-tx/proposals.ts';
 const proposalHandler = readText(proposalHandlerPath);
 assertNotIncludes(proposalHandler, 'console.', proposalHandlerPath);
+
+const entityInputMergePath = 'runtime/entity-input-merge.ts';
+const entityInputMerge = readText(entityInputMergePath);
+assertNotIncludes(entityInputMerge, 'console.', entityInputMergePath);
 
 const accountHandlerPath = 'runtime/entity-tx/handlers/account.ts';
 const accountHandler = readText(accountHandlerPath);
@@ -379,6 +384,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
+  ['runtime/__tests__/entity-input-merge.test.ts', ['uses structured logging without direct console output', 'entity.input.merge']],
   ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
   ['runtime/__tests__/account-tx-apply-logging.test.ts', ['account_frame without direct console output', 'account_frame.rejected']],
   ['runtime/__tests__/account-followup-logging.test.ts', ['account committed followups use structured logging only', 'account.followup']],
