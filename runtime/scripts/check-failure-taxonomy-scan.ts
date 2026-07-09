@@ -1,0 +1,287 @@
+#!/usr/bin/env bun
+
+import { readFileSync } from 'node:fs';
+
+import { deliveryFailure, isDeliveryResult } from '../delivery-result';
+import {
+  buildRuntimeFailureSignal,
+  classifyRuntimeFaucetFailure,
+  classifyRuntimeJBatchFailure,
+  classifyRuntimeMarketMakerFailure,
+  classifyRuntimeTransportFailure,
+  isRuntimeFailureSignal,
+  type RuntimeFailureSignal,
+} from '../failure-taxonomy';
+import { publicAggregatedHealth } from '../health-redaction';
+import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
+
+const readText = (path: string): string => readFileSync(path, 'utf8');
+
+const assertIncludes = (text: string, needle: string, path: string): void => {
+  if (!text.includes(needle)) throw new Error(`${path} is missing required text: ${needle}`);
+};
+
+const assertNotIncludes = (text: string, needle: string, path: string): void => {
+  if (text.includes(needle)) throw new Error(`${path} contains forbidden text: ${needle}`);
+};
+
+function requireCondition(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+const assertFailure = (
+  failure: RuntimeFailureSignal,
+  expected: Pick<RuntimeFailureSignal, 'category' | 'code' | 'retryable' | 'fatal'>,
+): void => {
+  requireCondition(isRuntimeFailureSignal(failure), `invalid failure signal: ${JSON.stringify(failure)}`);
+  requireCondition(failure.category === expected.category, `category mismatch: ${failure.category} !== ${expected.category}`);
+  requireCondition(failure.code === expected.code, `code mismatch: ${failure.code} !== ${expected.code}`);
+  requireCondition(failure.retryable === expected.retryable, `retryable mismatch for ${failure.code}`);
+  requireCondition(failure.fatal === expected.fatal, `fatal mismatch for ${failure.code}`);
+};
+
+const expectedEmpty = classifyRuntimeFaucetFailure('FAUCET_ACCOUNT_NOT_OPEN', 'account has no open faucet line');
+assertFailure(expectedEmpty, {
+  category: 'ExpectedEmpty',
+  code: 'FAUCET_ACCOUNT_NOT_OPEN',
+  retryable: false,
+  fatal: false,
+});
+
+const transient = classifyRuntimeJBatchFailure('J_SUBMIT_TRANSIENT', 'rpc ECONNRESET');
+assertFailure(transient, {
+  category: 'TransientRace',
+  code: 'J_SUBMIT_TRANSIENT',
+  retryable: true,
+  fatal: false,
+});
+
+const contradiction = buildRuntimeFailureSignal({
+  category: 'Contradiction',
+  code: 'OPERATOR_CONFIG_INVALID',
+  message: 'secret-token-must-not-be-public',
+});
+assertFailure(contradiction, {
+  category: 'Contradiction',
+  code: 'OPERATOR_CONFIG_INVALID',
+  retryable: false,
+  fatal: true,
+});
+
+const transportContradiction = classifyRuntimeTransportFailure('RPC_UPSTREAM_NOT_CONFIGURED');
+assertFailure(transportContradiction, {
+  category: 'Contradiction',
+  code: 'RPC_UPSTREAM_NOT_CONFIGURED',
+  retryable: false,
+  fatal: true,
+});
+
+const marketMakerExpectedEmpty = classifyRuntimeMarketMakerFailure('MARKET_MAKER_DISABLED');
+assertFailure(marketMakerExpectedEmpty, {
+  category: 'ExpectedEmpty',
+  code: 'MARKET_MAKER_DISABLED',
+  retryable: false,
+  fatal: false,
+});
+
+const delivery = deliveryFailure({
+  category: 'Contradiction',
+  code: 'RPC_UPSTREAM_NOT_CONFIGURED',
+  message: 'secret delivery detail',
+});
+requireCondition(isDeliveryResult(delivery), `invalid typed delivery result: ${JSON.stringify(delivery)}`);
+requireCondition(delivery.failure?.code === 'RPC_UPSTREAM_NOT_CONFIGURED', 'delivery failure code was not propagated');
+requireCondition(delivery.terminal === true, 'contradiction delivery must be terminal');
+
+const readinessHealth: Parameters<typeof resolveRuntimeImportReadiness>[0] = {
+  systemOk: true,
+  coreOk: true,
+  degraded: [],
+  failures: [contradiction],
+  reset: {
+    inProgress: false,
+    lastError: null,
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    resolvedAt: null,
+  },
+  hubMesh: {
+    ok: true,
+    hubIds: [],
+    pairs: [],
+    direct: { openLinkCount: 0, links: [] },
+  },
+  marketMaker: {
+    enabled: false,
+    ok: true,
+    failure: null,
+    entityId: null,
+    startupPhase: null,
+    expectedOffersPerHub: 0,
+    expectedOffersPerPair: 0,
+    cross: {
+      applicable: false,
+      ok: true,
+      expectedRoutes: 0,
+      expectedOffersPerRoute: 0,
+      expectedOffersPerPair: 0,
+      routeCount: 0,
+      routes: [],
+    },
+    hubs: [],
+  },
+  custody: {
+    enabled: false,
+    ok: true,
+    entityId: null,
+    daemonPort: null,
+    servicePort: null,
+  },
+  bootstrapReserves: {
+    ok: true,
+    targetMet: true,
+    requiredTokenCount: 0,
+    entityCount: 0,
+    entities: [],
+  },
+};
+const readiness = resolveRuntimeImportReadiness(readinessHealth);
+requireCondition(readiness.ok === false, 'runtime import readiness must fail on fatal typed failure');
+requireCondition(readiness.code === 'OPERATOR_CONFIG_INVALID', `readiness code mismatch: ${readiness.ok ? 'ok' : readiness.code}`);
+requireCondition(readiness.fatal === true, 'runtime import readiness fatal flag was not propagated');
+requireCondition(readiness.failure.code === 'OPERATOR_CONFIG_INVALID', 'runtime import readiness failure payload missing code');
+
+const publicHealth = publicAggregatedHealth({
+  coreOk: false,
+  systemOk: false,
+  degraded: ['marketMaker'],
+  failures: [contradiction],
+  marketMaker: { enabled: true, ok: false, failure: contradiction },
+  bootstrapTimeline: {
+    stages: [{
+      key: 'ready-hash',
+      label: 'Ready hash',
+      status: 'blocked',
+      reason: 'secret timeline reason',
+      failure: transient,
+    }],
+  },
+});
+const publicHealthText = JSON.stringify(publicHealth);
+assertNotIncludes(publicHealthText, 'secret-token-must-not-be-public', 'publicAggregatedHealth');
+assertNotIncludes(publicHealthText, 'secret timeline reason', 'publicAggregatedHealth');
+assertIncludes(publicHealthText, '"code":"OPERATOR_CONFIG_INVALID"', 'publicAggregatedHealth');
+assertIncludes(publicHealthText, '"fatal":true', 'publicAggregatedHealth');
+
+const taxonomyPath = 'runtime/failure-taxonomy.ts';
+const taxonomy = readText(taxonomyPath);
+for (const marker of [
+  "export type RuntimeFailureCategory = 'ExpectedEmpty' | 'TransientRace' | 'Contradiction';",
+  "(value as RuntimeFailureSignal).retryable === ((value as RuntimeFailureSignal).category === 'TransientRace')",
+  "(value as RuntimeFailureSignal).fatal === ((value as RuntimeFailureSignal).category === 'Contradiction')",
+  'classifyRuntimeImportReadinessReason',
+  'classifyRuntimeTransportFailure',
+  'classifyRuntimeFaucetFailure',
+  'classifyRuntimeBootstrapStageFailure',
+  'classifyRuntimeMarketMakerFailure',
+  'classifyRuntimeJBatchFailure',
+]) {
+  assertIncludes(taxonomy, marker, taxonomyPath);
+}
+
+const runtimeImportReadinessPath = 'runtime/orchestrator/runtime-import-readiness.ts';
+const runtimeImportReadiness = readText(runtimeImportReadinessPath);
+for (const marker of [
+  "error: 'RUNTIME_IMPORT_NETWORK_NOT_READY'",
+  'category: RuntimeFailureCategory;',
+  'failure: RuntimeFailureSignal;',
+  'const fatalFailure = typedFailures.find(failure => failure.fatal === true);',
+  'return fail(`fatal:${fatalFailure.code}`, fatalFailure);',
+]) {
+  assertIncludes(runtimeImportReadiness, marker, runtimeImportReadinessPath);
+}
+
+const orchestratorPath = 'runtime/orchestrator/orchestrator.ts';
+const orchestrator = readText(orchestratorPath);
+for (const marker of [
+  'const readiness = resolveRuntimeImportReadiness(health);',
+  'category: readiness.category',
+  'code: readiness.code',
+  'retryable: readiness.retryable',
+  'fatal: readiness.fatal',
+  'failure: readiness.failure',
+  'classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)',
+]) {
+  assertIncludes(orchestrator, marker, orchestratorPath);
+}
+
+const healthRedactionPath = 'runtime/health-redaction.ts';
+const healthRedaction = readText(healthRedactionPath);
+for (const marker of [
+  'const publicFailureSignal = (value: unknown): Record<string, unknown> | null => {',
+  "category: valueOf(value, 'category')",
+  "code: valueOf(value, 'code')",
+  "retryable: valueOf(value, 'retryable') === true",
+  "fatal: valueOf(value, 'fatal') === true",
+  "failure: publicFailureSignal(valueOf(marketMaker, 'failure'))",
+  "failure: publicFailureSignal(valueOf(stage, 'failure'))",
+]) {
+  assertIncludes(healthRedaction, marker, healthRedactionPath);
+}
+
+const publicFailureSignalSource = healthRedaction.slice(
+  healthRedaction.indexOf('const publicFailureSignal ='),
+  healthRedaction.indexOf('const publicFailureSignals ='),
+);
+assertNotIncludes(publicFailureSignalSource, 'message', healthRedactionPath);
+
+const prodHealthPath = 'runtime/scripts/prod-health-smoke.ts';
+const prodHealth = readText(prodHealthPath);
+for (const marker of [
+  'export const getFatalHealthFailures',
+  'publicHealthFailureSignals(failures).filter(failure => failure.fatal === true)',
+  'fatalFailures.length === 0',
+  'health.failures has fatal entries',
+]) {
+  assertIncludes(prodHealth, marker, prodHealthPath);
+}
+
+for (const [path, markers] of [
+  ['runtime/server/faucet-failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
+  ['runtime/server/offchain-faucet.ts', ['faucetFailureBody']],
+  ['runtime/server/reserve-faucet.ts', ['faucetFailureBody']],
+  ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
+  ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
+  ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
+  ['runtime/delivery-result.ts', ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure']],
+] as const) {
+  const text = readText(path);
+  for (const marker of markers) assertIncludes(text, marker, path);
+}
+
+for (const [path, markers] of [
+  ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
+  ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
+  ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],
+  ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
+] as const) {
+  const text = readText(path);
+  for (const marker of markers) assertIncludes(text, marker, path);
+}
+
+const auditDocPath = 'docs/security/failure-taxonomy-scan.md';
+const auditDoc = readText(auditDocPath);
+for (const marker of [
+  '# Runtime Failure Taxonomy Scan',
+  'Last refreshed: 2026-07-09',
+  'bun run security:failure-taxonomy',
+  '`Contradiction` is fatal',
+  '`TransientRace` is retryable',
+  '`ExpectedEmpty` is non-fatal',
+  'Public health redaction exposes code/category/retryability/fatality',
+]) {
+  assertIncludes(auditDoc, marker, auditDocPath);
+}
+
+console.log('runtime failure taxonomy scan check passed');

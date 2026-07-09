@@ -290,11 +290,14 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: prod health smoke and e2e baseline readiness now treat typed
      `fatal:true` health failures as authoritative readiness blockers while
      preserving legacy `degraded[]` checks.
-   - Partial: runtime health now scopes hub mesh, market maker, and bootstrap
-     reserve projections to runtimes that actually own those roles; non-hub
-     daemons report those components as `applicable:false, ok:true` instead of
-     false degraded failures. Guard: `runtime/__tests__/runtime-health-api.test.ts`.
-   - Apply first to transport, bootstrap, faucet/seed funding, market maker,
+  - Partial: runtime health now scopes hub mesh, market maker, and bootstrap
+    reserve projections to runtimes that actually own those roles; non-hub
+    daemons report those components as `applicable:false, ok:true` instead of
+    false degraded failures. Guard: `runtime/__tests__/runtime-health-api.test.ts`.
+  - Current executable scan: `bun run security:failure-taxonomy` passed on
+    2026-07-09, is part of `bun run security:audit-pack`, and documents open
+    manual-review questions in `docs/security/failure-taxonomy-scan.md`.
+  - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.
    - Exit: orchestrator/health can explain why a component is degraded without

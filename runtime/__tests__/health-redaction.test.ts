@@ -143,4 +143,5 @@ test('public aggregated health keeps bootstrap timeline evidence without state h
   expect(body).not.toContain('secretTx');
   expect(body).not.toContain('entityId');
   expect(body).not.toContain('internal child pid');
+  expect(body).not.toContain('Latest /api/health child refresh window');
 });

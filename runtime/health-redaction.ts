@@ -311,7 +311,6 @@ const publicBootstrapTimeline = (timeline: PublicHealthRecord): Record<string, u
       key: valueOf(stage, 'key'),
       label: valueOf(stage, 'label'),
       status: valueOf(stage, 'status'),
-      reason: valueOf(stage, 'reason'),
       failure: publicFailureSignal(valueOf(stage, 'failure')),
       budgetMs: valueOf(stage, 'budgetMs'),
       actualMs: valueOf(stage, 'actualMs'),

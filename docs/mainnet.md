@@ -20,8 +20,8 @@ encrypted, scheduled, covered by browser E2E, direct same-chain/cross-j swaps
 and lending are in the fast E2E gate, `bun run gate:release` passed on the
 release line, `bun run test:all:fast` passed on 2026-07-08 with 95/95 isolated
 browser shards, `bun run security:contract-governance`,
-`bun run security:consensus-hanko`, and `bun run security:audit-pack` passed on
-2026-07-09, and a
+`bun run security:consensus-hanko`, `bun run security:failure-taxonomy`, and
+`bun run security:audit-pack` passed on 2026-07-09, and a
 historical release soak completed 13 full gate/benchmark iterations before
 being stopped manually. That is enough for serious public-testnet hardening. It
 is not enough for real funds because the full uninterrupted current
@@ -110,7 +110,7 @@ bun run soak:release
 
 Current evidence: `bun run gate:release` passed on the release line; `bun run
 test:all:fast` passed on 2026-07-08 and `bun run security:audit-pack` passed on
-2026-07-09. The
+2026-07-09, including the runtime failure taxonomy scan. The
 historical long soak was manually stopped after 13 complete successful
 iterations, so it is useful evidence but not a completed gate. The current
 required soak evidence is the one-hour `bun run gate:mainnet` run from a clean
@@ -152,6 +152,7 @@ External audit handoff:
 ```bash
 bun run security:contract-governance
 bun run security:consensus-hanko
+bun run security:failure-taxonomy
 bun run security:audit-pack
 ```
 

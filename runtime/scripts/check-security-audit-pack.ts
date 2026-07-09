@@ -23,6 +23,7 @@ const scripts = packageJson.scripts ?? {};
 for (const name of [
   'security:contract-governance',
   'security:consensus-hanko',
+  'security:failure-taxonomy',
   'gate:ci',
   'gate:release',
   'gate:mainnet-preflight',
@@ -36,21 +37,17 @@ for (const name of [
   if (!scripts[name]) throw new Error(`package.json missing script: ${name}`);
 }
 
-const governanceScan = spawnSync('bun', ['runtime/scripts/check-contract-governance-scan.ts'], {
-  stdio: 'inherit',
-});
-if (governanceScan.error) throw governanceScan.error;
-if (governanceScan.status !== 0) {
-  throw new Error(`contract governance scan failed with exit ${governanceScan.status ?? governanceScan.signal}`);
-}
+const runScan = (label: string, script: string): void => {
+  const result = spawnSync('bun', [script], { stdio: 'inherit' });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`${label} failed with exit ${result.status ?? result.signal}`);
+  }
+};
 
-const consensusHankoScan = spawnSync('bun', ['runtime/scripts/check-consensus-hanko-scan.ts'], {
-  stdio: 'inherit',
-});
-if (consensusHankoScan.error) throw consensusHankoScan.error;
-if (consensusHankoScan.status !== 0) {
-  throw new Error(`consensus hanko scan failed with exit ${consensusHankoScan.status ?? consensusHankoScan.signal}`);
-}
+runScan('contract governance scan', 'runtime/scripts/check-contract-governance-scan.ts');
+runScan('consensus hanko scan', 'runtime/scripts/check-consensus-hanko-scan.ts');
+runScan('runtime failure taxonomy scan', 'runtime/scripts/check-failure-taxonomy-scan.ts');
 
 const auditBriefPath = 'docs/security/external-audit-brief.md';
 const auditBrief = readText(auditBriefPath);
@@ -68,6 +65,7 @@ for (const heading of [
 for (const command of [
   'bun run security:contract-governance',
   'bun run security:consensus-hanko',
+  'bun run security:failure-taxonomy',
   'bun run gate:ci',
   'bun run test:e2e:coverage',
   'bun run gate:release',
