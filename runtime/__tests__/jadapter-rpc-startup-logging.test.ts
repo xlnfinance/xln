@@ -32,6 +32,7 @@ test('runtime dev startup status logs stay structured', () => {
   const orchestrator = readFileSync(join(process.cwd(), 'runtime/orchestrator/orchestrator.ts'), 'utf8');
   const wsClient = readFileSync(join(process.cwd(), 'runtime/networking/ws-client.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
+  const localConfig = readFileSync(join(process.cwd(), 'runtime/jadapter/local-config.ts'), 'utf8');
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
   expect(runtime).toContain("runtimeLog.debug('jadapter_watcher.started'");
@@ -48,6 +49,9 @@ test('runtime dev startup status logs stay structured', () => {
   expect(wsClient).not.toContain('console.log(`[WS] Connected to ${this.options.url}`)');
   expect(wsClient).toContain("const wsLog = createStructuredLogger('runtime.wsClient');");
   expect(wsClient).toContain("wsLog.debug('connected'");
+  expect(localConfig).not.toContain('console.log(');
+  expect(localConfig).toContain("const localConfigLog = createStructuredLogger('jadapter.localConfig');");
+  expect(localConfig).toContain("localConfigLog.debug('default_dispute_delay.ready'");
 
   for (const noisyBootstrapString of [
     '[BOOTSTRAP] Starting hub bootstrap',

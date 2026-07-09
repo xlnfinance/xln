@@ -1,6 +1,8 @@
 import type { JAdapter } from './types';
+import { createStructuredLogger } from '../logger';
 
 const DEFAULT_DISPUTE_DELAY_READ_TIMEOUT_MS = 5_000;
+const localConfigLog = createStructuredLogger('jadapter.localConfig');
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -42,8 +44,10 @@ export async function ensureLocalDisputeDelayConfigured(
     return null;
   }
 
-  console.log(
-    `[Runtime] ${jurisdictionName}: defaultDisputeDelay=${currentDelay} (source: immutable contract policy)`,
-  );
+  localConfigLog.debug('default_dispute_delay.ready', {
+    jurisdiction: jurisdictionName,
+    defaultDisputeDelay: currentDelay,
+    source: 'immutable_contract_policy',
+  });
   return currentDelay;
 }
