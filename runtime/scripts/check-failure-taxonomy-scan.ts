@@ -354,6 +354,10 @@ for (const relayLoggingPath of [
   assertNotIncludes(readText(relayLoggingPath), 'console.', relayLoggingPath);
 }
 
+const solvencyPath = 'runtime/solvency.ts';
+const solvency = readText(solvencyPath);
+assertNotIncludes(solvency, 'console.', solvencyPath);
+
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);
 assertNotIncludes(r2cHandler, 'console.log', r2cHandlerPath);
@@ -467,6 +471,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/account-propose-logging.test.ts', ['account frame proposal path uses structured logging only', 'proposal.profile']],
   ['runtime/__tests__/debt-ledger.test.ts', ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE']],
   ['runtime/__tests__/relay-router.test.ts', ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery']],
+  ['runtime/__tests__/solvency-logging.test.ts', ['solvency diagnostics use structured logging only', 'runtime.solvency']],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);

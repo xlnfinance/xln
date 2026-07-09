@@ -1,5 +1,8 @@
 import { isLeftEntity } from './entity-id-utils';
+import { createStructuredLogger } from './logger';
 import type { Env } from './types';
+
+const solvencyLog = createStructuredLogger('runtime.solvency');
 
 export interface Solvency {
   reserves: bigint;
@@ -45,11 +48,22 @@ export const verifySolvency = (env: Env, expected?: bigint, label?: string): boo
   const prefix = label ? `[${label}] ` : '';
 
   if (expected !== undefined && solvency.total !== expected) {
-    console.error(`❌ ${prefix}SOLVENCY VIOLATION: Expected ${expected}, got ${solvency.total}`);
-    console.error(`   Reserves: ${solvency.reserves}, Collateral: ${solvency.collateral}`);
+    solvencyLog.error('violation', {
+      label: label ?? '',
+      expected: expected.toString(),
+      total: solvency.total.toString(),
+      reserves: solvency.reserves.toString(),
+      collateral: solvency.collateral.toString(),
+    });
     throw new Error(`Solvency check failed: ${solvency.total} !== ${expected}`);
   }
 
-  console.log(`✅ ${prefix}Solvency: ${solvency.total} (R:${solvency.reserves} + C:${solvency.collateral})`);
+  solvencyLog.info('ok', {
+    label: label ?? '',
+    prefix,
+    total: solvency.total.toString(),
+    reserves: solvency.reserves.toString(),
+    collateral: solvency.collateral.toString(),
+  });
   return true;
 };
