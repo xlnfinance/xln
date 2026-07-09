@@ -13,6 +13,8 @@ import { applyAccountTx } from '../account-tx/apply';
 import { markStorageAccountDirty } from '../env-events';
 import { createStructuredLogger, shortHash, shortId } from '../logger';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from '../account-consensus-frame';
+import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../proof-builder';
+import { signEntityHashes } from '../hanko/signing';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
@@ -396,7 +398,6 @@ export async function proposeAccountFrame(
     };
   }
 
-  const { buildAccountProofBody, createDisputeProofHashWithNonce } = await import('../proof-builder');
   const depositoryAddress = getAccountDepositoryAddress(env, accountMachine);
   if (!isAddress20(depositoryAddress)) {
     return {
@@ -428,7 +429,6 @@ export async function proposeAccountFrame(
   // Build both hankos in one signer-key/precheck pass. They remain separate
   // hankos over separate hashes; batching here only removes duplicated local
   // lookup/guard work from the hot account-consensus path.
-  const { signEntityHashes } = await import('../hanko/signing');
   const [frameHanko, disputeHanko] = await signEntityHashes(env, signingEntityId, signingSignerId, [
     newFrame.stateHash,
     disputeHash,

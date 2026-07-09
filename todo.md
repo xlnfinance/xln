@@ -465,6 +465,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: remaining cross-j and pull event strings plus swap-offer
      `minFillRatio` validation now use the shared fill-ratio constants instead
      of embedding `65535`.
+   - Partial: account frame proposal now statically imports dispute proof
+     building and hanko batch signing instead of using `await import()` in the
+     hot proposal path.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
