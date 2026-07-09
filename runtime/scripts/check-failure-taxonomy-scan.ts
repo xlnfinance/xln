@@ -288,7 +288,7 @@ for (const [path, markers] of [
   ['runtime/account-utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
-  ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
+  ['runtime/runtime-j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
   ['runtime/delivery-result.ts', ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure']],
 ] as const) {
@@ -318,6 +318,12 @@ for (const legacyRuntimeLogMarker of [
 const runtimeTxHandlersPath = 'runtime/runtime-tx-handlers.ts';
 const runtimeTxHandlers = readText(runtimeTxHandlersPath);
 assertNotIncludes(runtimeTxHandlers, 'console.', runtimeTxHandlersPath);
+
+const runtimeJSubmitPath = 'runtime/runtime-j-submit.ts';
+const runtimeJSubmit = readText(runtimeJSubmitPath);
+assertNotIncludes(runtimeJSubmit, 'console.', runtimeJSubmitPath);
+assertNotIncludes(runtimeJSubmit, '[J-SUBMIT]', runtimeJSubmitPath);
+assertNotIncludes(runtimeJSubmit, '[SIDE-EFFECT]', runtimeJSubmitPath);
 
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);

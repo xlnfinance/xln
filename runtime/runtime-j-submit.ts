@@ -5,6 +5,9 @@ import { rememberRecentJEvents } from './j-event-evidence';
 import { getEntityReplicaById } from './orchestrator/mesh-common';
 import { ensureLiveJAdapterForReplica } from './runtime-infra';
 import { classifyRuntimeJBatchFailure } from './failure-taxonomy';
+import { createStructuredLogger, shortId } from './logger';
+
+const jSubmitLog = createStructuredLogger('runtime.jsubmit');
 
 export type RuntimeJOutboxQueue = (
   env: Env,
@@ -53,7 +56,7 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
   await jAdapter.pollNow();
   const prioritized = prioritizeJEventsQueuedAfterSubmit(env, beforePoll);
   if (prioritized > 0) {
-    console.log(`✅ [J-SUBMIT] prioritized ${prioritized} watcher j_event input(s) before local follow-ups`);
+    jSubmitLog.debug('j_event.prioritized', { prioritized });
   }
 };
 
@@ -154,19 +157,21 @@ const skipAlreadyConsumedSealedBatch = async (
   try {
     chainNonce = await jAdapter.getEntityNonce(jTx.entityId);
   } catch (error) {
-    console.warn(
-      `⚠️ [J-SUBMIT] nonce preflight unavailable for ${jTx.entityId.slice(-4)}: ` +
-      `${error instanceof Error ? error.message : String(error)}`,
-    );
+    jSubmitLog.warn('nonce_preflight.unavailable', {
+      entityId: shortId(jTx.entityId),
+      error: error instanceof Error ? error.message : String(error),
+    });
     return false;
   }
   const submittedNonce = BigInt(jTx.data.entityNonce);
   if (chainNonce < submittedNonce) return false;
   const skipped = markSentBatchStaleNonceSkipped(env, jTx, chainNonce);
-  console.warn(
-    `⚠️ [J-SUBMIT] skipped stale sealed batch for ${jTx.entityId.slice(-4)}: ` +
-    `submittedNonce=${submittedNonce} chainNonce=${chainNonce} clearedSentBatch=${skipped}`,
-  );
+  jSubmitLog.warn('sealed_batch.stale_skipped', {
+    entityId: shortId(jTx.entityId),
+    submittedNonce: submittedNonce.toString(),
+    chainNonce: chainNonce.toString(),
+    clearedSentBatch: skipped,
+  });
   return true;
 };
 
@@ -177,10 +182,11 @@ const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
   if (!signerId || !runtimeId) return true;
   if (signerId === runtimeId) return true;
   if (getCachedSignerPrivateKey(signerId)) return true;
-  console.warn(
-    `⚠️ [J-SUBMIT] skipped non-local sealed batch for ${jTx.entityId.slice(-4)}: ` +
-    `signer=${signerId.slice(-8)} runtime=${runtimeId.slice(-8)}`,
-  );
+  jSubmitLog.warn('sealed_batch.non_local_skipped', {
+    entityId: shortId(jTx.entityId),
+    signer: shortId(signerId, 8),
+    runtime: shortId(runtimeId, 8),
+  });
   return false;
 };
 
@@ -200,7 +206,7 @@ export async function submitRuntimeJOutbox(
   if (jOutbox.length === 0) return;
 
   const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
-  console.log(`⚡ [SIDE-EFFECT] Submitting ${totalJTxs} J-txs via JAdapter (${jOutbox.length} JInputs)`);
+  jSubmitLog.debug('outbox.submit_start', { jTxs: totalJTxs, jInputs: jOutbox.length });
 
   for (const jInput of jOutbox) {
     const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
@@ -219,7 +225,11 @@ export async function submitRuntimeJOutbox(
     }
 
     for (const jTx of jInput.jTxs) {
-      console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
+      jSubmitLog.debug('tx.submit_start', {
+        type: jTx.type,
+        entityId: shortId(jTx.entityId),
+        jurisdictionName: jInput.jurisdictionName,
+      });
       validateSealedBatchJTx(jTx);
       if (!shouldSubmitFromThisRuntime(env, jTx)) {
         continue;
@@ -240,8 +250,13 @@ export async function submitRuntimeJOutbox(
           timestamp: jTx.timestamp ?? env.timestamp,
         });
       } catch (error) {
-        console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
         const message = error instanceof Error ? error.message : String(error);
+        jSubmitLog.error('tx.submit_threw', {
+          type: jTx.type,
+          entityId: shortId(jTx.entityId),
+          jurisdictionName: jInput.jurisdictionName,
+          error: message,
+        });
         if (isTransientJSubmitFailure(error)) {
           markSentBatchTransientFailure(env, jTx, message);
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
@@ -252,13 +267,22 @@ export async function submitRuntimeJOutbox(
 
       if (result.success) {
         rememberRecentJEvents(env, result.events);
-        console.log(
-          `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
-        );
+        jSubmitLog.debug('tx.submit_ok', {
+          type: jTx.type,
+          entityId: shortId(jTx.entityId),
+          jurisdictionName: jInput.jurisdictionName,
+          events: result.events?.length ?? 0,
+          txHash: result.txHash ?? null,
+        });
         await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
       } else {
-        console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
         const message = result.error || 'unknown';
+        jSubmitLog.error('tx.submit_failed', {
+          type: jTx.type,
+          entityId: shortId(jTx.entityId),
+          jurisdictionName: jInput.jurisdictionName,
+          error: message,
+        });
         if (isTransientJSubmitFailure(message)) {
           markSentBatchTransientFailure(env, jTx, message);
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
