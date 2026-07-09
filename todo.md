@@ -525,6 +525,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: same-jurisdiction orderbook matching diagnostics now use the
      structured `orderbook.same` logger instead of direct `console.*`, with a
      Bun source guard and failure-taxonomy scan coverage.
+   - Partial: settlement operation compilation now rejects unknown operation
+     types with `SETTLEMENT_UNKNOWN_OP_TYPE` instead of warning and skipping
+     malformed settlement input, with Bun behavior coverage and the
+     failure-taxonomy scan guarding against raw console fallback.
    - Partial: compact entity j-batch operation handlers (`r2r`,
      `createSettlement`, `mintReserves`, `j_broadcast`, `j_clear_batch`,
      `j_abort_sent_batch`) now use the structured `entity.jbatch` logger

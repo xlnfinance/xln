@@ -58,6 +58,13 @@ export function compileOps(
       continue;
     }
 
+    if (op.type !== 'r2c' && op.type !== 'c2r' && op.type !== 'r2r') {
+      const unknownOp = op as { type?: unknown; tokenId?: unknown };
+      throw new Error(
+        `SETTLEMENT_UNKNOWN_OP_TYPE: type=${String(unknownOp.type ?? 'unknown')} tokenId=${String(unknownOp.tokenId ?? 'unknown')}`,
+      );
+    }
+
     const diff = ensureDiff(op.tokenId);
     const amount = op.amount;
 
@@ -111,12 +118,8 @@ export function compileOps(
         break;
       }
 
-      default: {
-        // Unknown op type — skip (shouldn't happen with TS types)
-        const unknownOp = op as { type?: unknown };
-        console.warn(`⚠️ compileOps: unknown op type "${String(unknownOp.type ?? 'unknown')}"`);
+      default:
         break;
-      }
     }
   }
 

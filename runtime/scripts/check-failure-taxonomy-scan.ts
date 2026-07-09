@@ -311,6 +311,11 @@ const sameOrderbookMatchingPath = 'runtime/entity-tx/handlers/account/orderbook-
 const sameOrderbookMatching = readText(sameOrderbookMatchingPath);
 assertNotIncludes(sameOrderbookMatching, 'console.', sameOrderbookMatchingPath);
 
+const settlementOpsPath = 'runtime/settlement-ops.ts';
+const settlementOps = readText(settlementOpsPath);
+assertIncludes(settlementOps, 'SETTLEMENT_UNKNOWN_OP_TYPE', settlementOpsPath);
+assertNotIncludes(settlementOps, 'console.', settlementOpsPath);
+
 for (const jBatchHandlerPath of [
   'runtime/entity-tx/handlers/r2r.ts',
   'runtime/entity-tx/handlers/create-settlement.ts',
@@ -345,6 +350,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
+  ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
