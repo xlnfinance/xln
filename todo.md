@@ -675,6 +675,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.
+   - Partial: the pre-wallet "Connect to live runtime" list now parses
+     `/api/runtime-import` with the same shared import parser as the app bulk
+     import flow, with a focused test for H1/H2/H3/MM/Custody choices.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.

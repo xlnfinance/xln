@@ -1,3 +1,8 @@
+import {
+  parseRemoteRuntimeImportSourcePayload,
+  type RemoteRuntimeImportAccess,
+} from '../../utils/remoteRuntimeImport';
+
 export type FactorInfo = {
   factor: number;
   shards: number;
@@ -136,6 +141,34 @@ export type LiveRuntimeImportStatusPayload = {
 
 export const LIVE_RUNTIME_DISCOVERY_RETRY_MS = 2_000;
 export const LIVE_RUNTIME_DISCOVERY_MAX_RETRIES = 60;
+
+export type LiveRuntimeChoice = {
+  label: string;
+  access: RemoteRuntimeImportAccess;
+  wsUrl: string;
+  token: string;
+};
+
+const hasRuntimeImportEntries = (value: unknown): boolean => {
+  const source = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  const manifest = source?.['manifest'];
+  const entries = manifest !== null && typeof manifest === 'object' && !Array.isArray(manifest)
+    ? (manifest as Record<string, unknown>)['entries']
+    : source?.['entries'];
+  return Array.isArray(entries) && entries.length > 0;
+};
+
+export function parseLiveRuntimeChoices(payload: unknown): LiveRuntimeChoice[] {
+  if (!hasRuntimeImportEntries(payload)) return [];
+  return parseRemoteRuntimeImportSourcePayload(payload).map((entry) => ({
+    label: entry.label,
+    access: entry.access,
+    wsUrl: entry.wsUrl,
+    token: entry.token,
+  }));
+}
 
 export function shouldRetryLiveRuntimeDiscovery(
   payload: LiveRuntimeImportStatusPayload,

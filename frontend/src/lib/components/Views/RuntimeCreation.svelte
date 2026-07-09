@@ -45,7 +45,9 @@
     formatMemoryLabel,
     formatRuntimeDurationRounded,
     generateBase58Secret,
+    parseLiveRuntimeChoices,
     shouldRetryLiveRuntimeDiscovery,
+    type LiveRuntimeChoice,
   } from './runtime-creation-model';
 
   // Props
@@ -99,7 +101,7 @@
   }, []);
 
   // Live remote runtimes discovered from the server's import manifest (hubs + MM + custody).
-  type LiveRuntime = { label: string; access: 'admin' | 'read'; wsUrl: string; token: string };
+  type LiveRuntime = LiveRuntimeChoice;
   let liveRuntimes: LiveRuntime[] = [];
   let liveRuntimesLoading = false;
   let liveRuntimesRetrying = false;
@@ -175,15 +177,7 @@
         degraded?: unknown[];
         manifest?: { entries?: Array<Record<string, unknown>> };
       };
-      const next: LiveRuntime[] = [];
-      for (const entry of payload.manifest?.entries ?? []) {
-        const wsUrl = String(entry['wsUrl'] || '').trim();
-        const token = String(entry['token'] || '').trim();
-        const label = String(entry['label'] || wsUrl || 'runtime');
-        const access = entry['access'] === 'admin' ? 'admin' : 'read';
-        if (!wsUrl || !token) continue;
-        next.push({ label, access, wsUrl, token });
-      }
+      const next = parseLiveRuntimeChoices(payload);
       liveRuntimes = next;
       if (!next.some((runtime) => runtime.wsUrl === selectedRuntimeKey)) {
         selectedRuntimeKey = next[0]?.wsUrl ?? '';
