@@ -116,6 +116,7 @@
   let playTimer: number | null = null;
   let loadSeq = 0;
   let builderInspectText = 'No frame loaded.';
+  let diagnosticMessages: string[] = [];
 
   const emptyVisual: FrameVisual = {
     nodes: [],
@@ -156,6 +157,16 @@
     return value && typeof value === 'object' && !Array.isArray(value)
       ? value as Record<string, unknown>
       : {};
+  }
+
+  function formatErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message;
+    return String(error);
+  }
+
+  function appendDiagnostics(messages: string[]): void {
+    if (messages.length === 0) return;
+    diagnosticMessages = [...diagnosticMessages, ...messages].slice(-6);
   }
 
   function shortId(value: string): string {
@@ -323,8 +334,9 @@
     return env;
   }
 
-  function stopPreviewInfra(env: Env | null): void {
-    if (!env) return;
+  function stopPreviewInfra(env: Env | null, label = 'preview'): string[] {
+    const diagnostics: string[] = [];
+    if (!env) return diagnostics;
     for (const [, jReplica] of mapEntries<Record<string, unknown>>(env.jReplicas)) {
       const adapter = asRecord(jReplica['jadapter']);
       try {
@@ -332,18 +344,19 @@
           (adapter['stopWatching'] as () => void)();
         }
       } catch (error) {
-        console.warn('[scenario-player] failed to stop J-watcher', error);
+        diagnostics.push(`${label}: failed to stop J-watcher: ${formatErrorMessage(error)}`);
       }
     }
     try {
       env.runtimeState?.stopLoop?.();
     } catch (error) {
-      console.warn('[scenario-player] failed to stop runtime loop', error);
+      diagnostics.push(`${label}: failed to stop runtime loop: ${formatErrorMessage(error)}`);
     }
     if (env.runtimeState) {
       env.runtimeState.loopActive = false;
       env.runtimeState.stopLoop = null;
     }
+    return diagnostics;
   }
 
   async function runRuntimeScenario(xln: XLNModule, option: ScenarioOption, env: Env): Promise<Env> {
@@ -389,8 +402,9 @@
     status = 'loading';
     statusText = `Running ${option.title}`;
     errorText = '';
+    diagnosticMessages = [];
     frames = [];
-    stopPreviewInfra(loadedEnv);
+    appendDiagnostics(stopPreviewInfra(loadedEnv, 'previous scenario'));
     loadedEnv = null;
     currentFrame = 0;
 
@@ -398,7 +412,7 @@
       const xln = await getXLN();
       const env = preparePreviewEnv(xln.createEmptyEnv(`scenario-preview:${option.id}`));
       const resultEnv = preparePreviewEnv(await runRuntimeScenario(xln, option, env));
-      stopPreviewInfra(resultEnv);
+      appendDiagnostics(stopPreviewInfra(resultEnv, option.title));
       const nextFrames = Array.isArray(resultEnv.history) ? resultEnv.history : [];
       if (seq !== loadSeq) return;
       if (nextFrames.length === 0) throw new Error(`SCENARIO_EMPTY_HISTORY:${option.id}`);
@@ -412,9 +426,8 @@
     } catch (error) {
       if (seq !== loadSeq) return;
       status = 'error';
-      errorText = error instanceof Error ? error.message : String(error);
+      errorText = formatErrorMessage(error);
       statusText = 'Scenario failed';
-      console.error('[scenario-player] load failed', error);
     }
   }
 
@@ -501,7 +514,7 @@
 
   onDestroy(() => {
     pause();
-    stopPreviewInfra(loadedEnv);
+    stopPreviewInfra(loadedEnv, 'destroy');
   });
 </script>
 
@@ -577,6 +590,13 @@
           <div class="loading-layer" data-testid="scenario-loading">Running deterministic runtime scenario...</div>
         {:else if status === 'error'}
           <div class="error-layer" data-testid="scenario-error">{errorText}</div>
+        {/if}
+        {#if diagnosticMessages.length > 0}
+          <div class="diagnostic-layer" data-testid="scenario-diagnostics">
+            {#each diagnosticMessages as message}
+              <span>{message}</span>
+            {/each}
+          </div>
         {/if}
         <svg class="scenario-graph" viewBox="0 0 100 64" role="img" aria-label="Scenario entity graph" data-testid="scenario-graph">
           <defs>
@@ -953,6 +973,24 @@
     color: #ff9b8f;
     padding: 24px;
     text-align: center;
+  }
+
+  .diagnostic-layer {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 3;
+    display: grid;
+    gap: 4px;
+    max-width: min(520px, calc(100% - 24px));
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 155, 143, 0.46);
+    border-radius: 7px;
+    background: rgba(47, 19, 16, 0.9);
+    color: #ffd4cc;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
   }
 
   .frame-narrative {
