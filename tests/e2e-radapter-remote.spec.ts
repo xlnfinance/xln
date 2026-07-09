@@ -2551,9 +2551,9 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     expect(browserHealth.custody?.ok, `custody health: ${JSON.stringify(browserHealth.custody ?? {})}`).toBe(true);
     expectMarketMakerBooksHealthy(browserHealth);
 
-    const importedHubEntries = ['h1', 'h2', 'h3'].map((label) => {
+    const importedContextEntries = ['h1', 'h2', 'h3', 'mm', 'custody'].map((label) => {
       const entry = importSummary.entries.find((candidate) => candidate.label.toLowerCase() === label);
-      if (!entry) throw new Error(`REMOTE_RUNTIME_IMPORT_HUB_MISSING:${label}`);
+      if (!entry) throw new Error(`REMOTE_RUNTIME_IMPORT_ENTRY_MISSING:${label}`);
       return {
         label,
         runtimeId: entry.runtimeId.toLowerCase(),
@@ -2561,7 +2561,7 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     });
 
     await page.getByTestId('context-current').click();
-    for (const entry of importedHubEntries) {
+    for (const entry of importedContextEntries) {
       await page.waitForFunction(({ targetRuntimeId, targetLabel }) =>
         Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
           .some((row) =>
@@ -2570,13 +2570,15 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
           ),
       { targetRuntimeId: entry.runtimeId, targetLabel: entry.label }, { timeout: REMOTE_E2E_WAIT_MS });
       const row = await page.evaluate(({ targetRuntimeId, targetLabel }) => {
-        const candidate = Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
+        const group = document.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
+        const candidate = Array.from(group?.querySelectorAll('[data-testid="context-entity-row"]') ?? [])
           .find((element) =>
             element.getAttribute('data-runtime-id') === targetRuntimeId &&
             element.getAttribute('data-entity-label') === targetLabel
           ) as HTMLElement | undefined;
         if (!candidate) return null;
         return {
+          groupText: group?.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
           text: candidate.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
           visible: candidate.getClientRects().length > 0,
         };
@@ -2584,6 +2586,10 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       expect(row, `context row for ${entry.label} runtime ${entry.runtimeId}`).not.toBeNull();
       expect(row!.visible, `context row visible for ${entry.label}`).toBe(true);
       expect(row!.text, `context row text for ${entry.label}`).toContain(entry.label);
+      expect(row!.groupText, `context group source for ${entry.label}`).toContain('remote');
+      if (entry.label === 'mm' || entry.label === 'custody') {
+        expect(row!.text, `non-hub runtime ${entry.label} must not point at H3`).not.toContain('h3');
+      }
     }
   } finally {
     await context.close();
