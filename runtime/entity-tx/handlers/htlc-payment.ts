@@ -22,10 +22,12 @@ import { createOnionEnvelopes, type HtlcEnvelope } from '../../htlc-envelope-typ
 import { getRuntimeJurisdictionHeight } from '../../j-height';
 import { compareStableText, safeStringify } from '../../serialization-utils';
 import { getReplicaByEntityId } from '../../replica-utils';
+import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../logger';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
-const logError = (context: string, message: string) => console.error(`[${context}] ${message}`);
+const htlcLog = createStructuredLogger('entity.htlc');
+const logError = (context: string, message: string) => htlcLog.error('failed', { context, message });
 const isHexChar = (char: string): boolean => {
   const code = char.charCodeAt(0);
   return (
@@ -49,10 +51,17 @@ export async function handleHtlcPayment(
   entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
   env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: Array<{ accountId: string; tx: AccountTx }> }> {
-  if (env.quietRuntimeLogs !== true) {
-    console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
-    console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
-  }
+  const trace = (message: string, fields: Record<string, unknown> = {}): void => {
+    if (env.quietRuntimeLogs !== true) htlcLog.debug(message, fields);
+  };
+
+  trace('start', {
+    from: shortId(entityState.entityId),
+    target: shortId(entityTx.data.targetEntityId),
+    tokenId: entityTx.data.tokenId,
+    amount: formatAmount(entityTx.data.amount),
+    route: entityTx.data.route?.map((entityId: string) => shortId(entityId)) ?? [],
+  });
 
   // Emit HTLC initiation event
   env.emit('HtlcInitiated', {
@@ -83,7 +92,7 @@ export async function handleHtlcPayment(
   } else if (secret && !hashlock) {
     try {
       hashlock = hashHtlcSecret(secret);
-      console.log(`🔒 Derived hashlock from provided secret: ${hashlock.slice(0,16)}...`);
+      trace('hashlock.derived', { hashlock: shortHash(hashlock) });
     } catch (error) {
       logError("HTLC_PAYMENT", `❌ Invalid secret format: ${error instanceof Error ? error.message : String(error)}`);
       addMessage(newState, `❌ HTLC payment failed: invalid secret`);
@@ -119,7 +128,7 @@ export async function handleHtlcPayment(
   if (!route || route.length === 0) {
     // Account keyed by counterparty ID (no canonical helper needed)
     if (newState.accounts.has(targetEntityId)) {
-      console.log(`🔒 Direct account exists with ${formatEntityId(targetEntityId)}`);
+      trace('route.direct_account', { target: shortId(targetEntityId) });
       route = [entityState.entityId, targetEntityId];
     } else {
       // Find route through network using gossip
@@ -135,7 +144,7 @@ export async function handleHtlcPayment(
             return { newState, outputs: [], mempoolOps: [] };
           }
           route = selectedPath;
-          console.log(`🔒 Found route: ${route.map((e: string) => formatEntityId(e)).join(' → ')}`);
+          trace('route.discovery_found', { route: route.map((entityId: string) => shortId(entityId)) });
         } else {
           logError("HTLC_PAYMENT", `❌ No route found to ${formatEntityId(targetEntityId)}`);
           addMessage(newState, `❌ HTLC payment failed: No route to ${formatEntityId(targetEntityId)}`);
@@ -226,9 +235,11 @@ export async function handleHtlcPayment(
       if (senderLockAmount <= 0n || totalFee < 0n) {
         throw new Error(`invalid prepared amounts senderLock=${senderLockAmount} totalFee=${totalFee}`);
       }
-      console.log(
-        `🔒 HTLC using prepared payload: recipient=${desiredRecipientAmount}, senderLock=${senderLockAmount}, totalFee=${totalFee}`
-      );
+      trace('quote.prepared', {
+        recipient: formatAmount(desiredRecipientAmount),
+        senderLock: formatAmount(senderLockAmount),
+        totalFee: formatAmount(totalFee),
+      });
     } catch (error) {
       logError('HTLC_PAYMENT', `❌ Invalid prepared sender lock amount: ${error instanceof Error ? error.message : String(error)}`);
       addMessage(newState, '❌ HTLC payment failed: invalid prepared payload');
@@ -251,7 +262,11 @@ export async function handleHtlcPayment(
     }
     senderLockAmount = computedSenderLockAmount;
     totalFee = computedSenderLockAmount - desiredRecipientAmount;
-    console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${computedSenderLockAmount}, totalFee=${totalFee}`);
+    trace('quote.computed', {
+      recipient: formatAmount(desiredRecipientAmount),
+      senderLock: formatAmount(computedSenderLockAmount),
+      totalFee: formatAmount(totalFee),
+    });
   }
   if (senderLockAmount === null || totalFee === null) {
     logError('HTLC_PAYMENT', '❌ Missing finalized HTLC quote amounts');
@@ -297,10 +312,11 @@ export async function handleHtlcPayment(
       if (timelock <= 0n || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= 0) {
         throw new Error(`invalid deadlines timelock=${String(preparedTimelockRaw)} revealBeforeHeight=${String(preparedRevealBeforeHeightRaw)}`);
       }
-      console.log(
-        `🔒 HTLC using prepared deadlines: lockId=${lockId.slice(0, 16)}... ` +
-        `timelock=${timelock.toString()} revealBeforeHeight=${revealBeforeHeight}`,
-      );
+      trace('deadlines.prepared', {
+        lockId: shortHash(lockId),
+        timelock: timelock.toString(),
+        revealBeforeHeight,
+      });
     } catch (error) {
       logError(
         'HTLC_PAYMENT',
@@ -334,10 +350,12 @@ export async function handleHtlcPayment(
     entityTx.data.preparedLockId = lockId;
     entityTx.data.preparedTimelock = timelock.toString();
     entityTx.data.preparedRevealBeforeHeight = revealBeforeHeight;
-    console.log(
-      `🔒 HTLC runtime deadlines: runtimeJHeight=${runtimeJHeight} ` +
-      `timelock=${timelock.toString()} revealBeforeHeight=${revealBeforeHeight}`,
-    );
+    trace('deadlines.runtime', {
+      runtimeJHeight,
+      lockId: shortHash(lockId),
+      timelock: timelock.toString(),
+      revealBeforeHeight,
+    });
   }
 
   if (!lockId || timelock === null || revealBeforeHeight === null) {
@@ -457,16 +475,20 @@ export async function handleHtlcPayment(
       const msg = `❌ HTLC rejected: missing encryption keys for route hops [${missingList}]`;
       logError("HTLC_PAYMENT", `${msg} route=${route.map(formatEntityId).join('→')} available=[${availableList}]`);
       addMessage(newState, `${msg}. Refresh gossip and retry.`);
-      console.warn(`⚠️ HTLC: Available keys: ${availableList}`);
+      htlcLog.warn('envelope.keys_missing', {
+        route: route.map((entityId: string) => shortId(entityId)),
+        missing: missingKeys.map((entityId) => shortId(entityId)),
+        available: [...entityPubKeys.keys()].map((entityId) => shortId(entityId)),
+      });
       return { newState, outputs: [], mempoolOps: [] };
     }
     const keyDebug = hops.map((entityId: string) => {
       const key = entityPubKeys.get(entityId) || '';
       const isHex = isHexValue(key, 32);
       const source = keySources.get(entityId) || 'unknown';
-      return `${formatEntityId(entityId)}:${isHex ? 'hex32' : 'b64'}:len=${key.length}:src=${source}`;
-    }).join(' | ');
-    console.log(`🧅 HTLC-KEYS: ${keyDebug}`);
+      return { entity: shortId(entityId), format: isHex ? 'hex32' : 'b64', length: key.length, source };
+    });
+    trace('envelope.keys', { keys: keyDebug });
     const deterministicEnvelopeSeed = safeStringify({
       version: 'xln:htlc-envelope-entropy:v1',
       sender: newState.entityId,
@@ -496,7 +518,12 @@ export async function handleHtlcPayment(
       paymentDescription || undefined,
       paymentStartedAtMs,
     );
-    console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);
+    trace('envelope.created', {
+      encrypted: true,
+      hops: hops.length,
+      keyCount: entityPubKeys.size,
+      missing: missingKeys.map((entityId) => shortId(entityId)),
+    });
 
     // Persist deterministic payload for WAL replay.
     entityTx.data.preparedEnvelope = envelope;
@@ -526,8 +553,13 @@ export async function handleHtlcPayment(
   const accountMachine = newState.accounts.get(nextHop);
   if (accountMachine) {
     mempoolOps.push({ accountId: nextHop, tx: accountTx });
-    console.log(`🔒 Queued HTLC lock for mempool (account ${formatEntityId(nextHop)})`);
-    console.log(`🔒 Lock ID: ${lockId.slice(0,16)}..., expires block ${revealBeforeHeight}`);
+    trace('mempool.queued', {
+      account: shortId(nextHop),
+      lockId: shortHash(lockId),
+      revealBeforeHeight,
+      amount: formatAmount(finalizedSenderLockAmount),
+      tokenId,
+    });
 
     // Add to lockBook (E-Machine aggregated view)
     newState.lockBook.set(lockId, {

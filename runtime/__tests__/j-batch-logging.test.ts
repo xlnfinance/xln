@@ -17,3 +17,12 @@ test('r2c handler traces stay behind structured debug logging', () => {
   expect(source).not.toContain('console.log');
   expect(source).toContain('r2cLog.debug');
 });
+
+test('htlc payment handler traces stay behind structured logging', () => {
+  const source = readFileSync(join(process.cwd(), 'runtime/entity-tx/handlers/htlc-payment.ts'), 'utf8');
+
+  expect(source).toContain("const htlcLog = createStructuredLogger('entity.htlc');");
+  expect(source).not.toContain('console.');
+  expect(source).toContain('htlcLog.debug');
+  expect(source).toContain('htlcLog.error');
+});

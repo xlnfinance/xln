@@ -260,6 +260,7 @@ for (const [path, markers] of [
     "'NEXT_HOP_ACCOUNT_MISSING'",
   ]],
   ['runtime/entity-tx/handlers/r2c.ts', ["createStructuredLogger('entity.r2c')"]],
+  ['runtime/entity-tx/handlers/htlc-payment.ts', ["createStructuredLogger('entity.htlc')"]],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -276,6 +277,10 @@ assertNotIncludes(directPaymentHandler, 'console.log', directPaymentHandlerPath)
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);
 assertNotIncludes(r2cHandler, 'console.log', r2cHandlerPath);
+
+const htlcPaymentHandlerPath = 'runtime/entity-tx/handlers/htlc-payment.ts';
+const htlcPaymentHandler = readText(htlcPaymentHandlerPath);
+assertNotIncludes(htlcPaymentHandler, 'console.', htlcPaymentHandlerPath);
 
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
