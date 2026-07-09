@@ -2474,11 +2474,19 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
     expect(baseline.custody?.ok, `custody must be ready: ${JSON.stringify(baseline.custody ?? {})}`).toBe(true);
     expectMarketMakerBooksHealthy(baseline);
 
-    const importUrl = `${APP_BASE_URL}/app#runtime-import-src=${encodeURIComponent('/api/runtime-import?access=read')}`;
+    const importResponse = await page.request.get(`${API_BASE_URL}/api/runtime-import?access=read`, {
+      headers: { 'Cache-Control': 'no-store' },
+      timeout: 10_000,
+    });
+    const importPayload = await importResponse.json().catch(() => ({})) as { importUrl?: string };
+    expect(importResponse.ok(), `runtime import payload=${JSON.stringify(importPayload)}`).toBe(true);
+    const importUrl = String(importPayload.importUrl || '');
     const parsedImportUrl = new URL(importUrl);
     expect(parsedImportUrl.pathname).toBe('/app');
     expect(parsedImportUrl.search).toBe('');
     expect(parsedImportUrl.hash).toContain('runtime-import-src=');
+    expect(importUrl).toContain('/app#runtime-import-src=');
+    expect(importUrl).not.toContain('/radapter/manage#runtime-import');
     expect(importUrl).not.toContain('?runtimeList=');
     expect(importUrl).not.toContain('&token=');
     expect(importUrl).not.toContain('xlnra1.');

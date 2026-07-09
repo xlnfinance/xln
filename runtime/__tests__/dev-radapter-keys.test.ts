@@ -10,7 +10,7 @@ type DevRadapterKeysPayload = {
   entries: Array<{ name: string; wsUrl: string; authSeed: string }>;
 };
 
-test('dev radapter keys prints one manager source URL without pre-runtime tokens', () => {
+test('dev radapter keys prints one app source URL without pre-runtime tokens', () => {
   const dir = mkdtempSync(join(tmpdir(), 'xln-dev-radapter-'));
   const outPath = join(dir, 'radapter-keys.json');
   const envOutPath = join(dir, 'radapter-keys.env');
@@ -32,18 +32,21 @@ test('dev radapter keys prints one manager source URL without pre-runtime tokens
     });
 
     expect(result.status, result.stderr).toBe(0);
-    const managerLinks = result.stdout.match(/https:\/\/localhost:8084\/radapter\/manage#runtime-import-src=[^\s]+/g) ?? [];
-    expect(managerLinks.length).toBe(1);
+    const appLinks = result.stdout.match(/https:\/\/localhost:8084\/app#runtime-import-src=[^\s]+/g) ?? [];
+    expect(appLinks.length).toBe(1);
+    expect(result.stdout).not.toContain('/radapter/manage#runtime-import-src=');
     expect(result.stdout).not.toContain('key=paste');
     expect(result.stdout).not.toContain('Open these URLs');
     expect(result.stdout).not.toContain('?runtimeList=');
     expect(result.stdout).not.toContain('xlnra1.');
 
     const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
-    expect(payload.importUrl).toBe(managerLinks[0]);
-    expect(payload.importUrl).toContain('/radapter/manage#runtime-import-src=');
+    expect(payload.importUrl).toBe(appLinks[0]);
+    expect(payload.importUrl).toContain('/app#runtime-import-src=');
+    expect(payload.importUrl).not.toContain('/radapter/manage#runtime-import-src=');
     expect(payload.importUrl).not.toContain('?runtimeList=');
-    expect(payload.adminImportUrl).toContain('/radapter/manage#runtime-import-src=');
+    expect(payload.adminImportUrl).toContain('/app#runtime-import-src=');
+    expect(payload.adminImportUrl).not.toContain('/radapter/manage#runtime-import-src=');
     expect(payload.adminImportUrl).toContain('access%3Dadmin');
     expect(payload.importUrl).not.toContain('xlnra1.');
     expect(payload.adminImportUrl).not.toContain('xlnra1.');
@@ -78,9 +81,10 @@ test('dev radapter keys can suppress early URL logging for bun run dev', () => {
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).not.toContain('/radapter/manage#runtime-import-src=');
+    expect(result.stdout).not.toContain('/app#runtime-import-src=');
     const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
-    expect(payload.importUrl).toContain('/radapter/manage#runtime-import-src=');
+    expect(payload.importUrl).toContain('/app#runtime-import-src=');
+    expect(payload.importUrl).not.toContain('/radapter/manage#runtime-import-src=');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -112,13 +116,14 @@ test('dev radapter keys can run quietly when bun run dev waits for the real mani
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe('');
     const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
-    expect(payload.importUrl).toContain('/radapter/manage#runtime-import-src=');
+    expect(payload.importUrl).toContain('/app#runtime-import-src=');
+    expect(payload.importUrl).not.toContain('/radapter/manage#runtime-import-src=');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('dev radapter keys can point manager links at the browser QA origin', () => {
+test('dev radapter keys can point app import links at the browser QA origin', () => {
   const dir = mkdtempSync(join(tmpdir(), 'xln-dev-radapter-'));
   const outPath = join(dir, 'radapter-keys.json');
   const envOutPath = join(dir, 'radapter-keys.env');
@@ -145,8 +150,10 @@ test('dev radapter keys can point manager links at the browser QA origin', () =>
 
     expect(result.status, result.stderr).toBe(0);
     const payload = JSON.parse(readFileSync(outPath, 'utf8')) as DevRadapterKeysPayload;
-    expect(payload.importUrl.startsWith('http://localhost:8085/radapter/manage#runtime-import-src=')).toBe(true);
-    expect(payload.adminImportUrl.startsWith('http://localhost:8085/radapter/manage#runtime-import-src=')).toBe(true);
+    expect(payload.importUrl.startsWith('http://localhost:8085/app#runtime-import-src=')).toBe(true);
+    expect(payload.adminImportUrl.startsWith('http://localhost:8085/app#runtime-import-src=')).toBe(true);
+    expect(payload.importUrl).not.toContain('/radapter/manage#runtime-import-src=');
+    expect(payload.adminImportUrl).not.toContain('/radapter/manage#runtime-import-src=');
     expect(payload.importUrl).toContain('access%3Dread');
     expect(payload.adminImportUrl).toContain('access%3Dadmin');
   } finally {

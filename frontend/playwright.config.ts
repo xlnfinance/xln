@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+delete process.env['NO_COLOR'];
+
 const host = process.env.PLAYWRIGHT_FRONTEND_HOST || '127.0.0.1';
 const port = Number(process.env.PLAYWRIGHT_FRONTEND_PORT || 4173);
 const baseURL = `https://${host}:${port}`;

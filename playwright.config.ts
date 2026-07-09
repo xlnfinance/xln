@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+delete process.env['NO_COLOR'];
+
 const PW_BASE_URL = process.env['PW_BASE_URL'] || 'https://localhost:8080';
 const PW_WORKERS_RAW = Number(process.env['PW_WORKERS'] || '1');
 const PW_WORKERS = Number.isFinite(PW_WORKERS_RAW) && PW_WORKERS_RAW > 0 ? Math.floor(PW_WORKERS_RAW) : 1;

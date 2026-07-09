@@ -39,13 +39,13 @@ const quoteForShell = (value: string): string => `'${value.replace(/'/g, `'\\''`
 
 const webPort = requireNumberArg('--web-port');
 const apiPort = requireNumberArg('--api-port');
-const managerOrigin = (readArg('--manager-origin') || `https://localhost:${webPort}`).replace(/\/+$/, '');
+const appOrigin = (readArg('--manager-origin') || `https://localhost:${webPort}`).replace(/\/+$/, '');
 const outPath = resolve(readArg('--out', './db/dev/radapter-keys.json')!);
 const envOutPath = resolve(readArg('--env-out', './db/dev/radapter-keys.env')!);
 const suppressUrlLog = hasFlag('--suppress-url-log');
 const quiet = hasFlag('--quiet');
 const buildRuntimeImportSourceUrl = (access: 'read' | 'admin'): string =>
-  `${managerOrigin}/radapter/manage#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent(`/api/runtime-import?access=${access}`)}`;
+  `${appOrigin}/app#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent(`/api/runtime-import?access=${access}`)}`;
 
 const seeds: Record<string, string> = {};
 const entries = RUNTIMES.map(runtime => {

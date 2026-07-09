@@ -68,7 +68,7 @@ test('runtime import stdout log can expose the full URL only when explicitly req
     expiresAt: 1_797_123_456_000,
     entries: [{ label: 'H1' }],
   } as unknown as RuntimeImportLogManifest;
-  const importUrl = 'https://localhost:8080/radapter/manage#runtime-import=H1%20%7C%20read%20%7C%20ws%3A%2F%2Flocalhost%3A8092%2Frpc%20%7C%20xlnra1.read.secret';
+  const importUrl = 'https://localhost:8080/app#runtime-import=H1%20%7C%20read%20%7C%20ws%3A%2F%2Flocalhost%3A8092%2Frpc%20%7C%20xlnra1.read.secret';
 
   const line = buildRuntimeImportLogLine({
     manifest,

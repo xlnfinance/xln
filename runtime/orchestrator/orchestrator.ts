@@ -384,12 +384,14 @@ const deriveRuntimeImportToken = (
 
 const buildRuntimeImportUrl = (manifest: RuntimeImportManifest): string => {
   const url = new URL(args.walletUrl);
-  const lines = manifest.entries
-    .map(entry => `${entry.label} | ${entry.access} | ${entry.wsUrl} | ${entry.token}`)
-    .join('\n');
-  url.pathname = '/radapter/manage';
+  const accesses = new Set(manifest.entries.map(entry => entry.access));
+  if (accesses.size !== 1) {
+    throw new Error(`RUNTIME_IMPORT_URL_ACCESS_MISMATCH:${Array.from(accesses).join(',')}`);
+  }
+  const access = manifest.entries[0]?.access ?? runtimeImportAccess;
+  url.pathname = '/app';
   url.search = '';
-  url.hash = `runtime-import=${encodeURIComponent(lines)}`;
+  url.hash = `${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=${encodeURIComponent(`/api/runtime-import?access=${access}`)}`;
   return url.toString();
 };
 

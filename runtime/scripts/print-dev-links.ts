@@ -60,10 +60,8 @@ const stringFlag = (name: string): string => {
 
 const readKeys = (path: string): DevRadapterKeys => {
   const payload = JSON.parse(readFileSync(resolve(path), 'utf8')) as DevRadapterKeys;
-  const readImportReady = payload.importUrl?.includes('/radapter/manage#runtime-import=')
-    || payload.importUrl?.includes(`/radapter/manage#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=`);
-  const adminImportReady = payload.adminImportUrl?.includes('/radapter/manage#runtime-import=')
-    || payload.adminImportUrl?.includes(`/radapter/manage#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=`);
+  const readImportReady = payload.importUrl?.includes(`/app#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=`);
+  const adminImportReady = payload.adminImportUrl?.includes(`/app#${REMOTE_RUNTIME.IMPORT_SOURCE_HASH_PARAM}=`);
   if (!readImportReady) {
     throw new Error('DEV_LINKS_IMPORT_URL_MISSING');
   }
@@ -129,7 +127,7 @@ for (const row of rows) {
 }
 console.log('-'.repeat(88));
 console.log(`runtime import key file: ${resolve(args.keysPath)}`);
-console.log('runtime import links fetch fresh tokens into the manager; press Confirm in the browser.');
+console.log('runtime import links fetch fresh tokens into the app runtime list.');
 console.log('logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
 console.log(line);
 console.log('');

@@ -55,6 +55,8 @@ describe('playwright global setup cleanup', () => {
 
     expect(rootConfig).toContain("globalSetup: './tests/playwright-global-setup.ts'");
     expect(frontendConfig).toContain("globalSetup: '../tests/playwright-global-setup.ts'");
+    expect(rootConfig).toContain("delete process.env['NO_COLOR'];");
+    expect(frontendConfig).toContain("delete process.env['NO_COLOR'];");
     expect(globalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_CWD');
     expect(globalSetup).toContain("resolve(__dirname, '..')");
     expect(globalSetup).not.toContain('import.meta.dir');
