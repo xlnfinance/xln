@@ -54,6 +54,8 @@ test('runtime dev startup status logs stay structured', () => {
   expect(marketMakerNode).toContain("nodeLog.debug('token_universe.ready'");
   expect(orchestrator).not.toContain('console.log(`HUB_READY_SNAPSHOTS_PERSISTED');
   expect(orchestrator).toContain("meshLog.info('hub_ready_snapshots.persisted'");
+  expect(orchestrator).not.toContain('[MESH] runtime import manifest refresh failed');
+  expect(orchestrator).toContain("meshLog.warn('runtime_import_manifest.refresh_failed'");
   expect(wsClient).not.toContain('console.log(`[WS] Connected to ${this.options.url}`)');
   expect(wsClient).toContain("const wsLog = createStructuredLogger('runtime.wsClient');");
   expect(wsClient).toContain("wsLog.debug('connected'");

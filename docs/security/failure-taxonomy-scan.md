@@ -105,6 +105,8 @@ warnings.
 - Runtime adapter oversized-response diagnostics use the structured
   `runtime.radapter` logger and are guarded against direct `[RADAPTER]`
   console output.
+- Runtime-import manifest refresh failures use structured `mesh.orchestrator`
+  warnings and are guarded against direct `[MESH]` console output.
 
 ## Open Manual Review
 

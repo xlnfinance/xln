@@ -211,10 +211,12 @@ for (const marker of [
   'retryable: readiness.retryable',
   'fatal: readiness.fatal',
   'failure: readiness.failure',
+  "meshLog.warn('runtime_import_manifest.refresh_failed'",
   'classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)',
 ]) {
   assertIncludes(orchestrator, marker, orchestratorPath);
 }
+assertNotIncludes(orchestrator, '[MESH] runtime import manifest refresh failed', orchestratorPath);
 
 const healthRedactionPath = 'runtime/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
@@ -572,6 +574,7 @@ for (const marker of [
   'Public health redaction exposes code/category/retryability/fatality',
   'External wallet/faucet diagnostics use the structured',
   'Runtime adapter oversized-response diagnostics use the structured',
+  'Runtime-import manifest refresh failures use structured',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }

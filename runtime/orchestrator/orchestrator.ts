@@ -487,7 +487,7 @@ const scheduleRuntimeImportManifestRefresh = (manifest: RuntimeImportManifest | 
   runtimeImportRefreshTimer = setTimeout(() => {
     runtimeImportRefreshTimer = null;
     void publishRuntimeImportManifest().catch((error) => {
-      console.warn(`[MESH] runtime import manifest refresh failed: ${serializeError(error)}`);
+      meshLog.warn('runtime_import_manifest.refresh_failed', { error: serializeError(error) });
       clearRuntimeImportManifestFile();
       scheduleRuntimeImportManifestRefresh(null);
     });
