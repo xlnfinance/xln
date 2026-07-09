@@ -149,6 +149,42 @@ describe('remote runtime import manager utilities', () => {
     expect(entries[0]?.wsUrl).toBe('ws://127.0.0.1:8092/rpc');
   });
 
+  test('parses full dev runtime import manifest for same UX runtime list', () => {
+    const runtimeSpecs = [
+      ['H1', 8092],
+      ['H2', 8093],
+      ['H3', 8094],
+      ['MM', 8095],
+      ['Custody', 8088],
+    ] as const;
+    const entries = parseRemoteRuntimeImportSourcePayload({
+      ok: true,
+      ready: true,
+      manifest: {
+        entries: runtimeSpecs.map(([label, port], index) => ({
+          label,
+          access: 'read',
+          wsUrl: `ws://localhost:${port}/rpc`,
+          token: `${token}-${label.toLowerCase()}`,
+          runtimeId: `0x${String(index + 1).padStart(40, '0')}`,
+          authLevel: 'inspect',
+          height: 42 + index,
+          entityCount: 1,
+        })),
+      },
+    });
+
+    expect(entries.map(entry => entry.label)).toEqual(['H1', 'H2', 'H3', 'MM', 'Custody']);
+    expect(entries.map(entry => entry.access)).toEqual(['read', 'read', 'read', 'read', 'read']);
+    expect(entries.map(entry => entry.wsUrl)).toEqual([
+      'ws://127.0.0.1:8092/rpc',
+      'ws://127.0.0.1:8093/rpc',
+      'ws://127.0.0.1:8094/rpc',
+      'ws://127.0.0.1:8095/rpc',
+      'ws://127.0.0.1:8088/rpc',
+    ]);
+  });
+
   test('parses partial local runtime import payloads while the mesh baseline is still converging', () => {
     const entries = parseRemoteRuntimeImportSourcePayload({
       ok: true,
@@ -503,6 +539,8 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString())');
     expect(runtimeCreation).toContain("url.searchParams.set('allowPartial', '1')");
     expect(runtimeCreation).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString())');
+    expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\)\)/g))
+      .toHaveLength(1);
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
     expect(vaultStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports();');
