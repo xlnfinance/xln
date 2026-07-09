@@ -11,6 +11,7 @@ import { REMOTE_RUNTIME } from '../constants';
 import { createStructuredLogger } from '../logger';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 import {
   startCustodySupport,
   stopManagedChild,
@@ -978,14 +979,6 @@ const getMarketMakerIdentities = (): MarketMakerSupportPeerIdentity[] => {
   return identities;
 };
 
-const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
-  const next: NodeJS.ProcessEnv = { ...env };
-  if (Object.hasOwn(next, 'NO_COLOR')) {
-    delete next['NO_COLOR'];
-  }
-  return next;
-};
-
 const clearChildRestartTimer = (child: { restartTimer: ReturnType<typeof setTimeout> | null }): void => {
   if (!child.restartTimer) return;
   clearTimeout(child.restartTimer);
@@ -1107,7 +1100,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: sanitizeChildEnv({
+    env: sanitizeChildProcessEnv({
       ...process.env,
       XLN_DB_PATH: child.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
@@ -1187,7 +1180,7 @@ const spawnMarketMaker = async (): Promise<void> => {
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: sanitizeChildEnv({
+    env: sanitizeChildProcessEnv({
       ...process.env,
       XLN_DB_PATH: marketMakerChild.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,

@@ -59,6 +59,7 @@ import type {
 } from '../qa/types';
 import { assertMinDiskFree } from '../orchestrator/storage-monitor';
 import { compareStableText } from '../serialization-utils';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
 import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
 
@@ -1513,14 +1514,6 @@ const waitForHttpsReady = async (url: string, timeoutMs: number): Promise<void> 
   throw new Error(`HTTPS_ENDPOINT_NOT_READY url=${url} timeoutMs=${timeoutMs} last=${lastError || 'none'}`);
 };
 
-const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
-  const next: NodeJS.ProcessEnv = { ...env };
-  if (Object.hasOwn(next, 'NO_COLOR')) {
-    delete next['NO_COLOR'];
-  }
-  return next;
-};
-
 const runCmd = async (
   cmd: string,
   args: string[],
@@ -1536,7 +1529,7 @@ const runCmd = async (
 ): Promise<number | null> => {
   const proc = spawn(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: sanitizeChildEnv(opts.env ?? process.env),
+    env: sanitizeChildProcessEnv(opts.env ?? process.env),
     cwd: opts.cwd,
   });
   if (proc.pid) opts.onSpawn?.(proc.pid);
@@ -1690,7 +1683,7 @@ const captureShardFailureForensics = async (options: {
       ['runtime/scripts/read-frame-receipts.ts', '--runtime-id', runtimeId, '--tail', '20', '--json'],
       {
         cwd: process.cwd(),
-        env: sanitizeChildEnv({
+        env: sanitizeChildProcessEnv({
           ...process.env,
           XLN_DB_PATH: dbPath,
         }),
@@ -1839,7 +1832,7 @@ const runShard = async (
         anvilStatePath,
         '--silent',
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildEnv(process.env) },
+      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildProcessEnv(process.env) },
     );
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
     anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
@@ -1860,7 +1853,7 @@ const runShard = async (
         anvil2StatePath,
         '--silent',
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildEnv(process.env) },
+      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildProcessEnv(process.env) },
     );
     anvil2.stdout.on('data', c => log.write(`[anvil2] ${c.toString()}`));
     anvil2.stderr.on('data', c => log.write(`[anvil2:err] ${c.toString()}`));
@@ -1905,7 +1898,7 @@ const runShard = async (
       ],
       {
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: sanitizeChildEnv({
+        env: sanitizeChildProcessEnv({
           ...process.env,
           USE_ANVIL: 'true',
           ANVIL_RPC: rpcUrl,
@@ -1968,7 +1961,7 @@ const runShard = async (
       {
         cwd: resolve(process.cwd(), 'frontend'),
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: sanitizeChildEnv({
+        env: sanitizeChildProcessEnv({
           ...process.env,
           ANVIL_RPC: rpcUrl,
           ANVIL_RPC2: rpc2Url,

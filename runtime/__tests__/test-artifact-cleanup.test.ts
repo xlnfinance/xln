@@ -12,6 +12,7 @@ import {
   withoutTestArtifactCleanupDoneEnv,
 } from '../scripts/test-artifact-cleanup';
 import { parseRunWithTestCleanupArgs } from '../scripts/run-with-test-cleanup';
+import { sanitizeChildProcessEnv } from '../child-process-env';
 
 const makeTempWorkspace = (): string => mkdtempSync(join(tmpdir(), 'xln-test-artifacts-'));
 
@@ -269,12 +270,14 @@ describe('test artifact cleanup', () => {
     expect(parsed.cleanupArgv).toContain('--keep-test-artifacts');
   });
 
-  test('run-with-test-cleanup sanitizes color env before spawning child tools', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/scripts/run-with-test-cleanup.ts'), 'utf8');
+  test('child process env sanitizer removes NO_COLOR before child tools can set FORCE_COLOR', () => {
+    const env = sanitizeChildProcessEnv({
+      FORCE_COLOR: '1',
+      NO_COLOR: '1',
+      KEEP_ME: 'yes',
+    });
 
-    expect(source).toContain("if (Object.hasOwn(next, 'NO_COLOR'))");
-    expect(source).toContain("delete next['NO_COLOR']");
-    expect(source).toContain('env: sanitizeChildEnv({');
+    expect(env).toEqual({ FORCE_COLOR: '1', KEEP_ME: 'yes' });
   });
 
   test('package test shortcuts run through cleanup before direct browser or hardhat tests', () => {
