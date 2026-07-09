@@ -180,6 +180,22 @@ test('vault runtime recovery and restore diagnostics use persistent error log', 
   expect(`${recoverySource}\n${cleanupSource}\n${restoreSource}`).not.toContain('console.info');
 });
 
+test('vaultStore diagnostics do not use raw console output', () => {
+  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+
+  expect(source).toContain("errorLog.log('Resume refresh failed', 'Runtime Resume', error)");
+  expect(source).toContain('Broadcast refresh failed');
+  expect(source).toContain("errorLog.log('Failed to load runtimes; clearing corrupted storage', 'Runtime Storage', error)");
+  expect(source).toContain("errorLog.log('Failed to save runtimes', 'Runtime Storage', error)");
+  expect(source).toContain('createRuntime failed for ${id.slice(0, 12)}');
+  expect(source).toContain("errorLog.log('Failed to register key/create entity', 'Runtime Creation'");
+  expect(source).toContain("errorLog.log('Failed to get balance', 'Runtime Balance'");
+  expect(source).toContain("errorLog.log('Send failed', 'Runtime Send'");
+  expect(source).not.toContain('console.warn');
+  expect(source).not.toContain('console.error');
+  expect(source).not.toContain('console.info');
+});
+
 const testMnemonic = 'test test test test test test test test test test test junk';
 const testWatchSeed = `0x${'42'.repeat(32)}`;
 const abiCoder = AbiCoder.defaultAbiCoder();

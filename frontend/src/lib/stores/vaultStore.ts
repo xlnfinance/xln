@@ -2684,7 +2684,7 @@ function registerRuntimeResumeListener(): void {
     if (isInactiveTabStandby()) return;
     if (document.visibilityState !== 'visible') return;
     void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch((error) => {
-      console.warn('[VaultStore] Resume refresh failed:', error);
+      errorLog.log('Resume refresh failed', 'Runtime Resume', error);
     });
   };
   runtimeResumeTrigger = triggerRefresh;
@@ -2701,7 +2701,11 @@ function registerRuntimeResumeListener(): void {
       const currentHeight = Number(runtimeEntry?.env?.height ?? 0);
       if (height <= currentHeight) return;
       void vaultOperations.refreshActiveRuntimeFromDbIfBehind().catch((error) => {
-        console.warn('[VaultStore] Broadcast refresh failed:', error);
+        errorLog.log(
+          'Broadcast refresh failed',
+          'Runtime Resume',
+          { runtimeId, height, currentHeight, error },
+        );
       });
     };
   }
@@ -2816,7 +2820,11 @@ export const vaultOperations = {
       };
     }
     if (existing) {
-      console.warn(`[VaultStore] J-machine "${config.name}" exists without a live adapter; re-importing`);
+      errorLog.log(
+        `J-machine "${config.name}" exists without a live adapter; re-importing`,
+        'J-Machine Import',
+        { runtimeId, jurisdiction: config.name },
+      );
     }
 
     ensureRuntimeLoopRunning(runtimeEnv, xln, `import-jmachine:${config.name}`);
@@ -3036,7 +3044,7 @@ export const vaultOperations = {
       }
       vaultStorageLoaded.set(true);
     } catch (error) {
-      console.error('❌ Failed to load runtimes (clearing corrupted storage):', error);
+      errorLog.log('Failed to load runtimes; clearing corrupted storage', 'Runtime Storage', error);
       localStorage.removeItem(VAULT_STORAGE_KEY);
       runtimesState.set(defaultState);
       vaultStorageLoaded.set(true);
@@ -3051,7 +3059,7 @@ export const vaultOperations = {
       const current = get(runtimesState);
       localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(current));
     } catch (error) {
-      console.error('❌ Failed to save runtimes:', error);
+      errorLog.log('Failed to save runtimes', 'Runtime Storage', error);
     }
   },
 
@@ -3451,13 +3459,21 @@ export const vaultOperations = {
       finishRuntimeCreation();
       return runtime;
     } catch (error) {
-      console.error(`[VaultStore] createRuntime failed for ${id.slice(0, 12)}`, error);
+      errorLog.log(
+        `createRuntime failed for ${id.slice(0, 12)}`,
+        'Runtime Creation',
+        { runtimeId: id, error },
+      );
       try {
         if (runtimeId) {
           await cleanupRuntimeEnv(runtimeId);
         }
       } catch (cleanupError) {
-        console.warn(`[VaultStore] Failed to cleanup partial runtime ${id.slice(0, 12)}`, cleanupError);
+        errorLog.log(
+          `Failed to cleanup partial runtime ${id.slice(0, 12)}`,
+          'Runtime Creation',
+          { runtimeId: id, cleanupRuntimeId: runtimeId, error: cleanupError },
+        );
       }
       runtimesState.update((state) => {
         const nextRuntimes = { ...state.runtimes };
@@ -3613,7 +3629,12 @@ export const vaultOperations = {
         this.setSignerEntity(nextIndex, entityId);
       }
     })().catch(err => {
-      console.error('[VaultStore] Failed to register key/create entity:', err);
+      errorLog.log('Failed to register key/create entity', 'Runtime Creation', {
+        runtimeId: runtime.id,
+        signerIndex: nextIndex,
+        signerAddress: address,
+        error: err,
+      });
       toasts.error(`Failed to create signer entity: ${(err as Error)?.message || String(err)}`, 10_000);
       throw err;
     });
@@ -3870,7 +3891,11 @@ export const vaultOperations = {
 
       return await jadapter.getReserves(signer.entityId, tokenId);
     } catch (err) {
-      console.error('[VaultStore] Failed to get balance:', err);
+      errorLog.log('Failed to get balance', 'Runtime Balance', {
+        entityId: signer.entityId,
+        tokenId,
+        error: err,
+      });
       return 0n;
     }
   },
@@ -3900,7 +3925,13 @@ export const vaultOperations = {
       }]);
       return { success: true };
     } catch (err) {
-      console.error('[VaultStore] Send failed:', err);
+      errorLog.log('Send failed', 'Runtime Send', {
+        fromEntityId: signer.entityId,
+        toEntityId,
+        tokenId,
+        amount: amount.toString(),
+        error: err,
+      });
       return { success: false, error: err instanceof Error ? err.message : 'Transfer failed' };
     }
   },

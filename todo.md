@@ -699,6 +699,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      use persistent frontend `errorLog` instead of raw console output in tower
      restore/upload, faucet funding, runtime DB cleanup, J-watcher shutdown,
      DB restore fallback, and jurisdiction re-import wait paths.
+   - Partial: all remaining `vaultStore` runtime resume, J-machine import,
+     localStorage load/save, runtime creation cleanup, signer entity creation,
+     balance, and send diagnostics now use persistent frontend `errorLog`; a
+     focused source guard rejects any raw `console.warn/error/info` in the store.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.
