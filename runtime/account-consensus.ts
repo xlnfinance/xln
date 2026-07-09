@@ -397,7 +397,7 @@ async function handlePendingFrameAck(
   if (!(accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && input.prevHanko)) {
     return { kind: 'not_applicable' };
   }
-  if (HEAVY_LOGS) console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
+  if (HEAVY_LOGS) accountLog.debug('ack.debug', { from: shortId(input.fromEntityId), to: shortId(input.toEntityId) });
 
   const frameHash = accountMachine.pendingFrame.stateHash;
 
@@ -467,7 +467,7 @@ async function handlePendingFrameAck(
       env,
     );
     if (!commitResult.success) {
-      console.error(`❌ PROPOSER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
+      accountLog.error('frame.commit.failed', { side: 'proposer', type: tx.type, error: commitResult.error });
       throw new Error(
         `Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`,
       );
@@ -579,7 +579,7 @@ async function handlePendingFrameAck(
         };
       }
     }
-    if (HEAVY_LOGS) console.log(`🔍 RETURN-ACK-ONLY: frame ${ackHeight} ACKed, no new frame bundled`);
+    if (HEAVY_LOGS) accountLog.debug('return.ack_only', { height: ackHeight });
     return {
       kind: 'return',
       result: { success: true, events, timedOutHashlocks, ...(committedFrames.length > 0 && { committedFrames }) },
@@ -747,9 +747,11 @@ function handleSameHeightIncomingFrame(
   // Simultaneous proposal tiebreaker: left keeps its pending frame, right rolls back.
   const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
   if (HEAVY_LOGS) {
-    console.log(
-      `🔍 TIEBREAKER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, toEntity=${accountMachine.proofHeader.toEntity.slice(-4)}, isLeft=${isLeftEntity}`,
-    );
+    accountLog.debug('frame.tiebreaker', {
+      from: shortId(accountMachine.proofHeader.fromEntity),
+      to: shortId(accountMachine.proofHeader.toEntity),
+      isLeft: isLeftEntity,
+    });
   }
 
   if (isLeftEntity) {
@@ -783,9 +785,7 @@ function handleSameHeightIncomingFrame(
   accountMachine.rollbackCount = Math.max(1, accountMachine.rollbackCount + 1);
   accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
   if (accountMachine.rollbackCount > 1) {
-    console.warn(
-      `⚠️ ROLLBACK-RETRY: repeated RIGHT rollback count=${accountMachine.rollbackCount} (continuing deterministically)`,
-    );
+    accountLog.warn('rollback.retry', { count: accountMachine.rollbackCount, frame: shortHash(receivedHash) });
   }
 
   events.push(`📥 Accepted LEFT's frame ${receivedFrame.height} (we are RIGHT, deterministic tiebreaker)`);
@@ -888,8 +888,7 @@ async function preflightIncomingAccountFrame(
       expectedPrevFrameHash,
       account: describeAccountState(accountMachine),
     };
-    console.warn(`⚠️ FRAME-CHAIN: prevHash mismatch at height ${accountMachine.currentHeight}`);
-    console.warn(`[A-MACHINE][FRAME-CHAIN-MISMATCH] ${safeStringify(mismatchDebug)}`);
+    accountLog.warn('frame.prev_hash_mismatch', mismatchDebug);
     return {
       kind: 'return',
       result: {
@@ -917,14 +916,17 @@ async function preflightIncomingAccountFrame(
 
   // NOTE: rollbackCount decrement happens in ACK block when pendingFrame confirmed.
   if (HEAVY_LOGS) {
-    console.log(
-      `🔍 SEQUENCE-CHECK: receivedFrame.height=${receivedFrame.height}, currentHeight=${accountMachine.currentHeight}, expected=${accountMachine.currentHeight + 1}`,
-    );
+    accountLog.debug('frame.sequence_check', {
+      receivedHeight: receivedFrame.height,
+      currentHeight: accountMachine.currentHeight,
+      expectedHeight: accountMachine.currentHeight + 1,
+    });
   }
   if (receivedFrame.height !== accountMachine.currentHeight + 1) {
-    console.log(
-      `❌ Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`,
-    );
+    accountLog.warn('frame.sequence_mismatch', {
+      expectedHeight: accountMachine.currentHeight + 1,
+      receivedHeight: receivedFrame.height,
+    });
     return {
       kind: 'return',
       result: {
@@ -960,7 +962,7 @@ function collectReceiverValidationDeltas(clonedMachine: AccountMachine): {
     const totalDelta = delta.offdelta;
 
     if (!shouldIncludeToken(delta, totalDelta)) {
-      if (HEAVY_LOGS) console.log(`⏭️  RECEIVER: Skipping unused token ${tokenId} from validation`);
+      if (HEAVY_LOGS) accountLog.debug('receiver.token.skip_unused', { tokenId });
       continue;
     }
 
@@ -969,7 +971,7 @@ function collectReceiverValidationDeltas(clonedMachine: AccountMachine): {
   }
 
   if (HEAVY_LOGS) {
-    console.log(`🔍 RECEIVER: Computed ${tokenIds.length} tokens after filtering: [${tokenIds.join(', ')}]`);
+    accountLog.debug('receiver.tokens.computed', { tokenIds });
   }
   return { tokenIds, deltas };
 }
@@ -1004,9 +1006,11 @@ function verifyReceiverStateMatchesFrame(
   }
 
   if (ourComputedState !== theirClaimedState) {
-    console.warn(
-      `⚠️ CONSENSUS: Frame ${receivedFrame.height} - state mismatch (our: ${ourComputedState.slice(0, 16)}... vs their: ${theirClaimedState.slice(0, 16)}...)`,
-    );
+    accountLog.warn('frame.state_mismatch', {
+      height: receivedFrame.height,
+      our: shortHash(ourComputedState),
+      their: shortHash(theirClaimedState),
+    });
     return { success: false, error: `Bilateral consensus failure - states don't match`, events };
   }
   return undefined;
@@ -1019,9 +1023,7 @@ function verifyReceiverBilateralDeltas(
 ): HandleAccountInputResult | undefined {
   const theirDeltas = receivedFrame.deltas;
   if (ourFinalDeltas.length !== theirDeltas.length) {
-    console.warn(
-      `⚠️ SECURITY: delta count mismatch (our: ${ourFinalDeltas.length}, their: ${theirDeltas.length})`,
-    );
+    accountLog.warn('frame.delta_count_mismatch', { ours: ourFinalDeltas.length, theirs: theirDeltas.length });
     return { success: false, error: `Bilateral state injection detected - delta count mismatch`, events };
   }
 
@@ -1038,12 +1040,14 @@ function verifyReceiverBilateralDeltas(
       (ours.rightHold ?? 0n) !== (theirs.rightHold ?? 0n);
 
     if (bilateralMismatch) {
-      console.warn(`⚠️ SECURITY: Bilateral field mismatch at token ${ours.tokenId}:`);
-      console.warn(`   offdelta: our=${ours.offdelta}, their=${theirs.offdelta}`);
-      console.warn(`   leftCreditLimit: our=${ours.leftCreditLimit}, their=${theirs.leftCreditLimit}`);
-      console.warn(`   rightCreditLimit: our=${ours.rightCreditLimit}, their=${theirs.rightCreditLimit}`);
-      console.warn(`   leftHold: our=${ours.leftHold ?? 0n}, their=${theirs.leftHold ?? 0n}`);
-      console.warn(`   rightHold: our=${ours.rightHold ?? 0n}, their=${theirs.rightHold ?? 0n}`);
+      accountLog.warn('frame.bilateral_delta_mismatch', {
+        tokenId: ours.tokenId,
+        offdelta: { ours: ours.offdelta.toString(), theirs: theirs.offdelta.toString() },
+        leftCreditLimit: { ours: ours.leftCreditLimit.toString(), theirs: theirs.leftCreditLimit.toString() },
+        rightCreditLimit: { ours: ours.rightCreditLimit.toString(), theirs: theirs.rightCreditLimit.toString() },
+        leftHold: { ours: String(ours.leftHold ?? 0n), theirs: String(theirs.leftHold ?? 0n) },
+        rightHold: { ours: String(ours.rightHold ?? 0n), theirs: String(theirs.rightHold ?? 0n) },
+      });
       return { success: false, error: `Bilateral state injection detected - credit/allowance mismatch`, events };
     }
   }
@@ -1054,8 +1058,7 @@ async function verifySenderFrameHash(
   receivedFrame: AccountFrame,
   events: string[],
 ): Promise<HandleAccountInputResult | undefined> {
-  if (HEAVY_LOGS) console.log(`🔍 ABOUT-TO-VERIFY-HASH: Computing frame hash...`);
-  if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
+  if (HEAVY_LOGS) accountLog.debug('frame.hash.verify_start', { height: receivedFrame.height });
   const senderHashFrame: AccountFrame = {
     height: receivedFrame.height,
     timestamp: receivedFrame.timestamp,
@@ -1069,9 +1072,10 @@ async function verifySenderFrameHash(
   const recomputedSenderHash = await createFrameHash(senderHashFrame);
 
   if (recomputedSenderHash !== receivedFrame.stateHash) {
-    console.warn(`⚠️ SECURITY: Frame hash mismatch after validation`);
-    console.warn(`   Recomputed: ${recomputedSenderHash.slice(0, 16)}...`);
-    console.warn(`   Claimed:    ${receivedFrame.stateHash.slice(0, 16)}...`);
+    accountLog.warn('frame.hash_mismatch', {
+      recomputed: shortHash(recomputedSenderHash),
+      claimed: shortHash(receivedFrame.stateHash),
+    });
     return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
   }
   return undefined;
@@ -1121,7 +1125,7 @@ async function validateIncomingFrameOnClone(
     assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');
     processEvents.push(...result.events);
 
-    if (HEAVY_LOGS) console.log(`🔍 TX-PROCESSED: ${accountTx.type}, success=${result.success}`);
+    if (HEAVY_LOGS) accountLog.debug('receiver.tx.processed', { type: accountTx.type, success: result.success });
     if (result.secret && result.hashlock) {
       revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
     }
@@ -1186,9 +1190,10 @@ async function commitIncomingFrameOnRealState(
 ): Promise<void> {
   const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
   if (HEAVY_LOGS) {
-    console.log(
-      `🔍 RECEIVER-COMMIT: Re-executing ${receivedFrame.accountTxs.length} txs for ${cpForCommitLog.slice(-4)}`,
-    );
+    accountLog.debug('receiver.commit.reexecute', {
+      txs: receivedFrame.accountTxs.length,
+      counterparty: shortId(cpForCommitLog),
+    });
   }
 
   for (const tx of receivedFrame.accountTxs) {
@@ -1204,7 +1209,7 @@ async function commitIncomingFrameOnRealState(
     );
 
     if (!commitResult.success) {
-      console.error(`❌ RECEIVER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
+      accountLog.error('frame.commit.failed', { side: 'receiver', type: tx.type, error: commitResult.error });
       throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
     }
     assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');
@@ -1413,9 +1418,12 @@ async function maybeBatchAckWithNewFrame(
   let proposeResult: ProposeAccountFrameResult | undefined;
 
   if (HEAVY_LOGS) {
-    console.log(
-      `🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`,
-    );
+    accountLog.debug('ack.batch_check', {
+      from: shortId(input.fromEntityId),
+      mempool: accountMachine.mempool.length,
+      pendingFrame: Boolean(accountMachine.pendingFrame),
+      mempoolTxs: accountMachine.mempool.map(tx => tx.type),
+    });
   }
   if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
     proposeResult = await proposeAccountFrame(env, accountMachine, true);
@@ -1479,9 +1487,11 @@ function buildIncomingFrameReturnPayload(
   ];
 
   if (HEAVY_LOGS) {
-    console.log(
-      `🔍 RETURN-RESPONSE: h=${response.height} prevHanko=${!!response.prevHanko} newFrame=${!!response.newAccountFrame}`,
-    );
+    accountLog.debug('return.response', {
+      height: response.height,
+      prevHanko: Boolean(response.prevHanko),
+      newFrame: Boolean(response.newAccountFrame),
+    });
   }
   return {
     success: true,
@@ -1712,7 +1722,7 @@ export async function applyAccountInput(
   );
   if (unmatchedAck) return unmatchedAck;
 
-  if (HEAVY_LOGS) console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
+  if (HEAVY_LOGS) accountLog.debug('return.no_response');
   return {
     success: true,
     events,
@@ -1742,9 +1752,11 @@ export function addToAccountMempool(accountMachine: AccountMachine, accountTx: A
 export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
   const should = accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
   if (HEAVY_LOGS) {
-    console.log(
-      `   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.pendingFrame}, result=${should}`,
-    );
+    accountLog.debug('proposal.should_propose', {
+      mempool: accountMachine.mempool.length,
+      pendingFrame: Boolean(accountMachine.pendingFrame),
+      result: should,
+    });
   }
   return should;
 }
