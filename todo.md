@@ -657,6 +657,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: market snapshot enrichment failures now use structured
      `mesh.orchestrator` warnings instead of direct `[MESH]` console output;
      health source tests and the failure-taxonomy scan guard it.
+   - Partial: orchestrator child stop timeout and unexpected child exit
+     diagnostics now use structured `mesh.orchestrator` logs instead of direct
+     `[MESH]` console output; production wiring tests and the failure-taxonomy
+     scan guard it.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

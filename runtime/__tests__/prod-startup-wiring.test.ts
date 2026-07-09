@@ -66,6 +66,12 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("process.env['XLN_MARKET_MAKER_INFO_TIMEOUT_MS'] || '1500'");
     expect(orchestrator).toContain("process.env['XLN_CHILD_SHUTDOWN_QUIESCE_MS'] || '5000'");
     expect(orchestrator).toContain('const CHILD_RESET_QUIESCE_TIMEOUT_MS = 45_000;');
+    expect(orchestrator).toContain("meshLog.warn('child.stop_timeout_sigkill'");
+    expect(orchestrator).toContain("meshLog.error('child.unexpected_exit'");
+    expect(orchestrator).toContain("meshLog.error('child.unexpected_exit.stop_failed'");
+    expect(orchestrator).not.toContain('[MESH] child pid=');
+    expect(orchestrator).not.toContain('failed while stopping children after fatal exit');
+    expect(orchestrator).not.toContain('shutting down instead of restarting');
     expect(orchestrator).toContain('await stopAllChildren({');
     expect(orchestrator).toContain('quiesceRounds: 1');
     expect(orchestrator).toContain('quiesceTimeoutMs: CHILD_SHUTDOWN_QUIESCE_TIMEOUT_MS');

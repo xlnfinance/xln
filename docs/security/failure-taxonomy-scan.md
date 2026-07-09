@@ -109,6 +109,9 @@ warnings.
   warnings and are guarded against direct `[MESH]` console output.
 - Market snapshot enrichment failures use structured `mesh.orchestrator`
   warnings and are guarded against direct `[MESH]` console output.
+- Orchestrator child stop timeout and unexpected child exit diagnostics use
+  structured `mesh.orchestrator` logs and are guarded against direct `[MESH]`
+  console output.
 
 ## Open Manual Review
 

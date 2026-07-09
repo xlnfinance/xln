@@ -213,12 +213,18 @@ for (const marker of [
   'failure: readiness.failure',
   "meshLog.warn('runtime_import_manifest.refresh_failed'",
   "meshLog.warn('market_snapshot.enrichment_unavailable'",
+  "meshLog.warn('child.stop_timeout_sigkill'",
+  "meshLog.error('child.unexpected_exit'",
+  "meshLog.error('child.unexpected_exit.stop_failed'",
   'classifyRuntimeBootstrapStageFailure(stage.key, stage.status, stage.reason)',
 ]) {
   assertIncludes(orchestrator, marker, orchestratorPath);
 }
 assertNotIncludes(orchestrator, '[MESH] runtime import manifest refresh failed', orchestratorPath);
 assertNotIncludes(orchestrator, '[MESH] market snapshot enrichment unavailable', orchestratorPath);
+assertNotIncludes(orchestrator, '[MESH] child pid=', orchestratorPath);
+assertNotIncludes(orchestrator, 'failed while stopping children after fatal exit', orchestratorPath);
+assertNotIncludes(orchestrator, 'shutting down instead of restarting', orchestratorPath);
 
 const healthRedactionPath = 'runtime/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
@@ -578,6 +584,7 @@ for (const marker of [
   'Runtime adapter oversized-response diagnostics use the structured',
   'Runtime-import manifest refresh failures use structured',
   'Market snapshot enrichment failures use structured',
+  'Orchestrator child stop timeout and unexpected child exit diagnostics use',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }

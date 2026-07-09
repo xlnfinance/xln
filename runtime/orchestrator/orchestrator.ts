@@ -635,7 +635,10 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
     await delay(100);
   }
   if (proc.exitCode === null) {
-    console.warn(`[MESH] child pid=${proc.pid ?? 'unknown'} did not exit after ${CHILD_GRACEFUL_SHUTDOWN_MS}ms; sending SIGKILL`);
+    meshLog.warn('child.stop_timeout_sigkill', {
+      pid: proc.pid ?? null,
+      timeoutMs: CHILD_GRACEFUL_SHUTDOWN_MS,
+    });
     proc.kill('SIGKILL');
     const killDeadline = Date.now() + CHILD_GRACEFUL_SHUTDOWN_MS;
     while (proc.exitCode === null && Date.now() < killDeadline) {
@@ -1038,12 +1041,12 @@ const consumeControlledStop = (pid: number | null | undefined): boolean => (
 const failFastUnexpectedChildExit = (message: string): void => {
   if (resetState.inProgress || fatalOrchestratorShutdownStarted) return;
   fatalOrchestratorShutdownStarted = true;
-  console.error(`[MESH] ${message}; shutting down instead of restarting`);
+  meshLog.error('child.unexpected_exit', { message });
   void (async () => {
     try {
       await stopAllChildren();
     } catch (error) {
-      console.error(`[MESH] failed while stopping children after fatal exit: ${serializeError(error)}`);
+      meshLog.error('child.unexpected_exit.stop_failed', { error: serializeError(error) });
     } finally {
       process.exit(1);
     }
