@@ -4,6 +4,7 @@
 -->
 <script lang="ts">
   import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
+  import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import {
@@ -104,7 +105,7 @@
       }
 
     } catch (err) {
-      console.error('[HubDiscovery] Failed:', err);
+      errorLog.log('Hub discovery failed', 'Hub Discovery', { entityId, err });
       error = (err as Error)?.message || 'Discovery failed';
     } finally {
       loading = false;
@@ -156,7 +157,7 @@
       }));
 
     } catch (err) {
-      console.error('[HubDiscovery] Connect failed:', err);
+      errorLog.log('Hub connection failed', 'Hub Discovery', { entityId, hubId, err });
       error = (err as Error)?.message || 'Connection failed';
     } finally {
       const next = new Set(connectingHubIds);

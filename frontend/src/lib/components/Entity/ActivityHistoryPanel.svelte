@@ -5,6 +5,7 @@
     RuntimeAdapterReadQuery,
     RuntimeActivityEvent,
   } from '@xln/runtime/xln-api';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeControllerHandle, runtimeAdapterHeight } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import {
@@ -183,7 +184,7 @@
       events = options.append ? dedupe([...events, ...nextEvents]) : dedupe(nextEvents);
     } catch (err) {
       if (loadVersion !== activityLoadVersion) return;
-      console.error('[ActivityHistoryPanel] activity projection read failed', err);
+      errorLog.log('Activity history projection read failed', 'Activity History', { entityId: currentEntity, runtimeId, err });
       error = err instanceof Error ? err.message : 'Failed to load activity history';
     } finally {
       if (loadVersion === activityLoadVersion) loading = false;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Network, PlusCircle, Save, ShieldCheck, SlidersHorizontal } from 'lucide-svelte';
   import type { Env, HubRebalanceConfig } from '@xln/runtime/xln-api';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import {
@@ -305,7 +306,7 @@
       });
       profileSaved = true;
     } catch (error) {
-      console.error('[EntitySettingsProjectionPanel] profile update failed', error);
+      errorLog.log('Entity profile update failed', 'Entity Settings', { entityId: normalizedEntityId, error });
       profileError = error instanceof Error ? error.message : String(error);
     } finally {
       savingProfile = false;
@@ -325,7 +326,7 @@
       importSaved = true;
       networkPanelOpen = false;
     } catch (error) {
-      console.error('[EntitySettingsProjectionPanel] jurisdiction import failed', error);
+      errorLog.log('Jurisdiction import failed', 'Entity Settings', { entityId: normalizedEntityId, error });
       importError = error instanceof Error ? error.message : String(error);
     } finally {
       importingJMachine = false;

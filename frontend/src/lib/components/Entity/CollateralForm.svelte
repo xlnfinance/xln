@@ -2,6 +2,7 @@
   import { get } from 'svelte/store';
   import type { AccountMachine, Env, Profile as GossipProfile, RuntimeInput } from '@xln/runtime/xln-api';
   import { xlnFunctions, error } from '../../stores/xlnStore';
+  import { errorLog } from '../../stores/errorLogStore';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import {
     getCounterpartyAccount,
@@ -248,7 +249,7 @@
 
       collateralAmount = 0n;
     } catch (err) {
-      console.error('Failed to request collateral:', err);
+      errorLog.log('Collateral request failed', 'Collateral Form', { entityId, counterpartyId: effectiveCounterparty, err });
       const message = err instanceof Error ? err.message : 'Unknown error';
       error.set(`Collateral request failed: ${message}`);
     }

@@ -2,6 +2,7 @@
   import { get } from 'svelte/store';
   import type { Env, RuntimeInput } from '@xln/runtime/xln-api';
   import { xlnFunctions, error } from '../../stores/xlnStore';
+  import { errorLog } from '../../stores/errorLogStore';
   import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
   import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
@@ -103,7 +104,7 @@
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Credit action failed:', message);
+      errorLog.log('Credit action failed', 'Credit Form', { entityId, counterpartyId: effectiveCounterparty, err });
       error.set(`Credit action failed: ${message}`);
     }
   }
@@ -143,7 +144,7 @@
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Credit request failed:', message);
+      errorLog.log('Credit request failed', 'Credit Form', { entityId, counterpartyId: effectiveCounterparty, err });
       error.set(`Credit request failed: ${message}`);
     }
   }

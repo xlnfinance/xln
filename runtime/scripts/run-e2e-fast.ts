@@ -35,7 +35,7 @@ const FAST_E2E_TARGETS = [
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',
-    title: 'runtime dropdown manager attaches a remote radapter by token',
+    title: 'runtime dropdown switches app-imported remote runtimes without manager route',
   },
   {
     file: 'tests/e2e-radapter-remote.spec.ts',

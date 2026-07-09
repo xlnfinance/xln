@@ -8,6 +8,7 @@
   import { createEventDispatcher } from 'svelte';
   import type { ConsensusConfig } from '@xln/runtime/xln-api';
   import { getXLN, submitRuntimeInput } from '../../stores/xlnStore';
+  import { errorLog } from '../../stores/errorLogStore';
   import { activeRuntime, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
   import { Plus, X, Download, Upload, Shield, Hash, Tag, Zap } from 'lucide-svelte';
@@ -194,7 +195,7 @@
       resetForm();
 
     } catch (err) {
-      console.error('[FormationPanel] Creation failed:', err);
+      errorLog.log('Entity creation failed', 'Formation Panel', { entityName, entityType, selectedJurisdiction, err });
       error = err instanceof Error ? err.message : 'Creation failed';
     } finally {
       creating = false;
