@@ -615,6 +615,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      the structured `runtime.storage` logger instead of direct `console.*` /
      `[storage-epoch]` output; source tests and the failure-taxonomy scan guard
      the boundary.
+   - Partial: standalone watchtower startup/sweep diagnostics now use
+     structured `watchtower.standalone` logging instead of direct `[WATCHTOWER]`
+     / `[PUSH-WATCH]` console sweep lines; the standalone suite and
+     failure-taxonomy scan guard it.
    - Partial: orchestrator lifecycle helper diagnostics for HTTP drain timeout,
      stale child lease cleanup, and parent-liveness loss now use structured
      orchestrator loggers instead of direct `console.*`; behavior/source tests

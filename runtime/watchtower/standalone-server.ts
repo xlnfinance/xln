@@ -21,6 +21,7 @@ import { runDisputeWatchSweep } from './dispute-watch';
 import { createWatchtowerStore, type WatchtowerStore } from './store';
 import { createPushStore, type PushStore } from '../push/store';
 import { createPushSender, type PushSenderConfig } from '../push/sender';
+import { createStructuredLogger } from '../logger';
 
 export type StandaloneWatchtowerOptions = {
   host?: string;
@@ -56,6 +57,9 @@ type SweepScheduler = {
 };
 
 const SWEEP_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+const watchtowerLog = createStructuredLogger('watchtower.standalone');
+
+const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 const startSweepScheduler = (
   store: WatchtowerStore,
@@ -104,10 +108,16 @@ const startSweepScheduler = (
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
       });
       if (result.scanned > 0 || result.submitted > 0 || result.errors > 0) {
-        console.log(`[WATCHTOWER] sweep ${JSON.stringify(result)}`);
+        const fields = {
+          scanned: result.scanned,
+          submitted: result.submitted,
+          errors: result.errors,
+        };
+        if (result.errors > 0) watchtowerLog.warn('sweep.complete', fields);
+        else watchtowerLog.info('sweep.complete', fields);
       }
     } catch (error) {
-      console.error(`[WATCHTOWER] sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+      watchtowerLog.error('sweep.failed', { error: formatError(error) });
     } finally {
       running = false;
       schedule();
@@ -167,10 +177,17 @@ const startPushWatchScheduler = (
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
       });
       if (result.eventsObserved > 0 || result.notificationsSent > 0 || result.errors > 0) {
-        console.log(`[PUSH-WATCH] sweep ${JSON.stringify(result)}`);
+        const fields = {
+          eventsObserved: result.eventsObserved,
+          notificationsSent: result.notificationsSent,
+          notificationsSkipped: result.notificationsSkipped,
+          errors: result.errors,
+        };
+        if (result.errors > 0) watchtowerLog.warn('push_sweep.complete', fields);
+        else watchtowerLog.info('push_sweep.complete', fields);
       }
     } catch (error) {
-      console.error(`[PUSH-WATCH] sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+      watchtowerLog.error('push_sweep.failed', { error: formatError(error) });
     } finally {
       running = false;
       schedule();
@@ -328,9 +345,12 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     },
   });
 
-  console.log(
-    `[WATCHTOWER] "${store.towerId}" listening on ${bindHost}:${server.port} (quota=${store.maxStoredBytesPerLookupKey}B)`,
-  );
+  watchtowerLog.info('service.listen', {
+    towerId: store.towerId,
+    host: bindHost,
+    port: server.port,
+    maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
+  });
 
   return {
     server,

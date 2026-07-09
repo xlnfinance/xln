@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Wallet, keccak256, toUtf8Bytes } from 'ethers';
 
@@ -115,6 +115,18 @@ const createRuntimeAppointment = async () => {
 };
 
 describe('standalone watchtower service', () => {
+  test('uses structured logging without direct console output', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/watchtower/standalone-server.ts'), 'utf8');
+
+    expect(source).toContain("createStructuredLogger('watchtower.standalone')");
+    expect(source).toContain("watchtowerLog.info('service.listen'");
+    expect(source).toContain("watchtowerLog.error('sweep.failed'");
+    expect(source).toContain("watchtowerLog.error('push_sweep.failed'");
+    expect(source).not.toContain('console.');
+    expect(source).not.toContain('[WATCHTOWER] sweep');
+    expect(source).not.toContain('[PUSH-WATCH] sweep');
+  });
+
   test('stores and restores bundles over HTTP', async () => {
     const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-http-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });

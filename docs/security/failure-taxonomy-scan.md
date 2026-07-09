@@ -44,6 +44,9 @@ warnings.
 - Runtime storage DB open/close/block/recovery diagnostics use the structured
   `runtime.storage` logger and are guarded against direct `console.*` /
   `[storage-epoch]` noise in core.
+- Standalone watchtower startup/sweep diagnostics use the structured
+  `watchtower.standalone` logger and are guarded against direct `[WATCHTOWER]`
+  / `[PUSH-WATCH]` console sweep output.
 - Orchestrator lifecycle helper diagnostics for HTTP drain timeout, stale child
   lease cleanup, and parent-liveness loss use structured orchestrator loggers
   and are guarded against direct `console.*` helper output.
