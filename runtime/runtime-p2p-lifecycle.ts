@@ -170,7 +170,9 @@ export const detachRuntimeP2P = (env: Env, deps: RuntimeP2PLifecycleDeps): void 
   try {
     state.p2p.close();
   } catch (error) {
-    console.warn('⚠️ Failed to close P2P during runtime detach:', error instanceof Error ? error.message : error);
+    p2pLifecycleLog.warn('detach.close_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
   if (singleton === state.p2p) {

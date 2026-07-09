@@ -265,6 +265,7 @@ for (const [path, markers] of [
   ['runtime/entity-consensus.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
   ['runtime/runtime-entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
   ['runtime/runtime-input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
+  ['runtime/runtime-p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
   ['runtime/entity-input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
   ['runtime/entity-tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity-tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
@@ -335,6 +336,10 @@ const runtimeInputQueuePath = 'runtime/runtime-input-queue.ts';
 const runtimeInputQueue = readText(runtimeInputQueuePath);
 assertNotIncludes(runtimeInputQueue, 'console.', runtimeInputQueuePath);
 assertNotIncludes(runtimeInputQueue, '[enqueueRuntimeInput]', runtimeInputQueuePath);
+
+const runtimeP2PLifecyclePath = 'runtime/runtime-p2p-lifecycle.ts';
+const runtimeP2PLifecycle = readText(runtimeP2PLifecyclePath);
+assertNotIncludes(runtimeP2PLifecycle, 'console.', runtimeP2PLifecyclePath);
 
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);
