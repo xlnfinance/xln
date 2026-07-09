@@ -14,7 +14,9 @@ import type { EntityInput, EntityReplica, Env, JInput, RoutedEntityInput } from 
 import { validateEntityOutput } from './validation-utils';
 import { nodeProcess } from './runtime-platform';
 import { DEBUG, getPerfMs } from './utils';
-import { logError } from './logger';
+import { createStructuredLogger, logError, shortId } from './logger';
+
+const entityInputLog = createStructuredLogger('runtime.entity_inputs');
 
 const ENTITY_INPUT_PROFILE =
   nodeProcess?.env?.['XLN_ENTITY_INPUT_PROFILE'] === '1' ||
@@ -200,7 +202,10 @@ export const applyMergedEntityInputs = async (
     env.eReplicas.set(replicaKey, result.nextReplica);
     entityOutbox.push(...result.outputs);
     if (result.jOutputs.length > 0) {
-      console.log(`📦 [2/6] Collecting ${result.jOutputs.length} jOutputs from ${replicaKey.slice(-10)}`);
+      entityInputLog.debug('j_outputs.collected', {
+        count: result.jOutputs.length,
+        replica: shortId(replicaKey, 10),
+      });
       jOutbox.push(...result.jOutputs);
     }
   }
@@ -259,7 +264,10 @@ export const applyMergedEntityInputs = async (
       env.eReplicas.set(replicaKey, result.nextReplica);
       entityOutbox.push(...result.outputs);
       if (result.jOutputs.length > 0) {
-        console.log(`📦 [2/6] Collecting ${result.jOutputs.length} jOutputs from ${replicaKey.slice(-10)}`);
+        entityInputLog.debug('j_outputs.collected', {
+          count: result.jOutputs.length,
+          replica: shortId(replicaKey, 10),
+        });
         jOutbox.push(...result.jOutputs);
       }
     }
