@@ -11,11 +11,15 @@ describe('frontend check output', () => {
       scripts: Record<string, string>;
     };
     const checkScript = packageJson.scripts['check'];
+    const copyStatic = readFileSync(join(repoRoot, 'frontend/copy-static-files.js'), 'utf8');
 
     expect(checkScript).toContain('bun copy-static-files.js');
     expect(checkScript).toContain('bun scripts/vite-build-check.ts');
     expect(checkScript).not.toContain('node copy-static-files.js');
     expect(checkScript).not.toContain('vite build');
+    expect(copyStatic).toContain("process.env.XLN_STATIC_VERBOSE === '1'");
+    expect(copyStatic).toContain("stdio: llmsVerbose ? 'inherit' : 'pipe'");
+    expect(copyStatic).toContain('llms static context regenerated');
   });
 
   test('vite check wrapper removes the npm preview banner without swallowing build output', () => {

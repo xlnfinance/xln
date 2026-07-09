@@ -318,6 +318,7 @@ function copyDocsAndManifest() {
 function generateLlmsStaticFiles() {
   const llmsPath = fromFrontend('static/llms.txt');
   const rebuildRequested = process.env.XLN_REBUILD_LLMS === '1' || process.argv.includes('--rebuild-llms');
+  const llmsVerbose = process.env.XLN_STATIC_VERBOSE === '1' || process.argv.includes('--verbose');
   if (!rebuildRequested && existsSync(llmsPath) && statSync(llmsPath).size > 0) {
     console.log('[static] llms static context present; skipping rebuild (set XLN_REBUILD_LLMS=1 to refresh)');
     return;
@@ -331,13 +332,28 @@ function generateLlmsStaticFiles() {
     throw new Error(`LLMS_CONTEXT_GENERATOR_MISSING:${generatorPath}`);
   }
 
-  execFileSync(process.execPath, [generatorPath], {
-    cwd: REPO_ROOT,
-    stdio: 'inherit',
-  });
+  try {
+    execFileSync(process.execPath, [generatorPath], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: llmsVerbose ? 'inherit' : 'pipe',
+    });
+  } catch (error) {
+    if (!llmsVerbose && error && typeof error === 'object') {
+      const output = [
+        'stdout' in error ? String(error.stdout || '') : '',
+        'stderr' in error ? String(error.stderr || '') : '',
+      ].join('\n').trim();
+      if (output) console.error(output.slice(-4000));
+    }
+    throw error;
+  }
 
   if (!existsSync(llmsPath) || statSync(llmsPath).size === 0) {
     throw new Error(`LLMS_CONTEXT_GENERATION_FAILED:${llmsPath}`);
+  }
+  if (!llmsVerbose) {
+    console.log('[static] llms static context regenerated (set XLN_STATIC_VERBOSE=1 for token breakdowns)');
   }
 }
 

@@ -40,6 +40,7 @@
   import {
     FACTOR_INFO,
     STRENGTH_COLORS,
+    formatLiveRuntimeImportStatus,
     formatMemoryLabel,
     formatRuntimeDurationRounded,
     generateBase58Secret,
@@ -113,8 +114,8 @@
     return liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey)?.access ?? 'read';
   }
 
-  // `silent` (used for auto-discovery on mount) swallows errors so a login screen with no
-  // reachable runtime server doesn't surface a scary fetch error before the user asks for it.
+  // Auto-discovery suppresses transport failures only; reachable runtime-import readiness
+  // failures must stay visible so "no live runtimes" is never a silent bootstrap failure.
   async function discoverLiveRuntimes(silent = false): Promise<void> {
     if (typeof window === 'undefined' || liveRuntimesLoading) return;
     liveRuntimesLoading = true;
@@ -129,8 +130,11 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const payload = await res.json() as {
         ready?: boolean;
+        partial?: boolean;
         reason?: string;
         error?: string;
+        code?: string;
+        degraded?: unknown[];
         manifest?: { entries?: Array<Record<string, unknown>> };
       };
       const next: LiveRuntime[] = [];
@@ -143,10 +147,11 @@
         next.push({ label, access, wsUrl, token });
       }
       liveRuntimes = next;
-      liveRuntimesLoaded = true;
-      if (!silent && next.length === 0 && payload.ready === false) {
-        liveRuntimesError = String(payload.reason || payload.error || 'runtime import not ready');
+      if (!next.some((runtime) => runtime.wsUrl === selectedRuntimeKey)) {
+        selectedRuntimeKey = next[0]?.wsUrl ?? '';
       }
+      liveRuntimesLoaded = true;
+      liveRuntimesError = formatLiveRuntimeImportStatus(payload, next.length);
       await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { throwOnError: !silent });
     } catch (err) {
       if (!silent) liveRuntimesError = err instanceof Error ? err.message : String(err);
@@ -1182,7 +1187,7 @@
               </div>
             {:else if liveRuntimesLoading}
               <div class="live-runtime-hint">Discovering live runtimes…</div>
-            {:else if liveRuntimesLoaded}
+            {:else if liveRuntimesLoaded && !liveRuntimesError}
               <div class="live-runtime-hint">No live runtimes online.</div>
             {/if}
 

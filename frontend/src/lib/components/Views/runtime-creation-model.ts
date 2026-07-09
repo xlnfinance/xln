@@ -98,3 +98,57 @@ export function formatMemoryLabel(memoryMb: number): string {
   return `${Math.floor(memoryMb)} MB`;
 }
 
+export type PasswordStrengthRating = keyof typeof STRENGTH_COLORS;
+
+export type PasswordStrengthEstimate = {
+  bits: number;
+  rating: PasswordStrengthRating;
+};
+
+export function estimatePasswordStrength(value: string): PasswordStrengthEstimate {
+  const password = String(value || '');
+  if (!password) return { bits: 0, rating: 'weak' };
+
+  let poolSize = 0;
+  if (/[a-z]/.test(password)) poolSize += 26;
+  if (/[A-Z]/.test(password)) poolSize += 26;
+  if (/[0-9]/.test(password)) poolSize += 10;
+  if (/[^a-zA-Z0-9]/.test(password)) poolSize += 33;
+
+  const bits = Math.max(0, Math.round(password.length * Math.log2(Math.max(poolSize, 1))));
+  if (bits >= 110) return { bits, rating: 'excellent' };
+  if (bits >= 80) return { bits, rating: 'strong' };
+  if (bits >= 60) return { bits, rating: 'good' };
+  if (bits >= 40) return { bits, rating: 'fair' };
+  return { bits, rating: 'weak' };
+}
+
+export type LiveRuntimeImportStatusPayload = {
+  ready?: boolean;
+  partial?: boolean;
+  reason?: unknown;
+  error?: unknown;
+  code?: unknown;
+  degraded?: unknown;
+};
+
+export function formatLiveRuntimeImportStatus(
+  payload: LiveRuntimeImportStatusPayload,
+  entryCount: number,
+): string {
+  if (payload.ready !== false) return '';
+  const prefix = payload.partial || entryCount > 0
+    ? `Runtime network still converging; showing ${entryCount} import target${entryCount === 1 ? '' : 's'}.`
+    : 'Runtime import is not ready.';
+  const reason = String(payload.reason || payload.error || '').trim();
+  const code = String(payload.code || '').trim();
+  const degraded = Array.isArray(payload.degraded)
+    ? payload.degraded.map(value => String(value).trim()).filter(Boolean).join(',')
+    : '';
+  const details = [
+    code ? `code=${code}` : '',
+    reason ? `reason=${reason}` : '',
+    degraded ? `degraded=${degraded}` : '',
+  ].filter(Boolean);
+  return details.length > 0 ? `${prefix} ${details.join(' · ')}` : prefix;
+}
