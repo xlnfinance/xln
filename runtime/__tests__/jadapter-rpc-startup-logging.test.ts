@@ -30,6 +30,7 @@ test('runtime dev startup status logs stay structured', () => {
   const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
   const marketMakerNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/mm-node.ts'), 'utf8');
   const orchestrator = readFileSync(join(process.cwd(), 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+  const wsClient = readFileSync(join(process.cwd(), 'runtime/networking/ws-client.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
@@ -44,6 +45,9 @@ test('runtime dev startup status logs stay structured', () => {
   expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_hash'");
   expect(orchestrator).not.toContain('console.log(`HUB_READY_SNAPSHOTS_PERSISTED');
   expect(orchestrator).toContain("meshLog.info('hub_ready_snapshots.persisted'");
+  expect(wsClient).not.toContain('console.log(`[WS] Connected to ${this.options.url}`)');
+  expect(wsClient).toContain("const wsLog = createStructuredLogger('runtime.wsClient');");
+  expect(wsClient).toContain("wsLog.debug('connected'");
 
   for (const noisyBootstrapString of [
     '[BOOTSTRAP] Starting hub bootstrap',

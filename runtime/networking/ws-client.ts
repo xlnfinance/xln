@@ -4,8 +4,10 @@ import { signDigest } from '../account-crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
+import { createStructuredLogger } from '../logger';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
+const wsLog = createStructuredLogger('runtime.wsClient');
 
 // Separate interfaces for browser and Node.js WebSocket implementations
 interface BrowserWebSocket {
@@ -202,7 +204,10 @@ export class RuntimeWsClient {
       this.ws.on('open', () => {
         this.connecting = false;
         this.reconnectAttempts = 0;
-        console.log(`[WS] Connected to ${this.options.url}`);
+        wsLog.debug('connected', {
+          runtimeId: this.options.runtimeId,
+          url: this.options.url,
+        });
         if (!this.sendHello()) return;
         this.options.onOpen?.();
       });
@@ -243,7 +248,10 @@ export class RuntimeWsClient {
       this.ws.onopen = () => {
         this.connecting = false;
         this.reconnectAttempts = 0;
-        console.log(`[WS] Connected to ${this.options.url}`);
+        wsLog.debug('connected', {
+          runtimeId: this.options.runtimeId,
+          url: this.options.url,
+        });
         if (!this.sendHello()) return;
         this.options.onOpen?.();
       };
