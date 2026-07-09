@@ -58,8 +58,30 @@ type SweepScheduler = {
 
 const SWEEP_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const watchtowerLog = createStructuredLogger('watchtower.standalone');
+const WATCHTOWER_CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,OPTIONS',
+  'Access-Control-Allow-Headers': 'authorization,content-type,x-watchtower-operator-token',
+} as const;
+const WATCHTOWER_JSON_HEADERS = {
+  ...WATCHTOWER_CORS_HEADERS,
+  'content-type': 'application/json',
+  'cache-control': 'no-store, max-age=0',
+} as const;
 
 const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const withCors = (response: Response): Response => {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(WATCHTOWER_CORS_HEADERS)) {
+    headers.set(key, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
 
 const startSweepScheduler = (
   store: WatchtowerStore,
@@ -253,7 +275,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     error: operatorApiEnabled ? 'WATCHTOWER_OPERATOR_AUTH_REQUIRED' : 'WATCHTOWER_OPERATOR_API_DISABLED',
   }), {
     status: operatorApiEnabled ? 401 : 404,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store, max-age=0' },
+    headers: WATCHTOWER_JSON_HEADERS,
   });
 
   const pushDisabled = (): Response => new Response(JSON.stringify({
@@ -261,7 +283,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     error: 'WATCHTOWER_PUSH_WAKE_DISABLED',
   }), {
     status: 404,
-    headers: { 'content-type': 'application/json', 'cache-control': 'no-store, max-age=0' },
+    headers: WATCHTOWER_JSON_HEADERS,
   });
 
   const server = Bun.serve({
@@ -270,6 +292,10 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     async fetch(req) {
       const url = new URL(req.url);
       const pathname = url.pathname;
+
+      if (req.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: WATCHTOWER_CORS_HEADERS });
+      }
 
       if (pathname === '/' || pathname === '/healthz' || pathname === '/api/tower/healthz') {
         const stats = await store.getStats();
@@ -297,51 +323,51 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
           },
           stats,
         }), {
-          headers: { 'content-type': 'application/json', 'cache-control': 'no-store, max-age=0' },
+          headers: WATCHTOWER_JSON_HEADERS,
         });
       }
 
       if (pathname === '/api/tower/appointment' && req.method === 'PUT') {
-        return handleTowerAppointment(req, store);
+        return withCors(await handleTowerAppointment(req, store));
       }
       if (pathname === '/api/tower/restore' && req.method === 'POST') {
-        return handleTowerRestore(req, store);
+        return withCors(await handleTowerRestore(req, store));
       }
       const towerReceiptMatch = pathname.match(/^\/api\/tower\/receipt\/([^/]+)$/);
       if (towerReceiptMatch && req.method === 'GET') {
-        return handleTowerReceipt(decodeURIComponent(towerReceiptMatch[1] || ''), store);
+        return withCors(await handleTowerReceipt(decodeURIComponent(towerReceiptMatch[1] || ''), store));
       }
       if (pathname === '/api/recovery/discover' && req.method === 'POST') {
-        return handleRecoveryDiscover(req, store);
+        return withCors(await handleRecoveryDiscover(req, store));
       }
       if (pathname === '/api/recovery/state' && req.method === 'POST') {
-        return handleRecoveryState(req, store);
+        return withCors(await handleRecoveryState(req, store));
       }
       if (pathname === '/api/recovery/complaint' && req.method === 'POST') {
-        return handleRecoveryComplaint(req, store);
+        return withCors(await handleRecoveryComplaint(req, store));
       }
       if (pathname === '/api/watchtower/sweep' && req.method === 'POST') {
         if (!operatorAllowed(req)) return operatorDenied();
-        return handleWatchtowerSweep(req, store, {
+        return withCors(await handleWatchtowerSweep(req, store, {
           ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
-        });
+        }));
       }
       const actionReceiptMatch = pathname.match(/^\/api\/watchtower\/actions\/([^/]+)$/);
       if (actionReceiptMatch && req.method === 'GET') {
         if (!operatorAllowed(req)) return operatorDenied();
-        return handleWatchtowerActions(decodeURIComponent(actionReceiptMatch[1] || ''), store);
+        return withCors(await handleWatchtowerActions(decodeURIComponent(actionReceiptMatch[1] || ''), store));
       }
 
       if (pathname === '/api/push/register' && (req.method === 'PUT' || req.method === 'POST')) {
         if (!pushStore) return pushDisabled();
-        return handlePushRegister(req, pushStore);
+        return withCors(await handlePushRegister(req, pushStore));
       }
       if (pathname === '/api/push/unregister' && req.method === 'POST') {
         if (!pushStore) return pushDisabled();
-        return handlePushUnregister(req, pushStore);
+        return withCors(await handlePushUnregister(req, pushStore));
       }
 
-      return new Response('Not found', { status: 404 });
+      return new Response('Not found', { status: 404, headers: WATCHTOWER_CORS_HEADERS });
     },
   });
 

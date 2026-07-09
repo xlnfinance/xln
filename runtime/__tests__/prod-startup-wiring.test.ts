@@ -1281,8 +1281,10 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).toContain('reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;');
     expect(driveMeshBootstrap).toContain('MESH_BOOTSTRAP_TICK_TIMEOUT');
     expect(hubNode).toContain("const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] === '1';");
-    expect(hubNode).toContain('if (resolvedArgs.deployTokens && AUTO_PROVISION_EXTERNAL_FAUCET)');
+    expect(hubNode).toContain('if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;');
+    expect(hubNode).toContain('await ensureExternalFaucetProvisionReady();');
     expect(hubNode).not.toContain('if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()');
+    expect(hubNode).not.toContain('void externalWalletApi.provisionFaucetWallet()');
   });
 
   test('custody bootstrap waits until market maker readiness completes', () => {

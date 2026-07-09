@@ -2166,9 +2166,23 @@ const run = async (): Promise<void> => {
   let accountsReadyMarked = false;
   let creditReadyMarked = false;
   let reserveReadyMarked = false;
+  let faucetProvisionPromise: Promise<void> | null = null;
   let meshLoopInFlight = false;
   let meshLoopStartedAt = 0;
   let meshLoopStep = 'idle';
+
+  const ensureExternalFaucetProvisionReady = async (): Promise<void> => {
+    if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;
+    if (!faucetProvisionPromise) {
+      faucetProvisionPromise = externalWalletApi.provisionFaucetWallet()
+        .then(() => {
+          if (!shuttingDown) {
+            console.log(`[MESH-HUB] FAUCET_PROVISION_READY name=${resolvedArgs.name}`);
+          }
+        });
+    }
+    await faucetProvisionPromise;
+  };
 
   const driveMeshBootstrap = async (): Promise<void> => {
     if (!bootstrap) return;
@@ -2363,6 +2377,8 @@ const run = async (): Promise<void> => {
         creditReadyMarked = true;
       }
       if (allCreditReady && reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {
+        meshLoopStep = 'external-faucet-provision';
+        await ensureExternalFaucetProvisionReady();
         finishTiming('mesh_ready_total', totalMeshStartedAt);
       }
     } finally {
@@ -2391,21 +2407,6 @@ const run = async (): Promise<void> => {
     void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
   }, BOOTSTRAP_POLL_MS);
   void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
-
-  if (resolvedArgs.deployTokens && AUTO_PROVISION_EXTERNAL_FAUCET) {
-    void externalWalletApi.provisionFaucetWallet()
-      .then(() => {
-        if (!shuttingDown) {
-          console.log(`[MESH-HUB] FAUCET_PROVISION_READY name=${resolvedArgs.name}`);
-        }
-      })
-      .catch((error) => {
-        if (shuttingDown) return;
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(`[MESH-HUB] FAUCET_PROVISION_FATAL name=${resolvedArgs.name} error=${message}`);
-        process.exit(1);
-      });
-  }
 
   console.log(
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,

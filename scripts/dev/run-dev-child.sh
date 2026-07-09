@@ -72,6 +72,7 @@ case "$role" in
       ANVIL_RPC="http://localhost:${RPC_PORT}" \
       ANVIL_RPC2="http://localhost:${RPC2_PORT}" \
       XLN_MESH_RESET_ALLOWED=1 \
+      XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}" \
       bun runtime/orchestrator/orchestrator.ts \
         --host 127.0.0.1 \
         --port "$API_PORT" \

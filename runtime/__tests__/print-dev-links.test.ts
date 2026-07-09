@@ -111,6 +111,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(devChild).toContain('DEV_CHILD_ROLE_UNKNOWN');
   expect(devChild).toContain('set -euo pipefail');
   expect(devChild).toContain('VITE_DEV_SERVER_START port=${port}');
+  expect(devChild).toContain('XLN_AUTO_PROVISION_EXTERNAL_FAUCET="${XLN_AUTO_PROVISION_EXTERNAL_FAUCET:-1}"');
   expect(runDev).toContain('./scripts/dev/watch-runtime-build.sh');
   expect(runDev).not.toContain('bun build runtime/runtime.ts');
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');

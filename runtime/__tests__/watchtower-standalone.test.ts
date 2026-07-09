@@ -119,12 +119,43 @@ describe('standalone watchtower service', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/watchtower/standalone-server.ts'), 'utf8');
 
     expect(source).toContain("createStructuredLogger('watchtower.standalone')");
+    expect(source).toContain('WATCHTOWER_CORS_HEADERS');
+    expect(source).toContain("if (req.method === 'OPTIONS')");
     expect(source).toContain("watchtowerLog.info('service.listen'");
     expect(source).toContain("watchtowerLog.error('sweep.failed'");
     expect(source).toContain("watchtowerLog.error('push_sweep.failed'");
     expect(source).not.toContain('console.');
     expect(source).not.toContain('[WATCHTOWER] sweep');
     expect(source).not.toContain('[PUSH-WATCH] sweep');
+  });
+
+  test('answers browser CORS preflight for recovery endpoints', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-cors-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-cors-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+    });
+    servers.push(server);
+
+    const response = await fetch(`http://127.0.0.1:${server.server.port}/api/recovery/discover`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'http://localhost:8081',
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(response.headers.get('Access-Control-Allow-Methods')).toContain('POST');
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('content-type');
   });
 
   test('stores and restores bundles over HTTP', async () => {

@@ -10,18 +10,22 @@
     activeRuntime as activeVaultRuntime,
     allRuntimes as allVaultRuntimes,
     vaultOperations,
-    type Runtime as VaultRuntime,
   } from '$lib/stores/vaultStore';
   import {
     activeRuntime as activeStoreRuntime,
     activeRuntimeId,
     runtimes as runtimeStoreRuntimes,
     runtimeOperations,
-    type Runtime as StoreRuntime,
   } from '$lib/stores/runtimeStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { p2pState } from '$lib/stores/xlnStore';
   import { settings } from '$lib/stores/settingsStore';
+  import {
+    buildRuntimeDropdownEntries,
+    shortRuntimeId,
+    type RuntimeDotStatus,
+    type RuntimeDropdownEntry,
+  } from './runtime-dropdown-view';
 
   export let allowAdd = false;
   export let allowDelete = false;
@@ -29,64 +33,6 @@
 
   let isOpen = false;
   const dispatch = createEventDispatcher();
-
-  type RuntimeDotStatus = 'connected' | 'syncing' | 'reconnecting' | 'disconnected' | 'error' | 'inactive';
-
-  type RuntimeEntry = {
-    id: string;
-    label: string;
-    title: string;
-    meta: string;
-    source: 'browser' | 'remote';
-    status: RuntimeDotStatus;
-    signers: number;
-    vault?: VaultRuntime;
-    remote?: StoreRuntime;
-  };
-
-  const shortId = (value: string): string => {
-    const raw = String(value || '').trim();
-    if (!raw) return '';
-    if (raw.length <= 16) return raw;
-    return `${raw.slice(0, 6)}...${raw.slice(-4)}`;
-  };
-
-  const remoteHostLabel = (runtime: StoreRuntime | null | undefined): string => {
-    const raw = String(runtime?.label || runtime?.id || $runtimeControllerHandle.endpoint || 'remote runtime');
-    const match = raw.match(/wss?:\/\/[^/\s]+(?:\/[^\s]*)?/);
-    if (!match) return raw.replace(/^Remote\s+/i, '');
-    try {
-      const url = new URL(match[0]);
-      return `${url.host}${url.pathname}`;
-    } catch {
-      return match[0];
-    }
-  };
-
-  const fromVaultRuntime = (runtime: VaultRuntime): RuntimeEntry => {
-    const signerAddress = runtime.signers?.[0]?.address || '';
-    return {
-      id: runtime.id,
-      label: signerAddress ? `${shortId(signerAddress)} (${runtime.label})` : runtime.label || 'Browser runtime',
-      title: signerAddress || runtime.id,
-      meta: `browser · ${runtime.signers.length} signer${runtime.signers.length === 1 ? '' : 's'}`,
-      source: 'browser',
-      status: runtime.id === $activeRuntimeId ? connStatus : 'inactive',
-      signers: runtime.signers.length,
-      vault: runtime,
-    };
-  };
-
-  const fromRemoteRuntime = (runtime: StoreRuntime): RuntimeEntry => ({
-    id: runtime.id,
-    label: `Remote ${remoteHostLabel(runtime)}`,
-    title: runtime.id,
-    meta: `${runtime.permissions === 'write' ? 'remote · full' : 'remote · read'} · ${runtime.status}`,
-    source: 'remote',
-    status: runtime.status,
-    signers: 0,
-    remote: runtime,
-  });
 
   $: connStatus = ($p2pState.connected ? 'connected' : $p2pState.reconnect ? 'reconnecting' : 'disconnected') as RuntimeDotStatus;
   $: runtimeAdapterDotStatus = ($runtimeControllerHandle.status === 'connected'
@@ -98,16 +44,21 @@
         : 'disconnected') as RuntimeDotStatus;
   $: relayUrl = $settings.relayUrl;
   $: remoteRuntimes = Array.from($runtimeStoreRuntimes.values()).filter((runtime) => runtime.type === 'remote');
-  $: runtimeEntries = [
-    ...remoteRuntimes.map(fromRemoteRuntime),
-    ...$allVaultRuntimes.map(fromVaultRuntime),
-  ];
+  $: runtimeEntries = buildRuntimeDropdownEntries({
+    remoteRuntimes,
+    vaultRuntimes: $allVaultRuntimes,
+    activeRuntimeId: $activeRuntimeId,
+    connStatus,
+    runtimeAdapterDotStatus,
+    runtimeControllerEndpoint: $runtimeControllerHandle.endpoint,
+  });
   $: currentRemoteRuntime = $activeStoreRuntime?.type === 'remote' || $runtimeControllerHandle.mode === 'remote'
     ? ($activeStoreRuntime?.type === 'remote' ? $activeStoreRuntime : remoteRuntimes[0] ?? null)
     : null;
-  $: currentRuntime = currentRemoteRuntime ? fromRemoteRuntime(currentRemoteRuntime) : ($activeVaultRuntime ? fromVaultRuntime($activeVaultRuntime) : null);
+  $: currentRuntimeId = currentRemoteRuntime?.id ?? $activeVaultRuntime?.id ?? '';
+  $: currentRuntime = runtimeEntries.find((runtime) => runtime.id === currentRuntimeId) ?? null;
 
-  async function selectRuntime(entry: RuntimeEntry): Promise<void> {
+  async function selectRuntime(entry: RuntimeDropdownEntry): Promise<void> {
     if (entry.source === 'remote') {
       await runtimeOperations.selectRuntime(entry.id);
     } else {
@@ -122,7 +73,7 @@
     isOpen = false;
   }
 
-  async function handleDeleteRuntime(event: MouseEvent, runtime: RuntimeEntry): Promise<void> {
+  async function handleDeleteRuntime(event: MouseEvent, runtime: RuntimeDropdownEntry): Promise<void> {
     event.stopPropagation();
     if (runtime.source === 'remote') {
       await runtimeOperations.disconnect(runtime.id);
@@ -132,13 +83,13 @@
     isOpen = false;
   }
 
-  function handleRuntimeKeydown(event: KeyboardEvent, runtime: RuntimeEntry) {
+  function handleRuntimeKeydown(event: KeyboardEvent, runtime: RuntimeDropdownEntry) {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
     void selectRuntime(runtime);
   }
 
-  function runtimeLabel(runtime: RuntimeEntry | null): string {
+  function runtimeLabel(runtime: RuntimeDropdownEntry | null): string {
     if (!runtime) return allowAdd ? 'Add Runtime' : 'Select Runtime';
     return runtime.label || 'Runtime';
   }
@@ -158,24 +109,45 @@
     {:else}
       {#each runtimeEntries as runtime (runtime.id)}
         <div
-          class="menu-item"
+          class="menu-item runtime-item"
           class:selected={runtime.id === currentRuntime?.id}
           role="button"
           tabindex="0"
           on:click={() => void selectRuntime(runtime)}
           on:keydown={(event) => handleRuntimeKeydown(event, runtime)}
         >
-          <span class="conn-dot {runtime.id === currentRuntime?.id ? runtime.status : 'inactive'}"></span>
-          <span class="menu-label" title={runtime.title}>{runtime.label}</span>
-          <span class="menu-meta">{runtime.meta}</span>
-          {#if runtime.source === 'remote' || (allowDelete && runtime.source === 'browser')}
-            <button
-              class="delete-btn"
-              on:click={(e) => void handleDeleteRuntime(e, runtime)}
-              title={runtime.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}
-            >
-              <Trash2 size={12} />
-            </button>
+          <div class="runtime-item-main">
+            <span class="conn-dot {runtime.id === currentRuntime?.id ? runtime.status : 'inactive'}"></span>
+            <span class="menu-label" title={runtime.title}>{runtime.label}</span>
+            <span class="source-chip {runtime.source}">{runtime.source}</span>
+            <span class="menu-meta">{runtime.meta}</span>
+            {#if runtime.source === 'remote' || (allowDelete && runtime.source === 'browser')}
+              <button
+                class="delete-btn"
+                on:click={(e) => void handleDeleteRuntime(e, runtime)}
+                title={runtime.source === 'remote' ? 'Forget remote runtime' : 'Delete runtime'}
+              >
+                <Trash2 size={12} />
+              </button>
+            {/if}
+          </div>
+          {#if runtime.groups.length > 0}
+            <div class="runtime-tree" aria-label={`${runtime.label} entities`}>
+              {#each runtime.groups as group (group.id)}
+                <div class="tree-jurisdiction">
+                  <span class="tree-branch"></span>
+                  <span class="tree-jurisdiction-label">{group.label}</span>
+                  <span class="tree-count">{group.entities.length}</span>
+                </div>
+                {#each group.entities as entity (entity.id)}
+                  <div class="tree-entity" title={entity.id}>
+                    <span class="tree-branch entity-branch"></span>
+                    <span class="tree-entity-label">{entity.label}</span>
+                    <span class="tree-entity-id">{shortRuntimeId(entity.id)}</span>
+                  </div>
+                {/each}
+              {/each}
+            </div>
           {/if}
         </div>
       {/each}
@@ -289,11 +261,95 @@
     background: rgba(0, 122, 255, 0.18);
   }
 
+  .runtime-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .runtime-item-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+  }
+
   .menu-label {
     flex: 1;
     min-width: 0;
     line-height: 1.25;
     overflow-wrap: anywhere;
+  }
+
+  .source-chip {
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 9px;
+    line-height: 1.3;
+    text-transform: uppercase;
+    letter-spacing: 0;
+    color: #c7d2fe;
+    background: rgba(99, 102, 241, 0.12);
+  }
+
+  .source-chip.browser {
+    color: #bbf7d0;
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.18);
+  }
+
+  .runtime-tree {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 3px;
+    padding-left: 15px;
+    color: #a1a1aa;
+  }
+
+  .tree-jurisdiction,
+  .tree-entity {
+    display: grid;
+    grid-template-columns: 12px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 11px;
+    line-height: 1.25;
+  }
+
+  .tree-entity {
+    padding-left: 12px;
+    color: #71717a;
+    font-size: 10px;
+  }
+
+  .tree-branch {
+    width: 8px;
+    height: 8px;
+    border-left: 1px solid rgba(161, 161, 170, 0.35);
+    border-bottom: 1px solid rgba(161, 161, 170, 0.35);
+  }
+
+  .entity-branch {
+    border-color: rgba(113, 113, 122, 0.3);
+  }
+
+  .tree-jurisdiction-label,
+  .tree-entity-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tree-count,
+  .tree-entity-id {
+    flex-shrink: 0;
+    font-family: 'SF Mono', monospace;
+    color: #52525b;
+    font-size: 10px;
   }
 
   .menu-meta {
