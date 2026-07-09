@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createStructuredLogger } from '../logger';
 import { safeStringify } from '../serialization-utils';
 import type { ManagedRuntimeLease, ManagedRuntimeSpec } from './orchestrator-types';
 
@@ -13,6 +14,8 @@ type ManagedRuntimeLeaseManagerConfig = {
 };
 
 const formatError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+const managedLeaseLog = createStructuredLogger('orchestrator.managed_leases');
 
 const isPidAlive = (pid: number): boolean => {
   try {
@@ -37,7 +40,7 @@ const commandMatchesManagedRuntime = (command: string, spec: ManagedRuntimeSpec)
 
 const killProcessIds = async (pids: number[], label: string): Promise<void> => {
   if (pids.length === 0) return;
-  console.warn(`[MESH] killing stale ${label}: ${pids.join(' ')}`);
+  managedLeaseLog.warn('stale_processes.kill', { label, pids });
   for (const pid of pids) {
     try { process.kill(pid, 'SIGTERM'); } catch {}
   }
@@ -111,7 +114,7 @@ export const createManagedRuntimeLeaseManager = (config: ManagedRuntimeLeaseMana
         };
       }
     } catch (error) {
-      console.warn(`[MESH] ignoring unreadable child lease ${path}: ${formatError(error)}`);
+      managedLeaseLog.warn('lease.unreadable_ignored', { path, error: formatError(error) });
     }
     return null;
   };

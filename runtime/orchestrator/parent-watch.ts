@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { createStructuredLogger } from '../logger';
 
 const DEFAULT_PARENT_WATCH_MS = 5_000;
+const parentWatchLog = createStructuredLogger('orchestrator.parent_watch');
 
 const readLinuxProcessStartTicks = (pid: number): string | null => {
   try {
@@ -23,14 +25,14 @@ export const startParentLivenessWatch = (
   const parentPid = Number(parentPidRaw || 0);
   if (!Number.isInteger(parentPid) || parentPid <= 1) {
     if (process.env['XLN_ALLOW_ORPHAN_RUNTIME'] === '1') {
-      console.warn(`[${label}] XLN_ORCHESTRATOR_PID missing/invalid; XLN_ALLOW_ORPHAN_RUNTIME=1 so parent-watch is disabled`);
+      parentWatchLog.warn('disabled_missing_parent_pid', { label, parentPidRaw });
       return () => {};
     }
     let stopping = false;
     queueMicrotask(() => {
       if (stopping) return;
       stopping = true;
-      console.error(`[${label}] XLN_ORCHESTRATOR_PID missing/invalid (${String(parentPidRaw)}), exiting to avoid orphan runtime`);
+      parentWatchLog.error('missing_parent_pid', { label, parentPidRaw });
       onParentLost();
     });
     return () => {
@@ -44,7 +46,7 @@ export const startParentLivenessWatch = (
     if (stopping) return;
     if (process.ppid === 1) {
       stopping = true;
-      console.error(`[${label}] orchestrator parent missing (ppid=1), exiting`);
+      parentWatchLog.error('parent_missing_ppid_one', { label, parentPid });
       onParentLost();
       return;
     }
@@ -53,12 +55,12 @@ export const startParentLivenessWatch = (
       const currentStartTicks = readLinuxProcessStartTicks(parentPid);
       if (parentStartTicks && currentStartTicks && currentStartTicks !== parentStartTicks) {
         stopping = true;
-        console.error(`[${label}] orchestrator parent pid=${parentPid} was reused, exiting`);
+        parentWatchLog.error('parent_pid_reused', { label, parentPid });
         onParentLost();
       }
     } catch {
       stopping = true;
-      console.error(`[${label}] orchestrator parent pid=${parentPid} missing, exiting`);
+      parentWatchLog.error('parent_pid_missing', { label, parentPid });
       onParentLost();
     }
   }, intervalMs);

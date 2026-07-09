@@ -1,6 +1,10 @@
+import { createStructuredLogger } from '../logger';
+
 type BunServerLike = {
   stop: (closeActiveConnections?: boolean) => void;
 };
+
+const orchestratorLifecycleLog = createStructuredLogger('orchestrator.lifecycle');
 
 export type HttpDrainTracker = {
   begin: () => () => void;
@@ -61,7 +65,11 @@ export const stopServerGracefully = async (
   server.stop(false);
   const idle = await tracker.waitForIdle(timeoutMs);
   if (!idle) {
-    console.warn(`[${label}] shutdown timed out waiting for ${tracker.active()} HTTP request(s); closing active connections`);
+    orchestratorLifecycleLog.warn('http.shutdown_timeout', {
+      label,
+      activeRequests: tracker.active(),
+      timeoutMs,
+    });
     server.stop(true);
   }
   return idle;

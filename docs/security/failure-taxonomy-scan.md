@@ -44,6 +44,9 @@ warnings.
 - Runtime storage DB open/close/block/recovery diagnostics use the structured
   `runtime.storage` logger and are guarded against direct `console.*` /
   `[storage-epoch]` noise in core.
+- Orchestrator lifecycle helper diagnostics for HTTP drain timeout, stale child
+  lease cleanup, and parent-liveness loss use structured orchestrator loggers
+  and are guarded against direct `console.*` helper output.
 - Browser jurisdiction discovery treats missing `/api/jurisdictions` as a
   structured debug fallback, but malformed browser config fails loud with
   `JURISDICTIONS_BROWSER_CONFIG_INVALID`; the loader is guarded against direct
