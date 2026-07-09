@@ -275,6 +275,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/htlc-payment.ts', ["createStructuredLogger('entity.htlc')"]],
   ['runtime/entity-tx/handlers/dispute.ts', ["createStructuredLogger('entity.dispute')"]],
   ['runtime/entity-tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
+  ['runtime/entity-tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -344,6 +345,10 @@ const settleHandlerPath = 'runtime/entity-tx/handlers/settle.ts';
 const settleHandler = readText(settleHandlerPath);
 assertNotIncludes(settleHandler, 'console.', settleHandlerPath);
 
+const debtEventsPath = 'runtime/entity-tx/j-events-debt.ts';
+const debtEvents = readText(debtEventsPath);
+assertNotIncludes(debtEvents, 'console.', debtEventsPath);
+
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
   ['runtime/__tests__/audit-failfast-regressions.test.ts', [
@@ -357,6 +362,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
   ['runtime/__tests__/settlement-ops.test.ts', ['SETTLEMENT_UNKNOWN_OP_TYPE', 'without console fallback']],
   ['runtime/__tests__/account-tx-apply-logging.test.ts', ['account_frame without direct console output', 'account_frame.rejected']],
+  ['runtime/__tests__/debt-ledger.test.ts', ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE']],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);

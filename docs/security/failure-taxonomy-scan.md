@@ -52,6 +52,9 @@ warnings.
   noise in core.
 - Settlement progress and warning traces use the structured `entity.settle`
   logger; the handler is guarded against direct `console.*` noise in core.
+- Debt ledger divergence diagnostics use the structured `entity.debt` logger;
+  operator-visible state messages are preserved without direct `console.*`
+  noise in core.
 
 ## Open Manual Review
 

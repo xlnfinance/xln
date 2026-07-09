@@ -5,6 +5,7 @@ import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '.
 import { decode, encode } from '../snapshot-coder';
 import { cloneEntityState } from '../state-helpers';
 import { applyJEvent, type JEventEntityTxData } from '../entity-tx/j-events';
+import { applyDebtEnforced } from '../entity-tx/j-events-debt';
 import { createEmptyEnv } from '../runtime';
 import type { ConsensusConfig, EntityState, JurisdictionEvent } from '../types';
 
@@ -86,6 +87,39 @@ const findOnlyDebt = (state: EntityState, direction: 'out' | 'in', tokenId = 1) 
 };
 
 describe('debt ledger', () => {
+  test('records debt ledger divergence without direct console warning', () => {
+    const state = makeState(ALICE);
+    const event: Extract<JurisdictionEvent, { type: 'DebtEnforced' }> = {
+      type: 'DebtEnforced',
+      blockNumber: 15,
+      transactionHash: `0x${'dd'.repeat(32)}`,
+      data: {
+        debtor: ALICE,
+        creditor: BOB,
+        tokenId: 1,
+        amountPaid: '10',
+        remainingAmount: '140',
+        newDebtIndex: 4,
+      },
+    };
+    const originalWarn = console.warn;
+    let warned = false;
+    console.warn = () => {
+      warned = true;
+    };
+
+    try {
+      applyDebtEnforced(state, event);
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warned).toBe(false);
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toContain('DEBT_LEDGER_DIVERGENCE DebtEnforced');
+    expect(state.messages[0]).toContain('missing-open-debt amountPaid=10 remaining=140');
+  });
+
   test('mirrors debt lifecycle on debtor and creditor sides and survives clone/persist', async () => {
     const env = createEmptyEnv('debt-ledger-seed');
     env.quietRuntimeLogs = true;

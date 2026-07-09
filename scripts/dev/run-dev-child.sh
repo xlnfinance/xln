@@ -45,6 +45,7 @@ run_vite() {
   local port="$1"
   shift
   cd frontend
+  echo "VITE_DEV_SERVER_START port=${port} api=http://127.0.0.1:${API_PORT} logLevel=warn"
   exec env \
     VITE_DEV_PORT="$port" \
     VITE_API_PROXY_TARGET="http://127.0.0.1:${API_PORT}" \

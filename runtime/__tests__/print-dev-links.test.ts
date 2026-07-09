@@ -58,6 +58,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.status, banner.stderr).toBe(0);
     expect(banner.stdout).toContain('XLN DEV CONTROL PANEL');
     expect(banner.stdout).toContain('Open any subsystem from here');
+    expect(banner.stdout).toContain('service status/log lines stream below');
     expect(banner.stdout).toContain('wallet');
     expect(banner.stdout).toContain('https://localhost:8084/app');
     expect(banner.stdout).toContain('wallet browser QA');
@@ -81,6 +82,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');
     expect(banner.stdout).toContain('runtime import links fetch fresh tokens into the app runtime list.');
     expect(banner.stdout).toContain('expected remote runtimes: H1, H2, H3, MM, Custody');
+    expect(banner.stdout).toContain('status/logs below:');
     expect(banner.stdout).toContain('VITE_HTTP');
     expect(banner.stdout).not.toContain('radapter manager QA');
     expect(banner.stdout).not.toContain('radapter inspector');
@@ -106,6 +108,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(devChild).toContain('runtime/orchestrator/orchestrator.ts');
   expect(devChild).toContain('DEV_CHILD_ROLE_UNKNOWN');
   expect(devChild).toContain('set -euo pipefail');
+  expect(devChild).toContain('VITE_DEV_SERVER_START port=${port}');
   expect(runDev).toContain('./scripts/dev/watch-runtime-build.sh');
   expect(runDev).not.toContain('bun build runtime/runtime.ts');
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
@@ -114,4 +117,11 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(runtimeWatcher).toContain('bun build runtime/runtime.ts');
   expect(runtimeWatcher).toContain('--external buffer');
   expect(runtimeWatcher).toContain('if [[ -z "${line//[[:space:]]/}" ]]');
+});
+
+test('dev hub storage mode log is explicit and not an alarming pause line', () => {
+  const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
+
+  expect(hubNode).toContain('DEV_BOOTSTRAP_STORAGE_DISABLED');
+  expect(hubNode).not.toContain('BOOTSTRAP_STORAGE_PAUSED');
 });

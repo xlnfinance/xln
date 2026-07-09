@@ -118,7 +118,7 @@ const expectedRemoteRuntimes = ['H1', 'H2', 'H3', 'MM', 'Custody'].join(', ');
 console.log('');
 console.log(line);
 console.log('XLN DEV CONTROL PANEL');
-console.log('Open any subsystem from here; service logs stream below this block.');
+console.log('Open any subsystem from here; service status/log lines stream below this block.');
 console.log(line);
 for (const row of rows) {
   console.log(`${row.label.padEnd(labelWidth)}  ${row.url}`);
@@ -127,6 +127,6 @@ console.log('-'.repeat(88));
 console.log(`runtime import key file: ${resolve(args.keysPath)}`);
 console.log('runtime import links fetch fresh tokens into the app runtime list.');
 console.log(`expected remote runtimes: ${expectedRemoteRuntimes}`);
-console.log('logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
+console.log('status/logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
 console.log(line);
 console.log('');

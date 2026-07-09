@@ -1,5 +1,8 @@
 import type { DebtEntry, DebtEventType, EntityState, JurisdictionEvent } from '../types';
 import { addMessage } from '../state-helpers';
+import { createStructuredLogger, shortId } from '../logger';
+
+const debtLog = createStructuredLogger('entity.debt');
 
 const normalizeDebtEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -79,7 +82,13 @@ function noteDebtLedgerDivergence(
   detail: string,
 ): void {
   const message = `⚠️ DEBT_LEDGER_DIVERGENCE ${kind} token=${tokenId} debtor=${debtor.slice(-8)} creditor=${creditor.slice(-8)} ${detail}`;
-  console.warn(message);
+  debtLog.debug('ledger.divergence', {
+    kind,
+    tokenId,
+    debtor: shortId(debtor, 8),
+    creditor: shortId(creditor, 8),
+    detail,
+  });
   addMessage(state, message);
 }
 

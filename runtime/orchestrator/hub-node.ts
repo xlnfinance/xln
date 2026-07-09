@@ -540,7 +540,7 @@ const configureHubBootstrapStorage = (env: Env): void => {
   if (!envFlagEnabled(process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'])) return;
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.persistencePaused = true;
-  console.log(`[MESH-HUB] BOOTSTRAP_STORAGE_PAUSED name=${resolvedArgs.name}`);
+  console.log(`[MESH-HUB] DEV_BOOTSTRAP_STORAGE_DISABLED name=${resolvedArgs.name}`);
 };
 
 const resolveOperatorAppUrl = (): string => {
