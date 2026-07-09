@@ -14,6 +14,9 @@ type DirectPaymentResult = {
   mempoolOps?: MempoolOp[];
 };
 
+const directPaymentInvariant = (code: string, detail: string): Error =>
+  new Error(`DIRECT_PAYMENT_${code}:${detail}`);
+
 export const handleDirectPaymentEntityTx = async (
   env: Env,
   entityState: EntityState,
@@ -81,39 +84,39 @@ export const handleDirectPaymentEntityTx = async (
   }
 
   if (route.length < 1 || route[0] !== entityState.entityId) {
-    console.error(
-      `❌ ROUTE VALIDATION FAILED: route.length=${route.length}, route[0]=${route[0]?.slice(-4)}, entityId=${entityState.entityId.slice(-4)}`,
+    throw directPaymentInvariant(
+      'ROUTE_START_INVALID',
+      `entity=${entityState.entityId}:route0=${route[0] ?? ''}:target=${targetEntityId}`,
     );
-    logError('ENTITY_TX', `❌ Invalid route: doesn't start with current entity`);
-    return { newState: entityState, outputs: [] };
   }
 
   if (route[route.length - 1] !== targetEntityId) {
-    console.error(
-      `❌ ROUTE VALIDATION FAILED: route ends with ${route[route.length - 1]?.slice(-4)}, expected targetEntityId=${targetEntityId.slice(-4)}`,
+    throw directPaymentInvariant(
+      'ROUTE_END_INVALID',
+      `entity=${entityState.entityId}:last=${route[route.length - 1] ?? ''}:target=${targetEntityId}`,
     );
-    logError('ENTITY_TX', `❌ Invalid route: route end must match targetEntityId`);
-    return { newState: entityState, outputs: [] };
   }
 
   if (route.length === 1 && route[0] === targetEntityId) {
-    console.error(`✅ FINAL DESTINATION: Entity ${entityState.entityId.slice(-4)} is the final recipient`);
+    if (verbose) console.log(`💸 FINAL DESTINATION: Entity ${entityState.entityId.slice(-4)} is the final recipient`);
     addMessage(newState, `💰 Received payment of ${amount} (token ${tokenId})`);
     return { newState, outputs: [] };
   }
 
   const nextHop = route[1];
   if (!nextHop) {
-    console.error(`❌ ROUTE ERROR: No next hop in route=[${route.map(r => r.slice(-4)).join(',')}]`);
-    logError('ENTITY_TX', `❌ Invalid route: no next hop specified in route`);
-    return { newState, outputs: [] };
+    throw directPaymentInvariant(
+      'NEXT_HOP_MISSING',
+      `entity=${entityState.entityId}:target=${targetEntityId}:route=${route.join(',')}`,
+    );
   }
 
   const accountMachine = newState.accounts.get(nextHop);
   if (!accountMachine) {
-    logError('ENTITY_TX', `❌ No account with next hop: ${nextHop}`);
-    addMessage(newState, `❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
-    return { newState, outputs: [] };
+    throw directPaymentInvariant(
+      'NEXT_HOP_ACCOUNT_MISSING',
+      `entity=${entityState.entityId}:nextHop=${nextHop}:target=${targetEntityId}`,
+    );
   }
 
   const accountTx: AccountTx = {

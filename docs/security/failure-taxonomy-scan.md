@@ -27,6 +27,8 @@ warnings.
   hiding internal failure messages.
 - Faucet, proxy, bootstrap, market-maker, J-batch, delivery, prod-health, and
   runtime-import paths are all covered by a typed-failure source marker.
+- Direct payment topology contradictions use fatal `DIRECT_PAYMENT_*`
+  invariant errors instead of console output plus no-op returns.
 
 ## Open Manual Review
 

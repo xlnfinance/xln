@@ -251,6 +251,13 @@ for (const [path, markers] of [
   ['runtime/server/faucet-failure.ts', ['classifyRuntimeFaucetFailure', 'failure,']],
   ['runtime/server/offchain-faucet.ts', ['faucetFailureBody']],
   ['runtime/server/reserve-faucet.ts', ['faucetFailureBody']],
+  ['runtime/entity-tx/invariant-errors.ts', ["'DIRECT_PAYMENT_',", "'SWAP_REQUEST_',"]],
+  ['runtime/entity-tx/handlers/direct-payment.ts', [
+    'DIRECT_PAYMENT_${code}:${detail}',
+    "'ROUTE_START_INVALID'",
+    "'ROUTE_END_INVALID'",
+    "'NEXT_HOP_ACCOUNT_MISSING'",
+  ]],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -262,6 +269,12 @@ for (const [path, markers] of [
 
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
+  ['runtime/__tests__/audit-failfast-regressions.test.ts', [
+    'direct payment fails loud for invalid route topology',
+    'DIRECT_PAYMENT_ROUTE_START_INVALID',
+    'DIRECT_PAYMENT_ROUTE_END_INVALID',
+    'DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING',
+  ]],
   ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],

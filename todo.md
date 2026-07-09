@@ -509,6 +509,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: swap request missing-account paths now fail loud with
      `SWAP_REQUEST_ACCOUNT_MISSING` instead of `console.error` plus no-op, and
      the swap-cancel canonical scan guards that behavior.
+   - Partial: direct payment invalid-route and missing next-hop-account paths
+     now fail loud with `DIRECT_PAYMENT_*` invariant errors instead of
+     `console.error` plus no-op, and the failure-taxonomy scan guards it.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

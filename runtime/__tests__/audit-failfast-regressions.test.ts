@@ -1057,6 +1057,47 @@ describe('audit fail-fast regressions', () => {
     } as any)).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:proposeCancelSwap');
   });
 
+  test('direct payment fails loud for invalid route topology', async () => {
+    const env = createEmptyEnv('direct-payment-invalid-route');
+    env.quietRuntimeLogs = true;
+    const source = `0x${'64'.repeat(32)}`;
+    const wrongStart = `0x${'65'.repeat(32)}`;
+    const target = `0x${'66'.repeat(32)}`;
+    const missingNextHop = `0x${'67'.repeat(32)}`;
+    const wrongEnd = `0x${'68'.repeat(32)}`;
+    const state = makeEntityState(source);
+
+    await expect(applyEntityTx(env, state, {
+      type: 'directPayment',
+      data: {
+        targetEntityId: target,
+        tokenId: 1,
+        amount: 100n,
+        route: [wrongStart, target],
+      },
+    } as any)).rejects.toThrow('DIRECT_PAYMENT_ROUTE_START_INVALID');
+
+    await expect(applyEntityTx(env, state, {
+      type: 'directPayment',
+      data: {
+        targetEntityId: target,
+        tokenId: 1,
+        amount: 100n,
+        route: [source, wrongEnd],
+      },
+    } as any)).rejects.toThrow('DIRECT_PAYMENT_ROUTE_END_INVALID');
+
+    await expect(applyEntityTx(env, state, {
+      type: 'directPayment',
+      data: {
+        targetEntityId: target,
+        tokenId: 1,
+        amount: 100n,
+        route: [source, missingNextHop, target],
+      },
+    } as any)).rejects.toThrow('DIRECT_PAYMENT_NEXT_HOP_ACCOUNT_MISSING');
+  });
+
   test('entity frame aborts instead of partially committing after a skipped tx', async () => {
     const env = createEmptyEnv('entity-frame-atomicity');
     env.quietRuntimeLogs = true;
