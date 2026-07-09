@@ -553,6 +553,42 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain('await stopProcess(api, 120_000);');
   });
 
+  test('managed runtime quiesce stops network IO before waiting for teardown drain', () => {
+    const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
+    const sources = [
+      readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
+      readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8'),
+    ];
+
+    expect(runtimeMain).toContain('export const stopJurisdictionWatchers = (env: Env): void => {');
+    for (const source of sources) {
+      expect(source).toContain('stopJurisdictionWatchers,');
+      const quiesceBlock = extractSourceBlock(
+        source,
+        "if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {",
+        'return new Response(safeStringify({ ok: true, runtimeDrained: drained',
+      );
+      expect(quiesceBlock.indexOf('stopP2P(env);')).toBeLessThan(
+        quiesceBlock.indexOf('waitForRuntimeWorkDrained(env, 20_000, 750)'),
+      );
+      expect(quiesceBlock.indexOf('stopJurisdictionWatchers(env);')).toBeLessThan(
+        quiesceBlock.indexOf('waitForRuntimeWorkDrained(env, 20_000, 750)'),
+      );
+
+      const shutdownBlock = extractSourceBlock(
+        source,
+        'const shutdown = async',
+        'const stopParentWatch = startParentLivenessWatch',
+      );
+      expect(shutdownBlock.indexOf('stopP2P(env);')).toBeLessThan(
+        shutdownBlock.indexOf('stopRuntimeLoopAndWait(env, 10_000)'),
+      );
+      expect(shutdownBlock.indexOf('stopJurisdictionWatchers(env);')).toBeLessThan(
+        shutdownBlock.indexOf('stopRuntimeLoopAndWait(env, 10_000)'),
+      );
+    }
+  });
+
   test('deploy starts and checks the production Tron chain', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {

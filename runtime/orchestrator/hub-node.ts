@@ -82,6 +82,7 @@ import {
   handleInboundP2PEntityInput,
   startP2P,
   stopP2P,
+  stopJurisdictionWatchers,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
   waitForRuntimeWorkDrained,
@@ -1700,6 +1701,8 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
         shuttingDown = true;
         if (meshLoop) clearInterval(meshLoop);
+        stopP2P(env);
+        stopJurisdictionWatchers(env);
         const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
         if (!drained) {
           console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
@@ -2416,13 +2419,14 @@ const run = async (): Promise<void> => {
     shutdownStarted = true;
     shuttingDown = true;
     if (meshLoop) clearInterval(meshLoop);
+    stopP2P(env);
+    stopJurisdictionWatchers(env);
     try {
       const idle = await stopRuntimeLoopAndWait(env, 10_000);
       if (!idle) {
         console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
       }
       await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
-      stopP2P(env);
       await closeRuntimeDb(env);
       await closeInfraDb(env);
     } catch (error) {

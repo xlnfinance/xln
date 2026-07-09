@@ -1258,7 +1258,7 @@ export const startJurisdictionWatchers = (env: Env): void => {
   }
 };
 
-const stopJurisdictionWatchers = (env: Env): void => {
+export const stopJurisdictionWatchers = (env: Env): void => {
   if (!env.jReplicas || env.jReplicas.size === 0) return;
   for (const [name, jReplica] of env.jReplicas.entries()) {
     const adapter = jReplica.jadapter;

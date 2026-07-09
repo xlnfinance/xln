@@ -46,8 +46,12 @@ test('runtime dev startup status logs stay structured', () => {
   expect(hubNode).toContain("nodeLog.debug('sibling_jurisdiction.ready'");
   expect(marketMakerNode).not.toContain('console.log(`[MESH-MM] BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
   expect(marketMakerNode).not.toContain('BOOTSTRAP_READY_HASH hash=${fingerprint.hash}');
+  expect(marketMakerNode).not.toContain('console.log(`[MESH-MM] Sibling MM ready');
+  expect(marketMakerNode).not.toContain('Token universe for market making:');
   expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_snapshot.persisted'");
   expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_hash'");
+  expect(marketMakerNode).toContain("nodeLog.debug('sibling_mm.ready'");
+  expect(marketMakerNode).toContain("nodeLog.debug('token_universe.ready'");
   expect(orchestrator).not.toContain('console.log(`HUB_READY_SNAPSHOTS_PERSISTED');
   expect(orchestrator).toContain("meshLog.info('hub_ready_snapshots.persisted'");
   expect(wsClient).not.toContain('console.log(`[WS] Connected to ${this.options.url}`)');

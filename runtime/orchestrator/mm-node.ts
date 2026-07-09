@@ -25,12 +25,13 @@ import {
   getP2PState,
   closeInfraDb,
   closeRuntimeDb,
-	  main,
-	  enqueueRuntimeInput,
-	  validateRuntimeInputAdmission,
-	  handleInboundP2PEntityInput,
+  main,
+  enqueueRuntimeInput,
+  validateRuntimeInputAdmission,
+  handleInboundP2PEntityInput,
   startP2P,
   stopP2P,
+  stopJurisdictionWatchers,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
   waitForRuntimeWorkDrained,
@@ -3679,6 +3680,8 @@ const run = async (): Promise<void> => {
           shuttingDown = true;
           if (loop) clearInterval(loop);
           if (healthRefreshLoop) clearInterval(healthRefreshLoop);
+          stopP2P(env);
+          stopJurisdictionWatchers(env);
           const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
           if (!drained) {
             console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
@@ -3770,14 +3773,18 @@ const run = async (): Promise<void> => {
       { x: 160 + index * 80, y: -40, z: 120, jurisdiction: secondaryName },
     );
     mmContexts.push(siblingContext);
-    console.log(
-      `[MESH-MM] Sibling MM ready jurisdiction=${secondaryName} entity=${siblingContext.entityId.slice(0, 12)}`,
-    );
+    nodeLog.debug('sibling_mm.ready', {
+      jurisdiction: secondaryName,
+      entityId: siblingContext.entityId,
+    });
   }
   mmTokenIdsByContext = buildMarketMakerTokenIdsByContext(tokenCatalog, mmContexts);
-  console.log(`[MESH-MM] Token universe for market making: ${mmContexts
-    .map(context => `${formatJurisdictionDisplayName(context.jurisdictionName) || context.jurisdictionName}=${getMarketMakerTokenIds(mmTokenIdsByContext, context).join(',')}`)
-    .join(' ')}`);
+  nodeLog.debug('token_universe.ready', {
+    jurisdictions: mmContexts.map(context => ({
+      jurisdiction: formatJurisdictionDisplayName(context.jurisdictionName) || context.jurisdictionName,
+      tokenIds: getMarketMakerTokenIds(mmTokenIdsByContext, context),
+    })),
+  });
 
   startupPhase = 'start-p2p';
   const p2p = startP2P(env, {
@@ -4588,13 +4595,14 @@ const run = async (): Promise<void> => {
     shuttingDown = true;
     if (loop) clearInterval(loop);
     if (healthRefreshLoop) clearInterval(healthRefreshLoop);
+    stopP2P(env);
+    stopJurisdictionWatchers(env);
     try {
       const idle = await stopRuntimeLoopAndWait(env, 10_000);
       if (!idle) {
         console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
       }
       await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
-      stopP2P(env);
       await closeRuntimeDb(env);
       await closeInfraDb(env);
     } catch (error) {
