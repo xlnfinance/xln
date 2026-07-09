@@ -179,8 +179,10 @@ describe('production startup wiring', () => {
     const rpcAdapter = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
     expect(hubNode).toContain("nodeLog.info('jurisdiction_contracts.stale_dropped'");
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] RPC contracts have no code');
-    expect(hubNode).toContain('Importing sibling hub jurisdiction ${secondaryName}');
-    expect(hubNode).toContain('Sibling hub ready jurisdiction=${secondaryName}');
+    expect(hubNode).toContain("nodeLog.debug('sibling_jurisdiction.importing'");
+    expect(hubNode).toContain("nodeLog.debug('sibling_jurisdiction.ready'");
+    expect(hubNode).not.toContain('console.log(`Importing sibling hub jurisdiction');
+    expect(hubNode).not.toContain('console.log(`Sibling hub ready');
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] Importing sibling hub jurisdiction');
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] Sibling hub ready');
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] deploying fresh RPC contract stack');

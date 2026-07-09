@@ -40,6 +40,10 @@ test('runtime dev startup status logs stay structured', () => {
   expect(hubNode).not.toContain('RPC contracts have no code; deploying fresh stack instead of using stale addresses:');
   expect(hubNode).toContain("nodeLog.info('jurisdiction_contracts.stale_dropped'");
   expect(hubNode).toContain("nodeLog.info('bootstrap_ready_snapshot.persisted'");
+  expect(hubNode).not.toContain('console.log(`Importing sibling hub jurisdiction');
+  expect(hubNode).not.toContain('console.log(`Sibling hub ready');
+  expect(hubNode).toContain("nodeLog.debug('sibling_jurisdiction.importing'");
+  expect(hubNode).toContain("nodeLog.debug('sibling_jurisdiction.ready'");
   expect(marketMakerNode).not.toContain('console.log(`[MESH-MM] BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
   expect(marketMakerNode).not.toContain('BOOTSTRAP_READY_HASH hash=${fingerprint.hash}');
   expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_snapshot.persisted'");

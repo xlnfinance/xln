@@ -2055,7 +2055,10 @@ const run = async (): Promise<void> => {
     if (!secondaryName) continue;
     const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
     if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {
-      console.log(`Importing sibling hub jurisdiction ${secondaryName} (${secondary.rpc})`);
+      nodeLog.debug('sibling_jurisdiction.importing', {
+        jurisdiction: secondaryName,
+        rpc: secondary.rpc,
+      });
       enqueueRuntimeInput(env, {
         runtimeTxs: [{
           type: 'importJ',
@@ -2072,7 +2075,9 @@ const run = async (): Promise<void> => {
       });
       await runtimeProcess(env);
     } else {
-      console.log(`Reusing sibling hub jurisdiction ${secondaryName}`);
+      nodeLog.debug('sibling_jurisdiction.reusing', {
+        jurisdiction: secondaryName,
+      });
     }
 
     const priorActiveJurisdiction = env.activeJurisdiction;
@@ -2111,7 +2116,10 @@ const run = async (): Promise<void> => {
       primary: false,
     });
     await ensureOrderbook(env, sibling.entityId, sibling.signerId);
-    console.log(`Sibling hub ready jurisdiction=${secondaryName} entity=${sibling.entityId.slice(0, 12)}`);
+    nodeLog.debug('sibling_jurisdiction.ready', {
+      jurisdiction: secondaryName,
+      entityId: sibling.entityId,
+    });
   }
   env.activeJurisdiction = primaryJurisdictionName;
 
