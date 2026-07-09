@@ -695,6 +695,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: relay mismatch, P2P poll, and entity helper diagnostics in
      `xlnStore` now use persistent frontend `errorLog`; entity helper failures
      still rethrow fail-fast instead of degrading into fallback UI data.
+   - Partial: `vaultStore` recovery/restore/funding/cleanup diagnostics now
+     use persistent frontend `errorLog` instead of raw console output in tower
+     restore/upload, faucet funding, runtime DB cleanup, J-watcher shutdown,
+     DB restore fallback, and jurisdiction re-import wait paths.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.

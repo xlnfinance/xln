@@ -28,6 +28,7 @@ import {
 } from './xlnStore';
 import { settings } from './settingsStore';
 import { toasts } from './toastStore';
+import { errorLog } from './errorLogStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '../utils/onboardingPreferences';
 import { writeOnboardingCompleteForEntities } from '../utils/onboardingState';
 import { tabOperations } from './tabStore';
@@ -1169,8 +1170,8 @@ const persistRuntimeMetadataSnapshot = (): void => {
   try {
     if (typeof localStorage === 'undefined') return;
     localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(get(runtimesState)));
-  } catch {
-    // Recovery upload should never break the interactive runtime.
+  } catch (error) {
+    errorLog.log('Runtime metadata snapshot persistence failed', 'Runtime Recovery', error);
   }
 };
 
@@ -1249,7 +1250,11 @@ export async function tryRestoreRuntimeEnvFromTower(
       && candidate.checkpointHash !== best.checkpointHash,
     );
     if (conflictingSameHeight) {
-      console.warn(`[VaultStore] Tower restore conflict detected for ${runtimeId.slice(0, 12)}; choosing highest valid bundle from ${best.sourceLabel}`);
+      errorLog.log(
+        `Tower restore conflict detected for ${runtimeId.slice(0, 12)}; choosing highest valid bundle from ${best.sourceLabel}`,
+        'Runtime Recovery',
+        { runtimeId, sourceLabel: best.sourceLabel, candidateCount: discovery.candidates.length },
+      );
     }
   }
   return restoreRuntimeEnvFromRecoveryCandidate(runtime, xln, best);
@@ -1492,7 +1497,11 @@ function scheduleRuntimeRecoveryUpload(
     setTimeout(() => {
       runtimeRecoveryUploadTimers.delete(normalizedRuntimeId);
       void uploadRuntimeRecoverySnapshot(normalizedRuntimeId, unwrapLiveRuntimeEnv(env) ?? env, xln).catch((error) => {
-        console.warn(`[VaultStore] Tower recovery upload failed for ${normalizedRuntimeId.slice(0, 12)}:`, error);
+        errorLog.log(
+          `Tower recovery upload failed for ${normalizedRuntimeId.slice(0, 12)}`,
+          'Runtime Recovery',
+          { runtimeId: normalizedRuntimeId, error },
+        );
       });
     }, RECOVERY_UPLOAD_DEBOUNCE_MS),
   );
@@ -2072,16 +2081,15 @@ async function fundSignerWalletViaFaucet(address: string): Promise<void> {
 
     if (!response.ok) {
       const errorMsg = result?.error || `Faucet failed (${response.status})`;
-      console.warn('[VaultStore] Faucet failed:', errorMsg);
+      errorLog.log('Faucet failed', 'Runtime Funding', { address, error: errorMsg });
       return;
     }
 
-    if (result?.success) {
-    } else {
-      console.warn('[VaultStore] Faucet failed:', result?.error || 'Unknown faucet error');
+    if (!result?.success) {
+      errorLog.log('Faucet failed', 'Runtime Funding', { address, error: result?.error || 'Unknown faucet error' });
     }
   } catch (err) {
-    console.warn('[VaultStore] Failed to call faucet:', err);
+    errorLog.log('Failed to call faucet', 'Runtime Funding', { address, error: err });
   }
 }
 
@@ -2120,17 +2128,29 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     try {
       await xln.clearDB(runtimeEnv);
     } catch (dbErr) {
-      console.warn('[VaultStore] DB clear failed:', dbErr);
+      errorLog.log(
+        'DB clear failed during runtime cleanup',
+        'Runtime Cleanup',
+        { runtimeId: normalizedRuntimeId, error: dbErr },
+      );
     } finally {
       try {
         if (typeof xln.closeRuntimeDb === 'function') await xln.closeRuntimeDb(runtimeEnv);
         if (typeof xln.closeInfraDb === 'function') await xln.closeInfraDb(runtimeEnv);
       } catch (closeErr) {
-        console.warn('[VaultStore] DB close after cleanup failed:', closeErr);
+        errorLog.log(
+          'DB close after cleanup failed',
+          'Runtime Cleanup',
+          { runtimeId: normalizedRuntimeId, error: closeErr },
+        );
       }
     }
   } catch (err) {
-    console.warn(`[VaultStore] Failed to cleanup runtime ${runtimeId.slice(0, 12)}:`, err);
+    errorLog.log(
+      `Failed to cleanup runtime ${runtimeId.slice(0, 12)}`,
+      'Runtime Cleanup',
+      { runtimeId, error: err },
+    );
   }
 }
 
@@ -2153,7 +2173,11 @@ async function suspendRuntimeEnvActivity(env: Env): Promise<void> {
     try {
       jReplica.jadapter?.stopWatching?.();
     } catch (error) {
-      console.warn(`[VaultStore] Failed to stop J-watcher for ${jReplica.name}:`, error);
+      errorLog.log(
+        `Failed to stop J-watcher for ${jReplica.name}`,
+        'Runtime Cleanup',
+        { jurisdiction: jReplica.name, error },
+      );
     }
   }
 
@@ -2341,8 +2365,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       env = towerRestored.env;
       restoredFromTower = true;
       signerMetadataChanged = true;
-      console.info(
-        `[VaultStore] Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}`,
+      errorLog.log(
+        `Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}`,
+        'Runtime Restore',
+        { runtimeId: runtime.id, reason },
       );
       return true;
     } catch (error) {
@@ -2350,7 +2376,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`[VaultStore] Tower restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
       }
-      console.warn('[VaultStore] ⚠️ Failed to restore env from tower, continuing with local recovery path:', error);
+      errorLog.log(
+        'Failed to restore env from tower; continuing with local recovery path',
+        'Runtime Restore',
+        { runtimeId: runtime.id, reason, error },
+      );
       return false;
     }
   };
@@ -2361,8 +2391,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (normalizeEntityId(signer.entityId) === canonicalEntityId) continue;
     signer.entityId = canonicalEntityId;
     signerMetadataChanged = true;
-    console.error(
+    errorLog.log(
       `[VaultStore] Canonical signer/entity mismatch detected for ${signer.address.slice(0, 10)}; forcing lazy entity ${canonicalEntityId.slice(0, 12)} without deleting persisted runtime`,
+      'Runtime Restore',
+      { runtimeId: runtime.id, signerAddress: signer.address, canonicalEntityId },
     );
   }
 
@@ -2373,10 +2405,18 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   } catch (error) {
     if (strictRestore) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}; refusing to reset persisted runtime state`, error);
+      errorLog.log(
+        `Strict restore failed for ${runtime.id.slice(0, 12)}; refusing to reset persisted runtime state`,
+        'Runtime Restore',
+        { runtimeId: runtime.id, error },
+      );
       throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
     } else {
-      console.warn('[VaultStore] ⚠️ Failed to load env from DB, falling back to fresh import:', error);
+      errorLog.log(
+        'Failed to load env from DB; falling back to fresh import',
+        'Runtime Restore',
+        { runtimeId: runtime.id, error },
+      );
       env = null;
     }
   }
@@ -2395,7 +2435,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (strictRestore && !restoredFromTower) {
       throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`);
     }
-    console.warn('[VaultStore] ⚠️ Restored env missing J-replicas; retrying tower restore before local re-import');
+    errorLog.log(
+      'Restored env missing J-replicas; retrying tower restore before local re-import',
+      'Runtime Restore',
+      { runtimeId: runtime.id },
+    );
     env = null;
     if (!restoredFromTower) {
       await restoreFromTower('invalid_local_env');
@@ -2428,9 +2472,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         const restoredEntityKeys = env.eReplicas
           ? Array.from(env.eReplicas.keys()).map((key) => String(key))
           : [];
-        console.error(
-          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}; ` +
-          `restoredKeys=${JSON.stringify(restoredEntityKeys)} replayMeta=${JSON.stringify(getReplayMeta(env))}; resetting runtime storage`
+        errorLog.log(
+          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}`,
+          'Runtime Restore',
+          { runtimeId: runtime.id, signerEntityId: signer.entityId, restoredEntityKeys, replayMeta: getReplayMeta(env) },
         );
         throw new Error(
           `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: missing restored entity ${signer.entityId.slice(0, 12)}`
@@ -2519,7 +2564,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     const logKey = `${runtimeIdLower}:${primaryJurisdictionName}:${chainId}`;
     if (!loggedLiveJAdapterReimports.has(logKey)) {
       loggedLiveJAdapterReimports.add(logKey);
-      console.info(`[VaultStore] Restored env has no live J-adapter; re-importing ${primaryJurisdictionName} jurisdiction`);
+      errorLog.log(
+        `Restored env has no live J-adapter; re-importing ${primaryJurisdictionName} jurisdiction`,
+        'Runtime Restore',
+        { runtimeId: runtime.id, jurisdiction: primaryJurisdictionName, chainId },
+      );
     }
     await enqueueAndAwait(
       xln,
@@ -2564,7 +2613,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
       if (normalizeJurisdictionKey(preferredJurisdictionName) === normalizeJurisdictionKey(primaryJurisdictionName)) {
         throw new Error(message);
       }
-      console.warn(`${message}; waiting for jurisdiction import`);
+      errorLog.log(
+        `${message}; waiting for jurisdiction import`,
+        'Runtime Restore',
+        { runtimeId: runtime.id, entityId, preferredJurisdictionName },
+      );
       continue;
     }
 

@@ -145,6 +145,41 @@ test('runtime recovery tower status summaries are bounded, compact, and fail-fas
   expect(source).toContain('updateRuntimeRecoveryMetadata(normalizedRuntimeId');
 });
 
+test('vault runtime recovery and restore diagnostics use persistent error log', () => {
+  const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
+  const recoveryStart = source.indexOf('const persistRuntimeMetadataSnapshot');
+  const recoveryEnd = source.indexOf('const findRuntimeByIdCaseInsensitive', recoveryStart);
+  const cleanupStart = source.indexOf('async function fundSignerWalletViaFaucet');
+  const cleanupEnd = source.indexOf('async function buildOrRestoreRuntimeEnv', cleanupStart);
+  const restoreStart = cleanupEnd;
+  const restoreEnd = source.indexOf('function registerRuntimeResumeListener', restoreStart);
+
+  expect(source).toContain("import { errorLog } from './errorLogStore';");
+  expect(recoveryStart).toBeGreaterThan(0);
+  expect(recoveryEnd).toBeGreaterThan(recoveryStart);
+  expect(cleanupStart).toBeGreaterThan(0);
+  expect(cleanupEnd).toBeGreaterThan(cleanupStart);
+  expect(restoreEnd).toBeGreaterThan(restoreStart);
+
+  const recoverySource = source.slice(recoveryStart, recoveryEnd);
+  const cleanupSource = source.slice(cleanupStart, cleanupEnd);
+  const restoreSource = source.slice(restoreStart, restoreEnd);
+
+  expect(recoverySource).toContain("errorLog.log('Runtime metadata snapshot persistence failed', 'Runtime Recovery', error)");
+  expect(recoverySource).toContain('Tower recovery upload failed');
+  expect(cleanupSource).toContain("errorLog.log('Faucet failed', 'Runtime Funding'");
+  expect(cleanupSource).toContain('DB clear failed during runtime cleanup');
+  expect(cleanupSource).toContain('Failed to stop J-watcher');
+  expect(restoreSource).toContain('Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}');
+  expect(restoreSource).toContain('Failed to restore env from tower; continuing with local recovery path');
+  expect(restoreSource).toContain('Failed to load env from DB; falling back to fresh import');
+  expect(restoreSource).toContain('Restored env missing J-replicas; retrying tower restore before local re-import');
+  expect(restoreSource).toContain('${message}; waiting for jurisdiction import');
+  expect(`${recoverySource}\n${cleanupSource}\n${restoreSource}`).not.toContain('console.warn');
+  expect(`${recoverySource}\n${cleanupSource}\n${restoreSource}`).not.toContain('console.error');
+  expect(`${recoverySource}\n${cleanupSource}\n${restoreSource}`).not.toContain('console.info');
+});
+
 const testMnemonic = 'test test test test test test test test test test test junk';
 const testWatchSeed = `0x${'42'.repeat(32)}`;
 const abiCoder = AbiCoder.defaultAbiCoder();
