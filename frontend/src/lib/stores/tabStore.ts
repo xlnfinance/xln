@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import type { Tab } from '$lib/types/ui';
+import { errorLog } from './errorLogStore';
 
 export const tabs = writable<Tab[]>([]);
 export const activeTabId = writable<string | null>(null);
@@ -20,7 +21,7 @@ const tabOperations = {
         nextTabId.set(tabData.nextTabId || 1);
       }
     } catch (error) {
-      console.error('❌ Failed to load tabs (clearing corrupted storage):', error);
+      errorLog.log('Failed to load tabs; clearing corrupted storage', 'Tabs', error);
       localStorage.removeItem(STORAGE_KEY);
       tabs.set([]);
       activeTabId.set(null);
@@ -39,7 +40,7 @@ const tabOperations = {
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tabData));
     } catch (error) {
-      console.error('❌ Failed to save tabs:', error);
+      errorLog.log('Failed to save tabs', 'Tabs', error);
     }
   },
 

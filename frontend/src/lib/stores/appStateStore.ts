@@ -8,6 +8,7 @@
 
 import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
+import { errorLog } from './errorLogStore';
 
 export type AppMode = 'user' | 'dev';
 export type ViewMode = 'home' | 'settings' | 'docs' | 'brainvault' | 'panels' | 'graph3d' | 'terminal';
@@ -40,7 +41,7 @@ function safeGetItem(key: string): string | null {
   try {
     return localStorage.getItem(key);
   } catch (error) {
-    console.warn(`localStorage.getItem("${key}") failed:`, error);
+    errorLog.log('localStorage get failed', 'App State', { key, error });
     return null;
   }
 }
@@ -50,7 +51,7 @@ function safeSetItem(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
   } catch (error) {
-    console.warn(`localStorage.setItem("${key}") failed (quota/private mode):`, error);
+    errorLog.log('localStorage set failed', 'App State', { key, error });
   }
 }
 

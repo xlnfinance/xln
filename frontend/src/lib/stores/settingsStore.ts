@@ -9,6 +9,7 @@ import {
   normalizeUiStyle,
 } from '../utils/ui-style';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
+import { errorLog } from './errorLogStore';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
 const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
@@ -115,7 +116,7 @@ const settingsOperations = {
       }
       
     } catch (error) {
-      console.error('❌ Failed to load settings (clearing corrupted storage):', error);
+      errorLog.log('Failed to load settings; clearing corrupted storage', 'Settings', error);
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(COMPONENT_STATES_KEY);
       settings.set(defaultSettings);
@@ -137,7 +138,7 @@ const settingsOperations = {
       localStorage.setItem(COMPONENT_STATES_KEY, JSON.stringify(componentStates));
       
     } catch (error) {
-      console.error('❌ Failed to save settings:', error);
+      errorLog.log('Failed to save settings', 'Settings', error);
     }
   },
 
@@ -199,7 +200,7 @@ const settingsOperations = {
   setRelayUrl(relayUrl: string) {
     const canonical = resolveDefaultRelayUrl();
     if (!sameWsEndpoint(relayUrl, canonical)) {
-      console.error(`[settings] RELAY_OVERRIDE_BLOCKED: one-relay mode forced (${canonical}), requested=${relayUrl}`);
+      errorLog.log('RELAY_OVERRIDE_BLOCKED: one-relay mode forced', 'Settings', { canonical, requested: relayUrl });
     }
     settings.update(current => ({ ...current, relayUrl: canonical }));
     this.saveToStorage();

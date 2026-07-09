@@ -15,6 +15,7 @@
   } from '$lib/stores/xlnStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeViewPageInfo, setRuntimeViewPage } from '$lib/stores/runtimeViewStore';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { tabOperations } from '$lib/stores/tabStore';
   import { timeOperations } from '$lib/stores/timeStore';
@@ -67,6 +68,10 @@
   type DeployVersionPayload = {
     version: string;
   };
+
+  function logAppShellDiagnostic(message: string, details?: unknown): void {
+    errorLog.log(message, 'App Shell', details);
+  }
 
   type HashRouteState = {
     route: string;
@@ -196,11 +201,11 @@
         try {
           persistDeployVersion(await fetchCurrentDeployVersion());
         } catch (deployError) {
-          console.warn('[deploy-version] failed to persist deploy version:', deployError);
+          logAppShellDiagnostic('Deploy version persistence failed after boot', deployError);
         }
       }
     } catch (err) {
-      console.error(`${options.errorLabel}:`, err);
+      logAppShellDiagnostic(options.errorLabel, err);
       error.set((err as Error)?.message || options.errorLabel);
       activeTabLockReady = true;
       hasActiveTabLock = false;
@@ -309,7 +314,7 @@
     try {
       currentVersion = await fetchCurrentDeployVersion();
     } catch (error) {
-      console.warn('[deploy-version] failed to fetch deploy version:', error);
+      logAppShellDiagnostic('Deploy version fetch failed', error);
       return false;
     }
 
@@ -342,7 +347,7 @@
       await vaultOperations.suspendAllRuntimeActivity();
       await suspendClientActivity();
     } catch (err) {
-      console.warn('Failed to suspend inactive tab activity:', err);
+      logAppShellDiagnostic('Inactive tab activity suspension failed', err);
     }
   }
 
@@ -373,7 +378,7 @@
       embedBootReady = true;
     } catch (err) {
       if (generation !== bootGeneration || !hasActiveTabLock) return;
-      console.error('Failed to initialize XLN:', err);
+      logAppShellDiagnostic('XLN initialization failed', err);
       error.set((err as Error)?.message || 'Initialization failed');
       embedBootReady = false;
     }
@@ -434,7 +439,7 @@
         try {
           persistDeployVersion(await fetchCurrentDeployVersion());
         } catch (error) {
-          console.warn('[deploy-version] failed to persist deploy version:', error);
+          logAppShellDiagnostic('Deploy version persistence failed in lock test mode', error);
         }
         return;
       }
@@ -442,11 +447,11 @@
       try {
         persistDeployVersion(await fetchCurrentDeployVersion());
       } catch (error) {
-        console.warn('[deploy-version] failed to persist deploy version:', error);
+        logAppShellDiagnostic('Deploy version persistence failed after app boot', error);
       }
     })().catch((err) => {
       if (disposed) return;
-      console.error('Failed to initialize active tab lock:', err);
+      logAppShellDiagnostic('Active tab lock initialization failed', err);
       error.set((err as Error)?.message || 'Active tab lock initialization failed');
       activeTabLockReady = true;
       hasActiveTabLock = false;

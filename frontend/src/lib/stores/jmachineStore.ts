@@ -8,6 +8,7 @@
 import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
 import { compareStableText } from '$lib/utils/stableSort';
+import { errorLog } from './errorLogStore';
 
 export interface JMachineConfig {
   name: string;
@@ -265,7 +266,7 @@ export const jmachineOperations = {
         });
       }
     } catch (error) {
-      console.error('❌ Failed to load J-Machine configs (clearing corrupted storage):', error);
+      errorLog.log('Failed to load J-Machine configs; clearing corrupted storage', 'J-Machine Store', error);
       localStorage.removeItem(STORAGE_KEY);
       jmachineState.set(defaultState);
     }
@@ -281,7 +282,7 @@ export const jmachineOperations = {
       const current = get(jmachineState);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
     } catch (error) {
-      console.error('❌ Failed to save J-Machine configs:', error);
+      errorLog.log('Failed to save J-Machine configs', 'J-Machine Store', error);
     }
   },
 

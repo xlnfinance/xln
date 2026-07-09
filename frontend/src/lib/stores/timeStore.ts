@@ -2,6 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '$lib/types/ui';
 import type { EnvSnapshot } from '@xln/runtime/xln-api';
 import { history } from './xlnStore';
+import { errorLog } from './errorLogStore';
 
 const defaultTimeState: TimeState = {
   currentTimeIndex: -1,
@@ -39,7 +40,9 @@ const timeOperations = {
 
     // SAFETY: Ensure history is actually populated before proceeding
     if (!$history || !Array.isArray($history)) {
-      console.warn('🕰️ TIME-MACHINE-SAFETY: History not ready, skipping update');
+      errorLog.log('TIME_MACHINE_HISTORY_NOT_READY: skipping max-index update', 'Time Machine', {
+        historyType: typeof $history,
+      });
       return;
     }
 

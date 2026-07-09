@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { getXLN } from './xlnStore';
+import { errorLog } from './errorLogStore';
 import type { JurisdictionConfig as RuntimeJurisdictionConfig } from '@xln/runtime/xln-api';
 
 interface JurisdictionConfig {
@@ -77,7 +78,7 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
       jurisdictionsLoaded.set(true);
       return data;
     } catch (error) {
-      console.error('❌ Failed to load jurisdictions from server:', error);
+      errorLog.log('Failed to load jurisdictions from runtime', 'Jurisdiction Store', error);
       throw error;
     }
   })();
