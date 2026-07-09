@@ -66,6 +66,7 @@ import { prepareSignedBatch } from '../hanko/batch';
 import { resolveEntityProposerId } from '../state-helpers';
 import { BLOCKCHAIN } from '../constants';
 import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
+import { createStructuredLogger } from '../logger';
 import {
   firstAddress,
   isDebugEventEmitter,
@@ -79,6 +80,7 @@ import { nodeProcess, runtimeIsBrowser } from '../runtime-platform';
 
 const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const TRON_FINALITY_DEPTH = 19;
+const rpcLog = createStructuredLogger('jadapter.rpc');
 
 const isTronChainId = (chainId: number): boolean => TRON_CHAIN_IDS.has(chainId);
 
@@ -628,11 +630,13 @@ export async function createRpcAdapter(
       config.fromReplica.contracts?.deltaTransformer,
     );
 
-    console.log('[JAdapter:rpc] fromReplica mode - connecting to contracts:');
-    console.log('  Account:', addresses.account);
-    console.log('  Depository:', addresses.depository);
-    console.log('  EntityProvider:', addresses.entityProvider);
-    console.log('  DeltaTransformer:', addresses.deltaTransformer);
+    rpcLog.info('contracts.connect_from_replica.start', {
+      chainId: config.chainId,
+      account: addresses.account,
+      depository: addresses.depository,
+      entityProvider: addresses.entityProvider,
+      deltaTransformer: addresses.deltaTransformer,
+    });
 
     const missingReplicaAddresses = [
       !addresses.account ? 'account' : null,
@@ -684,7 +688,13 @@ export async function createRpcAdapter(
       trace('fromReplica.setDeltaTransformer:start');
       setDeltaTransformerAddress(addresses.deltaTransformer);
       trace('fromReplica.setDeltaTransformer:done');
-      console.log(`[JAdapter:rpc] connected to existing contracts chain=${config.chainId}`);
+      rpcLog.info('contracts.connected', {
+        chainId: config.chainId,
+        account: addresses.account,
+        depository: addresses.depository,
+        entityProvider: addresses.entityProvider,
+        deltaTransformer: addresses.deltaTransformer,
+      });
     }
   }
 
@@ -714,12 +724,12 @@ export async function createRpcAdapter(
 
     async deployStack() {
       if (deployed) {
-        console.log('[JAdapter:rpc] Using existing contracts');
+        rpcLog.info('contracts.reuse_existing', { chainId: config.chainId });
         setDeltaTransformerAddress(addresses.deltaTransformer);
         return;
       }
 
-      console.log('[JAdapter:rpc] Deploying stack...');
+      rpcLog.info('contracts.deploy.start', { chainId: config.chainId });
 
       // Deploy Account library
       // Use any cast to handle ethers version mismatch between root and jurisdictions
@@ -728,7 +738,7 @@ export async function createRpcAdapter(
       await accountContract.waitForDeployment();
       addresses.account = await accountContract.getAddress();
       account = accountContract;
-      console.log(`  Account: ${addresses.account}`);
+      rpcLog.debug('contracts.deploy.account', { chainId: config.chainId, account: addresses.account });
 
       // Deploy EntityProvider
       const entityProviderFactory = makeEntityProviderFactory(signer);
@@ -737,7 +747,11 @@ export async function createRpcAdapter(
       await entityProviderContract.waitForDeployment();
       addresses.entityProvider = await entityProviderContract.getAddress();
       entityProvider = entityProviderContract;
-      console.log(`  EntityProvider: ${addresses.entityProvider} (foundation recipient ${foundationRecipient})`);
+      rpcLog.debug('contracts.deploy.entity_provider', {
+        chainId: config.chainId,
+        entityProvider: addresses.entityProvider,
+        foundationRecipient,
+      });
 
       // Deploy Depository (needs Account library linked)
       const linkedDepositoryBytecode = linkArtifactBytecode(
@@ -770,7 +784,7 @@ export async function createRpcAdapter(
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
       depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
-      console.log(`  Depository: ${addresses.depository}`);
+      rpcLog.debug('contracts.deploy.depository', { chainId: config.chainId, depository: addresses.depository });
 
       // Deploy DeltaTransformer
       const deltaTransformerFactory = makeDeltaTransformerFactory(signer);
@@ -779,7 +793,10 @@ export async function createRpcAdapter(
       addresses.deltaTransformer = await deltaTransformerContract.getAddress();
       deltaTransformer = deltaTransformerContract;
       setDeltaTransformerAddress(addresses.deltaTransformer);
-      console.log(`  DeltaTransformer: ${addresses.deltaTransformer}`);
+      rpcLog.debug('contracts.deploy.delta_transformer', {
+        chainId: config.chainId,
+        deltaTransformer: addresses.deltaTransformer,
+      });
 
       // Deploy bootstrap ERC20 test tokens. The first three IDs stay stable
       // across dev chains (USDC=1, WETH=2, USDT=3); Tron-like local chains
@@ -790,13 +807,21 @@ export async function createRpcAdapter(
         const erc20Contract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
         await erc20Contract.waitForDeployment();
         const erc20Address = await erc20Contract.getAddress();
-        console.log(`  ERC20Mock(${token.symbol}): ${erc20Address}`);
+        rpcLog.debug('contracts.deploy.erc20', {
+          chainId: config.chainId,
+          symbol: token.symbol,
+          address: erc20Address,
+        });
 
         // Pre-fund Depository with ERC20 so withdrawals (reserveToExternalToken) work.
         // mintToReserve only updates internal accounting — the Depository needs real ERC20 balance.
         const prefundTx = await erc20Contract.mint(addresses.depository, DEFAULT_TOKEN_SUPPLY, await buildFeeOverrides());
         await waitForReceipt(prefundTx, `erc20.mint-to-depository.${token.symbol}`);
-        console.log(`  Depository pre-funded: ${ethers.formatUnits(DEFAULT_TOKEN_SUPPLY, token.decimals)} ${token.symbol}`);
+        rpcLog.debug('contracts.deploy.erc20_prefunded', {
+          chainId: config.chainId,
+          symbol: token.symbol,
+          amount: ethers.formatUnits(DEFAULT_TOKEN_SUPPLY, token.decimals),
+        });
 
         const approveTx = await erc20Contract.approve(addresses.depository, TOKEN_REGISTRATION_AMOUNT, await buildFeeOverrides());
         await waitForReceipt(approveTx, `erc20.approve.${token.symbol}`);
@@ -814,12 +839,23 @@ export async function createRpcAdapter(
         if (tokenId === 0n) {
           throw new Error(`[JAdapter:rpc] Failed to register bootstrap ERC20 token ${token.symbol}`);
         }
-        console.log(`  TokenRegistry: ${token.symbol} tokenId=${tokenId}`);
+        rpcLog.debug('contracts.deploy.token_registered', {
+          chainId: config.chainId,
+          symbol: token.symbol,
+          tokenId: tokenId.toString(),
+        });
       }
 
       deployed = true;
 
-      console.log('[JAdapter:rpc] Stack deployed');
+      rpcLog.info('contracts.deploy.ready', {
+        chainId: config.chainId,
+        tokens: bootstrapTokens.map(token => token.symbol),
+        account: addresses.account,
+        depository: addresses.depository,
+        entityProvider: addresses.entityProvider,
+        deltaTransformer: addresses.deltaTransformer,
+      });
     },
 
     async snapshot(): Promise<SnapshotId> {
@@ -1852,7 +1888,7 @@ export async function createRpcAdapter(
     // === J-Watcher integration (RPC polling — uses shared event conversion from watcher.ts) ===
     startWatching(env: Env): void {
       if (watcherInterval) {
-        console.log(`[JAdapter:rpc] watcher already running chain=${config.chainId}`);
+        rpcLog.debug('watcher.already_running', { chainId: config.chainId });
         return;
       }
       type ContractListenerSource = {
@@ -1874,9 +1910,12 @@ export async function createRpcAdapter(
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
       const startBlock = getWatcherStartBlock(env, addresses.depository);
       lastSyncedBlock = Math.max(0, startBlock - 1);
-      console.log(
-        `[JAdapter:rpc] starting event watcher chain=${config.chainId} pollMs=${watchPollMs} depth=${confirmationDepth} fromBlock=${startBlock}`,
-      );
+      rpcLog.info('watcher.start', {
+        chainId: config.chainId,
+        pollMs: watchPollMs,
+        depth: confirmationDepth,
+        fromBlock: startBlock,
+      });
 
       // Depository ABI for queryFilter — must match CANONICAL_J_EVENTS
       const depositoryABI = [
@@ -2416,7 +2455,7 @@ export async function createRpcAdapter(
       }, watchPollMs);
       void doPoll();
 
-      console.log(`[JAdapter:rpc] watcher started chain=${config.chainId} pollMs=${watchPollMs}`);
+      rpcLog.info('watcher.ready', { chainId: config.chainId, pollMs: watchPollMs });
     },
 
     async pollNow(): Promise<void> {
@@ -2436,7 +2475,7 @@ export async function createRpcAdapter(
         watcherEnv = null;
         pollInFlight = null;
         pollNowHandler = null;
-        console.log(`[JAdapter:rpc] watcher stopped chain=${config.chainId}`);
+        rpcLog.info('watcher.stopped', { chainId: config.chainId });
       }
     },
 

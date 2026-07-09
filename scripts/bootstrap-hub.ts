@@ -13,6 +13,7 @@ import {
   registerSignerKey,
 } from '../runtime/account-crypto';
 import { encodeBoard, hashBoard } from '../runtime/entity-factory';
+import { createStructuredLogger } from '../runtime/logger';
 import type { ConsensusConfig, Env } from '../runtime/types';
 
 const args = process.argv.slice(2);
@@ -51,6 +52,7 @@ export type HubConfig = {
 
 const defaultPort = Number(getArg('--port', process.env['PORT'] ?? '0')) || undefined;
 const defaultServerId = process.env['SERVER_ID'] ?? undefined;
+const bootstrapLog = createStructuredLogger('bootstrap.hub');
 
 const DEFAULT_CONFIG: HubConfig = {
   name: getArg('--name', 'Main Hub'),
@@ -102,11 +104,12 @@ const resolveJurisdiction = (env: Env, requestedName?: string) => {
 export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
   const hubConfig: HubConfig = { ...DEFAULT_CONFIG, ...(config || {}) };
   const { signerAddress } = deriveHubSigner(hubConfig.seed, hubConfig.signerId);
-
-  console.log('[BOOTSTRAP] Starting hub bootstrap...');
-  console.log(`[BOOTSTRAP] Name: ${hubConfig.name}`);
-  console.log(`[BOOTSTRAP] Region: ${hubConfig.region || 'global'}`);
-  console.log(`[BOOTSTRAP] Signer: ${signerAddress}`);
+  bootstrapLog.info('hub.start', {
+    name: hubConfig.name,
+    region: hubConfig.region || 'global',
+    signer: signerAddress,
+    jurisdictionName: hubConfig.jurisdictionName || '',
+  });
 
   // Initialize runtime if not provided
   if (!env) {
@@ -128,9 +131,6 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
   const replicaExists = !!Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${entityId}:`));
 
   if (!replicaExists) {
-    console.log('[BOOTSTRAP] Creating hub entity...');
-    console.log(`[BOOTSTRAP]    EntityId: ${entityId}`);
-
     ensureRuntimeInput(env);
     env.runtimeInput.runtimeTxs.push({
       type: 'importReplica',
@@ -145,17 +145,29 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     });
 
     await runtimeProcess(env, []);
-    console.log('[BOOTSTRAP] entity created');
+    bootstrapLog.info('hub.entity_created', {
+      name: hubConfig.name,
+      entityId,
+      jurisdictionName: jurisdiction?.name || hubConfig.jurisdictionName || '',
+    });
   } else if (jurisdiction && env.eReplicas) {
     for (const [key, replica] of env.eReplicas.entries()) {
       if (key.startsWith(entityId)) {
         if (!replica.state.config?.jurisdiction) {
           replica.state.config.jurisdiction = jurisdiction;
-          console.log('[BOOTSTRAP] patched existing hub jurisdiction config');
+          bootstrapLog.info('hub.jurisdiction_config_patched', {
+            name: hubConfig.name,
+            entityId,
+            jurisdictionName: jurisdiction.name,
+          });
         }
       }
     }
-    console.log('[BOOTSTRAP] hub entity already exists');
+    bootstrapLog.info('hub.entity_reused', {
+      name: hubConfig.name,
+      entityId,
+      jurisdictionName: jurisdiction.name,
+    });
   }
 
   ensureRuntimeInput(env);
@@ -188,16 +200,22 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
 
   if (env.gossip?.getHubs) {
     const hubs = env.gossip.getHubs();
-    console.log(`[BOOTSTRAP] Gossip verification: ${hubs?.length || 0} hubs found`);
+    bootstrapLog.debug('hub.gossip_verified', {
+      name: hubConfig.name,
+      entityId,
+      hubs: hubs?.length || 0,
+    });
   }
 
-  console.log('[BOOTSTRAP] hub bootstrap complete');
-  console.log(`[BOOTSTRAP]    Name: ${hubConfig.name}`);
-  console.log(`[BOOTSTRAP]    EntityId: ${entityId.slice(0, 16)}...`);
-  console.log(`[BOOTSTRAP]    Region: ${hubConfig.region || 'global'}`);
-  console.log(`[BOOTSTRAP]    Fee: ${(hubConfig.routingFeePPM ?? 100) / 10000}%`);
-  console.log(`[BOOTSTRAP]    Swap taker fee: ${(hubConfig.swapTakerFeeBps ?? 1) / 100}%`);
-  console.log(`[BOOTSTRAP]    Relay: ${hubConfig.relayUrl}`);
+  bootstrapLog.info('hub.ready', {
+    name: hubConfig.name,
+    entityId,
+    region: hubConfig.region || 'global',
+    jurisdictionName: jurisdiction?.name || hubConfig.jurisdictionName || '',
+    routingFeePct: (hubConfig.routingFeePPM ?? 100) / 10000,
+    swapTakerFeePct: (hubConfig.swapTakerFeeBps ?? 1) / 100,
+    relay: hubConfig.relayUrl,
+  });
 
   return { entityId, signerId: signerAddress };
 }

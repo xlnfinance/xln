@@ -177,7 +177,7 @@ describe('production startup wiring', () => {
     const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime-tx-handlers.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
     const rpcAdapter = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
-    expect(hubNode).toContain('RPC contracts have no code; deploying fresh stack instead of using stale addresses:');
+    expect(hubNode).toContain("nodeLog.info('jurisdiction_contracts.stale_dropped'");
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] RPC contracts have no code');
     expect(hubNode).toContain('Importing sibling hub jurisdiction ${secondaryName}');
     expect(hubNode).toContain('Sibling hub ready jurisdiction=${secondaryName}');
@@ -253,7 +253,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('await stopRuntimeLoopAndWait(env, 30_000);');
     expect(hubNode).toContain('await persistRestoredEnvToDB(env);');
     expect(hubNode).toContain('startRuntimeLoop(env, {');
-    expect(hubNode).toContain('BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
+    expect(hubNode).toContain("nodeLog.info('bootstrap_ready_snapshot.persisted'");
     expect(hubNode).toContain("import { prewarmSignerLabels } from '../account-crypto';");
     expect(hubNode).toContain('const buildLocalHubSignerLabels = (): string[] => {');
     expect(hubNode).toContain('const prewarmLocalHubSignerKeys = (): void => {');

@@ -663,10 +663,11 @@ const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): P
   // hub before it can bootstrap. Drop those stale addresses and let importJ
   // deploy a fresh stack; ensureRpcStackReady writes the resulting addresses
   // back for H2/H3/MM.
-  console.log(
-    'RPC contracts have no code; deploying fresh stack instead of using stale addresses: ' +
-      missingCode.join(', '),
-  );
+  nodeLog.info('jurisdiction_contracts.stale_dropped', {
+    jurisdictionName: jurisdiction.name,
+    chainId: jurisdiction.chainId,
+    missingCode,
+  });
   jurisdictionImportDiagnostics.usedContracts = false;
   jurisdictionImportDiagnostics.mode = 'dropped-stale';
   const { contracts: _staleContracts, ...withoutContracts } = jurisdiction;
@@ -1740,7 +1741,10 @@ const run = async (): Promise<void> => {
             tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
             maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
           });
-          console.log(`[MESH-HUB] BOOTSTRAP_READY_SNAPSHOT_PERSISTED name=${resolvedArgs.name} height=${env.height}`);
+          nodeLog.info('bootstrap_ready_snapshot.persisted', {
+            height: env.height,
+            wasPaused: previousPaused,
+          });
           return new Response(safeStringify({
             ok: true,
             runtimeIdle: true,
