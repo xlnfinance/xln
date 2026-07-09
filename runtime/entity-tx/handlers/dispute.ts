@@ -46,6 +46,15 @@ import {
 
 const disputeLog = createStructuredLogger('entity.dispute');
 
+const warnDisputeUnlessQuiet = (
+  env: Env,
+  message: string,
+  fields: Record<string, unknown>,
+): void => {
+  if (env.quietRuntimeLogs === true) return;
+  disputeLog.warn(message, fields);
+};
+
 const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
@@ -950,7 +959,7 @@ export async function handleDisputeFinalize(
       newState,
       `❌ disputeFinalize cooperative=true rejected for ${counterpartyEntityId.slice(-4)} (unilateral-only protocol)`,
     );
-    disputeLog.warn('finalize.cooperative_rejected', { counterparty: shortId(counterpartyEntityId) });
+    warnDisputeUnlessQuiet(env, 'finalize.cooperative_rejected', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs };
   }
 
@@ -1145,7 +1154,7 @@ export async function handleDisputeFinalize(
         newState,
         `❌ disputeFinalize too early for starter: currentBlock=${currentJBlock}, timeout=${account.activeDispute.disputeTimeout}`,
       );
-      disputeLog.warn('finalize.too_early', {
+      warnDisputeUnlessQuiet(env, 'finalize.too_early', {
         counterparty: shortId(counterpartyEntityId),
         currentJBlock,
         timeout: account.activeDispute.disputeTimeout,

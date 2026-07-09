@@ -166,16 +166,6 @@ export function handleDirectPayment(
     events.push(`💰 Received ${amount.toString()} token ${tokenId} from Entity ${paymentFromEntity.slice(-4)} ${description ? '(' + description + ')' : ''}`);
   }
 
-  // Update current frame
-  const tokenIndex = accountMachine.currentFrame.deltas.findIndex((entry) => entry.tokenId === tokenId);
-
-  if (tokenIndex >= 0) {
-    accountMachine.currentFrame.deltas[tokenIndex] = { ...delta };
-  } else {
-    accountMachine.currentFrame.deltas.push({ ...delta });
-  }
-  accountMachine.currentFrame.deltas.sort((left, right) => left.tokenId - right.tokenId);
-
   // Check if we need to forward the payment (multi-hop routing)
   const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
 
