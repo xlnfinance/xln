@@ -216,6 +216,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      `tests/frontend/remote-runtime-import.test.ts`,
      `tests/frontend/runtime-store-hot-swap.test.ts`, and focused
      `tests/e2e-radapter-remote.spec.ts` bulk import coverage.
+   - Closed: removed the separate `/radapter/manage` import page and
+     `RemoteRuntimeManager` component; remote runtime import now has one app
+     entrypoint and active tests only keep negative guards against the old
+     manager path.
 
 4. **External audit handoff.**
    - Refresh `docs/security/external-audit-brief.md`.

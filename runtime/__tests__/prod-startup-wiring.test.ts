@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { discoverHubIds } from '../orchestrator/custody-bootstrap';
@@ -627,7 +627,8 @@ describe('production startup wiring', () => {
   test('prod remote runtime import e2e cannot reset the shared prod mesh implicitly', () => {
     const baseline = readFileSync(join(repoRoot, 'tests/utils/e2e-baseline.ts'), 'utf8');
     const radapterRemote = readFileSync(join(repoRoot, 'tests/e2e-radapter-remote.spec.ts'), 'utf8');
-    const manager = readFileSync(join(repoRoot, 'frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte'), 'utf8');
+    const appLayout = readFileSync(join(repoRoot, 'frontend/src/routes/app/+layout.svelte'), 'utf8');
+    const importFlow = readFileSync(join(repoRoot, 'frontend/src/lib/utils/remoteRuntimeImportFlow.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
 
     expect(baseline).toContain('allowAutoReset?: boolean;');
@@ -652,10 +653,13 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('await persistHubReadySnapshots();\n    publishRuntimeImportManifest();');
     expect(orchestrator).toContain('resetState.inProgress = false;\n  }\n  await publishRuntimeImportManifest();');
 
-    expect(manager).toContain('let loadingImportSource = false;');
-    expect(manager).toContain('bulkImportDisabled = working || loadingImportSource || bulkText.trim().length === 0');
-    expect(manager).toContain('disabled={bulkImportDisabled}');
-    expect(manager).toContain('if (bulkImportDisabled) return;');
+    expect(existsSync(join(repoRoot, 'frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte'))).toBe(false);
+    expect(existsSync(join(repoRoot, 'frontend/src/routes/radapter/manage/+page.svelte'))).toBe(false);
+    expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
+    expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');
+    expect(appLayout).toContain('const result = await importRemoteRuntimeEntries(entries)');
+    expect(importFlow).toContain('await Promise.allSettled(workers)');
+    expect(importFlow).toContain('writeRemoteRuntimeImportSummary(results, entries.length, importedAt)');
   });
 
   test('prod diagnose accepts the market maker terminal startup phase', () => {

@@ -178,7 +178,9 @@ test('remote projection never materializes fake Env snapshots', () => {
 
 test('remote runtime bulk import validates with bounded parallelism', () => {
   const source = readFileSync('frontend/src/lib/utils/remoteRuntimeImportFlow.ts', 'utf8');
-  const managerSource = readFileSync('frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte', 'utf8');
+  const appLayoutSource = readFileSync('frontend/src/routes/app/+layout.svelte', 'utf8');
+  expect(existsSync('frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte')).toBe(false);
+  expect(existsSync('frontend/src/routes/radapter/manage/+page.svelte')).toBe(false);
   expect(source).toContain('const REMOTE_RUNTIME_IMPORT_CONCURRENCY = 4');
   expect(source).toContain('export const validateRemoteRuntimeImportEntries = async');
   expect(source).toContain('Array.from({ length: workerCount }');
@@ -187,7 +189,8 @@ test('remote runtime bulk import validates with bounded parallelism', () => {
   expect(source).toContain('failedCount: failed.length');
   expect(source).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
   expect(source).toContain('summarizeFailedRemoteRuntimeEntry');
-  expect(managerSource).toContain('importRemoteRuntimeEntries(entries');
+  expect(appLayoutSource).toContain('importRemoteRuntimesIntoApp');
+  expect(appLayoutSource).toContain('const result = await importRemoteRuntimeEntries(entries)');
   expect(source).not.toContain('for (const [index, entry] of entries.entries())');
 });
 
