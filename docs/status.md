@@ -131,8 +131,8 @@ When docs disagree, use this order:
 6. Classify runtime exceptions as `drop`, `defer`, `debug-assert`, or `fatal`.
 7. Re-check current consensus/Hanko production semantics against the current
    code, not old audit snapshots.
-8. Re-run a current contract governance/access-control scan before external
-   audit.
+8. Keep contract governance/access-control scan green and hand its documented
+   manual-review questions to the external auditor.
 9. Keep destructive reset/clearDB/dev actions strongly gated.
 
 ### P2 - product clarity
