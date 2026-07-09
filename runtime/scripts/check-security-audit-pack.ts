@@ -80,6 +80,31 @@ for (const marker of [
   assertIncludes(mainnet, marker, mainnetPath);
 }
 
+const statusPath = 'docs/status.md';
+const status = readText(statusPath);
+for (const marker of [
+  'bun run gate:mainnet',
+  'one-hour mainnet-preflight soak',
+]) {
+  assertIncludes(status, marker, statusPath);
+}
+
+const todoPath = 'todo.md';
+const todo = readText(todoPath);
+for (const marker of [
+  'bun run gate:mainnet',
+  'External audit handoff',
+]) {
+  assertIncludes(todo, marker, todoPath);
+}
+for (const stale of [
+  'bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak',
+]) {
+  assertNotIncludes(status, stale, statusPath);
+  assertNotIncludes(todo, stale, todoPath);
+  assertNotIncludes(mainnet, stale, mainnetPath);
+}
+
 const gptContextPath = 'scripts/debug/gpt.cjs';
 const gptContext = readText(gptContextPath);
 for (const marker of [

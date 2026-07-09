@@ -9,7 +9,7 @@ summarizes why those items matter and how they fit the protocol.
 
 ## Current Snapshot
 
-**Date:** 2026-07-08
+**Date:** 2026-07-09
 **State:** current `main` is production-demo/public-testnet grade, not mainnet-ready.
 
 What is true now:
@@ -112,10 +112,9 @@ When docs disagree, use this order:
 
 ### P0 - release and mainnet readiness
 
-1. Complete the current one-hour
-   `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak` before
-   calling any build a mainnet candidate. `bun run gate:release` already passed
-   on the release line; the soak has only partial historical evidence so far.
+1. Complete the current one-hour `bun run gate:mainnet` before calling any
+   build a mainnet candidate. `bun run gate:release` already passed on the
+   release line; the soak has only partial historical evidence so far.
 2. Document real mainnet chain/RPC, operator keys, tower gas policy,
    backup/restore drills, last-resort dispute drills, and monitoring
    thresholds.

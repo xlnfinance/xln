@@ -197,8 +197,7 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      iterations (`gate:ci` plus `hub10k`) passed before the run was stopped
      manually for time.
    - Still needed for a mainnet candidate: a complete uninterrupted
-     one-hour `bun runtime/scripts/run-mainnet-preflight-gate.ts --include-soak`
-     from a clean tree.
+     one-hour `bun run gate:mainnet` from a clean tree.
 
 2. **Make real mainnet ops explicit.**
    - Chain/RPC endpoints selected and documented.
