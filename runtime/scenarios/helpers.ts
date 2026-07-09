@@ -7,6 +7,7 @@ import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
 import { setFailFastErrors } from '../logger';
 import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { createGossipLayer } from '../networking/gossip';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -30,16 +31,21 @@ export const commitRuntimeInput = async (env: Env, runtimeInput: RuntimeInput): 
 
 export { checkSolvency } from './solvency-check';
 
+const normalizeRuntimeSeed = (value: string | null | undefined): string | null => {
+  if (value === undefined || value === null) return null;
+  return String(value).trim().length > 0 ? value : null;
+};
+
 export function requireRuntimeSeed(env: Env, label: string): string {
-  const envSeed = env.runtimeSeed ?? null;
+  const envSeed = normalizeRuntimeSeed(env.runtimeSeed ?? null);
   const processSeed = (typeof process !== 'undefined' && process.env)
-    ? (process.env['XLN_RUNTIME_SEED'] || process.env['RUNTIME_SEED'] || null)
+    ? normalizeRuntimeSeed(process.env['XLN_RUNTIME_SEED'] ?? process.env['RUNTIME_SEED'] ?? null)
     : null;
   const seed = envSeed ?? processSeed;
   if (!seed) {
     throw new Error(`${label}: runtimeSeed missing - unlock vault or set XLN_RUNTIME_SEED`);
   }
-  if (env.runtimeSeed === undefined || env.runtimeSeed === null) {
+  if (!envSeed) {
     env.runtimeSeed = seed;
   }
   return seed;
@@ -54,6 +60,18 @@ export function ensureSignerKeysFromSeed(env: Env, signerIds: string[], label: s
     const privateKey = deriveSignerKeySync(seed, signerId);
     registerSignerKey(signerId, privateKey);
   }
+}
+
+export function setScenarioStorageEnabled(env: Env, enabled: boolean): void {
+  env.runtimeConfig = {
+    ...env.runtimeConfig,
+    storage: {
+      ...env.runtimeConfig?.storage,
+      enabled,
+    },
+  };
+  if (env.runtimeState) env.runtimeState.persistencePaused = !enabled;
+  if (!enabled) env.gossip = createGossipLayer();
 }
 
 type ScenarioLogLevel = 'debug' | 'info' | 'warn' | 'error';

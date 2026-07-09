@@ -10,8 +10,7 @@ import { createXlnJsonRpcProvider } from '../jadapter';
 import { getCachedSignerPrivateKey } from '../account-crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 import { isLoopbackUrl } from '../loopback-url';
-import { createGossipLayer } from '../networking/gossip';
-import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge } from './helpers';
+import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';
 
 export type { JAdapterMode };
 
@@ -305,17 +304,7 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   const env = createEmptyEnv(seed);
   env.scenarioMode = true;
   env.timestamp = 1;
-  if (config.storageEnabled !== undefined) {
-    env.runtimeConfig = {
-      ...env.runtimeConfig,
-      storage: {
-        ...env.runtimeConfig?.storage,
-        enabled: config.storageEnabled,
-      },
-    };
-    if (env.runtimeState) env.runtimeState.persistencePaused = !config.storageEnabled;
-    if (!config.storageEnabled) env.gossip = createGossipLayer();
-  }
+  setScenarioStorageEnabled(env, config.storageEnabled ?? false);
 
   // 2. Seed signer keys
   requireRuntimeSeed(env, config.name);

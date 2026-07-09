@@ -12,7 +12,7 @@
 
 import type { Env, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../settlement-ops';
-import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica } from './helpers';
+import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled } from './helpers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
@@ -93,6 +93,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }
 
   env.scenarioMode = true;
+  setScenarioStorageEnabled(env, false);
   env.quietRuntimeLogs = true;
   if (env.runtimeSeed === undefined || env.runtimeSeed === null) {
     env.runtimeSeed = '';
