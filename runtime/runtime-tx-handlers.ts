@@ -29,6 +29,8 @@ const runtimeTxLog = createStructuredLogger('runtime.tx');
 type ImportJRuntimeTx = Extract<RuntimeTx, { type: 'importJ' }>;
 type ImportReplicaRuntimeTx = Extract<RuntimeTx, { type: 'importReplica' }>;
 
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
 export interface RuntimeTxHandlerDeps {
   onJurisdictionImported?: (env: Env) => void;
 }
@@ -92,10 +94,13 @@ const importJurisdictionRuntimeTx = async (
       context: `importJ:${runtimeTx.data.name}`,
       attempts: typeof window !== 'undefined' ? 5 : 3,
       onRetry: (attempt, attempts, retryError) => {
-        console.warn(
-          `[Runtime] Retrying J-machine import "${runtimeTx.data.name}" ` +
-            `(${attempt}/${attempts}): ${retryError instanceof Error ? retryError.message : String(retryError)}`,
-        );
+        runtimeTxLog.warn('jurisdiction.import_retry', {
+          name: runtimeTx.data.name,
+          chainId: runtimeTx.data.chainId,
+          attempt,
+          attempts,
+          error: errorMessage(retryError),
+        });
       },
     });
     if (!fromReplica) {
@@ -173,7 +178,11 @@ const importJurisdictionRuntimeTx = async (
       chainId: runtimeTx.data.chainId,
     });
   } catch (error) {
-    console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
+    runtimeTxLog.error('jurisdiction.import_failed', {
+      name: runtimeTx.data.name,
+      chainId: runtimeTx.data.chainId,
+      error: errorMessage(error),
+    });
     throw error;
   }
 };
@@ -202,9 +211,11 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
     throw new Error(`IMPORT_REPLICA_INVALID_ID: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`);
   }
   if (DEBUG) {
-    console.log(
-      `Importing replica Entity #${formatEntityDisplay(importedEntityId)}:${formatSignerDisplay(importedSignerId)} (proposer: ${runtimeTx.data.isProposer})`,
-    );
+    runtimeTxLog.debug('replica.import_start', {
+      entity: formatEntityDisplay(importedEntityId),
+      signer: formatSignerDisplay(importedSignerId),
+      isProposer: runtimeTx.data.isProposer,
+    });
   }
 
   const replicaKey = `${importedEntityId}:${importedSignerId}`;
@@ -227,9 +238,10 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
     env.eReplicas.set(replicaKey, existingReplica);
     markStorageEntityDirty(env, existingReplica.state.entityId);
     if (DEBUG) {
-      console.log(
-        `Skipping fresh replica init for restored entity #${formatEntityDisplay(importedEntityId)}:${formatSignerDisplay(importedSignerId)}`,
-      );
+      runtimeTxLog.debug('replica.restored_reused', {
+        entity: formatEntityDisplay(importedEntityId),
+        signer: formatSignerDisplay(importedSignerId),
+      });
     }
     return;
   }
@@ -328,9 +340,10 @@ const registerSingleSignerEntityWallet = (
       jReplica.jadapter?.registerEntityWallet?.(importedEntityId, privateKeyHex);
     }
   } catch (_error) {
-    console.warn(
-      `⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping entity wallet registration`,
-    );
+    runtimeTxLog.warn('replica.wallet_registration_skipped', {
+      signer: formatSignerDisplay(signerId),
+      reason: 'signer_private_key_unavailable',
+    });
   }
 };
 

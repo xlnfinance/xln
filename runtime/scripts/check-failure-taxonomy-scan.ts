@@ -273,6 +273,7 @@ for (const [path, markers] of [
   ['runtime/account-consensus/propose.ts', ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile']],
   ['runtime/account-tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
   ['runtime/entity-tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
+  ['runtime/runtime-tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'jurisdiction.import_failed', 'replica.wallet_registration_skipped']],
   ['runtime/entity-tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity-tx/handlers/create-settlement.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity-tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -313,6 +314,10 @@ for (const legacyRuntimeLogMarker of [
 ]) {
   assertNotIncludes(runtimeCore, legacyRuntimeLogMarker, runtimeCorePath);
 }
+
+const runtimeTxHandlersPath = 'runtime/runtime-tx-handlers.ts';
+const runtimeTxHandlers = readText(runtimeTxHandlersPath);
+assertNotIncludes(runtimeTxHandlers, 'console.', runtimeTxHandlersPath);
 
 const r2cHandlerPath = 'runtime/entity-tx/handlers/r2c.ts';
 const r2cHandler = readText(r2cHandlerPath);
