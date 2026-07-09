@@ -39,11 +39,13 @@
   } from '$lib/brainvault/workers';
   import {
     FACTOR_INFO,
+    LIVE_RUNTIME_DISCOVERY_RETRY_MS,
     STRENGTH_COLORS,
     formatLiveRuntimeImportStatus,
     formatMemoryLabel,
     formatRuntimeDurationRounded,
     generateBase58Secret,
+    shouldRetryLiveRuntimeDiscovery,
   } from './runtime-creation-model';
 
   // Props
@@ -100,10 +102,40 @@
   type LiveRuntime = { label: string; access: 'admin' | 'read'; wsUrl: string; token: string };
   let liveRuntimes: LiveRuntime[] = [];
   let liveRuntimesLoading = false;
+  let liveRuntimesRetrying = false;
   let liveRuntimesError = '';
   let liveRuntimesLoaded = false;
   let connectingRuntimeId = '';
   let selectedRuntimeKey = '';
+  let liveRuntimeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let liveRuntimeRetryAttempts = 0;
+
+  function clearLiveRuntimeDiscoveryRetry(): void {
+    if (liveRuntimeRetryTimer !== null) {
+      clearTimeout(liveRuntimeRetryTimer);
+      liveRuntimeRetryTimer = null;
+    }
+    liveRuntimesRetrying = false;
+  }
+
+  function scheduleLiveRuntimeDiscoveryRetry(
+    payload: { ready?: boolean; partial?: boolean; retryable?: boolean; fatal?: boolean },
+    entryCount: number,
+  ): boolean {
+    if (!shouldRetryLiveRuntimeDiscovery(payload, entryCount, liveRuntimeRetryAttempts)) {
+      liveRuntimesRetrying = false;
+      return false;
+    }
+    clearLiveRuntimeDiscoveryRetry();
+    liveRuntimeRetryAttempts += 1;
+    liveRuntimesRetrying = true;
+    liveRuntimeRetryTimer = setTimeout(() => {
+      liveRuntimeRetryTimer = null;
+      liveRuntimesRetrying = false;
+      void discoverLiveRuntimes(true);
+    }, LIVE_RUNTIME_DISCOVERY_RETRY_MS);
+    return true;
+  }
 
   function connectSelectedRuntime(): void {
     const rt = liveRuntimes.find((r) => r.wsUrl === selectedRuntimeKey);
@@ -118,6 +150,10 @@
   // failures must stay visible so "no live runtimes" is never a silent bootstrap failure.
   async function discoverLiveRuntimes(silent = false): Promise<void> {
     if (typeof window === 'undefined' || liveRuntimesLoading) return;
+    if (!silent) {
+      clearLiveRuntimeDiscoveryRetry();
+      liveRuntimeRetryAttempts = 0;
+    }
     liveRuntimesLoading = true;
     liveRuntimesError = '';
     try {
@@ -134,6 +170,8 @@
         reason?: string;
         error?: string;
         code?: string;
+        retryable?: boolean;
+        fatal?: boolean;
         degraded?: unknown[];
         manifest?: { entries?: Array<Record<string, unknown>> };
       };
@@ -150,11 +188,22 @@
       if (!next.some((runtime) => runtime.wsUrl === selectedRuntimeKey)) {
         selectedRuntimeKey = next[0]?.wsUrl ?? '';
       }
-      liveRuntimesLoaded = true;
-      liveRuntimesError = formatLiveRuntimeImportStatus(payload, next.length);
+      const retrying = silent && next.length === 0
+        ? scheduleLiveRuntimeDiscoveryRetry(payload, next.length)
+        : false;
+      if (next.length > 0) {
+        clearLiveRuntimeDiscoveryRetry();
+        liveRuntimeRetryAttempts = 0;
+      }
+      liveRuntimesLoaded = !retrying;
+      liveRuntimesError = retrying ? '' : formatLiveRuntimeImportStatus(payload, next.length);
       await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { throwOnError: !silent });
     } catch (err) {
-      if (!silent) liveRuntimesError = err instanceof Error ? err.message : String(err);
+      if (silent) {
+        liveRuntimesLoaded = !scheduleLiveRuntimeDiscoveryRetry({ retryable: true }, 0);
+      } else {
+        liveRuntimesError = err instanceof Error ? err.message : String(err);
+      }
     } finally {
       liveRuntimesLoading = false;
     }
@@ -989,6 +1038,7 @@
   }
 
   onDestroy(() => {
+    clearLiveRuntimeDiscoveryRetry();
     terminateWorkers();
   });
 
@@ -1185,7 +1235,7 @@
                   {connectingRuntimeId ? 'Connecting…' : `Connect · ${selectedRuntimeAccessLabel()}`}
                 </button>
               </div>
-            {:else if liveRuntimesLoading}
+            {:else if liveRuntimesLoading || liveRuntimesRetrying}
               <div class="live-runtime-hint">Discovering live runtimes…</div>
             {:else if liveRuntimesLoaded && !liveRuntimesError}
               <div class="live-runtime-hint">No live runtimes online.</div>

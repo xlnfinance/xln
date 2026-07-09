@@ -18,6 +18,10 @@ import {
   type StoredRemoteRuntimeImportEntry,
 } from '../../frontend/src/lib/utils/remoteRuntimeImport';
 import {
+  LIVE_RUNTIME_DISCOVERY_MAX_RETRIES,
+  shouldRetryLiveRuntimeDiscovery,
+} from '../../frontend/src/lib/components/Views/runtime-creation-model';
+import {
   buildRemoteRuntimeRecoveryPeerSources,
   buildRuntimeWsRecoveryPeerSource,
   buildRuntimeWsRecoveryPeerSources,
@@ -204,6 +208,14 @@ describe('remote runtime import manager utilities', () => {
       'ws://127.0.0.1:8092/rpc',
       'ws://127.0.0.1:8093/rpc',
     ]);
+  });
+
+  test('live runtime auto-discovery retries empty startup responses but not fatal failures', () => {
+    expect(shouldRetryLiveRuntimeDiscovery({ ready: true }, 0, 0)).toBe(true);
+    expect(shouldRetryLiveRuntimeDiscovery({ ready: false, retryable: true }, 0, 1)).toBe(true);
+    expect(shouldRetryLiveRuntimeDiscovery({ ready: false, fatal: true }, 0, 1)).toBe(false);
+    expect(shouldRetryLiveRuntimeDiscovery({ ready: false }, 1, 0)).toBe(false);
+    expect(shouldRetryLiveRuntimeDiscovery({ ready: false }, 0, LIVE_RUNTIME_DISCOVERY_MAX_RETRIES)).toBe(false);
   });
 
 
@@ -581,6 +593,10 @@ describe('remote runtime import manager utilities', () => {
     expect(runtimeCreation).toContain('await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { throwOnError: !silent })');
     expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\), \{ throwOnError: !silent \}\)/g))
       .toHaveLength(1);
+    expect(runtimeCreation).toContain('scheduleLiveRuntimeDiscoveryRetry(payload, next.length)');
+    expect(runtimeCreation).toContain('setTimeout(() => {');
+    expect(runtimeCreation).toContain('clearLiveRuntimeDiscoveryRetry();');
+    expect(runtimeCreation).toContain('liveRuntimesLoading || liveRuntimesRetrying');
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
     expect(vaultStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports();');

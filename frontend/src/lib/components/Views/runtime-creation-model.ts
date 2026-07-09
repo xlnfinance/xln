@@ -126,11 +126,27 @@ export function estimatePasswordStrength(value: string): PasswordStrengthEstimat
 export type LiveRuntimeImportStatusPayload = {
   ready?: boolean;
   partial?: boolean;
+  retryable?: boolean;
+  fatal?: boolean;
   reason?: unknown;
   error?: unknown;
   code?: unknown;
   degraded?: unknown;
 };
+
+export const LIVE_RUNTIME_DISCOVERY_RETRY_MS = 2_000;
+export const LIVE_RUNTIME_DISCOVERY_MAX_RETRIES = 60;
+
+export function shouldRetryLiveRuntimeDiscovery(
+  payload: LiveRuntimeImportStatusPayload,
+  entryCount: number,
+  attempts: number,
+): boolean {
+  if (entryCount > 0) return false;
+  if (attempts >= LIVE_RUNTIME_DISCOVERY_MAX_RETRIES) return false;
+  if (payload.fatal === true && payload.retryable !== true) return false;
+  return true;
+}
 
 export function formatLiveRuntimeImportStatus(
   payload: LiveRuntimeImportStatusPayload,
