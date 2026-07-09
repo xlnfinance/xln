@@ -1,0 +1,62 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { updateJurisdictionsJson } from '../server/jurisdictions';
+
+const tempRoots: string[] = [];
+
+const withJurisdictionsPath = (payload: unknown): string => {
+  const root = mkdtempSync(join(tmpdir(), 'xln-server-jurisdictions-'));
+  tempRoots.push(root);
+  const path = join(root, 'jurisdictions.json');
+  writeFileSync(path, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  process.env['XLN_JURISDICTIONS_PATH'] = path;
+  return path;
+};
+
+afterEach(() => {
+  delete process.env['XLN_JURISDICTIONS_PATH'];
+  delete process.env['PUBLIC_RPC'];
+  for (const root of tempRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+describe('server jurisdiction writer', () => {
+  test('returns the selected jurisdiction key and preserves its configured display name', async () => {
+    const path = withJurisdictionsPath({
+      version: '1',
+      jurisdictions: {
+        renamedPrimary: {
+          name: 'Base Local',
+          primary: true,
+          status: 'active',
+          chainId: 31337,
+          rpc: 'http://127.0.0.1:8545',
+          contracts: {
+            depository: '0x0000000000000000000000000000000000000001',
+            entityProvider: '0x0000000000000000000000000000000000000002',
+          },
+        },
+      },
+    });
+
+    const selected = await updateJurisdictionsJson({
+      account: '0x0000000000000000000000000000000000000003',
+      depository: '0x0000000000000000000000000000000000000004',
+      entityProvider: '0x0000000000000000000000000000000000000005',
+      deltaTransformer: '0x0000000000000000000000000000000000000006',
+    }, 'http://127.0.0.1:8545', 31337);
+
+    expect(selected).toEqual({ key: 'renamedPrimary', name: 'Base Local' });
+    const written = JSON.parse(readFileSync(path, 'utf8')) as {
+      jurisdictions: Record<string, { name?: string; contracts?: Record<string, string> }>;
+    };
+    expect(written.jurisdictions['renamedPrimary']?.name).toBe('Base Local');
+    expect(written.jurisdictions['renamedPrimary']?.contracts?.['depository'])
+      .toBe('0x0000000000000000000000000000000000000004');
+    expect(written.jurisdictions['arrakis']).toBeUndefined();
+  });
+});

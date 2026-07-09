@@ -193,6 +193,8 @@ describe('production startup wiring', () => {
     expect(serverJurisdictions).not.toContain('arrakisDisplayName');
     expect(serverJurisdictions).not.toContain('existingArrakis');
     expect(serverJurisdictions).toContain('name: displayName');
+    expect(standaloneServer).toContain("const jName = updatedRuntimeJurisdiction?.key || 'primary';");
+    expect(standaloneServer).not.toContain("const jName = 'arrakis';");
     expect(hubNode).toContain('selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl])');
     expect(hubNode).not.toContain("targetKey = 'arrakis'");
     expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');

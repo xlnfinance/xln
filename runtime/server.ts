@@ -1182,8 +1182,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     const block = await withStartupStepTimeout('provider.getBlockNumber', globalJAdapter.provider.getBlockNumber());
     serverLog.info('anvil.connected', { block });
 
+    let updatedRuntimeJurisdiction: Awaited<ReturnType<typeof updateJurisdictionsJson>> = null;
     if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
-      await withStartupStepTimeout(
+      updatedRuntimeJurisdiction = await withStartupStepTimeout(
         'updateJurisdictionsJson',
         updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId),
       );
@@ -1192,11 +1193,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     // Ensure env has a J-replica for this RPC jurisdiction (required for j_broadcast → j-mempool)
     if (globalJAdapter && env) {
       if (!env.jReplicas) env.jReplicas = new Map();
-      const jName = 'arrakis';
+      const jName = updatedRuntimeJurisdiction?.key || 'primary';
+      const jDisplayName = updatedRuntimeJurisdiction?.name || jName;
       if (!env.jReplicas.has(jName)) {
         const stateRoot = await (globalJAdapter.captureStateRoot?.() ?? Promise.resolve(null));
         env.jReplicas.set(jName, {
-          name: jName,
+          name: jDisplayName,
           blockNumber: 0n,
           stateRoot,
           mempool: [],

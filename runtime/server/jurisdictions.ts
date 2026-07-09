@@ -14,11 +14,16 @@ const serverLog = createStructuredLogger('server');
 const normalizeJurisdictionDisplayName = (value: unknown): string =>
   String(value || '').trim();
 
+export type UpdatedRuntimeJurisdiction = {
+  key: string;
+  name: string;
+};
+
 export const updateJurisdictionsJson = async (
   contracts: JAdapter['addresses'],
   rpcUrl?: string,
   chainIdOverride?: number,
-): Promise<void> => {
+): Promise<UpdatedRuntimeJurisdiction | null> => {
   try {
     const canonicalPath = resolveJurisdictionsJsonPath();
     const publicRpc = toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || rpcUrl || '/rpc'));
@@ -82,8 +87,10 @@ export const updateJurisdictionsJson = async (
     const payload = JSON.stringify(data, null, 2);
     await writeFile(canonicalPath, payload);
     serverLog.info('jurisdictions.updated', { path: canonicalPath });
+    return { key: targetKey, name: displayName };
   } catch (err) {
     serverLog.warn('jurisdictions.update_failed', { error: (err as Error).message });
+    return null;
   }
 };
 
