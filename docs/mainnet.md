@@ -12,14 +12,14 @@ acceptance prompt and evidence loop in
 
 ## Current Position
 
-**Date:** 2026-07-08
+**Date:** 2026-07-09
 **State:** current `main` is not mainnet-ready.
 
 The current branch materially raised the floor: watchtower recovery is live,
 encrypted, scheduled, covered by browser E2E, direct same-chain/cross-j swaps
 and lending are in the fast E2E gate, `bun run gate:release` passed on the
 release line, `bun run test:all:fast` passed on 2026-07-08 with 95/95 isolated
-browser shards, `bun run security:audit-pack` passed on 2026-07-08, and a
+browser shards, `bun run security:audit-pack` passed on 2026-07-09, and a
 historical release soak completed 13 full gate/benchmark iterations before
 being stopped manually. That is enough for serious public-testnet hardening. It
 is not enough for real funds because the full uninterrupted current
@@ -107,7 +107,8 @@ bun run soak:release
 ```
 
 Current evidence: `bun run gate:release` passed on the release line; `bun run
-test:all:fast` and `bun run security:audit-pack` passed on 2026-07-08. The
+test:all:fast` passed on 2026-07-08 and `bun run security:audit-pack` passed on
+2026-07-09. The
 historical long soak was manually stopped after 13 complete successful
 iterations, so it is useful evidence but not a completed gate. The current
 required soak evidence is the one-hour `bun run gate:mainnet` run from a clean

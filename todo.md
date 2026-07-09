@@ -222,8 +222,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      manager path.
 
 4. **External audit handoff.**
-   - Refresh `docs/security/external-audit-brief.md`.
-   - Produce the current audit pack with `bun run security:audit-pack`.
+   - Current evidence refresh: `docs/security/external-audit-brief.md`,
+     `docs/status.md`, and `docs/mainnet.md` were refreshed on 2026-07-09 after
+     the remote-runtime import cleanup.
+   - Current audit pack: `bun run security:audit-pack` passed on 2026-07-09.
    - Do not treat internal E2E success as a substitute for audit on real funds.
 
 ## P1 - Protocol And Runtime
