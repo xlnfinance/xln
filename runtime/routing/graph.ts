@@ -4,6 +4,7 @@
  */
 
 import type { Profile } from '../networking/gossip';
+import { createStructuredLogger } from '../logger';
 import { getTokenCapacity } from './capacity';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from './fees';
 
@@ -31,6 +32,8 @@ export interface NetworkGraph {
 const isHubLikeProfile = (profile: Profile): boolean => {
   return profile.metadata.isHub === true;
 };
+
+const routingGraphLog = createStructuredLogger('routing.graph');
 
 const hasRequiredRoutingMetadata = (profile: Profile): boolean => {
   const name = profile.name.trim();
@@ -65,9 +68,11 @@ export function buildNetworkGraph(
     const fromIsHubLike = isHubLikeProfile(profile);
 
     if (fromIsHubLike && !hasRequiredRoutingMetadata(profile)) {
-      console.error(
-        `[ROUTING][DROP_HUB_PROFILE_MISSING_METADATA] entity=${fromEntity} missing name or routingFeePPM`
-      );
+      routingGraphLog.error('drop_hub_profile_missing_metadata', {
+        entityId: fromEntity,
+        hasName: Boolean(profile.name.trim()),
+        routingFeePPM: profile.metadata.routingFeePPM,
+      });
       continue;
     }
 

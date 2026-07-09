@@ -173,6 +173,32 @@ describe('state helper cloning', () => {
     expect(() => cloneEntityState(corruptState)).toThrow('lastFinalizedJHeight was not preserved');
   });
 
+  test('entity clone preserves aliased cross-j route carriers from original state', () => {
+    const state = makeProjectionReplica().state as any;
+    const route = makeCrossJurisdictionRoute();
+    const account = makeManualFallbackAccount() as any;
+    account.swapOffers = new Map([[
+      route.orderId,
+      {
+        offerId: route.orderId,
+        crossJurisdiction: route,
+      },
+    ]]);
+    state.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    state.accounts.set('source', account);
+
+    const cloned = cloneEntityState(state);
+    const clonedRoute = cloned.crossJurisdictionSwaps!.get(route.orderId)!;
+    const clonedOfferRoute = cloned.accounts.get('source')!.swapOffers.get(route.orderId)!.crossJurisdiction!;
+
+    expect(clonedRoute).not.toBe(route);
+    expect(clonedOfferRoute).not.toBe(route);
+    expect(clonedRoute.source).toEqual(route.source);
+    expect(clonedRoute.target).toEqual(route.target);
+    expect(clonedOfferRoute.source).toEqual(route.source);
+    expect(clonedOfferRoute.target).toEqual(route.target);
+  });
+
   test('validates consensus config quorum shape', () => {
     expect(validateConsensusConfig({
       mode: 'proposer-based',

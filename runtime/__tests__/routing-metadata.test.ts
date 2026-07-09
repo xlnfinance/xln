@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Profile } from '../networking/gossip';
 import { parseProfile } from '../networking/gossip';
 import { buildNetworkGraph } from '../routing/graph';
@@ -44,6 +46,14 @@ function profile(
 }
 
 describe('Routing metadata hard requirements', () => {
+  test('routing graph diagnostics use structured logging only', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/routing/graph.ts'), 'utf8');
+
+    expect(source).toContain("createStructuredLogger('routing.graph')");
+    expect(source).toContain("routingGraphLog.error('drop_hub_profile_missing_metadata'");
+    expect(source).not.toContain('console.');
+  });
+
   test('rejects legacy profile endpoints field', () => {
     expect(() => parseProfile({
       entityId: ALICE,

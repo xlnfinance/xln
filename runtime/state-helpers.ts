@@ -55,18 +55,18 @@ const cloneAccountTxForState = <T extends AccountTx>(tx: T): T => {
   return cloneCrossJurisdictionAccountTxRoute(cloned) as T;
 };
 
-const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
-  if (state.crossJurisdictionSwaps) {
+const cloneCrossJurisdictionRoutesInState = (state: EntityState, source: EntityState = state): void => {
+  if (source.crossJurisdictionSwaps) {
     state.crossJurisdictionSwaps = new Map(
-      Array.from(state.crossJurisdictionSwaps.entries()).map(([id, route]) => [
+      Array.from(source.crossJurisdictionSwaps.entries()).map(([id, route]) => [
         id,
         cloneCrossJurisdictionRoute(route),
       ]),
     );
   }
-  if (state.pendingCrossJurisdictionFillAcks) {
+  if (source.pendingCrossJurisdictionFillAcks) {
     state.pendingCrossJurisdictionFillAcks = new Map(
-      Array.from(state.pendingCrossJurisdictionFillAcks.entries()).map(([id, pending]) => [
+      Array.from(source.pendingCrossJurisdictionFillAcks.entries()).map(([id, pending]) => [
         id,
         {
           ...pending,
@@ -75,9 +75,9 @@ const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
       ]),
     );
   }
-  if (state.crossJurisdictionBookAdmissions) {
+  if (source.crossJurisdictionBookAdmissions) {
     state.crossJurisdictionBookAdmissions = new Map(
-      Array.from(state.crossJurisdictionBookAdmissions.entries()).map(([id, admission]) => [
+      Array.from(source.crossJurisdictionBookAdmissions.entries()).map(([id, admission]) => [
         id,
         cloneCrossJurisdictionBookAdmission(admission),
       ]),
@@ -85,36 +85,38 @@ const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
   }
 };
 
-const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine): void => {
-  account.mempool = account.mempool.map(cloneAccountTxForState);
-  account.currentFrame = cloneCrossJurisdictionAccountFrameRoute(account.currentFrame);
-  if (account.pendingFrame) account.pendingFrame = cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame);
-  if (account.pendingAccountInput) account.pendingAccountInput = cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput);
+const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine, source: AccountMachine = account): void => {
+  account.mempool = source.mempool.map(cloneAccountTxForState);
+  account.currentFrame = cloneCrossJurisdictionAccountFrameRoute(source.currentFrame);
+  if (source.pendingFrame) account.pendingFrame = cloneCrossJurisdictionAccountFrameRoute(source.pendingFrame);
+  if (source.pendingAccountInput) {
+    account.pendingAccountInput = cloneCrossJurisdictionAccountInputRoute(source.pendingAccountInput);
+  }
   account.swapOffers = new Map(
-    Array.from((account.swapOffers ?? new Map()).entries()).map(([id, offer]) => [
+    Array.from((source.swapOffers ?? new Map()).entries()).map(([id, offer]) => [
       id,
       cloneCrossJurisdictionSwapOfferRoute(offer),
     ]),
   );
   account.pulls = new Map(
-    Array.from((account.pulls ?? new Map()).entries()).map(([id, pull]) => [
+    Array.from((source.pulls ?? new Map()).entries()).map(([id, pull]) => [
       id,
       pull.crossJurisdiction
         ? { ...pull, crossJurisdiction: cloneCrossJurisdictionPullBinding(pull.crossJurisdiction) }
         : { ...pull },
     ]),
   );
-  if (account.swapOrderHistory instanceof Map) {
+  if (source.swapOrderHistory instanceof Map) {
     account.swapOrderHistory = new Map(
-      Array.from(account.swapOrderHistory.entries()).map(([id, entry]) => [
+      Array.from(source.swapOrderHistory.entries()).map(([id, entry]) => [
         id,
         cloneCrossJurisdictionSwapHistoryRoute(entry),
       ]),
     );
   }
-  if (account.swapClosedOrders instanceof Map) {
+  if (source.swapClosedOrders instanceof Map) {
     account.swapClosedOrders = new Map(
-      Array.from(account.swapClosedOrders.entries()).map(([id, entry]) => [
+      Array.from(source.swapClosedOrders.entries()).map(([id, entry]) => [
         id,
         cloneCrossJurisdictionSwapHistoryRoute(entry),
       ]),
@@ -515,11 +517,11 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
   if (entityState.lending) {
     cloned.lending = cloneLendingState(entityState.lending);
   }
-  cloneCrossJurisdictionRoutesInState(cloned);
+  cloneCrossJurisdictionRoutesInState(cloned, entityState);
   for (const [accountId, account] of cloned.accounts.entries()) {
     const sourceAccount = entityState.accounts.get(accountId);
     if (sourceAccount) cloneDisputeEvidenceIntoAccount(account, sourceAccount);
-    cloneCrossJurisdictionRoutesInAccount(account);
+    cloneCrossJurisdictionRoutesInAccount(account, sourceAccount ?? account);
   }
 
   // VALIDATE AT SOURCE: Guarantee type safety from this point forward.
@@ -782,6 +784,7 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
     try {
       const cloned = structuredClone(accountWithoutCloned) as AccountMachine;
       cloneDisputeEvidenceIntoAccount(cloned, account);
+      cloneCrossJurisdictionRoutesInAccount(cloned, account);
       return cloned;
     } catch {
       return manualCloneAccountMachine(account, true);
@@ -793,7 +796,7 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
     const cloned = structuredClone(account);
     setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
     cloneDisputeEvidenceIntoAccount(cloned, account);
-    cloneCrossJurisdictionRoutesInAccount(cloned);
+    cloneCrossJurisdictionRoutesInAccount(cloned, account);
     return cloned;
   } catch (error) {
     if (HEAVY_LOGS) {
@@ -1033,6 +1036,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     );
   }
 
-  cloneCrossJurisdictionRoutesInAccount(result);
+  cloneCrossJurisdictionRoutesInAccount(result, account);
   return result;
 }
