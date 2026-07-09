@@ -29,6 +29,10 @@
   let sliceStart = 0;
   let sliceEnd = -1;
 
+  function errorMessage(value: unknown): string {
+    return value instanceof Error ? value.message : String(value || 'Failed to load scenario');
+  }
+
   async function loadAndExecuteScenario() {
     try {
       let scenarioText: string;
@@ -71,7 +75,7 @@
       await new Promise(resolve => setTimeout(resolve, 50));
 
       if (container) {
-        initThreeJS();
+        if (!initThreeJS()) return;
         renderFrame(currentFrame);
         if (autoplay) play();
       } else {
@@ -79,15 +83,14 @@
       }
 
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to load scenario';
-      console.error('IsolatedScenarioPlayer error:', err);
+      error = errorMessage(err);
     }
   }
 
-  function initThreeJS() {
+  function initThreeJS(): boolean {
     if (!container) {
-      console.error('Cannot init Three.js - container not ready');
-      return;
+      error = 'Container element not available';
+      return false;
     }
 
     scene = new THREE.Scene();
@@ -121,6 +124,7 @@
     scene.add(directionalLight);
 
     animate();
+    return true;
   }
 
   function renderFrame(frameIndex: number) {
@@ -273,7 +277,7 @@
 
 <div class="scenario-player" style="width: {width}; height: {height};">
   {#if error}
-    <div class="error-state">
+    <div class="error-state" data-testid="isolated-scenario-error">
       <p>⚠️ {error}</p>
     </div>
   {:else if loaded}
