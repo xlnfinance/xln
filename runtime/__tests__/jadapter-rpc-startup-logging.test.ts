@@ -28,6 +28,8 @@ test('rpc jadapter startup and watcher lifecycle logs stay structured', () => {
 test('runtime dev startup status logs stay structured', () => {
   const runtime = readFileSync(join(process.cwd(), 'runtime/runtime.ts'), 'utf8');
   const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
+  const marketMakerNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/mm-node.ts'), 'utf8');
+  const orchestrator = readFileSync(join(process.cwd(), 'runtime/orchestrator/orchestrator.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
 
   expect(runtime).not.toContain('console.log(`JAdapter watcher started for jReplica');
@@ -36,6 +38,12 @@ test('runtime dev startup status logs stay structured', () => {
   expect(hubNode).not.toContain('RPC contracts have no code; deploying fresh stack instead of using stale addresses:');
   expect(hubNode).toContain("nodeLog.info('jurisdiction_contracts.stale_dropped'");
   expect(hubNode).toContain("nodeLog.info('bootstrap_ready_snapshot.persisted'");
+  expect(marketMakerNode).not.toContain('console.log(`[MESH-MM] BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
+  expect(marketMakerNode).not.toContain('BOOTSTRAP_READY_HASH hash=${fingerprint.hash}');
+  expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_snapshot.persisted'");
+  expect(marketMakerNode).toContain("nodeLog.info('bootstrap.ready_hash'");
+  expect(orchestrator).not.toContain('console.log(`HUB_READY_SNAPSHOTS_PERSISTED');
+  expect(orchestrator).toContain("meshLog.info('hub_ready_snapshots.persisted'");
 
   for (const noisyBootstrapString of [
     '[BOOTSTRAP] Starting hub bootstrap',

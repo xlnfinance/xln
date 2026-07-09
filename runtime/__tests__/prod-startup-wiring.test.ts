@@ -485,7 +485,7 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('blockers: blocker ? [blocker] : []');
     expect(mmNode).toContain('accountReady && expectedHubOffers > 0');
     expect(mmNode).toContain('MARKET_MAKER_BOOTSTRAP_INCOMPLETE');
-    expect(mmNode).toContain('BOOTSTRAP_READY_HASH');
+    expect(mmNode).toContain("nodeLog.info('bootstrap.ready_hash'");
     expect(mmNode).toContain('const health = assertMarketMakerBootstrapFinalized(');
     expect(mmNode).toContain('const isMarketMakerFullDepthComplete = (health: MarketMakerHealth | null): boolean => {');
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_NEW_OFFERS_PER_ENTITY_INPUT');
@@ -684,7 +684,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('bootstrapReadyHash = fingerprint.hash;');
     expect(mmNode).toContain('bootstrapRuntimeStateHash = runtimeStateHash;');
     expect(mmNode).toContain('bootstrapEntityStateHash = entityStateHash;');
-    expect(mmNode).toContain('runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}');
+    expect(mmNode).toContain('runtimeStateHash,');
+    expect(mmNode).toContain('entityStateHash,');
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD']");
     expect(mmNode).toContain('BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}');
     expect(mmNode).toContain('let bootstrapCrossPlanJobCount: number | null = null;');
@@ -873,7 +874,7 @@ describe('production startup wiring', () => {
     expect(smoke).toContain('blockerDetails: health.marketMaker?.cross?.routes?.map(route => summarizeBlockers(route.blockers)) ?? []');
     expect(mmNode).toContain("persistRestoredEnvToDB");
     expect(mmNode).toContain("process.env['XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT']");
-    expect(mmNode).toContain('BOOTSTRAP_READY_SNAPSHOT_PERSISTED');
+    expect(mmNode).toContain("nodeLog.info('bootstrap.ready_snapshot.persisted'");
     expect(mmNode).toContain('const markOffersReady = async (finalizedHealth?: MarketMakerHealth | null): Promise<void> => {');
     expect(mmNode).toContain('await persistBootstrapReadySnapshotIfRequested();');
     expect(orchestrator).toContain("const preserveState = process.env['XLN_MESH_PRESERVE_STATE_ON_RESET'] === '1';");
@@ -912,8 +913,10 @@ describe('production startup wiring', () => {
     expect(smoke).toContain("process.env['MARKET_MAKER_CROSS_MAX_TOKEN_PAIRS_PER_ROUTE'] || '1000'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
     expect(smoke).toContain("process.env['MARKET_MAKER_BOOTSTRAP_MAX_NEW_OFFERS_PER_TICK'] || '1000'");
-    expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_RUNTIME_HASH_MISMATCH');
-    expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_MISSING');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_RUNTIME_HASH_MISSING');
+    expect(smoke).toContain('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_ENTITY_HASH_MISSING');
+    expect(smoke).not.toContain('/BOOTSTRAP_READY_HASH hash=');
     expect(smoke).toContain("emitDebugEvent('bootstrap-hash'");
     expect(smoke).toContain('LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HEALTH_REGRESSED');
     expect(smoke).toContain('LOCAL_PROD_SMOKE_POST_BOOTSTRAP_HASH_CHANGED');

@@ -4248,7 +4248,7 @@ const run = async (): Promise<void> => {
       }
       await persistRestoredEnvToDB(env);
       bootstrapReadySnapshotPersisted = true;
-      console.log(`[MESH-MM] BOOTSTRAP_READY_SNAPSHOT_PERSISTED height=${env.height}`);
+      nodeLog.info('bootstrap.ready_snapshot.persisted', { height: env.height });
     } finally {
       env.runtimeConfig = previousRuntimeConfig;
       if (env.runtimeState) env.runtimeState.persistenceQuiescing = false;
@@ -4326,9 +4326,11 @@ const run = async (): Promise<void> => {
       health: summarizeMarketMakerHealthForDebug(health),
       finalizeDurationMs: Date.now() - finalizeStartedAt,
     });
-    console.log(
-      `[MESH-MM] BOOTSTRAP_READY_HASH hash=${fingerprint.hash} runtimeStateHash=${runtimeStateHash} entityStateHash=${entityStateHash}`,
-    );
+    nodeLog.info('bootstrap.ready_hash', {
+      hash: fingerprint.hash,
+      runtimeStateHash,
+      entityStateHash,
+    });
     if (envFlagEnabled(process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD'])) {
       console.log(`[MESH-MM] BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}`);
     }

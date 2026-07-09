@@ -762,18 +762,10 @@ const main = async (): Promise<void> => {
   const marketMakerInfo = process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] === '1'
     ? await assertMarketMakerInfoResponsive()
     : null;
-  const serverLog = readFileSync(logPath('server'), 'utf8');
-  const hashMatch = serverLog.match(
-    /BOOTSTRAP_READY_HASH hash=((?:0x)?[a-f0-9]{64})\s+runtimeStateHash=((?:0x)?[a-f0-9]{64})\s+entityStateHash=((?:0x)?[a-f0-9]{64})/,
-  );
-  if (!hashMatch || !isHash64(hashMatch[1]) || !isHash64(hashMatch[2]) || !isHash64(hashMatch[3])) {
-    throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_HASH_MISSING');
+  const bootstrap = marketMakerInfo?.bootstrap ?? readyHealth.bootstrap;
+  if (!bootstrap) {
+    throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_MISSING');
   }
-  const bootstrap = marketMakerInfo?.bootstrap ?? readyHealth.bootstrap ?? {
-    readyHash: hashMatch[1],
-    runtimeStateHash: hashMatch[2],
-    entityStateHash: hashMatch[3],
-  };
   if (!isHash64(bootstrap.readyHash)) {
     throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_HASH_MISSING');
   }
@@ -782,15 +774,6 @@ const main = async (): Promise<void> => {
   }
   if (!isHash64(bootstrap.entityStateHash)) {
     throw new Error('LOCAL_PROD_SMOKE_BOOTSTRAP_INFO_ENTITY_HASH_MISSING');
-  }
-  if (bootstrap.readyHash !== hashMatch[1]) {
-    throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_HASH_MISMATCH info=${bootstrap.readyHash} log=${hashMatch[1]}`);
-  }
-  if (bootstrap.runtimeStateHash !== hashMatch[2]) {
-    throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_RUNTIME_HASH_MISMATCH info=${bootstrap.runtimeStateHash} log=${hashMatch[2]}`);
-  }
-  if (bootstrap.entityStateHash !== hashMatch[3]) {
-    throw new Error(`LOCAL_PROD_SMOKE_BOOTSTRAP_ENTITY_HASH_MISMATCH info=${bootstrap.entityStateHash} log=${hashMatch[3]}`);
   }
   emitDebugEvent('bootstrap-hash', {
     stage: 'bootstrap-ready',

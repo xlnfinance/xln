@@ -2188,7 +2188,7 @@ const persistHubReadySnapshots = async (): Promise<void> => {
         persistencePaused: payload['persistencePaused'] ?? null,
       };
     }));
-    console.log(`HUB_READY_SNAPSHOTS_PERSISTED ${safeStringify(results)}`);
+    meshLog.info('hub_ready_snapshots.persisted', { results });
   } finally {
     finishTiming('reset_persist_ready_snapshots', startedAt);
   }
