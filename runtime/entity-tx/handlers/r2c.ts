@@ -19,7 +19,7 @@
 import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../../types';
 import { QUOTE_EXPIRY_MS } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { getEffectiveDraftReserveBalance } from '../../j-batch';
+import { batchAddReserveToCollateral, getEffectiveDraftReserveBalance, initJBatch } from '../../j-batch';
 
 type MempoolOp = { accountId: string; tx: AccountTx };
 
@@ -128,12 +128,10 @@ export async function handleR2C(
 
   // Initialize jBatch on first use
   if (!newState.jBatchState) {
-    const { initJBatch } = await import('../../j-batch');
     newState.jBatchState = initJBatch();
   }
 
   // Add to jBatch for on-chain submission
-  const { batchAddReserveToCollateral } = await import('../../j-batch');
   batchAddReserveToCollateral(
     newState.jBatchState,
     receivingEntity,

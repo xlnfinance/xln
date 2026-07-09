@@ -1,5 +1,12 @@
 import type { EntityState, JurisdictionEvent } from '../types';
-import type { BatchOpBreakdown, JBatch } from '../j-batch';
+import {
+  batchOpBreakdown,
+  batchOpCount,
+  cloneJBatch,
+  isBatchEmpty,
+  mergeBatchOps,
+  type BatchOpBreakdown,
+} from '../j-batch';
 import { addMessage } from '../state-helpers';
 import { filterActiveDisputeFinalizations } from './dispute-finalize-guards';
 import { appendBatchHistory } from './j-events-history';
@@ -24,9 +31,8 @@ function appendSelfBatchHistory(opts: {
   blockNumber: number;
   transactionHash: string;
   status: 'confirmed' | 'failed';
-  cloneJBatch: (batch: JBatch) => JBatch;
 }): void {
-  const { state, sentBatch, opCount, opBreakdown, nonce, blockNumber, transactionHash, status, cloneJBatch } = opts;
+  const { state, sentBatch, opCount, opBreakdown, nonce, blockNumber, transactionHash, status } = opts;
   appendBatchHistory(state, {
     batchHash: sentBatch?.batchHash || '',
     txHash: sentBatch?.txHash || transactionHash || '',
@@ -62,9 +68,8 @@ export async function applyHankoBatchProcessedEvent(opts: {
 
   if (success) {
     if (newState.jBatchState) {
-      const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty, cloneJBatch } = await import('../j-batch');
       const sentBatch = newState.jBatchState.sentBatch;
-      const opCount = sentBatch ? countOps(sentBatch.batch) : 0;
+      const opCount = sentBatch ? batchOpCount(sentBatch.batch) : 0;
       const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
       const wasPending = !!sentBatch;
 
@@ -83,7 +88,6 @@ export async function applyHankoBatchProcessedEvent(opts: {
         blockNumber,
         transactionHash,
         status: 'confirmed',
-        cloneJBatch,
       });
 
       delete newState.jBatchState.sentBatch;
@@ -95,9 +99,8 @@ export async function applyHankoBatchProcessedEvent(opts: {
   }
 
   if (newState.jBatchState) {
-    const { batchOpCount: countOps, batchOpBreakdown, isBatchEmpty, mergeBatchOps, cloneJBatch } = await import('../j-batch');
     const sentBatch = newState.jBatchState.sentBatch;
-    const opCount = sentBatch ? countOps(sentBatch.batch) : 0;
+    const opCount = sentBatch ? batchOpCount(sentBatch.batch) : 0;
     const opBreakdown = sentBatch ? batchOpBreakdown(sentBatch.batch) : undefined;
     newState.jBatchState.status = 'failed';
     newState.jBatchState.failedAttempts++;
@@ -112,7 +115,6 @@ export async function applyHankoBatchProcessedEvent(opts: {
       blockNumber,
       transactionHash,
       status: 'failed',
-      cloneJBatch,
     });
 
     if (sentBatch) {

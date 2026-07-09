@@ -59,6 +59,7 @@ import { terminateHtlcRoute } from './entity-tx/htlc-route-lifecycle';
 import { getRuntimeJurisdictionHeight } from './j-height';
 import { markStorageAccountDirty, markStorageEntityDirty } from './env-events';
 import { createStructuredLogger, shortHash, shortId } from './logger';
+import { batchAddReserveToCollateral, initJBatch } from './j-batch';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -697,7 +698,6 @@ async function hubRebalanceHandler(
 
   // Initialize jBatch if needed
   if (!replica.state.jBatchState) {
-    const { initJBatch } = await import('./j-batch');
     replica.state.jBatchState = initJBatch();
     markEntityCrontabDirty(_env, replica);
   }
@@ -932,7 +932,6 @@ async function hubRebalanceHandler(
   // Add R→C directly to jBatch — no quotes, no bilateral frames.
   let queuedCount = 0;
   if (selectedR2CTargets.length > 0 && canTouchBatch) {
-    const { batchAddReserveToCollateral } = await import('./j-batch');
     for (const target of selectedR2CTargets) {
       try {
         batchAddReserveToCollateral(

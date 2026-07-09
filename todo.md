@@ -471,6 +471,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: entity consensus now statically imports quorum hanko building,
      signer hash batching, and account-frame proposal dependencies instead of
      resolving them with `await import()` during frame commit/proposal.
+   - Partial: j-batch event handling, R2C, and hub rebalance crontab paths now
+     statically import shared batch helpers instead of resolving them during
+     event/crontab execution.
    - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
      precision boundary and one set of dust/rounding invariants.
 
