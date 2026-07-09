@@ -54,19 +54,21 @@ export function getDepositoryAddress(env: Env): string {
     const jReplica = env.jReplicas.get(env.activeJurisdiction);
     if (jReplica?.jadapter?.addresses?.depository) {
       if (browserVMAddress && browserVMAddress !== jReplica.jadapter.addresses.depository) {
-        console.warn(
-          `[account-consensus] browserVM depository ${browserVMAddress} ignored in favor of active jurisdiction ` +
-            `${env.activeJurisdiction}=${jReplica.jadapter.addresses.depository}`,
-        );
+        accountConsensusHelperLog.warn('depository.browser_vm_ignored', {
+          browserVMAddress,
+          jurisdictionName: env.activeJurisdiction,
+          depositoryAddress: jReplica.jadapter.addresses.depository,
+        });
       }
       return jReplica.jadapter.addresses.depository;
     }
     if (jReplica?.depositoryAddress) {
       if (browserVMAddress && browserVMAddress !== jReplica.depositoryAddress) {
-        console.warn(
-          `[account-consensus] browserVM depository ${browserVMAddress} ignored in favor of active jurisdiction ` +
-            `${env.activeJurisdiction}=${jReplica.depositoryAddress}`,
-        );
+        accountConsensusHelperLog.warn('depository.browser_vm_ignored', {
+          browserVMAddress,
+          jurisdictionName: env.activeJurisdiction,
+          depositoryAddress: jReplica.depositoryAddress,
+        });
       }
       return jReplica.depositoryAddress;
     }

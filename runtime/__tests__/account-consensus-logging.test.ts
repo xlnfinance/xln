@@ -12,3 +12,11 @@ test('account consensus core uses structured logging only', () => {
   expect(source).toContain("accountLog.debug('return.no_response'");
   expect(source).not.toContain('console.');
 });
+
+test('account consensus helper diagnostics use structured logging only', () => {
+  const source = readFileSync(join(process.cwd(), 'runtime/account-consensus-helpers.ts'), 'utf8');
+
+  expect(source).toContain("createStructuredLogger('account.consensus')");
+  expect(source).toContain("accountConsensusHelperLog.warn('depository.browser_vm_ignored'");
+  expect(source).not.toContain('console.');
+});

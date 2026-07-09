@@ -38,6 +38,9 @@ import {
 } from './cross-jurisdiction';
 import type { CrontabState, ScheduledHook } from './crontab-types';
 import type { Profile } from './networking/gossip';
+import { createStructuredLogger } from './logger';
+
+const stateHelperLog = createStructuredLogger('state.helpers');
 import type {
   BookOrderState,
   BookState,
@@ -467,52 +470,60 @@ const cloneBatchHistoryEntry = (entry: CompletedBatch): CompletedBatch => {
  * This prevents the jBlock corruption bugs that occur with manual state spreading
  */
 export function cloneEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
-  // Use structuredClone for deep cloning with fallback
+  let cloned: EntityState;
+
+  // Use structuredClone for deep cloning with fallback.
   try {
-    const cloned = structuredClone(entityState);
-
-    // CRITICAL: Validate entityId was preserved correctly
-    if (!cloned.entityId || cloned.entityId !== entityState.entityId) {
-      cloned.entityId = entityState.entityId; // Force preserve entityId
-    }
-
-    // CRITICAL: Validate lastFinalizedJHeight was preserved correctly
-    if (typeof cloned.lastFinalizedJHeight !== 'number') {
-      console.error(`💥 CLONE-CORRUPTION: structuredClone corrupted lastFinalizedJHeight!`);
-      console.error(`💥   Original: ${entityState.lastFinalizedJHeight} (${typeof entityState.lastFinalizedJHeight})`);
-      console.error(`💥   Cloned: ${cloned.lastFinalizedJHeight} (${typeof cloned.lastFinalizedJHeight})`);
-      cloned.lastFinalizedJHeight = entityState.lastFinalizedJHeight ?? 0; // Force fix
-    }
-
-    // For snapshots, remove clonedForValidation from all accounts to avoid cycles
-    if (forSnapshot) {
-      for (const account of cloned.accounts.values()) {
-        delete account.clonedForValidation;
-      }
-    }
-
-    if (entityState.jBatchState && !cloned.jBatchState) {
-      cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
-    }
-    if (entityState.lending) {
-      cloned.lending = cloneLendingState(entityState.lending);
-    }
-    cloneCrossJurisdictionRoutesInState(cloned);
-    for (const [accountId, account] of cloned.accounts.entries()) {
-      const sourceAccount = entityState.accounts.get(accountId);
-      if (sourceAccount) cloneDisputeEvidenceIntoAccount(account, sourceAccount);
-      cloneCrossJurisdictionRoutesInAccount(account);
-    }
-
-    // VALIDATE AT SOURCE: Guarantee type safety from this point forward
-    return validateEntityState(cloned, 'cloneEntityState.structuredClone');
+    cloned = structuredClone(entityState);
   } catch (error) {
-    // structuredClone warning removed - browser limitation, not actionable
     const manual = manualCloneEntityState(entityState, forSnapshot);
 
-    // VALIDATE AT SOURCE: Guarantee type safety from manual clone path too
+    // VALIDATE AT SOURCE: Guarantee type safety from manual clone path too.
     return validateEntityState(manual, 'cloneEntityState.manual');
   }
+
+  // CRITICAL: Validate entityId was preserved correctly.
+  if (!cloned.entityId || cloned.entityId !== entityState.entityId) {
+    stateHelperLog.error('clone.entity_state.entity_id_corrupt', {
+      original: entityState.entityId,
+      cloned: cloned.entityId,
+    });
+    throw new Error('cloneEntityState failed: entityId was not preserved');
+  }
+
+  // CRITICAL: Validate lastFinalizedJHeight was preserved correctly.
+  if (typeof cloned.lastFinalizedJHeight !== 'number') {
+    stateHelperLog.error('clone.entity_state.last_finalized_j_height_corrupt', {
+      original: entityState.lastFinalizedJHeight,
+      originalType: typeof entityState.lastFinalizedJHeight,
+      cloned: cloned.lastFinalizedJHeight,
+      clonedType: typeof cloned.lastFinalizedJHeight,
+    });
+    throw new Error('cloneEntityState failed: lastFinalizedJHeight was not preserved');
+  }
+
+  // For snapshots, remove clonedForValidation from all accounts to avoid cycles.
+  if (forSnapshot) {
+    for (const account of cloned.accounts.values()) {
+      delete account.clonedForValidation;
+    }
+  }
+
+  if (entityState.jBatchState && !cloned.jBatchState) {
+    cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
+  }
+  if (entityState.lending) {
+    cloned.lending = cloneLendingState(entityState.lending);
+  }
+  cloneCrossJurisdictionRoutesInState(cloned);
+  for (const [accountId, account] of cloned.accounts.entries()) {
+    const sourceAccount = entityState.accounts.get(accountId);
+    if (sourceAccount) cloneDisputeEvidenceIntoAccount(account, sourceAccount);
+    cloneCrossJurisdictionRoutesInAccount(account);
+  }
+
+  // VALIDATE AT SOURCE: Guarantee type safety from this point forward.
+  return validateEntityState(cloned, 'cloneEntityState.structuredClone');
 }
 
 /**
@@ -546,7 +557,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       ? { batchHistory: entityState.batchHistory.map((entry) => cloneBatchHistoryEntry(entry as CompletedBatch)) }
       : {}),
     // JBlock consensus state
-    lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,
+    lastFinalizedJHeight: entityState.lastFinalizedJHeight,
     jBlockObservations: cloneArray(entityState.jBlockObservations || []),
     jBlockChain: cloneArray(entityState.jBlockChain || []),
     // Crontab state is part of entity state, but it remains declarative:
@@ -786,7 +797,9 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
     return cloned;
   } catch (error) {
     if (HEAVY_LOGS) {
-      console.log(`structuredClone failed for AccountMachine, using manual clone`);
+      stateHelperLog.debug('clone.account_machine.structured_clone_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     return manualCloneAccountMachine(account, false);
   }

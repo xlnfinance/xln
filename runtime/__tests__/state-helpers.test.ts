@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 
 import { cloneAccountMachine, cloneEntityReplica, cloneEntityState } from '../state-helpers';
 import { validateConsensusConfig, validateEntityReplica } from '../validation-utils';
@@ -155,6 +156,23 @@ const makeProjectionReplica = () => ({
 });
 
 describe('state helper cloning', () => {
+  test('state helper diagnostics use structured logging only', () => {
+    const source = readFileSync('runtime/state-helpers.ts', 'utf8');
+
+    expect(source).toContain("const stateHelperLog = createStructuredLogger('state.helpers');");
+    expect(source).toContain("stateHelperLog.error('clone.entity_state.entity_id_corrupt'");
+    expect(source).toContain("stateHelperLog.error('clone.entity_state.last_finalized_j_height_corrupt'");
+    expect(source).toContain("stateHelperLog.debug('clone.account_machine.structured_clone_failed'");
+    expect(source).not.toContain('console.');
+  });
+
+  test('entity state clone fails loudly when j-height is corrupt', () => {
+    const corruptState = makeProjectionReplica().state as any;
+    corruptState.lastFinalizedJHeight = undefined;
+
+    expect(() => cloneEntityState(corruptState)).toThrow('lastFinalizedJHeight was not preserved');
+  });
+
   test('validates consensus config quorum shape', () => {
     expect(validateConsensusConfig({
       mode: 'proposer-based',
