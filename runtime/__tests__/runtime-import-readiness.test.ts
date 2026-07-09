@@ -11,6 +11,7 @@ const baseReadyHealth = (): Pick<AggregatedHealth,
   'systemOk' |
   'coreOk' |
   'degraded' |
+  'failures' |
   'reset' |
   'hubMesh' |
   'marketMaker' |
@@ -20,6 +21,7 @@ const baseReadyHealth = (): Pick<AggregatedHealth,
   systemOk: true,
   coreOk: true,
   degraded: [],
+  failures: [],
   reset: { inProgress: false } as AggregatedHealth['reset'],
   hubMesh: { ok: true, hubIds: ['h1', 'h2', 'h3'], pairs: [], direct: { openLinkCount: 6, links: [] } },
   marketMaker: {
@@ -89,17 +91,47 @@ describe('runtime import readiness gate', () => {
       error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
       reason: 'degraded:bootstrapReserveTargets',
       category: 'TransientRace',
-      code: 'DEGRADED',
+      code: 'BOOTSTRAP_RESERVE_TARGETS_NOT_READY',
       retryable: true,
       fatal: false,
       failure: {
         category: 'TransientRace',
-        code: 'DEGRADED',
-        message: 'degraded:bootstrapReserveTargets',
+        code: 'BOOTSTRAP_RESERVE_TARGETS_NOT_READY',
+        message: 'bootstrapReserveTargets',
         retryable: true,
         fatal: false,
       },
       degraded: ['bootstrapReserveTargets'],
+    });
+  });
+
+  test('blocks import on typed fatal health failure even if legacy degraded list is empty', () => {
+    const health = baseReadyHealth();
+    health.failures = [{
+      category: 'Contradiction',
+      code: 'INVALID_RUNTIME_IMPORT_MANIFEST',
+      message: 'runtime import manifest contains token/runtime mismatch',
+      retryable: false,
+      fatal: true,
+    }];
+
+    expect(resolveRuntimeImportReadiness(health)).toEqual({
+      ok: false,
+      status: 503,
+      error: 'RUNTIME_IMPORT_NETWORK_NOT_READY',
+      reason: 'fatal:INVALID_RUNTIME_IMPORT_MANIFEST',
+      category: 'Contradiction',
+      code: 'INVALID_RUNTIME_IMPORT_MANIFEST',
+      retryable: false,
+      fatal: true,
+      failure: {
+        category: 'Contradiction',
+        code: 'INVALID_RUNTIME_IMPORT_MANIFEST',
+        message: 'runtime import manifest contains token/runtime mismatch',
+        retryable: false,
+        fatal: true,
+      },
+      degraded: [],
     });
   });
 

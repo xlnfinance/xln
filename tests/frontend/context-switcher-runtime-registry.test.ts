@@ -21,6 +21,7 @@ test('ContextSwitcher hydrates the shared remote runtime registry before showing
   expect(source).toContain('`${normalizeId(entity.runtimeId)}:${normalizeId(entity.entityId)}`');
   expect(source).toContain('data-testid="context-jurisdiction-group"');
   expect(source).toContain('data-testid="context-entity-row"');
+  expect(source).toContain('data-entity-label={normalizeId(entity.name)}');
   expect(source).not.toContain('class="runtime-main"');
   expect(source).not.toContain('runtime.env');
   expect(source).not.toContain('eReplicas');

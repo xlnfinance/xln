@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -85,4 +85,11 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('bun run dev does not print token-bearing runtime import URLs by default', () => {
+  const runDev = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
+
+  expect(runDev).not.toContain('XLN_RUNTIME_IMPORT_LOG_URL=1');
+  expect(runDev).toContain('runtime/orchestrator/orchestrator.ts');
 });

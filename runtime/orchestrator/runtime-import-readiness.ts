@@ -1,6 +1,8 @@
 import type { AggregatedHealth } from './orchestrator-types';
 import {
   classifyRuntimeImportReadinessReason,
+  classifyRuntimeHealthDegradedReason,
+  isRuntimeFailureSignal,
   type RuntimeFailureCategory,
   type RuntimeFailureSignal,
 } from '../failure-taxonomy';
@@ -25,6 +27,7 @@ export const resolveRuntimeImportReadiness = (
     'systemOk' |
     'coreOk' |
     'degraded' |
+    'failures' |
     'reset' |
     'hubMesh' |
     'marketMaker' |
@@ -33,6 +36,14 @@ export const resolveRuntimeImportReadiness = (
   >,
 ): RuntimeImportReadinessDecision => {
   const degraded = Array.isArray(health.degraded) ? health.degraded : [];
+  const typedFailures = Array.isArray(health.failures)
+    ? health.failures.filter(isRuntimeFailureSignal)
+    : [];
+  const failureForDegradedReason = (reason: string): RuntimeFailureSignal => {
+    if (reason === 'marketMaker' && health.marketMaker?.failure) return health.marketMaker.failure;
+    const classified = classifyRuntimeHealthDegradedReason(reason);
+    return typedFailures.find(failure => failure.code === classified.code) ?? classified;
+  };
   const fail = (
     reason: string,
     sourceFailure?: RuntimeFailureSignal | null,
@@ -53,10 +64,14 @@ export const resolveRuntimeImportReadiness = (
   };
 
   if (health.reset?.inProgress === true) return fail('reset-in-progress');
+  const fatalFailure = typedFailures.find(failure => failure.fatal === true);
+  if (fatalFailure) return fail(`fatal:${fatalFailure.code}`, fatalFailure);
   if (health.systemOk !== true) return fail('system-not-ok');
   if (health.coreOk !== true) return fail('core-not-ok');
   if (degraded.length > 0) {
-    const componentFailure = degraded.includes('marketMaker') ? health.marketMaker?.failure : null;
+    const componentFailure = degraded
+      .map(failureForDegradedReason)
+      .find(failure => failure.fatal === true) ?? failureForDegradedReason(degraded[0] ?? 'degraded');
     return fail(`degraded:${degraded.join(',')}`, componentFailure);
   }
   if (health.hubMesh?.ok !== true) return fail('hub-mesh-not-ready');

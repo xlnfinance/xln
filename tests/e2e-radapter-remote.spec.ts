@@ -2554,19 +2554,25 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
 
     await page.getByTestId('context-current').click();
     for (const entry of importedHubEntries) {
-      await page.waitForFunction((targetRuntimeId) =>
+      await page.waitForFunction(({ targetRuntimeId, targetLabel }) =>
         Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
-          .some((row) => row.getAttribute('data-runtime-id') === targetRuntimeId),
-      entry.runtimeId, { timeout: REMOTE_E2E_WAIT_MS });
-      const row = await page.evaluate((targetRuntimeId) => {
+          .some((row) =>
+            row.getAttribute('data-runtime-id') === targetRuntimeId &&
+            row.getAttribute('data-entity-label') === targetLabel
+          ),
+      { targetRuntimeId: entry.runtimeId, targetLabel: entry.label }, { timeout: REMOTE_E2E_WAIT_MS });
+      const row = await page.evaluate(({ targetRuntimeId, targetLabel }) => {
         const candidate = Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
-          .find((element) => element.getAttribute('data-runtime-id') === targetRuntimeId) as HTMLElement | undefined;
+          .find((element) =>
+            element.getAttribute('data-runtime-id') === targetRuntimeId &&
+            element.getAttribute('data-entity-label') === targetLabel
+          ) as HTMLElement | undefined;
         if (!candidate) return null;
         return {
           text: candidate.textContent?.replace(/\s+/g, ' ').trim().toLowerCase() || '',
           visible: candidate.getClientRects().length > 0,
         };
-      }, entry.runtimeId);
+      }, { targetRuntimeId: entry.runtimeId, targetLabel: entry.label });
       expect(row, `context row for ${entry.label} runtime ${entry.runtimeId}`).not.toBeNull();
       expect(row!.visible, `context row visible for ${entry.label}`).toBe(true);
       expect(row!.text, `context row text for ${entry.label}`).toContain(entry.label);

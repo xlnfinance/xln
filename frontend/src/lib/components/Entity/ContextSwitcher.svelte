@@ -540,6 +540,7 @@
                     data-testid="context-entity-row"
                     data-runtime-id={normalizeId(entity.runtimeId)}
                     data-entity-id={normalizeId(entity.entityId)}
+                    data-entity-label={normalizeId(entity.name)}
                     data-signer-id={normalizeId(entity.signerId || entity.groupSignerId)}
                     data-jurisdiction={entity.jurisdiction || ''}
                     on:click={() => void selectRuntimeEntity(entity.runtimeId, entity.groupSignerId, entity)}
