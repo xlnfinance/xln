@@ -184,6 +184,9 @@ test('remote runtime bulk import validates with bounded parallelism', () => {
   expect(source).toContain('Array.from({ length: workerCount }');
   expect(source).toContain('await Promise.allSettled(workers)');
   expect(source).toContain('const results = await validateRemoteRuntimeImportEntries(entries, {');
+  expect(source).toContain('failedCount: failed.length');
+  expect(source).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
+  expect(source).toContain('summarizeFailedRemoteRuntimeEntry');
   expect(managerSource).toContain('importRemoteRuntimeEntries(entries');
   expect(source).not.toContain('for (const [index, entry] of entries.entries())');
 });

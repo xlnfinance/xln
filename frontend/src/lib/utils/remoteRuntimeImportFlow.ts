@@ -22,6 +22,27 @@ export type RemoteRuntimeImportFlowResult = {
   persisted: StoredRemoteRuntimeImportEntry[];
 };
 
+type RemoteRuntimeImportSummaryEntry = {
+  label: string;
+  access: RemoteRuntimeImportEntry['access'];
+  wsUrl: string;
+  runtimeId: string;
+  height: number;
+  entityCount: number;
+};
+
+type RemoteRuntimeImportSummaryFailure = {
+  index: number;
+  label: string;
+  access: RemoteRuntimeImportEntry['access'];
+  wsUrl: string;
+  reason: string;
+};
+
+type RemoteRuntimeImportSummaryCheckedRow =
+  | ({ index: number; ok: true } & RemoteRuntimeImportSummaryEntry)
+  | ({ ok: false } & RemoteRuntimeImportSummaryFailure);
+
 export const fetchRemoteRuntimeImportSource = async (
   source: string,
 ): Promise<RemoteRuntimeImportEntry[]> => {
@@ -35,25 +56,47 @@ export const fetchRemoteRuntimeImportSource = async (
   return parseRemoteRuntimeImportSourcePayload(await response.json());
 };
 
+const summarizeStoredRemoteRuntimeEntry = (
+  entry: StoredRemoteRuntimeImportEntry,
+): RemoteRuntimeImportSummaryEntry => ({
+  label: entry.label,
+  access: entry.access,
+  wsUrl: entry.wsUrl,
+  runtimeId: entry.runtimeId,
+  height: entry.height,
+  entityCount: entry.entityCount,
+});
+
+const summarizeFailedRemoteRuntimeEntry = (
+  result: Extract<RemoteRuntimeImportValidationResult, { ok: false }>,
+): RemoteRuntimeImportSummaryFailure => ({
+  index: result.index,
+  label: result.entry.label,
+  access: result.entry.access,
+  wsUrl: result.entry.wsUrl,
+  reason: result.reason,
+});
+
 export const writeRemoteRuntimeImportSummary = (
-  validated: StoredRemoteRuntimeImportEntry[],
+  results: RemoteRuntimeImportValidationResult[],
   total: number,
   importedAt: number,
 ): void => {
   if (typeof sessionStorage === 'undefined') return;
+  const entries = results.flatMap((result) => result.ok ? [summarizeStoredRemoteRuntimeEntry(result.stored)] : []);
+  const failed = results.flatMap((result) => result.ok ? [] : [summarizeFailedRemoteRuntimeEntry(result)]);
+  const checked: RemoteRuntimeImportSummaryCheckedRow[] = results.map((result) => result.ok
+    ? { index: result.index, ok: true, ...summarizeStoredRemoteRuntimeEntry(result.stored) }
+    : { ok: false, ...summarizeFailedRemoteRuntimeEntry(result) });
   sessionStorage.setItem(REMOTE_RUNTIME_IMPORT_RESULT_STORAGE_KEY, JSON.stringify({
     ok: true,
     importedAt,
-    count: validated.length,
+    count: entries.length,
     total,
-    entries: validated.map(entry => ({
-      label: entry.label,
-      access: entry.access,
-      wsUrl: entry.wsUrl,
-      runtimeId: entry.runtimeId,
-      height: entry.height,
-      entityCount: entry.entityCount,
-    })),
+    failedCount: failed.length,
+    entries,
+    failed,
+    checked,
   }));
 };
 
@@ -124,7 +167,7 @@ export const importRemoteRuntimeEntries = async (
     throw new Error(failed[0]?.reason || 'REMOTE_RUNTIME_IMPORT_EMPTY');
   }
   const persisted = runtimeOperations.upsertRemoteRuntimeImports(validated);
-  writeRemoteRuntimeImportSummary(validated, entries.length, importedAt);
+  writeRemoteRuntimeImportSummary(results, entries.length, importedAt);
   if (options.activateFirst === true) {
     const first = validated[0]!;
     const activated = await runtimeOperations.activateRemoteRuntime(first.runtimeId, { href: '/app' });

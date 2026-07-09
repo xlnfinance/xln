@@ -15,6 +15,7 @@ const REMOTE_E2E_WAIT_MS = 15_000;
 type RuntimeImportSummary = {
   ok: boolean;
   count: number;
+  failedCount?: number;
   entries: Array<{
     label: string;
     access: string;
@@ -22,6 +23,24 @@ type RuntimeImportSummary = {
     runtimeId: string;
     height: number;
     entityCount: number;
+  }>;
+  failed?: Array<{
+    index: number;
+    label: string;
+    access: string;
+    wsUrl: string;
+    reason: string;
+  }>;
+  checked?: Array<{
+    index: number;
+    ok: boolean;
+    label: string;
+    access: string;
+    wsUrl: string;
+    runtimeId?: string;
+    height?: number;
+    entityCount?: number;
+    reason?: string;
   }>;
 };
 
@@ -2512,6 +2531,10 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
 
     expect(importSummary.ok).toBe(true);
     expect(importSummary.entries.length).toBeGreaterThanOrEqual(5);
+    expect(importSummary.failedCount ?? 0).toBe(0);
+    expect(importSummary.failed ?? []).toEqual([]);
+    expect(importSummary.checked?.length ?? 0).toBeGreaterThanOrEqual(importSummary.entries.length);
+    expect((importSummary.checked ?? []).every(row => row.ok === true)).toBe(true);
     const labels = new Set(importSummary.entries.map(entry => entry.label.toLowerCase()));
     for (const label of ['h1', 'h2', 'h3', 'mm', 'custody']) {
       expect(Array.from(labels), `import summary labels=${Array.from(labels).join(',')}`).toContain(label);

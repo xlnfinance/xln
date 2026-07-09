@@ -597,6 +597,8 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).not.toContain('redirectRemoteRuntimeImportToManager');
     expect(importFlow).toContain('export const importRemoteRuntimeEntries = async');
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
+    expect(importFlow).toContain('failedCount: failed.length');
+    expect(importFlow).toContain('checked: RemoteRuntimeImportSummaryCheckedRow[]');
     expect(runtimeStore).toContain('throwOnError?: boolean');
     expect(runtimeStore).toContain('REMOTE_RUNTIME_IMPORT_SOURCE_VALIDATION_FAILED');
     expect(runtimeStore).toContain('const hydration = remoteImportSourceHydration');
