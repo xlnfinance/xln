@@ -3,13 +3,11 @@ import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
   RuntimeAdapterConfig,
-  RuntimeAdapterReadQuery,
   RuntimeAdapterSendResult,
   RuntimeAdapterStatus,
   RuntimeInput,
 } from '@xln/runtime/xln-api';
 import { RemoteRuntimeAdapter } from '../../../../runtime/radapter/remote';
-import { registerDebugSurface } from '$lib/utils/debugSurface';
 import { sameWsEndpoint } from '$lib/utils/wsUrl';
 
 export type RuntimeHandle = {
@@ -191,37 +189,3 @@ export const runtimeAdapterSend = async (input: RuntimeInput): Promise<RuntimeAd
   if (!adapter) throw new Error('Runtime adapter is not connected');
   return adapter.send(input);
 };
-
-const getRuntimeQueryClient = async () => (await import('./runtimeQueryClient')).runtimeQueryClient;
-
-const exposeRuntimeAdapterDebugSurface = (): void => {
-  registerDebugSurface('adapter', () => ({
-    query: {
-      head: async () => (await getRuntimeQueryClient()).readHead(),
-      entities: async (query?: RuntimeAdapterReadQuery) => (await getRuntimeQueryClient()).readEntities(query),
-      viewFrame: async (query: RuntimeAdapterReadQuery = {}) => (await getRuntimeQueryClient()).readViewFrame(query),
-      historyFrameBatch: async (query: RuntimeAdapterReadQuery) =>
-        (await getRuntimeQueryClient()).readHistoryFrameBatch(query),
-      activity: async (query: RuntimeAdapterReadQuery) => (await getRuntimeQueryClient()).readActivity(query),
-      solvencySummary: async (query: RuntimeAdapterReadQuery = {}) =>
-        (await getRuntimeQueryClient()).readSolvencySummary(query),
-      checkpoints: async () => (await getRuntimeQueryClient()).readCheckpoints(),
-      receiptStatus: async (receiptId: string) => (await getRuntimeQueryClient()).readReceiptStatus(receiptId),
-    },
-    status: () => {
-      const adapter = activeAdapter;
-      const handle = get(runtimeControllerHandle);
-      return {
-        connected: adapter?.status === 'connected',
-        height: Math.max(0, Math.floor(Number(adapter?.currentHeight || 0))),
-        authLevel: adapter?.authLevel ?? null,
-        runtimeId: handle.runtimeId,
-        mode: handle.mode,
-        endpoint: handle.endpoint,
-        permissions: handle.permissions,
-      };
-    },
-  }));
-};
-
-exposeRuntimeAdapterDebugSurface();

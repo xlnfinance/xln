@@ -27,6 +27,7 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const runtimeDropdownSource = readFileSync('frontend/src/lib/components/Runtime/RuntimeDropdown.svelte', 'utf8');
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
+  const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
 
   expect(controllerSource).toContain('new RemoteRuntimeAdapter');
   expect(controllerSource).toContain('export const connectRuntimeAdapter');
@@ -34,10 +35,11 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(controllerSource).toContain('pendingRuntimeId: string');
   expect(controllerSource).toContain('export const setRuntimeControllerPendingRuntimeId');
   expect(controllerSource).toContain('runtimeId: id');
-  expect(controllerSource).toContain('const handle = get(runtimeControllerHandle)');
-  expect(controllerSource).toContain('runtimeId: handle.runtimeId');
-  expect(controllerSource).toContain('mode: handle.mode');
-  expect(controllerSource).toContain('permissions: handle.permissions');
+  expect(queryClientSource).toContain('const adapter = getRuntimeControllerAdapter();');
+  expect(queryClientSource).toContain('const handle = get(runtimeControllerHandle)');
+  expect(queryClientSource).toContain('runtimeId: handle.runtimeId');
+  expect(queryClientSource).toContain('mode: handle.mode');
+  expect(queryClientSource).toContain('permissions: handle.permissions');
   expect(controllerSource).toContain('activeAdapter = null');
   expect(controllerSource).toContain('runtimeControllerConfig.set(null)');
   expect(existsSync('frontend/src/lib/stores/runtimeAdapterStore.ts')).toBe(false);

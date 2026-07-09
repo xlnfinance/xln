@@ -211,28 +211,30 @@ test('runtime recovery bundles read through typed query client without cache reu
 
 test('runtime controller exposes only typed debug projection queries', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
+  const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
   const appTypes = readFileSync('frontend/src/app.d.ts', 'utf8');
   const storeSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
   const remoteE2ESource = readFileSync('tests/e2e-radapter-remote.spec.ts', 'utf8');
 
-  expect(controllerSource).toContain('query: {');
-  expect(controllerSource).toContain('readHead()');
-  expect(controllerSource).toContain('readEntities(query)');
-  expect(controllerSource).toContain('readViewFrame(query)');
-  expect(controllerSource).toContain('readHistoryFrameBatch(query)');
-  expect(controllerSource).toContain('readReceiptStatus(receiptId)');
+  expect(queryClientSource).toContain('query: {');
+  expect(queryClientSource).toContain('runtimeQueryClient.readHead()');
+  expect(queryClientSource).toContain('runtimeQueryClient.readEntities(query)');
+  expect(queryClientSource).toContain('runtimeQueryClient.readViewFrame(query)');
+  expect(queryClientSource).toContain('runtimeQueryClient.readHistoryFrameBatch(query)');
+  expect(queryClientSource).toContain('runtimeQueryClient.readReceiptStatus(receiptId)');
+  expect(queryClientSource).toContain("registerDebugSurface('adapter'");
+  expect(controllerSource).not.toContain("import('./runtimeQueryClient')");
+  expect(controllerSource).not.toContain("registerDebugSurface('adapter'");
   expect(controllerSource).not.toContain('runtimeAdapterRead');
   expect(controllerSource).not.toContain('createRuntimeReadStore');
   expect(controllerSource).not.toContain('runtimeQueryRead');
   expect(controllerSource).not.toContain('read:');
   expect(controllerSource).not.toContain('send: runtimeAdapterSend');
-  expect(controllerSource).toContain("registerDebugSurface('adapter'");
   expect(appTypes).not.toContain('__xlnRuntimeAdapter');
   expect(appTypes).not.toContain('read: <T = unknown>');
   expect(storeSource).toContain('runtimeQueryClient.readReceiptStatus(id)');
   expect(storeSource).not.toContain("adapter.read<RuntimeReceiptStatus>(`receipt/");
   expect(storeSource).not.toContain("adapter.read<RemoteRuntimeReceiptStatus>(`receipt/");
-  const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
   expect(queryClientSource).not.toContain('export const runtimeQueryRead');
   expect(queryClientSource).toContain('private async read<T>');
   expect(queryClientSource).toContain('private async cachedRead<T>');

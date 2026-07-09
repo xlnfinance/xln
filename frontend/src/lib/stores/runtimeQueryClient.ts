@@ -16,6 +16,7 @@ import {
   runtimeAdapterHeight,
   runtimeControllerHandle,
 } from './runtimeControllerStore';
+import { registerDebugSurface } from '$lib/utils/debugSurface';
 
 type RuntimeQueryCacheEntry<T> = {
   height: number;
@@ -155,6 +156,36 @@ export class RuntimeQueryClient {
 export const runtimeQueryClient = new RuntimeQueryClient();
 
 runtimeAdapter.subscribe(() => clearRuntimeQueryCache());
+
+const exposeRuntimeAdapterDebugSurface = (): void => {
+  registerDebugSurface('adapter', () => ({
+    query: {
+      head: async () => runtimeQueryClient.readHead(),
+      entities: async (query?: RuntimeAdapterReadQuery) => runtimeQueryClient.readEntities(query),
+      viewFrame: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readViewFrame(query),
+      historyFrameBatch: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readHistoryFrameBatch(query),
+      activity: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readActivity(query),
+      solvencySummary: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readSolvencySummary(query),
+      checkpoints: async () => runtimeQueryClient.readCheckpoints(),
+      receiptStatus: async (receiptId: string) => runtimeQueryClient.readReceiptStatus(receiptId),
+    },
+    status: () => {
+      const adapter = getRuntimeControllerAdapter();
+      const handle = get(runtimeControllerHandle);
+      return {
+        connected: adapter?.status === 'connected',
+        height: Math.max(0, Math.floor(Number(adapter?.currentHeight || 0))),
+        authLevel: adapter?.authLevel ?? null,
+        runtimeId: handle.runtimeId,
+        mode: handle.mode,
+        endpoint: handle.endpoint,
+        permissions: handle.permissions,
+      };
+    },
+  }));
+};
+
+exposeRuntimeAdapterDebugSurface();
 
 export const createRuntimeQueryStore = <T>(
   reader: (client: RuntimeQueryClient) => Promise<T>,
