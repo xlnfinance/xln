@@ -16,7 +16,10 @@ import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts
 import type { JurisdictionConfig } from './types';
 import type { RuntimeFailureSignal } from './failure-taxonomy';
 import { normalizeEntityId, compareEntityIds } from './entity-id-utils';
+import { createStructuredLogger, shortHash, shortId } from './logger';
 import { PROOF_BODY_ABI } from './proof-body-types';
+
+const jBatchLog = createStructuredLogger('j.batch');
 
 /**
  * Batch structure matching Depository.sol (lines 203-231)
@@ -841,7 +844,12 @@ export function batchAddReserveToCollateral(
   }
 
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
-  console.log(`📦 jBatch: Added R→C ${amount} token ${tokenId} for ${entityId.slice(-4)}→${counterpartyId.slice(-4)}`);
+  jBatchLog.debug('reserve_to_collateral.added', {
+    entity: shortId(entityId),
+    counterparty: shortId(counterpartyId),
+    tokenId,
+    amount: amount.toString(),
+  });
 }
 
 
@@ -952,7 +960,13 @@ export function batchAddSettlement(
       });
 
       if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
-      console.log(`📦 jBatch: Added C2R shortcut ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${c2rResult.withdrawer} withdraws ${c2rResult.amount} token ${c2rResult.tokenId}`);
+      jBatchLog.debug('collateral_to_reserve.shortcut_added', {
+        left: shortId(leftEntity),
+        right: shortId(rightEntity),
+        withdrawer: c2rResult.withdrawer,
+        tokenId: c2rResult.tokenId,
+        amount: c2rResult.amount.toString(),
+      });
       return; // Skip full settlement
     }
   }
@@ -1014,7 +1028,11 @@ export function batchAddSettlement(
   }
 
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
-  console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens`);
+  jBatchLog.debug('settlement.added', {
+    left: shortId(leftEntity),
+    right: shortId(rightEntity),
+    diffs: diffs.length,
+  });
 }
 
 /**
@@ -1037,7 +1055,11 @@ export function batchAddReserveToReserve(
   });
 
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
-  console.log(`📦 jBatch: Added R→R ${amount} token ${tokenId} to ${receivingEntity.slice(-4)}`);
+  jBatchLog.debug('reserve_to_reserve.added', {
+    receivingEntity: shortId(receivingEntity),
+    tokenId,
+    amount: amount.toString(),
+  });
 }
 
 /**
@@ -1066,7 +1088,12 @@ export function batchAddExternalTokenToReserve(
   });
 
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
-  console.log(`📦 jBatch: Added E→R ${amount} via ${contractAddress.slice(0, 10)}... for ${entityId.slice(-4)}`);
+  jBatchLog.debug('external_to_reserve.added', {
+    entity: shortId(entityId),
+    contract: shortHash(contractAddress),
+    amount: amount.toString(),
+    internalTokenId,
+  });
 }
 
 /**
@@ -1089,7 +1116,11 @@ export function batchAddReserveToExternal(
   });
 
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
-  console.log(`📦 jBatch: Added R→E ${amount} token ${tokenId} to ${receivingEntity.slice(-4)}`);
+  jBatchLog.debug('reserve_to_external.added', {
+    receivingEntity: shortId(receivingEntity),
+    tokenId,
+    amount: amount.toString(),
+  });
 }
 
 /**
@@ -1118,7 +1149,10 @@ export function batchAddRevealSecret(
   );
   jBatchState.batch.revealSecrets.push({ transformer, secret });
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
-  console.log(`📦 jBatch: Added secret reveal ${secret.slice(0, 10)}... via ${transformer.slice(0, 10)}...`);
+  jBatchLog.debug('secret_reveal.added', {
+    secret: shortHash(secret),
+    transformer: shortHash(transformer),
+  });
 }
 
 /**
@@ -1166,14 +1200,19 @@ export function shouldBroadcastBatch(
 
   // Trigger 1: Batch is full
   if (batchSize >= MAX_BATCH_SIZE) {
-    console.log(`📦 jBatch: Full (${batchSize}/${MAX_BATCH_SIZE}) - triggering broadcast`);
+    jBatchLog.debug('broadcast.full', {
+      batchSize,
+      maxBatchSize: MAX_BATCH_SIZE,
+    });
     return true;
   }
 
   // Trigger 2: Timeout since last broadcast
   const timeSinceLastBroadcast = currentTimestamp - jBatchState.lastBroadcast;
   if (timeSinceLastBroadcast >= BATCH_TIMEOUT_MS) {
-    console.log(`📦 jBatch: Timeout (${timeSinceLastBroadcast}ms) - triggering broadcast`);
+    jBatchLog.debug('broadcast.timeout', {
+      elapsedMs: timeSinceLastBroadcast,
+    });
     return true;
   }
 
