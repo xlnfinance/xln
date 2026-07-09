@@ -685,6 +685,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      default; only background/silent discovery is marked optional, and
      cross-runtime Env overwrite attempts throw `RUNTIME_STORE_ENV_OVERWRITE_REFUSED`
      instead of logging and continuing.
+   - Partial: runtime boot/projection diagnostics in `xlnStore` now use the
+     persistent frontend `errorLog` instead of raw `console.warn/error` in the
+     initial projection, stale remote entity reset, financial restore failure,
+     embedded adapter connect failure, and XLN initialization failure paths.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.

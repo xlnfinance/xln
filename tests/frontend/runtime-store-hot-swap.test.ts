@@ -671,11 +671,34 @@ test('retryable remote adapter refresh errors do not unmount the app shell', () 
   expect(scheduleStart).toBeGreaterThan(handlerStart);
 
   const handlerSource = source.slice(handlerStart, scheduleStart);
-  expect(handlerSource).toContain("errorLog.log(message, 'Runtime Projection Refresh'");
+  expect(handlerSource).toContain("errorLog.log(logMessage, 'Runtime Projection Refresh'");
   expect(handlerSource).toContain("getRuntimeControllerConfig()?.mode === 'remote'");
   expect(handlerSource).toContain('Remote runtime projection refresh failed; keeping current runtime view mounted');
   expect(handlerSource).toContain('toasts.warning');
+  expect(handlerSource).not.toContain('console.warn');
+  expect(handlerSource).not.toContain('console.error');
   expect(handlerSource.indexOf('return;')).toBeLessThan(handlerSource.lastIndexOf('error.set(message)'));
+});
+
+test('xlnStore boot diagnostics use persistent error log instead of raw console', () => {
+  const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+  const initializeStart = source.indexOf('export async function initializeXLN');
+  const initializeEnd = source.indexOf('// Export XLN for direct component access.', initializeStart);
+  const refreshStart = source.indexOf('const refreshRemoteRuntimeProjection = async');
+  const createAdapterStart = source.indexOf('const createEmbeddedRuntimeAdapter = async', refreshStart);
+  expect(initializeStart).toBeGreaterThan(0);
+  expect(initializeEnd).toBeGreaterThan(initializeStart);
+  expect(refreshStart).toBeGreaterThan(0);
+  expect(createAdapterStart).toBeGreaterThan(refreshStart);
+
+  const initializeSource = source.slice(initializeStart, initializeEnd);
+  const refreshSource = source.slice(refreshStart, createAdapterStart);
+  expect(initializeSource).toContain("errorLog.log(errorMessage, 'XLN Initialization', err)");
+  expect(initializeSource).toContain("'Financial restore failure; refusing automatic local data reset'");
+  expect(initializeSource).toContain("'Embedded runtime adapter failed to connect; local env remains usable'");
+  expect(refreshSource).toContain('Remote active entity ${requestedEntityId} is not available in this runtime view; resetting to default entity.');
+  expect(`${initializeSource}\n${refreshSource}`).not.toContain('console.warn');
+  expect(`${initializeSource}\n${refreshSource}`).not.toContain('console.error');
 });
 
 test('local runtime creation marks the target before bootstrap and switches controller after persistence', () => {

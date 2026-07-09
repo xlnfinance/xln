@@ -398,9 +398,12 @@ const clearRuntimeAdapterSubscriptions = (): void => {
 
 const handleRuntimeProjectionRefreshError = (refreshError: unknown): void => {
   const message = refreshError instanceof Error ? refreshError.message : String(refreshError);
-  errorLog.log(message, 'Runtime Projection Refresh', refreshError);
-  if (getRuntimeControllerConfig()?.mode === 'remote') {
-    console.warn('[XLN] Remote runtime projection refresh failed; keeping current runtime view mounted', refreshError);
+  const isRemoteProjection = getRuntimeControllerConfig()?.mode === 'remote';
+  const logMessage = isRemoteProjection
+    ? `Remote runtime projection refresh failed; keeping current runtime view mounted: ${message}`
+    : message;
+  errorLog.log(logMessage, 'Runtime Projection Refresh', refreshError);
+  if (isRemoteProjection) {
     const now = Date.now();
     if (now - lastRemoteProjectionRefreshWarningAt >= REMOTE_PROJECTION_REFRESH_WARNING_COOLDOWN_MS) {
       lastRemoteProjectionRefreshWarningAt = now;
@@ -721,8 +724,9 @@ const refreshRemoteRuntimeProjection = async (
     frame = await refreshView(requestedEntityId);
   } catch (error) {
     if (!isStaleRemoteEntitySelectionError(error, requestedEntityId)) throw error;
-    console.warn(
-      `[XLN] Remote active entity ${requestedEntityId} is not available in this runtime view; resetting to default entity.`,
+    errorLog.log(
+      `Remote active entity ${requestedEntityId} is not available in this runtime view; resetting to default entity.`,
+      'Runtime Projection Refresh',
       error,
     );
     runtimeViewActiveEntityId.set('');
@@ -971,7 +975,11 @@ export async function initializeXLN(): Promise<Env | null> {
       if (!isFinancialRestoreFailure(restoreError)) {
         throw restoreError;
       }
-      console.error('[VaultStore:xlnStore] Financial restore failure; refusing automatic local data reset', restoreError);
+      errorLog.log(
+        'Financial restore failure; refusing automatic local data reset',
+        'XLN Restore',
+        restoreError,
+      );
       throw restoreError;
     }
 
@@ -1006,7 +1014,11 @@ export async function initializeXLN(): Promise<Env | null> {
         if (!isCurrentRuntimeAdapterConfig(adapterConfig)) return;
       });
     } catch (adapterError) {
-      console.warn('[VaultStore:xlnStore] Embedded runtime adapter failed to connect; local env remains usable', adapterError);
+      errorLog.log(
+        'Embedded runtime adapter failed to connect; local env remains usable',
+        'Runtime Adapter Connect',
+        adapterError,
+      );
     }
 
     error.set(null);
@@ -1019,9 +1031,6 @@ export async function initializeXLN(): Promise<Env | null> {
     startP2PPoll();
     return env;
   } catch (err) {
-    console.error('🚨 XLN initialization failed:', err);
-
-    // Log to persistent error store
     const errorMessage = err instanceof Error ? err.message : 'Critical system failure during initialization';
     errorLog.log(errorMessage, 'XLN Initialization', err);
 
