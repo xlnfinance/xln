@@ -10,6 +10,7 @@ import type { DisputeFinalizationEvidence, EntityInput, Env, JReplica, Jurisdict
 import { createEmptyBatch, type JBatch } from '../j-batch';
 import { enqueueRuntimeInput } from '../runtime';
 import { signAccountFrame } from '../account-crypto';
+import { createStructuredLogger, shortId } from '../logger';
 import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
@@ -27,6 +28,7 @@ export const CANONICAL_J_EVENTS = [
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 const CANONICAL_J_EVENT_SET = new Set<string>(CANONICAL_J_EVENTS);
+const jadapterHelperLog = createStructuredLogger('jadapter.helpers');
 
 // TEST-ONLY fallback signer (Hardhat account #0, publicly known key)
 export const DEFAULT_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -660,7 +662,11 @@ export function buildRawJEventsRuntimeInput(
   } = options;
 
   if (logBatch) {
-    console.log(`📡 [JAdapter:${adapterLabel}] ${rawEvents.length} canonical events from block ${blockNumber}`);
+    jadapterHelperLog.info('event_batch.canonical', {
+      adapterLabel,
+      blockNumber,
+      count: rawEvents.length,
+    });
   }
   const observedAt = resolveJEventObservedAt(blockNumber);
 
@@ -723,9 +729,12 @@ export function buildRawJEventsRuntimeInput(
 
     const settledCount = jEvents.filter((event) => event.type === 'AccountSettled').length;
     if (emitSettledDebugEvents && settledCount > 0) {
-      console.log(
-        `[REB][4][J_EVENT_DELIVER] entity=${entityId.slice(-8)} signer=${signerId.slice(-8)} block=${blockNumber} accountSettled=${settledCount}`,
-      );
+      jadapterHelperLog.info('j_event.deliver_settled', {
+        entityId: shortId(entityId, 8),
+        signerId: shortId(signerId, 8),
+        blockNumber,
+        accountSettled: settledCount,
+      });
       const p2p = env?.runtimeState?.p2p;
       if (p2p && typeof p2p.sendDebugEvent === 'function') {
         p2p.sendDebugEvent({
@@ -795,7 +804,11 @@ export function buildRawJEventsRuntimeInput(
     }
 
     if (logBatch) {
-      console.log(`   📮 [JAdapter:${adapterLabel}] → ${entityId.slice(-4)} (${jEvents.length} events)`);
+      jadapterHelperLog.info('event_batch.delivered_to_entity', {
+        adapterLabel,
+        entityId: shortId(entityId),
+        count: jEvents.length,
+      });
     }
   }
 

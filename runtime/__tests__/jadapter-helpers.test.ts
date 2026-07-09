@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   isTransientRpcUnavailableError,
@@ -93,6 +95,16 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
   }) as EntityReplica;
 
 describe('jadapter helper cursors', () => {
+  test('jadapter helper diagnostics use structured logging only', () => {
+    const source = readFileSync(join(process.cwd(), 'runtime/jadapter/helpers.ts'), 'utf8');
+
+    expect(source).toContain("createStructuredLogger('jadapter.helpers')");
+    expect(source).toContain("jadapterHelperLog.info('event_batch.canonical'");
+    expect(source).toContain("jadapterHelperLog.info('j_event.deliver_settled'");
+    expect(source).toContain("jadapterHelperLog.info('event_batch.delivered_to_entity'");
+    expect(source).not.toContain('console.');
+  });
+
   test('RPC wallet snapshot reads fail fast on partial RPC errors', () => {
     expect(readRequiredRpcBatchBigInt(new Map([[1, { id: 1, result: '0x2a' }]]), 1, 'balance')).toBe(42n);
     expect(() => readRequiredRpcBatchBigInt(new Map(), 1, 'balance')).toThrow(/EXTERNAL_WALLET_SNAPSHOT_RPC_MISSING/);
