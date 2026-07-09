@@ -29,6 +29,13 @@ describe('runtime failure taxonomy', () => {
       retryable: false,
       fatal: false,
     })).toBe(false);
+    expect(isRuntimeFailureSignal({
+      category: 'Contradiction',
+      code: 'INCONSISTENT_FLAGS',
+      message: 'bad flags',
+      retryable: true,
+      fatal: false,
+    })).toBe(false);
   });
 
   test('keeps runtime import readiness failures machine-readable', () => {

@@ -24,7 +24,9 @@ export const isRuntimeFailureSignal = (value: unknown): value is RuntimeFailureS
   typeof (value as RuntimeFailureSignal).code === 'string' &&
   typeof (value as RuntimeFailureSignal).message === 'string' &&
   typeof (value as RuntimeFailureSignal).retryable === 'boolean' &&
-  typeof (value as RuntimeFailureSignal).fatal === 'boolean';
+  typeof (value as RuntimeFailureSignal).fatal === 'boolean' &&
+  (value as RuntimeFailureSignal).retryable === ((value as RuntimeFailureSignal).category === 'TransientRace') &&
+  (value as RuntimeFailureSignal).fatal === ((value as RuntimeFailureSignal).category === 'Contradiction');
 
 const HEALTH_DEGRADED_CODES: Record<string, string> = {
   storage: 'STORAGE_NOT_READY',
