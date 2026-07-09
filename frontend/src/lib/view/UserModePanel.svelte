@@ -13,6 +13,7 @@
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
   import { activeRuntime as activeRuntimeStore, vaultOperations } from '$lib/stores/vaultStore';
+  import { errorLog } from '$lib/stores/errorLogStore';
   import { settings } from '$lib/stores/settingsStore';
   import {
     entityPositions,
@@ -87,6 +88,10 @@
   }
 
   const normalizeId = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+  function logUserModeDiagnostic(message: string, details?: unknown): void {
+    errorLog.log(message, 'User Mode', details);
+  }
 
   function isLiveRuntimeFrame(frame: RuntimeFrame): frame is Env {
     return unwrapLiveRuntimeEnv(frame) !== null;
@@ -706,10 +711,17 @@
           selectedEntityId = finalEntityId;
           selectedSignerId = signerAddress;
         } else {
-          console.error('[ensureSelfEntities] ❌ NULL entityId for signer:', signerAddress.slice(0, 10));
+          logUserModeDiagnostic('Self-entity creation returned no entity id', {
+            signer: signerAddress,
+            jurisdiction,
+          });
         }
       } catch (err) {
-        console.error('[ensureSelfEntities] ❌ ERROR:', err);
+        logUserModeDiagnostic('Self-entity bootstrap failed', {
+          signer: signerAddress,
+          jurisdiction,
+          err,
+        });
       } finally {
         selfEntityInFlight.delete(selfEntityKey);
       }
@@ -869,7 +881,7 @@
   async function handleAddSigner() {
     const newSigner = vaultOperations.addSigner();
     if (!newSigner) {
-      console.error('[UserModePanel] ❌ Failed to add signer (no active vault)');
+      logUserModeDiagnostic('Failed to add signer: no active vault');
     }
   }
 
@@ -899,7 +911,10 @@
       activeInlinePanel = 'none';
       isCreatingJMachine = false;
     } catch (err) {
-      console.error('[handleJMachineCreate] ERROR:', err);
+      logUserModeDiagnostic('J-Machine import failed', {
+        detail: event.detail,
+        err,
+      });
       jMachineCreateError = err instanceof Error ? err.message : String(err);
       isCreatingJMachine = false;
     }
