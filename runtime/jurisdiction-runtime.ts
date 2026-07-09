@@ -91,7 +91,7 @@ export const getJReplicaByName = (env: Env, name?: string | null): JReplica | un
 export const getJReplicaByJurisdictionRef = (env: Env, ref?: string | null): JReplica | undefined => {
   const raw = String(ref || '').trim();
   if (!raw) return undefined;
-  if (!isJurisdictionStackRef(raw)) return getJReplicaByName(env, raw);
+  if (!isJurisdictionStackRef(raw)) return undefined;
   const wanted = raw.toLowerCase();
   for (const replica of env.jReplicas?.values?.() || []) {
     if (getJReplicaStackId(replica) === wanted) return replica;
@@ -181,7 +181,9 @@ export function requireRuntimeJurisdictionConfigByName(
     throw new Error('ENTITY_JURISDICTION_MISSING');
   }
 
-  const replica = getJReplicaByJurisdictionRef(env, configuredName);
+  const replica = isJurisdictionStackRef(configuredName)
+    ? getJReplicaByJurisdictionRef(env, configuredName)
+    : getJReplicaByName(env, configuredName);
   if (!replica) {
     throw new Error(`ENTITY_JURISDICTION_UNAVAILABLE: ${configuredName}`);
   }

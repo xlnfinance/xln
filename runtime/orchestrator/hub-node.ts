@@ -996,6 +996,9 @@ const requireJAdapterForDebugReserve = (
 ): JAdapter => {
   const explicitJurisdiction = String(jurisdictionRef || '').trim();
   if (explicitJurisdiction) {
+    if (!isJurisdictionStackRef(explicitJurisdiction)) {
+      throw new Error(`DEBUG_RESERVE_JURISDICTION_REF_INVALID: entity=${entityId} jurisdiction=${explicitJurisdiction}`);
+    }
     const jReplica = getJReplicaByJurisdictionRef(env, explicitJurisdiction);
     const adapter = jReplica?.jadapter;
     if (!adapter) {

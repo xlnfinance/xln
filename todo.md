@@ -431,9 +431,15 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: market-maker visible hub discovery now drops name-only
      jurisdiction profiles before readiness/health planning instead of carrying
      unmatched display-name hubs through the bootstrap loop.
-   - Partial: market-maker bootstrap role ordering and fingerprints now use
-     canonical jurisdiction refs instead of mutable jurisdiction display names.
-   - Exit: adding a new testnet label cannot break hub/MM matching.
+  - Partial: market-maker bootstrap role ordering and fingerprints now use
+    canonical jurisdiction refs instead of mutable jurisdiction display names.
+  - Partial: stack-ref lookup is now strict: non-stack display names no longer
+    resolve through `getJReplicaByJurisdictionRef()`, and legacy name lookups
+    are explicit through name-bearing APIs only.
+  - Current executable scan: `bun run security:canonical-identity` passed on
+    2026-07-09, is part of `bun run security:audit-pack`, and documents open
+    manual-review questions in `docs/security/canonical-identity-scan.md`.
+  - Exit: adding a new testnet label cannot break hub/MM matching.
 
 6. **Canonical fill and amount representation.**
    - Exact bigint amounts are the source of truth.

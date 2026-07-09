@@ -93,6 +93,7 @@ describe('multi-jurisdiction entity binding', () => {
 
     expect(resolved?.name).toBe('Canonical');
     expect(resolved?.depositoryAddress).toBe(canonical.depositoryAddress);
+    expect(getJReplicaByJurisdictionRef(env, 'Canonical')).toBeUndefined();
   });
 
   const importEntity = async (

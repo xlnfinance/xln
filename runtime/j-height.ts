@@ -1,12 +1,24 @@
 import type { Env } from './types';
-import { getJReplicaByJurisdictionRef } from './jurisdiction-runtime';
+import {
+  getJReplicaByJurisdictionRef,
+  getJReplicaByName,
+  isJurisdictionStackRef,
+} from './jurisdiction-runtime';
 
 export const PRODUCTION_DISPUTE_DELAY_BLOCKS = 5_760;
+
+const getJReplicaByJurisdictionNameOrRef = (env: Env, jurisdictionName?: string): ReturnType<typeof getJReplicaByName> => {
+  const raw = String(jurisdictionName || '').trim();
+  if (!raw) return undefined;
+  return isJurisdictionStackRef(raw)
+    ? getJReplicaByJurisdictionRef(env, raw)
+    : getJReplicaByName(env, raw);
+};
 
 export function getRuntimeJurisdictionHeight(env: Env, fallbackHeight = 0, jurisdictionName?: string): number {
   const fallback = Number.isFinite(fallbackHeight) ? Math.max(0, Math.floor(fallbackHeight)) : 0;
   if (jurisdictionName) {
-    const requested = getJReplicaByJurisdictionRef(env, jurisdictionName);
+    const requested = getJReplicaByJurisdictionNameOrRef(env, jurisdictionName);
     if (!requested) return fallback;
     const blockNumber = Number(requested?.blockNumber ?? 0n);
     return Number.isFinite(blockNumber) ? Math.max(0, Math.floor(blockNumber)) : fallback;
@@ -30,7 +42,7 @@ export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
   fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
 ): number {
   const preferred =
-    getJReplicaByJurisdictionRef(env, jurisdictionName) ||
+    getJReplicaByJurisdictionNameOrRef(env, jurisdictionName) ||
     (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
   const candidates = preferred
     ? [preferred, ...Array.from(env.jReplicas?.values?.() || [])]
@@ -46,7 +58,7 @@ export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
 
 export function requireRuntimeJurisdictionBlockTimeMs(env: Env, jurisdictionName?: string): number {
   const preferred =
-    getJReplicaByJurisdictionRef(env, jurisdictionName) ||
+    getJReplicaByJurisdictionNameOrRef(env, jurisdictionName) ||
     (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
   const raw = Number(preferred?.blockTimeMs ?? NaN);
   if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);

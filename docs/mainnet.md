@@ -21,8 +21,8 @@ and lending are in the fast E2E gate, `bun run gate:release` passed on the
 release line, `bun run test:all:fast` passed on 2026-07-08 with 95/95 isolated
 browser shards, `bun run security:contract-governance`,
 `bun run security:consensus-hanko`, `bun run security:failure-taxonomy`, and
-`bun run security:delivery-boundary`, and `bun run security:audit-pack` passed
-on 2026-07-09, and a
+`bun run security:delivery-boundary`, `bun run security:canonical-identity`,
+and `bun run security:audit-pack` passed on 2026-07-09, and a
 historical release soak completed 13 full gate/benchmark iterations before
 being stopped manually. That is enough for serious public-testnet hardening. It
 is not enough for real funds because the full uninterrupted current
@@ -155,6 +155,7 @@ bun run security:contract-governance
 bun run security:consensus-hanko
 bun run security:failure-taxonomy
 bun run security:delivery-boundary
+bun run security:canonical-identity
 bun run security:audit-pack
 ```
 
