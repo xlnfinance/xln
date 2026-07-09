@@ -29,7 +29,15 @@ const isDeliveryOutcome = (value: unknown): value is DeliveryOutcome =>
 
 const hasValidOptionalFailure = (value: unknown): boolean => {
   const failure = (value as { failure?: unknown }).failure;
-  return failure === undefined || isRuntimeFailureSignal(failure);
+  if (failure === undefined) return true;
+  if (!isRuntimeFailureSignal(failure)) return false;
+  const delivery = value as DeliveryResult;
+  return (
+    delivery.outcome === 'failed' &&
+    delivery.code === failure.code &&
+    delivery.retryable === failure.retryable &&
+    delivery.fatal === failure.fatal
+  );
 };
 
 export const isDeliveryResult = (value: unknown): value is DeliveryResult =>

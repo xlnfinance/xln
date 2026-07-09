@@ -41,6 +41,48 @@ test('delivery result helpers validate the shared delivery contract', () => {
       fatal: false,
     },
   })).toBe(false);
+  expect(isDeliveryResult({
+    outcome: 'deferred',
+    code: 'TRANSIENT',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    failure: {
+      category: 'TransientRace',
+      code: 'TRANSIENT',
+      message: 'TRANSIENT',
+      retryable: true,
+      fatal: false,
+    },
+  })).toBe(false);
+  expect(isDeliveryResult({
+    outcome: 'failed',
+    code: 'TRANSIENT_WRONG_CODE',
+    retryable: true,
+    fatal: false,
+    terminal: false,
+    failure: {
+      category: 'TransientRace',
+      code: 'TRANSIENT',
+      message: 'TRANSIENT',
+      retryable: true,
+      fatal: false,
+    },
+  })).toBe(false);
+  expect(isDeliveryResult({
+    outcome: 'failed',
+    code: 'TRANSIENT',
+    retryable: false,
+    fatal: false,
+    terminal: false,
+    failure: {
+      category: 'TransientRace',
+      code: 'TRANSIENT',
+      message: 'TRANSIENT',
+      retryable: true,
+      fatal: false,
+    },
+  })).toBe(false);
   expect(() => requireDeliveryResult(true, 'TEST_INVALID')).toThrow(
     'TEST_INVALID: expected DeliveryResult',
   );
