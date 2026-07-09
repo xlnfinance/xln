@@ -27,7 +27,15 @@ assertNotIncludes(apply, 'cancelSwap:', applyPath);
 const handlerPath = 'runtime/entity-tx/handlers/swap-requests.ts';
 const handler = readText(handlerPath);
 assertIncludes(handler, "Extract<EntityTx, { type: 'proposeCancelSwap' }>", handlerPath);
+assertIncludes(handler, 'const requireSwapAccount =', handlerPath);
+assertIncludes(handler, 'SWAP_REQUEST_ACCOUNT_MISSING:${action}', handlerPath);
 assertNotIncludes(handler, "'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwap'", handlerPath);
+assertNotIncludes(handler, 'console.error', handlerPath);
+assertNotIncludes(handler, 'return { newState: entityState, outputs: [] };', handlerPath);
+
+const invariantPath = 'runtime/entity-tx/invariant-errors.ts';
+const invariant = readText(invariantPath);
+assertIncludes(invariant, "'SWAP_REQUEST_',", invariantPath);
 
 const frontendPath = 'frontend/src/lib/components/Entity/SwapPanel.svelte';
 const frontend = readText(frontendPath);
@@ -40,5 +48,12 @@ const activity = readText(activityPath);
 assertIncludes(activity, "case 'cancelSwap':", activityPath);
 assertIncludes(activity, "case 'cancelSwapOffer':", activityPath);
 assertIncludes(activity, "case 'proposeCancelSwap':", activityPath);
+
+const regressionPath = 'runtime/__tests__/audit-failfast-regressions.test.ts';
+const regression = readText(regressionPath);
+assertIncludes(regression, 'swap requests fail loud when the target account is missing', regressionPath);
+assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer')", regressionPath);
+assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:resolveSwap')", regressionPath);
+assertIncludes(regression, "rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:proposeCancelSwap')", regressionPath);
 
 console.log('swap cancel canonical scan check passed');

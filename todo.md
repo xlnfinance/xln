@@ -506,6 +506,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      `proposeCancelSwap`; legacy `cancelSwap` / `cancelSwapOffer` aliases stay
      out of `EntityTx` and the dispatcher, with activity history still tolerant
      of old journals.
+   - Partial: swap request missing-account paths now fail loud with
+     `SWAP_REQUEST_ACCOUNT_MISSING` instead of `console.error` plus no-op, and
+     the swap-cancel canonical scan guards that behavior.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

@@ -1020,6 +1020,43 @@ describe('audit fail-fast regressions', () => {
     } as any)).rejects.toThrow('j_event rejected: missing observation signature');
   });
 
+  test('swap requests fail loud when the target account is missing', async () => {
+    const env = createEmptyEnv('swap-request-missing-account');
+    const state = makeEntityState(`0x${'62'.repeat(32)}`);
+    const missingCounterparty = `0x${'63'.repeat(32)}`;
+
+    await expect(applyEntityTx(env, state, {
+      type: 'placeSwapOffer',
+      data: {
+        counterpartyEntityId: missingCounterparty,
+        offerId: 'missing-account-offer',
+        giveTokenId: 1,
+        giveAmount: 100n,
+        wantTokenId: 2,
+        wantAmount: 200n,
+        minFillRatio: 0,
+      },
+    } as any)).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:placeSwapOffer');
+
+    await expect(applyEntityTx(env, state, {
+      type: 'resolveSwap',
+      data: {
+        counterpartyEntityId: missingCounterparty,
+        offerId: 'missing-account-offer',
+        fillRatio: 0,
+        cancelRemainder: true,
+      },
+    } as any)).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:resolveSwap');
+
+    await expect(applyEntityTx(env, state, {
+      type: 'proposeCancelSwap',
+      data: {
+        counterpartyEntityId: missingCounterparty,
+        offerId: 'missing-account-offer',
+      },
+    } as any)).rejects.toThrow('SWAP_REQUEST_ACCOUNT_MISSING:proposeCancelSwap');
+  });
+
   test('entity frame aborts instead of partially committing after a skipped tx', async () => {
     const env = createEmptyEnv('entity-frame-atomicity');
     env.quietRuntimeLogs = true;

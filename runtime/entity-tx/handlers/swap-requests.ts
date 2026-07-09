@@ -1,4 +1,4 @@
-import type { AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../types';
+import type { AccountMachine, AccountTx, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import {
   cloneCrossJurisdictionRoute,
@@ -31,6 +31,20 @@ const wakeEntity = (state: EntityState, outputs: EntityInput[]): void => {
   }
 };
 
+const requireSwapAccount = (
+  state: EntityState,
+  counterpartyEntityId: string,
+  action: string,
+): AccountMachine => {
+  const account = state.accounts.get(counterpartyEntityId);
+  if (!account) {
+    throw new Error(
+      `SWAP_REQUEST_ACCOUNT_MISSING:${action}:entity=${state.entityId}:counterparty=${counterpartyEntityId}`,
+    );
+  }
+  return account;
+};
+
 export const handlePlaceSwapOfferRequest = (
   env: Env,
   entityState: EntityState,
@@ -43,11 +57,7 @@ export const handlePlaceSwapOfferRequest = (
   const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio, crossJurisdiction } =
     entityTx.data;
 
-  const accountMachine = newState.accounts.get(counterpartyEntityId);
-  if (!accountMachine) {
-    console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap offer`);
-    return { newState: entityState, outputs: [] };
-  }
+  requireSwapAccount(newState, counterpartyEntityId, 'placeSwapOffer');
   const publicCrossJurisdiction = crossJurisdiction
     ? cloneCrossJurisdictionRoute(withCanonicalCrossJurisdictionRouteHash(crossJurisdiction))
     : undefined;
@@ -106,11 +116,7 @@ export const handleResolveSwapRequest = (
     executionWantAmount,
   } = entityTx.data;
 
-  const accountMachine = newState.accounts.get(counterpartyEntityId);
-  if (!accountMachine) {
-    console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap resolve`);
-    return { newState: entityState, outputs: [] };
-  }
+  const accountMachine = requireSwapAccount(newState, counterpartyEntityId, 'resolveSwap');
   if (accountMachine.swapOffers.get(offerId)?.crossJurisdiction) {
     addMessage(newState, `❌ Cross-j offer ${offerId} cannot be resolved through plain swap_resolve`);
     return { newState, outputs, mempoolOps };
@@ -152,11 +158,7 @@ export const handleCancelSwapRequest = (
   const mempoolOps: MempoolOp[] = [];
   const { counterpartyEntityId, offerId } = entityTx.data;
 
-  const accountMachine = newState.accounts.get(counterpartyEntityId);
-  if (!accountMachine) {
-    console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap cancel`);
-    return { newState: entityState, outputs: [] };
-  }
+  requireSwapAccount(newState, counterpartyEntityId, 'proposeCancelSwap');
 
   mempoolOps.push({
     accountId: counterpartyEntityId,
