@@ -85,6 +85,9 @@ warnings.
 - Debt ledger divergence diagnostics use the structured `entity.debt` logger;
   operator-visible state messages are preserved without direct `console.*`
   noise in core.
+- Account delta validation now fails loud with `ACCOUNT_DELTAS_*` errors for
+  missing/malformed inputs instead of returning partial maps after `console.*`
+  warnings.
 
 ## Open Manual Review
 

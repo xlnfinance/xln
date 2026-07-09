@@ -288,6 +288,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/entity-tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
   ['runtime/account-utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
+  ['runtime/validation-utils.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
   ['runtime/runtime-infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'browservm.restore_failed']],
   ['runtime/runtime-infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
@@ -477,6 +478,10 @@ const debtEventsPath = 'runtime/entity-tx/j-events-debt.ts';
 const debtEvents = readText(debtEventsPath);
 assertNotIncludes(debtEvents, 'console.', debtEventsPath);
 
+const validationUtilsPath = 'runtime/validation-utils.ts';
+const validationUtils = readText(validationUtilsPath);
+assertNotIncludes(validationUtils, 'console.', validationUtilsPath);
+
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
   ['runtime/__tests__/audit-failfast-regressions.test.ts', [
@@ -498,6 +503,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/account-consensus-logging.test.ts', ['account consensus core uses structured logging only', 'frame.bilateral_delta_mismatch']],
   ['runtime/__tests__/account-propose-logging.test.ts', ['account frame proposal path uses structured logging only', 'proposal.profile']],
   ['runtime/__tests__/debt-ledger.test.ts', ['debt ledger divergence without direct console warning', 'DEBT_LEDGER_DIVERGENCE']],
+  ['runtime/__tests__/validation-utils.test.ts', ['validateAccountDeltas fails loud', 'ACCOUNT_DELTAS_MISSING']],
   ['runtime/__tests__/relay-router.test.ts', ['relay router and local delivery verbose diagnostics use structured logging', 'relay.local_delivery']],
   ['runtime/__tests__/solvency-logging.test.ts', ['solvency diagnostics use structured logging only', 'runtime.solvency']],
   ['runtime/__tests__/runtime-storage-logging.test.ts', ['runtime storage DB boundary uses structured logging without direct console output', 'runtime.storage']],

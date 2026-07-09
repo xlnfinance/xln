@@ -424,8 +424,8 @@ export interface XLNModule {
 
   // Validation
   validateDelta: (delta: unknown) => Delta;
-  validateAccountDeltas: (deltas: unknown) => Map<string, Delta>;
-  createDefaultDelta: () => Delta;
+  validateAccountDeltas: (deltas: unknown) => Map<number, Delta>;
+  createDefaultDelta: (tokenId: number) => Delta;
   isDelta: (obj: unknown) => obj is Delta;
 
   // Profile management

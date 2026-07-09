@@ -576,6 +576,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
      `entity.debt` logger instead of direct `console.warn`; operator-visible
      state messages are preserved, with Bun behavior coverage and the
      failure-taxonomy scan guarding regressions.
+   - Partial: account delta validation now fails loud with
+     `ACCOUNT_DELTAS_*` errors for missing, malformed, or partial payloads
+     instead of logging and returning partial maps; Bun behavior/source tests
+     and the failure-taxonomy scan guard it.
    - Partial: `deriveDelta` account math debug output now uses the existing
      `ACCOUNT_STATE` logger instead of direct `console.log`; deriveDelta
      property/invariant tests and the failure-taxonomy scan guard regressions.

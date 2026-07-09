@@ -89,50 +89,46 @@ export function validateDelta(delta: unknown, source: string = 'unknown'): Delta
 }
 
 /**
- * Validate and fix account deltas Map
+ * Validate account deltas from a Map or serialized object.
+ *
+ * This is a source boundary for financial data: every entry must be valid, and
+ * malformed input fails the whole payload instead of returning a partial map.
  * @param deltas - Unvalidated Map or object that may contain deltas
  * @param source - Source context for error messages
  */
 export function validateAccountDeltas(deltas: unknown, source: string = 'unknown'): Map<number, Delta> {
-  if (!deltas) {
-    console.warn(`No deltas provided from ${source}, returning empty Map`);
-    return new Map();
+  if (deltas === null || deltas === undefined) {
+    throw new TypeSafetyViolationError(`ACCOUNT_DELTAS_MISSING: ${source} must provide account deltas`, deltas);
   }
 
-  // Handle both Map and plain object formats
   const result = new Map<number, Delta>();
 
   if (deltas instanceof Map) {
     for (const [tokenId, delta] of deltas.entries()) {
-      try {
-        const validatedDelta = validateDelta(delta, `${source}.Map[${tokenId}]`);
-        result.set(tokenId, validatedDelta);
-      } catch (error) {
-        console.error(`Skipping invalid delta for token ${tokenId}:`, error);
+      if (!Number.isInteger(tokenId) || tokenId < 0) {
+        throw new TypeSafetyViolationError(
+          `ACCOUNT_DELTAS_INVALID_TOKEN_ID: ${source}.Map key must be a non-negative integer`,
+          tokenId,
+        );
       }
+      const validatedDelta = validateDelta(delta, `${source}.Map[${tokenId}]`);
+      result.set(tokenId, validatedDelta);
     }
-  } else if (typeof deltas === 'object') {
-    // Handle serialized Map or plain object
-    for (const [tokenIdStr, delta] of Object.entries(deltas)) {
-      const tokenId = parseInt(tokenIdStr, 10);
-      if (isNaN(tokenId)) {
-        console.error(`Invalid tokenId: ${tokenIdStr}`);
-        continue;
-      }
-
-      try {
-        const validatedDelta = validateDelta(delta, `${source}.Object[${tokenId}]`);
-        result.set(tokenId, validatedDelta);
-      } catch (error) {
-        console.error(`Skipping invalid delta for token ${tokenId}:`, error);
-      }
-    }
-  } else {
-    console.error(`Invalid deltas format from ${source}:`, typeof deltas);
-    return new Map();
+    return result;
   }
 
-  console.log(`✅ Validated ${result.size} deltas from ${source}`);
+  const deltaObject = validateObject(deltas, `AccountDeltas from ${source}`);
+  for (const [tokenIdStr, delta] of Object.entries(deltaObject)) {
+    if (!/^(0|[1-9]\d*)$/.test(tokenIdStr)) {
+      throw new TypeSafetyViolationError(
+        `ACCOUNT_DELTAS_INVALID_TOKEN_ID: ${source}.Object key must be a canonical non-negative integer`,
+        tokenIdStr,
+      );
+    }
+    const tokenId = Number(tokenIdStr);
+    const validatedDelta = validateDelta(delta, `${source}.Object[${tokenId}]`);
+    result.set(tokenId, validatedDelta);
+  }
   return result;
 }
 
