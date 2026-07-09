@@ -499,6 +499,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Current executable scan: `bun run security:canonical-fill` passed on
      2026-07-09, is part of `bun run security:audit-pack`, and documents open
      manual-review questions in `docs/security/canonical-fill-scan.md`.
+   - Partial: deferred source-hub cross-j fill ACK evidence is capped by
+     `MAX_PENDING_CROSS_J_FILL_ACKS`, prunes before insertion, preserves TTL
+     expiry as operator evidence, and is now guarded by the canonical-fill scan.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.

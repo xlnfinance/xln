@@ -21,6 +21,9 @@ economics.
   and target amounts remain exact.
 - Fill progress, claim progress, pending fill ACKs, and proof-ratio helpers
   share the same exact-aware boundary.
+- Deferred source-hub fill ACK evidence is capped by
+  `MAX_PENDING_CROSS_J_FILL_ACKS`, prunes before insertion, and preserves TTL
+  expiry as operator evidence instead of silently deleting divergent state.
 - Incomplete or out-of-range exact ratio fields fail fast instead of silently
   falling back to a lossy projection.
 - Debug/proof/gossip files use named constants instead of raw `65535` literals.
@@ -32,3 +35,7 @@ economics.
 - Cross-j route structs still carry legacy coarse ratio fields for compatibility.
   Auditors should verify every new route lifecycle path treats those as proof
   projections only.
+- The source-hub deferred ACK stash is bounded. The book-owner admission stores
+  only one pending fill per admitted order; auditors should still check global
+  orderbook admission lifecycle limits before raising production market-maker
+  limits.

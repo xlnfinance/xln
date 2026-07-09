@@ -153,6 +153,16 @@ requireCondition(
 );
 
 for (const [path, markers] of [
+  ['runtime/entity-consensus.ts', [
+    'export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;',
+    'const prunePendingCrossJurisdictionFillAcks =',
+    'pending.size < MAX_PENDING_CROSS_J_FILL_ACKS',
+    'targetSize = Math.max(0, MAX_PENDING_CROSS_J_FILL_ACKS - 1)',
+    "entityLog.warn('crossj.fill_ack_stash_pruned'",
+    "entityLog.warn('crossj.fill_ack_ttl_expired_preserved'",
+    'preserveEvidence: true',
+    'Do not delete this pending ack silently',
+  ]],
   ['runtime/cross-jurisdiction.ts', [
     'getCrossJurisdictionCommittedProofRatio',
     'getCrossJurisdictionCommittedFillAmounts',
@@ -181,6 +191,12 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/cross-j-salvage.ts', [
     'getCrossJurisdictionCommittedProofRatio',
     'CROSS_J_MAX_FILL_RATIO',
+  ]],
+  ['runtime/__tests__/audit-failfast-regressions.test.ts', [
+    'MAX_PENDING_CROSS_J_FILL_ACKS',
+    'pendingCrossJurisdictionFillAcks = new Map();',
+    'expect(cappedPending?.size).toBe(MAX_PENDING_CROSS_J_FILL_ACKS);',
+    "entry.tx.data.offerId === orderId && entry.tx.data.fillSeq === 1",
   ]],
 ] as const) {
   const text = readText(path);
