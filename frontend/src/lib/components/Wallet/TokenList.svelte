@@ -11,8 +11,9 @@
 
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { JsonRpcProvider, Contract, formatEther, formatUnits, type InterfaceAbi } from 'ethers';
-  import { EVM_NETWORKS, ERC20_ABI, type EVMNetwork, type TokenInfo } from '$lib/config/evmNetworks';
+  import { EVM_NETWORKS, ERC20_ABI, type EVMNetwork } from '$lib/config/evmNetworks';
   import { RefreshCw, TrendingUp, TrendingDown } from 'lucide-svelte';
+  import { toasts } from '$lib/stores/toastStore';
 
   export let privateKey: string; void privateKey; // Reserved for signing
   export let walletAddress: string;
@@ -42,6 +43,9 @@
   let refreshInterval = 15; // seconds (default; manual refresh button is primary)
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let lastFetchKey = '';
+  let loadError: string | null = null;
+  let tokenWarnings: string[] = [];
+  let lastToastKey = '';
 
   const ERC20_INTERFACE: InterfaceAbi = ERC20_ABI as InterfaceAbi;
 
@@ -63,15 +67,32 @@
     return new JsonRpcProvider(selectedNetwork.rpcUrl);
   }
 
+  function errorMessage(value: unknown): string {
+    return value instanceof Error ? value.message : String(value || 'Unknown error');
+  }
+
+  function notifyIssue(type: 'error' | 'warning', message: string, duration: number): void {
+    const key = `${type}:${message}`;
+    if (key === lastToastKey) return;
+    lastToastKey = key;
+    if (type === 'error') toasts.error(message, duration);
+    else toasts.warning(message, duration);
+  }
+
   async function fetchBalances() {
     if (!enabled) {
       loading = false;
+      loadError = null;
+      tokenWarnings = [];
       return;
     }
     if (!walletAddress) return;
 
     loading = true;
+    loadError = null;
+    tokenWarnings = [];
     const balances: TokenBalance[] = [];
+    const warnings: string[] = [];
 
     try {
       const provider = getProvider();
@@ -117,7 +138,7 @@
             });
           }
         } catch (e) {
-          console.warn(`Failed to fetch ${token.symbol} balance:`, e);
+          warnings.push(`${token.symbol}: ${errorMessage(e)}`);
         }
       }
 
@@ -134,9 +155,23 @@
         : 0;
 
       dispatch('portfolioUpdate', { total, change: avgChange });
+      tokenWarnings = warnings;
+      if (warnings.length > 0) {
+        notifyIssue(
+          'warning',
+          `Some token balances are unavailable: ${warnings.map((entry) => entry.split(':')[0]).join(', ')}`,
+          7000,
+        );
+      } else {
+        lastToastKey = '';
+      }
 
     } catch (e) {
-      console.error('Failed to fetch balances:', e);
+      const message = `Failed to fetch balances: ${errorMessage(e)}`;
+      loadError = message;
+      tokenBalances = [];
+      lastUpdated = null;
+      notifyIssue('error', message, 10_000);
     } finally {
       loading = false;
     }
@@ -197,6 +232,8 @@
         loading = false;
         tokenBalances = [];
         lastUpdated = null;
+        loadError = null;
+        tokenWarnings = [];
         stopRefreshTimer();
       } else if (walletAddress && selectedNetwork) {
         startRefreshTimer();
@@ -217,6 +254,14 @@
       <span class:spinning={loading}><RefreshCw size={14} /></span>
     </button>
   </div>
+
+  {#if loadError}
+    <div class="balance-alert error" data-testid="wallet-token-error">{loadError}</div>
+  {:else if tokenWarnings.length > 0}
+    <div class="balance-alert warning" data-testid="wallet-token-warning">
+      Partial balance refresh: {tokenWarnings.length} token{tokenWarnings.length === 1 ? '' : 's'} unavailable
+    </div>
+  {/if}
 
   <div class="tokens">
     {#if !enabled}
@@ -341,6 +386,25 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .balance-alert {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .balance-alert.error {
+    color: rgba(255, 185, 185, 0.95);
+    background: rgba(255, 68, 102, 0.10);
+    border: 1px solid rgba(255, 68, 102, 0.22);
+  }
+
+  .balance-alert.warning {
+    color: rgba(255, 220, 150, 0.95);
+    background: rgba(255, 190, 90, 0.10);
+    border: 1px solid rgba(255, 190, 90, 0.20);
   }
 
   .token-item {
