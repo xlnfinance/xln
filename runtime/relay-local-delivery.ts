@@ -14,9 +14,11 @@ import {
   normalizeRuntimeKey,
   pushDebugEvent,
 } from './relay-store';
+import { createStructuredLogger } from './logger';
 
+const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
-  ? (message: string): void => console.log(message)
+  ? (message: string): void => relayLocalDeliveryLog.debug('verbose', { line: message })
   : (_message: string): void => {};
 
 // ---------------------------------------------------------------------------

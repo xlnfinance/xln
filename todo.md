@@ -600,6 +600,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime P2P lifecycle detach diagnostics now use the existing
      `p2p.lifecycle` structured logger instead of direct `console.warn`;
      behavior/source tests and the failure-taxonomy scan guard it.
+   - Partial: relay router/local delivery verbose diagnostics now use
+     structured `relay.router` / `relay.local_delivery` loggers instead of
+     direct `console.log`; relay source tests and the failure-taxonomy scan
+     guard both files.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

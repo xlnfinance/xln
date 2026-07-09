@@ -33,6 +33,7 @@ import { verifyProfileSignature, type ProfileVerifyResult } from './networking/p
 import { verifyHelloAuth } from './networking/hello-auth';
 import type { RuntimeWsMessage } from './networking/ws-protocol';
 import { isDeliveryDelivered, type DeliveryResult } from './delivery-result';
+import { createStructuredLogger } from './logger';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');
@@ -47,8 +48,9 @@ const LIVE_RECOVERY_MESSAGE_TYPES = new Set([
   'recovery_bundle_request',
   'recovery_bundle_response',
 ]);
+const relayRouterLog = createStructuredLogger('relay.router');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
-  ? (message: string): void => console.log(message)
+  ? (message: string): void => relayRouterLog.debug('verbose', { line: message })
   : (_message: string): void => {};
 
 const rememberSocketRuntimeId = (ws: unknown, runtimeId: string): void => {

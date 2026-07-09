@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Profile } from '../networking/gossip';
 import { relayRoute } from '../relay-router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay-store';
@@ -72,6 +74,18 @@ const buildProfile = (
 });
 
 describe('relay-router gossip fanout', () => {
+  test('relay router and local delivery verbose diagnostics use structured logging', () => {
+    const routerSource = readFileSync(join(process.cwd(), 'runtime/relay-router.ts'), 'utf8');
+    const localDeliverySource = readFileSync(join(process.cwd(), 'runtime/relay-local-delivery.ts'), 'utf8');
+
+    expect(routerSource).toContain("const relayRouterLog = createStructuredLogger('relay.router');");
+    expect(routerSource).toContain("relayRouterLog.debug('verbose'");
+    expect(routerSource).not.toContain('console.');
+    expect(localDeliverySource).toContain("const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');");
+    expect(localDeliverySource).toContain("relayLocalDeliveryLog.debug('verbose'");
+    expect(localDeliverySource).not.toContain('console.');
+  });
+
   test('broadcasts fresh gossip updates to other connected clients', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
