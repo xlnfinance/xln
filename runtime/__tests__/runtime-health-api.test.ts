@@ -1,9 +1,36 @@
 import { describe, expect, test } from 'bun:test';
-import { createRelayStore } from '../relay-store';
+import type { Profile } from '../networking/gossip';
+import { createRelayStore, storeVerifiedGossipProfile } from '../relay-store';
+import { createEmptyEnv } from '../runtime';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../server/health-api';
 import { createMarketMakerServerState } from '../server/market-maker-health';
 
 const runtimeSecret = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+const makeHubProfile = (suffix: string, updatedAt = 1): Profile => ({
+  entityId: `0x${suffix.padStart(40, '0')}`,
+  name: `Hub ${suffix}`,
+  avatar: '',
+  bio: '',
+  website: '',
+  lastUpdated: updatedAt,
+  runtimeId: `0x${suffix.padStart(40, '1')}`,
+  runtimeEncPubKey: `0x${suffix.padStart(64, '2')}`,
+  publicAccounts: [],
+  wsUrl: null,
+  relays: [],
+  metadata: {
+    entityEncPubKey: `0x${suffix.padStart(64, '3')}`,
+    isHub: true,
+    routingFeePPM: 1,
+    baseFee: 0n,
+    board: {
+      threshold: 1,
+      validators: [{ signer: `0x${suffix.padStart(40, '4')}`, signerId: '1', publicKey: `0x${suffix.padStart(64, '5')}`, weight: 1 }],
+    },
+  },
+  accounts: [],
+});
 
 const createHealthDeps = () => {
   let inFlightSetCount = 0;
@@ -97,5 +124,47 @@ describe('runtime health API handler', () => {
     expect(publicJson.boot?.error).toBe('redacted');
     expect(publicBody).not.toContain(runtimeSecret);
     expect(publicBody).not.toContain('operator-only boot error');
+  });
+
+  test('scopes hub mesh and market maker health to runtimes that own those roles', async () => {
+    const { deps, relayStore } = createHealthDeps();
+    deps.env = createEmptyEnv('runtime-health-non-hub-daemon');
+    deps.env.quietRuntimeLogs = true;
+    expect(storeVerifiedGossipProfile(relayStore, makeHubProfile('a'))).toBe(true);
+
+    const response = await handleRuntimeHealth(
+      new Request('http://127.0.0.1:8080/api/health'),
+      { 'Content-Type': 'application/json' },
+      deps,
+    );
+    const body = JSON.parse(await response.text()) as {
+      hubs?: unknown[];
+      hubMesh?: Record<string, unknown>;
+      marketMaker?: Record<string, unknown>;
+      bootstrapReserves?: Record<string, unknown>;
+      system?: { runtime?: boolean };
+    };
+
+    expect(body.system?.runtime).toBe(true);
+    expect(body.hubs).toEqual([]);
+    expect(body.hubMesh).toMatchObject({
+      applicable: false,
+      ok: true,
+      reason: 'no-active-hub-entities',
+      hubIds: [],
+      pairs: [],
+    });
+    expect(body.marketMaker).toMatchObject({
+      applicable: false,
+      enabled: false,
+      ok: true,
+      hubs: [],
+    });
+    expect(body.bootstrapReserves).toMatchObject({
+      applicable: false,
+      ok: true,
+      entityCount: 0,
+      entities: [],
+    });
   });
 });

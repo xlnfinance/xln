@@ -1,6 +1,6 @@
 # XLN TODO
 
-Last updated: 2026-07-08
+Last updated: 2026-07-09
 
 This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
@@ -268,6 +268,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: prod health smoke and e2e baseline readiness now treat typed
      `fatal:true` health failures as authoritative readiness blockers while
      preserving legacy `degraded[]` checks.
+   - Partial: runtime health now scopes hub mesh, market maker, and bootstrap
+     reserve projections to runtimes that actually own those roles; non-hub
+     daemons report those components as `applicable:false, ok:true` instead of
+     false degraded failures. Guard: `runtime/__tests__/runtime-health-api.test.ts`.
    - Apply first to transport, bootstrap, faucet/seed funding, market maker,
      settlement batching, and health readiness before touching consensus hot
      paths.
