@@ -22,7 +22,9 @@ import {
   formatEntityDisplay,
   formatSignerDisplay,
 } from './utils';
-import { logError } from './logger';
+import { createStructuredLogger } from './logger';
+
+const runtimeTxLog = createStructuredLogger('runtime.tx');
 
 type ImportJRuntimeTx = Extract<RuntimeTx, { type: 'importJ' }>;
 type ImportReplicaRuntimeTx = Extract<RuntimeTx, { type: 'importReplica' }>;
@@ -53,7 +55,10 @@ const importJurisdictionRuntimeTx = async (
   runtimeTx: ImportJRuntimeTx,
   deps: RuntimeTxHandlerDeps,
 ): Promise<void> => {
-  console.log(`[Runtime] Importing J-machine "${runtimeTx.data.name}" (chain ${runtimeTx.data.chainId})...`);
+  runtimeTxLog.info('jurisdiction.import_start', {
+    name: runtimeTx.data.name,
+    chainId: runtimeTx.data.chainId,
+  });
 
   try {
     const isBrowserVM = runtimeTx.data.rpcs.length === 0;
@@ -163,7 +168,10 @@ const importJurisdictionRuntimeTx = async (
     }
 
     deps.onJurisdictionImported?.(env);
-    console.log(`[Runtime] JReplica "${runtimeTx.data.name}" ready`);
+    runtimeTxLog.info('jurisdiction.ready', {
+      name: runtimeTx.data.name,
+      chainId: runtimeTx.data.chainId,
+    });
   } catch (error) {
     console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
     throw error;
@@ -292,12 +300,10 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
   }
 
   if (typeof actualJBlock !== 'number') {
-    logError('RUNTIME_TICK', `💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
-    logError('RUNTIME_TICK', `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
-    if (createdReplica) {
-      createdReplica.state.lastFinalizedJHeight = 0;
-      console.log(`💥   FIXED: Set jBlock to 0 for replica ${replicaKey}`);
-    }
+    throw new Error(
+      `ENTITY_CREATION_INVALID_J_HEIGHT: replica=${replicaKey} ` +
+        `expected=number actualType=${typeof actualJBlock} actual=${String(actualJBlock)}`,
+    );
   }
 };
 
