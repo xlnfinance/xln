@@ -3,6 +3,10 @@ import type { JAdapter } from './jadapter';
 import type { BrowserVMProvider, JAdapterConfig } from './jadapter/types';
 import { createJAdapter } from './jadapter';
 import { createJAdapterWithRetry } from './jadapter/retry';
+import { createStructuredLogger } from './logger';
+
+const infraLog = createStructuredLogger('runtime.infra');
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 export const hasLiveJAdapter = (value: unknown): value is JAdapter => {
   if (!value || typeof value !== 'object') return false;
@@ -56,10 +60,12 @@ export const ensureLiveJAdapterForReplica = async (
     context,
     attempts,
     onRetry: (attempt, totalAttempts, error) => {
-      console.warn(
-        `⚠️ Retrying JAdapter restore for "${name}" ` +
-          `(${attempt}/${totalAttempts}): ${error instanceof Error ? error.message : String(error)}`,
-      );
+      infraLog.warn('jadapter.restore_retry', {
+        name,
+        attempt,
+        attempts: totalAttempts,
+        error: errorMessage(error),
+      });
     },
   });
 
@@ -72,7 +78,7 @@ export const ensureLiveJAdapterForReplica = async (
   }
 
   jReplica.jadapter = jadapter;
-  console.log(`✅ JAdapter derived for jReplica "${name}" (${hasRpcs ? 'rpc' : 'browservm'})`);
+  infraLog.debug('jadapter.derived', { name, mode: hasRpcs ? 'rpc' : 'browservm' });
   return jadapter;
 };
 
@@ -88,10 +94,7 @@ export const rehydrateRestoredRuntimeInfra = async (
   try {
     await options.loadGossipProfiles(env);
   } catch (error) {
-    console.warn(
-      '[loadEnvFromDB] skipped infra gossip restore:',
-      error instanceof Error ? error.message : String(error),
-    );
+    infraLog.warn('gossip.restore_skipped', { error: errorMessage(error) });
   }
 
   options.assertPersistedContractConfigReady(env, 'loadEnvFromDB post-replay');
@@ -113,9 +116,9 @@ export const rehydrateRestoredRuntimeInfra = async (
       if (typeof window !== 'undefined') {
         (window as Window & { __xlnBrowserVM?: BrowserVMProvider | null }).__xlnBrowserVM = browserVM;
       }
-      console.log('✅ BrowserVM restored from loadEnvFromDB');
+      infraLog.debug('browservm.restored');
     } catch (error) {
-      console.warn('⚠️ Failed to restore BrowserVM state (loadEnvFromDB):', error);
+      infraLog.warn('browservm.restore_failed', { error: errorMessage(error) });
     }
   }
 
@@ -130,7 +133,7 @@ export const rehydrateRestoredRuntimeInfra = async (
       });
     } catch (error) {
       throw new Error(
-        `RESTORE_JADAPTER_FAILED: name=${name} cause=${error instanceof Error ? error.message : String(error)}`,
+        `RESTORE_JADAPTER_FAILED: name=${name} cause=${errorMessage(error)}`,
       );
     }
   }

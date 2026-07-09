@@ -588,6 +588,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime J-submit side-effect diagnostics now use the structured
      `runtime.jsubmit` logger instead of direct `[J-SUBMIT]` / `[SIDE-EFFECT]`
      console lines; source tests and the failure-taxonomy scan guard this path.
+   - Partial: runtime infra/JAdapter restore diagnostics now use the structured
+     `runtime.infra` logger instead of direct `console.*`; source tests and the
+     failure-taxonomy scan guard the restore path.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.
