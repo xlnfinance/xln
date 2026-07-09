@@ -17,8 +17,12 @@ WATCHTOWER_PORT="$(xln_watchtower_port)"
 ANVIL_BLOCK_TIME="${XLN_ANVIL_BLOCK_TIME:-1}"
 DEV_LOG_DIR="${XLN_DEV_LOG_DIR:-$REPO_ROOT/.logs/dev}"
 MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"
+DEV_VERBOSE="${DEV_VERBOSE:-0}"
+RUNTIME_VERBOSE_LOGS="${RUNTIME_VERBOSE_LOGS:-0}"
 
 export XLN_JURISDICTIONS_PATH="${XLN_JURISDICTIONS_PATH:-./db/dev/jurisdictions.json}"
+export RPC_PORT RPC2_PORT API_PORT WEB_PORT WEB_HTTP_PORT CUSTODY_PORT CUSTODY_DAEMON_PORT WATCHTOWER_PORT
+export ANVIL_BLOCK_TIME DEV_LOG_DIR MESH_LOG_LEVEL DEV_VERBOSE RUNTIME_VERBOSE_LOGS
 
 cd "$REPO_ROOT"
 mkdir -p "$DEV_LOG_DIR"
@@ -46,11 +50,7 @@ bun runtime/scripts/print-dev-links.ts \
   --watchtower-port "${WATCHTOWER_PORT}" \
   --keys "$DEV_RADAPTER_KEYS_JSON"
 
-ANVIL_CMD="anvil --silent --host 0.0.0.0 --port ${RPC_PORT} --chain-id 31337 --mixed-mining --block-time ${ANVIL_BLOCK_TIME} --block-gas-limit 60000000 --code-size-limit 65536"
-ANVIL2_CMD="anvil --silent --host 0.0.0.0 --port ${RPC2_PORT} --chain-id 31338 --mixed-mining --block-time ${ANVIL_BLOCK_TIME} --block-gas-limit 60000000 --code-size-limit 65536"
-if [[ "${DEV_VERBOSE:-0}" != "1" ]]; then
-  ANVIL_CMD="${ANVIL_CMD} > ${DEV_LOG_DIR}/anvil-${RPC_PORT}.log 2>&1"
-  ANVIL2_CMD="${ANVIL2_CMD} > ${DEV_LOG_DIR}/anvil-${RPC2_PORT}.log 2>&1"
+if [[ "$DEV_VERBOSE" != "1" ]]; then
   echo "anvil logs             ${DEV_LOG_DIR}/anvil-${RPC_PORT}.log"
   echo "anvil2 logs            ${DEV_LOG_DIR}/anvil-${RPC2_PORT}.log"
 fi
@@ -59,10 +59,10 @@ exec concurrently \
   --kill-others-on-fail \
   --names 'ANVIL,ANVIL2,MESH,WATCH,RUNTIME,VITE,VITE_HTTP' \
   -c 'magenta,cyan,blue,red,yellow,green,white' \
-  "$ANVIL_CMD" \
-  "$ANVIL2_CMD" \
-  "USE_ANVIL=true RUNTIME_VERBOSE_LOGS=${RUNTIME_VERBOSE_LOGS:-0} XLN_LOG_LEVEL=${MESH_LOG_LEVEL} ANVIL_RPC=http://localhost:${RPC_PORT} ANVIL_RPC2=http://localhost:${RPC2_PORT} XLN_MESH_RESET_ALLOWED=1 bun runtime/orchestrator/orchestrator.ts --host 127.0.0.1 --port ${API_PORT} --public-ws-base-url ws://127.0.0.1:${API_PORT} --rpc-url http://127.0.0.1:${RPC_PORT} --rpc2-url http://127.0.0.1:${RPC2_PORT} --db-root ./db/dev/mesh --mm --custody --allow-reset --custody-port ${CUSTODY_PORT} --custody-daemon-port ${CUSTODY_DAEMON_PORT} --wallet-url http://localhost:${WEB_HTTP_PORT}/app" \
-  "bun runtime/watchtower/standalone-server.ts --host 127.0.0.1 --port ${WATCHTOWER_PORT} --db ./db/dev/watchtower --quota-bytes 4194304 --max-bundles 3" \
+  "./scripts/dev/run-dev-child.sh anvil" \
+  "./scripts/dev/run-dev-child.sh anvil2" \
+  "./scripts/dev/run-dev-child.sh mesh" \
+  "./scripts/dev/run-dev-child.sh watchtower" \
   "./scripts/dev/watch-runtime-build.sh" \
-  "cd frontend && VITE_DEV_PORT=${WEB_PORT} VITE_API_PROXY_TARGET=http://127.0.0.1:${API_PORT} VITE_XLN_WATCHTOWER_URL=http://127.0.0.1:${WATCHTOWER_PORT} ANVIL_RPC=http://localhost:${RPC_PORT} ANVIL_RPC2=http://localhost:${RPC2_PORT} RPC_ETHEREUM=http://localhost:${RPC_PORT} RPC_TRON=http://localhost:${RPC2_PORT} vite dev --logLevel warn" \
-  "cd frontend && VITE_DEV_PORT=${WEB_HTTP_PORT} VITE_API_PROXY_TARGET=http://127.0.0.1:${API_PORT} VITE_XLN_WATCHTOWER_URL=http://127.0.0.1:${WATCHTOWER_PORT} ANVIL_RPC=http://localhost:${RPC_PORT} ANVIL_RPC2=http://localhost:${RPC2_PORT} RPC_ETHEREUM=http://localhost:${RPC_PORT} RPC_TRON=http://localhost:${RPC2_PORT} vite dev --config vite.config.http.ts --logLevel warn"
+  "./scripts/dev/run-dev-child.sh vite" \
+  "./scripts/dev/run-dev-child.sh vite-http"

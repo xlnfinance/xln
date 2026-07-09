@@ -96,14 +96,20 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
 
 test('bun run dev does not print token-bearing runtime import URLs by default', () => {
   const runDev = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
+  const devChild = readFileSync(join(process.cwd(), 'scripts/dev/run-dev-child.sh'), 'utf8');
   const runtimeWatcher = readFileSync(join(process.cwd(), 'scripts/dev/watch-runtime-build.sh'), 'utf8');
 
   expect(runDev).not.toContain('XLN_RUNTIME_IMPORT_LOG_URL=1');
-  expect(runDev).toContain('runtime/orchestrator/orchestrator.ts');
+  expect(runDev).toContain('./scripts/dev/run-dev-child.sh mesh');
+  expect(runDev).toContain('./scripts/dev/run-dev-child.sh vite-http');
+  expect(runDev).not.toContain('USE_ANVIL=true RUNTIME_VERBOSE_LOGS=');
+  expect(devChild).toContain('runtime/orchestrator/orchestrator.ts');
+  expect(devChild).toContain('DEV_CHILD_ROLE_UNKNOWN');
+  expect(devChild).toContain('set -euo pipefail');
   expect(runDev).toContain('./scripts/dev/watch-runtime-build.sh');
   expect(runDev).not.toContain('bun build runtime/runtime.ts');
   expect(runDev).toContain('MESH_LOG_LEVEL="${XLN_LOG_LEVEL:-warn}"');
-  expect(runDev).toContain('XLN_LOG_LEVEL=${MESH_LOG_LEVEL}');
+  expect(devChild).toContain('XLN_LOG_LEVEL="$MESH_LOG_LEVEL"');
   expect(runtimeWatcher).toContain('set -euo pipefail');
   expect(runtimeWatcher).toContain('bun build runtime/runtime.ts');
   expect(runtimeWatcher).toContain('--external buffer');
