@@ -578,8 +578,8 @@ describe('remote runtime import manager utilities', () => {
     expect(xlnStore).toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString())');
     expect(runtimeCreation).toContain("url.searchParams.set('allowPartial', '1')");
-    expect(runtimeCreation).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString())');
-    expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\)\)/g))
+    expect(runtimeCreation).toContain('await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { throwOnError: !silent })');
+    expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\), \{ throwOnError: !silent \}\)/g))
       .toHaveLength(1);
     expect(runtimeCreation).toContain('buildRemoteRuntimeRecoveryPeerSources({ runtimeId: recoveryRuntimeId })');
     expect(runtimeCreation).toContain('recoveryCheckedPeers = discovery.checkedPeers');
@@ -597,6 +597,10 @@ describe('remote runtime import manager utilities', () => {
     expect(appLayout).not.toContain('redirectRemoteRuntimeImportToManager');
     expect(importFlow).toContain('export const importRemoteRuntimeEntries = async');
     expect(importFlow).toContain('runtimeOperations.upsertRemoteRuntimeImports(validated)');
+    expect(runtimeStore).toContain('throwOnError?: boolean');
+    expect(runtimeStore).toContain('REMOTE_RUNTIME_IMPORT_SOURCE_VALIDATION_FAILED');
+    expect(runtimeStore).toContain('const hydration = remoteImportSourceHydration');
+    expect(runtimeStore).toContain('if (options.throwOnError === true) return hydration');
     expect(runtimeStore).not.toContain('/api/hubs');
   });
 

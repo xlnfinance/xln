@@ -147,7 +147,7 @@
       if (!silent && next.length === 0 && payload.ready === false) {
         liveRuntimesError = String(payload.reason || payload.error || 'runtime import not ready');
       }
-      void runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString());
+      await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { throwOnError: !silent });
     } catch (err) {
       if (!silent) liveRuntimesError = err instanceof Error ? err.message : String(err);
     } finally {

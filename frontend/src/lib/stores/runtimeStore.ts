@@ -4,6 +4,7 @@ import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRunti
 import { registerDebugSurface } from '$lib/utils/debugSurface';
 import {
   normalizeRemoteRuntimeWsUrl,
+  describeRemoteRuntimeImportError,
   parseRemoteRuntimeImportSourcePayload,
   persistRemoteRuntimeImports,
   readStoredRemoteRuntimeImports,
@@ -51,6 +52,10 @@ const normalizeRuntimeId = (id: string | null | undefined): string =>
   String(id || '').trim().toLowerCase();
 
 let remoteImportSourceHydration: Promise<StoredRemoteRuntimeImportEntry[]> | null = null;
+
+type RemoteRuntimeImportSourceHydrationOptions = {
+  throwOnError?: boolean;
+};
 
 export const activeRuntimeId = derived(
   [runtimeControllerHandle, runtimes],
@@ -361,26 +366,46 @@ export const runtimeOperations = {
     runtimes.update((current) => entries.reduce(upsertRemoteImportEntry, current));
   },
 
-  async hydrateRemoteRuntimeImportSource(source = '/api/runtime-import'): Promise<StoredRemoteRuntimeImportEntry[]> {
+  async hydrateRemoteRuntimeImportSource(
+    source = '/api/runtime-import',
+    options: RemoteRuntimeImportSourceHydrationOptions = {},
+  ): Promise<StoredRemoteRuntimeImportEntry[]> {
     if (typeof window === 'undefined') return [];
-    if (remoteImportSourceHydration) return remoteImportSourceHydration;
-    remoteImportSourceHydration = (async () => {
-      const importedAt = Date.now();
-      const entries = await fetchRemoteRuntimeImportSource(source);
-      if (entries.length === 0) return [];
-      const results = await Promise.allSettled(entries.map((entry, index) =>
-        validateRemoteRuntimeEntry(entry, { index, importedAt })
-      ));
-      const validated = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
-      if (validated.length === 0) return [];
-      return runtimeOperations.upsertRemoteRuntimeImports(validated);
-    })().catch((error) => {
+    if (!remoteImportSourceHydration) {
+      remoteImportSourceHydration = (async () => {
+        const importedAt = Date.now();
+        const entries = await fetchRemoteRuntimeImportSource(source);
+        if (entries.length === 0) return [];
+        const results = await Promise.allSettled(entries.map((entry, index) =>
+          validateRemoteRuntimeEntry(entry, { index, importedAt })
+        ));
+        const validated = results.flatMap((result) => result.status === 'fulfilled' ? [result.value] : []);
+        const failed = results.flatMap((result, index) => {
+          if (result.status === 'fulfilled') return [];
+          const entry = entries[index]!;
+          return [{
+            entry,
+            reason: describeRemoteRuntimeImportError(result.reason, entry),
+          }];
+        });
+        if (failed.length > 0) {
+          const first = failed[0]!;
+          const message = `REMOTE_RUNTIME_IMPORT_SOURCE_VALIDATION_FAILED:${validated.length}/${entries.length}:${first.reason}`;
+          if (validated.length === 0) throw new Error(message);
+          console.warn(`[runtimeStore] ${message}`);
+        }
+        return runtimeOperations.upsertRemoteRuntimeImports(validated);
+      })().finally(() => {
+        remoteImportSourceHydration = null;
+      });
+    }
+    const hydration = remoteImportSourceHydration;
+    if (!hydration) return [];
+    if (options.throwOnError === true) return hydration;
+    return hydration.catch((error) => {
       console.warn('[runtimeStore] Remote runtime import source hydration failed:', error);
       return [];
-    }).finally(() => {
-      remoteImportSourceHydration = null;
     });
-    return remoteImportSourceHydration;
   },
 
   // Disconnect runtime
