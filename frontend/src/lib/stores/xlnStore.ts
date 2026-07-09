@@ -90,6 +90,7 @@ const REMOTE_RUNTIME_PROJECTION_WAIT_TIMEOUT_MS = 5_000;
 const REMOTE_RUNTIME_PROJECTION_WAIT_POLL_MS = 100;
 const PAYMENT_GOSSIP_REFRESH_ATTEMPTS = 3;
 const PAYMENT_GOSSIP_REFRESH_WAIT_MS = 100;
+const P2P_POLL_WARNING_COOLDOWN_MS = 7_500;
 
 type FrontendEntitySummary = {
   id: string;
@@ -189,7 +190,11 @@ export function resolveRelayUrls(): string[] {
   const relay = normalizeWsUrl(`${protocol}//${window.location.host}/relay`);
   const configured = get(settings)?.relayUrl;
   if (configured && !sameWsEndpoint(configured, relay)) {
-    console.error(`[relay] SETTINGS_MISMATCH: forcing single relay ${relay}, ignoring ${configured}`);
+    errorLog.log(
+      `SETTINGS_MISMATCH: forcing single relay ${relay}, ignoring ${configured}`,
+      'Relay Settings',
+      { relay, configured },
+    );
   }
   return [relay];
 }
@@ -210,6 +215,7 @@ export const p2pState = writable<P2PState>({
 });
 
 let p2pPollTimer: ReturnType<typeof setInterval> | null = null;
+let lastP2PPollWarningAt = 0;
 
 const areP2PQueuesEqual = (
   left: P2PState['queue'],
@@ -259,13 +265,25 @@ function startP2PPoll() {
           p2pState.set(state);
         }
       }
-    } catch {
-      /* ignore if not available */
+    } catch (pollError) {
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (lastP2PPollWarningAt === 0 || now - lastP2PPollWarningAt >= P2P_POLL_WARNING_COOLDOWN_MS) {
+        lastP2PPollWarningAt = now;
+        errorLog.log('P2P state poll failed', 'P2P State Poll', pollError);
+      }
     }
     if (typeof window !== 'undefined' && typeof performance !== 'undefined') {
       const elapsedMs = performance.now() - startedAt;
       if (elapsedMs >= 32) {
-        console.warn(`[perf] slow timer xlnStore.p2pStatePoll ${elapsedMs.toFixed(1)}ms`);
+        const now = performance.now();
+        if (lastP2PPollWarningAt === 0 || now - lastP2PPollWarningAt >= P2P_POLL_WARNING_COOLDOWN_MS) {
+          lastP2PPollWarningAt = now;
+          errorLog.log(
+            `slow timer xlnStore.p2pStatePoll ${elapsedMs.toFixed(1)}ms`,
+            'P2P State Poll',
+            { elapsedMs },
+          );
+        }
       }
     }
   };
@@ -1607,7 +1625,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
           info: $xlnInstance.getEntityDisplayInfo(entityId),
         };
       } catch (error) {
-        console.error('FINTECH-SAFETY: Entity access failed:', error);
+        errorLog.log('FINTECH-SAFETY: Entity access failed', 'Entity Access', error);
         throw error; // Fail fast - don't hide errors
       }
     },
@@ -1621,7 +1639,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
         }
         return result;
       } catch (error) {
-        console.error('FINTECH-SAFETY: Entity ID extraction failed:', error);
+        errorLog.log('FINTECH-SAFETY: Entity ID extraction failed', 'Entity Access', error);
         throw error; // Fail fast - don't hide errors
       }
     },

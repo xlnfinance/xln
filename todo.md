@@ -692,6 +692,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: runtime debug event and payment-gossip diagnostics in `xlnStore`
      now use the persistent frontend `errorLog` instead of raw `console.warn`
      while preserving the same retry/fetch/announce control flow.
+   - Partial: relay mismatch, P2P poll, and entity helper diagnostics in
+     `xlnStore` now use persistent frontend `errorLog`; entity helper failures
+     still rethrow fail-fast instead of degrading into fallback UI data.
    - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
      fanout lines during normal shutdown while preserving the real child exit
      status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.

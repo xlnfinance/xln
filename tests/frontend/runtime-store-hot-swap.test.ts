@@ -720,6 +720,17 @@ test('xlnStore payment gossip diagnostics use persistent error log instead of ra
   expect(gossipSource).not.toContain('console.error');
 });
 
+test('xlnStore diagnostics avoid raw warn/error console output', () => {
+  const source = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
+
+  expect(source).toContain("errorLog.log('P2P state poll failed', 'P2P State Poll', pollError)");
+  expect(source).toContain("errorLog.log('FINTECH-SAFETY: Entity access failed', 'Entity Access', error)");
+  expect(source).toContain("errorLog.log('FINTECH-SAFETY: Entity ID extraction failed', 'Entity Access', error)");
+  expect(source).toContain("'Relay Settings'");
+  expect(source).not.toContain('console.warn');
+  expect(source).not.toContain('console.error');
+});
+
 test('local runtime creation marks the target before bootstrap and switches controller after persistence', () => {
   const source = readFileSync('frontend/src/lib/stores/vaultStore.ts', 'utf8');
   const createStart = source.indexOf('async createRuntime(');
