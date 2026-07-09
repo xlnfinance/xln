@@ -528,7 +528,10 @@ const buildLocalHubSignerLabels = (): string[] => {
 
 const prewarmLocalHubSignerKeys = (): void => {
   const signerIds = prewarmSignerLabels(resolvedArgs.seed, buildLocalHubSignerLabels());
-  console.log(`[MESH-HUB] SIGNER_KEYS_PREWARMED name=${resolvedArgs.name} count=${signerIds.length}`);
+  nodeLog.info('signer_keys.prewarmed', {
+    name: resolvedArgs.name,
+    count: signerIds.length,
+  });
 };
 
 const configureHubRuntimeLogging = (env: Env): void => {
@@ -540,7 +543,7 @@ const configureHubBootstrapStorage = (env: Env): void => {
   if (!envFlagEnabled(process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'])) return;
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.persistencePaused = true;
-  console.log(`[MESH-HUB] DEV_BOOTSTRAP_STORAGE_DISABLED name=${resolvedArgs.name}`);
+  nodeLog.info('dev_bootstrap.storage_disabled', { name: resolvedArgs.name });
 };
 
 const resolveOperatorAppUrl = (): string => {
@@ -2177,7 +2180,7 @@ const run = async (): Promise<void> => {
       faucetProvisionPromise = externalWalletApi.provisionFaucetWallet()
         .then(() => {
           if (!shuttingDown) {
-            console.log(`[MESH-HUB] FAUCET_PROVISION_READY name=${resolvedArgs.name}`);
+            nodeLog.info('faucet_provision.ready', { name: resolvedArgs.name });
           }
         });
     }
@@ -2408,9 +2411,13 @@ const run = async (): Promise<void> => {
   }, BOOTSTRAP_POLL_MS);
   void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
 
-  console.log(
-    `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
-  );
+  nodeLog.info('runtime.ready', {
+    name: resolvedArgs.name,
+    entityId: bootstrap.entityId,
+    runtimeId: String(env.runtimeId || ''),
+    api: apiUrl,
+    relay: resolvedArgs.relayUrl,
+  });
   if (LOG_HUB_INSPECT_URL) {
     try {
       const inspectUrl = buildRuntimeInspectUrl(env);

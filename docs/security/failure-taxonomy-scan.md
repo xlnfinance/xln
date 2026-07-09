@@ -117,6 +117,9 @@ warnings.
   against direct `[MESH]` console output.
 - Hub inspect URL diagnostics use structured `mesh.hub` logs and are guarded
   against direct `[MESH-HUB] INSPECT_URL` console output.
+- Hub/MM normal startup diagnostics use structured `mesh.hub` /
+  `mesh.marketMaker` logs, leaving `RUNTIME_IMPORT_READY` as the dev-facing
+  readiness summary instead of repeated raw `[MESH-HUB]` / `[MESH-MM]` lines.
 
 ## Open Manual Review
 

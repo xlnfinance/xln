@@ -564,7 +564,10 @@ const buildLocalMarketMakerSignerLabels = (): string[] => {
 
 const prewarmLocalMarketMakerSignerKeys = (): void => {
   const signerIds = prewarmSignerLabels(resolvedArgs.seed, buildLocalMarketMakerSignerLabels());
-  console.log(`[MESH-MM] SIGNER_KEYS_PREWARMED name=${resolvedArgs.name} count=${signerIds.length}`);
+  nodeLog.info('signer_keys.prewarmed', {
+    name: resolvedArgs.name,
+    count: signerIds.length,
+  });
 };
 
 const configureMarketMakerStorage = (env: Env): void => {
@@ -576,7 +579,7 @@ const configureMarketMakerStorage = (env: Env): void => {
       enabled: false,
     },
   };
-  console.log('[MESH-MM] Runtime storage disabled for rebuildable market-maker state');
+  nodeLog.info('dev_bootstrap.storage_disabled', { name: resolvedArgs.name });
 };
 
 const configureMarketMakerRuntimeLogging = (env: Env): void => {
@@ -4341,9 +4344,12 @@ const run = async (): Promise<void> => {
     if (envFlagEnabled(process.env['XLN_MARKET_MAKER_LOG_READY_HASH_PAYLOAD'])) {
       console.log(`[MESH-MM] BOOTSTRAP_READY_HASH_PAYLOAD payload=${safeStringify(fingerprint.payload)}`);
     }
-    console.log(
-      `[MESH-MM] OFFERS_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
-    );
+    nodeLog.info('offers.ready', {
+      entityId: primaryMmContext.entityId,
+      runtimeId: String(env.runtimeId || ''),
+      api: apiUrl,
+      relay: resolvedArgs.relayUrl,
+    });
   };
 
   const waitForBootstrapOffers = async (): Promise<MarketMakerHealth | null> => {
@@ -4569,9 +4575,12 @@ const run = async (): Promise<void> => {
   publishMarketMakerHealthSnapshot({ includeCross: false });
   startHealthRefreshLoop();
   emitBootstrapDebugEvent('phase', { phase: startupPhase });
-  console.log(
-    `[MESH-MM] RUNTIME_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
-  );
+  nodeLog.info('runtime.ready', {
+    entityId: primaryMmContext.entityId,
+    runtimeId: String(env.runtimeId || ''),
+    api: apiUrl,
+    relay: resolvedArgs.relayUrl,
+  });
 
   void (async () => {
     await sleep(MARKET_MAKER_BOOTSTRAP_START_DELAY_MS);

@@ -668,6 +668,10 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: hub inspect URL diagnostics now use structured `mesh.hub` logs
      instead of direct `[MESH-HUB] INSPECT_URL` console output; production
      wiring tests and the failure-taxonomy scan guard it.
+   - Partial: hub/MM normal startup diagnostics now use structured `mesh.hub`
+     / `mesh.marketMaker` logs instead of repeated raw `[MESH-HUB]` /
+     `[MESH-MM]` readiness lines; the dev-facing summary remains
+     `RUNTIME_IMPORT_READY count=5 labels=H1,H2,H3,MM,Custody`.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.

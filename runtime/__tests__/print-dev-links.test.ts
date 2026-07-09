@@ -129,6 +129,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
 test('dev hub storage mode log is explicit and not an alarming pause line', () => {
   const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
 
-  expect(hubNode).toContain('DEV_BOOTSTRAP_STORAGE_DISABLED');
+  expect(hubNode).toContain("nodeLog.info('dev_bootstrap.storage_disabled'");
+  expect(hubNode).not.toContain('DEV_BOOTSTRAP_STORAGE_DISABLED');
   expect(hubNode).not.toContain('BOOTSTRAP_STORAGE_PAUSED');
 });

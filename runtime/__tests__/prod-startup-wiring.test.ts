@@ -284,7 +284,8 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('buildMarketMakerConsensusConfig(signerId, entityJurisdiction)');
     expect(mmNode).toContain('deriveMarketMakerEntityId(signerId, entityJurisdiction)');
     expect(mmNode).toContain('isCanonicalAccountOpener(mmEntityId, hubEntityId)');
-    expect(mmNode).toContain('Runtime storage disabled for rebuildable market-maker state');
+    expect(mmNode).toContain("nodeLog.info('dev_bootstrap.storage_disabled'");
+    expect(mmNode).not.toContain('Runtime storage disabled for rebuildable market-maker state');
     expect(mmNode).toContain('const configureMarketMakerRuntimeLogging = (env: Env): void => {');
     expect(mmNode).toContain("if (envFlagEnabled(process.env['XLN_MARKET_MAKER_VERBOSE_RUNTIME_LOGS'])) return;");
     expect(mmNode).toContain('env.quietRuntimeLogs = true;');

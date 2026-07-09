@@ -236,13 +236,37 @@ const hubNodePath = 'runtime/orchestrator/hub-node.ts';
 const hubNode = readText(hubNodePath);
 for (const marker of [
   "createStructuredLogger('mesh.hub'",
+  "nodeLog.info('signer_keys.prewarmed'",
+  "nodeLog.info('dev_bootstrap.storage_disabled'",
+  "nodeLog.info('faucet_provision.ready'",
+  "nodeLog.info('runtime.ready'",
   "nodeLog.info('inspect_url.ready'",
   "nodeLog.warn('inspect_url.unavailable'",
 ]) {
   assertIncludes(hubNode, marker, hubNodePath);
 }
+assertNotIncludes(hubNode, '[MESH-HUB] SIGNER_KEYS_PREWARMED', hubNodePath);
+assertNotIncludes(hubNode, '[MESH-HUB] DEV_BOOTSTRAP_STORAGE_DISABLED', hubNodePath);
+assertNotIncludes(hubNode, '[MESH-HUB] FAUCET_PROVISION_READY', hubNodePath);
+assertNotIncludes(hubNode, '[MESH-HUB] READY', hubNodePath);
 assertNotIncludes(hubNode, '[MESH-HUB] INSPECT_URL', hubNodePath);
 assertNotIncludes(hubNode, '[MESH-HUB] INSPECT_URL_UNAVAILABLE', hubNodePath);
+
+const marketMakerNodePath = 'runtime/orchestrator/mm-node.ts';
+const marketMakerNode = readText(marketMakerNodePath);
+for (const marker of [
+  "createStructuredLogger('mesh.marketMaker'",
+  "nodeLog.info('signer_keys.prewarmed'",
+  "nodeLog.info('dev_bootstrap.storage_disabled'",
+  "nodeLog.info('runtime.ready'",
+  "nodeLog.info('offers.ready'",
+]) {
+  assertIncludes(marketMakerNode, marker, marketMakerNodePath);
+}
+assertNotIncludes(marketMakerNode, '[MESH-MM] SIGNER_KEYS_PREWARMED', marketMakerNodePath);
+assertNotIncludes(marketMakerNode, 'Runtime storage disabled for rebuildable market-maker state', marketMakerNodePath);
+assertNotIncludes(marketMakerNode, '[MESH-MM] RUNTIME_READY', marketMakerNodePath);
+assertNotIncludes(marketMakerNode, '[MESH-MM] OFFERS_READY', marketMakerNodePath);
 
 const healthRedactionPath = 'runtime/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
@@ -605,6 +629,7 @@ for (const marker of [
   'Orchestrator child stop timeout and unexpected child exit diagnostics use',
   'Orchestrator custody bootstrap, SIGTERM-during-reset, and initial reset',
   'Hub inspect URL diagnostics use structured',
+  'Hub/MM normal startup diagnostics use structured',
 ]) {
   assertIncludes(auditDoc, marker, auditDocPath);
 }
