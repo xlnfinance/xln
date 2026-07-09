@@ -27,7 +27,7 @@ import {
 import { safeStringify } from '../serialization-utils.js';
 import { getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
-import { batchAddSettlement, createEmptyBatch } from '../j-batch';
+import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../j-batch';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
 import { DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
@@ -246,7 +246,6 @@ export class BrowserVMProvider {
     }
 
     // Encode constructor args: constructor(address _entityProvider)
-    const { ethers } = await import('ethers');
     const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
       ['address'],
       [this.entityProviderAddress.toString()]
@@ -1224,7 +1223,6 @@ export class BrowserVMProvider {
           claimedEntityId = ethers.hexlify(claims[claims.length - 1][0]);
           expectedNextNonce = (await this.getEntityNonce(claimedEntityId)) + 1n;
         }
-        const { decodeJBatch, summarizeBatch } = await import('../j-batch');
         const batch = decodeJBatch(encodedBatch);
         batchSummary = safeStringify(summarizeBatch(batch));
         if (returnData !== '0x') {
