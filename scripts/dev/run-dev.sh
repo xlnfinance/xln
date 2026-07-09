@@ -55,7 +55,8 @@ if [[ "$DEV_VERBOSE" != "1" ]]; then
   echo "anvil2 logs            ${DEV_LOG_DIR}/anvil-${RPC2_PORT}.log"
 fi
 
-exec concurrently \
+set +e
+concurrently \
   --kill-others-on-fail \
   --names 'ANVIL,ANVIL2,MESH,WATCH,RUNTIME,VITE,VITE_HTTP' \
   -c 'magenta,cyan,blue,red,yellow,green,white' \
@@ -65,4 +66,13 @@ exec concurrently \
   "./scripts/dev/run-dev-child.sh watchtower" \
   "./scripts/dev/watch-runtime-build.sh" \
   "./scripts/dev/run-dev-child.sh vite" \
-  "./scripts/dev/run-dev-child.sh vite-http"
+  "./scripts/dev/run-dev-child.sh vite-http" \
+  2>&1 | awk '
+    /Sending SIGTERM to other processes\.\./ {
+      if (sawSigtermFanout++) next
+    }
+    { print; fflush() }
+  '
+concurrently_status=${PIPESTATUS[0]}
+set -e
+exit "$concurrently_status"

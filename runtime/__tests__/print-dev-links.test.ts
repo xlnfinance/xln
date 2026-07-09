@@ -107,6 +107,10 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
   expect(runDev).toContain('./scripts/dev/run-dev-child.sh mesh');
   expect(runDev).toContain('./scripts/dev/run-dev-child.sh vite-http');
   expect(runDev).not.toContain('USE_ANVIL=true RUNTIME_VERBOSE_LOGS=');
+  expect(runDev).not.toContain('exec concurrently');
+  expect(runDev).toContain('sawSigtermFanout++');
+  expect(runDev).toContain('concurrently_status=${PIPESTATUS[0]}');
+  expect(runDev).toContain('exit "$concurrently_status"');
   expect(devChild).toContain('runtime/orchestrator/orchestrator.ts');
   expect(devChild).toContain('DEV_CHILD_ROLE_UNKNOWN');
   expect(devChild).toContain('set -euo pipefail');

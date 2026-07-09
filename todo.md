@@ -671,6 +671,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: `bun run dev` now prints an explicit `suggested runtimes`
      endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
      path is directly inspectable instead of inferred from the app hash link.
+   - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
+     fanout lines during normal shutdown while preserving the real child exit
+     status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.
    - Partial: account frame proposal now statically imports dispute proof
      building and hanko batch signing instead of using `await import()` in the
      hot proposal path.
