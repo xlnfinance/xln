@@ -8,6 +8,7 @@ import { ethers } from 'ethers';
 import { getCachedSignerAddress } from './account-crypto';
 import { createJAdapter } from './jadapter';
 import { buildJAdapterConfigFromJurisdiction } from './jadapter/jurisdiction';
+import { createStructuredLogger, shortHash, shortId } from './logger';
 import { compareStableText } from './serialization-utils';
 import type { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
 import { DEBUG } from './utils';
@@ -19,6 +20,7 @@ declare global {
 }
 
 let namedRequestCounter = 0;
+const factoryLog = createStructuredLogger('entity.factory');
 
 // Entity encoding utilities
 const resolveValidatorAddress = (validator: string): string => {
@@ -210,11 +212,14 @@ export const createLazyEntity = (
 ): { config: ConsensusConfig; executionTimeMs: number } => {
   const entityId = generateLazyEntityId(validators, threshold);
 
-  if (DEBUG) console.log(`🔒 Creating lazy entity: ${name}`);
-  if (DEBUG) console.log(`   EntityID: ${entityId} (quorum hash)`);
-  if (DEBUG) console.log(`   Validators: ${validators.join(', ')}`);
-  if (DEBUG) console.log(`   Threshold: ${threshold}`);
-  if (DEBUG) console.log(`   🆓 FREE - No gas required`);
+  if (DEBUG) {
+    factoryLog.debug('lazy.create', {
+      name,
+      entity: shortId(entityId, 8),
+      validators: validators.map(validator => shortId(validator, 8)),
+      threshold: threshold.toString(),
+    });
+  }
 
   const shares: { [validatorId: string]: bigint } = {};
   validators.forEach(validator => {
@@ -230,7 +235,7 @@ export const createLazyEntity = (
   };
 
   const executionTimeMs = 0;
-  if (DEBUG) console.log(`⚡ Lazy entity creation: ${executionTimeMs.toFixed(3)}ms (pure in-memory)`);
+  if (DEBUG) factoryLog.debug('lazy.created', { name, entity: shortId(entityId, 8), executionTimeMs });
 
   return { config, executionTimeMs };
 };
@@ -256,10 +261,13 @@ export const createNumberedEntity = async (
     }),
   );
 
-  if (DEBUG) console.log(`🔢 Creating numbered entity: ${name}`);
-  if (DEBUG) console.log(`   Board Hash: ${boardHash}`);
-  if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
-  if (DEBUG) console.log(`   💸 Gas required for registration`);
+  if (DEBUG) {
+    factoryLog.debug('numbered.create', {
+      name,
+      board: shortHash(boardHash),
+      jurisdiction: jurisdiction.name,
+    });
+  }
 
   try {
     const jadapter = await createJAdapter(buildJAdapterConfigFromJurisdiction(jurisdiction));
@@ -274,8 +282,7 @@ export const createNumberedEntity = async (
 
     const entityId = generateNumberedEntityId(entityNumber);
 
-    if (DEBUG) console.log(`   ✅ Registered Entity Number: ${entityNumber}`);
-    if (DEBUG) console.log(`   EntityID: ${entityId}`);
+    if (DEBUG) factoryLog.debug('numbered.registered', { name, entityNumber, entity: shortId(entityId, 8) });
 
     const shares: { [validatorId: string]: bigint } = {};
     validators.forEach(validator => {
@@ -292,7 +299,10 @@ export const createNumberedEntity = async (
 
     return { config, entityNumber, entityId };
   } catch (error) {
-    console.error('❌ Failed to register numbered entity on blockchain:', error);
+    factoryLog.error('numbered.register_failed', {
+      name,
+      error: error instanceof Error ? error.message : String(error),
+    });
     throw error;
   }
 };
@@ -309,7 +319,7 @@ export const createNumberedEntitiesBatch = async (
     throw new Error('Jurisdiction required for numbered entity registration');
   }
 
-  if (DEBUG) console.log(`🔢 Batch creating ${entities.length} numbered entities in ONE transaction`);
+  if (DEBUG) factoryLog.debug('numbered.batch_create', { count: entities.length });
 
   // Build configs for all entities
   const configs: ConsensusConfig[] = entities.map(e => ({
@@ -336,7 +346,14 @@ export const createNumberedEntitiesBatch = async (
     const config = configs[i];
     if (!config) throw new Error(`Missing config for entity ${i}`);
 
-    if (DEBUG) console.log(`  ✅ Entity ${i + 1}/${entities.length}: #${entityNumber} (${entityId.slice(0, 10)}...)`);
+    if (DEBUG) {
+      factoryLog.debug('numbered.batch_registered', {
+        index: i + 1,
+        count: entities.length,
+        entityNumber,
+        entity: shortId(entityId, 8),
+      });
+    }
 
     return { config, entityNumber, entityId };
   });
@@ -352,17 +369,18 @@ export const requestNamedEntity = async (
     throw new Error('Jurisdiction required for named entity');
   }
 
-  if (DEBUG) console.log(`🏷️ Requesting named entity assignment`);
-  if (DEBUG) console.log(`   Name: ${name}`);
-  if (DEBUG) console.log(`   Target Entity Number: ${entityNumber}`);
-  if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
-  if (DEBUG) console.log(`   👑 Requires admin approval`);
+  if (DEBUG) {
+    factoryLog.debug('named.request', {
+      name,
+      entityNumber,
+      jurisdiction: jurisdiction.name,
+    });
+  }
 
   // Simulate admin assignment request (deterministic)
   const requestId = `req_${namedRequestCounter++}`;
 
-  if (DEBUG) console.log(`   📝 Name assignment request submitted: ${requestId}`);
-  if (DEBUG) console.log(`   ⏳ Waiting for admin approval...`);
+  if (DEBUG) factoryLog.debug('named.request_submitted', { name, entityNumber, requestId });
 
   return requestId;
 };
@@ -393,7 +411,7 @@ export const resolveEntityIdentifier = async (identifier: string): Promise<{ ent
   } else {
     // "coinbase" -> named entity (requires on-chain lookup)
     // For demo, simulate lookup
-    if (DEBUG) console.log(`🔍 Looking up named entity: ${identifier}`);
+    if (DEBUG) factoryLog.debug('named.lookup', { identifier });
 
     // Simulate on-chain name resolution
     const simulatedNumber = identifier === 'coinbase' ? 42 : 0;

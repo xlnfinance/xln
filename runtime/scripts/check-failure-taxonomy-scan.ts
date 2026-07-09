@@ -261,6 +261,7 @@ for (const [path, markers] of [
   ]],
   ['runtime/entity-tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity-tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
+  ['runtime/entity-factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed']],
   ['runtime/entity-consensus.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
   ['runtime/runtime-entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
   ['runtime/entity-input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
@@ -307,6 +308,10 @@ assertNotIncludes(basicHandler, 'console.', basicHandlerPath);
 const proposalHandlerPath = 'runtime/entity-tx/proposals.ts';
 const proposalHandler = readText(proposalHandlerPath);
 assertNotIncludes(proposalHandler, 'console.', proposalHandlerPath);
+
+const entityFactoryPath = 'runtime/entity-factory.ts';
+const entityFactory = readText(entityFactoryPath);
+assertNotIncludes(entityFactory, 'console.', entityFactoryPath);
 
 const entityInputMergePath = 'runtime/entity-input-merge.ts';
 const entityInputMerge = readText(entityInputMergePath);
@@ -394,6 +399,7 @@ for (const [path, markers] of [
   ['runtime/__tests__/runtime-import-readiness.test.ts', ['runtime import readiness gate', 'fatal: true']],
   ['runtime/__tests__/health-redaction.test.ts', ['public aggregated health strips child process ids', 'Latest /api/health child refresh window']],
   ['runtime/__tests__/prod-health-smoke.test.ts', ['getFatalHealthFailures']],
+  ['runtime/__tests__/entity-factory-logging.test.ts', ['entity factory uses structured logging without direct console output', 'entity.factory']],
   ['runtime/__tests__/entity-consensus-logging.test.ts', ['entity consensus core uses structured logging only', 'frame.profile']],
   ['runtime/__tests__/runtime-entity-input-logging.test.ts', ['runtime entity input j-output collection logs stay behind structured debug logging', 'inputs.profile']],
   ['runtime/__tests__/entity-input-merge.test.ts', ['uses structured logging without direct console output', 'entity.input.merge']],

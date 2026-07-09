@@ -518,6 +518,9 @@ surface area. Prefer deletion or stricter boundaries over compatibility shims.
    - Partial: basic entity proposal/vote traces now use the structured
      `entity.basic` logger instead of direct `console.*`, with both Bun source
      tests and the failure-taxonomy scan guarding regressions.
+   - Partial: entity factory creation/registration diagnostics now use the
+     structured `entity.factory` logger instead of direct `console.*`, with Bun
+     source/behavior tests and the failure-taxonomy scan guarding regressions.
    - Partial: entity consensus frame diagnostics and slow-profile notices now
      use the structured `entity` logger instead of direct `console.*`, with Bun
      source coverage and the failure-taxonomy scan guarding regressions.

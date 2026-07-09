@@ -24,12 +24,12 @@ test('createLazyEntity is silent when runtime DEBUG is disabled', () => {
   expect(messages).toEqual([]);
 });
 
-test('entity factory console logs stay behind DEBUG', () => {
+test('entity factory uses structured logging without direct console output', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/entity-factory.ts'), 'utf8');
-  const offenders = source
-    .split('\n')
-    .map((line, index) => ({ line: line.trim(), lineNumber: index + 1 }))
-    .filter(({ line }) => line.includes('console.log') && !line.includes('if (DEBUG)'));
 
-  expect(offenders).toEqual([]);
+  expect(source).toContain("const factoryLog = createStructuredLogger('entity.factory');");
+  expect(source).toContain("factoryLog.debug('lazy.create'");
+  expect(source).toContain("factoryLog.debug('numbered.create'");
+  expect(source).toContain("factoryLog.error('numbered.register_failed'");
+  expect(source).not.toContain('console.');
 });
