@@ -59,7 +59,11 @@ test('entity factory auto-create uses injected runtime env and fails loud', () =
   expect(entityFactory).toContain('env: Env,');
   expect(entityFactory).toContain('const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;');
   expect(entityFactory).toContain("throw new Error('[EntityFactory] No runtime env available for auto-create');");
-  expect(entityFactory).toContain("throw error;");
+  expect(entityFactory).toContain('available=${formatJMachineNames(env)}');
+  expect(entityFactory).toContain('Refusing to create signer entity in another jurisdiction');
+  expect(entityFactory).not.toContain('console.error');
+  expect(entityFactory).not.toContain('console.warn');
+  expect(entityFactory).not.toContain('console.info');
   expect(entityFactory).not.toContain('xlnEnvironment');
   expect(entityFactory).not.toContain('activeEnv');
   expect(entityFactory).not.toContain('return null;\n    } catch (error)');
