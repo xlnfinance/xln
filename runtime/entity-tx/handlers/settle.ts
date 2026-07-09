@@ -73,7 +73,11 @@ async function signPostSettlementDisputeProof(
     );
     return { hanko: hankos[0], proofBodyHash, disputeHash, nonce };
   } catch (e) {
-    console.warn(`⚠️ Post-settlement dispute proof signing failed: ${e instanceof Error ? e.message : String(e)}`);
+    settleLog.warn('post_settlement_dispute_sign_failed', {
+      left: shortId(account.leftEntity),
+      right: shortId(account.rightEntity),
+      error: e instanceof Error ? e.message : String(e),
+    });
     return null;
   }
 }
@@ -159,9 +163,7 @@ export async function handleSettlePropose(
   if (account.settlementWorkspace) {
     const version = account.settlementWorkspace.version;
     addMessage(newState, `⏭️ Settlement propose skipped: workspace already exists (v${version})`);
-    console.warn(
-      `⚠️ settle_propose skipped: workspace already exists for ${counterpartyEntityId.slice(-4)} (v${version})`,
-    );
+    settleLog.warn('propose.skip_workspace_exists', { counterparty: shortId(counterpartyEntityId), version });
     return { newState, outputs, mempoolOps };
   }
 
@@ -459,21 +461,19 @@ export async function handleSettleExecute(
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) {
     addMessage(newState, `⏭️ settle_execute skipped: no account with ${counterpartyEntityId.slice(-4)}`);
-    console.warn(`⚠️ settle_execute skipped: no account with ${counterpartyEntityId.slice(-4)}`);
+    settleLog.warn('execute.skip_no_account', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
   if (!account.settlementWorkspace) {
     addMessage(newState, `⏭️ settle_execute skipped: no workspace with ${counterpartyEntityId.slice(-4)}`);
-    console.warn(`⚠️ settle_execute skipped: no workspace for ${counterpartyEntityId.slice(-4)}`);
+    settleLog.warn('execute.skip_no_workspace', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
 
   const workspace = account.settlementWorkspace;
   if (workspace.status === 'submitted') {
     addMessage(newState, `⏭️ settle_execute skipped: settlement already submitted`);
-    console.warn(
-      `⚠️ settle_execute skipped: settlement already submitted for ${counterpartyEntityId.slice(-4)} (waiting for J-event finality)`,
-    );
+    settleLog.warn('execute.skip_already_submitted', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
 
@@ -482,9 +482,7 @@ export async function handleSettleExecute(
   const counterpartyHanko = iAmLeft ? workspace.rightHanko : workspace.leftHanko;
   if (!counterpartyHanko) {
     addMessage(newState, `⏭️ settle_execute skipped: missing counterparty signature`);
-    console.warn(
-      `⚠️ settle_execute skipped: missing counterparty hanko for ${counterpartyEntityId.slice(-4)} (iAmLeft=${iAmLeft})`,
-    );
+    settleLog.warn('execute.skip_missing_counterparty_hanko', { counterparty: shortId(counterpartyEntityId), iAmLeft });
     return { newState, outputs, mempoolOps };
   }
 
@@ -521,9 +519,7 @@ export async function handleSettleExecute(
   // these proofs can already be stale and the next processBatch will revert on-chain.
   if (newState.jBatchState.sentBatch) {
     addMessage(newState, `⏭️ settle_execute skipped: jBatch sentBatch pending`);
-    console.warn(
-      `⚠️ settle_execute skipped: sentBatch pending for ${counterpartyEntityId.slice(-4)} (retry after HankoBatchProcessed)`,
-    );
+    settleLog.warn('execute.skip_sent_batch_pending', { counterparty: shortId(counterpartyEntityId) });
     return { newState, outputs, mempoolOps };
   }
 
@@ -534,7 +530,7 @@ export async function handleSettleExecute(
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.entityProviderAddress) {
     addMessage(newState, '⏭️ settle_execute skipped: no entityProvider configured');
-    console.warn('⚠️ settle_execute skipped: no entityProvider configured in jurisdiction');
+    settleLog.warn('execute.skip_entity_provider_missing', { jurisdiction: jurisdiction?.name ?? 'unknown' });
     return { newState, outputs, mempoolOps };
   }
 
@@ -556,9 +552,7 @@ export async function handleSettleExecute(
     const msg = (error as Error)?.message || '';
     if (msg.includes('pending broadcast')) {
       addMessage(newState, `⏭️ settle_execute skipped: jBatch sentBatch pending`);
-      console.warn(
-        `⚠️ settle_execute skipped: sentBatch pending for ${counterpartyEntityId.slice(-4)} (retry next tick)`,
-      );
+      settleLog.warn('execute.skip_pending_broadcast', { counterparty: shortId(counterpartyEntityId) });
       return { newState, outputs, mempoolOps };
     }
     throw error;
@@ -750,7 +744,10 @@ export async function processSettleAction(
             }
           }
         } catch (e) {
-          console.warn(`⚠️ Auto-approve signing failed: ${e instanceof Error ? e.message : String(e)}`);
+          settleLog.warn('receive.auto_approve.sign_failed', {
+            from: shortId(fromEntityId),
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
       }
 

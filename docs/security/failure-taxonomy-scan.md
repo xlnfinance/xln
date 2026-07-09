@@ -38,6 +38,8 @@ warnings.
 - Dispute start/finalize traces and failures use the structured
   `entity.dispute` logger; the handler is guarded against direct `console.*`
   noise in core.
+- Settlement progress and warning traces use the structured `entity.settle`
+  logger; the handler is guarded against direct `console.*` noise in core.
 
 ## Open Manual Review
 

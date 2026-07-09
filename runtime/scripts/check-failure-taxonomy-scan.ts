@@ -262,6 +262,7 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/r2c.ts', ["createStructuredLogger('entity.r2c')"]],
   ['runtime/entity-tx/handlers/htlc-payment.ts', ["createStructuredLogger('entity.htlc')"]],
   ['runtime/entity-tx/handlers/dispute.ts', ["createStructuredLogger('entity.dispute')"]],
+  ['runtime/entity-tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ['classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
@@ -286,6 +287,10 @@ assertNotIncludes(htlcPaymentHandler, 'console.', htlcPaymentHandlerPath);
 const disputeHandlerPath = 'runtime/entity-tx/handlers/dispute.ts';
 const disputeHandler = readText(disputeHandlerPath);
 assertNotIncludes(disputeHandler, 'console.', disputeHandlerPath);
+
+const settleHandlerPath = 'runtime/entity-tx/handlers/settle.ts';
+const settleHandler = readText(settleHandlerPath);
+assertNotIncludes(settleHandler, 'console.', settleHandlerPath);
 
 for (const [path, markers] of [
   ['runtime/__tests__/failure-taxonomy.test.ts', ['runtime failure taxonomy', 'J_BATCH_LIMIT_EXCEEDED']],
