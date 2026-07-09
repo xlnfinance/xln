@@ -80,6 +80,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
     expect(banner.stdout).toContain('https://localhost:8087');
     expect(banner.stdout).toContain('http://127.0.0.1:9100/api/tower/healthz');
     expect(banner.stdout).toContain('runtime import links fetch fresh tokens into the app runtime list.');
+    expect(banner.stdout).toContain('expected remote runtimes: H1, H2, H3, MM, Custody');
     expect(banner.stdout).toContain('VITE_HTTP');
     expect(banner.stdout).not.toContain('radapter manager QA');
     expect(banner.stdout).not.toContain('radapter inspector');

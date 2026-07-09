@@ -113,6 +113,7 @@ const rows: LinkRow[] = [
 
 const labelWidth = rows.reduce((width, row) => Math.max(width, row.label.length), 0);
 const line = '='.repeat(88);
+const expectedRemoteRuntimes = ['H1', 'H2', 'H3', 'MM', 'Custody'].join(', ');
 
 console.log('');
 console.log(line);
@@ -125,6 +126,7 @@ for (const row of rows) {
 console.log('-'.repeat(88));
 console.log(`runtime import key file: ${resolve(args.keysPath)}`);
 console.log('runtime import links fetch fresh tokens into the app runtime list.');
+console.log(`expected remote runtimes: ${expectedRemoteRuntimes}`);
 console.log('logs below: ANVIL, ANVIL2, MESH, WATCH, RUNTIME, VITE, VITE_HTTP');
 console.log(line);
 console.log('');
