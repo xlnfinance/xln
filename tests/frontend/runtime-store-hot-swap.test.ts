@@ -30,7 +30,7 @@ test('runtime selector hot-swaps adapters instead of reloading the app', () => {
 test('runtime controller is the single adapter lifecycle owner', () => {
   const controllerSource = readFileSync('frontend/src/lib/stores/runtimeControllerStore.ts', 'utf8');
   const xlnStoreSource = readFileSync('frontend/src/lib/stores/xlnStore.ts', 'utf8');
-  const runtimeDropdownSource = readFileSync('frontend/src/lib/components/Runtime/RuntimeDropdown.svelte', 'utf8');
+  const contextSwitcherSource = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
   const runtimeStoreSource = readFileSync('frontend/src/lib/stores/runtimeStore.ts', 'utf8');
   const queryClientSource = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
 
@@ -61,13 +61,12 @@ test('runtime controller is the single adapter lifecycle owner', () => {
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterMode.set');
   expect(xlnStoreSource).not.toContain('appRuntimeAdapterEndpoint.set');
   expect(controllerSource).not.toContain('runtimeAdapterAuthLevel');
-  expect(runtimeDropdownSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
-  expect(runtimeDropdownSource).toContain('$runtimeControllerHandle.mode');
-  expect(runtimeDropdownSource).toContain('$runtimeControllerHandle.status');
-  expect(runtimeDropdownSource).toContain('$runtimeControllerHandle.endpoint');
-  expect(runtimeDropdownSource).not.toContain('appRuntimeAdapterMode');
-  expect(runtimeDropdownSource).not.toContain('appRuntimeAdapterStatus');
-  expect(runtimeDropdownSource).not.toContain('appRuntimeAdapterEndpoint');
+  expect(contextSwitcherSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
+  expect(contextSwitcherSource).toContain('$runtimeControllerHandle.runtimeId');
+  expect(contextSwitcherSource).toContain('$runtimeControllerHandle.permissions');
+  expect(contextSwitcherSource).not.toContain('appRuntimeAdapterMode');
+  expect(contextSwitcherSource).not.toContain('appRuntimeAdapterStatus');
+  expect(contextSwitcherSource).not.toContain('appRuntimeAdapterEndpoint');
   expect(runtimeStoreSource).toContain('export const activeRuntimeId = derived');
   expect(runtimeStoreSource).toContain('[runtimeControllerHandle, runtimes]');
   expect(runtimeStoreSource).toContain('$handle.pendingRuntimeId');
