@@ -1,0 +1,149 @@
+.sales-hero {
+  color: var(--theme-text-primary, #f4f4f5);
+  border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, #27272a) 78%, transparent);
+}
+
+.sales-hero-inner {
+  position: relative;
+  width: min(100%, 1480px);
+  margin: 0 auto;
+  padding: clamp(68px, 8vw, 124px) clamp(22px, 5.5vw, 88px) clamp(62px, 7vw, 104px);
+}
+
+.sales-hero-inner::before {
+  position: absolute;
+  top: clamp(68px, 8vw, 124px);
+  left: 0;
+  width: 3px;
+  height: clamp(96px, 12vw, 168px);
+  content: '';
+  border-radius: 999px;
+  background: var(--theme-collateral, #22c55e);
+  opacity: 0.82;
+}
+
+.sales-hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--theme-collateral, #22c55e);
+  font-size: 13px;
+  font-weight: 720;
+  letter-spacing: 0.02em;
+}
+
+.sales-hero h1 {
+  max-width: 980px;
+  margin: 22px 0 0;
+  font-size: clamp(54px, 7.4vw, 112px);
+  font-weight: 720;
+  line-height: 0.91;
+  letter-spacing: -0.067em;
+  text-wrap: balance;
+}
+
+.sales-hero h1 span {
+  color: color-mix(in srgb, var(--theme-text-primary, #f4f4f5) 36%, transparent);
+}
+
+.sales-hero-summary {
+  max-width: 790px;
+  margin: clamp(28px, 3.4vw, 48px) 0 0;
+  color: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 94%, transparent);
+  font-size: clamp(17px, 1.45vw, 21px);
+  line-height: 1.58;
+  letter-spacing: -0.012em;
+}
+
+.sales-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.sales-action {
+  min-height: 50px;
+  padding: 0 19px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 720;
+  cursor: pointer;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.sales-action.primary {
+  color: color-mix(in srgb, var(--theme-background, #09090b) 86%, black 14%);
+  background: var(--theme-collateral, #22c55e);
+  border-color: color-mix(in srgb, var(--theme-collateral, #22c55e) 76%, white 24%);
+}
+
+.sales-action.secondary {
+  color: var(--theme-text-primary, #f4f4f5);
+  border-color: color-mix(in srgb, var(--theme-card-border, #3f3f46) 88%, transparent);
+  background: color-mix(in srgb, var(--theme-card-bg, #18181b) 88%, transparent);
+}
+
+.sales-action:hover {
+  transform: translateY(-1px);
+}
+
+.sales-action.secondary:hover {
+  border-color: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 42%, transparent);
+  background: var(--theme-surface-hover, #202024);
+}
+
+.sales-action:focus-visible {
+  outline: 2px solid var(--theme-accent, #fbbf24);
+  outline-offset: 3px;
+}
+
+.action-arrow {
+  margin-left: 3px;
+}
+
+@media (max-width: 760px) {
+  .sales-hero-inner {
+    padding: 58px 20px 60px 28px;
+  }
+
+  .sales-hero-inner::before {
+    top: 59px;
+    height: 104px;
+  }
+
+  .sales-hero h1 {
+    margin-top: 18px;
+    font-size: clamp(48px, 14.5vw, 66px);
+    line-height: 0.94;
+  }
+
+  .sales-hero-summary {
+    margin-top: 26px;
+    font-size: 16px;
+    line-height: 1.55;
+  }
+
+  .sales-hero-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    margin-top: 28px;
+  }
+
+  .sales-action {
+    width: 100%;
+    min-height: 52px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sales-action {
+    transition: none;
+  }
+}

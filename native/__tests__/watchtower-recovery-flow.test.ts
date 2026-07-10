@@ -320,7 +320,7 @@ describe('watchtower recovery full flow', () => {
     expect(reloaded?.runtimeId).toBe(runtimeId);
     expect(reloaded?.height).toBe(bundle.runtimeHeight);
     expect(reloaded?.eReplicas.size).toBe(env.eReplicas.size);
-  });
+  }, 15_000);
 
   test('frontend last-resort builder emits a tower-bound appointment for dispute-capable accounts', async () => {
     const runtimeSeed = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';

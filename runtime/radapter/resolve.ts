@@ -33,6 +33,7 @@ import type {
   RuntimeAdapterEntitySummary,
   RuntimeAdapterReadQuery,
   RuntimeAdapterSolvencySummary,
+  RuntimeAdapterTimelineIndexPage,
 } from './types';
 import type { Profile } from '../networking/gossip';
 import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
@@ -1398,6 +1399,66 @@ const compactFrameRecordForRemote = (frame: StorageFrameRecord): RuntimeAdapterF
   };
 };
 
+const projectTimelineIndex = async (
+  ctx: RuntimeAdapterResolveContext,
+  query?: RuntimeAdapterReadQuery,
+): Promise<RuntimeAdapterTimelineIndexPage> => {
+  if (!ctx.readFrame) throw new RuntimeAdapterError('E_BAD_QUERY', 'timeline-index requires persisted frame storage');
+  const head = await readBestHead(ctx);
+  const latestHeight = Math.max(0, Math.min(envHeight(ctx.env), Math.floor(Number(head.latestHeight || 0))));
+  const beforeHeight = query?.beforeHeight === undefined
+    ? latestHeight + 1
+    : Math.floor(Number(query.beforeHeight));
+  if (!Number.isFinite(beforeHeight) || beforeHeight < 2) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'beforeHeight must be an integer greater than 1');
+  }
+  const limit = readBoundedLimit(query?.limit, 250);
+  const rawScanLimit = Math.floor(Number(query?.scanLimit ?? limit * 4));
+  if (!Number.isFinite(rawScanLimit) || rawScanLimit < 1) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'scanLimit must be a positive integer');
+  }
+  const scanLimit = Math.min(2_000, rawScanLimit);
+  const fromTimestamp = query?.fromTimestamp === undefined ? null : Math.floor(Number(query.fromTimestamp));
+  const toTimestamp = query?.toTimestamp === undefined ? null : Math.floor(Number(query.toTimestamp));
+  if (fromTimestamp !== null && (!Number.isFinite(fromTimestamp) || fromTimestamp < 0)) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'fromTimestamp must be a non-negative integer');
+  }
+  if (toTimestamp !== null && (!Number.isFinite(toTimestamp) || toTimestamp < 0)) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'toTimestamp must be a non-negative integer');
+  }
+  const runtimeId = normalizeEntityId(String(ctx.env.runtimeId || '')) || 'embedded';
+  const entries: RuntimeAdapterTimelineIndexPage['entries'] = [];
+  let cursor = Math.min(latestHeight, beforeHeight - 1);
+  let scannedHeights = 0;
+  while (cursor >= 1 && scannedHeights < scanLimit && entries.length < limit) {
+    const frame = await ctx.readFrame(cursor);
+    cursor -= 1;
+    scannedHeights += 1;
+    if (!frame) continue;
+    const timestamp = Math.max(0, Math.floor(Number(frame.timestamp || 0)));
+    if (fromTimestamp !== null && timestamp < fromTimestamp) continue;
+    if (toTimestamp !== null && timestamp > toTimestamp) continue;
+    entries.push({
+      runtimeId,
+      height: Math.max(1, Math.floor(Number(frame.height || 0))),
+      timestamp,
+      stateHash: String(frame.stateHash || ''),
+      materialized: frame.materializedState === true,
+      graphChanged: (frame.touchedEntities?.length ?? 0) > 0
+        || (frame.touchedAccounts?.length ?? 0) > 0
+        || (frame.touchedBookEntities?.length ?? 0) > 0,
+    });
+  }
+  entries.sort((left, right) => left.timestamp - right.timestamp || left.height - right.height);
+  return {
+    runtimeId,
+    latestHeight,
+    entries,
+    scannedHeights,
+    nextBeforeHeight: cursor >= 1 ? cursor + 1 : null,
+  };
+};
+
 const projectActivityPage = async (
   ctx: RuntimeAdapterResolveContext,
   query?: RuntimeAdapterReadQuery,
@@ -1511,6 +1572,10 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
   if (parts.length === 1 && parts[0] === 'history-frame-batch') {
     return await projectHistoryFrameBatch(ctx, query) as T;
+  }
+
+  if (parts.length === 1 && parts[0] === 'timeline-index') {
+    return await projectTimelineIndex(ctx, query) as T;
   }
 
   if (parts.length === 1 && parts[0] === 'activity') {

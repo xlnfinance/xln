@@ -190,6 +190,8 @@ import type {
 	  RuntimeAdapterEntitySummary,
 	  RuntimeAdapterReadQuery,
 	  RuntimeAdapterSolvencySummary,
+	  RuntimeAdapterTimelineIndexPage,
+	  RuntimeAdapterTimelineFrame,
 	} from './radapter/types';
 
 export type QueueEntityInputPayload = {
@@ -226,6 +228,8 @@ export type {
 	  RuntimeAdapterActivityPage,
 	  RuntimeAdapterEntitySummary,
 	  RuntimeAdapterSolvencySummary,
+	  RuntimeAdapterTimelineIndexPage,
+	  RuntimeAdapterTimelineFrame,
 	};
 
 export type P2PConfig = {

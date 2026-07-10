@@ -10,6 +10,10 @@ import {
 } from '../utils/ui-style';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { errorLog } from './errorLogStore';
+import {
+  DEFAULT_XLN_MASCOT_DOCK,
+  normalizeXlnMascotDock,
+} from '$lib/components/XlnMascot/mascot-geometry';
 
 const VALID_BAR_COLOR_MODES: readonly BarColorMode[] = ['rgy', 'theme', 'token'] as const;
 const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-token', 'aggregated'] as const;
@@ -47,6 +51,8 @@ const defaultSettings: Settings = {
   tokenPrecision: 4, // 2..18 digits after decimal for token amounts (18 = full)
   showTokenIcons: true,
   showTimeMachine: false, // Off by default to reduce visual noise in wallet mode
+  showXlnMascot: true,
+  xlnMascotDock: DEFAULT_XLN_MASCOT_DOCK,
   dropdownMode: 'signer-first',
   runtimeDelay: 0, // 0 = no artificial frame delay (controls env.runtimeConfig.minFrameDelayMs)
   balanceRefreshMs: CANONICAL_BALANCE_REFRESH_MS, // One canonical wallet snapshot per second
@@ -96,6 +102,10 @@ const settingsOperations = {
         if (typeof parsed.showTimeMachine !== 'boolean') {
           parsed.showTimeMachine = defaultSettings.showTimeMachine;
         }
+        if (typeof parsed.showXlnMascot !== 'boolean') {
+          parsed.showXlnMascot = defaultSettings.showXlnMascot;
+        }
+        parsed.xlnMascotDock = normalizeXlnMascotDock(parsed.xlnMascotDock);
         if (typeof parsed.liteMode !== 'boolean') {
           parsed.liteMode = defaultSettings.liteMode;
         }
@@ -238,6 +248,16 @@ const settingsOperations = {
 
   setShowTimeMachine(show: boolean) {
     settings.update(current => ({ ...current, showTimeMachine: !!show }));
+    this.saveToStorage();
+  },
+
+  setShowXlnMascot(show: boolean) {
+    settings.update(current => ({ ...current, showXlnMascot: !!show }));
+    this.saveToStorage();
+  },
+
+  setXlnMascotDock(dock: unknown) {
+    settings.update(current => ({ ...current, xlnMascotDock: normalizeXlnMascotDock(dock) }));
     this.saveToStorage();
   },
 

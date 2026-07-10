@@ -551,6 +551,18 @@
           on:change={(event) => settingsOperations.setShowTimeMachine((event.currentTarget as HTMLInputElement).checked)}
         />
       </label>
+      <label class="settings-control settings-control--toggle">
+        <span class="settings-control-copy">
+          <strong>xln guide</strong>
+          <small>Show the draggable logo and local AI mini-chat.</small>
+        </span>
+        <input
+          type="checkbox"
+          data-testid="settings-xln-mascot-toggle"
+          checked={$settings.showXlnMascot}
+          on:change={(event) => settingsOperations.setShowXlnMascot((event.currentTarget as HTMLInputElement).checked)}
+        />
+      </label>
     </section>
   {:else}
 

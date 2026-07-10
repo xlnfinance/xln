@@ -18,6 +18,7 @@
   import type { Tab } from '$lib/types/ui';
   import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
 
   // Props from Dockview panel params (Svelte 5 runes syntax)
   let {
@@ -37,7 +38,7 @@
     runtimeFrameHistory?: Writable<EnvSnapshot[]>;
     runtimeFrameTimeIndex?: Writable<number>;
     runtimeFrameIsLive?: Writable<boolean>;
-    initialAction?: 'r2r' | 'r2c';
+    initialAction?: EntityOpenAction;
   } = $props();
 
   const localTab: Tab = $derived({

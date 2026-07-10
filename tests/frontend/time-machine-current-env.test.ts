@@ -1,12 +1,144 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runtimeControllerHandle } from '../../frontend/src/lib/stores/runtimeControllerStore';
+import { runtimeQueryClient } from '../../frontend/src/lib/stores/runtimeQueryClient';
+import {
+  assertRuntimeViewIsLive,
+  normalizeRuntimeViewAtHeight,
+  resetRuntimeView,
+  runtimeView,
+  runtimeViewFrameMatchesAtHeight,
+  runtimeViewQueryAtHeight,
+  setRuntimeViewAtHeight,
+} from '../../frontend/src/lib/stores/runtimeViewStore';
 
 const repoRoot = process.cwd();
 
 const read = (path: string) => readFileSync(join(repoRoot, path), 'utf8');
+const readStore = <T>(store: { subscribe: (run: (value: T) => void) => () => void }): T => {
+  let current!: T;
+  const unsubscribe = store.subscribe((value) => { current = value; });
+  unsubscribe();
+  return current;
+};
+
+const originalReadHead = runtimeQueryClient.readHead.bind(runtimeQueryClient);
+const originalReadViewFrame = runtimeQueryClient.readViewFrame.bind(runtimeQueryClient);
+
+afterEach(() => {
+  runtimeQueryClient.readHead = originalReadHead;
+  runtimeQueryClient.readViewFrame = originalReadViewFrame;
+  runtimeControllerHandle.set({
+    id: 'embedded',
+    runtimeId: 'embedded',
+    pendingRuntimeId: '',
+    mode: 'embedded',
+    endpoint: 'embedded',
+    permissions: 'write',
+    status: 'disconnected',
+    height: 0,
+    authLevel: null,
+  });
+  resetRuntimeView();
+});
 
 describe('frontend time-machine current env contract', () => {
+  test('selected historical height is part of the shared RuntimeView query', () => {
+    expect(normalizeRuntimeViewAtHeight(null)).toBeNull();
+    expect(normalizeRuntimeViewAtHeight(7.9)).toBe(7);
+    expect(() => normalizeRuntimeViewAtHeight(0)).toThrow('positive integer');
+
+    expect(runtimeViewQueryAtHeight({ entityId: '0xabc', accountsLimit: 8 }, 7)).toEqual({
+      entityId: '0xabc',
+      accountsLimit: 8,
+      atHeight: 7,
+    });
+    expect(runtimeViewQueryAtHeight({ entityId: '0xabc', atHeight: 7 }, null)).toEqual({
+      entityId: '0xabc',
+    });
+    expect(runtimeViewFrameMatchesAtHeight({ height: 7 } as never, 7)).toBe(true);
+    expect(runtimeViewFrameMatchesAtHeight({ height: 8 } as never, 7)).toBe(false);
+    expect(() => assertRuntimeViewIsLive({ atHeight: 7 })).toThrow('RUNTIME_COMMAND_REQUIRES_LIVE_VIEW');
+    expect(() => assertRuntimeViewIsLive({ atHeight: null })).not.toThrow();
+  });
+
+  test('returning to LIVE reloads the current frame without atHeight', async () => {
+    const queries: Array<number | undefined> = [];
+    runtimeControllerHandle.set({
+      id: 'browser-a',
+      runtimeId: 'browser-a',
+      pendingRuntimeId: '',
+      mode: 'embedded',
+      endpoint: 'embedded',
+      permissions: 'write',
+      status: 'connected',
+      height: 12,
+      authLevel: 'admin',
+    });
+    runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
+    runtimeQueryClient.readViewFrame = async (query = {}) => {
+      queries.push(query.atHeight);
+      return { height: query.atHeight ?? 12 } as never;
+    };
+    resetRuntimeView();
+
+    await setRuntimeViewAtHeight(7);
+    expect(readStore(runtimeView)).toMatchObject({ atHeight: 7, height: 7, frame: { height: 7 } });
+
+    await setRuntimeViewAtHeight(null);
+    expect(readStore(runtimeView)).toMatchObject({ atHeight: null, height: 12, frame: { height: 12 } });
+    expect(queries).toEqual([7, undefined]);
+  });
+
+  test('a stale historical failure cannot overwrite a newer LIVE selection', async () => {
+    let rejectHistorical!: (error: Error) => void;
+    runtimeControllerHandle.set({
+      id: 'browser-a',
+      runtimeId: 'browser-a',
+      pendingRuntimeId: '',
+      mode: 'embedded',
+      endpoint: 'embedded',
+      permissions: 'write',
+      status: 'connected',
+      height: 12,
+      authLevel: 'admin',
+    });
+    runtimeQueryClient.readHead = async () => ({ latestHeight: 12 }) as never;
+    runtimeQueryClient.readViewFrame = async (query = {}) => {
+      if (query.atHeight === 7) {
+        return new Promise((_, reject) => { rejectHistorical = reject; });
+      }
+      return { height: 12 } as never;
+    };
+    resetRuntimeView();
+
+    const historical = setRuntimeViewAtHeight(7);
+    const live = setRuntimeViewAtHeight(null);
+    await live;
+    rejectHistorical(new Error('stale historical read failed'));
+
+    await expect(historical).resolves.toMatchObject({ atHeight: null, frame: { height: 12 } });
+    expect(readStore(runtimeView)).toMatchObject({ atHeight: null, height: 12, frame: { height: 12 }, error: null });
+  });
+
+  test('TimeMachine publishes its selected frame through RuntimeView for browser and remote runtimes', () => {
+    const timeMachine = read('frontend/src/lib/view/core/TimeMachine.svelte');
+    const workspace = read('frontend/src/lib/components/Entity/EntityWorkspace.svelte');
+    const chrome = read('frontend/src/lib/components/Entity/EntityPanelChrome.svelte');
+    const xlnStore = read('frontend/src/lib/stores/xlnStore.ts');
+
+    expect(timeMachine).toContain('setRuntimeViewAtHeight');
+    expect(timeMachine).toContain('selectedRuntimeViewHeight');
+    expect(timeMachine).toContain('`${$runtimeControllerHandle.id}|${$isLive');
+    expect(workspace).toContain('$runtimeView.atHeight');
+    expect(workspace).toContain('runtimeViewFrameMatchesAtHeight');
+    expect(xlnStore.match(/assertRuntimeViewIsLive\(get\(runtimeView\)\)/g)).toHaveLength(2);
+    expect(xlnStore.match(/assertNetworkMachineIsLive\(get\(networkMachineRuntime\)\)/g)).toHaveLength(2);
+    expect(chrome).not.toContain('Viewing historical state');
+    expect(chrome).not.toContain('history-warning');
+  });
+
   test('TimeMachine keeps -1 as the only live cursor sentinel', () => {
     const source = read('frontend/src/lib/view/core/TimeMachine.svelte');
 

@@ -24,47 +24,45 @@ test('DockRoot resolves entity panel seeds through RuntimeView projections', () 
   expect(source).not.toContain('parameters.api?.close?.()');
 });
 
-test('DockRoot keeps Dev Lab Architect out of the default operator cockpit', () => {
+test('DockRoot treats Dock mode itself as the developer workspace without a devLab gate', () => {
   const source = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
 
-  expect(source).toContain('const LEGACY_DEV_PANEL_NAMES = new Set');
-  expect(source).toContain('function resolveDevLabEnabled');
-  expect(source).toContain("params.get('devLab') === '1'");
-  expect(source).toContain("localStorage.getItem('xln-dev-lab') === '1'");
-  expect(source).toContain('function layoutRequiresDevLab');
-  expect(source).toContain('function panelRequiresDevLab');
-  expect(source).toContain('if (!devLabEnabled && panelRequiresDevLab(options.name))');
   expect(source).toContain("void import('./panels/ArchitectPanel.svelte')");
-  expect(source).toContain('if (devLabEnabled) {');
-  expect(source).toContain("title: '🎬 Dev Lab'");
-  expect(source).toContain("position: { direction: 'within', referencePanel: primaryDockReferencePanel() }");
-  expect(source).toContain("showEntityPanelStatus(div, 'Legacy Dev Lab panel is disabled for the operator cockpit.', true)");
+  expect(source).toContain("title: '🎬 Architect'");
+  expect(source).toContain("position: { direction: 'below', referencePanel: 'wallet-main' }");
+  expect(source).not.toContain('devLabEnabled');
+  expect(source).not.toContain('xln-dev-lab');
+  expect(source).not.toContain('LEGACY_DEV_PANEL_NAMES');
   expect(source).not.toContain("import ArchitectPanel from './panels/ArchitectPanel.svelte'");
-  expect(source).not.toContain("title: '🎬 Architect'");
-  expect(source).not.toContain("architectPanel?.api.setActive()");
 });
 
-test('DockRoot does not auto-mount raw Env legacy panels in the default operator cockpit', () => {
+test('DockRoot defaults to Graph left plus pinned wallet and tools on the right', () => {
   const source = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
-  const defaultPanelStart = source.indexOf("ensurePanel({\n      id: 'graph3d'");
-  const restoreStart = source.indexOf('if (shouldRestoreLayout && savedLayout)');
-  expect(defaultPanelStart).toBeGreaterThan(0);
-  expect(restoreStart).toBeGreaterThan(defaultPanelStart);
-  const defaultPanelSource = source.slice(defaultPanelStart, restoreStart);
-  const devLabBlockStart = defaultPanelSource.indexOf('if (devLabEnabled) {');
-  expect(devLabBlockStart).toBeGreaterThan(0);
-  const gossipPanelStart = defaultPanelSource.indexOf("ensurePanel({\n      id: 'gossip'");
-  expect(gossipPanelStart).toBeGreaterThan(devLabBlockStart);
-  const operatorDefaultSource = `${defaultPanelSource.slice(0, devLabBlockStart)}${defaultPanelSource.slice(gossipPanelStart)}`;
-  const devLabSource = defaultPanelSource.slice(devLabBlockStart, gossipPanelStart);
 
-  for (const panelId of ['architect', 'jurisdiction', 'runtime-io', 'settings']) {
-    expect(operatorDefaultSource).not.toContain(`id: '${panelId}'`);
-    expect(devLabSource).toContain(`id: '${panelId}'`);
+  expect(source).toContain("id: 'graph3d'");
+  expect(source).toContain("id: 'wallet-main'");
+  expect(source).toContain("component: 'wallet'");
+  expect(source).toContain("tabComponent: 'pinned-tab'");
+  expect(source).toContain("position: { direction: 'right', referencePanel: 'graph3d' }");
+  expect(source).toContain("position: { direction: 'below', referencePanel: 'wallet-main' }");
+  for (const panelId of [
+    'runtime-io',
+    'settings',
+    'console',
+    'gossip',
+    'solvency',
+    'entity-audit',
+    'jmachine-inspector',
+    'runtime-manager',
+    'leveldb-inspector',
+    'runtime-diagnostics',
+  ]) {
+    expect(source).toContain(`id: '${panelId}'`);
   }
-  expect(operatorDefaultSource).toContain("id: 'graph3d'");
-  expect(operatorDefaultSource).toContain("id: 'gossip'");
-  expect(devLabSource).not.toContain("id: 'gossip'");
+  expect(source).toContain("import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte'");
+  expect(source).toContain("import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte'");
+  expect(source).toContain("appStateOperations.setMode('user')");
+  expect(source).toContain('showDockTimeMachine = !embedMode || $settings.showTimeMachine');
 });
 
 test('DockRoot blocks Env-only panels on remote runtimes instead of mounting blank fake Env views', () => {
@@ -72,12 +70,13 @@ test('DockRoot blocks Env-only panels on remote runtimes instead of mounting bla
 
   expect(source).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
   expect(source).toContain('const ENV_ONLY_PANEL_NAMES = new Set');
-  expect(source).toContain("'graph3d'");
   const envOnlyStart = source.indexOf('const ENV_ONLY_PANEL_NAMES = new Set');
   const envOnlyEnd = source.indexOf(']);', envOnlyStart);
   expect(envOnlyStart).toBeGreaterThan(0);
   expect(envOnlyEnd).toBeGreaterThan(envOnlyStart);
   expect(source.slice(envOnlyStart, envOnlyEnd)).not.toContain("'solvency'");
+  expect(source.slice(envOnlyStart, envOnlyEnd)).not.toContain("'graph3d'");
+  expect(source.slice(envOnlyStart, envOnlyEnd)).not.toContain("'settings'");
   expect(source).toContain('function shouldBlockRemoteEnvOnlyPanel');
   expect(source).toContain("$runtimeControllerHandle.mode === 'remote'");
   expect(source).toContain('panelRequiresRuntimeEnv(panelName)');
@@ -89,4 +88,23 @@ test('DockRoot blocks Env-only panels on remote runtimes instead of mounting bla
   expect(source).toContain('showRemoteProjectionBoundary(div, options.name)');
   expect(source).toContain('embedded-only until its projection endpoint is available');
   expect(source).toContain('Remote runtime state is readable in Entity, Gossip, Activity, and Time Machine.');
+});
+
+test('Dock entity opening replaces the pinned wallet by default and supports explicit new tabs', () => {
+  const dock = readFileSync('frontend/src/lib/view/DockRoot.svelte', 'utf8');
+  const wallet = readFileSync('frontend/src/lib/view/UserModePanel.svelte', 'utf8');
+  const settings = readFileSync('frontend/src/lib/view/panels/SettingsPanel.svelte', 'utf8');
+
+  expect(dock).toContain("localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab'");
+  expect(dock).toContain("panelBridge.emit('dock:selectEntity'");
+  expect(dock).toContain("dockview.getPanel('wallet-main')?.api.setActive()");
+  expect(wallet).toContain("panelBridge.on('dock:selectEntity'");
+  expect(wallet).toContain('dockMode = false');
+  expect(settings).toContain('data-testid="dock-entity-open-mode"');
+  expect(settings).toContain('Replace pinned Main Wallet');
+  expect(settings).toContain('Open a new entity tab');
+  expect(settings).toContain('data-testid="network-machine-timeline-mode"');
+  expect(settings).toContain("focusDockPanel('leveldb-inspector')");
+  expect(settings).toContain("focusDockPanel('entity-audit')");
+  expect(settings).toContain('TabStylePicker');
 });

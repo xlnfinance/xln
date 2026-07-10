@@ -24,6 +24,7 @@ import {
 } from './runtimeHistoryStore';
 import { clearRuntimeQueryCache, runtimeQueryClient, type RuntimeReceiptStatus } from './runtimeQueryClient';
 import {
+  assertRuntimeViewIsLive,
   runtimeView,
   resetRuntimeView,
   resetRuntimeViewSelection,
@@ -33,6 +34,7 @@ import {
   runtimeViewBooksPage,
   runtimeViewPageInfo,
 } from './runtimeViewStore';
+import { assertNetworkMachineIsLive, networkMachineRuntime } from './networkMachineRuntimeStore';
 import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import {
@@ -1449,6 +1451,8 @@ const resolveActiveRuntimeCommandEnv = async (xln: XLNModule): Promise<Env> => {
 };
 
 export async function submitActiveRuntimeInput(input: RuntimeInput): Promise<Env | null> {
+  assertRuntimeViewIsLive(get(runtimeView));
+  assertNetworkMachineIsLive(get(networkMachineRuntime));
   const adapter = getRuntimeControllerAdapter();
   const handle = get(runtimeControllerHandle);
   if (adapter?.mode === 'remote' && handle.mode === 'remote') {
@@ -1460,6 +1464,8 @@ export async function submitActiveRuntimeInput(input: RuntimeInput): Promise<Env
 }
 
 export async function dispatchRuntimeInputToRuntimeEnv(env: Env, input: RuntimeInput): Promise<Env | null> {
+  assertRuntimeViewIsLive(get(runtimeView));
+  assertNetworkMachineIsLive(get(networkMachineRuntime));
   const xln = await getXLN();
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   if (input.entityInputs?.length) {

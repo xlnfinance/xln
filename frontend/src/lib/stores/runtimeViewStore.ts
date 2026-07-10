@@ -18,6 +18,7 @@ export type RuntimeView = {
   mode: 'embedded' | 'remote';
   authLevel: 'inspect' | 'admin' | null;
   status: RuntimeAdapterStatus;
+  atHeight: number | null;
   height: number;
   loading: boolean;
   error: string | null;
@@ -73,6 +74,39 @@ export const runtimeViewPageNeedsNavigation = (
 
 const normalizeEntityIdForRuntimeView = (value: unknown): string => String(value || '').trim().toLowerCase();
 
+export const normalizeRuntimeViewAtHeight = (value: number | null | undefined): number | null => {
+  if (value === null || value === undefined) return null;
+  const height = Math.floor(Number(value));
+  if (!Number.isFinite(height) || height < 1) {
+    throw new Error('RuntimeView historical height must be a positive integer');
+  }
+  return height;
+};
+
+export const runtimeViewQueryAtHeight = (
+  query: RuntimeAdapterReadQuery,
+  atHeight: number | null,
+): RuntimeAdapterReadQuery => {
+  const next = { ...query };
+  if (atHeight === null) delete next.atHeight;
+  else next.atHeight = atHeight;
+  return next;
+};
+
+export const runtimeViewFrameMatchesAtHeight = (
+  frame: RuntimeAdapterViewFrame | null | undefined,
+  atHeight: number | null,
+): boolean => {
+  if (!frame) return false;
+  if (atHeight === null) return true;
+  return Math.max(0, Math.floor(Number(frame.height || 0))) === atHeight;
+};
+
+export const assertRuntimeViewIsLive = (view: Pick<RuntimeView, 'atHeight'>): void => {
+  if (view.atHeight === null) return;
+  throw new Error(`RUNTIME_COMMAND_REQUIRES_LIVE_VIEW: selected=h${view.atHeight}`);
+};
+
 export const emptyRuntimeViewHistoryScan = (endpoint = ''): RuntimeViewHistoryScanState => ({
   loading: false,
   error: null,
@@ -116,14 +150,17 @@ export const resetRuntimeViewSelection = (): void => {
   runtimeViewHistoryScan.set(emptyRuntimeViewHistoryScan());
 };
 
-const emptyRuntimeView = (): RuntimeView => {
+let selectedRuntimeViewHeight: number | null = null;
+
+const emptyRuntimeView = (atHeight = selectedRuntimeViewHeight): RuntimeView => {
   const handle = get(runtimeControllerHandle);
   return {
     runtimeId: handle.id,
     mode: handle.mode,
     authLevel: handle.authLevel,
     status: handle.status,
-    height: handle.height,
+    atHeight,
+    height: atHeight ?? handle.height,
     loading: false,
     error: null,
     head: null,
@@ -145,19 +182,23 @@ export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
 export const resetRuntimeView = (): void => {
   runtimeViewRefreshId += 1;
   pendingHeightRefresh = 0;
+  selectedRuntimeViewHeight = null;
   runtimeView.set(emptyRuntimeView());
 };
 
-export const refreshRuntimeView = async (query: RuntimeAdapterReadQuery = {}): Promise<RuntimeView> => {
+export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {}): Promise<RuntimeView> => {
   const refreshId = ++runtimeViewRefreshId;
   const handle = get(runtimeControllerHandle);
   const expectedRuntimeId = handle.id;
   const expectedRuntimeMode = handle.mode;
+  const expectedAtHeight = selectedRuntimeViewHeight;
+  const query = runtimeViewQueryAtHeight(inputQuery, expectedAtHeight);
   const requestStillCurrent = (): boolean => {
     const current = get(runtimeControllerHandle);
     return refreshId === runtimeViewRefreshId &&
       current.id === expectedRuntimeId &&
-      current.mode === expectedRuntimeMode;
+      current.mode === expectedRuntimeMode &&
+      selectedRuntimeViewHeight === expectedAtHeight;
   };
   runtimeView.update((view) => ({
     ...view,
@@ -165,14 +206,15 @@ export const refreshRuntimeView = async (query: RuntimeAdapterReadQuery = {}): P
     mode: handle.mode,
     authLevel: handle.authLevel,
     status: handle.status,
-    height: handle.height,
+    atHeight: expectedAtHeight,
+    height: expectedAtHeight ?? handle.height,
     loading: true,
     error: null,
   }));
 
   if (handle.status !== 'connected') {
     const next: RuntimeView = {
-      ...emptyRuntimeView(),
+      ...emptyRuntimeView(expectedAtHeight),
       loading: false,
       error: 'Runtime adapter is not connected',
     };
@@ -185,13 +227,17 @@ export const refreshRuntimeView = async (query: RuntimeAdapterReadQuery = {}): P
       runtimeQueryClient.readHead(),
       runtimeQueryClient.readViewFrame(query),
     ]);
+    if (!runtimeViewFrameMatchesAtHeight(frame, expectedAtHeight)) {
+      throw new Error(`RuntimeView returned h${Number(frame.height || 0)} for selected h${expectedAtHeight}`);
+    }
     const current = get(runtimeControllerHandle);
     const next: RuntimeView = {
       runtimeId: current.id,
       mode: current.mode,
       authLevel: current.authLevel,
       status: current.status,
-      height: Math.max(Number(current.height || 0), Number(frame.height || 0), Number(head.latestHeight || 0)),
+      atHeight: expectedAtHeight,
+      height: expectedAtHeight ?? Math.max(Number(current.height || 0), Number(frame.height || 0), Number(head.latestHeight || 0)),
       loading: false,
       error: null,
       head,
@@ -203,18 +249,20 @@ export const refreshRuntimeView = async (query: RuntimeAdapterReadQuery = {}): P
     runtimeView.set(next);
     return next;
   } catch (error) {
+    if (!requestStillCurrent()) return get(runtimeView);
     const current = get(runtimeControllerHandle);
     const next: RuntimeView = {
-      ...emptyRuntimeView(),
+      ...emptyRuntimeView(expectedAtHeight),
       runtimeId: current.id,
       mode: current.mode,
       authLevel: current.authLevel,
       status: current.status,
-      height: current.height,
+      atHeight: expectedAtHeight,
+      height: expectedAtHeight ?? current.height,
       loading: false,
       error: errorMessage(error),
     };
-    if (requestStillCurrent()) runtimeView.set(next);
+    runtimeView.set(next);
     throw error;
   }
 };
@@ -227,10 +275,38 @@ const currentRuntimeViewQuery = (): RuntimeAdapterReadQuery => {
     booksPage: get(runtimeViewBooksPage),
   };
   if (entityId) query.entityId = entityId;
-  return query;
+  return runtimeViewQueryAtHeight(query, selectedRuntimeViewHeight);
+};
+
+export const setRuntimeViewAtHeight = async (value: number | null): Promise<RuntimeView> => {
+  const atHeight = normalizeRuntimeViewAtHeight(value);
+  const current = get(runtimeView);
+  if (
+    selectedRuntimeViewHeight === atHeight &&
+    runtimeViewFrameMatchesAtHeight(current.frame, atHeight) &&
+    !current.loading &&
+    !current.error
+  ) {
+    return current;
+  }
+
+  selectedRuntimeViewHeight = atHeight;
+  runtimeViewRefreshId += 1;
+  pendingHeightRefresh = 0;
+  runtimeView.update((view) => ({
+    ...view,
+    atHeight,
+    height: atHeight ?? get(runtimeControllerHandle).height,
+    loading: true,
+    error: null,
+    frame: null,
+    entities: [],
+  }));
+  return refreshRuntimeView(currentRuntimeViewQuery());
 };
 
 const refreshRuntimeViewAfterHeightAdvance = async (): Promise<void> => {
+  if (selectedRuntimeViewHeight !== null) return;
   if (heightRefreshInFlight) return;
   heightRefreshInFlight = true;
   try {
@@ -248,7 +324,11 @@ const refreshRuntimeViewAfterHeightAdvance = async (): Promise<void> => {
   } finally {
     heightRefreshInFlight = false;
     const frameHeight = Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)));
-    if (pendingHeightRefresh > frameHeight && get(runtimeControllerHandle).status === 'connected') {
+    if (
+      selectedRuntimeViewHeight === null &&
+      pendingHeightRefresh > frameHeight &&
+      get(runtimeControllerHandle).status === 'connected'
+    ) {
       void refreshRuntimeViewAfterHeightAdvance();
     }
   }
@@ -262,9 +342,10 @@ runtimeAdapterHeight.subscribe((height) => {
   const nextHeight = Math.max(0, Math.floor(Number(height || 0)));
   runtimeView.update((view) => ({
     ...view,
-    height: Math.max(view.height, nextHeight),
+    height: view.atHeight ?? Math.max(view.height, nextHeight),
   }));
   const handle = get(runtimeControllerHandle);
+  if (selectedRuntimeViewHeight !== null) return;
   if (handle.status !== 'connected' || nextHeight <= 0) return;
   const frameHeight = Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)));
   if (nextHeight <= frameHeight) return;

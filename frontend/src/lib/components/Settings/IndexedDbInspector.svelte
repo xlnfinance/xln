@@ -581,7 +581,7 @@
   });
 </script>
 
-<div class="db-inspector">
+<div class="db-inspector" data-testid="leveldb-inspector">
   <div class="toolbar">
     <div class="filter-group">
       <button class:selected={selectedKind === 'all'} on:click={() => selectedKind = 'all'}>All</button>

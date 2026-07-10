@@ -84,6 +84,8 @@ export interface UiSettingsExport {
   compactNumbers: boolean;
   showTokenIcons: boolean;
   showTimeMachine: boolean;
+  showXlnMascot: boolean;
+  xlnMascotDock: XlnMascotDockPlacement;
   tokenPrecision: number;
   accountDeltaViewMode: AccountDeltaViewMode;
   portfolioScale: number;
@@ -97,6 +99,14 @@ export interface UiSettingsExport {
   barAnimGlow: boolean;
   barAnimDeltaFlash: boolean;
   barAnimRipple: boolean;
+}
+
+export type XlnMascotDockSide = 'left' | 'right' | 'top' | 'bottom';
+
+export interface XlnMascotDockPlacement {
+  version: 1;
+  side: XlnMascotDockSide;
+  offsetRatio: number;
 }
 
 export type AccountSkin = 'classic' | 'apple';
@@ -119,6 +129,8 @@ export interface Settings {
   tokenPrecision: number;
   showTokenIcons: boolean;
   showTimeMachine: boolean;
+  showXlnMascot: boolean;
+  xlnMascotDock: XlnMascotDockPlacement;
   dropdownMode: 'signer-first' | 'entity-first';
   runtimeDelay: number;
   balanceRefreshMs: number;

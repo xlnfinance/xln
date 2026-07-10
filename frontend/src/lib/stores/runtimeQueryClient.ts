@@ -7,6 +7,7 @@ import type {
   RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterReadQuery,
   RuntimeAdapterSolvencySummary,
+  RuntimeAdapterTimelineIndexPage,
   RuntimeAdapterViewFrame,
 } from '@xln/runtime/xln-api';
 import type { StorageHead } from '@xln/runtime/storage/types';
@@ -128,6 +129,10 @@ export class RuntimeQueryClient {
     return this.cachedRead<RuntimeAdapterHistoryFrameBatch>('history-frame-batch', query);
   }
 
+  readTimelineIndex(query: RuntimeAdapterReadQuery = {}): Promise<RuntimeAdapterTimelineIndexPage> {
+    return this.cachedRead<RuntimeAdapterTimelineIndexPage>('timeline-index', query);
+  }
+
   readActivity(query: RuntimeAdapterReadQuery): Promise<RuntimeAdapterActivityPage> {
     return this.cachedRead<RuntimeAdapterActivityPage>('activity', query);
   }
@@ -164,6 +169,7 @@ const exposeRuntimeAdapterDebugSurface = (): void => {
       entities: async (query?: RuntimeAdapterReadQuery) => runtimeQueryClient.readEntities(query),
       viewFrame: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readViewFrame(query),
       historyFrameBatch: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readHistoryFrameBatch(query),
+      timelineIndex: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readTimelineIndex(query),
       activity: async (query: RuntimeAdapterReadQuery) => runtimeQueryClient.readActivity(query),
       solvencySummary: async (query: RuntimeAdapterReadQuery = {}) => runtimeQueryClient.readSolvencySummary(query),
       checkpoints: async () => runtimeQueryClient.readCheckpoints(),

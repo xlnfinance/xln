@@ -196,6 +196,7 @@ xln.formatEntity(xln.getEnv().eReplicas.values().next().value.state)
 - Security-critical code needs rich comments with counterexamples: explain why the design rejects tempting alternatives, especially for dispute arguments, cross-j orderbook lifecycle, and adversarial inputs.
 - Dispute transformer arguments are adversarial optional evidence: malformed args soft-fail to empty/no-op; signed ProofBody, nonces, hashes, and account state stay fail-fast.
 - Test progression must be L1 narrow -> L2 targeted flow -> L3 broad gate; avoid large e2e batches while a single failure is still being isolated.
+- Every visual feature requires screenshot-driven E2E coverage at its key states. Inspect and score every screenshot, fix every visible defect before reporting completion, and verify mobile/iPhone, laptop, and wide desktop/Mac Studio viewports so all users receive the same polished result.
 ## 🔍 EXTERNAL AUDIT RULE
 
 **Never blindly trust subagent or external audit findings.**

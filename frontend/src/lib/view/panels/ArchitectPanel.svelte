@@ -1824,7 +1824,7 @@
 
 </script>
 
-<div class="architect-panel">
+<div class="architect-panel" data-testid="architect-panel">
   <div class="header">
     <h3> Architect</h3>
   </div>

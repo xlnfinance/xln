@@ -11,14 +11,21 @@
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
   import GossipPanel from './panels/GossipPanel.svelte';
+  import DockEntityAuditPanel from './panels/DockEntityAuditPanel.svelte';
+  import JMachineInspectorPanel from './panels/JMachineInspectorPanel.svelte';
+  import RuntimeDiagnosticsPanel from './panels/RuntimeDiagnosticsPanel.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
+  import RemoteRuntimeManager from '$lib/components/Runtime/RemoteRuntimeManager.svelte';
+  import IndexedDbInspector from '$lib/components/Settings/IndexedDbInspector.svelte';
+  import UserModePanel from './UserModePanel.svelte';
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
-  import { panelBridge } from './utils/panelBridge';
+  import { panelBridge, type EntityOpenAction } from './utils/panelBridge';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { settings } from '$lib/stores/settingsStore';
   import { refreshRuntimeView } from '$lib/stores/runtimeViewStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
+  import { appStateOperations } from '$lib/stores/appStateStore';
   import 'dockview/dist/styles/dockview.css';
 
   export let embedMode = false;
@@ -37,9 +44,9 @@
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
   let showSidebarInEmbed = false;
-  let devLabEnabled = false;
+  $: showDockTimeMachine = !embedMode || $settings.showTimeMachine;
 
-  type EntityPanelSeed = { entityId: string; entityName: string; signerId: string; action?: 'r2r' | 'r2c' };
+  type EntityPanelSeed = { entityId: string; entityName: string; signerId: string; action?: EntityOpenAction };
   type DockviewInitParams = { api: { id: string; close?: () => void } };
   type DockviewWindow = Window & { __dockview_instance?: DockviewComponent };
   type ActivePanelRef = { id?: string; api?: { id?: string } } | undefined;
@@ -47,40 +54,13 @@
 
   const graphInitSignal = writable<boolean>(embedMode);
   const pendingEntityData = new Map<string, EntityPanelSeed>();
-  const LEGACY_DEV_PANEL_NAMES = new Set([
+  const ENV_ONLY_PANEL_NAMES = new Set([
     'architect',
     'console',
     'runtime-io',
-    'settings',
     'jurisdiction',
+    'jmachine-inspector',
   ]);
-  const ENV_ONLY_PANEL_NAMES = new Set([
-    'graph3d',
-    ...LEGACY_DEV_PANEL_NAMES,
-  ]);
-
-  function resolveDevLabEnabled(): boolean {
-    if (typeof window === 'undefined') return false;
-    const params = new URLSearchParams(window.location.search);
-    return params.get('devLab') === '1' || localStorage.getItem('xln-dev-lab') === '1';
-  }
-
-  function layoutRequiresDevLab(rawLayout: string): boolean {
-    try {
-      const text = JSON.stringify(JSON.parse(rawLayout)).toLowerCase();
-      return Array.from(LEGACY_DEV_PANEL_NAMES).some((panelName) =>
-        text.includes(`"component":"${panelName}"`) ||
-        text.includes(`"id":"${panelName}"`) ||
-        text.includes(`"${panelName}"`)
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  function panelRequiresDevLab(panelName: string): boolean {
-    return LEGACY_DEV_PANEL_NAMES.has(panelName);
-  }
 
   function panelRequiresRuntimeEnv(panelName: string): boolean {
     return ENV_ONLY_PANEL_NAMES.has(panelName);
@@ -105,7 +85,7 @@
   }
 
   function primaryDockReferencePanel(): string {
-    return devLabEnabled ? 'architect' : 'graph3d';
+    return 'wallet-main';
   }
 
   function entityIdFromPanelId(panelId: string): string | null {
@@ -123,6 +103,12 @@
 
   function logDockRootDiagnostic(message: string, details?: unknown): void {
     errorLog.log(message, 'DockRoot', details);
+  }
+
+  function entityOpenMode(): 'replace' | 'new-tab' {
+    return typeof localStorage !== 'undefined' && localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab'
+      ? 'new-tab'
+      : 'replace';
   }
 
   function seedFromViewFrame(
@@ -168,26 +154,28 @@
   }
 
   onMount(() => {
-    graphInitSignal.set(embedMode);
-    devLabEnabled = resolveDevLabEnabled();
+    graphInitSignal.set(true);
 
     dockview = new DockviewComponent(container, {
       className: 'dockview-theme-dark',
+      createTabComponent: (options) => {
+        if (options.name !== 'pinned-tab') return undefined;
+        const element = document.createElement('div');
+        element.className = 'xln-pinned-dock-tab';
+        return {
+          element,
+          init: (parameters: { title: string }) => {
+            element.textContent = `📌 ${parameters.title}`;
+            element.title = 'Pinned reference panel';
+          },
+        };
+      },
       createComponent: (options) => {
         const div = document.createElement('div');
         div.style.width = '100%';
         div.style.height = '100%';
 
         let component: MountedComponent = null;
-
-        if (!devLabEnabled && panelRequiresDevLab(options.name)) {
-          showEntityPanelStatus(div, 'Legacy Dev Lab panel is disabled for the operator cockpit.', true);
-          return {
-            element: div,
-            init: () => {},
-            dispose: () => {},
-          };
-        }
 
         if (shouldBlockRemoteEnvOnlyPanel(options.name)) {
           showRemoteProjectionBoundary(div, options.name);
@@ -207,6 +195,17 @@
               runtimeFrameTimeIndex,
               runtimeFrameIsLive,
               graphInitSignal,
+            },
+          });
+        } else if (options.name === 'wallet') {
+          component = mount(UserModePanel, {
+            target: div,
+            props: {
+              runtimeFrameEnv,
+              runtimeFrameHistory,
+              runtimeFrameTimeIndex,
+              runtimeFrameIsLive,
+              dockMode: true,
             },
           });
         } else if (options.name === 'brainvault') {
@@ -270,6 +269,19 @@
             target: div,
             props: {},
           });
+        } else if (options.name === 'entity-audit') {
+          component = mount(DockEntityAuditPanel, { target: div, props: {} });
+        } else if (options.name === 'jmachine-inspector') {
+          component = mount(JMachineInspectorPanel, {
+            target: div,
+            props: { runtimeFrameEnv, runtimeFrameHistory, runtimeFrameTimeIndex },
+          });
+        } else if (options.name === 'runtime-manager') {
+          component = mount(RemoteRuntimeManager, { target: div, props: {} });
+        } else if (options.name === 'leveldb-inspector') {
+          component = mount(IndexedDbInspector, { target: div, props: {} });
+        } else if (options.name === 'runtime-diagnostics') {
+          component = mount(RuntimeDiagnosticsPanel, { target: div, props: {} });
         }
 
         return {
@@ -337,12 +349,6 @@
       try {
         const config = JSON.parse(savedLayout);
         if (config.dockview) shouldRestoreLayout = true;
-        if (!devLabEnabled && layoutRequiresDevLab(savedLayout)) {
-          shouldRestoreLayout = false;
-          localStorage.removeItem('xln-workspace-layout');
-          localStorage.removeItem('xln-dockview-layout');
-          localStorage.removeItem('dockview-layout');
-        }
       } catch {
         localStorage.removeItem('xln-workspace-layout');
       }
@@ -354,73 +360,65 @@
       return dockview.addPanel(config);
     };
 
-    ensurePanel({
-      id: 'graph3d',
-      component: 'graph3d',
-      title: '🌐 Graph3D',
-      params: { closeable: false },
-    });
+    const ensureWorkspacePanels = () => {
+      ensurePanel({
+        id: 'graph3d',
+        component: 'graph3d',
+        title: 'Graph3D',
+      });
 
-    if (devLabEnabled) {
+      ensurePanel({
+        id: 'wallet-main',
+        component: 'wallet',
+        tabComponent: 'pinned-tab',
+        title: 'Main Wallet',
+        position: { direction: 'right', referencePanel: 'graph3d' },
+      });
+
       ensurePanel({
         id: 'architect',
         component: 'architect',
-        title: '🎬 Dev Lab',
-        position: { direction: 'right', referencePanel: 'graph3d' },
-        params: { closeable: false },
+        title: '🎬 Architect',
+        position: { direction: 'below', referencePanel: 'wallet-main' },
+        initialHeight: Math.max(240, Math.floor(window.innerHeight * 0.32)),
       });
 
       ensurePanel({
         id: 'jurisdiction',
         component: 'jurisdiction',
-        title: '🏛️ Jurisdiction',
-        position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
+        title: '🏛️ J-Machine',
+        position: { direction: 'right', referencePanel: 'architect' },
         inactive: true,
-        params: { closeable: false },
       });
 
-      ensurePanel({
-        id: 'runtime-io',
-        component: 'runtime-io',
-        title: '🔄 Runtime I/O',
-        position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
-        inactive: true,
-        params: { closeable: false },
-      });
+      for (const panel of [
+        { id: 'runtime-io', component: 'runtime-io', title: '🔄 Runtime I/O' },
+        { id: 'settings', component: 'settings', title: '⚙️ Settings' },
+        { id: 'console', component: 'console', title: '⌨️ Console' },
+        { id: 'gossip', component: 'gossip', title: '📡 Gossip' },
+        { id: 'solvency', component: 'solvency', title: '⚖️ Solvency' },
+        { id: 'entity-audit', component: 'entity-audit', title: '🔎 Entity Audit' },
+        { id: 'jmachine-inspector', component: 'jmachine-inspector', title: '🧬 J-State' },
+        { id: 'runtime-manager', component: 'runtime-manager', title: '🌐 Runtimes' },
+        { id: 'leveldb-inspector', component: 'leveldb-inspector', title: '🗄️ LevelDB' },
+        { id: 'runtime-diagnostics', component: 'runtime-diagnostics', title: '🩺 Diagnostics' },
+      ]) {
+        ensurePanel({
+          ...panel,
+          position: { direction: 'within', referencePanel: 'jurisdiction' },
+          inactive: true,
+        });
+      }
+    };
 
-      ensurePanel({
-        id: 'settings',
-        component: 'settings',
-        title: '⚙️ Settings',
-        position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
-        inactive: true,
-        params: { closeable: false },
-      });
-    }
-
-    ensurePanel({
-      id: 'gossip',
-      component: 'gossip',
-      title: '📡 Gossip',
-      position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
-      inactive: true,
-      params: { closeable: false },
-    });
-
-    ensurePanel({
-      id: 'solvency',
-      component: 'solvency',
-      title: '⚖️ Solvency',
-      position: { direction: 'within', referencePanel: primaryDockReferencePanel() },
-      inactive: true,
-      params: { closeable: false },
-    });
+    ensureWorkspacePanels();
 
     if (shouldRestoreLayout && savedLayout) {
       setTimeout(() => {
         try {
           const config = JSON.parse(savedLayout);
           if (config.dockview) dockview.fromJSON(config.dockview);
+          ensureWorkspacePanels();
         } catch (err) {
           logDockRootDiagnostic('Layout restore failed; clearing saved workspace layout', err);
           localStorage.removeItem('xln-workspace-layout');
@@ -430,7 +428,7 @@
       }, 100);
     } else {
       setTimeout(() => {
-        const primaryPanel = dockview.getPanel(primaryDockReferencePanel());
+        const primaryPanel = dockview.getPanel('wallet-main');
         primaryPanel?.api.setActive();
       }, 0);
     }
@@ -438,7 +436,7 @@
     const graph3dApi = dockview.getPanel('graph3d');
     if (graph3dApi) {
       setTimeout(() => {
-        const widthPercent = embedMode ? 1.0 : 0.70;
+        const widthPercent = embedMode ? 1.0 : 0.50;
         graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
       }, 100);
     }
@@ -465,6 +463,16 @@
     });
 
     unsubOpenEntity = panelBridge.on('openEntityOperations', ({ entityId, entityName, signerId, action }) => {
+      if (entityOpenMode() === 'replace') {
+        panelBridge.emit('dock:selectEntity', {
+          entityId,
+          entityName,
+          ...(signerId ? { signerId } : {}),
+          ...(action ? { action } : {}),
+        });
+        dockview.getPanel('wallet-main')?.api.setActive();
+        return;
+      }
       const panelId = `entity-${entityId}`;
       const existingPanel = dockview.panels.find((p) => p.id === panelId);
 
@@ -523,13 +531,24 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode}>
+  {#if !embedMode}
+    <button
+      type="button"
+      class="dock-exit-btn"
+      data-testid="dock-exit-user-mode"
+      on:click={() => appStateOperations.setMode('user')}
+      title="Return to the basic wallet"
+    >
+      User
+    </button>
+  {/if}
   <div
     class="view-container"
-    class:with-timemachine={$settings.showTimeMachine && !collapsed}
+    class:with-timemachine={showDockTimeMachine && !collapsed}
     bind:this={container}
   ></div>
 
-  {#if $settings.showTimeMachine}
+  {#if showDockTimeMachine}
     <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
       {#if !embedMode}
         <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
@@ -586,6 +605,32 @@
 
   .view-container.with-timemachine {
     height: calc(100dvh - 48px);
+  }
+
+  .dock-exit-btn {
+    position: fixed;
+    top: 7px;
+    right: 10px;
+    z-index: 80;
+    height: 26px;
+    padding: 0 10px;
+    border: 1px solid rgba(73, 208, 255, 0.35);
+    border-radius: 6px;
+    background: rgba(6, 15, 22, 0.92);
+    color: #a7e8ff;
+    font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    cursor: pointer;
+  }
+
+  :global(.xln-pinned-dock-tab) {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    height: 100%;
+    padding: 0 10px;
+    color: #d7eef7;
+    font-size: 12px;
+    white-space: nowrap;
   }
 
   .view-wrapper.embed-mode {

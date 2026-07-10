@@ -104,6 +104,10 @@ const compactReadQueryForLog = (query: RuntimeAdapterReadQuery | undefined): Rec
     'cursor',
     'accountsCursor',
     'booksCursor',
+    'beforeHeight',
+    'scanLimit',
+    'fromTimestamp',
+    'toTimestamp',
   ];
   const compact: Record<string, unknown> = {};
   for (const key of keys) {

@@ -17,6 +17,10 @@ import type {
   UITabStyle,
   UITypographyScale,
 } from '$lib/types/ui';
+import {
+  DEFAULT_XLN_MASCOT_DOCK,
+  normalizeXlnMascotDock,
+} from '$lib/components/XlnMascot/mascot-geometry';
 
 const VALID_DENSITY: readonly UIDensityMode[] = ['compact', 'comfortable', 'roomy'] as const;
 const VALID_RADIUS: readonly UIRadiusMode[] = ['sharp', 'soft', 'pill'] as const;
@@ -161,6 +165,8 @@ export function exportUiSettings(settings: Settings): UiSettingsExport {
     compactNumbers: !!settings.compactNumbers,
     showTokenIcons: !!settings.showTokenIcons,
     showTimeMachine: !!settings.showTimeMachine,
+    showXlnMascot: !!settings.showXlnMascot,
+    xlnMascotDock: normalizeXlnMascotDock(settings.xlnMascotDock),
     tokenPrecision: clampNumber(settings.tokenPrecision, 4, 2, 18),
     accountDeltaViewMode: settings.accountDeltaViewMode,
     portfolioScale: clampNumber(settings.portfolioScale, 5000, 1000, 10000),
@@ -194,6 +200,10 @@ export function normalizeImportedUiSettings(input: unknown): Partial<Settings> {
     compactNumbers: !!value.compactNumbers,
     showTokenIcons: !!value.showTokenIcons,
     showTimeMachine: !!value.showTimeMachine,
+    showXlnMascot: value.showXlnMascot !== false,
+    xlnMascotDock: value.xlnMascotDock
+      ? normalizeXlnMascotDock(value.xlnMascotDock)
+      : { ...DEFAULT_XLN_MASCOT_DOCK },
     tokenPrecision: clampNumber(value.tokenPrecision, 4, 2, 18),
     accountDeltaViewMode: pickOption(value.accountDeltaViewMode, VALID_ACCOUNT_DELTA_VIEW, 'per-token'),
     portfolioScale: clampNumber(value.portfolioScale, 5000, 1000, 10000),

@@ -5,6 +5,8 @@
   import type { JAdapter } from '@xln/runtime/jadapter';
   import { DISPLAY, TIME_MACHINE } from '@xln/runtime/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
+  import NetworkMachineTimeline from './NetworkMachineTimeline.svelte';
+  import { runtimeGraphScope } from '$lib/stores/runtimeGraphControlStore';
   import { panelBridge } from '../utils/panelBridge';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
@@ -12,9 +14,12 @@
     runtimeView,
     runtimeViewActiveEntityId,
     runtimeViewHistoryScan,
+    setRuntimeViewAtHeight,
     setRuntimeViewActiveEntityId,
     type RuntimeViewHistoryScanState,
   } from '$lib/stores/runtimeViewStore';
+  import { toasts } from '$lib/stores/toastStore';
+  import { appState, appStateOperations } from '$lib/stores/appStateStore';
   import {
     getXLN,
     refreshCurrentRuntimeProjection,
@@ -202,6 +207,7 @@
   let remoteEntityChanging = false;
   let pendingDeepLink: { height: number; entityId: string; runtimeId: string } | null = null;
   let deepLinkApplied = false;
+  let lastRuntimeViewSelectionKey = '';
 
   const speedOptions = [
     { value: 0.1, label: '0.1x' },
@@ -622,6 +628,24 @@
   $: selectedRuntimeHistoryHeight = isRemoteRuntime
     ? Number($runtimeHistoryFrames[selectedFrameIndex]?.height || 0)
     : Number($history[selectedFrameIndex]?.height || 0);
+  $: selectedRuntimeViewHeight = $isLive
+    ? null
+    : Math.max(0, Math.floor(selectedRuntimeHistoryHeight));
+  $: runtimeViewSelectionKey = `${$runtimeControllerHandle.id}|${$isLive ? 'live' : `h:${selectedRuntimeViewHeight}`}`;
+  $: if (runtimeViewSelectionKey !== lastRuntimeViewSelectionKey) {
+    lastRuntimeViewSelectionKey = runtimeViewSelectionKey;
+    if (!$isLive && !selectedRuntimeViewHeight) {
+      const message = 'Time Machine selected a frame without a persisted runtime height';
+      remoteScanError = message;
+      toasts.error(message);
+    } else {
+      void setRuntimeViewAtHeight(selectedRuntimeViewHeight).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || 'RuntimeView historical read failed');
+        remoteScanError = message;
+        toasts.error(`Time Machine failed: ${message}`);
+      });
+    }
+  }
   $: selectedRuntimeHistoryFrame = findRuntimeHistoryFrame($runtimeHistoryFrames, selectedRuntimeHistoryHeight);
   $: remoteHistoryFrameCount = Math.max($runtimeHistoryFrames.length, $history.length);
   $: remoteScanPlaceholder = String(Math.max(1, Math.floor(Number(selectedRuntimeHistoryFrame?.height || selectedRuntimeHistoryHeight || $runtimeControllerHandle.height || 1))));
@@ -664,6 +688,9 @@
   }
 </script>
 
+{#if $runtimeGraphScope === 'merged'}
+  <NetworkMachineTimeline />
+{:else}
 <div class="time-machine">
   <!-- Frame Navigation (LEFT - most used) -->
   <div class="frame-nav">
@@ -828,14 +855,15 @@
       disabled={$history.length === 0}
     />
     <span class="time-label end">{totalTime}</span>
-    <button class="dock-toggle-btn" on:click={() => import('$lib/stores/appStateStore').then(m => m.toggleMode())}>
-      Dock
+    <button class="dock-toggle-btn" on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}>
+      {$appState.mode === 'dev' ? 'User' : 'Dock'}
     </button>
   </div>
 
   <!-- Fed Chair Subtitle (inline, above controls) -->
   <FrameSubtitle subtitle={currentSubtitle} visible={!$isLive && currentSubtitle !== undefined} />
 </div>
+{/if}
 
 <style>
   .time-machine {

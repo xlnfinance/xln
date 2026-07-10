@@ -249,7 +249,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   export let selectedJurisdiction: string | null = null;
   export let allowHeaderAddRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
-  export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
+  import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
+  export let initialAction: EntityOpenAction | undefined = undefined;
   export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
   export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
   export let runtimeProjectionFrame: RuntimeAdapterViewFrame | null = null;
@@ -261,7 +262,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   let history: EnvSnapshot[] = [];
   let timeIndex = -1;
   let isLive = true;
-  let onGoToLive: () => void = () => {};
   $: env = embeddedRuntimeContext.env;
   $: liveEnv = embeddedRuntimeContext.liveEnv;
   $: liveEnvResolver = embeddedRuntimeContext.liveEnvResolver;
@@ -269,7 +269,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   $: history = embeddedRuntimeContext.history;
   $: timeIndex = runtimeFrameContext.timeIndex;
   $: isLive = runtimeFrameContext.isLive;
-  $: onGoToLive = runtimeFrameContext.onGoToLive;
   type DebtDrainRequest = {
     tokenId: number;
     symbol: string;
@@ -291,8 +290,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     return 'accounts';
   }
   function getInitialAccountWorkspaceTab(): AccountWorkspaceTab {
-    if (initialAction === 'r2r') return 'send';
+    if (initialAction === 'r2r' || initialAction === 'pay') return 'send';
     if (initialAction === 'r2c') return 'move';
+    if (initialAction === 'swap') return 'swap';
+    if (initialAction === 'dispute') return 'configure';
     return 'open';
   }
   let activeTab: ViewTab = getInitialTab();
@@ -3537,9 +3538,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
   function openDisputedAccount(counterpartyEntityId: string) {
     applyAccountNavigationPatch(openDisputedAccountNavigation(counterpartyEntityId));
   }
-  function goToLive() {
-    onGoToLive();
-  }
   function getPendingBatchLabelOptions() {
     return {
       activeEnv,
@@ -3641,10 +3639,8 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     {activeReplicas}
     entityNames={panelView.entityNames}
     jurisdictions={panelView.jurisdictions}
-    {activeIsLive}
     {handleJurisdictionSelect}
     {handleEntitySelect}
-    {goToLive}
   />
 
   <main class="main-scroll">

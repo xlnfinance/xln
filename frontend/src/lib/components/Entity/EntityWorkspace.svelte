@@ -1,7 +1,11 @@
 <script lang="ts">
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeCommandLatestReceipt } from '$lib/stores/runtimeCommandBus';
-  import { refreshRuntimeView, runtimeView } from '$lib/stores/runtimeViewStore';
+  import {
+    refreshRuntimeView,
+    runtimeView,
+    runtimeViewFrameMatchesAtHeight,
+  } from '$lib/stores/runtimeViewStore';
   import type { RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
   import { REMOTE_RUNTIME } from '@xln/runtime/constants';
   import type { Tab } from '$lib/types/ui';
@@ -27,7 +31,8 @@
   export let selectedJurisdiction: string | null = null;
   export let allowHeaderAddRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
-  export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
+  import type { EntityOpenAction } from '$lib/view/utils/panelBridge';
+  export let initialAction: EntityOpenAction | undefined = undefined;
   export let workspaceView: EntityWorkspaceView | null = null;
   export let runtimeFrameContext: EntityWorkspaceRuntimeFrameContext = emptyEntityWorkspaceRuntimeFrameContext;
   export let embeddedRuntimeContext: EntityWorkspaceEmbeddedRuntimeContext = emptyEntityWorkspaceEmbeddedRuntimeContext;
@@ -79,10 +84,12 @@
     const entityId = handle.mode === 'remote'
       ? (tabEntityId || runtimeActiveEntityId)
       : tabEntityId;
-    const nextKey = `${selectedRuntimeId}|${handle.status}|${entityId}`;
+    const selectedAtHeight = $runtimeView.atHeight;
+    const nextKey = `${selectedRuntimeId}|${handle.status}|${entityId}|${selectedAtHeight ?? 'live'}`;
     if (
       runtimeProjectionMatchesRuntime($runtimeView.runtimeId, selectedRuntimeId)
       && projectionFrameMatchesEntity($runtimeView.frame, entityId)
+      && runtimeViewFrameMatchesAtHeight($runtimeView.frame, selectedAtHeight)
     ) {
       workspaceProjectionKey = nextKey;
       workspaceProjectionFrame = $runtimeView.frame;
@@ -165,7 +172,7 @@
     />
   {:else}
     <section class="action-unavailable" data-testid="entity-workspace-action-unavailable">
-      Runtime action surface requires a live runtime frame.
+      Runtime action surface requires a runtime frame.
     </section>
   {/if}
 </div>

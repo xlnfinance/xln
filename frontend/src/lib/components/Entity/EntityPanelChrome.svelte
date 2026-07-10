@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { AlertTriangle } from 'lucide-svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { EntityPanelJurisdictionView } from './entity-panel-model';
   import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
@@ -13,10 +12,8 @@
   export let activeReplicas: Map<string, EntityReplica> | null = null;
   export let entityNames: Map<string, string> = new Map();
   export let jurisdictions: EntityPanelJurisdictionView[] = [];
-  export let activeIsLive = true;
   export let handleJurisdictionSelect: (event: CustomEvent<{ selected: string | null }>) => void = () => {};
   export let handleEntitySelect: (event: CustomEvent) => void = () => {};
-  export let goToLive: () => void = () => {};
 </script>
 
 {#if !hideHeader && !userModeHeader}
@@ -36,13 +33,6 @@
       on:entitySelect={handleEntitySelect}
     />
   </header>
-{/if}
-
-{#if !activeIsLive}
-  <button type="button" class="history-warning" on:click={goToLive}>
-    <AlertTriangle size={14} />
-    <span>Viewing historical state. Click to go LIVE.</span>
-  </button>
 {/if}
 
 <style>
@@ -79,23 +69,4 @@
     cursor: pointer;
   }
 
-  .history-warning {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 8px;
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 14%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 34%, transparent);
-    color: var(--theme-accent, #fbbf24);
-    font-size: 12px;
-    flex-shrink: 0;
-    border: 0;
-    width: 100%;
-    cursor: pointer;
-  }
-
-  .history-warning:hover {
-    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent);
-  }
 </style>

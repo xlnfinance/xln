@@ -70,6 +70,23 @@ export type RuntimeAdapterSolvencySummary = {
   isValid: boolean;
 };
 
+export type RuntimeAdapterTimelineFrame = {
+  runtimeId: string;
+  height: number;
+  timestamp: number;
+  stateHash: string;
+  materialized: boolean;
+  graphChanged: boolean;
+};
+
+export type RuntimeAdapterTimelineIndexPage = {
+  runtimeId: string;
+  latestHeight: number;
+  entries: RuntimeAdapterTimelineFrame[];
+  scannedHeights: number;
+  nextBeforeHeight: number | null;
+};
+
 export type RuntimeAdapterSendResult = {
   height: number;
   receipt?: RuntimeIngressReceipt;

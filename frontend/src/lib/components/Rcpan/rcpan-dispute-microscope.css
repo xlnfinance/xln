@@ -1,0 +1,17 @@
+.dispute-microscope { position: relative; display: grid; width: 100%; min-width: 0; isolation: isolate; }
+.dispute-microscope.placement-top, .dispute-microscope.placement-bottom { gap: 42px; }
+.dispute-microscope.placement-right { grid-template-columns: minmax(0, 1.55fr) minmax(520px, 1fr); align-items: center; gap: 52px; }
+.court-slot, .account-slot { position: relative; min-width: 0; }
+.placement-top .court-slot { z-index: 3; }
+.placement-bottom .court-slot { z-index: 3; }
+.placement-right .court-slot { z-index: 3; }
+
+@media (max-width: 1180px) {
+  .dispute-microscope.placement-right { grid-template-columns: 1fr; gap: 42px; }
+  .placement-right .account-slot { order: 2; }
+  .placement-right .court-slot { order: 1; }
+}
+
+@media (max-width: 680px) {
+  .dispute-microscope.placement-top, .dispute-microscope.placement-bottom, .dispute-microscope.placement-right { gap: 36px; }
+}

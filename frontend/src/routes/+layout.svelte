@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import Topbar from '$lib/components/Topbar.svelte';
 	import Toast from '$lib/components/Toast.svelte';
+	import XlnMascot from '$lib/components/XlnMascot/XlnMascot.svelte';
 	import { initializeNativeShell } from '$lib/native/capacitor';
 	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
 	import '$lib/styles/apple-glass.css';
@@ -47,6 +48,7 @@
 	});
 
 	let showTopbar = $derived(!isEmbed && chromeMode === 'site');
+	let showXlnMascot = $derived(!isEmbed && $page.url.pathname.startsWith('/app'));
 	let deployLabel = $state('');
 
 	async function loadDeployLabel(): Promise<void> {
@@ -86,6 +88,9 @@
 {/if}
 
 <Toast />
+{#if showXlnMascot}
+	<XlnMascot />
+{/if}
 {#if deployLabel && chromeMode === 'site' && !isEmbed && !skipDeployLabel}
 	<div class="build-badge">{deployLabel}</div>
 {/if}

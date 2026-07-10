@@ -3,6 +3,8 @@
  * Event bus for inter-panel communication
  */
 
+export type EntityOpenAction = 'r2r' | 'r2c' | 'pay' | 'swap' | 'dispute';
+
 type EventMap = {
   'entity:selected': { entityId: string };
   'entity:created': { entityId: string; type: string };
@@ -22,7 +24,8 @@ type EventMap = {
   'rebalance:requested': { entityId: string };
   'renderFps': number; // Real-time rendering FPS from Graph3DPanel
   'auto-demo:start': {}; // Auto-start demo in VR mode
-  'openEntityOperations': { entityId: string; entityName: string; signerId?: string; action?: 'r2r' | 'r2c' }; // Open entity panel with optional action
+  'openEntityOperations': { entityId: string; entityName: string; signerId?: string; action?: EntityOpenAction }; // Open entity panel with optional action
+  'dock:selectEntity': { entityId: string; entityName: string; signerId?: string; action?: EntityOpenAction };
   'openJurisdiction': { jurisdictionName: string }; // Open jurisdiction panel (J-Machine click)
   'focusPanel': { panelId: string }; // Focus any panel by ID
   'scenario:loaded': { name: string; frames: number }; // Scenario loaded successfully

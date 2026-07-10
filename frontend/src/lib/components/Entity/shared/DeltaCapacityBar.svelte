@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy } from 'svelte';
   import { settings } from '$lib/stores/settingsStore';
-  import type { DeltaParts, DeltaVisualScale } from './delta-types';
+  import type { DeltaCapacityBarPresentation, DeltaParts, DeltaVisualScale } from './delta-types';
 
   export let derived: DeltaParts;
   export let heightPx: number = 4;
@@ -10,6 +10,7 @@
   export let visualScale: DeltaVisualScale | null = null;
   export let interactive = false;
   export let expanded = false;
+  export let presentation: DeltaCapacityBarPresentation | null = null;
 
   const dispatch = createEventDispatcher<{ activate: void }>();
 
@@ -23,11 +24,44 @@
   $: halfMax = outTotal > inTotal ? outTotal : inTotal;
 
   // Settings flags
-  $: creditGradient = $settings.barCreditGradient ?? true;
-  $: animTransition = $settings.barAnimTransition ?? true;
-  $: animSweep = $settings.barAnimSweep ?? false;
-  $: animGlow = $settings.barAnimGlow ?? false;
-  $: animRipple = $settings.barAnimRipple ?? false;
+  $: creditGradient = presentation?.creditGradient ?? $settings.barCreditGradient ?? true;
+  $: animTransition = presentation?.animations?.transition ?? $settings.barAnimTransition ?? true;
+  $: animSweep = presentation?.animations?.sweep ?? $settings.barAnimSweep ?? false;
+  $: animGlow = presentation?.animations?.glow ?? $settings.barAnimGlow ?? false;
+  $: animRipple = presentation?.animations?.ripple ?? $settings.barAnimRipple ?? false;
+
+  $: transitionMs = durationMs('transition', presentation?.durationsMs?.transition, 400);
+  $: sweepMs = durationMs('sweep', presentation?.durationsMs?.sweep, 700);
+  $: glowMs = durationMs('glow', presentation?.durationsMs?.glow, 600);
+  $: rippleMs = durationMs('ripple', presentation?.durationsMs?.ripple, 800);
+  $: stripeMs = durationMs('stripe', presentation?.durationsMs?.stripe, 800);
+  $: settlingMs = durationMs('settling', presentation?.durationsMs?.settling, 1000);
+
+  $: creditColor = presentation?.colors?.credit ?? 'rgba(255, 255, 255, 0.75)';
+  $: collateralColor = presentation?.colors?.collateral ?? '#22c55e';
+  $: debtColor = presentation?.colors?.debt ?? '#ef4444';
+  $: trackColor = presentation?.colors?.track ?? 'rgba(39, 39, 42, 0.9)';
+  $: deltaColor = presentation?.colors?.delta ?? '#dc6b6b';
+  $: deltaShadow = presentation?.colors?.delta
+    ? `color-mix(in srgb, ${deltaColor} 30%, transparent)`
+    : 'rgba(220, 107, 107, 0.3)';
+  $: presentationStyle = [
+    `--bar-h:${heightPx}px`,
+    `--center-gap:${CENTER_GAP_PX}px`,
+    `--sides-gap:${SIDES_GAP_PX}px`,
+    `--bar-credit-color:${creditColor}`,
+    `--bar-collateral-color:${collateralColor}`,
+    `--bar-debt-color:${debtColor}`,
+    `--bar-track-color:${trackColor}`,
+    `--bar-delta-color:${deltaColor}`,
+    `--bar-delta-shadow:${deltaShadow}`,
+    `--bar-transition-duration:${transitionMs}ms`,
+    `--bar-sweep-duration:${sweepMs}ms`,
+    `--bar-glow-duration:${glowMs}ms`,
+    `--bar-ripple-duration:${rippleMs}ms`,
+    `--bar-stripe-duration:${stripeMs}ms`,
+    `--bar-settling-duration:${settlingMs}ms`
+  ].join(';');
 
   $: outVisualOwnUsd = visualScale?.outOwnCreditUsd ?? 0;
   $: outVisualCollUsd = visualScale?.outCollateralUsd ?? 0;
@@ -53,6 +87,14 @@
 
   function pctOf(value: bigint, base: bigint): number {
     return base > 0n ? Number((value * 10000n) / base) / 100 : 0;
+  }
+
+  function durationMs(name: string, value: number | undefined, fallback: number): number {
+    if (value === undefined) return fallback;
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error(`DeltaCapacityBar ${name} duration must be a finite non-negative number`);
+    }
+    return value;
   }
 
   function widthPxForUsd(valueUsd: number, usdPerPixel: number): number {
@@ -85,42 +127,51 @@
 
   // Sweep animation: trigger on capacity change (right-to-left = inbound from hub)
   let sweepActive = false;
+  let sweepTimer: ReturnType<typeof setTimeout> | undefined;
+  let glowActive = false;
+  let glowTimer: ReturnType<typeof setTimeout> | undefined;
+  let rippleActive = false;
+  let rippleTimer: ReturnType<typeof setTimeout> | undefined;
   let prevOutCap = 0n;
   let prevInCap = 0n;
+
+  function activateSweep(): void {
+    if (sweepTimer !== undefined) clearTimeout(sweepTimer);
+    sweepActive = true;
+    sweepTimer = setTimeout(() => { sweepActive = false; }, sweepMs);
+  }
+
+  function activateGlow(): void {
+    if (glowTimer !== undefined) clearTimeout(glowTimer);
+    glowActive = true;
+    glowTimer = setTimeout(() => { glowActive = false; }, glowMs);
+  }
+
+  function activateRipple(): void {
+    if (rippleTimer !== undefined) clearTimeout(rippleTimer);
+    rippleActive = true;
+    rippleTimer = setTimeout(() => { rippleActive = false; }, rippleMs);
+  }
+
   $: {
     const curOut = derived.outCapacity;
     const curIn = derived.inCapacity;
-    if (animSweep && (prevOutCap !== 0n || prevInCap !== 0n) && (curOut !== prevOutCap || curIn !== prevInCap)) {
-      sweepActive = true;
-      setTimeout(() => { sweepActive = false; }, 700);
+    const initialized = prevOutCap !== 0n || prevInCap !== 0n;
+    const changed = curOut !== prevOutCap || curIn !== prevInCap;
+    if (initialized && changed) {
+      if (animSweep) activateSweep();
+      if (animGlow) activateGlow();
+      if (animRipple) activateRipple();
     }
     prevOutCap = curOut;
     prevInCap = curIn;
   }
 
-  // Glow animation: trigger on capacity change
-  let glowActive = false;
-  let glowCounter = 0;
-  $: {
-    const curOut = derived.outCapacity;
-    const curIn = derived.inCapacity;
-    if (animGlow && (prevOutCap !== 0n || prevInCap !== 0n) && (curOut !== prevOutCap || curIn !== prevInCap)) {
-      glowCounter += 1;
-      glowActive = true;
-      setTimeout(() => { glowActive = false; }, 600);
-    }
-  }
-
-  // Ripple animation: expanding ring from center
-  let rippleActive = false;
-  $: {
-    const curOut = derived.outCapacity;
-    const curIn = derived.inCapacity;
-    if (animRipple && (prevOutCap !== 0n || prevInCap !== 0n) && (curOut !== prevOutCap || curIn !== prevInCap)) {
-      rippleActive = true;
-      setTimeout(() => { rippleActive = false; }, 800);
-    }
-  }
+  onDestroy(() => {
+    if (sweepTimer !== undefined) clearTimeout(sweepTimer);
+    if (glowTimer !== undefined) clearTimeout(glowTimer);
+    if (rippleTimer !== undefined) clearTimeout(rippleTimer);
+  });
 
   function activate(event?: MouseEvent | KeyboardEvent): void {
     if (!interactive) return;
@@ -141,7 +192,7 @@
   role={interactive ? 'button' : undefined}
   aria-expanded={interactive ? expanded : undefined}
   on:click={activate}
-  style={`--bar-h:${heightPx}px; --center-gap:${CENTER_GAP_PX}px; --sides-gap:${SIDES_GAP_PX}px;`}
+  style={presentationStyle}
 >
   {#if hasVisualScale}
     <div class="track"></div>
@@ -278,7 +329,7 @@
     width: 100%;
     height: var(--bar-h);
     border-radius: 999px;
-    background: rgba(39, 39, 42, 0.9);
+    background: var(--bar-track-color);
     box-shadow: inset 0 0 0 0.5px rgba(82, 82, 91, 0.35);
   }
 
@@ -309,7 +360,7 @@
 
   .bar.empty {
     border-radius: 999px;
-    background: rgba(39, 39, 42, 0.9);
+    background: var(--bar-track-color);
     box-shadow: inset 0 0 0 0.5px rgba(82, 82, 91, 0.35);
     opacity: 0.45;
   }
@@ -317,7 +368,7 @@
   .bar.one-sided {
     border-radius: 999px;
     overflow: hidden;
-    background: rgba(39, 39, 42, 0.9);
+    background: var(--bar-track-color);
     box-shadow: inset 0 0 0 0.5px rgba(82, 82, 91, 0.35);
     display: flex;
     align-items: stretch;
@@ -345,7 +396,7 @@
   .anim-transition .shell,
   .anim-transition .seg,
   .anim-transition .half {
-    transition: width 0.4s ease-out;
+    transition: width var(--bar-transition-duration) ease-out;
   }
 
   .visual-center .shell.out.center-shell {
@@ -410,9 +461,9 @@
     transform: translate(-50%, -50%);
     width: 1.5px;
     height: calc(var(--bar-h) + 6px);
-    background: #dc6b6b;
+    background: var(--bar-delta-color);
     border-radius: 0;
-    box-shadow: 0 0 3px rgba(220, 107, 107, 0.3);
+    box-shadow: 0 0 3px var(--bar-delta-shadow);
     z-index: 5;
     pointer-events: none;
   }
@@ -425,17 +476,17 @@
 
   /* credit = bright white — peer credit promise */
   .seg.credit {
-    background: rgba(255, 255, 255, 0.75);
+    background: var(--bar-credit-color);
   }
 
   /* coll = electric green — hard collateral */
   .seg.coll {
-    background: #22c55e;
+    background: var(--bar-collateral-color);
   }
 
   /* debt = hot red — uncollateralized exposure */
   .seg.debt {
-    background: #ef4444;
+    background: var(--bar-debt-color);
   }
 
   .seg.debt.striped {
@@ -447,18 +498,18 @@
       #fbbf24 6px
     );
     background-size: 8px 8px;
-    animation: stripe-scroll 0.8s linear infinite;
+    animation: stripe-scroll var(--bar-stripe-duration) linear infinite;
   }
 
   .seg.debt.settling {
     background: linear-gradient(180deg, #fbbf24, #f59e0b);
-    animation: settling-pulse 1s ease-in-out infinite;
+    animation: settling-pulse var(--bar-settling-duration) ease-in-out infinite;
   }
 
   /* ── Glow animation ── */
   .anim-glow .shell,
   .anim-glow .bar:not(.empty) {
-    animation: bar-glow 0.6s ease-out;
+    animation: bar-glow var(--bar-glow-duration) ease-out;
   }
 
   @keyframes bar-glow {
@@ -475,7 +526,7 @@
     border-radius: 999px;
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), rgba(251, 191, 36, 0.3), transparent);
     z-index: 10;
-    animation: sweep-rtl 0.7s ease-out forwards;
+    animation: sweep-rtl var(--bar-sweep-duration) ease-out forwards;
     pointer-events: none;
   }
 
@@ -495,7 +546,7 @@
     border: 2px solid rgba(251, 191, 36, 0.6);
     transform: translate(-50%, -50%);
     z-index: 10;
-    animation: ripple-expand 0.8s ease-out forwards;
+    animation: ripple-expand var(--bar-ripple-duration) ease-out forwards;
     pointer-events: none;
   }
 
@@ -512,5 +563,25 @@
   @keyframes settling-pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .anim-transition .shell,
+    .anim-transition .seg,
+    .anim-transition .half {
+      transition: none;
+    }
+
+    .anim-glow .shell,
+    .anim-glow .bar:not(.empty),
+    .seg.debt.striped,
+    .seg.debt.settling {
+      animation: none;
+    }
+
+    .sweep-line,
+    .ripple-ring {
+      display: none;
+    }
   }
 </style>

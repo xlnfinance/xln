@@ -2317,6 +2317,22 @@ test('admin remote runtime control advances live state and exposes past frames',
   await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(/ms/);
   await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
+  await expect.poll(async () => page.evaluate(() => {
+    const view = (window as any).__xln?.view;
+    return {
+      atHeight: view?.atHeight ?? null,
+      frameHeight: Number(view?.frame?.height || 0),
+      profileName: String(view?.frame?.activeEntity?.core?.profile?.name || ''),
+      accountsShown: Number(view?.frame?.activeEntity?.accounts?.items?.length || 0),
+      warningCount: document.querySelectorAll('.history-warning').length,
+    };
+  }), { timeout: REMOTE_E2E_WAIT_MS }).toEqual({
+    atHeight: controlResult.beforeHeight,
+    frameHeight: controlResult.beforeHeight,
+    profileName: activeH1Before.profileName,
+    accountsShown: expect.any(Number),
+    warningCount: 0,
+  });
   await expect(page.getByTestId('time-machine-remote-diff')).toContainText(/Δh/);
   await page.getByTestId('time-machine-remote-deeplink').click();
   await expect.poll(() => new URL(page.url()).hash).toContain(`tmHeight=${controlResult.beforeHeight}`);
@@ -2352,6 +2368,22 @@ test('admin remote runtime control advances live state and exposes past frames',
   await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${controlResult.beforeHeight}`, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('time-machine-frame-badge')).not.toContainText(/LIVE/);
+  await page.getByTitle('Go to live (End)').click();
+  await expect(page.getByTestId('time-machine-frame-badge')).toContainText(/LIVE/, { timeout: REMOTE_E2E_WAIT_MS });
+  await expect.poll(async () => page.evaluate(() => {
+    const view = (window as any).__xln?.view;
+    return {
+      atHeight: view?.atHeight ?? null,
+      frameHeight: Number(view?.frame?.height || 0),
+      profileName: String(view?.frame?.activeEntity?.core?.profile?.name || ''),
+    };
+  }), { timeout: REMOTE_E2E_WAIT_MS }).toEqual({
+    atHeight: null,
+    frameHeight: expect.any(Number),
+    profileName: nextProfileName,
+  });
+  const liveProjectionHeight = await page.evaluate(() => Number((window as any).__xln?.view?.frame?.height || 0));
+  expect(liveProjectionHeight).toBeGreaterThanOrEqual(after.envHeight);
 });
 
 test('runtime dropdown switches app-imported remote runtimes without manager route', async ({ page }) => {

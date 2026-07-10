@@ -12,6 +12,11 @@
   import { panelBridge } from '../utils/panelBridge';
   import { setFrontendVerboseLogging } from '../utils/frontendLogger';
   import ConsolePanel from './ConsolePanel.svelte';
+  import TabStylePicker from '$lib/components/Settings/TabStylePicker.svelte';
+  import { TAB_STYLE_OPTIONS } from '$lib/utils/ui-style-options';
+  import { settings as appSettings, settingsOperations } from '$lib/stores/settingsStore';
+  import { networkMachineConfig, networkMachineOperations } from '$lib/stores/networkMachineStore';
+  import type { NetworkMachineTimelineMode } from '$lib/network3d/networkMachine';
 
   // Props (isolated stores - reserved for future time-travel settings UI)
   export let runtimeFrameEnv: Writable<any>; void runtimeFrameEnv;
@@ -103,13 +108,17 @@
   };
 
   let settings: ViewSettings = { ...DEFAULT_SETTINGS };
-  let activeCategory: 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'layout' = 'scene';
+  let activeCategory: 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'advanced' | 'layout' = 'scene';
 
   // Layout config state
   let layoutJson = '';
   let layoutError = '';
   let layoutSuccess = '';
   let settingsStorageError = '';
+  let entityOpenMode: 'replace' | 'new-tab' = 'replace';
+  let networkMachineJson = '';
+  let networkMachineStatus = '';
+  let networkMachineError = '';
 
   function formatSettingsError(action: string, err: unknown): string {
     const message = err instanceof Error ? err.message : String(err);
@@ -125,6 +134,7 @@
         settings = { ...DEFAULT_SETTINGS, ...storedSettings };
       }
       settingsStorageError = '';
+      entityOpenMode = localStorage.getItem('xln-dock-entity-open-mode') === 'new-tab' ? 'new-tab' : 'replace';
 
       // Auto-detect WebGPU if not explicitly set by user
       if (!storedSettings?.rendererMode) {
@@ -149,6 +159,12 @@
     });
 
     loadSettings();
+    try {
+      networkMachineOperations.load();
+      networkMachineJson = networkMachineOperations.exportJson();
+    } catch (err) {
+      networkMachineError = formatSettingsError('load NetworkMachine', err);
+    }
 
     return () => {
       unsubscribe?.();
@@ -296,9 +312,41 @@
       layoutError = `Load failed: ${err}`;
     }
   }
+
+  function updateEntityOpenMode(mode: 'replace' | 'new-tab'): void {
+    entityOpenMode = mode;
+    localStorage.setItem('xln-dock-entity-open-mode', mode);
+  }
+
+  function focusDockPanel(panelId: string): void {
+    panelBridge.emit('focusPanel', { panelId });
+  }
+
+  function updateNetworkTimelineMode(mode: NetworkMachineTimelineMode): void {
+    try {
+      networkMachineOperations.setTimelineMode(mode);
+      networkMachineJson = networkMachineOperations.exportJson();
+      networkMachineStatus = 'NetworkMachine timeline updated.';
+      networkMachineError = '';
+    } catch (err) {
+      networkMachineError = formatSettingsError('update NetworkMachine', err);
+    }
+  }
+
+  function importNetworkMachine(): void {
+    try {
+      networkMachineOperations.importJson(networkMachineJson);
+      networkMachineJson = networkMachineOperations.exportJson();
+      networkMachineStatus = 'NetworkMachine config imported.';
+      networkMachineError = '';
+    } catch (err) {
+      networkMachineStatus = '';
+      networkMachineError = formatSettingsError('import NetworkMachine', err);
+    }
+  }
 </script>
 
-<div class="settings-panel">
+<div class="settings-panel" data-testid="dock-settings-panel">
   <div class="header">
     <h3> Settings</h3>
     <button class="reset-btn" on:click={resetToDefaults}>Reset All</button>
@@ -353,11 +401,30 @@
     >
       📐 Layout
     </button>
+    <button
+      class:active={activeCategory === 'advanced'}
+      on:click={() => activeCategory = 'advanced'}
+    >
+      🧰 Advanced
+    </button>
   </div>
 
   <div class="settings-content">
     {#if activeCategory === 'scene'}
       <h4>Scene Configuration</h4>
+
+      <div class="setting-group">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            data-testid="dock-settings-xln-mascot-toggle"
+            checked={$appSettings.showXlnMascot}
+            on:change={(event) => settingsOperations.setShowXlnMascot((event.currentTarget as HTMLInputElement).checked)}
+          />
+          <span>Show xln guide</span>
+        </label>
+        <small>Drag the animated xln mark to dock the local AI guide anywhere along the screen edge.</small>
+      </div>
 
       <div class="setting-group">
         <label>
@@ -741,8 +808,70 @@
         />
       </div>
 
+    {:else if activeCategory === 'advanced'}
+      <h4>🧰 Dock Developer Tools</h4>
+      <p class="section-copy">These tools are available because Dock is the developer workspace. They are never hidden behind a second dev flag.</p>
+
+      <div class="tool-grid">
+        <button on:click={() => focusDockPanel('leveldb-inspector')}>🗄️ LevelDB Inspector</button>
+        <button on:click={() => focusDockPanel('runtime-diagnostics')}>🩺 Verify / Checkpoints</button>
+        <button on:click={() => focusDockPanel('runtime-manager')}>🌐 Runtime Manager</button>
+        <button on:click={() => focusDockPanel('entity-audit')}>🔎 Entity Audit</button>
+        <button on:click={() => focusDockPanel('jmachine-inspector')}>🧬 Raw J-State</button>
+        <button on:click={() => focusDockPanel('jurisdiction')}>🏛️ J-Machine</button>
+        <button on:click={() => focusDockPanel('wallet-main')}>👛 Hub Policy / Manage</button>
+        <button on:click={() => focusDockPanel('architect')}>🎬 Architect</button>
+      </div>
+
+      <h4>NetworkMachine</h4>
+      <div class="setting-group">
+        <label>
+          Timeline density
+          <select
+            value={$networkMachineConfig.timelineMode}
+            data-testid="network-machine-timeline-mode"
+            on:change={(event) => updateNetworkTimelineMode(event.currentTarget.value as NetworkMachineTimelineMode)}
+          >
+            <option value="all-frames">Every runtime frame</option>
+            <option value="graph-changes">Frames changing the visible graph</option>
+          </select>
+        </label>
+        <small>Every R-frame is the default. Filtering changes only the presentation timeline, never runtime history.</small>
+      </div>
+      <div class="setting-group">
+        <label>
+          Presentation config: runtimes, subtitles, focus and camera cues
+          <textarea bind:value={networkMachineJson} rows="14" spellcheck="false"></textarea>
+        </label>
+        <button class="action-btn" on:click={importNetworkMachine}>Import NetworkMachine config</button>
+      </div>
+      {#if networkMachineStatus}<div class="status-message success">{networkMachineStatus}</div>{/if}
+      {#if networkMachineError}<div class="status-message error">{networkMachineError}</div>{/if}
+
+      <h4>Tab Style</h4>
+      <TabStylePicker
+        value={$appSettings.uiStyle.tabs}
+        options={TAB_STYLE_OPTIONS}
+        on:change={(event) => settingsOperations.setUiStyle({ tabs: event.detail })}
+      />
+
     {:else if activeCategory === 'layout'}
       <h4>📐 Workspace Layout Manager</h4>
+
+      <div class="setting-group">
+        <label>
+          Graph entity opening
+          <select
+            value={entityOpenMode}
+            data-testid="dock-entity-open-mode"
+            on:change={(event) => updateEntityOpenMode(event.currentTarget.value as 'replace' | 'new-tab')}
+          >
+            <option value="replace">Replace pinned Main Wallet</option>
+            <option value="new-tab">Open a new entity tab</option>
+          </select>
+        </label>
+        <small>Main Wallet stays pinned and is the reference entity for Dock tools.</small>
+      </div>
       <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
         Export/import complete workspace configuration: panel sizes, tab order, camera position, and all settings.
       </p>
@@ -946,6 +1075,30 @@
     font-size: 14px;
     font-weight: 600;
     color: #00ff41;
+  }
+
+  .section-copy {
+    margin: -6px 0 14px;
+    color: #8d9aa3;
+    font-size: 12px;
+  }
+
+  .tool-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+
+  .tool-grid button {
+    min-height: 42px;
+    padding: 8px 10px;
+    border: 1px solid #315263;
+    border-radius: 6px;
+    background: #10202a;
+    color: #c8eaff;
+    text-align: left;
+    cursor: pointer;
   }
 
   .setting-group {

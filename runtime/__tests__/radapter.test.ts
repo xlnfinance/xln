@@ -946,6 +946,50 @@ test('runtime adapter frame read returns compact summary without raw runtime inp
   });
 });
 
+test('runtime adapter timeline-index returns a bounded compact timestamp page', async () => {
+  const env = makeEnv();
+  const frames = new Map<number, StorageFrameRecord>(Array.from({ length: 7 }, (_, index) => {
+    const height = index + 1;
+    return [height, {
+      height,
+      timestamp: height * 1_000,
+      stateHash: `state-${height}`,
+      materializedState: height % 2 === 0,
+      runtimeInput: { runtimeTxs: [], entityInputs: [], jInputs: [] },
+      touchedEntities: [],
+      touchedAccounts: [],
+      touchedBookEntities: [],
+    } as StorageFrameRecord];
+  }));
+
+  const page = await resolveRuntimeAdapterRead<{
+    entries: Array<{ height: number; timestamp: number; stateHash: string; materialized: boolean }>;
+    scannedHeights: number;
+    nextBeforeHeight: number | null;
+  }>({
+    env,
+    readHead: async () => ({
+      schemaVersion: 1,
+      latestHeight: 7,
+      latestSnapshotHeight: 6,
+      snapshotPeriodFrames: 2,
+      retainSnapshots: 3,
+      epochMaxBytes: 1_000,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 1_000,
+    }),
+    readFrame: async (height) => frames.get(height) ?? null,
+  }, 'timeline-index', { beforeHeight: 8, limit: 3 });
+
+  expect(page.entries).toEqual([
+    { runtimeId: 'embedded', height: 5, timestamp: 5_000, stateHash: 'state-5', materialized: false, graphChanged: false },
+    { runtimeId: 'embedded', height: 6, timestamp: 6_000, stateHash: 'state-6', materialized: true, graphChanged: false },
+    { runtimeId: 'embedded', height: 7, timestamp: 7_000, stateHash: 'state-7', materialized: false, graphChanged: false },
+  ]);
+  expect(page.scannedHeights).toBe(3);
+  expect(page.nextBeforeHeight).toBe(5);
+});
+
 test('runtime adapter receipt read returns ingress receipt status over websocket protocol', async () => {
   const env = makeEnv();
   const receipt = await resolveRuntimeAdapterRead<Record<string, unknown>>({

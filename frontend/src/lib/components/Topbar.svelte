@@ -11,7 +11,7 @@
   let { variant = 'default' }: Props = $props();
 
   // Highlight current page
-  let currentPath = $derived($page.url.pathname);
+  let currentPath = $derived(String($page.url.pathname));
 
   // Dropdown states
   let langDropdownOpen = $state(false);
@@ -42,7 +42,8 @@
   <div class="topbar-links">
     <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
     <a href="/docs" class="topbar-link" class:active={currentPath === '/docs'}>Docs</a>
-    <div class="topbar-dropdown">
+    <a href="/rcpan" class="topbar-link" class:active={currentPath === '/rcpan'}>RCPAN</a>
+    <div class="topbar-dropdown tools-dropdown">
       <Dropdown bind:open={toolsDropdownOpen} minWidth={160} maxWidth={220}>
         <span slot="trigger" class="topbar-trigger">
           <span>Tools</span>
@@ -85,23 +86,43 @@
 
 <style>
   .topbar {
+    --topbar-accent: var(--theme-collateral, #4fd18b);
+    --dropdown-bg: var(--theme-glass-bg, var(--glass-bg, rgba(17, 25, 40, 0.75)));
+    --dropdown-bg-hover: var(--theme-surface-hover, var(--glass-bg-hover, rgba(17, 25, 40, 0.85)));
+    --dropdown-menu-bg: color-mix(
+      in srgb,
+      var(--theme-card-bg, rgba(12, 18, 28, 0.95)) 96%,
+      transparent
+    );
+    --dropdown-border: var(--theme-glass-border, var(--glass-border, rgba(255, 255, 255, 0.125)));
+    --dropdown-border-hover: color-mix(in srgb, var(--theme-text-primary, white) 20%, transparent);
+    --dropdown-text: var(--theme-text-primary, rgba(255, 255, 255, 0.95));
+    --dropdown-item-hover: var(--theme-surface-hover, rgba(255, 255, 255, 0.06));
+    --dropdown-selected: color-mix(in srgb, var(--topbar-accent) 15%, transparent);
     height: 56px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0 var(--space-3);
-    background: var(--glass-bg);
+    background: var(--theme-glass-bg, var(--glass-bg, rgba(17, 25, 40, 0.75)));
     backdrop-filter: blur(var(--blur-md));
     -webkit-backdrop-filter: blur(var(--blur-md));
-    border-bottom: 1px solid var(--glass-border);
-    box-shadow: 0 1px 16px rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid var(--theme-glass-border, var(--glass-border, rgba(255, 255, 255, 0.125)));
+    box-shadow: 0 1px 16px color-mix(in srgb, var(--theme-background, #000) 20%, transparent);
     position: sticky;
     top: 0;
     z-index: 1000;
   }
 
   .topbar.transparent {
-    background: rgba(17, 25, 40, 0.65);
+    background: color-mix(
+      in srgb,
+      var(--theme-glass-bg, rgba(17, 25, 40, 0.75)) 86%,
+      transparent
+    );
     backdrop-filter: blur(var(--blur-lg));
     -webkit-backdrop-filter: blur(var(--blur-lg));
   }
@@ -109,6 +130,8 @@
   .topbar-left {
     display: flex;
     align-items: center;
+    flex: 0 0 auto;
+    min-width: 0;
   }
 
   .topbar-logo {
@@ -121,26 +144,33 @@
     width: auto;
   }
 
+  :global(html[data-theme='light']) .topbar-logo img,
+  :global(html[data-theme='merchant']) .topbar-logo img {
+    filter: invert(1);
+  }
+
   .stage-badge {
     margin-left: 12px;
     font-size: 0.65rem;
     font-weight: 600;
     letter-spacing: 0.05em;
     padding: 0.2rem 0.5rem;
-    background: rgba(79, 209, 139, 0.15);
-    border: 1px solid rgba(79, 209, 139, 0.3);
+    background: color-mix(in srgb, var(--topbar-accent) 15%, transparent);
+    border: 1px solid color-mix(in srgb, var(--topbar-accent) 30%, transparent);
     border-radius: 4px;
-    color: #4fd18b;
+    color: var(--topbar-accent);
   }
 
   .topbar-links {
     display: flex;
     gap: 1.5rem;
     align-items: center;
+    min-width: 0;
+    white-space: nowrap;
   }
 
   .topbar-link {
-    color: rgba(255, 255, 255, 0.8);
+    color: color-mix(in srgb, var(--theme-text-primary, white) 80%, transparent);
     text-decoration: none;
     font-size: 0.9rem;
     font-weight: 500;
@@ -148,11 +178,11 @@
   }
 
   .topbar-link:hover {
-    color: #4fd18b;
+    color: var(--topbar-accent);
   }
 
   .topbar-link.active {
-    color: #4fd18b;
+    color: var(--topbar-accent);
   }
 
   .topbar-dropdown {
@@ -174,7 +204,7 @@
     align-items: center;
     gap: 0.35rem;
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.85);
+    color: color-mix(in srgb, var(--theme-text-primary, white) 85%, transparent);
   }
 
   .lang-flag {
@@ -204,7 +234,7 @@
     background: transparent;
     border: none;
     border-radius: 6px;
-    color: rgba(255, 255, 255, 0.85);
+    color: color-mix(in srgb, var(--theme-text-primary, white) 85%, transparent);
     font-size: 13px;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -213,12 +243,12 @@
 
   .topbar-menu-item:hover {
     background: var(--dropdown-item-hover, rgba(255, 255, 255, 0.06));
-    color: white;
+    color: var(--theme-text-primary, white);
   }
 
   .topbar-menu-item.active {
     background: var(--dropdown-selected, rgba(79, 209, 139, 0.15));
-    color: #4fd18b;
+    color: var(--topbar-accent);
   }
 
   .menu-flag {
@@ -240,7 +270,7 @@
 
   @media (max-width: 768px) {
     .topbar {
-      padding: 0.5rem 1rem;
+      padding: 0 1rem;
     }
 
     .topbar-logo img {
@@ -261,6 +291,34 @@
 
     .topbar-dropdown :global(.dropdown-trigger) {
       padding: 5px 8px;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .tools-dropdown {
+      display: none;
+    }
+
+    .topbar-links {
+      gap: 0.625rem;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .topbar {
+      padding-inline: 0.625rem;
+    }
+
+    .topbar-logo img {
+      height: 26px;
+    }
+
+    .topbar-links {
+      gap: 0.45rem;
+    }
+
+    .topbar-dropdown :global(.dropdown-trigger) {
+      padding-inline: 5px;
     }
   }
 </style>

@@ -35,6 +35,7 @@
     writeOnboardingCompleteForEntities,
   } from '$lib/utils/onboardingState';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+  import { panelBridge } from './utils/panelBridge';
 
   import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
   import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/entity-workspace';
@@ -70,6 +71,7 @@
     runtimeFrameTimeIndex?: Writable<number>;
     runtimeFrameIsLive?: Writable<boolean>;
     liveEnvResolver?: () => Env | null;
+    dockMode?: boolean;
   }
 
   let {
@@ -79,6 +81,7 @@
     runtimeFrameTimeIndex = writable(-1),
     runtimeFrameIsLive = writable(true),
     liveEnvResolver = () => null,
+    dockMode = false,
   }: Props = $props();
 
   function publishRuntimeFrameEnv(env: Env | null) {
@@ -140,8 +143,10 @@
   }
 
   onMount(async () => {
-    runtimeFrameTimeIndex.set(-1);
-    runtimeFrameIsLive.set(true);
+    if (!dockMode) {
+      runtimeFrameTimeIndex.set(-1);
+      runtimeFrameIsLive.set(true);
+    }
     if (get(runtimeControllerHandle).mode !== 'remote') {
       await vaultOperations.initialize();
     }
@@ -163,6 +168,25 @@
   const selfEntityInFlight = new Set<string>();
   let ensureSelfEntitiesEpoch = 0;
   let onboardingComplete = $state(false);
+
+  let selectedInitialAction = $state<import('$lib/view/utils/panelBridge').EntityOpenAction | undefined>(undefined);
+  let workspaceActionRevision = $state(0);
+
+  onMount(() => panelBridge.on('dock:selectEntity', ({ entityId, signerId, action }) => {
+    const nextEntityId = normalizeId(entityId);
+    const nextSignerId = normalizeId(signerId);
+    if (!dockMode || !nextEntityId) return;
+    viewMode = 'entity';
+    activeInlinePanel = 'none';
+    selectedEntityId = nextEntityId;
+    selectedSignerId = nextSignerId || null;
+    selectedAccountId = null;
+    selectedJurisdictionName = null;
+    selectedInitialAction = action;
+    workspaceActionRevision += 1;
+    setRuntimeViewActiveEntityId(nextEntityId);
+    if ($runtimeControllerHandle.mode === 'remote') void refreshCurrentRuntimeProjection();
+  }));
 
   // Reactive: signer info from vault
   const signer = $derived.by(() => {
@@ -982,6 +1006,7 @@
     />
   </main>
 {:else if viewMode === 'entity' && (currentFrame || remoteWorkspaceAvailable)}
+  {#key `${selectedEntityId || ''}:${workspaceActionRevision}`}
   <EntityWorkspace
     tab={entityTab}
     userModeHeader={true}
@@ -989,6 +1014,7 @@
     selectedJurisdiction={selectedJurisdictionName}
     allowHeaderAddRuntime={true}
     headerRuntimeAddLabel="+ Add Runtime"
+    initialAction={selectedInitialAction}
     runtimeFrameContext={workspaceRuntimeFrameContext}
     embeddedRuntimeContext={workspaceEmbeddedRuntimeContext}
     on:signerSelect={handleSignerSelect}
@@ -999,6 +1025,7 @@
     on:addEntity={handleAddEntity}
     on:addRuntime={handleAddRuntime}
   />
+  {/key}
 {:else if viewMode === 'entity'}
   <main class="panel-content"></main>
 {:else if viewMode === 'jurisdiction'}
@@ -1011,7 +1038,7 @@
   </main>
 {/if}
 
-{#if $settings.showTimeMachine}
+{#if $settings.showTimeMachine && !dockMode}
   <TimeMachine
     history={runtimeFrameHistory}
     timeIndex={runtimeFrameTimeIndex}
