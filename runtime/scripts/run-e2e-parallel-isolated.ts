@@ -1644,6 +1644,9 @@ const prepareE2eSvelteKitSourceOutDir = (logsDir: string): string => {
   return sourceOutDir;
 };
 
+const FAILURE_RECEIPT_DUMP_TIMEOUT_MS = 2_000;
+const FAILURE_RECEIPT_DUMP_MAX_RUNTIMES = 10;
+
 const captureShardFailureForensics = async (options: {
   logsDir: string;
   shard: number;
@@ -1672,12 +1675,15 @@ const captureShardFailureForensics = async (options: {
     ? (entities as { entities: Array<Record<string, unknown>> }).entities
     : [];
 
-  for (const entry of entityEntries) {
+  const receiptTargets = Array.from(new Map(entityEntries.map(entry => {
     const runtimeId = typeof entry['runtimeId'] === 'string' ? entry['runtimeId'].trim() : '';
     const dbPath = typeof entry['dbPath'] === 'string' ? entry['dbPath'].trim() : '';
     const entityId = typeof entry['entityId'] === 'string' ? entry['entityId'].trim().toLowerCase() : 'unknown';
-    if (!runtimeId || !dbPath) continue;
+    return [`${runtimeId}\0${dbPath}`, { runtimeId, dbPath, entityId }] as const;
+  }).filter(([, target]) => target.runtimeId && target.dbPath)).values())
+    .slice(0, FAILURE_RECEIPT_DUMP_MAX_RUNTIMES);
 
+  for (const { runtimeId, dbPath, entityId } of receiptTargets) {
     const receiptDump = spawnSync(
       'bun',
       ['runtime/scripts/read-frame-receipts.ts', '--runtime-id', runtimeId, '--tail', '20', '--json'],
@@ -1688,6 +1694,8 @@ const captureShardFailureForensics = async (options: {
           XLN_DB_PATH: dbPath,
         }),
         encoding: 'utf8',
+        timeout: FAILURE_RECEIPT_DUMP_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
       },
     );
 
@@ -1696,10 +1704,12 @@ const captureShardFailureForensics = async (options: {
       continue;
     }
 
-    const stderr = String(receiptDump.stderr || '').trim();
-    if (stderr) {
-      writeFileSync(join(outputDir, `receipts-${entityId.slice(-8)}.error.txt`), stderr);
-    }
+    const failure = String(
+      receiptDump.error?.message
+      || receiptDump.stderr
+      || `exit=${String(receiptDump.status)} signal=${String(receiptDump.signal)}`,
+    ).trim();
+    writeFileSync(join(outputDir, `receipts-${entityId.slice(-8)}.error.txt`), failure);
   }
 
   options.log.write(`[forensics] wrote failure debug bundle: ${outputDir}\n`);

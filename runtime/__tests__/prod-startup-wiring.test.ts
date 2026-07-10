@@ -1217,6 +1217,17 @@ describe('production startup wiring', () => {
     expect(meshCommon).toContain('export const hasQueuedExtendCredit = (');
   });
 
+  test('isolated E2E failure receipts cannot block shard teardown on a live database lock', () => {
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const forensicsStart = runner.indexOf('const captureShardFailureForensics = async (');
+    const runShardStart = runner.indexOf('const runShard = async (');
+    const forensics = runner.slice(forensicsStart, runShardStart);
+
+    expect(forensics).toContain('timeout: FAILURE_RECEIPT_DUMP_TIMEOUT_MS');
+    expect(forensics).toContain("killSignal: 'SIGKILL'");
+    expect(forensics).toContain('receiptDump.error?.message');
+  });
+
   test('market maker bootstrap never sends hub-side credit inputs itself', () => {
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
