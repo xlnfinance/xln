@@ -92,4 +92,17 @@ describe('runtime history store', () => {
     expect(tail.map((item) => item.height)).toEqual([2, 3]);
     expect(tail[0]?.activeEntityId).toBe('0xreplacement');
   });
+
+  test('does not advertise a phantom next page when totals fit on one page', () => {
+    const frame = frameAt(4, '0xsingle', 4, 10);
+    frame.activeEntity!.accounts.nextCursor = 'phantom-account-cursor';
+    frame.activeEntity!.books.nextCursor = 'phantom-book-cursor';
+
+    const item = runtimeHistoryFrameFromViewFrame({ runtimeId: 'h1', mode: 'remote', frame });
+
+    expect(item.pageInfo?.accountsPageCount).toBe(1);
+    expect(item.pageInfo?.booksPageCount).toBe(1);
+    expect(item.pageInfo?.accountsHasMore).toBe(false);
+    expect(item.pageInfo?.booksHasMore).toBe(false);
+  });
 });

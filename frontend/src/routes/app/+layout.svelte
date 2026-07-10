@@ -14,7 +14,11 @@
     xlnFunctions
   } from '$lib/stores/xlnStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
-  import { runtimeViewPageInfo, setRuntimeViewPage } from '$lib/stores/runtimeViewStore';
+  import {
+    runtimeViewPageInfo,
+    runtimeViewPageNeedsNavigation,
+    setRuntimeViewPage,
+  } from '$lib/stores/runtimeViewStore';
   import { errorLog } from '$lib/stores/errorLogStore';
   import { settingsOperations } from '$lib/stores/settingsStore';
   import { tabOperations } from '$lib/stores/tabStore';
@@ -597,37 +601,41 @@
     />
   </div>
 {:else}
-  {#if $runtimeControllerHandle.mode === 'remote' && $runtimeViewPageInfo && ($runtimeViewPageInfo.accountsHasMore || $runtimeViewPageInfo.booksHasMore)}
+  {#if $runtimeControllerHandle.mode === 'remote' && $runtimeViewPageInfo && runtimeViewPageNeedsNavigation($runtimeViewPageInfo)}
     <div class="remote-page-notice" data-testid="remote-page-notice">
-      <span>
-        Accounts {$runtimeViewPageInfo.accountsPageIndex + 1}/{$runtimeViewPageInfo.accountsPageCount || 1}
-        ({$runtimeViewPageInfo.accountsShown}/{$runtimeViewPageInfo.accountsTotal})
-      </span>
-      <button
-        type="button"
-        disabled={$runtimeViewPageInfo.accountsPageIndex <= 0}
-        onclick={() => changeRemotePage('accounts', $runtimeViewPageInfo!.accountsPageIndex - 1)}
-      >Prev</button>
-      <button
-        type="button"
-        disabled={!$runtimeViewPageInfo.accountsHasMore}
-        onclick={() => changeRemotePage('accounts', $runtimeViewPageInfo!.accountsPageIndex + 1)}
-      >Next</button>
-      {#if $runtimeViewPageInfo.booksTotal > 0}
-        <span>
-          Books {$runtimeViewPageInfo.booksPageIndex + 1}/{$runtimeViewPageInfo.booksPageCount || 1}
-          ({$runtimeViewPageInfo.booksShown}/{$runtimeViewPageInfo.booksTotal})
-        </span>
+      {#if runtimeViewPageNeedsNavigation($runtimeViewPageInfo, 'accounts')}
+        <div class="remote-page-group">
+          <span><strong>Accounts</strong> {$runtimeViewPageInfo.accountsPageIndex + 1}/{$runtimeViewPageInfo.accountsPageCount}</span>
+          <button
+            type="button"
+            aria-label="Previous accounts page"
+            disabled={$runtimeViewPageInfo.accountsPageIndex <= 0}
+            onclick={() => changeRemotePage('accounts', $runtimeViewPageInfo!.accountsPageIndex - 1)}
+          >‹</button>
+          <button
+            type="button"
+            aria-label="Next accounts page"
+            disabled={!$runtimeViewPageInfo.accountsHasMore}
+            onclick={() => changeRemotePage('accounts', $runtimeViewPageInfo!.accountsPageIndex + 1)}
+          >›</button>
+        </div>
+      {/if}
+      {#if $runtimeViewPageInfo.booksTotal > 0 && runtimeViewPageNeedsNavigation($runtimeViewPageInfo, 'books')}
+        <div class="remote-page-group">
+          <span><strong>Books</strong> {$runtimeViewPageInfo.booksPageIndex + 1}/{$runtimeViewPageInfo.booksPageCount}</span>
         <button
           type="button"
+          aria-label="Previous books page"
           disabled={$runtimeViewPageInfo.booksPageIndex <= 0}
           onclick={() => changeRemotePage('books', $runtimeViewPageInfo!.booksPageIndex - 1)}
-        >Prev</button>
+        >‹</button>
         <button
           type="button"
+          aria-label="Next books page"
           disabled={!$runtimeViewPageInfo.booksHasMore}
           onclick={() => changeRemotePage('books', $runtimeViewPageInfo!.booksPageIndex + 1)}
-        >Next</button>
+        >›</button>
+        </div>
       {/if}
     </div>
   {/if}
@@ -804,29 +812,52 @@
     right: 14px;
     bottom: 14px;
     z-index: 60;
-    max-width: min(440px, calc(100vw - 28px));
+    max-width: min(360px, calc(100vw - 28px));
     display: flex;
     align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    padding: 9px 12px;
+    gap: 6px;
+    padding: 5px;
     border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 28%, transparent);
     border-radius: 7px;
     background: color-mix(in srgb, var(--theme-card-bg, #141416) 94%, transparent);
     color: var(--theme-text-secondary, #d6d3d1);
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.35;
     box-shadow: 0 16px 46px rgba(0, 0, 0, 0.28);
   }
 
+  .remote-page-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .remote-page-group + .remote-page-group {
+    padding-left: 6px;
+    border-left: 1px solid color-mix(in srgb, var(--theme-card-border, #3f3f46) 72%, transparent);
+  }
+
+  .remote-page-group span {
+    padding: 0 4px;
+    color: var(--theme-text-muted, #a8a29e);
+    white-space: nowrap;
+  }
+
+  .remote-page-group strong {
+    color: var(--theme-text-primary, #f5f5f4);
+  }
+
   .remote-page-notice button {
-    min-height: 26px;
-    padding: 0 9px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
     border-radius: 6px;
     border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 30%, transparent);
     background: color-mix(in srgb, var(--theme-card-bg, #141416) 84%, var(--theme-accent, #facc15));
     color: var(--theme-text-primary, #f5f5f4);
     font: inherit;
+    font-size: 18px;
+    line-height: 1;
     cursor: pointer;
   }
 

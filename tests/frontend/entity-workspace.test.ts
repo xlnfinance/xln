@@ -117,7 +117,9 @@ test('entity settings workspace is a projection command surface, not the legacy 
   expect(settings).toContain('runtimeEnv: Env | null');
   expect(settings).toContain('settingsSubview: SettingsSubview');
   expect(settings).toContain('data-testid="settings-theme-select"');
+  expect(settings).toContain('data-testid="settings-time-machine-toggle"');
   expect(settings).toContain('settingsOperations.setTheme');
+  expect(settings).toContain('settingsOperations.setShowTimeMachine');
   expect(settings).toContain('data-testid="entity-settings-projection-panel"');
   expect(settings).not.toContain('xlnEnvironment');
   expect(settings).not.toContain('$xlnEnvironment');

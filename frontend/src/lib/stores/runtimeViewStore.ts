@@ -60,6 +60,17 @@ export type RuntimeViewPageInfo = {
   booksHasMore: boolean;
 };
 
+export const runtimeViewPageNeedsNavigation = (
+  pageInfo: RuntimeViewPageInfo,
+  kind?: 'accounts' | 'books',
+): boolean => {
+  const accountsNeedNavigation = pageInfo.accountsPageIndex > 0 || pageInfo.accountsPageCount > 1;
+  const booksNeedNavigation = pageInfo.booksPageIndex > 0 || pageInfo.booksPageCount > 1;
+  if (kind === 'accounts') return accountsNeedNavigation;
+  if (kind === 'books') return booksNeedNavigation;
+  return accountsNeedNavigation || booksNeedNavigation;
+};
+
 const normalizeEntityIdForRuntimeView = (value: unknown): string => String(value || '').trim().toLowerCase();
 
 export const emptyRuntimeViewHistoryScan = (endpoint = ''): RuntimeViewHistoryScanState => ({

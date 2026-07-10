@@ -48,22 +48,26 @@ const pageInfoFromFrame = (
 ): RuntimeViewPageInfo | null => {
   const active = frame.activeEntity;
   if (!active || !entityId) return null;
+  const accountsPageIndex = active.accounts.pageIndex ?? 0;
+  const accountsPageCount = active.accounts.pageCount ?? 1;
+  const booksPageIndex = active.books.pageIndex ?? 0;
+  const booksPageCount = active.books.pageCount ?? 1;
   return {
     entityId,
     accountsShown: active.accounts.items.length,
     accountsTotal: active.accounts.totalItems ?? active.accounts.items.length,
-    accountsPageIndex: active.accounts.pageIndex ?? 0,
-    accountsPageCount: active.accounts.pageCount ?? 1,
+    accountsPageIndex,
+    accountsPageCount,
     accountsPrevCursor: active.accounts.prevCursor ?? null,
     accountsNextCursor: active.accounts.nextCursor ?? null,
-    accountsHasMore: !!active.accounts.nextCursor,
+    accountsHasMore: accountsPageIndex + 1 < accountsPageCount && !!active.accounts.nextCursor,
     booksShown: active.books.items.length,
     booksTotal: active.books.totalItems ?? active.books.items.length,
-    booksPageIndex: active.books.pageIndex ?? 0,
-    booksPageCount: active.books.pageCount ?? 1,
+    booksPageIndex,
+    booksPageCount,
     booksPrevCursor: active.books.prevCursor ?? null,
     booksNextCursor: active.books.nextCursor ?? null,
-    booksHasMore: !!active.books.nextCursor,
+    booksHasMore: booksPageIndex + 1 < booksPageCount && !!active.books.nextCursor,
   };
 };
 

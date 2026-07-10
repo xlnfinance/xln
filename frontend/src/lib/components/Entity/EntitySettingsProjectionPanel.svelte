@@ -539,6 +539,18 @@
           {/each}
         </select>
       </label>
+      <label class="settings-control settings-control--toggle">
+        <span class="settings-control-copy">
+          <strong>Time Machine</strong>
+          <small>Show historical frame navigation in the workspace.</small>
+        </span>
+        <input
+          type="checkbox"
+          data-testid="settings-time-machine-toggle"
+          checked={$settings.showTimeMachine}
+          on:change={(event) => settingsOperations.setShowTimeMachine((event.currentTarget as HTMLInputElement).checked)}
+        />
+      </label>
     </section>
   {:else}
 
@@ -752,6 +764,43 @@
     border-radius: 8px;
     background: color-mix(in srgb, var(--theme-card-bg, #111113) 94%, transparent);
     padding: 16px;
+  }
+
+  .display-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .settings-control--toggle {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 44px;
+  }
+
+  .settings-control-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .settings-control-copy strong {
+    color: var(--theme-text-primary, #f4f4f5);
+    font-size: 13px;
+  }
+
+  .settings-control-copy small {
+    color: var(--theme-text-muted, #71717a);
+    font-size: 12px;
+  }
+
+  .settings-control--toggle input {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    accent-color: var(--theme-accent, #fbbf24);
   }
 
   .panel-title {

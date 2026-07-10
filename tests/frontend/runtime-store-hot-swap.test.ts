@@ -649,14 +649,20 @@ test('remote app can page through full hub account and book projections', () => 
 
   expect(layoutSource).toContain("import {");
   expect(layoutSource).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
-  expect(layoutSource).toContain("import { runtimeViewPageInfo, setRuntimeViewPage } from '$lib/stores/runtimeViewStore'");
+  expect(layoutSource).toContain('runtimeViewPageInfo,');
+  expect(layoutSource).toContain('runtimeViewPageNeedsNavigation,');
+  expect(layoutSource).toContain('setRuntimeViewPage,');
   expect(layoutSource).toContain('$runtimeControllerHandle.mode');
   expect(layoutSource).toContain('setRuntimeViewPage');
   expect(layoutSource).toContain('async function changeRemotePage');
   expect(layoutSource).toContain('setRuntimeViewPage(kind, pageIndex);');
   expect(layoutSource).toContain('await refreshCurrentRuntimeProjection();');
   expect(layoutSource).toContain('data-testid="remote-page-notice"');
-  expect(layoutSource).toContain('Accounts {$runtimeViewPageInfo.accountsPageIndex + 1}/{$runtimeViewPageInfo.accountsPageCount || 1}');
+  expect(layoutSource).toContain('runtimeViewPageNeedsNavigation($runtimeViewPageInfo)');
+  expect(layoutSource).toContain("aria-label=\"Previous accounts page\"");
+  expect(layoutSource).toContain("aria-label=\"Next books page\"");
+  expect(layoutSource).not.toContain('>Prev</button>');
+  expect(layoutSource).not.toContain('>Next</button>');
   expect(layoutSource).toContain('disabled={!$runtimeViewPageInfo.accountsHasMore}');
   expect(layoutSource).toContain('onclick={() => changeRemotePage(\'accounts\', $runtimeViewPageInfo!.accountsPageIndex + 1)}');
   expect(layoutSource).toContain('onclick={() => changeRemotePage(\'books\', $runtimeViewPageInfo!.booksPageIndex + 1)}');
@@ -672,6 +678,7 @@ test('remote app can page through full hub account and book projections', () => 
   expect(runtimeViewSource).toContain('accountsPageIndex: number');
   expect(runtimeViewSource).toContain('accountsPageCount: number');
   expect(runtimeViewSource).toContain('accountsHasMore: boolean');
+  expect(runtimeViewSource).toContain('export const runtimeViewPageNeedsNavigation');
   expect(runtimeViewSource).toContain('export const runtimeViewPageInfo');
 });
 
