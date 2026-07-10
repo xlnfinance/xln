@@ -1,6 +1,7 @@
 import { getTokenInfo } from '../account-utils';
 import type { Env } from '../types';
 import type { JTokenInfo } from '../jadapter/types';
+import { getBootstrapTokenAmount } from '../bootstrap-economy';
 import {
   getAccountMachine,
   getEntityOutCapacity,
@@ -12,7 +13,6 @@ export const HUB_MESH_TOKEN_ID = 1;
 export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
 export const HUB_MESH_REQUIRED_HUBS = 3;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
-export const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 
 const REQUEST_CREDIT_CAP_WHOLE = 1_000n;
 
@@ -164,7 +164,7 @@ export const getBootstrapReserveHealth = async (
       marketMakerEntityId && entityId === marketMakerEntityId ? 'market-maker' : 'hub';
     const tokens = bootstrapTokens.map<BootstrapReserveTokenHealth>((token) => {
       const current = replica?.state?.reserves?.get(token.tokenId) ?? 0n;
-      const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals);
+      const expectedMin = getBootstrapTokenAmount(token.tokenId, token.decimals);
       return {
         tokenId: token.tokenId,
         symbol: token.symbol,

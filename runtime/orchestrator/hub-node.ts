@@ -105,6 +105,7 @@ import {
   DEFAULT_ACCOUNT_TOKEN_IDS,
   getAccountMachine,
   getBootstrapCreditAmount,
+  getBootstrapTokenAmount,
   getCreditGrantedByEntity,
   getEntityOutCapacity,
   getEntityReplicaById,
@@ -112,7 +113,6 @@ import {
   HUB_DEFAULT_SUPPORTED_PAIRS,
   HUB_MESH_TOKEN_ID,
   HUB_REQUIRED_TOKEN_COUNT,
-  HUB_RESERVE_TARGET_UNITS,
   hasAccount,
   hasQueuedOpenAccount,
   hasPairMutualCredits,
@@ -1041,7 +1041,7 @@ const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]
     const tokenId = Number(token.tokenId);
     const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
     const current = replica?.state?.reserves?.get(tokenId) ?? 0n;
-    const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
+    const expectedMin = getBootstrapTokenAmount(tokenId, decimals);
     return {
       tokenId,
       symbol: String(token.symbol || `token-${tokenId}`),
@@ -1102,7 +1102,7 @@ const ensureBootstrapReserves = async (
     const tokenId = Number(token.tokenId);
     if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
     const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
-    const target = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
+    const target = getBootstrapTokenAmount(tokenId, decimals);
     const localCurrent = replica?.state?.reserves?.get(tokenId) ?? 0n;
     const chainCurrent = await jadapter.getReserves(entityId, tokenId);
     if (chainCurrent !== localCurrent) {
@@ -1178,7 +1178,7 @@ const ensurePeerBootstrapReserves = async (
         const tokenId = Number(token.tokenId);
         if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
         const decimals = Number.isFinite(token.decimals) ? Number(token.decimals) : 18;
-        const target = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(decimals);
+        const target = getBootstrapTokenAmount(tokenId, decimals);
         const current = await jadapter.getReserves(peer.entityId, tokenId);
         if (current >= target) continue;
         mints.push({

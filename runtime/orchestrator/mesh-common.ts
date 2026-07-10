@@ -2,24 +2,20 @@ import type { AccountMachine, Delta, EntityReplica, EntityTx, Env } from '../typ
 import { deriveDelta } from '../account-utils';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText } from '../serialization-utils';
+import { getBootstrapTokenAmount } from '../bootstrap-economy';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
+export {
+  BOOTSTRAP_USD_NOTIONAL,
+  BOOTSTRAP_WETH_USD_RATE,
+  getBootstrapTokenAmount,
+} from '../bootstrap-economy';
 
 export const HUB_MESH_TOKEN_ID = 1;
-export const BOOTSTRAP_USD_NOTIONAL = 1_000_000n;
-export const BOOTSTRAP_WETH_USD_RATE = 1_000n;
-const BOOTSTRAP_TOKEN_UNIT = 10n ** 18n;
-
-export const getBootstrapCreditAmount = (tokenId: number): bigint => {
-  const wholeTokens = tokenId === 2
-    ? BOOTSTRAP_USD_NOTIONAL / BOOTSTRAP_WETH_USD_RATE
-    : BOOTSTRAP_USD_NOTIONAL;
-  return wholeTokens * BOOTSTRAP_TOKEN_UNIT;
-};
+export const getBootstrapCreditAmount = (tokenId: number): bigint => getBootstrapTokenAmount(tokenId, 18);
 
 export const HUB_MESH_CREDIT_AMOUNT = getBootstrapCreditAmount(HUB_MESH_TOKEN_ID);
 export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
-export const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 export const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 export const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 export const BOOTSTRAP_POLL_MS = Math.max(10, Number(process.env['BOOTSTRAP_POLL_MS'] || '50'));

@@ -4,6 +4,7 @@ import {
   buildMarketMakerConsensusConfig,
   deriveMarketMakerEntityId,
   getBootstrapCreditAmount,
+  getBootstrapTokenAmount,
   isCanonicalAccountOpener,
 } from '../orchestrator/mesh-common';
 
@@ -16,6 +17,8 @@ describe('mesh account bootstrap ownership', () => {
     expect(getBootstrapCreditAmount(1)).toBe(1_000_000n * unit);
     expect(getBootstrapCreditAmount(3)).toBe(1_000_000n * unit);
     expect(getBootstrapCreditAmount(2)).toBe(1_000n * unit);
+    expect(getBootstrapTokenAmount(1, 6)).toBe(1_000_000n * 10n ** 6n);
+    expect(getBootstrapTokenAmount(2, 18)).toBe(1_000n * unit);
   });
 
   test('assigns exactly one canonical opener per bilateral account', () => {

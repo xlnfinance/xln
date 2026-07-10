@@ -31,7 +31,8 @@ import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } fr
 import { setDeltaTransformerAddress } from '../proof-builder.js';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
-import { DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
+import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
+import { getBootstrapTokenAmountBySymbol } from '../bootstrap-economy';
 import {
   decodeBrowserVmEvents,
   toBrowserVmReceiptLogs,
@@ -357,7 +358,7 @@ export class BrowserVMProvider {
   }
 
   /** Faucet: fund a signer address with ETH + default tokens */
-  async fundSignerWallet(address: string, amount: bigint = DEFAULT_SIGNER_FAUCET): Promise<void> {
+  async fundSignerWallet(address: string, amount?: bigint): Promise<void> {
     if (!address) return;
     if (!this.tokenRegistry.size) {
       await this.deployDefaultTokens();
@@ -367,14 +368,15 @@ export class BrowserVMProvider {
     await this.ensureEthBalance(address, 1000n * 10n ** 18n);
 
     for (const token of this.tokenRegistry.values()) {
+      const targetAmount = amount ?? getBootstrapTokenAmountBySymbol(token.symbol, token.decimals);
       const balance = await this.getErc20Balance(token.address, address);
-      if (balance >= amount) continue;
-      const delta = amount - balance;
+      if (balance >= targetAmount) continue;
+      const delta = targetAmount - balance;
       await this.transferErc20(this.deployerPrivKey, token.address, address, delta);
     }
 
     this.fundedAddresses.add(normalized);
-    console.log(`[BrowserVM] Faucet funded ${address.slice(0, 10)}... with ${amount} of ${this.tokenRegistry.size} tokens`);
+    console.log(`[BrowserVM] Faucet funded ${address.slice(0, 10)}... with value-normalized defaults for ${this.tokenRegistry.size} tokens`);
   }
 
   private async deployDefaultTokens(): Promise<void> {
