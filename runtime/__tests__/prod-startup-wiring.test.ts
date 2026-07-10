@@ -581,6 +581,10 @@ describe('production startup wiring', () => {
     expect(runner).toContain('const E2E_ANVIL_MAX_PERSISTED_STATES = 256;');
     expect(runner.match(/'--max-persisted-states'/g)).toHaveLength(2);
     expect(runner.match(/String\(E2E_ANVIL_MAX_PERSISTED_STATES\)/g)).toHaveLength(2);
+    expect(runner).toContain("TMPDIR: anvilTmpDir");
+    expect(runner).toContain("TMPDIR: anvil2TmpDir");
+    expect(runner).toContain('rmSync(anvilTmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });');
+    expect(runner).toContain('rmSync(anvil2TmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });');
     expect(runner).not.toContain('await stopProcess(api, 120_000);');
   });
 

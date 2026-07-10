@@ -1763,7 +1763,11 @@ const runShard = async (
   // Keep anvil's live state outside orchestrator dbRoot. Reset intentionally rm -rf's dbRoot.
   const anvilStatePath = join(logsDir, `anvil-state-shard-${shard}.json`);
   const anvil2StatePath = join(logsDir, `anvil2-state-shard-${shard}.json`);
+  const anvilTmpDir = join(logsDir, `anvil-tmp-shard-${shard}`);
+  const anvil2TmpDir = join(logsDir, `anvil2-tmp-shard-${shard}`);
   mkdirSync(dbPath, { recursive: true });
+  mkdirSync(anvilTmpDir, { recursive: true });
+  mkdirSync(anvil2TmpDir, { recursive: true });
   let baselineHealth: unknown | null = null;
 
   const phaseMs: RunResult['phaseMs'] = {
@@ -1852,7 +1856,10 @@ const runShard = async (
         anvilStatePath,
         '--silent',
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildProcessEnv(process.env) },
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: sanitizeChildProcessEnv({ ...process.env, TMPDIR: anvilTmpDir }),
+      },
     );
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
     anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
@@ -1875,7 +1882,10 @@ const runShard = async (
         anvil2StatePath,
         '--silent',
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildProcessEnv(process.env) },
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: sanitizeChildProcessEnv({ ...process.env, TMPDIR: anvil2TmpDir }),
+      },
     );
     anvil2.stdout.on('data', c => log.write(`[anvil2] ${c.toString()}`));
     anvil2.stderr.on('data', c => log.write(`[anvil2:err] ${c.toString()}`));
@@ -2206,6 +2216,8 @@ const runShard = async (
     await stopShardRuntimePorts(apiPort, log);
     await stopProcess(vite);
     await Promise.all([stopProcess(anvil), stopProcess(anvil2)]);
+    rmSync(anvilTmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    rmSync(anvil2TmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     log.end();
   }
 };
