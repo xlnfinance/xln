@@ -261,7 +261,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
-  test('latest restore fails closed for multi-validator replica when live identity meta is missing', async () => {
+  test('latest restore preserves multi-validator signer/proposer identity and fails closed without its meta', async () => {
     const seed = `storage-restore-missing-multisig-meta ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -304,10 +304,18 @@ describe('storage frame journal retention', () => {
       entityInputs: [],
     });
     await processRuntime(env, []);
-    await getRuntimeStorageDb(env).del(keyLiveReplicaMeta(entityId));
-
     await closeRuntimeDb(env);
     await closeInfraDb(env);
+
+    const restored = await loadEnvFromDB(runtimeId, seed);
+    if (!restored) throw new Error('test fixture failed to restore multi-validator runtime');
+    const restoredReplica = Array.from(restored.eReplicas.values()).find((replica) => replica.entityId === entityId);
+    expect(restoredReplica?.signerId).toBe(signerA);
+    expect(restoredReplica?.isProposer).toBe(true);
+
+    await getRuntimeStorageDb(restored).del(keyLiveReplicaMeta(entityId));
+    await closeRuntimeDb(restored);
+    await closeInfraDb(restored);
 
     await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_REPLICA_META_REQUIRED');
   });
