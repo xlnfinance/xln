@@ -1,6 +1,6 @@
 {
   "name": "xlnfinance",
-  "version": "1.0.0",
+  "version": "0.1.6",
   "main": "index.js",
   "scripts": {
     "clean-slate": "./scripts/dev/clean-slate.sh",
@@ -154,6 +154,7 @@
     "check:no-active-infra-in-state-machine": "bun runtime/scripts/check-no-active-infra-in-state-machine.ts",
     "check:determinism": "bun runtime/scripts/check-determinism.ts",
     "soundcheck": "bun tools/soundcheck.ts",
+    "release:snapshot": "bun tools/release-snapshot.ts",
     "visualcheck": "bun tools/visualcheck.ts",
     "build:tsc": "bun node_modules/@typescript/native/bin/tsc",
     "watch": "bun node_modules/@typescript/native/bin/tsc --watch",
