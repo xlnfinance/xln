@@ -31,9 +31,11 @@ const ROOT_ORDER = ['runtime', 'jurisdictions', 'frontend', 'docs', 'tools', 'te
 const GENERATED_PREFIXES = [
   'jurisdictions/artifacts/',
   'jurisdictions/cache/',
-  'jurisdictions/typechain-types/',
+  'jurisdictions/typechain',
   'frontend/static/contracts/',
   'frontend/static/docs-catalog/',
+  'frontend/static/docs-static/',
+  'frontend/static/hash-wasm-',
   'frontend/.svelte-kit/',
   'frontend/build/',
   'node_modules/',

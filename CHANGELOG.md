@@ -2,9 +2,40 @@
 
 All notable XLN changes are documented here.
 
-The project is still pre-mainnet. Version `0.1.5` marks the current state of the
-production demo network, recovery/watchtower stack, channel runtime, and test
-gates.
+The project is still pre-mainnet. Version `0.1.6` marks the current runtime,
+remote projection, developer visualization, and release-observability baseline.
+
+## [0.1.6] - 2026-07-11
+
+### Runtime Projection and Time Machine
+
+- Unified browser and remote runtime reads behind the runtime adapter.
+- Made historical navigation project the complete runtime view instead of
+  mixing historical frames with live accounts.
+- Added bounded runtime-frame caching and explicit return to live state.
+- Added remote runtime projection and time-machine regression coverage.
+
+### Disputes and Developer Surfaces
+
+- Added deterministic dispute-finalization helpers and focused tests.
+- Added the RCPAN bilateral dispute and court-ledger explainer.
+- Added runtime diagnostics, entity audit, jurisdiction inspection, and network
+  graph timeline surfaces.
+- Added the xln assistant proxy, guide context, and mascot UI.
+
+### Release Observability
+
+- Added a deterministic repository snapshot tool backed by `scc`.
+- Added per-file raw metrics, dependency/test relations, historical deltas,
+  generated-file exclusion, and complete ASCII codebase trees.
+- Added the Releases site section with metric and module history charts.
+- Established `VERSION`, package metadata, and tag `v0.1.6` as the canonical
+  release identity.
+
+### Verification
+
+- `bun run check`
+- Full repository snapshot generation against `v0.1.5` and `v0.1.6`
 
 ## [0.1.5] - 2026-05-29
 
