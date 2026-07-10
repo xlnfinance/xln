@@ -167,41 +167,6 @@ async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
   if (proc.exitCode === null) proc.kill('SIGKILL');
 }
 
-function isRelayReadyLogText(text: string): boolean {
-  return text.includes('listening on') || text.includes('service.listen');
-}
-
-async function waitRelayReady(proc: PipedChildProcess, timeoutMs: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(new Error(`relay startup timeout (${timeoutMs}ms)`));
-    }, timeoutMs);
-
-    const onData = (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (isRelayReadyLogText(text)) {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve();
-      }
-    };
-    const onExit = (code: number | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error(`relay exited early (code=${code})`));
-    };
-
-    proc.stdout.on('data', onData);
-    proc.stderr.on('data', onData);
-    proc.once('exit', onExit);
-  });
-}
-
 type ParallelResult = {
   scenario: string;
   workerId: number;
@@ -230,7 +195,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
   mkdirSync(logsDir, { recursive: true });
 
   console.log('\n' + '='.repeat(72));
-  console.log('Parallel Scenario Runner (isolated Anvil + relay per worker)');
+  console.log('Parallel Scenario Runner (isolated RPC per worker; in-memory gossip)');
   console.log('='.repeat(72));
   console.log(`Set       : ${set}`);
   console.log(`Mode      : ${mode}`);
@@ -246,32 +211,15 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
     const startedAt = Date.now();
     const logPath = join(logsDir, `${String(workerId).padStart(2, '0')}-${scenario}.log`);
     const log = createWriteStream(logPath, { flags: 'w' });
-    let relayProc: PipedChildProcess | null = null;
     let scenarioProc: PipedChildProcess | null = null;
 
     try {
       const rpcPort = await reserveFreeLocalPort();
-      const relayPort = await reserveFreeLocalPort();
       const rpcUrl = `http://127.0.0.1:${rpcPort}`;
-      const relayUrl = `ws://127.0.0.1:${relayPort}`;
       const dbPath = join(logsDir, `db-worker-${workerId}-${scenario}`);
       mkdirSync(dbPath, { recursive: true });
 
-      log.write(`scenario=${scenario}\nworker=${workerId}\nrpc=${rpcUrl}\nrelay=${relayUrl}\n\n`);
-
-      relayProc = spawn('bun', ['runtime/relay/standalone-server.ts', '--port', String(relayPort)], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          WS_PORT: String(relayPort),
-          WS_SERVER_ID: `relay-${workerId}-${scenario}`,
-        },
-      });
-
-      const activeRelayProc = relayProc;
-      activeRelayProc.stdout.on('data', (c) => log.write(`[relay] ${c.toString()}`));
-      activeRelayProc.stderr.on('data', (c) => log.write(`[relay:err] ${c.toString()}`));
-      await waitRelayReady(activeRelayProc, 10_000);
+      log.write(`scenario=${scenario}\nworker=${workerId}\nrpc=${rpcUrl}\nnetwork=in-memory-gossip\n\n`);
 
       scenarioProc = spawn('bun', [
         'runtime/scenarios/run.ts',
@@ -287,10 +235,6 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
           JADAPTER_MODE: mode,
           ANVIL_RPC: rpcUrl,
           XLN_DB_PATH: dbPath,
-          RELAY_URL: relayUrl,
-          INTERNAL_RELAY_URL: relayUrl,
-          PUBLIC_RELAY_URL: relayUrl,
-          P2P_RELAY_PORT: String(relayPort),
         },
       });
 
@@ -332,7 +276,6 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
       };
     } finally {
       await stopProcess(scenarioProc);
-      await stopProcess(relayProc);
       log.end();
     }
   };

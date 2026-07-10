@@ -2347,11 +2347,14 @@ async function main(): Promise<void> {
       if (abortController.signal.aborted) return null;
       while (claimedCount < tasks.length) {
         if (abortController.signal.aborted) return null;
-        for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
-          if (claimed[taskIndex]) continue;
+        const prioritizedMarketMakerIndex = activeMarketMakerTasks < args.maxMmConcurrency
+          ? tasks.findIndex((task, index) => !claimed[index] && task.requireMarketMaker)
+          : -1;
+        const plainTaskIndex = tasks.findIndex((task, index) => !claimed[index] && !task.requireMarketMaker);
+        const taskIndex = prioritizedMarketMakerIndex >= 0 ? prioritizedMarketMakerIndex : plainTaskIndex;
+        if (taskIndex >= 0) {
           const task = tasks[taskIndex];
-          if (!task) continue;
-          if (task.requireMarketMaker && activeMarketMakerTasks >= args.maxMmConcurrency) continue;
+          if (!task) throw new Error(`E2E_TASK_MISSING: index=${taskIndex}`);
           claimed[taskIndex] = true;
           claimedCount += 1;
           if (task.requireMarketMaker) activeMarketMakerTasks += 1;

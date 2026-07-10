@@ -14,7 +14,7 @@ type StandaloneRelayOptions = {
   port: number;
   serverId: string;
   serverRuntimeId?: string;
-  onEntityInput?: (from: string | undefined, msg: unknown) => Promise<void> | void;
+  onEntityInput?: (from: string | undefined, msg: RuntimeWsMessage, store: RelayStore) => Promise<void> | void;
 };
 
 export type StandaloneRelayServer = {
@@ -49,7 +49,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
     store,
     localRuntimeId,
     localDeliver: async (from, msg) => {
-      await options.onEntityInput?.(from, msg);
+      await options.onEntityInput?.(from, msg, store);
     },
     send: (ws, data) => ws.send(data),
   };

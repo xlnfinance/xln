@@ -625,6 +625,13 @@ describe('production startup wiring', () => {
     expect(Number(configured?.[1] || 0)).toBeLessThanOrEqual(8);
   });
 
+  test('isolated e2e overlaps the bounded market-maker queue with plain stacks', () => {
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    expect(runner).toContain('const prioritizedMarketMakerIndex = activeMarketMakerTasks < args.maxMmConcurrency');
+    expect(runner).toContain('!claimed[index] && task.requireMarketMaker');
+    expect(runner).toContain('!claimed[index] && !task.requireMarketMaker');
+  });
+
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     const sources = [
@@ -1109,6 +1116,10 @@ describe('production startup wiring', () => {
     expect(packageJson).toContain('"test:contracts:full": "bun runtime/scripts/run-with-test-cleanup.ts --reason=contracts --child-cwd=jurisdictions -- sh -c \\"bunx hardhat test test/*.ts test/*.cjs\\""');
     expect(packageJson).toContain('"test:e2e:release": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --exclude-market-maker');
     expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only');
+    expect(packageJson).toContain('"test:e2e:full": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
+    expect(packageJson).toContain('"test:e2e:mm": "bun run prod:bootstrap:soundcheck && bun runtime/scripts/run-e2e-parallel-isolated.ts --all --market-maker-only --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
+    expect(packageJson).toContain('"test:e2e:all": "bun runtime/scripts/run-e2e-parallel-isolated.ts --all --shards=8 --workers-per-shard=1 --max-mm-concurrency=2');
+    expect(packageJson).toContain('"test:p2p:relay": "bun runtime/scripts/test-artifact-cleanup.ts --reason=p2p-relay && bun runtime/scenarios/p2p-relay.ts"');
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO: process.env['XLN_LOCAL_PROD_SMOKE_ASSERT_MM_INFO'] || '1'");
     expect(bootstrapSoundcheck).toContain("XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS: process.env['XLN_LOCAL_PROD_SMOKE_MM_INFO_MAX_MS'] || '1500'");
     expect(runner).toContain('excludeMarketMaker: hasFlag');
@@ -1118,6 +1129,7 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain("XLN_MIN_DISK_FREE_BYTES: process.env['XLN_MIN_DISK_FREE_BYTES'] || '1'");
     expect(runner).toContain("...(process.env['XLN_MIN_DISK_FREE_BYTES']");
     expect(releaseGate).toContain("{ name: 'bootstrap soundcheck', command: 'bun run prod:bootstrap:soundcheck', timeoutMs: 240_000 }");
+    expect(releaseGate).toContain("{ name: 'real WebSocket P2P relay', command: 'bun run test:p2p:relay', timeoutMs: 240_000 }");
     expect(releaseGate).toContain("{ name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 }");
     expect(releaseGate.indexOf("'frontend generated aliases'")).toBeLessThan(releaseGate.indexOf("'runtime core unit tests'"));
     expect(releaseGate.indexOf("'bootstrap soundcheck'")).toBeLessThan(releaseGate.indexOf("'fast E2E gate'"));
@@ -1133,6 +1145,9 @@ describe('production startup wiring', () => {
     expect(unitTestsRunner).toContain('env: sanitizeChildProcessEnv({');
     expect(unitTestsRunner).toContain("'--keep-test-artifacts'");
     expect(unitTestsRunner).toContain("'--no-cleanup'");
+    expect(unitTestsRunner).toContain('const SUBPROCESS_STDIO_TEST_FILES = [');
+    expect(unitTestsRunner).toContain('`--path-ignore-patterns=**/${file}`');
+    expect(unitTestsRunner).toContain("resolve(process.cwd(), 'runtime')");
     expect(e2eFastRunner).toContain('cleanupTestArtifactsBeforeRun({');
     expect(e2eFastRunner).toContain("reason: 'e2e-fast'");
     expect(e2eFastRunner).toContain("scope: 'e2e'");
@@ -1171,6 +1186,24 @@ describe('production startup wiring', () => {
     expect(playwrightGlobalSetup).toContain("'playwright'");
     expect(playwrightGlobalSetup).toContain("'e2e'");
     expect(playwrightGlobalSetup).toContain('PLAYWRIGHT_ARTIFACT_CLEANUP_FAILED');
+  });
+
+  test('scenario workers only start transports their scenario actually uses', () => {
+    const runner = readFileSync(join(repoRoot, 'runtime/scenarios/run.ts'), 'utf8');
+    const p2pNode = readFileSync(join(repoRoot, 'runtime/scenarios/p2p-node.ts'), 'utf8');
+
+    expect(runner).not.toContain('runtime/relay/standalone-server.ts');
+    expect(runner).not.toContain('RELAY_URL:');
+    expect(runner).not.toContain('INTERNAL_RELAY_URL:');
+    expect(runner).not.toContain('PUBLIC_RELAY_URL:');
+    expect(runner).not.toContain('P2P_RELAY_PORT:');
+    expect(runner).toContain('Parallel Scenario Runner (isolated RPC per worker; in-memory gossip)');
+
+    expect(p2pNode).toContain('console.log(`P2P_JADAPTER_READY role=${role} mode=browservm`)');
+    expect(p2pNode).toContain('rpcs: []');
+    expect(p2pNode).toContain('profileName: role');
+    expect(p2pNode).toContain('createLocalDeliveryHandler(env, store, getEntityReplicaById)');
+    expect(p2pNode).not.toContain('env.networkInbox.push(routedInput)');
   });
 
   test('fatal log monitor reports the concrete marker line and last 80 log lines', () => {

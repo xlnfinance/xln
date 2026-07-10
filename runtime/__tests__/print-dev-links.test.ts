@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+
+const repoRoot = resolve(import.meta.dir, '../..');
 
 test('dev link banner prints stable subsystem links and bulk import fragments', () => {
   const dir = mkdtempSync(join(tmpdir(), 'xln-dev-links-'));
@@ -23,7 +25,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
       '--suppress-url-log',
       '--quiet',
     ], {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       encoding: 'utf8',
       stdio: 'pipe',
     });
@@ -50,7 +52,7 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
       '--keys',
       keysPath,
     ], {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       encoding: 'utf8',
       stdio: 'pipe',
     });
@@ -99,9 +101,9 @@ test('dev link banner prints stable subsystem links and bulk import fragments', 
 });
 
 test('bun run dev does not print token-bearing runtime import URLs by default', () => {
-  const runDev = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
-  const devChild = readFileSync(join(process.cwd(), 'scripts/dev/run-dev-child.sh'), 'utf8');
-  const runtimeWatcher = readFileSync(join(process.cwd(), 'scripts/dev/watch-runtime-build.sh'), 'utf8');
+  const runDev = readFileSync(join(repoRoot, 'scripts/dev/run-dev.sh'), 'utf8');
+  const devChild = readFileSync(join(repoRoot, 'scripts/dev/run-dev-child.sh'), 'utf8');
+  const runtimeWatcher = readFileSync(join(repoRoot, 'scripts/dev/watch-runtime-build.sh'), 'utf8');
 
   expect(runDev).not.toContain('XLN_RUNTIME_IMPORT_LOG_URL=1');
   expect(runDev).toContain('./scripts/dev/run-dev-child.sh mesh');
@@ -127,7 +129,7 @@ test('bun run dev does not print token-bearing runtime import URLs by default', 
 });
 
 test('dev hub storage mode log is explicit and not an alarming pause line', () => {
-  const hubNode = readFileSync(join(process.cwd(), 'runtime/orchestrator/hub-node.ts'), 'utf8');
+  const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
 
   expect(hubNode).toContain("nodeLog.info('dev_bootstrap.storage_disabled'");
   expect(hubNode).not.toContain('DEV_BOOTSTRAP_STORAGE_DISABLED');

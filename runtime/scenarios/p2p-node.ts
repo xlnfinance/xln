@@ -5,6 +5,8 @@
 
 import { startStandaloneRelayServer } from '../relay/standalone-server';
 import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
+import { createLocalDeliveryHandler } from '../relay-local-delivery';
+import { getEntityReplicaById } from '../server/entity-lookup';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
@@ -12,7 +14,7 @@ import { loadJurisdictions } from '../jurisdiction-loader';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { hashHtlcSecret } from '../htlc-utils';
-import type { AccountMachine, Delta, EntityInput, Env, JurisdictionConfig, RoutedEntityInput } from '../types';
+import type { AccountMachine, Delta, EntityInput, Env, JurisdictionConfig } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../networking/gossip';
 import { ethers } from 'ethers';
@@ -48,7 +50,7 @@ const R2R_AMOUNT = usd(250);
 const HTLC_AMOUNT = usd(1_000);
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-type P2PScenarioEnv = Env & { _lastGossipRefresh?: number };
+type P2PScenarioEnv = Env;
 
 const resolveJurisdiction = (): {
   jurisdiction: JurisdictionConfig;
@@ -655,36 +657,49 @@ const run = async () => {
 
     // J-event watching is handled by JAdapter.startWatching() per-jReplica
     console.log(`P2P_JADAPTER_READY role=${role} rpc=${rpcUrl}`);
+  } else {
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [
+        {
+          type: 'importJ',
+          data: {
+            name: jurisdictionName,
+            chainId: 31337,
+            ticker: 'XLN',
+            rpcs: [],
+          },
+        },
+      ],
+      entityInputs: [],
+    });
+    await runtimeProcess(env);
+
+    const browserReplica = env.jReplicas.get(jurisdictionName);
+    const browserAdapter = browserReplica?.jadapter;
+    if (!browserReplica || !browserAdapter?.addresses.depository || !browserAdapter.addresses.entityProvider) {
+      throw new Error(`P2P_BROWSERVM_JURISDICTION_MISSING: ${jurisdictionName}`);
+    }
+    jurisdiction = {
+      name: browserReplica.name,
+      address: 'browservm://',
+      entityProviderAddress: browserAdapter.addresses.entityProvider,
+      depositoryAddress: browserAdapter.addresses.depository,
+      chainId: Number(browserAdapter.chainId || 31337),
+    };
+    console.log(`P2P_JADAPTER_READY role=${role} mode=browservm`);
   }
 
   // CRITICAL: Start relay AFTER env created so we can pass callbacks
   if (isHub && relayPort > 0) {
+    let localDelivery: ReturnType<typeof createLocalDeliveryHandler> | null = null;
     startStandaloneRelayServer({
       host: relayHost,
       port: relayPort,
       serverId: role,
       ...(env.runtimeId ? { serverRuntimeId: env.runtimeId } : {}),  // Enable local delivery for messages to self
-      // CRITICAL: Pass callback to feed messages into Hub's runtime
-      onEntityInput: async (from: string | undefined, input: unknown) => {
-        const routedInput = input as RoutedEntityInput;
-        const fromLabel = from ? from.slice(0, 10) : 'unknown';
-        console.log(`[HUB-RELAY] Received entity_input from=${fromLabel} entity=${routedInput.entityId.slice(-4)}`);
-
-        // CRITICAL: Ensure we have profiles before processing
-        // Only refresh if we haven't recently (to avoid slowdown)
-        const now = Date.now();
-        const lastRefresh = env._lastGossipRefresh || 0;
-        if (p2p && (now - lastRefresh > 1000)) {  // Refresh max once per second
-          console.log(`[HUB-RELAY] Refreshing gossip before processing...`);
-          p2p.refreshGossip();
-          env._lastGossipRefresh = now;
-          await sleep(100);  // Brief wait for response
-        }
-
-        if (!env.networkInbox) env.networkInbox = [];
-        env.networkInbox.push(routedInput);
-        console.log(`[HUB-RELAY] Added to networkInbox, size=${env.networkInbox.length}`);
-        // Runtime loop will pick this up on next tick (always-on via startRuntimeLoop)
+      onEntityInput: async (from, msg, store) => {
+        localDelivery ??= createLocalDeliveryHandler(env, store, getEntityReplicaById);
+        await localDelivery(from, msg);
       },
     });
     console.log(`P2P_RELAY_READY host=${relayHost} port=${relayPort}`);
@@ -715,6 +730,7 @@ const run = async () => {
         data: {
           config,
           isProposer: true,
+          profileName: role,
           position: { x: 0, y: 0, z: 0 },
         },
       },

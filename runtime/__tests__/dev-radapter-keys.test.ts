@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+
+const repoRoot = resolve(import.meta.dir, '../..');
 
 type DevRadapterKeysPayload = {
   importUrl: string;
@@ -26,7 +28,7 @@ test('dev radapter keys prints one app source URL without pre-runtime tokens', (
       '--env-out',
       envOutPath,
     ], {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       encoding: 'utf8',
       stdio: 'pipe',
     });
@@ -75,7 +77,7 @@ test('dev radapter keys can suppress early URL logging for bun run dev', () => {
       envOutPath,
       '--suppress-url-log',
     ], {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       encoding: 'utf8',
       stdio: 'pipe',
     });
@@ -108,7 +110,7 @@ test('dev radapter keys can run quietly when bun run dev waits for the real mani
       '--suppress-url-log',
       '--quiet',
     ], {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       encoding: 'utf8',
       stdio: 'pipe',
     });
@@ -143,7 +145,7 @@ test('dev radapter keys can point app import links at the browser QA origin', ()
       '--suppress-url-log',
       '--quiet',
     ], {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       encoding: 'utf8',
       stdio: 'pipe',
     });

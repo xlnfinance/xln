@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
 import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
 
-const repoRoot = process.cwd();
+const repoRoot = resolve(import.meta.dir, '../..');
 
 const reservePort = (): number => {
   const server = Bun.serve({
