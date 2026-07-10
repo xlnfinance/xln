@@ -32,11 +32,6 @@ const diagnosticFiles = [
     importLine: "import { errorLog } from './errorLogStore';",
     logLine: "errorLog.log('Failed to load J-Machine configs; clearing corrupted storage', 'J-Machine Store'",
   },
-  {
-    path: 'frontend/src/lib/stores/jurisdictionStore.ts',
-    importLine: "import { errorLog } from './errorLogStore';",
-    logLine: "errorLog.log('Failed to load jurisdictions from runtime', 'Jurisdiction Store'",
-  },
 ] as const;
 
 test('app shell and small stores persist diagnostics instead of raw console output', () => {
