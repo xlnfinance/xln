@@ -200,6 +200,22 @@ history remains in git. Every item below is still open or intentionally heavy.
   cannot remove a newer lease; adversarial multi-process tests cover concurrent
   takeover, killed writers, long writes, PID reuse, and current/history parity.
 
+### 14. Repair stale orderbook level aggregate cleanup
+
+- Reproduced on current HEAD: put two asks at one price, make the first cached
+  order stale with zero quantity, then partially fill the second. The cleanup
+  removes the stale id but leaves its old quantity in `level.totalQtyLots`;
+  `validateBookStructure` reports `expected=4 actual=9`.
+- Risk: a stale/corrupt cache row that shares a price level with a live order
+  remains structurally inconsistent after the existing self-heal path and can
+  distort later aggregate checks. The canonical offer state remains the source
+  of truth, but changing matching-cache mutation is consensus-sensitive.
+- Acceptance: obtain explicit consensus approval; add the failing two-order L1
+  regression; recompute or otherwise restore the exact live level aggregate
+  when stale ids are evicted; prove matching/trade order and replay hashes are
+  unchanged for valid books; pass orderbook, same-j, cross-j, replay, and TPS
+  gates with `validateBookStructure` green after cleanup.
+
 ## HEAVY TODO — separate design/approval required
 
 ### 1. Prove validate/commit equivalence
