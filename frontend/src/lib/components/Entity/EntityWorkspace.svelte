@@ -8,6 +8,7 @@
   import EntityPanelTabs from './EntityPanelTabs.svelte';
   import {
     buildEntityWorkspaceView,
+    runtimeProjectionMatchesRuntime,
     type EntityWorkspaceView,
   } from './entity-workspace';
   import {
@@ -74,11 +75,15 @@
     const tabEntityId = String(tab?.entityId || '').trim().toLowerCase();
     const runtimeActiveEntityId = String($runtimeView.activeEntityId || '').trim().toLowerCase();
     const handle = $runtimeControllerHandle;
+    const selectedRuntimeId = String(handle.runtimeId || handle.id || '').trim().toLowerCase();
     const entityId = handle.mode === 'remote'
       ? (tabEntityId || runtimeActiveEntityId)
       : tabEntityId;
-    const nextKey = `${handle.id}|${handle.status}|${entityId}`;
-    if (projectionFrameMatchesEntity($runtimeView.frame, entityId)) {
+    const nextKey = `${selectedRuntimeId}|${handle.status}|${entityId}`;
+    if (
+      runtimeProjectionMatchesRuntime($runtimeView.runtimeId, selectedRuntimeId)
+      && projectionFrameMatchesEntity($runtimeView.frame, entityId)
+    ) {
       workspaceProjectionKey = nextKey;
       workspaceProjectionFrame = $runtimeView.frame;
       workspaceProjectionError = null;

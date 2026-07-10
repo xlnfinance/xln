@@ -36,6 +36,15 @@ export type EntityWorkspaceCapabilities = {
 
 const normalizeId = (value: string | null | undefined): string => String(value || '').trim().toLowerCase();
 
+export const runtimeProjectionMatchesRuntime = (
+  projectionRuntimeId: string | null | undefined,
+  selectedRuntimeId: string | null | undefined,
+): boolean => {
+  const projection = normalizeId(projectionRuntimeId);
+  const selected = normalizeId(selectedRuntimeId);
+  return projection.length > 0 && selected.length > 0 && projection === selected;
+};
+
 const safeSize = (value: unknown): number => {
   if (!value) return 0;
   if (value instanceof Map || value instanceof Set) return value.size;

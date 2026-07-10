@@ -41,12 +41,14 @@
   }
 
   // Auto-select signer when vault becomes active
-  $: if ($activeSigner && !$appState.navigation.signer) {
+  $: if ($activeSigner && !$appState.navigation.signer
+    && navigationView.signerItems.some((signer) => signer.id.toLowerCase() === $activeSigner.address.toLowerCase())) {
     appStateOperations.navigate('signer', $activeSigner.address);
   }
 
   // Auto-select entity when signer has one
-  $: if ($activeSigner?.entityId && !$appState.navigation.entity) {
+  $: if ($activeSigner?.entityId && !$appState.navigation.entity
+    && navigationView.signerItems.some((signer) => signer.id.toLowerCase() === $activeSigner.address.toLowerCase())) {
     appStateOperations.navigate('entity', $activeSigner.entityId);
   }
 </script>

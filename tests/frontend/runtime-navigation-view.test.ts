@@ -9,17 +9,20 @@ const signerA = '0xAaAa';
 const signerB = '0xBbBb';
 const entityA = '0xentity-a';
 const entityB = '0xentity-b';
+const entityC = '0xentity-c';
 const accountA = '0xaccount-a';
 
 test('hierarchical navigation projects runtime state into breadcrumb items', () => {
   const runtimes = new Map([
     [runtimeA, {
       id: runtimeA,
+      type: 'local',
       label: 'Runtime A',
-      entityCount: 2,
+      entityCount: 3,
     }],
     [runtimeB, {
       id: runtimeB,
+      type: 'remote',
       label: 'Runtime B',
       entityCount: 0,
     }],
@@ -29,12 +32,13 @@ test('hierarchical navigation projects runtime state into breadcrumb items', () 
     runtimes,
     {
       runtime: runtimeA,
-      jurisdiction: null,
+      jurisdiction: 'Testnet',
       signer: signerA.toLowerCase(),
       entity: entityA.toUpperCase(),
       account: null,
     },
     {
+      id: runtimeA,
       signers: [
         { address: signerA, name: 'Alice' },
         { address: signerB, name: 'Bob' },
@@ -55,6 +59,12 @@ test('hierarchical navigation projects runtime state into breadcrumb items', () 
           label: entityB,
           jurisdiction: { name: 'Testnet', chainId: 31337 },
         },
+        {
+          entityId: entityC,
+          signerId: signerA,
+          label: entityC,
+          jurisdiction: { name: 'Tron', chainId: 728126428 },
+        },
       ],
       frame: {
         activeEntityId: entityA,
@@ -70,16 +80,51 @@ test('hierarchical navigation projects runtime state into breadcrumb items', () 
   );
 
   expect(view.runtimeItems).toEqual([
-    { id: runtimeA, label: 'Runtime A', count: 2 },
+    { id: runtimeA, label: 'Runtime A', count: 3 },
     { id: runtimeB, label: 'Runtime B', count: 0 },
   ]);
-  expect(view.jurisdictionItems).toEqual([{ id: 'Testnet', label: 'Testnet', count: 0 }]);
+  expect(view.jurisdictionItems).toEqual([
+    { id: 'Testnet', label: 'Testnet', count: 2 },
+    { id: 'Tron', label: 'Tron', count: 1 },
+  ]);
   expect(view.signerItems).toEqual([
     { id: signerA, label: 'Alice' },
     { id: signerB, label: 'Bob' },
   ]);
   expect(view.entityItems).toEqual([{ id: entityA, label: entityA, count: 1 }]);
   expect(view.accountItems).toEqual([{ id: accountA, label: `A${accountA.slice(0, 8)}` }]);
+});
+
+test('remote runtime navigation does not inherit local vault signer selection', () => {
+  const view = buildHierarchicalNavigationView(
+    new Map([
+      [runtimeA, { id: runtimeA, type: 'local', label: 'Runtime A' }],
+      [runtimeB, { id: runtimeB, type: 'remote', label: 'Runtime B' }],
+    ]),
+    {
+      runtime: runtimeB,
+      jurisdiction: 'Testnet',
+      signer: signerA,
+      entity: null,
+      account: null,
+    },
+    {
+      id: runtimeA,
+      signers: [{ address: signerA, name: 'Alice' }],
+    } as never,
+    {
+      runtimeId: runtimeB,
+      entities: [{
+        entityId: entityB,
+        signerId: signerB,
+        label: entityB,
+        jurisdiction: { name: 'Testnet', chainId: 31337 },
+      }],
+    },
+  );
+
+  expect(view.signerItems).toEqual([]);
+  expect(view.entityItems).toEqual([{ id: entityB, label: entityB, count: 0 }]);
 });
 
 test('HierarchicalNav consumes a projected navigation view instead of reading full runtime env', () => {

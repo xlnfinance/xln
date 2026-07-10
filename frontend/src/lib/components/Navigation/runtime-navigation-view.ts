@@ -9,6 +9,7 @@ export type NavigationItem = {
 
 export type RuntimeNavigationRuntime = {
   id: string;
+  type?: 'local' | 'remote';
   label: string;
   entityCount?: number;
 };
@@ -55,6 +56,15 @@ const normalizeId = (value: unknown): string => String(value || '').trim().toLow
 const runtimeMatchesView = (runtimeId: string, runtimeView: RuntimeNavigationViewProjection | null | undefined): boolean =>
   normalizeId(runtimeId) === normalizeId(runtimeView?.runtimeId);
 
+const jurisdictionItem = (
+  jurisdiction: NonNullable<RuntimeNavigationViewProjection['entities']>[number]['jurisdiction'],
+): NavigationItem | null => {
+  if (!jurisdiction) return null;
+  const id = String(jurisdiction.address || jurisdiction.name || jurisdiction.chainId || '').trim();
+  const label = String(jurisdiction.name || jurisdiction.address || jurisdiction.chainId || id).trim();
+  return id && label ? { id, label, count: 0 } : null;
+};
+
 const entityAccountCount = (
   entityId: string,
   runtimeView: RuntimeNavigationViewProjection | null | undefined,
@@ -78,14 +88,19 @@ const accountCounterpartyId = (entityId: string, account: { leftEntity?: string;
 export function buildHierarchicalNavigationView(
   runtimes: ReadonlyMap<string, RuntimeNavigationRuntime>,
   navigation: NavigationSelection,
-  activeVaultRuntime: Pick<VaultRuntime, 'signers'> | null | undefined,
+  activeVaultRuntime: Pick<VaultRuntime, 'id' | 'signers'> | null | undefined,
   runtimeView: RuntimeNavigationViewProjection | null | undefined = null,
 ): HierarchicalNavigationView {
   const selectedRuntimeId = String(navigation.runtime || '').trim();
+  const selectedJurisdictionId = normalizeId(navigation.jurisdiction);
   const selectedSignerId = normalizeId(navigation.signer);
   const selectedEntityId = normalizeId(navigation.entity);
   const selectedRuntimeHasProjection = runtimeMatchesView(selectedRuntimeId, runtimeView);
   const projectedEntities = selectedRuntimeHasProjection ? (runtimeView?.entities ?? []) : [];
+  const selectedRuntime = Array.from(runtimes.values())
+    .find((runtime) => normalizeId(runtime.id) === normalizeId(selectedRuntimeId));
+  const usesActiveVault = selectedRuntime?.type !== 'remote'
+    && normalizeId(activeVaultRuntime?.id) === normalizeId(selectedRuntimeId);
 
   const runtimeItems = Array.from(runtimes.values()).map((runtime) => ({
     id: runtime.id,
@@ -95,17 +110,18 @@ export function buildHierarchicalNavigationView(
       : Math.max(0, Math.floor(Number(runtime.entityCount || 0))),
   }));
 
-  const jurisdictionItems = Array.from(new Map(projectedEntities
-    .map((entity) => entity.jurisdiction)
-    .filter((jurisdiction): jurisdiction is NonNullable<typeof jurisdiction> => !!jurisdiction)
-    .map((jurisdiction) => {
-      const id = String(jurisdiction.address || jurisdiction.name || jurisdiction.chainId || '').trim();
-      const label = String(jurisdiction.name || jurisdiction.address || jurisdiction.chainId || id).trim();
-      return id && label ? [id, { id, label, count: 0 } as NavigationItem] : null;
-    })
-    .filter((item): item is [string, NavigationItem] => !!item)).values());
+  const jurisdictionsById = new Map<string, NavigationItem>();
+  for (const entity of projectedEntities) {
+    const item = jurisdictionItem(entity.jurisdiction);
+    if (!item) continue;
+    const key = normalizeId(item.id);
+    const existing = jurisdictionsById.get(key);
+    if (existing) existing.count = (existing.count ?? 0) + 1;
+    else jurisdictionsById.set(key, { ...item, count: 1 });
+  }
+  const jurisdictionItems = Array.from(jurisdictionsById.values());
 
-  const signerItems = (activeVaultRuntime?.signers || []).map((signer) => ({
+  const signerItems = (usesActiveVault ? activeVaultRuntime?.signers ?? [] : []).map((signer) => ({
     id: signer.address,
     label: signer.name,
   }));
@@ -114,8 +130,10 @@ export function buildHierarchicalNavigationView(
   for (const entity of projectedEntities) {
     const entityId = normalizeId(entity.entityId);
     if (!entityId) continue;
+    const entityJurisdictionId = normalizeId(jurisdictionItem(entity.jurisdiction)?.id);
+    if (selectedJurisdictionId && entityJurisdictionId !== selectedJurisdictionId) continue;
     const signerId = normalizeId(entity.signerId);
-    if (selectedSignerId && signerId && signerId !== selectedSignerId) continue;
+    if (usesActiveVault && selectedSignerId && signerId && signerId !== selectedSignerId) continue;
     entityItems.push({
       id: entityId,
       label: String(entity.label || entityId),

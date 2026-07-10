@@ -3,7 +3,16 @@ import { readFileSync } from 'node:fs';
 import {
   buildEntityWorkspaceView,
   resolveEntityWorkspaceCapabilities,
+  runtimeProjectionMatchesRuntime,
 } from '../../frontend/src/lib/components/Entity/entity-workspace';
+
+test('runtime projection cannot cross a runtime switch boundary', () => {
+  expect(runtimeProjectionMatchesRuntime('runtime-a', 'runtime-a')).toBe(true);
+  expect(runtimeProjectionMatchesRuntime('RUNTIME-A', 'runtime-a')).toBe(true);
+  expect(runtimeProjectionMatchesRuntime('runtime-a', 'runtime-b')).toBe(false);
+  expect(runtimeProjectionMatchesRuntime('', 'runtime-a')).toBe(false);
+  expect(runtimeProjectionMatchesRuntime('runtime-a', '')).toBe(false);
+});
 
 test('entity workspace exposes one wallet app surface without fake frontend roles', () => {
   const capabilities = resolveEntityWorkspaceCapabilities({
@@ -44,7 +53,8 @@ test('entity workspace shell consumes a projected workspace view instead of trav
   expect(source).toContain('? (tabEntityId || runtimeActiveEntityId)');
   expect(source).not.toContain('tabEntityId && tabEntityId === runtimeActiveEntityId ? tabEntityId : runtimeActiveEntityId');
   expect(source).toContain(': tabEntityId;');
-  expect(source).toContain('${handle.id}|${handle.status}|${entityId}');
+  expect(source).toContain('${selectedRuntimeId}|${handle.status}|${entityId}');
+  expect(source).toContain('runtimeProjectionMatchesRuntime($runtimeView.runtimeId, selectedRuntimeId)');
   expect(source).not.toContain('entity-workspace-readonly');
   expect(source).not.toContain('readOnlyReason');
   expect(source).not.toContain("if (handle.mode !== 'remote')");
@@ -191,6 +201,7 @@ test('user mode remote workspace mounts from RuntimeView instead of Env replica 
   expect(userMode).toContain("import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore'");
   expect(userMode).toContain('$runtimeView.frame');
   expect(userMode).toContain('$runtimeView.activeEntityId');
+  expect(userMode).toContain('runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $activeRuntimeId)');
   expect(userMode).toContain('get(runtimeControllerHandle).mode');
   expect(userMode).toContain('$runtimeControllerHandle.mode');
   expect(userMode).toContain('liveEnvResolver?: () => Env | null;');

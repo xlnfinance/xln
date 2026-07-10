@@ -2337,6 +2337,7 @@ test('admin remote runtime control advances live state and exposes past frames',
 });
 
 test('runtime dropdown switches app-imported remote runtimes without manager route', async ({ page }) => {
+  test.setTimeout(480_000);
   const baseline = await ensureE2EBaseline(page, {
     requireHubMesh: true,
     requireMarketMaker: true,

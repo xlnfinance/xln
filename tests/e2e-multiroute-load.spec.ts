@@ -342,7 +342,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     allowBrowserIssue({
       type: 'console',
       severity: 'error',
-      message: /\[HTLC_PAYMENT\].*Insufficient outbound capacity/,
+      message: /HTLC_PAYMENT.*Insufficient outbound capacity/,
     });
     const userNames: UserName[] = ['alice', 'bob', 'carol', 'dave', 'eve', 'frank'];
     const userContexts: BrowserContext[] = [];

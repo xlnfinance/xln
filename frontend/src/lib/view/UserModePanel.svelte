@@ -37,6 +37,7 @@
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 
   import EntityWorkspace from '$lib/components/Entity/EntityWorkspace.svelte';
+  import { runtimeProjectionMatchesRuntime } from '$lib/components/Entity/entity-workspace';
   import type { EntityWorkspaceRuntimeFrameContext } from '$lib/components/Entity/runtime-frame-context';
   import type { EntityWorkspaceEmbeddedRuntimeContext } from '$lib/components/Entity/embedded-runtime-context';
   import OnboardingPanel from '$lib/components/Entity/OnboardingPanel.svelte';
@@ -338,6 +339,7 @@
 
   $effect(() => {
     if (!isRemoteRuntime) return;
+    if (!runtimeProjectionMatchesRuntime($runtimeView.runtimeId, $activeRuntimeId)) return;
     const frame = $runtimeView.frame;
     const active = frame?.activeEntity ?? null;
     const entityId = normalizeId($runtimeView.activeEntityId || frame?.activeEntityId || active?.summary?.entityId || active?.core?.entityId);
