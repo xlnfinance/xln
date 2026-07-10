@@ -1,862 +1,273 @@
-# XLN TODO
+# xln TODO
 
-Last updated: 2026-07-09
+Last verified against code: 2026-07-10.
 
-This is the only live TODO/NEXT file for the repository. Older planning notes
-under `docs/archive/` are historical evidence, not active backlog. When this
-file and older docs disagree, prefer code and tests first, then this file.
+This is the only live TODO/NEXT file. Closed work is intentionally absent;
+history remains in git. Every item below is still open or intentionally heavy.
 
-## Mainnet Deferred
+## P0 — fintech-mainnet blockers
 
-- [ ] P0 security: move signing behind a remote signer/HSM boundary and keep raw
-  runtime signing seed material out of persisted artifacts and long-running
-  runtime process memory. Deferred by user on 2026-07-08 while non-signature
-  mainnet blockers are closed first.
+### 1. Move signing behind a remote signer/HSM boundary
 
-## Current Handoff Open Work
+- Status: deferred by explicit hardening constraint; do not change seed,
+  signing, HSM, remote-signer, or key-rotation code in routine cleanup.
+- Evidence: browser vault runtimes still contain mnemonic/seed material and
+  derive/register signer keys in `frontend/src/lib/stores/vaultStore.ts`;
+  production signing therefore has no demonstrated hardware custody boundary.
+- Risk: browser or host compromise can expose long-lived signing material;
+  rotation and incident containment are not operationally proven.
+- Acceptance: raw production keys never enter app memory; signer identity is
+  attested; threshold/role policy is enforced; rotation, revocation, backup,
+  recovery, audit logs, and fail-closed signer outage drills pass end to end.
 
-These items were not closed before the 2026-07-09 external-audit handoff.
-Treat them as live unless newer code/tests prove otherwise.
+### 2. Produce release evidence from one frozen candidate
 
-- [ ] Run a complete uninterrupted one-hour `bun run gate:mainnet` from a clean
-  tree before any mainnet-candidate claim.
-- [ ] Complete real mainnet ops planning: chain/RPC choices, funded operator and
-  tower accounts, gas policy, backup/restore drills, incident drill, and
-  monitoring thresholds for runtime, relay, storage, market maker, and
-  watchtower.
-- [ ] Finish independent external audit review using `auditormemo.md` as the
-  reading map. Internal E2E and security scans are not a substitute for this.
-- [ ] Finish Peer State Refresh (PSR) recovery flow so a wiped client can
-  recover from honest peer/hub state when the tower is unavailable.
-- [ ] Continue typed failure taxonomy until transport, bootstrap, faucet,
-  market-maker, settlement batching, and health readiness no longer rely on
-  parsing log strings or ambiguous warning buckets.
-- [ ] Continue one-delivery-boundary cleanup until relay/direct/local delivery
-  callers all consume one typed result and do not duplicate retry/defer/fatal
-  logic.
-- [ ] Finish canonical identity cleanup: jurisdiction/entity/account identity
-  must be canonical refs only; display names stay cosmetic.
-- [ ] Finish canonical fill/amount cleanup for cross-j swaps and pull flows:
-  exact bigint amounts must never round-trip through lossy uint16 ratios.
-- [ ] Model bootstrap lifecycle as an explicit state machine with enforceable
-  barriers for P2P, relay, hubs, custody, MM books, watchtower, and health.
-- [ ] Build a verified cold-system fixture for fast browser/radapter tests
-  instead of rebuilding full mesh state for short local loops.
-- [ ] Tighten orchestrator blast-radius boundaries so ancillary feature failure
-  degrades that feature without taking down health/debug endpoints.
-- [ ] Add executable settlement conservation proof coverage for
-  `pull_lock -> resolve -> on-chain release`, debt/collateral, and dispute
-  finalization.
-- [ ] Document and validate economics/scale assumptions: fees, collateral
-  ratios, market-maker incentives, griefing costs, and contention profiles.
-- [ ] Continue raw console/fail-silent cleanup in remaining UI/periphery modules
-  after the core/runtime paths stay green.
+- Evidence missing: a clean uninterrupted `bun run gate:mainnet`, the one-hour
+  capped-testnet soak, the one-tower/three-hub canary, browser/F12 drills, and a
+  rollback drill from the exact same commit.
+- Risk: green component suites do not prove long-running topology, restart,
+  RPC, persistence, or operator behavior.
+- Acceptance: every artifact required by
+  `docs/mainnet-acceptance-gate.md` is attached to one clean commit; any fix
+  restarts the evidence loop.
 
-## Closed Or Removed
+### 3. Complete real mainnet operations planning
 
-- Removed the stale testnet handoff whose old faucet/runtime notes were from a
-  retired stack and are not active release blockers.
-- Removed the broken root `next.md` symlink to a non-existent planning path.
-- Removed duplicated live TODO/NEXT pages from frontend static docs. The app
-  should not serve stale February/May planning snapshots as current status.
-- Merged `ai/todo.md` into this file as auxiliary work, then removed the
-  separate AI TODO source.
-- Removed old agent scratchpads and top-level audit drafts from the live tree.
-  Current consensus/signature/contract concerns are represented below instead
-  of scattered through dated request documents.
-- Closed default test-artifact cleanup for test pipelines: runners remove old
-  generated test output before new runs unless `--keep-test-artifacts`,
-  `--no-cleanup`, or `XLN_KEEP_TEST_ARTIFACTS` says otherwise, and the default
-  workspace budget gate is 50GiB.
-- Archived the stale admin/QA backlog from `docs/todo.md` to
-  `docs/archive/planning/todo-2026-06-25-admin-qa.md`; `bun run check`
-  now fails if another non-archived `todo.md`/`next.md` appears outside the
-  root live backlog.
-- Removed obsolete jurisdiction contract-size consultation notes that referred
-  to pre-refactor `Depository.sol` structure.
-- Closed as `v0.1.5` work: official same-origin watchtower endpoint, scheduler,
-  public sweep closure, encrypted active tower remedy payloads, body caps,
-  health stats caching, tower GC, runtime backup send barrier, browser recovery
-  restart survival, and prod health recovery.
-- Confirmed in the `0.1.5` release pass: `bun run gate:ci`,
-  `bun run test:e2e:full`, `bun run test:e2e:prod:payment`, and
-  `bun run prod:health` passed.
-- Closed RPC J-replica state commitment placeholder: RPC/external
-  jurisdictions now expose an explicit unavailable root instead of fake zero
-  bytes; BrowserVM replicas must provide a real captured root.
-- Closed destructive reset guardrails: mesh `/api/reset` now requires explicit
-  destructive confirmation and token protection for public binds; browser
-  `/resetdb` requires a nonce-cookie handshake, and restore/version failures no
-  longer wipe local client state automatically.
-- Closed persistence inspect/repair operator path: `bun run debug:persistence`
-  inspects frame DB, snapshots, WAL tail, recovery bundles, and tower receipts;
-  `--strict` turns warnings/critical findings into non-zero exit codes, and the
-  command is inspect-only with explicit repair guidance instead of automatic
-  persistence mutation.
-- Closed the current RPC/JAdapter release blocker: ethers provider cache/batch
-  behavior is disabled for XLN RPC providers, local Anvil latest-state
-  `staticCall` snapshot races are tolerated only after successful gas estimate
-  on dev chains, and fatal-log scanning no longer treats that handled dev race
-  as a protocol failure.
-- Confirmed on the current release line: `bun run gate:release` passed,
-  production health smoke returned healthy, and a release soak was manually
-  stopped after 13 complete `gate:ci + hub10k` iterations with exit code `0`.
-- Added mainnet-preflight gate plan and reduced the capped-testnet executable
-  soak policy from 24 hours to 1 hour for faster local release loops. The
-  uncapped real-funds bar can still require a longer soak before launch.
-- Added the dev control-panel banner, QA verdict explanation panel, browser-side
-  remote-runtime import diagnostics, and admin cockpit selftest assertions.
-- Aligned capped-testnet soak execution with the one-hour policy:
-  `soak:capped-testnet`, `MAINNET_GATE.soakMinutes`, the capped policy file,
-  and capped-gate tests now agree on 60 minutes.
-- Closed remote runtime time machine: browser UI scans historical subset
-  snapshots through RAdapter `historyFrameBatch`, uses bounded account/book
-  page sizes, caches selected past frames, and persists deeplinks for selected
-  height/entity. Guards: `tests/e2e-radapter-remote.spec.ts` admin remote
-  runtime control/time-machine flow and `runtime/__tests__/radapter.test.ts`.
-- Refreshed current mainnet/security status docs and re-ran
-  `bun run security:audit-pack`; this prepares the internal audit handoff pack
-  but does not replace an independent external audit.
-- Published the GitHub Release object for pushed tag `v0.1.5`:
-  https://github.com/xlnfinance/xln/releases/tag/v0.1.5. The release is marked
-  prerelease and explicitly says it is public-testnet/pre-mainnet evidence, not
-  mainnet approval.
-- Closed current contract governance/access-control scan: `bun run
-  security:contract-governance` passed on 2026-07-09, is part of
-  `bun run security:audit-pack`, and documents open manual-review questions in
-  `docs/security/contract-governance-scan.md`.
-- Closed current consensus/Hanko source-shape scan: `bun run
-  security:consensus-hanko` passed on 2026-07-09, is part of
-  `bun run security:audit-pack`, and documents open manual-review questions in
-  `docs/security/consensus-hanko-scan.md`.
+- Evidence missing: final chain/RPC providers, funded operator and contract
+  roles, alerts, secret ownership, gas policy, incident response, backup,
+  rollback, and enforceable value caps.
+- Risk: correct code can still lose funds through ambiguous operational
+  authority or an untested recovery procedure.
+- Acceptance: `docs/deployment/ops-runbook.md` is exercised on the intended
+  topology with named owners, monitored SLOs, least privilege, rollback, and
+  recovery evidence.
 
-## P0 - Release And Mainnet Readiness
+### 4. External audit handoff and independent sign-off
 
-### Current Runtime-Client Audit Closure
+- Evidence: internal review is mapped in `auditormemo.md`; independent sign-off
+  for the frozen release candidate is absent.
+- Risk: correlated implementation and review assumptions remain unchecked.
+- Acceptance: auditors receive reproducible source/test evidence, all critical
+  and high findings are fixed and retested, residual risks have explicit
+  owners, and the audited commit matches the release candidate.
 
-Status markers in this block are live. Do not mark an item closed without a
-regression test or executable gate that would fail if the issue returns.
+## P1 — protocol, runtime, and operations
 
-- [x] **P0: deterministic release gate exits cleanly.**
-  - Current failure: `bun run check:determinism` reaches PASS summary but keeps
-    watcher/anvil handles alive and must be stopped manually.
-  - Exit: command exits `0` on its own, with a regression guard for cleanup.
-  - Closed: scenario cleanup stops runtime loop, waits for in-flight watcher
-    polls, shuts down managed Anvil, and `check-determinism` exits `0` on
-    success. Guard: `runtime/__tests__/determinism-cleanup.test.ts`.
+### 1. Peer State Refresh (PSR)
 
-- [x] **P1: remote admin actions are projection/command based.**
-  - Remove remaining embedded `Env` requirements from reserve-to-external,
-    external-to-reserve, debt enforcement, and pending batch admin actions.
-  - Exit: writable remote admin surfaces build and submit `RuntimeInput`
-    through shared command paths without `requireRuntimeEnv`.
-  - Closed: move draft and pending-batch actions resolve signer from
-    projection-aware command context, and debt enforcement builds `jInputs`
-    from projected jurisdiction data. Guards:
-    `tests/frontend/runtime-command-bus.test.ts`,
-    `tests/frontend/pending-batch-actions.test.ts`, and
-    `tests/frontend/debt-enforcement-command.test.ts`.
+- Implement the authenticated peer/hub refresh flow in
+  `docs/recovery-watchtower-protocol.md`.
+- Acceptance: a wiped client recovers the highest valid state from honest
+  peers when towers are unavailable; stale, equivocal, malformed, and replayed
+  responses fail closed with deterministic selection and browser E2E coverage.
 
-- [x] **P1: no arbitrary direct adapter read escape hatch.**
-  - Replace raw `runtimeAdapterRead`/debug `read(path)` with typed
-    `RuntimeQueryClient` reads, including receipt status.
-  - Exit: frontend grep/test proves UI/debug surfaces cannot issue arbitrary
-    adapter read paths.
-  - Closed: `RuntimeQueryClient.readReceiptStatus()` owns receipt reads,
-    `window.__xlnRuntimeAdapter` exposes typed `query.*` helpers only, and
-    radapter e2e probes use that typed surface. Guard:
-    `tests/frontend/runtime-query-client.test.ts`.
+### 2. Recovery coverage and receipts
 
-- [x] **P2: remove or rename legacy `isolatedEnv` public surface.**
-  - `window.isolatedEnv` and `isolatedEnv` prop names are legacy debug names and
-    conflict with the RuntimeView ownership model.
-  - Exit: app code uses a typed live-runtime snapshot/debug surface name; E2E
-    helpers are updated or bridged only through explicit compatibility tests.
-  - Closed: `frontend/src/lib/view` now uses `runtimeFrame*` store names and
-    publishes local debug state through `window.__xln.liveRuntimeSnapshot` /
-    `window.__xln.publishLiveRuntimeSnapshot`, with no top-level
-    `window.isolatedEnv` compatibility surface. Guard:
-    `tests/frontend/runtime-store-hot-swap.test.ts`.
+- Surface local backup, tower backup, delayed last-resort, and PSR coverage per
+  runtime/account, including last successful height and typed failure.
+- Acceptance: users and operators can prove which state is recoverable, from
+  where, at what height, and why any source is degraded; no recovery failure
+  silently opens fresh state.
 
-- [x] **P2: EntityWorkspace API is projection-first.**
-  - Remove `Env | EnvSnapshot` ownership from the workspace boundary once the
-    action modules above no longer need live embedded env.
-  - Exit: workspace tests fail on `Env | EnvSnapshot` props in the entity shell.
-  - Closed: `EntityWorkspace.svelte` no longer exports separate Env/history/live
-    props and its projection model file does not import full Env. The remaining
-    embedded action passthrough is isolated as `EntityWorkspaceRuntimeFrameContext`
-    for `EntityPanelTabs`. Guard: `tests/frontend/entity-workspace.test.ts`.
+### 3. Finish the typed failure taxonomy
 
-### Current Runtime-Client Cleanup Pass
+- Current partial: recovery, runtime import, health, proxy, faucet, bootstrap,
+  market-maker, settlement, and delivery paths expose typed failure metadata;
+  `bun run security:failure-taxonomy` guards the current boundary.
+- Remaining risk: peripheral transport/bootstrap/ops callers still infer
+  retry/fatal behavior from strings or raw errors.
+- Acceptance: `Contradiction`, `ExpectedEmpty`, and `TransientRace` drive one
+  bounded policy across health and orchestration; no consensus hot path is
+  weakened to achieve taxonomy coverage.
 
-Status markers in this block track the audit items that reduce runtime-client
-surface area. Prefer deletion or stricter boundaries over compatibility shims.
+### 4. Finish one delivery boundary
 
-- [x] **P1: radapter current head preserves persisted checkpoints.**
-  - Failure: browser e2e saw `latestSnapshotHeight=0` after remote admin
-    command even though H1 persisted a ready snapshot.
-  - Exit: stale persisted heads keep snapshot cadence/checkpoint metadata while
-    live runtime height advances.
-  - Closed: `readBestHead()` now merges stale persisted snapshot metadata with
-    live height instead of discarding storage head entirely. Guards:
-    `runtime/__tests__/radapter.test.ts` and focused remote browser e2e.
+- Current partial: relay/direct/local paths share `DeliveryResult`, bounded
+  pending queues, terminal/retry metadata, and scan coverage through
+  `bun run security:delivery-boundary`.
+- Remaining risk: duplicated lifecycle decisions can diverge under reconnect,
+  queue expiry, or relay/direct races.
+- Acceptance: one boundary owns enqueue, delivery, ACK, retry, TTL, drop, and
+  diagnostics; direct transport is only a fast path over identical semantics.
 
-- [x] **P1: gate debug globals consistently.**
-  - Remove ungated `window.__xln_env` / `window.__xln_instance` writes or route
-    them through the localhost-only debug surface helper.
-  - Exit: non-localhost console cannot mutate live embedded runtime state via
-    global Env handles.
-  - Closed: both legacy names are localhost-only `registerDebugSurface` getters
-    under `window.__xln`; direct global assignment is source-guarded by
-    `tests/frontend/runtime-store-hot-swap.test.ts`.
+### 5. Finish canonical identity cleanup
 
-- [x] **P1: remove dead arbitrary read exports.**
-  - Delete unused `runtimeQueryRead` and `createRuntimeReadStore`; keep generic
-    adapter reads private inside `RuntimeQueryClient`.
-  - Exit: only typed query helpers are exported/used by frontend surfaces.
-  - Closed: `RuntimeQueryClient.read/cachedRead` are private, no public
-    `runtimeQueryRead` or `createRuntimeReadStore` remains. Guard:
-    `tests/frontend/runtime-query-client.test.ts`.
+- Current partial: stack identity is `stack:<chainId>:<depository>` and the
+  principal hub/MM/browser paths reject display-name identity; guarded by
+  `bun run security:canonical-identity`.
+- Remaining risk: legacy fixtures and peripheral APIs still carry optional
+  name-based or incomplete identity fields.
+- Acceptance: jurisdiction/entity/account matching is canonical everywhere;
+  display labels cannot affect routing, readiness, funding, restore, or tests.
 
-- [x] **P1: share debt enforcement command builder with runtime.**
-  - Delete frontend duplicate `debt-enforcement-command.ts` protocol shape.
-  - Exit: frontend and embedded Env path use one pure runtime builder.
-  - Closed: pure builder lives in `runtime/debt-enforcement-command.ts`;
-    frontend and env-aware runtime wrapper call the same function. Guards:
-    `tests/frontend/debt-enforcement-command.test.ts`,
-    `tests/frontend/runtime-command-bus.test.ts`, and
-    `runtime/__tests__/multi-jurisdiction-entity.test.ts`.
+### 6. Finish exact fill semantics and bounded cross-j state
 
-- [x] **P2: finish `isolatedRevision` naming cleanup.**
-  - Rename remaining `isolatedRevision` prop/store names to
-    `runtimeFrameRevision`.
-  - Exit: source grep only finds archived/test allowlist references for
-    `isolated[A-Z]`.
-  - Closed: `UserModePanel` and `View` use `runtimeFrameRevision`; legacy
-    isolated names are source-guarded by
-    `tests/frontend/runtime-store-hot-swap.test.ts`.
+- Current partial: exact bigint numerator/denominator are authoritative and
+  uint16 is proof projection only; deferred fill ACKs are capped at 1024 and
+  TTL-marked; guarded by `bun run security:canonical-fill`.
+- Remaining risk: legacy fill fields still exist, and route/admission/swap
+  records can remain in deterministic state after closing; see HEAVY item 3.
+- Acceptance: all settlement economics use exact amounts, legacy ratio
+  fallback is removed through a versioned migration, dust rules are explicit,
+  and every evidence/history collection has a deterministic bound.
 
-1. **Finish release-duration soak before any mainnet-candidate claim.**
-   - Already passed for `0.1.5`: `gate:ci`, full browser E2E, prod payment E2E,
-     prod health.
-   - Passed on current `main`: `bun run gate:release`.
-   - Partial evidence on current `main`: 13 full `bun run soak:release`
-     iterations (`gate:ci` plus `hub10k`) passed before the run was stopped
-     manually for time.
-   - Still needed for a mainnet candidate: a complete uninterrupted
-     one-hour `bun run gate:mainnet` from a clean tree.
+### 7. Model bootstrap as an explicit state machine
 
-2. **Make real mainnet ops explicit.**
-   - Chain/RPC endpoints selected and documented.
-   - Funded operator/tower accounts and gas policy documented.
-   - Backup/restore and incident drills run against production-like data.
-   - Monitoring and alert thresholds cover runtime, relay, storage, market
-     maker, and watchtower.
+- Required phases: P2P, relay, hubs, custody, same-j MM, cross-j MM,
+  watchtower, and health.
+- Acceptance: actions are impossible before their barrier; health returns the
+  exact blocked phase and typed dependency; restart/resume tests cover every
+  transition without wall-clock-dependent RJEA behavior.
 
-3. **Keep admin cockpit green before handoff.**
-   - Exit: focused QA cockpit e2e covers verdict explanations, four user-story
-     videos, screenshot gallery/slideshow, run ledger, history DB controls, and
-     read/admin disabled states.
-   - Closed: remote-runtime bulk import reports every checked row, imports
-     successful rows, and shows retryable diagnostics for failed rows through
-     the app-native `/app#runtime-import-src=...` flow. Guards:
-     `tests/frontend/remote-runtime-import.test.ts`,
-     `tests/frontend/runtime-store-hot-swap.test.ts`, and focused
-     `tests/e2e-radapter-remote.spec.ts` bulk import coverage.
-   - Closed: removed the separate `/radapter/manage` import page and
-     `RemoteRuntimeManager` component; remote runtime import now has one app
-     entrypoint and active tests only keep negative guards against the old
-     manager path.
+### 8. Build a verified cold-system fixture
 
-4. **External audit handoff.**
-   - Current evidence refresh: `docs/security/external-audit-brief.md`,
-     `docs/status.md`, and `docs/mainnet.md` were refreshed on 2026-07-09 after
-     the remote-runtime import cleanup.
-   - Current audit pack: `bun run security:audit-pack` passed on 2026-07-09.
-   - Do not treat internal E2E success as a substitute for audit on real funds.
+- Scope: chains, contracts, hub mesh, custody, same/cross-j books, watchtower,
+  and runtime import manifest.
+- Acceptance: fast browser/radapter tests hydrate one versioned, hash-checked
+  fixture without weakening production readiness or sharing mutable state.
 
-## P1 - Protocol And Runtime
+### 9. Tighten orchestrator blast radius
 
-1. **Peer State Refresh (PSR).**
-   - Define and implement the live peer refresh wire flow from
-     `docs/recovery-watchtower-protocol.md`.
-   - Exit: a wiped client can recover from honest peer/hub state even when the
-     tower is unavailable.
+- Risk: ancillary child failure can obscure the health endpoint needed to
+  diagnose the system; protocol contradictions must still halt loudly.
+- Acceptance: faucet/demo/MM/watchtower degradation stays queryable and typed;
+  custody or consensus contradiction remains fatal; kill/restart matrix passes.
 
-2. **Recovery coverage UX and receipts.**
-   - Show local, tower backup, delayed-last-resort, and peer-refresh coverage
-     per runtime/account.
-   - Surface last successful tower upload height and failure reason.
-   - Partial: peer-refresh coverage now surfaces persisted typed peer discovery
-     failure category/code for empty, transient, and contradictory PSR outcomes.
-   - Partial: onboarding recovery check now renders typed tower/peer discovery
-     failure labels instead of hiding them behind a warning count only.
+### 10. Add executable settlement conservation proofs
 
-3. **Typed failure taxonomy across runtime and ops.**
-   - Split failures into explicit categories instead of treating every loud
-     error as the same kind of stop.
-   - Baseline categories: `Contradiction` is fatal and halts,
-     `ExpectedEmpty` is normal empty state, `TransientRace` retries with a
-     bounded TTL and only becomes fatal after expiry.
-   - Partial: recovery discovery now records structured tower/peer failures
-     with `ExpectedEmpty`, `TransientRace`, and `Contradiction` categories while
-     keeping legacy warning strings for non-empty failures only.
-   - Partial: runtime import readiness now returns typed `failure` metadata
-     (`category`, `code`, `retryable`, `fatal`) instead of forcing health/API
-     callers to parse `reason` strings.
-   - Partial: aggregated runtime health now includes typed `failures[]` beside
-     legacy `degraded[]`, and public health redaction exposes safe failure
-     codes without leaking internal messages.
-   - Partial: orchestrator transport/proxy failures now include stable `code`,
-     `category`, `retryable`, `fatal`, and `failure` metadata while preserving
-     legacy `error` text and HTTP status.
-   - Partial: offchain faucet rejection paths now include typed failure metadata
-     for empty hubs, missing accounts, capacity limits, validation errors, and
-     runtime admission failures.
-   - Partial: reserve faucet rejection paths now share the faucet failure helper
-     and expose typed metadata for missing adapters, invalid tokens, empty hubs,
-     insufficient reserves, batch timeouts, and missing reserve evidence.
-   - Partial: bootstrap timeline stages now expose typed per-stage `failure`
-     metadata, with public health redaction preserving codes/categories while
-     hiding internal messages.
-   - Partial: aggregated market-maker health now exposes a typed component
-     `failure` for inactive child process, missing child health, startup phase,
-     hub depth, hub count, and cross-route readiness; public health redaction
-     keeps only safe code/category/retryability metadata.
-   - Partial: settlement/J-batch submission failures now classify transient RPC
-     failures separately from terminal protocol failures on the existing
-     `sentBatch` lifecycle metadata.
-   - Partial: prod health smoke and e2e baseline readiness now treat typed
-     `fatal:true` health failures as authoritative readiness blockers while
-     preserving legacy `degraded[]` checks.
-  - Partial: runtime health now scopes hub mesh, market maker, and bootstrap
-    reserve projections to runtimes that actually own those roles; non-hub
-    daemons report those components as `applicable:false, ok:true` instead of
-    false degraded failures. Guard: `runtime/__tests__/runtime-health-api.test.ts`.
-  - Current executable scan: `bun run security:failure-taxonomy` passed on
-    2026-07-09, is part of `bun run security:audit-pack`, and documents open
-    manual-review questions in `docs/security/failure-taxonomy-scan.md`.
-  - Apply first to transport, bootstrap, faucet/seed funding, market maker,
-     settlement batching, and health readiness before touching consensus hot
-     paths.
-   - Exit: orchestrator/health can explain why a component is degraded without
-     guessing from logs or swallowing real contradictions.
+- Cover both legs of `pull_lock -> resolve -> on-chain release`, including
+  debt, collateral, dispute start, and `_disputeFinalizeInternal`.
+- Acceptance: property/adversarial tests prove conservation and authorization
+  for success, retry, replay, partial fill, and abort; external auditors can
+  reproduce every invariant.
 
-4. **One delivery abstraction.**
-   - Collapse direct-vs-relay send logic, pending queues, TTLs, retries, and
-     ACK interpretation into one transport boundary.
-   - Relay is the official baseline; direct delivery is an opportunistic fast
-     path with the same bounded queue semantics.
-   - Partial: relay/direct/local delivery debug events now get one typed
-     `delivery` result with retry/fatal/terminal semantics instead of requiring
-     callers to parse status/reason strings.
-   - Partial: health relay timeline severity now reads `delivery` metadata
-     first and only falls back to legacy status strings for old events.
-   - Partial: P2P entity-input send, pending flush, and public entity-input
-     dispatch now use the same typed delivery result shape; boolean remains
-     only on raw socket transport send.
-   - Partial: P2P pending flush retry/drop decisions now use typed
-     `delivery.terminal` and emit typed delivery debug events for retryable and
-     terminal failures.
-   - Partial: P2P pending TTL expiry now emits the same typed terminal
-     `delivery` metadata before dropping stale queued entity inputs.
-   - Partial: public runtime `sendEntityInput`/routing results now return the
-     typed `delivery` result without legacy boolean summary fields.
-   - Partial: process-local direct entity dispatch is now typed-only at the
-     routing boundary; legacy boolean returns fail fast instead of falling
-     through to P2P.
-   - Partial: relay-socket, hub-node, and market-maker direct dispatch
-     implementations now return explicit `DeliveryResult`.
-   - Partial: direct runtime websocket route now exposes typed
-     `sendEntityInputDelivery()` instead of a high-level boolean send wrapper;
-     hub and market-maker nodes use that result directly.
-   - Partial: `RuntimeWsClient` entity-input send is now explicitly named
-     `sendEntityInputRaw()` and is only consumed inside P2P's typed delivery
-     adapter.
-   - Partial: delivery validation, delivered detection, and retry retention now
-     live in shared `delivery-result` helpers instead of per-call-site logic.
-   - Partial: RuntimeP2P now exposes typed `enqueueEntityInputDelivery()`;
-     `dispatchEntityOutputs()` requires it, with no high-level boolean wrapper.
-   - Partial: route dispatch now uses shared delivered-check helpers for direct
-     fast-path acceptance and P2P hard-delivery assertions instead of raw
-     `outcome` comparisons.
-   - Partial: P2P pending flush now gets retry/drop event disposition from the
-     shared delivery helper instead of mapping `terminal` to event level/code
-     locally.
-   - Partial: process-local relay direct dispatch now treats stale sockets and
-     failed `send()` results as typed deferred delivery instead of claiming
-     delivery, and its direct packet id comes from relay store sequencing rather
-     than wall-clock/random data.
-   - Partial: relay router and process-local relay direct dispatch now share
-     one relay send-result predicate for `false` and negative native send
-     return values.
-   - Partial: P2P no-pubkey debug and gossip-refresh decisions now read
-     `delivery.code` instead of reparsing thrown error text at call sites.
-   - Partial: P2P pending queue flush now produces one typed per-entry
-     flush result (`delivery`, retain/drop, optional event, gossip refresh)
-     before mutating the queue.
-   - Partial: relay router entity-input admission rejects and local-delivery
-     failures now attach typed `delivery` metadata while preserving existing
-     debug event status fields.
-   - Partial: relay pending flush now checks each send result and retains the
-     current plus remaining queued messages on send failure instead of dropping
-     them before delivery is confirmed.
-   - Partial: process-local relay direct dispatch now emits typed delivery
-     debug metadata for thrown send/encrypt failures instead of only returning
-     a deferred result to the caller.
-   - Partial: relay router direct socket forwarding now returns a typed
-     delivery result internally, so `send()` false is reported as `send-failed`
-     instead of being conflated with stale target sockets.
-  - Partial: process-local relay direct dispatch now emits typed delivery
-    debug metadata for missing source/target runtime encryption keys instead
-    of silently returning only a deferred result to the caller.
-  - Current executable scan: `bun run security:delivery-boundary` passed on
-    2026-07-09, is part of `bun run security:audit-pack`, and documents open
-    manual-review questions in `docs/security/delivery-boundary-scan.md`.
-  - Exit: callers receive one typed delivery result and no longer reimplement
-    retry/defer/fatal decisions per call site.
+### 11. Validate economics and scale
 
-5. **Canonical identity refs.**
-   - Treat jurisdiction/entity/account refs as protocol identity and display
-     names as cosmetic only.
-   - Delete alias allowlists and name-based matching from runtime, market maker,
-     health, and tests.
-   - Partial: shared jurisdiction identity helpers now derive canonical
-     `stack:<chainId>:<depository>` refs and hub/MM bootstrap readiness compares
-     those refs before falling back to legacy display names for incomplete
-     fixtures.
-   - Partial: orchestrator now passes chain/depository in market-maker support
-     identities, and hub/MM matching refuses name-only fallback when either
-     side already carries a canonical jurisdiction ref.
-   - Partial: hub peer reserve bootstrap now groups visible peer hubs by
-     canonical jurisdiction ref and resolves the funding J-adapter by that ref
-     before using legacy names.
-   - Partial: removed the permissive one-ref-vs-name jurisdiction matcher; the
-     remaining fallback only matches display names when both sides lack refs.
-   - Partial: removed the runtime hub-node display alias allowlist that rewrote
-     Arrakis/Wakanda/shared-anvil labels to Testnet.
-   - Partial: removed frontend wallet/swap display aliasing that rewrote
-     arrakis/wakanda/local test labels to Testnet/Tron during default imports
-     and account/orderbook label rendering.
-   - Partial: market-maker jurisdiction import/adaptor detection now compares
-     canonical jurisdiction refs only and no longer treats matching display
-     names as imported jurisdiction identity.
-   - Partial: hub support-peer identities, visible hub filtering, and peer
-     reserve catalog selection now require canonical jurisdiction refs instead
-     of falling back to matching display names.
-   - Partial: deleted the remaining runtime jurisdiction name-fallback helper;
-     tests now assert name-only jurisdiction objects are not identity matches.
-   - Partial: `/api/jurisdictions` and hub runtime jurisdiction payloads now
-     preserve configured/runtime display labels instead of forcing `arrakis` to
-     `Testnet`.
-   - Partial: mesh jurisdiction selection now resolves primary stacks by exact or
-     public RPC URL and explicit `primary:true`, so hub/MM/server bootstrap no
-     longer depends on an `arrakis` config key for renamed primary jurisdictions.
-   - Partial: browser runtime create/restore now selects the first usable
-     `primary:true` jurisdiction, or the first active jurisdiction with contracts,
-     instead of depending on an `arrakis` key.
-   - Partial: push-wake registration now resolves the J-replica by canonical
-     `(chainId, depositoryAddress)` stack identity and fails closed instead of
-     accepting a display-name jurisdiction match.
-   - Partial: browser runtime restore no longer rewrites a missing legacy
-     `testnet` signer jurisdiction to the current primary jurisdiction; missing
-     signer jurisdiction now remains explicit.
-   - Partial: stack-ref jurisdiction lookup now resolves only by canonical
-     `(chainId, depositoryAddress)` identity and cross-j local binding no longer
-     accepts display-name/depository-only fallbacks.
-   - Partial: hub peer reserve bootstrap now requires visible hub profiles to
-     carry canonical jurisdiction refs and resolves funding J-adapters only by
-     that ref, not by jurisdiction display name.
-   - Partial: market-maker visible hub discovery now drops name-only
-     jurisdiction profiles before readiness/health planning instead of carrying
-     unmatched display-name hubs through the bootstrap loop.
-  - Partial: market-maker bootstrap role ordering and fingerprints now use
-    canonical jurisdiction refs instead of mutable jurisdiction display names.
-  - Partial: stack-ref lookup is now strict: non-stack display names no longer
-    resolve through `getJReplicaByJurisdictionRef()`, and legacy name lookups
-    are explicit through name-bearing APIs only.
-  - Current executable scan: `bun run security:canonical-identity` passed on
-    2026-07-09, is part of `bun run security:audit-pack`, and documents open
-    manual-review questions in `docs/security/canonical-identity-scan.md`.
-  - Exit: adding a new testnet label cannot break hub/MM matching.
+- Document fee design, collateral ratios, MM incentives, griefing costs,
+  queue/state bounds, and intended value/concurrency limits.
+- Acceptance: contention benchmarks and adversarial cost models justify
+  enforced limits; no mainnet limit is based on an unmeasured assumption.
 
-6. **Canonical fill and amount representation.**
-   - Exact bigint amounts are the source of truth.
-   - `uint16` fill ratios are a one-way lossy projection for on-chain
-     hash-ladder proofs only; never round-trip ratio data back into exact
-     settlement amounts.
-   - Partial: cross-j claim progress now preserves exact committed
-     `filledSourceAmount`/`filledTargetAmount` and exact claim totals instead
-     of rehydrating them from the uint16 hash-ladder ratio during pull close.
-   - Partial: cross-j orderbook remaining amounts, cancel ACKs, and fill-notice
-     idempotency now share exact committed fill amount resolution before using
-     legacy uint16 ratio fallback.
-   - Partial: cross-j close proofs and subsequent fill validation now also use
-     shared exact committed fill resolution, so exact-only partial route state
-     cannot drift when the next ACK or close proof is built.
-   - Partial: cross-j pull bindings now materialize exact committed fill
-     amounts and preserve exact ratio fields, so account-level close proof
-     checks do not fall back to uint16-derived economics.
-   - Partial: committed-fill detection now uses the shared exact-aware resolver
-     instead of bespoke ratio/amount predicates.
-   - Partial: exact fill numerator/denominator now project the coarse
-     hash-ladder proof ratio inside the shared resolver when legacy
-     `cumulativeFillRatio` is absent, and source clear uses that resolver
-     instead of treating exact-only committed fills as empty.
-   - Partial: account/entity pull close, pull resolve, and cross-j salvage
-     proof-boundary checks now use the same exact-aware committed proof-ratio
-     helper instead of local `cumulativeFillRatio/claimedRatio` math.
-   - Partial: cross-j fill ACK cancel handling, duplicate fill-notice
-     idempotency, and pending-fill metadata now derive their proof ratio from
-     exact numerator/denominator when the legacy coarse field is absent.
-   - Partial: duplicate cross-j book progress now uses the exact-aware proof
-     ratio helper, so exact-only replay clears pending fill instead of failing
-     stale.
-   - Partial: cross-j fill validation, pull-resolve followups, and claim
-     progress now all derive committed proof ratio through the shared
-     exact-aware helper when legacy coarse ratio is absent.
-   - Partial: committed exact-only terminal fill ACK followup now routes through
-     clear handling instead of falling back into book-progress repair when
-     legacy coarse ratio is absent.
-   - Partial: account-level cross-j fill ACK validation now relies on the shared
-     exact progress validator for both source and target cumulative amounts
-     instead of a duplicate source-only exact-ratio check.
-   - Partial: quantized-claim projection now fail-fast validates incomplete or
-     out-of-range exact ratio fields instead of silently falling back to the
-     lossy uint16 projection.
-   - Partial: proof-ratio, committed-amount, quantized-claim, and fill-progress
-     validation now share one exact ratio parser/error code instead of four
-     manual numerator/denominator checks.
-   - Partial: cross-j account ACK, entity fill notice, and clear handlers now
-     use `CROSS_J_MAX_FILL_RATIO` for terminal/full-fill decisions and display
-     instead of local `65_535` / `MAX_SWAP_FILL_RATIO` constants.
-   - Partial: remaining cross-j and pull event strings plus swap-offer
-     `minFillRatio` validation now use the shared fill-ratio constants instead
-     of embedding `65535`.
-   - Partial: debug/proof/gossip surfaces now use named uint16/hash-ladder/swap
-     constants instead of raw fill-ratio literals.
-   - Current executable scan: `bun run security:canonical-fill` passed on
-     2026-07-09, is part of `bun run security:audit-pack`, and documents open
-     manual-review questions in `docs/security/canonical-fill-scan.md`.
-   - Partial: deferred source-hub cross-j fill ACK evidence is capped by
-     `MAX_PENDING_CROSS_J_FILL_ACKS`, prunes before insertion, preserves TTL
-     expiry as operator evidence, and is now guarded by the canonical-fill scan.
-   - Partial: entity-level swap cancel execution now has one canonical tx type,
-     `proposeCancelSwap`; legacy `cancelSwap` / `cancelSwapOffer` aliases stay
-     out of `EntityTx` and the dispatcher, with activity history still tolerant
-     of old journals.
-   - Partial: swap request missing-account paths now fail loud with
-     `SWAP_REQUEST_ACCOUNT_MISSING` instead of `console.error` plus no-op, and
-     the swap-cancel canonical scan guards that behavior.
-   - Partial: direct payment invalid-route and missing next-hop-account paths
-     now fail loud with `DIRECT_PAYMENT_*` invariant errors instead of
-     `console.error` plus no-op, and the failure-taxonomy scan guards it.
-   - Partial: entity direct-payment debug traces now use the structured
-     `entity.payment` logger instead of raw `console.log`, and the
-     failure-taxonomy scan guards against reintroducing core console noise.
-   - Partial: basic entity proposal/vote traces now use the structured
-     `entity.basic` logger instead of direct `console.*`, with both Bun source
-     tests and the failure-taxonomy scan guarding regressions.
-   - Partial: entity factory creation/registration diagnostics now use the
-     structured `entity.factory` logger instead of direct `console.*`, with Bun
-     source/behavior tests and the failure-taxonomy scan guarding regressions.
-   - Partial: entity consensus frame diagnostics and slow-profile notices now
-     use the structured `entity` logger instead of direct `console.*`, with Bun
-     source coverage and the failure-taxonomy scan guarding regressions.
-   - Partial: runtime entity-input replay/profile diagnostics now use the
-     structured `runtime.entity_inputs` logger instead of direct `console.*`,
-     with Bun source coverage and the failure-taxonomy scan guarding
-     regressions.
-   - Partial: entity input merge conflict/dedup diagnostics now use the
-     structured `entity.input.merge` logger instead of direct `console.*`, with
-     Bun source/behavior tests and the failure-taxonomy scan guarding
-     regressions.
-   - Partial: account input/open-account failure paths now use structured
-     `account.handler` / `account.open` loggers instead of direct `console.*`;
-     empty account inputs now fail fast with `ACCOUNT_INPUT_EMPTY` and are
-     covered by Bun source/behavior tests plus the failure-taxonomy scan.
-   - Partial: account committed followup diagnostics now use the structured
-     `account.followup` logger instead of direct `console.*`, with Bun source
-     coverage and the failure-taxonomy scan guarding regressions.
-   - Partial: account frame proposal diagnostics and slow-profile notices now
-     use the structured `account` logger instead of direct `console.*`, with
-     Bun source coverage and the failure-taxonomy scan guarding regressions.
-   - Partial: account consensus commit/validation diagnostics now use the
-     structured `account` logger instead of direct `console.*`, with Bun source
-     coverage and the failure-taxonomy scan guarding regressions.
-   - Partial: account transaction applicator now rejects impossible embedded
-     `account_frame` payloads without direct `console.error`, with structured
-     `account.tx` debug diagnostics and failure-taxonomy scan coverage.
-   - Partial: same-jurisdiction orderbook matching diagnostics now use the
-     structured `orderbook.same` logger instead of direct `console.*`, with a
-     Bun source guard and failure-taxonomy scan coverage.
-   - Partial: settlement operation compilation now rejects unknown operation
-     types with `SETTLEMENT_UNKNOWN_OP_TYPE` instead of warning and skipping
-     malformed settlement input, with Bun behavior coverage and the
-     failure-taxonomy scan guarding against raw console fallback.
-   - Partial: compact entity j-batch operation handlers (`r2r`,
-     `createSettlement`, `mintReserves`, `j_broadcast`, `j_clear_batch`,
-     `j_abort_sent_batch`) now use the structured `entity.jbatch` logger
-     instead of direct `console.*`, with Bun source tests and the
-     failure-taxonomy scan guarding regressions.
-   - Partial: entity R2C debug traces now use the structured `entity.r2c`
-     logger instead of raw `console.log`, with both Bun source tests and the
-     failure-taxonomy scan guarding against regressions.
-   - Partial: entity HTLC payment traces and failure logs now use the
-     structured `entity.htlc` logger instead of direct `console.*`, with both
-     Bun source tests and the failure-taxonomy scan guarding regressions.
-   - Partial: entity dispute start/finalize traces and failure logs now use the
-     structured `entity.dispute` logger instead of direct `console.*`, with
-     both Bun source tests and the failure-taxonomy scan guarding regressions.
-   - Partial: entity settlement progress and warning traces now use the
-     structured `entity.settle` logger instead of direct `console.*`, with
-     both Bun source tests and the failure-taxonomy scan guarding regressions.
-   - Partial: debt ledger divergence diagnostics now use the structured
-     `entity.debt` logger instead of direct `console.warn`; operator-visible
-     state messages are preserved, with Bun behavior coverage and the
-     failure-taxonomy scan guarding regressions.
-   - Partial: account delta validation now fails loud with
-     `ACCOUNT_DELTAS_*` errors for missing, malformed, or partial payloads
-     instead of logging and returning partial maps; Bun behavior/source tests
-     and the failure-taxonomy scan guard it.
-   - Partial: `deriveDelta` account math debug output now uses the existing
-     `ACCOUNT_STATE` logger instead of direct `console.log`; deriveDelta
-     property/invariant tests and the failure-taxonomy scan guard regressions.
-   - Partial: runtime apply/process hot-path diagnostics now use the structured
-     `runtime` logger instead of legacy tick/J-outbox/profile console prefixes;
-     the failure-taxonomy scan guards those prefixes against regression.
-   - Partial: runtime tx import/retry/failure diagnostics now use the structured
-     `runtime.tx` logger instead of direct `console.*`; source tests and the
-     failure-taxonomy scan reject raw console regression in the handler.
-   - Partial: runtime J-submit side-effect diagnostics now use the structured
-     `runtime.jsubmit` logger instead of direct `[J-SUBMIT]` / `[SIDE-EFFECT]`
-     console lines; source tests and the failure-taxonomy scan guard this path.
-   - Partial: runtime infra/JAdapter restore diagnostics now use the structured
-     `runtime.infra` logger instead of direct `console.*`; source tests and the
-     failure-taxonomy scan guard the restore path.
-   - Partial: runtime infra gossip-profile restore diagnostics now use the
-     structured `runtime.infra_gossip` logger instead of direct `[infra-db]`
-     console lines; behavior/source tests guard malformed-profile pruning.
-   - Partial: runtime input queue debug diagnostics now use the structured
-     `runtime.input_queue` logger instead of direct `[enqueueRuntimeInput]`
-     console JSON; behavior/source tests and the failure-taxonomy scan guard it.
-   - Partial: runtime P2P lifecycle detach diagnostics now use the existing
-     `p2p.lifecycle` structured logger instead of direct `console.warn`;
-     behavior/source tests and the failure-taxonomy scan guard it.
-   - Partial: relay router/local delivery verbose diagnostics now use
-     structured `relay.router` / `relay.local_delivery` loggers instead of
-     direct `console.log`; relay source tests and the failure-taxonomy scan
-     guard both files.
-   - Partial: standalone relay startup diagnostics now use structured
-     `relay.standalone` logging instead of direct `[WS] Runtime relay` console
-     output; websocket recovery source tests and the failure-taxonomy scan
-     guard it.
-   - Partial: runtime solvency invariant diagnostics now use structured
-     `runtime.solvency` logging instead of direct `console.*`; behavior/source
-     tests and the failure-taxonomy scan guard the helper.
-   - Partial: runtime storage DB open/close/block/recovery diagnostics now use
-     the structured `runtime.storage` logger instead of direct `console.*` /
-     `[storage-epoch]` output; source tests and the failure-taxonomy scan guard
-     the boundary.
-   - Partial: runtime storage frame persistence telemetry now uses structured
-     `runtime.storage` `persist.frame` events instead of direct `[PERSIST]`
-     console output; source tests and the failure-taxonomy scan guard it.
-   - Partial: standalone watchtower startup/sweep diagnostics now use
-     structured `watchtower.standalone` logging instead of direct `[WATCHTOWER]`
-     / `[PUSH-WATCH]` console sweep lines; the standalone suite and
-     failure-taxonomy scan guard it.
-   - Partial: push dispute-watch target failures now use structured
-     `watchtower.dispute_watch` logging instead of direct `[PUSH-WATCH] target`
-     console lines; push-dispute source tests and the failure-taxonomy scan
-     guard it.
-   - Partial: orchestrator lifecycle helper diagnostics for HTTP drain timeout,
-     stale child lease cleanup, and parent-liveness loss now use structured
-     orchestrator loggers instead of direct `console.*`; behavior/source tests
-     and the failure-taxonomy scan guard them.
-   - Partial: browser jurisdiction discovery now treats missing
-     `/api/jurisdictions` as structured debug fallback, while malformed browser
-     config fails loud with `JURISDICTIONS_BROWSER_CONFIG_INVALID`; source and
-     quiet-load tests plus the failure-taxonomy scan guard against raw console
-     regression.
-   - Partial: Node jurisdiction config loading now uses structured
-     `runtime.jurisdiction_loader` diagnostics, and the missing-file fallback
-     is quiet and deterministic instead of printing raw console output with a
-     wall-clock `lastUpdated`; source/behavior tests plus the failure-taxonomy
-     scan guard it.
-   - Partial: external wallet/faucet provision, ERC20, gas, and snapshot
-     diagnostics now use the structured `server.external_wallet` logger instead
-     of direct `[EXT-FAUCET]` / `[EXT-WALLET]` console output; source tests and
-     the failure-taxonomy scan guard this boundary.
-   - Partial: runtime adapter oversized-response diagnostics now use the
-     structured `runtime.radapter` logger instead of direct `[RADAPTER]`
-     console output; the radapter suite and failure-taxonomy scan guard it.
-   - Partial: runtime-import manifest refresh failures now use structured
-     `mesh.orchestrator` warnings instead of direct `[MESH]` console output;
-     startup logging tests and the failure-taxonomy scan guard it.
-   - Partial: market snapshot enrichment failures now use structured
-     `mesh.orchestrator` warnings instead of direct `[MESH]` console output;
-     health source tests and the failure-taxonomy scan guard it.
-   - Partial: orchestrator child stop timeout and unexpected child exit
-     diagnostics now use structured `mesh.orchestrator` logs instead of direct
-     `[MESH]` console output; production wiring tests and the failure-taxonomy
-     scan guard it.
-   - Partial: orchestrator custody bootstrap, SIGTERM-during-reset, and initial
-     reset failure diagnostics now use structured `mesh.orchestrator` logs
-     instead of direct `[MESH]` console output; production wiring tests and the
-     failure-taxonomy scan guard it.
-   - Partial: hub inspect URL diagnostics now use structured `mesh.hub` logs
-     instead of direct `[MESH-HUB] INSPECT_URL` console output; production
-     wiring tests and the failure-taxonomy scan guard it.
-   - Partial: hub/MM normal startup diagnostics now use structured `mesh.hub`
-     / `mesh.marketMaker` logs instead of repeated raw `[MESH-HUB]` /
-     `[MESH-MM]` readiness lines; the dev-facing summary remains
-     `RUNTIME_IMPORT_READY count=5 labels=H1,H2,H3,MM,Custody`.
-   - Partial: `bun run dev` now prints an explicit `suggested runtimes`
-     endpoint for H1/H2/H3/MM/Custody import tokens, so the remote-runtime list
-     path is directly inspectable instead of inferred from the app hash link.
-   - Partial: the pre-wallet "Connect to live runtime" list now parses
-     `/api/runtime-import` with the same shared import parser as the app bulk
-     import flow, with a focused test for H1/H2/H3/MM/Custody choices.
-   - Partial: the pre-wallet live runtime selector now has stable test IDs and
-     a Playwright browser test that selects suggested H1, clicks `Connect`, and
-     verifies the normal app workspace opens without any radapter manager route.
-   - Partial: explicit remote runtime import hydration now fails fast by
-     default; only background/silent discovery is marked optional, and
-     cross-runtime Env overwrite attempts throw `RUNTIME_STORE_ENV_OVERWRITE_REFUSED`
-     instead of logging and continuing.
-   - Partial: runtime boot/projection diagnostics in `xlnStore` now use the
-     persistent frontend `errorLog` instead of raw `console.warn/error` in the
-     initial projection, stale remote entity reset, financial restore failure,
-     embedded adapter connect failure, and XLN initialization failure paths.
-   - Partial: runtime debug event and payment-gossip diagnostics in `xlnStore`
-     now use the persistent frontend `errorLog` instead of raw `console.warn`
-     while preserving the same retry/fetch/announce control flow.
-   - Partial: relay mismatch, P2P poll, and entity helper diagnostics in
-     `xlnStore` now use persistent frontend `errorLog`; entity helper failures
-     still rethrow fail-fast instead of degrading into fallback UI data.
-   - Partial: `vaultStore` recovery/restore/funding/cleanup diagnostics now
-     use persistent frontend `errorLog` instead of raw console output in tower
-     restore/upload, faucet funding, runtime DB cleanup, J-watcher shutdown,
-     DB restore fallback, and jurisdiction re-import wait paths.
-   - Partial: all remaining `vaultStore` runtime resume, J-machine import,
-     localStorage load/save, runtime creation cleanup, signer entity creation,
-     balance, and send diagnostics now use persistent frontend `errorLog`; a
-     focused source guard rejects any raw `console.warn/error/info` in the store.
-   - Partial: `EntityPanelTabs` money-action, external wallet snapshot, move
-     allowance, dispute, debt, faucet, and copy diagnostics now use persistent
-     frontend `errorLog` instead of raw `console.warn/error/info`; external
-     wallet snapshot tests guard the full component against raw console output.
-   - Partial: `bun run dev` now collapses duplicate `concurrently` SIGTERM
-     fanout lines during normal shutdown while preserving the real child exit
-     status via `PIPESTATUS[0]`, keeping output quieter without hiding failure.
-   - Partial: account frame proposal now statically imports dispute proof
-     building and hanko batch signing instead of using `await import()` in the
-     hot proposal path.
-   - Partial: entity consensus now statically imports quorum hanko building,
-     signer hash batching, and account-frame proposal dependencies instead of
-     resolving them with `await import()` during frame commit/proposal.
-   - Partial: j-batch event handling, R2C, and hub rebalance crontab paths now
-     statically import shared batch helpers instead of resolving them during
-     event/crontab execution.
-   - Partial: account settlement action handling and DisputeStarted proof-body
-     inspection now use static imports instead of resolving helper modules in
-     account/J-event execution.
-   - Exit: cross-j orderbook, claim, settlement, and dispute paths share one
-     precision boundary and one set of dust/rounding invariants.
+### 12. Define the supported-token boundary
 
-7. **Bootstrap lifecycle as an explicit state machine.**
-   - Model startup phases and barriers the same way protocol state is modeled:
-     P2P, relay, hubs, custody, MM same-chain offers, MM cross offers,
-     watchtower, health.
-   - A send/seed/quote action should be impossible before its barrier is met.
-   - Exit: production health can show the exact blocked phase and dependency.
+- Either prove multi-token collateral, settlement, recovery, dispute, and UI
+  flows end to end, or enforce and label a single-token release boundary.
+- Acceptance: contracts, runtime admission, API, health, and UI reject any
+  unsupported token consistently and loudly.
 
-8. **Cold system fixture for fast tests.**
-    - Build a verified cold fixture/template for the whole system: anvil
-      chains, hub mesh, custody, MM same-chain books, MM cross books, watchtower,
-      and runtime import manifest.
-    - Tests should clone or hydrate from this fixture instead of rebuilding the
-      full mesh for every short local loop.
-    - Exit: local browser/radapter tests can start from a known full-ready
-      state without weakening production readiness semantics.
+## HEAVY TODO — separate design/approval required
 
-9. **Orchestrator blast-radius boundaries.**
-    - Decouple child process supervision from whole-tree failure.
-    - Ancillary feature failure degrades that feature and keeps diagnostics
-      queryable; protocol contradiction remains a loud fatal stop.
-    - Exit: faucet/demo/MM/watchtower failure cannot take down the health
-      endpoint needed to debug the node.
+### 1. Prove validate/commit equivalence
 
-10. **Settlement conservation proof.**
-    - Prove fund conservation across `pull_lock -> resolve -> on-chain release`
-      on both legs, including debt/collateral and dispute finalization.
-    - Cover `_disputeFinalizeInternal` line-by-line with adversarial fixtures.
-    - Exit: external audit gets executable invariants, not just E2E success.
+- Evidence: account frames validate on a clone with `isValidation=true` and
+  commit on the live replica with `isValidation=false`; `j_event_claim`
+  finalization is commit-only.
+- Risk: a future handler can mutate or branch differently after a frame has
+  already passed validation.
+- Acceptance: define the intended phase contract, add state/output equivalence
+  tests for every account tx, remove accidental phase branching, and migrate
+  only with explicit consensus approval and replay vectors.
 
-11. **Economics and scale validation.**
-    - Document fee design, collateral ratios, market-maker incentives, and
-      griefing costs for swaps and disputes.
-    - Profile runtime/orderbook/MM under contention before raising real-money
-      limits.
-    - Exit: mainnet limits are backed by measured capacity and explicit
-      incentive assumptions.
+### 2. Canonicalize AccountState/AccountReplica clone discipline
 
-12. **Full TypeScript 7 tooling migration.**
-    - Staged now: runtime typecheck uses the pinned TS7 native compiler through
-      `@typescript/native`, while `typescript@5.9` remains installed for tools
-      that import the compiler API.
-    - Partial: TS7 runtime typecheck pins `--checkers 4` so developer and CI
-      runs use the same native compiler parallelism.
-    - Defer full switch until Svelte, ESLint, Hardhat, TypeChain, and ts-node
-      paths are proven compatible with TS7's API/tooling story.
-    - Exit: all repo typecheck, lint, contract, frontend, and editor tooling use
-      one TS7 toolchain without compatibility aliases.
+- Evidence: `runtime/state-helpers.ts` uses `structuredClone` plus large manual
+  fallbacks; replica proposal/locked-frame state and outputs do not all share
+  one explicit ownership rule.
+- Risk: aliasing can let validation or proposal work mutate committed state;
+  broad clone changes can also alter consensus behavior and performance.
+- Acceptance: document ownership per field, add mutation/alias property tests,
+  choose one canonical clone/snapshot boundary, benchmark it, and migrate with
+  consensus approval plus historical replay.
 
-## P2 - Product And UI
+### 3. Bound cross-j admission, route, and swap history
 
-1. **Lending tab.**
-   - Product/runtime design lives in `docs/lend.md`.
-   - Do not mix this with the current production swap/health gate.
-   - Exit: hub lending pools, fixed-term lend/borrow/repay lifecycle, and
-     browser E2E are green on Testnet and Tron.
+- Evidence: pending cross-j fill ACKs are capped, but
+  `crossJurisdictionBookAdmissions` and `crossJurisdictionSwaps` close records
+  without a general deterministic deletion/compaction bound.
+- Risk: long-lived entities can grow consensus state and snapshots without
+  limit; naive deletion can destroy replay/dispute evidence.
+- Acceptance: specify evidence retention by lifecycle and dispute horizon,
+  introduce deterministic compaction/version migration, prove late replay and
+  dispute safety, and add soak tests that demonstrate a hard state-size bound.
 
-2. **Token support boundary.**
-   - Either prove multi-token collateral E2E or keep the product explicitly
-     USDC/single-token for the current release line.
+### 4. Introduce canonical binary encoding and versioned hashes
 
-3. **Custody and fee UX.**
-   - Make custody balance and auto-fee behavior read as one coherent flow.
+- Evidence: protocol/storage hashes still depend on the current canonical JSON
+  model and BigInt conventions.
+- Risk: cross-language ambiguity and future serializer drift; direct encoding
+  replacement would invalidate proofs, journals, and fixtures.
+- Acceptance: publish golden vectors, domain/version tags, independent
+  implementations, dual-read/dual-hash migration, rollback plan, and replay of
+  historical state before consensus activation.
 
-4. **SettlementPanel consistency.**
-   - Keep direct on-chain flows and entity/quorum flows visually and logically
-     distinct.
+### 5. Split AccountState and extract consensus extensions
 
-5. **Activity/account-card context.**
-   - Show routing, HTLC, swap, J-event, dispute, and recovery events clearly
-     enough for demo and support/debug use.
+- Scope: separate canonical state, computed/cache state, proposal state, and
+  extension reducers; shrink large consensus modules without wrapper layers.
+- Risk: a broad structural rewrite can change serialization, transition order,
+  or mutation ownership while appearing type-safe.
+- Acceptance: dependency/ownership map, characterization tests, measured LOC
+  and audit-surface reduction, small replay-equivalent migrations, and no
+  special/test-only execution path.
 
-6. **UX screenshot release evidence.**
-   - Keep at least 30 curated screenshots across desktop/mobile covering
-     onboarding, assets, accounts, payment, swap, cross-chain swap, disputes,
-     on-chain batch/history, health, QA, RAdapter import, and time machine.
-   - Exit: QA cockpit gallery opens every curated screenshot and slideshow
-     navigation works from keyboard/clicks.
+### 6. Add formal state-machine models
 
-7. **Pre-mainnet admin stories.**
-   - Keep four first-screen videos in QA cockpit: payment, swap, cross-chain
-     swap, dispute.
-   - Each story needs a short operator description and synchronized playback
-     transcript.
+- Model bilateral proposal/ACK/freeze, simultaneous proposals, dropped and
+  duplicate ACKs, recovery, and cross-j lifecycle in TLA+/PlusCal or equivalent.
+- Acceptance: model-check stated safety/liveness properties and connect every
+  counterexample class to an executable regression test.
 
-8. **AI court app after core health/QA work.**
-   - Finish the existing AI court app with XLN token intake, challenge flow,
-     adjudication, and winner-takes-all settlement.
-   - Not a mainnet readiness blocker until protocol/admin gates are green.
+### 7. Contract and deployment surface cleanup
 
-## Auxiliary AI Work
+- Evidence: dead or stale contract sources/interfaces remain (`ECDSA.sol`,
+  `IDepository.sol`, `IDeltaTransformer.sol`, `Token.sol`, `console.sol`),
+  `IEntityProvider` is not the canonical deployed interface,
+  `Account.verifyFinalDisputeProofHanko` appears unused, and parallel deploy
+  scripts retain overlapping stack logic.
+- Additional evidence: `createSettlementHashWithNonce` hardcodes an empty
+  `forgiveDebtsInTokenIds` projection and should remain fail-closed until the
+  intended hash boundary is specified.
+- Risk: deleting or changing these paths can alter ABI, bytecode, proof hashes,
+  deployment addresses, or external tooling.
+- Acceptance: obtain explicit contract approval; prove import/call graph and
+  ABI compatibility; add golden hash/deploy vectors; remove only confirmed
+  dead surfaces; leave one canonical deploy/verification path.
 
-These are useful local-product tasks but not XLN launch blockers.
+### 8. Expand multi-validator and jurisdiction adversarial coverage
 
-- Finish GPT-OSS 120B MLX download at `~/models/gpt-oss-120b-heretic-mlx`.
-- Install `piper` so `/api/synthesize` can produce voice locally.
+- Evidence: restore now preserves signer/proposer metadata and fails closed
+  when multi-validator live metadata is missing; Hanko separately enforces EOA
+  and total voting power. Full threshold/rotation/restore/dispute matrices are
+  not yet demonstrated.
+- Risk: quorum edge cases can pass unit thresholds but fail across restart,
+  proposer rotation, duplicate signatures, or on-chain verification.
+- Acceptance: executable N-of-M vectors cover proposer change, restore,
+  duplicate/unknown signers, reordered signatures, offline minorities, and
+  offchain/onchain parity. Any semantic change requires consensus/crypto/
+  contract approval.
+
+### 9. Complete the TypeScript 7 toolchain migration
+
+- Current partial: runtime typecheck uses pinned `@typescript/native`; Svelte,
+  ESLint, Hardhat, TypeChain, and ts-node still require compatibility tooling.
+- Acceptance: one supported compiler/toolchain passes runtime, frontend,
+  contracts, lint, editors, and CI with no compatibility alias.
+
+## P2 — product/UI after mainnet blockers
+
+1. Finish the lending lifecycle in `docs/lend.md`; keep it outside the release
+   boundary until runtime, contracts, and browser E2E are complete.
+2. Make custody balance, auto-fees, settlement modes, routing, J-events,
+   disputes, and recovery receipts coherent in the common app UI.
+3. Maintain curated desktop/mobile screenshot and operator-story evidence for
+   onboarding, recovery, payments, swaps, disputes, health, remote runtimes,
+   and time travel.
+4. Finish the AI court app only after protocol/admin gates are green; it is not
+   a fintech-mainnet blocker.
+
+## Auxiliary local AI work
+
+- Finish the GPT-OSS 120B MLX download at
+  `~/models/gpt-oss-120b-heretic-mlx`.
+- Install `piper` for local `/api/synthesize` voice output.
 - Fix the green visual speech indicator in `/ai`.
