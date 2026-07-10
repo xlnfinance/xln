@@ -618,6 +618,13 @@ describe('production startup wiring', () => {
     expect(outerTimeoutMs).toBeGreaterThan(Math.max(...declaredTimeouts));
   });
 
+  test('fast e2e caps full-stack browser concurrency at the release-tested level', () => {
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-fast.ts'), 'utf8');
+    const configured = runner.match(/'--shards=(\d+)'/);
+    expect(configured).not.toBeNull();
+    expect(Number(configured?.[1] || 0)).toBeLessThanOrEqual(8);
+  });
+
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     const sources = [

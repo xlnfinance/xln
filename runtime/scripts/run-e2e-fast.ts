@@ -93,7 +93,7 @@ cleanupTestArtifactsBeforeRun({
 const args = [
   'runtime/scripts/run-e2e-parallel-isolated.ts',
   ...passthrough,
-  '--shards=16',
+  '--shards=8',
   '--workers-per-shard=1',
   '--max-mm-concurrency=2',
   '--max-reset-concurrency=4',
