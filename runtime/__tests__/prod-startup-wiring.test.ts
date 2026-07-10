@@ -578,14 +578,30 @@ describe('production startup wiring', () => {
     expect(runner).toContain('await stopProcess(api, 35_000);');
     expect(runner).toContain('await stopShardRuntimePorts(apiPort, log);');
     expect(runner).toContain('await freePort(apiPort + 13, log);');
-    expect(runner).toContain('const E2E_ANVIL_MAX_PERSISTED_STATES = 256;');
-    expect(runner.match(/'--max-persisted-states'/g)).toHaveLength(2);
-    expect(runner.match(/String\(E2E_ANVIL_MAX_PERSISTED_STATES\)/g)).toHaveLength(2);
+    expect(runner).toContain('const E2E_ANVIL_HISTORY_STATES = 256;');
+    expect(runner.match(/'--prune-history'/g)).toHaveLength(2);
+    expect(runner.match(/String\(E2E_ANVIL_HISTORY_STATES\)/g)).toHaveLength(2);
+    expect(runner).not.toContain("'--max-persisted-states'");
     expect(runner).toContain("TMPDIR: anvilTmpDir");
     expect(runner).toContain("TMPDIR: anvil2TmpDir");
     expect(runner).toContain('rmSync(anvilTmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });');
     expect(runner).toContain('rmSync(anvil2TmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });');
     expect(runner).not.toContain('await stopProcess(api, 120_000);');
+  });
+
+  test('non-production Anvil harnesses keep bounded history in memory', () => {
+    const harnesses = [
+      'runtime/scripts/run-e2e-parallel-isolated.ts',
+      'runtime/scripts/rpc-settlement-parity.ts',
+      'runtime/scripts/dev-anvil-stack.ts',
+      'runtime/scripts/run-system-tests-parallel.ts',
+      'runtime/scenarios/boot.ts',
+      'runtime/__tests__/watchtower-rpc-last-resort.test.ts',
+    ];
+    for (const relativePath of harnesses) {
+      const source = readFileSync(join(repoRoot, relativePath), 'utf8');
+      expect(source, relativePath).toContain("'--prune-history'");
+    }
   });
 
   test('isolated e2e outer timeout exceeds every declared Playwright test timeout', () => {

@@ -29,6 +29,14 @@ const tempRoots: string[] = [];
 const servers: StandaloneWatchtowerServer[] = [];
 const anvilChildren: ChildProcessWithoutNullStreams[] = [];
 
+const waitForAnvilExit = async (child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> => {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return await Promise.race([
+    new Promise<boolean>((resolve) => child.once('exit', () => resolve(true))),
+    Bun.sleep(timeoutMs).then(() => false),
+  ]);
+};
+
 const reserveFreePort = async (): Promise<number> => new Promise((resolve, reject) => {
   const server = createServer();
   server.once('error', reject);
@@ -55,8 +63,13 @@ afterEach(async () => {
   }
   while (anvilChildren.length > 0) {
     const child = anvilChildren.pop();
-    if (!child || child.exitCode !== null) continue;
+    if (!child || child.exitCode !== null || child.signalCode !== null) continue;
     child.kill('SIGTERM');
+    const exited = await waitForAnvilExit(child, 3_000);
+    if (!exited && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await waitForAnvilExit(child, 3_000);
+    }
   }
   while (tempRoots.length > 0) {
     const root = tempRoots.pop();
@@ -120,14 +133,19 @@ const waitForRpcReady = async (rpcUrl: string): Promise<void> => {
 
 const startAnvil = async (port: number): Promise<{ child: ChildProcessWithoutNullStreams; rpcUrl: string }> => {
   const rpcUrl = `http://127.0.0.1:${port}`;
+  const anvilTmpRoot = await mkdtemp(join(tmpdir(), 'xln-watchtower-anvil-'));
+  tempRoots.push(anvilTmpRoot);
   const child = spawn('anvil', [
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', '31337',
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
+    '--prune-history', '256',
+    '--state', join(anvilTmpRoot, 'state.json'),
   ], {
     stdio: ['ignore', 'ignore', 'pipe'],
+    env: { ...process.env, TMPDIR: anvilTmpRoot },
   });
   anvilChildren.push(child);
   child.stderr.on('data', chunk => process.stderr.write(`[anvil] ${chunk.toString()}`));

@@ -126,7 +126,7 @@ type ManagedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
 const RESET_CONFIRMATION = 'RESET_MESH_STATE';
-const E2E_ANVIL_MAX_PERSISTED_STATES = 256;
+const E2E_ANVIL_HISTORY_STATES = 256;
 const DEFAULT_E2E_TEST_TIMEOUT_MS = 660_000;
 
 type QaCodeFingerprint = {
@@ -1850,8 +1850,8 @@ const runShard = async (
         '60000000',
         '--code-size-limit',
         '65536',
-        '--max-persisted-states',
-        String(E2E_ANVIL_MAX_PERSISTED_STATES),
+        '--prune-history',
+        String(E2E_ANVIL_HISTORY_STATES),
         '--state',
         anvilStatePath,
         '--silent',
@@ -1876,8 +1876,8 @@ const runShard = async (
         '60000000',
         '--code-size-limit',
         '65536',
-        '--max-persisted-states',
-        String(E2E_ANVIL_MAX_PERSISTED_STATES),
+        '--prune-history',
+        String(E2E_ANVIL_HISTORY_STATES),
         '--state',
         anvil2StatePath,
         '--silent',

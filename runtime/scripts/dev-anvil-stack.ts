@@ -117,6 +117,7 @@ const main = async (): Promise<void> => {
       '--block-time', String(args.blockTime),
       '--block-gas-limit', '60000000',
       '--code-size-limit', '65536',
+      '--prune-history', '256',
     ], {
       stdio: args.jsonOnly ? ['ignore', 'ignore', 'inherit'] : ['ignore', 'pipe', 'pipe'],
     });

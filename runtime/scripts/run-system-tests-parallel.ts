@@ -170,6 +170,7 @@ function spawnAnvil(
     '--chain-id', '31337',
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
+    '--prune-history', '256',
     '--silent',
   ], {
     stdio: ['ignore', 'pipe', 'pipe'],

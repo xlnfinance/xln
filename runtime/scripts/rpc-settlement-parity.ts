@@ -1,6 +1,9 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ethers } from 'ethers';
 
 import { DEFAULT_PRIVATE_KEY, createJAdapter, createXlnJsonRpcProvider } from '../jadapter';
@@ -17,6 +20,14 @@ type Args = {
   anvilPort: number;
   keepAnvil: boolean;
 };
+
+type ManagedAnvil = {
+  child: ChildProcess;
+  tmpRoot: string;
+};
+
+let activeAnvil: ManagedAnvil | null = null;
+let keepActiveAnvil = false;
 
 const parseArgs = (): Args => {
   const flags = new Map<string, string | true>();
@@ -74,8 +85,31 @@ const waitForRpcReady = async (rpcUrl: string, timeoutMs = 20_000): Promise<void
   throw new Error(`RPC not ready at ${rpcUrl}: ${lastError}`);
 };
 
-const startAnvil = (args: Args): ChildProcess | null => {
+const waitForAnvilExit = async (child: ChildProcess, timeoutMs: number): Promise<boolean> => {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return await Promise.race([
+    new Promise<boolean>((resolve) => child.once('exit', () => resolve(true))),
+    sleep(timeoutMs).then(() => false),
+  ]);
+};
+
+const stopAnvil = async (managed: ManagedAnvil | null, keepAnvil: boolean): Promise<void> => {
+  if (!managed || keepAnvil) return;
+  const { child, tmpRoot } = managed;
+  if (child.exitCode === null && child.signalCode === null) {
+    child.kill('SIGTERM');
+    const exited = await waitForAnvilExit(child, 3_000);
+    if (!exited && child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await waitForAnvilExit(child, 3_000);
+    }
+  }
+  await rm(tmpRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+};
+
+const startAnvil = async (args: Args): Promise<ManagedAnvil | null> => {
   if (!args.spawnAnvil) return null;
+  const anvilTmpRoot = await mkdtemp(join(tmpdir(), 'xln-rpc-settlement-anvil-'));
   const child = spawn('anvil', [
     '--host', '127.0.0.1',
     '--port', String(args.anvilPort),
@@ -84,11 +118,14 @@ const startAnvil = (args: Args): ChildProcess | null => {
     '--block-time', '1',
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
+    '--prune-history', '256',
+    '--state', join(anvilTmpRoot, 'state.json'),
   ], {
     stdio: ['ignore', 'ignore', 'pipe'],
+    env: { ...process.env, TMPDIR: anvilTmpRoot },
   });
   child.stderr?.on('data', chunk => process.stderr.write(`[anvil] ${chunk.toString()}`));
-  return child;
+  return { child, tmpRoot: anvilTmpRoot };
 };
 
 const toJurisdictionHash = (
@@ -115,23 +152,18 @@ const toJurisdictionHash = (
 
 const main = async (): Promise<void> => {
   const args = parseArgs();
-  const anvil = startAnvil(args);
-  const cleanup = (): void => {
-    if (!anvil || args.keepAnvil || anvil.exitCode !== null) return;
-    try {
-      anvil.kill('SIGTERM');
-    } catch {
-      // best-effort cleanup
-    }
+  activeAnvil = await startAnvil(args);
+  keepActiveAnvil = args.keepAnvil;
+  const cleanup = async (): Promise<void> => {
+    const managed = activeAnvil;
+    activeAnvil = null;
+    await stopAnvil(managed, args.keepAnvil);
   };
-  process.on('exit', cleanup);
   process.on('SIGINT', () => {
-    cleanup();
-    process.exit(130);
+    void cleanup().finally(() => process.exit(130));
   });
   process.on('SIGTERM', () => {
-    cleanup();
-    process.exit(143);
+    void cleanup().finally(() => process.exit(143));
   });
 
   await waitForRpcReady(args.rpcUrl);
@@ -204,7 +236,7 @@ const main = async (): Promise<void> => {
 
   await adapter.close();
   await provider.destroy();
-  cleanup();
+  await cleanup();
 
   console.log('✅ rpc-settlement-parity passed');
   console.log(JSON.stringify({
@@ -226,7 +258,9 @@ const main = async (): Promise<void> => {
   }, null, 2));
 };
 
-main().catch((error) => {
+main().catch(async (error) => {
+  await stopAnvil(activeAnvil, keepActiveAnvil);
+  activeAnvil = null;
   console.error('❌ rpc-settlement-parity failed:', error instanceof Error ? error.stack || error.message : String(error));
   process.exit(1);
 });
