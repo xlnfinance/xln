@@ -126,6 +126,7 @@ type ManagedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
 const RESET_CONFIRMATION = 'RESET_MESH_STATE';
+const E2E_ANVIL_MAX_PERSISTED_STATES = 256;
 
 type QaCodeFingerprint = {
   gitHead: string | null;
@@ -1838,6 +1839,8 @@ const runShard = async (
         '60000000',
         '--code-size-limit',
         '65536',
+        '--max-persisted-states',
+        String(E2E_ANVIL_MAX_PERSISTED_STATES),
         '--state',
         anvilStatePath,
         '--silent',
@@ -1859,6 +1862,8 @@ const runShard = async (
         '60000000',
         '--code-size-limit',
         '65536',
+        '--max-persisted-states',
+        String(E2E_ANVIL_MAX_PERSISTED_STATES),
         '--state',
         anvil2StatePath,
         '--silent',

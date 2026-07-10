@@ -566,6 +566,9 @@ describe('production startup wiring', () => {
     expect(runner).toContain('await stopProcess(api, 35_000);');
     expect(runner).toContain('await stopShardRuntimePorts(apiPort, log);');
     expect(runner).toContain('await freePort(apiPort + 13, log);');
+    expect(runner).toContain('const E2E_ANVIL_MAX_PERSISTED_STATES = 256;');
+    expect(runner.match(/'--max-persisted-states'/g)).toHaveLength(2);
+    expect(runner.match(/String\(E2E_ANVIL_MAX_PERSISTED_STATES\)/g)).toHaveLength(2);
     expect(runner).not.toContain('await stopProcess(api, 120_000);');
   });
 
