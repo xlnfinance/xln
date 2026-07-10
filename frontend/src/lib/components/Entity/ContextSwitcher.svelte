@@ -74,7 +74,7 @@
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
   $: runtimeGroups = buildRuntimeGroups();
   $: runtimeMenuGroups = buildRuntimeMenuGroups(runtimeGroups);
-  $: mutatingLocalControlsEnabled = $runtimeControllerHandle.mode !== 'remote';
+  $: runtimeMutationControlsEnabled = $runtimeControllerHandle.permissions === 'write';
   $: controllerRuntimeId = normalizeId($runtimeControllerHandle.runtimeId || $runtimeControllerHandle.id);
   $: currentGroup = runtimeGroups.find((group) => normalizeId(group.runtimeId) === controllerRuntimeId)
     || runtimeGroups.find((group) => group.runtimeId === $activeStoreRuntimeId)
@@ -287,7 +287,11 @@
     };
     for (const summary of fallbackSummaries) add(summary);
     if (normalizeId(runtimeId) === controllerRuntimeId || normalizeId(runtimeId) === normalizeId($runtimeView.runtimeId)) {
-      for (const summary of $runtimeView.entities ?? []) add(summary);
+      for (const summary of $runtimeView.entities ?? []) {
+        const projectionRuntimeId = normalizeId(summary?.runtimeId);
+        if (projectionRuntimeId !== normalizeId(runtimeId)) continue;
+        add(summary);
+      }
       add($runtimeView.frame?.activeEntity?.summary ?? null);
     }
     return Array.from(summaries.values());
@@ -575,18 +579,16 @@
 		    </div>
 
 	    <div class="menu-footer">
-      {#if mutatingLocalControlsEnabled && allowAddJurisdiction}
+      {#if runtimeMutationControlsEnabled && allowAddJurisdiction}
         <button class="add-runtime-btn" on:click={handleAddJurisdiction}>+ Add Jurisdiction</button>
       {/if}
-      {#if mutatingLocalControlsEnabled && allowAddEntity}
+      {#if runtimeMutationControlsEnabled && allowAddEntity}
         <button class="add-runtime-btn secondary-action" on:click={handleAddEntity}>+ Add Entity</button>
       {/if}
-      {#if mutatingLocalControlsEnabled && allowAddRuntime}
+      {#if allowAddRuntime}
         <button class="add-runtime-btn" on:click={handleAddRuntime}>{addRuntimeLabel}</button>
       {/if}
-      {#if mutatingLocalControlsEnabled}
-        <button class="reset-btn" on:click={handleReset}>Reset All Data</button>
-      {/if}
+      <button class="reset-btn" on:click={handleReset}>Reset All Data</button>
     </div>
   </div>
 </Dropdown>

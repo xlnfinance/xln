@@ -17,10 +17,12 @@ test('runtime dropdown view keeps browser and remote runtimes in one source-mark
       hubEntities: [{
         entityId: '0xhub1',
         label: 'H1',
+        runtimeId: '0xremote',
         jurisdiction: { name: 'Testnet', chainId: 31337 },
       }, {
         entityId: '0xhub2',
         label: 'H2',
+        runtimeId: '0xother',
         jurisdiction: { name: 'Tron', chainId: 31338 },
       }],
     }],
@@ -45,7 +47,6 @@ test('runtime dropdown view keeps browser and remote runtimes in one source-mark
   ]);
   expect(entries[0]?.groups.map(group => [group.label, group.entities.map(entity => entity.label)])).toEqual([
     ['Testnet', ['H1']],
-    ['Tron', ['H2']],
   ]);
   expect(entries[1]?.groups).toEqual([{
     id: 'testnet',

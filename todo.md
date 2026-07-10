@@ -7,18 +7,44 @@ history remains in git. Every item below is still open or intentionally heavy.
 
 ## P0 — fintech-mainnet blockers
 
+### 0. Bind bilateral account identity into every signed account frame
+
+- Evidence: `createFrameHash` commits transition fields and deltas but not the
+  two entity ids or an account/domain tag. `watchSeed` and the dispute seal do
+  bind the account, but both are optional on incoming frame envelopes.
+- Reproduced on current HEAD: a real A→B `set_credit_limit` frame and A hanko
+  were replayed into the empty A↔C account after stripping only the optional
+  `watchSeed` and dispute-seal fields; `applyAccountInput` accepted height 1 and
+  granted C the credit intended for B.
+- Risk: a captured genesis frame can authorize bilateral money state in another
+  account with the same signer and left/right orientation.
+- Acceptance: obtain explicit consensus approval; version the account-frame
+  domain over canonical left/right entity ids plus chain/depository context;
+  make account-bound envelope evidence non-strippable; reject A↔B frames on
+  A↔C at L1/L2; publish migration/replay/golden vectors before activation.
+
 ### 1. Move signing behind a remote signer/HSM boundary
 
 - Status: deferred by explicit hardening constraint; do not change seed,
   signing, HSM, remote-signer, or key-rotation code in routine cleanup.
+- Verified partial: canonical checkpoints and plaintext recovery bundles omit
+  `runtimeSeed`; runtime-adapter auth defaults to a separate
+  `XLN_RADAPTER_AUTH_SEED`. The opt-in
+  `XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH` compatibility path still couples
+  adapter authority to the runtime master seed and must not exist in the
+  mainnet boundary.
 - Evidence: browser vault runtimes still contain mnemonic/seed material and
   derive/register signer keys in `frontend/src/lib/stores/vaultStore.ts`;
-  production signing therefore has no demonstrated hardware custody boundary.
+  `signEntityHashes` and `signAccountFrame` still derive private keys from
+  `env.runtimeSeed`. Production signing therefore has no demonstrated hardware
+  custody boundary.
 - Risk: browser or host compromise can expose long-lived signing material;
   rotation and incident containment are not operationally proven.
-- Acceptance: raw production keys never enter app memory; signer identity is
-  attested; threshold/role policy is enforced; rotation, revocation, backup,
-  recovery, audit logs, and fail-closed signer outage drills pass end to end.
+- Acceptance: introduce one `SignerProvider` boundary for account/entity
+  hashes; persist signed outputs before commit; replay consumes persisted
+  signatures and never calls the signer; raw production keys never enter app
+  memory; signer identity is attested; threshold/role policy, rotation,
+  revocation, backup, recovery, audit logs, and fail-closed outage drills pass.
 
 ### 2. Produce release evidence from one frozen candidate
 
@@ -155,6 +181,25 @@ history remains in git. Every item below is still open or intentionally heavy.
 - Acceptance: contracts, runtime admission, API, health, and UI reject any
   unsupported token consistently and loudly.
 
+### 13. Add a durable storage writer fencing token
+
+- Current partial: `saveEnvToDB` wraps the full head-read/write path in an
+  exclusive `wx` namespace lock and rejects live-PID owners. Concurrent stale
+  takeover is now serialized by a separate exclusive recovery claim, and both
+  lock releases verify the acquired owner token. A 20-process regression proves
+  that exactly one dead-lock reclaimer enters the write section.
+- Remaining evidence: `StorageHead` does not carry a durable fencing token. A
+  process killed during the short recovery-claim window fails closed and needs
+  explicit operator cleanup; PID reuse and current/history parity under killed
+  writers are not yet covered.
+- Risk: filesystem ownership prevents the reproduced local split-writer race,
+  but it is not a storage-enforced monotonic lease across namespace copies,
+  process crashes, or operational recovery mistakes.
+- Acceptance: every append owns a monotonic durable fencing token recorded in
+  the authoritative head and checked in the same commit path; stale takeover
+  cannot remove a newer lease; adversarial multi-process tests cover concurrent
+  takeover, killed writers, long writes, PID reuse, and current/history parity.
+
 ## HEAVY TODO — separate design/approval required
 
 ### 1. Prove validate/commit equivalence
@@ -193,7 +238,9 @@ history remains in git. Every item below is still open or intentionally heavy.
 ### 4. Introduce canonical binary encoding and versioned hashes
 
 - Evidence: protocol/storage hashes still depend on the current canonical JSON
-  model and BigInt conventions.
+  model and BigInt conventions. Fixed account/entity frame vectors exist, but
+  WAL checkpoint/recovery, storage-head/frame, proof, and cross-language vectors
+  are not frozen as one versioned corpus.
 - Risk: cross-language ambiguity and future serializer drift; direct encoding
   replacement would invalidate proofs, journals, and fixtures.
 - Acceptance: publish golden vectors, domain/version tags, independent
@@ -204,11 +251,16 @@ history remains in git. Every item below is still open or intentionally heavy.
 
 - Scope: separate canonical state, computed/cache state, proposal state, and
   extension reducers; shrink large consensus modules without wrapper layers.
+- Money-core boundary: orderbook, cross-j, and lending mostly enqueue
+  `AccountTx`, while J-event reconciliation legitimately writes canonical
+  `ondelta/collateral`; no module/type boundary prevents a future feature from
+  mutating those fields directly.
 - Risk: a broad structural rewrite can change serialization, transition order,
   or mutation ownership while appearing type-safe.
 - Acceptance: dependency/ownership map, characterization tests, measured LOC
-  and audit-surface reduction, small replay-equivalent migrations, and no
-  special/test-only execution path.
+  and audit-surface reduction, compile-time imports that confine money mutation
+  to AccountTx/J-event reducers, adversarial conservation tests, small
+  replay-equivalent migrations, and no special/test-only execution path.
 
 ### 6. Add formal state-machine models
 

@@ -50,7 +50,6 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     importJMachineViaRuntime,
     type JMachineCreateDetail,
   } from '$lib/components/Jurisdiction/import-jmachine-runtime';
-  import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import ContextSwitcher from './ContextSwitcher.svelte';
   import {
     OFFCHAIN_FAUCET_REQUEST_TIMEOUT_MS,

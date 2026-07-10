@@ -78,6 +78,8 @@ describe('runtime creation live runtime discovery', () => {
     expect(source).toContain('data-testid="live-runtime-select"');
     expect(source).toContain('data-testid="live-runtime-connect"');
     expect(source).toContain('liveRuntimesLoaded && !liveRuntimesError');
+    expect(source).toContain("url.searchParams.set('access', 'admin')");
+    expect(source).not.toContain("url.searchParams.set('access', 'read')");
     expect(source).toContain('Auto-discovery suppresses transport failures only');
     expect(source).not.toContain('swallows errors');
     expect(source).not.toContain('next.length === 0 && payload.ready === false');

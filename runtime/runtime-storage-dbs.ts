@@ -138,7 +138,7 @@ const tryAcquireStorageWriterLock = async (
   lockPath: string,
   fs: typeof import('fs/promises'),
   path: typeof import('path'),
-): Promise<boolean> => {
+): Promise<StorageWriterLockBody> => {
   const now = Date.now();
   const body: StorageWriterLockBody = {
     owner: `${nodeProcess?.pid ?? 'unknown'}:${now}:${Math.max(0, Number(env.height || 0))}`,
@@ -152,10 +152,30 @@ const tryAcquireStorageWriterLock = async (
   const handle = await fs.open(lockPath, 'wx');
   try {
     await handle.writeFile(`${JSON.stringify(body)}\n`, 'utf8');
-    return true;
+    return body;
   } finally {
     await handle.close();
   }
+};
+
+const storageWriterErrorCode = (error: unknown): string =>
+  typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code?: unknown }).code || '')
+    : '';
+
+const releaseStorageWriterLock = async (
+  lockPath: string,
+  owner: StorageWriterLockBody,
+  fs: typeof import('fs/promises'),
+): Promise<void> => {
+  const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
+  const current = raw ? parseStorageWriterLock(raw) : null;
+  if (current?.owner !== owner.owner) {
+    throw new Error(
+      `STORAGE_WRITER_LOCK_OWNERSHIP_LOST: path=${lockPath} expected=${owner.owner} actual=${current?.owner ?? 'missing'}`,
+    );
+  }
+  await fs.unlink(lockPath);
 };
 
 export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): Promise<T> => {
@@ -169,29 +189,50 @@ export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): 
 
   const fs = await import('fs/promises');
   const path = await import('path');
-  let acquired = false;
+  let acquired: StorageWriterLockBody | null = null;
   try {
     try {
       acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path);
     } catch (error) {
-      const code = typeof error === 'object' && error !== null && 'code' in error
-        ? String((error as { code?: unknown }).code || '')
-        : '';
-      if (code !== 'EEXIST') throw error;
+      if (storageWriterErrorCode(error) !== 'EEXIST') throw error;
 
-      const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
-      const existing = raw ? parseStorageWriterLock(raw) : null;
-      if (!existing || existing.expiresAt > Date.now() || storageWriterPidIsAlive(existing.pid)) {
-        throw storageWriterLockHeldError(lockPath, existing);
+      const recoveryPath = `${lockPath}.recovery`;
+      let recoveryOwner: StorageWriterLockBody | null = null;
+      try {
+        try {
+          recoveryOwner = await tryAcquireStorageWriterLock(env, recoveryPath, fs, path);
+        } catch (recoveryError) {
+          if (storageWriterErrorCode(recoveryError) !== 'EEXIST') throw recoveryError;
+          throw storageWriterLockHeldError(lockPath, null);
+        }
+
+        const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
+        const existing = raw ? parseStorageWriterLock(raw) : null;
+        if (!existing || existing.expiresAt > Date.now() || storageWriterPidIsAlive(existing.pid)) {
+          throw storageWriterLockHeldError(lockPath, existing);
+        }
+        await fs.unlink(lockPath);
+        try {
+          acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path);
+        } catch (acquireError) {
+          if (storageWriterErrorCode(acquireError) !== 'EEXIST') throw acquireError;
+          const replacementRaw = await fs.readFile(lockPath, 'utf8').catch(() => '');
+          throw storageWriterLockHeldError(
+            lockPath,
+            replacementRaw ? parseStorageWriterLock(replacementRaw) : null,
+          );
+        }
+      } finally {
+        if (recoveryOwner) {
+          await releaseStorageWriterLock(recoveryPath, recoveryOwner, fs);
+        }
       }
-      await fs.unlink(lockPath).catch(() => undefined);
-      acquired = await tryAcquireStorageWriterLock(env, lockPath, fs, path);
     }
 
     return await fn();
   } finally {
     if (acquired) {
-      await fs.unlink(lockPath).catch(() => undefined);
+      await releaseStorageWriterLock(lockPath, acquired, fs);
     }
     activeStorageWriterLocks.delete(lockPath);
   }

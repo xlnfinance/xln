@@ -127,7 +127,11 @@ const browserRuntimeGroups = (runtime: RuntimeDropdownVaultRuntime): RuntimeDrop
   }));
 
 const remoteRuntimeGroups = (runtime: RuntimeDropdownRemoteRuntime): RuntimeDropdownJurisdictionGroup[] => {
-  const rows = (runtime.hubEntities || []).flatMap((entity) => {
+  const runtimeId = normalizeId(runtime.id);
+  const rows = (runtime.hubEntities || []).filter((entity) => {
+    const ownerRuntimeId = normalizeId(entity.runtimeId);
+    return !ownerRuntimeId || ownerRuntimeId === runtimeId;
+  }).flatMap((entity) => {
     const entityId = normalizeId(entity.entityId);
     if (!entityId) return [];
     return [{

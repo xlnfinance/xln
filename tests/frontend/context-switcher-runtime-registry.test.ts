@@ -77,6 +77,24 @@ test('ContextSwitcher does not pick the first sorted projection entity as the re
   expect(source).not.toContain('derivedEntities: selfEntity ? entities.slice(1) : entities');
 });
 
+test('ContextSwitcher keeps local controls visible and gates runtime mutations by write capability', () => {
+  const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
+
+  expect(source).toContain("runtimeMutationControlsEnabled = $runtimeControllerHandle.permissions === 'write'");
+  expect(source).toContain('{#if runtimeMutationControlsEnabled && allowAddEntity}');
+  expect(source).toContain('{#if runtimeMutationControlsEnabled && allowAddJurisdiction}');
+  expect(source).toContain('{#if allowAddRuntime}');
+  expect(source).toContain('<button class="reset-btn" on:click={handleReset}>Reset All Data</button>');
+  expect(source).not.toContain("mutatingLocalControlsEnabled = $runtimeControllerHandle.mode !== 'remote'");
+});
+
+test('ContextSwitcher only adds projection entities owned by the matching runtime', () => {
+  const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
+
+  expect(source).toContain('const projectionRuntimeId = normalizeId(summary?.runtimeId)');
+  expect(source).toContain('if (projectionRuntimeId !== normalizeId(runtimeId)) continue;');
+});
+
 test('remote empty entity state still exposes the context runtime switcher', () => {
   const emptyState = readFileSync('frontend/src/lib/components/Entity/EntitySelectionEmptyState.svelte', 'utf8');
   const tabs = readFileSync('frontend/src/lib/components/Entity/EntityPanelTabs.svelte', 'utf8');

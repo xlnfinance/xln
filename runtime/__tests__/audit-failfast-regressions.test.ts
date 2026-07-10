@@ -60,7 +60,7 @@ import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
 import { submitRuntimeJOutbox } from '../runtime-j-submit';
 import { safeStringify } from '../serialization-utils';
-import { projectAccountDoc } from '../storage/projections';
+import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
 import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';
@@ -3359,76 +3359,97 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
   });
 
-  test('receiver commit preserves explicit zero jHeight instead of falling back to account height', async () => {
+  test('account frame property matrix preserves explicit zero jHeight through receive, replay, and ACK commit', async () => {
     setDeltaTransformerAddress(hex20('99'));
 
-    for (const accountHeight of [1, 10, 100]) {
-      for (const revealBeforeHeight of [1, 2, 11]) {
-        const seed = `account-frame-zero-jheight-receiver-commit-${accountHeight}-${revealBeforeHeight}`;
-        const env = createEmptyEnv(seed);
-        env.quietRuntimeLogs = true;
-        env.timestamp = 10_000;
-        env.browserVM = {
-          getDepositoryAddress: () => hex20('dd'),
-        } as typeof env.browserVM;
+    const propertyCases = [1, 10, 100].flatMap(accountHeight =>
+      [3, 11, 101].flatMap(finalizedJHeight =>
+        [1, 2, 11].map(revealBeforeHeight => ({ accountHeight, finalizedJHeight, revealBeforeHeight })),
+      ),
+    );
+    for (const { accountHeight, finalizedJHeight, revealBeforeHeight } of propertyCases) {
+      const seed = `account-frame-zero-jheight-${accountHeight}-${finalizedJHeight}-${revealBeforeHeight}`;
+      const env = createEmptyEnv(seed);
+      env.quietRuntimeLogs = true;
+      env.timestamp = 10_000;
+      env.browserVM = {
+        getDepositoryAddress: () => hex20('dd'),
+      } as typeof env.browserVM;
 
-        const first = registerLazySigner(seed, '1');
-        const second = registerLazySigner(seed, '2');
-        const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
-        const right = left === first ? second : first;
-        attachSigningReplica(env, left.entityId, left.signerId);
-        attachSigningReplica(env, right.entityId, right.signerId);
+      const first = registerLazySigner(seed, '1');
+      const second = registerLazySigner(seed, '2');
+      const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+      const right = left === first ? second : first;
+      attachSigningReplica(env, left.entityId, left.signerId);
+      attachSigningReplica(env, right.entityId, right.signerId);
 
-        const makeFundedDelta = () => ({
-          ...createDefaultDelta(1),
-          leftCreditLimit: 10n,
-        });
-        const lockId = `zero-jheight-lock-${accountHeight}-${revealBeforeHeight}`;
-        const htlcTx: AccountTx = {
-          type: 'htlc_lock',
-          data: {
-            lockId,
-            hashlock: `0x${'31'.repeat(32)}`,
-            timelock: BigInt(env.timestamp + 60_000),
-            revealBeforeHeight,
-            amount: 1n,
-            tokenId: 1,
-          },
-        };
-        const previousStateHash = `0x${'ab'.repeat(32)}`;
-        const proposerAccount = makeProposalAccount([htlcTx], left.entityId, right.entityId);
-        proposerAccount.currentHeight = accountHeight;
-        proposerAccount.currentFrame = {
-          ...proposerAccount.currentFrame,
-          height: accountHeight,
-          timestamp: env.timestamp - 1,
-          stateHash: previousStateHash,
-        };
-        proposerAccount.deltas.set(1, makeFundedDelta());
+      const makeFundedDelta = () => ({
+        ...createDefaultDelta(1),
+        leftCreditLimit: 10n,
+      });
+      const lockId = `zero-jheight-lock-${accountHeight}-${revealBeforeHeight}`;
+      const htlcTx: AccountTx = {
+        type: 'htlc_lock',
+        data: {
+          lockId,
+          hashlock: `0x${'31'.repeat(32)}`,
+          timelock: BigInt(env.timestamp + 60_000),
+          revealBeforeHeight,
+          amount: 1n,
+          tokenId: 1,
+        },
+      };
+      const previousStateHash = `0x${'ab'.repeat(32)}`;
+      const proposerAccount = makeProposalAccount([htlcTx], left.entityId, right.entityId);
+      proposerAccount.lastFinalizedJHeight = finalizedJHeight;
+      proposerAccount.currentHeight = accountHeight;
+      proposerAccount.currentFrame = {
+        ...proposerAccount.currentFrame,
+        height: accountHeight,
+        timestamp: env.timestamp - 1,
+        stateHash: previousStateHash,
+      };
+      proposerAccount.deltas.set(1, makeFundedDelta());
 
-        const proposed = await proposeAccountFrame(env, proposerAccount, false, 0);
-        if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
-        expect(proposed.success).toBe(true);
-        expect(proposed.accountInput?.newAccountFrame.jHeight).toBe(0);
+      const proposed = await proposeAccountFrame(env, proposerAccount, false, 0);
+      if (!proposed.success) throw new Error(`ZERO_JHEIGHT_PROPOSAL_FAILED:${proposed.error}`);
+      expect(proposed.success).toBe(true);
+      expect(proposed.accountInput?.newAccountFrame.jHeight).toBe(0);
 
-        const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
-        receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nonce: 0 };
-        receiverAccount.currentHeight = accountHeight;
-        receiverAccount.currentFrame = {
-          ...receiverAccount.currentFrame,
-          height: accountHeight,
-          timestamp: env.timestamp - 1,
-          stateHash: previousStateHash,
-        };
-        receiverAccount.deltas.set(1, makeFundedDelta());
+      const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
+      receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nonce: 0 };
+      receiverAccount.lastFinalizedJHeight = finalizedJHeight;
+      receiverAccount.currentHeight = accountHeight;
+      receiverAccount.currentFrame = {
+        ...receiverAccount.currentFrame,
+        height: accountHeight,
+        timestamp: env.timestamp - 1,
+        stateHash: previousStateHash,
+      };
+      receiverAccount.deltas.set(1, makeFundedDelta());
+      const replayedReceiverAccount = hydrateAccountDocFromStorage(structuredClone(projectAccountDoc(receiverAccount)));
 
-        const result = await applyAccountInput(env, receiverAccount, proposed.accountInput!);
+      const result = await applyAccountInput(env, receiverAccount, proposed.accountInput!);
+      const replayResult = await applyAccountInput(env, replayedReceiverAccount, proposed.accountInput!);
 
-        expect(result.success).toBe(true);
-        expect(receiverAccount.currentHeight).toBe(accountHeight + 1);
-        expect(receiverAccount.currentFrame.jHeight).toBe(0);
-        expect(receiverAccount.locks.has(lockId)).toBe(true);
-      }
+      expect(result.success).toBe(true);
+      if (!replayResult.success) throw new Error(`ZERO_JHEIGHT_REPLAY_FAILED:${replayResult.error}`);
+      expect(replayResult.success).toBe(true);
+      expect(receiverAccount.currentHeight).toBe(accountHeight + 1);
+      expect(receiverAccount.currentFrame.jHeight).toBe(0);
+      expect(receiverAccount.locks.has(lockId)).toBe(true);
+      expect(safeStringify(projectAccountDoc(replayedReceiverAccount))).toBe(
+        safeStringify(projectAccountDoc(receiverAccount)),
+      );
+      expect(replayResult.response).toEqual(result.response);
+
+      if (!result.response) throw new Error('ZERO_JHEIGHT_ACK_MISSING');
+      const ackResult = await applyAccountInput(env, proposerAccount, result.response);
+      expect(ackResult.success).toBe(true);
+      expect(proposerAccount.currentHeight).toBe(accountHeight + 1);
+      expect(proposerAccount.currentFrame.jHeight).toBe(0);
+      expect(proposerAccount.currentFrame.stateHash).toBe(receiverAccount.currentFrame.stateHash);
+      expect(proposerAccount.locks.has(lockId)).toBe(true);
     }
   });
 
