@@ -2397,18 +2397,25 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   expect(importSummary.failedCount ?? 0).toBe(0);
 
   await page.getByTestId('context-current').click();
+  await page.evaluate((targetRuntimeId) => {
+    const runtime = document.querySelector(
+      `[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`,
+    ) as HTMLElement | null;
+    if (!runtime) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
+    runtime.click();
+  }, h2Endpoint.runtimeId);
   await page.waitForFunction(({ targetRuntimeId }) => {
-    const group = document.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
-    return Array.from(group?.querySelectorAll('[data-testid="context-entity-row"]') ?? [])
+    const focus = document.querySelector('[data-testid="context-runtime-focus"]');
+    return Array.from(focus?.querySelectorAll('[data-testid="context-entity-row"]') ?? [])
       .some((row) =>
         row.getAttribute('data-runtime-id') === targetRuntimeId &&
         row.getAttribute('data-entity-label') === 'h2',
       );
   }, { targetRuntimeId: h2Endpoint.runtimeId }, { timeout: REMOTE_E2E_WAIT_MS });
   await page.evaluate(({ targetRuntimeId }) => {
-    const group = document.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
-    if (!group) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
-    const row = Array.from(group.querySelectorAll('[data-testid="context-entity-row"]'))
+    const focus = document.querySelector('[data-testid="context-runtime-focus"]');
+    if (!focus) throw new Error('CONTEXT_RUNTIME_FOCUS_MISSING');
+    const row = Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]'))
       .find((candidate) =>
         candidate.getAttribute('data-runtime-id') === targetRuntimeId &&
         candidate.getAttribute('data-entity-label') === 'h2',
@@ -2439,7 +2446,7 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   expect(managerState.imports.length).toBeGreaterThanOrEqual(5);
   expect(managerState.imports.length).toBeLessThanOrEqual(100);
   expect(managerState.h2Import?.label).toBe('H2');
-  expect(managerState.h2Import?.access).toBe('read');
+  expect(managerState.h2Import?.access).toBe('admin');
   expect(managerState.h2Import?.entityCount ?? 0).toBeGreaterThan(0);
 
   await page.waitForFunction(
@@ -2451,7 +2458,7 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   await expect(page.locator('[data-testid="entity-lens-audit"]')).toHaveCount(0);
   await expect(page.locator('[data-testid="entity-workspace-readonly"]')).toHaveCount(0);
 
-  const inspectMutationProbe = await page.evaluate(async () => {
+  const adminProjectionProbe = await page.evaluate(async () => {
     const view = window as typeof window & {
       __xlnRuntimeAdapter?: RuntimeAdapterDebugSurface;
       __xlnRuntimeCommands?: {
@@ -2512,16 +2519,16 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
       receiptEntityTxs: Number(receipt?.inputSummary?.entityTxs || 0),
     };
   });
-  expect(inspectMutationProbe.authLevel).toBe('inspect');
-  expect(inspectMutationProbe.entityId).toMatch(/^0x[0-9a-f]{64}$/);
-  expect(inspectMutationProbe.signerId).toMatch(/^0x[0-9a-f]{40}$/);
-  expect(inspectMutationProbe.submitPresent).toBe(false);
-  expect(inspectMutationProbe.receiptStatus).toBe('');
-  expect(inspectMutationProbe.receiptError).toBe('');
-  expect(inspectMutationProbe.receiptEntityInputs).toBe(0);
-  expect(inspectMutationProbe.receiptEntityTxs).toBe(0);
-  expect(inspectMutationProbe.afterName).toBe(inspectMutationProbe.beforeName);
-  expect(inspectMutationProbe.afterHeight).toBeGreaterThanOrEqual(inspectMutationProbe.beforeHeight);
+  expect(adminProjectionProbe.authLevel).toBe('admin');
+  expect(adminProjectionProbe.entityId).toMatch(/^0x[0-9a-f]{64}$/);
+  expect(adminProjectionProbe.signerId).toMatch(/^0x[0-9a-f]{40}$/);
+  expect(adminProjectionProbe.submitPresent).toBe(false);
+  expect(adminProjectionProbe.receiptStatus).toBe('');
+  expect(adminProjectionProbe.receiptError).toBe('');
+  expect(adminProjectionProbe.receiptEntityInputs).toBe(0);
+  expect(adminProjectionProbe.receiptEntityTxs).toBe(0);
+  expect(adminProjectionProbe.afterName).toBe(adminProjectionProbe.beforeName);
+  expect(adminProjectionProbe.afterHeight).toBeGreaterThanOrEqual(adminProjectionProbe.beforeHeight);
 });
 
 test('pre-wallet live runtime selector connects suggested H1 runtime through the app UX', async ({ page }) => {
@@ -2559,7 +2566,7 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
   expect(h1Option?.value).toBe(h1Endpoint.wsUrl);
 
   await select.selectOption(h1Endpoint.wsUrl);
-  await expect(page.getByTestId('live-runtime-connect')).toContainText(/Connect · read/i);
+  await expect(page.getByTestId('live-runtime-connect')).toContainText(/Connect · admin/i);
   await page.getByTestId('live-runtime-connect').click();
   await page.waitForFunction((expectedRuntimeId) => {
     const runtimeView = (window as typeof window & { __xln?: { view?: { runtimeId?: string; height?: number } } }).__xln?.view;
@@ -2573,11 +2580,13 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
   const activeRemote = await page.evaluate((expectedWsUrl) => ({
     activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
     activeMode: localStorage.getItem('xln-runtime-adapter-mode'),
+    authLevel: String((window as any).__xln?.adapter?.status?.().authLevel || ''),
     importCount: JSON.parse(localStorage.getItem('xln-remote-runtime-imports') || '[]').length,
     url: window.location.href,
     expectedWsUrl,
   }), h1Endpoint.wsUrl);
   expect(activeRemote.activeMode).toBe('remote');
+  expect(activeRemote.authLevel).toBe('admin');
   expect(activeRemote.activeWsUrl).toBe(h1Endpoint.wsUrl);
   expect(activeRemote.importCount).toBeGreaterThanOrEqual(1);
   expect(activeRemote.url).toContain('/app');
@@ -2694,8 +2703,15 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
 
     await page.getByTestId('context-current').click();
     for (const entry of importedContextEntries) {
+      await page.evaluate((targetRuntimeId) => {
+        const runtime = document.querySelector(
+          `[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`,
+        ) as HTMLElement | null;
+        if (!runtime) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
+        runtime.click();
+      }, entry.runtimeId);
       await page.waitForFunction(({ targetRuntimeId, targetLabel }) =>
-        Array.from(document.querySelectorAll('[data-testid="context-entity-row"]'))
+        Array.from(document.querySelectorAll('[data-testid="context-runtime-focus"] [data-testid="context-entity-row"]'))
           .some((row) =>
             row.getAttribute('data-runtime-id') === targetRuntimeId &&
             row.getAttribute('data-entity-label') === targetLabel
@@ -2703,7 +2719,8 @@ test('bulk remote runtime import link validates mesh, custody, and market maker 
       { targetRuntimeId: entry.runtimeId, targetLabel: entry.label }, { timeout: REMOTE_E2E_WAIT_MS });
       const row = await page.evaluate(({ targetRuntimeId, targetLabel }) => {
         const group = document.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
-        const candidate = Array.from(group?.querySelectorAll('[data-testid="context-entity-row"]') ?? [])
+        const focus = document.querySelector('[data-testid="context-runtime-focus"]');
+        const candidate = Array.from(focus?.querySelectorAll('[data-testid="context-entity-row"]') ?? [])
           .find((element) =>
             element.getAttribute('data-runtime-id') === targetRuntimeId &&
             element.getAttribute('data-entity-label') === targetLabel
