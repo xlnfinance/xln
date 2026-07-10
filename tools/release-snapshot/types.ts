@@ -25,6 +25,7 @@ export type MetricDelta = Pick<RawMetrics, 'bytes' | 'lines' | 'code' | 'complex
 export type FileSnapshot = {
   path: string;
   name: string;
+  entryType: 'file' | 'symlink';
   extension: string;
   language: string;
   category: FileCategory;

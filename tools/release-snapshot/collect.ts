@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { extname, posix, relative, resolve } from 'node:path';
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
 
 import type {
   AggregateMetrics,
@@ -66,8 +66,7 @@ function run(command: string[], cwd: string): string {
 function listRepositoryFiles(root: string): string[] {
   return run(['git', 'ls-files', '--cached', '--others', '--exclude-standard', '-z'], root)
     .split('\0')
-    .map((path) => path.trim())
-    .filter(Boolean)
+    .filter((path) => path.length > 0)
     .sort();
 }
 
@@ -91,7 +90,8 @@ function classify(path: string): FileCategory {
 function collectScc(root: string, paths: string[]): { version: string; files: Map<string, SccFile> } {
   const version = run(['scc', '--version'], root).trim();
   const files = new Map<string, SccFile>();
-  const candidates = paths.filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()));
+  const candidates = paths.filter((path) =>
+    lstatSync(resolve(root, path)).isFile() && SOURCE_EXTENSIONS.has(extname(path).toLowerCase()));
   for (let offset = 0; offset < candidates.length; offset += 200) {
     const chunk = candidates.slice(offset, offset + 200);
     const parsed = JSON.parse(run(['scc', '--by-file', '--gen', '-f', 'json2', '--no-cocomo', ...chunk], root)) as SccOutput;
@@ -138,7 +138,9 @@ function metricDelta(current: RawMetrics, previous?: RawMetrics): MetricDelta | 
 }
 
 function collectFile(root: string, path: string, scc: SccFile | undefined, allPaths: Set<string>, previous?: FileSnapshot): FileSnapshot {
-  const buffer = readFileSync(resolve(root, path));
+  const absolute = resolve(root, path);
+  const entryType = lstatSync(absolute).isSymbolicLink() ? 'symlink' : 'file';
+  const buffer = entryType === 'symlink' ? Buffer.from(readlinkSync(absolute)) : readFileSync(absolute);
   const text = buffer.byteLength <= 2_000_000 ? readText(buffer) : '';
   const specifiers = dependencySpecifiers(text);
   const dependencies = [...new Set(specifiers.map((value) => resolveDependency(path, value, allPaths)).filter(Boolean) as string[])].sort();
@@ -165,8 +167,9 @@ function collectFile(root: string, path: string, scc: SccFile | undefined, allPa
   return {
     path,
     name: posix.basename(path),
+    entryType,
     extension: extname(path).toLowerCase(),
-    language: scc?.Language || (text ? 'Text' : 'Binary'),
+    language: entryType === 'symlink' ? 'Symlink' : scc?.Language || (text ? 'Text' : 'Binary'),
     category: classify(path),
     sha256: createHash('sha256').update(buffer).digest('hex'),
     metrics,
