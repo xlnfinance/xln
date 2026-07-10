@@ -560,6 +560,18 @@ describe('production startup wiring', () => {
     expect(mergeSource).not.toContain('console.');
   });
 
+  test('health enrichment cannot erase an active reset failure', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const recompute = extractSourceBlock(
+      orchestrator,
+      'const recomputeHealthWithMarketMaker = (',
+      'const enrichMarketMakerCrossFromHubSnapshots = async',
+    );
+    expect(recompute).toContain('const resetOk = deriveResetHealthOk(health.reset);');
+    expect(recompute).toContain('health.coreOk &&\n    resetOk &&');
+    expect(recompute).toContain("resetOk ? null : 'reset'");
+  });
+
   test('isolated e2e runner bounds green-path MM teardown and cleans child ports', () => {
     const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
     expect(runner).toContain('const stopShardRuntimePorts = async (');

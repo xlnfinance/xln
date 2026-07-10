@@ -74,7 +74,7 @@ import {
   type ManagedProcessTableEntry,
 } from './managed-runtime-leases';
 import { buildPrometheusMetrics } from './prometheus';
-import { deriveHubRuntimeHealth } from './health-model';
+import { deriveHubRuntimeHealth, deriveResetHealthOk } from './health-model';
 import { buildPublicHubDiscoveryPayload } from './public-discovery';
 import {
   assertOrchestratorResetAllowed,
@@ -1764,7 +1764,7 @@ const computeAggregatedHealth = (options: {
     reserveEntities.length >= HUB_NAMES.length &&
     reserveEntities.every((entity) => entity.targetMet);
   const coreOk = storage.ok && hubsOnline && hubMeshOk;
-  const resetOk = !resetState.inProgress && (!resetState.lastError || resetState.resolvedAt !== null);
+  const resetOk = deriveResetHealthOk(resetState);
   const systemOk = coreOk && resetOk && mmOk && custodyOk && bootstrapReservesOk;
   if (!resetState.inProgress && resetState.lastError && coreOk && !resetState.resolvedAt) {
     resetState.resolvedAt = Date.now();
@@ -1910,7 +1910,9 @@ const recomputeHealthWithMarketMaker = (
   health: AggregatedHealth,
   marketMaker: AggregatedHealth['marketMaker'],
 ): AggregatedHealth => {
+  const resetOk = deriveResetHealthOk(health.reset);
   const systemOk = health.coreOk &&
+    resetOk &&
     marketMaker.ok === true &&
     health.custody.ok === true &&
     health.bootstrapReserves.ok === true;
@@ -1918,6 +1920,7 @@ const recomputeHealthWithMarketMaker = (
     health.storage.ok ? null : 'storage',
     health.hubs.every((hub) => hub.online) ? null : 'hubs',
     health.hubMesh.ok ? null : 'hubMesh',
+    resetOk ? null : 'reset',
     marketMaker.ok ? null : 'marketMaker',
     health.custody.ok ? null : 'custody',
     health.bootstrapReserves.ok ? null : 'bootstrapReserves',
