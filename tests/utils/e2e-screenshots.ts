@@ -20,6 +20,7 @@ type ScreenshotOptions = {
 };
 
 const STATIC_UX_SCREENSHOTS_ROOT = resolve(process.cwd(), 'tests', 'e2e', 'screenshots', 'ux-gallery');
+const UPDATE_STATIC_UX_GALLERY = process.env['XLN_UPDATE_UX_GALLERY'] === '1';
 
 function writeScreenshotArtifact(testInfo: TestInfo, relativePath: string, bytes: Buffer | Uint8Array): void {
   const path = testInfo.outputPath(relativePath);
@@ -28,6 +29,7 @@ function writeScreenshotArtifact(testInfo: TestInfo, relativePath: string, bytes
 }
 
 function writeStaticUxArtifact(relativePath: string, bytes: Buffer | Uint8Array): void {
+  if (!UPDATE_STATIC_UX_GALLERY) return;
   const path = join(STATIC_UX_SCREENSHOTS_ROOT, relativePath);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, bytes);
@@ -48,6 +50,7 @@ function writeStaticUxMetadata(
   imageRelativePath: string,
   metadata: UxScreenshotMetadata,
 ): void {
+  if (!UPDATE_STATIC_UX_GALLERY) return;
   const payload = {
     ...metadata,
     sourceTest: testInfo.title,

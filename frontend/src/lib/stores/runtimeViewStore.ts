@@ -144,6 +144,7 @@ export const runtimeView = writable<RuntimeView>(emptyRuntimeView());
 
 export const resetRuntimeView = (): void => {
   runtimeViewRefreshId += 1;
+  pendingHeightRefresh = 0;
   runtimeView.set(emptyRuntimeView());
 };
 

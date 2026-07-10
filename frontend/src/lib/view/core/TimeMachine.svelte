@@ -895,11 +895,6 @@
     position: relative; /* For dropdown positioning */
   }
 
-  /* Runtime Selector */
-  .runtime-selector {
-    flex-shrink: 0;
-  }
-
   .frame-badge {
     font-family: 'SF Mono', monospace;
     font-size: 0.625rem;

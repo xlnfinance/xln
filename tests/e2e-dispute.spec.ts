@@ -1539,7 +1539,7 @@ test.describe('E2E Dispute Flow', () => {
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
       await expect(disputedRow).toContainText('Finalized disputed account');
       await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toBeVisible();
-      await capturePageScreenshot(page, testInfo, 'dispute-finalized-history-desktop.png', {
+      await capturePageScreenshot(page, testInfo, 'dispute-finalized-recovery-desktop.png', {
         fullPage: false,
         ux: {
           title: 'desktop finalized dispute',
