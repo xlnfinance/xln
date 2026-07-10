@@ -58,7 +58,7 @@
         </div>
       </Dropdown>
     </div>
-    <div class="topbar-dropdown">
+    <div class="topbar-dropdown language-dropdown">
       <Dropdown bind:open={langDropdownOpen} minWidth={160} maxWidth={220}>
         <span slot="trigger" class="topbar-trigger">
           <span class="lang-flag">{LOCALES[$locale].flag}</span>
@@ -296,12 +296,25 @@
   }
 
   @media (max-width: 520px) {
-    .tools-dropdown {
+    .tools-dropdown,
+    .language-dropdown {
       display: none;
     }
 
+    .topbar {
+      padding-inline: 0.75rem;
+    }
+
+    .topbar-logo img {
+      height: 24px;
+    }
+
     .topbar-links {
-      gap: 0.625rem;
+      gap: 0.75rem;
+    }
+
+    .topbar-link {
+      font-size: 0.8rem;
     }
   }
 
@@ -315,7 +328,11 @@
     }
 
     .topbar-links {
-      gap: 0.45rem;
+      gap: 0.55rem;
+    }
+
+    .topbar-link {
+      font-size: 0.72rem;
     }
 
     .topbar-dropdown :global(.dropdown-trigger) {

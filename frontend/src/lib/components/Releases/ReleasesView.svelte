@@ -67,10 +67,12 @@
     const maximum = Math.max(...values.map((point) => point.value), 1);
     const minimum = Math.min(...values.map((point) => point.value), 0);
     const spread = Math.max(maximum - minimum, 1);
+    const chartLeft = values.length <= 3 ? 132 : 44;
+    const chartWidth = values.length <= 3 ? 496 : 672;
     return values.map((point, index) => ({
       ...point,
-      x: values.length === 1 ? 380 : 44 + index * (672 / Math.max(values.length - 1, 1)),
-      y: 198 - ((point.value - minimum) / spread) * 148,
+      x: values.length === 1 ? 380 : chartLeft + index * (chartWidth / Math.max(values.length - 1, 1)),
+      y: 158 - ((point.value - minimum) / spread) * 112,
     }));
   });
   let chartPath = $derived(chartPoints.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' '));
@@ -167,9 +169,9 @@
       </div>
 
       <div class="chart-scroll">
-        <svg class="release-chart" viewBox="0 0 760 240" role="img" aria-label={`${selectedMetric} history for ${selectedScope}`}>
-          <line x1="44" y1="198" x2="716" y2="198" class="axis" />
-          <line x1="44" y1="50" x2="44" y2="198" class="axis" />
+        <svg class="release-chart" viewBox="0 0 760 200" role="img" aria-label={`${selectedMetric} history for ${selectedScope}`}>
+          <line x1="92" y1="158" x2="668" y2="158" class="axis" />
+          <line x1="92" y1="46" x2="92" y2="158" class="axis" />
           <path d={chartPath} class="trend" />
           {#each chartPoints as point}
             <g
@@ -182,7 +184,7 @@
             >
               <circle cx={point.x} cy={point.y} r={point.release.version === selectedVersion ? 6 : 4} />
               <text x={point.x} y={point.y - 13} text-anchor="middle" class="point-value">{formatMetric(point.value)}</text>
-              <text x={point.x} y="220" text-anchor="middle" class="point-label">{point.release.version}</text>
+              <text x={point.x} y="184" text-anchor="middle" class="point-label">{point.release.version}</text>
             </g>
           {/each}
         </svg>
@@ -227,8 +229,8 @@
   .current-value { margin-left: auto; display: grid; justify-items: end; gap: 4px; }
   .current-value span { color: #859189; font: 600 11px 'SF Mono', monospace; text-transform: uppercase; }
   .current-value strong { color: #71d59b; font: 600 24px 'SF Mono', monospace; }
-  .chart-scroll { overflow-x: auto; }
-  .release-chart { width: 100%; min-width: 620px; height: 240px; margin-top: 12px; }
+  .chart-scroll { overflow: hidden; }
+  .release-chart { display: block; width: 100%; height: 200px; margin-top: 8px; }
   .axis { stroke: #344239; stroke-width: 1; }
   .trend { fill: none; stroke: #71d59b; stroke-width: 2; }
   .point { cursor: pointer; }
@@ -255,7 +257,7 @@
   .markdown-body :global(h2) { margin: 34px 0 12px; padding-top: 8px; border-top: 1px solid #26312b; font-size: 20px; }
   .markdown-body :global(a) { color: #71d59b; }
   .markdown-body :global(code) { font-family: 'SF Mono', monospace; }
-  .markdown-body :global(pre) { max-height: 72vh; overflow: auto; padding: 18px; border: 1px solid #2d3a32; border-radius: 4px; background: #050706; color: #b7c5bc; font-size: 12px; line-height: 1.5; }
+  .markdown-body :global(pre) { max-height: 52vh; overflow: auto; padding: 18px; border: 1px solid #2d3a32; border-radius: 4px; background: #050706; color: #b7c5bc; font-size: 12px; line-height: 1.5; scrollbar-color: #344239 #050706; }
 
   @media (max-width: 760px) {
     .release-header, .metrics-band, .release-layout { width: min(100% - 24px, 1440px); }
@@ -265,9 +267,11 @@
     label { flex: 1 1 150px; }
     select { min-width: 0; width: 100%; }
     .current-value { width: 100%; margin-left: 0; justify-items: start; }
+    .release-chart { height: 168px; margin-top: 4px; }
     .release-layout { display: block; }
     .release-index { position: static; grid-auto-flow: column; grid-auto-columns: minmax(110px, 1fr); overflow-x: auto; padding: 18px 0; }
     .release-document { padding: 22px 0 60px; border-left: 0; border-top: 1px solid #26312b; }
     .document-actions { flex-wrap: wrap; }
+    .markdown-body :global(pre) { max-height: 420px; padding: 14px; font-size: 11px; }
   }
 </style>
