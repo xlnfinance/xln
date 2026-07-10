@@ -127,6 +127,7 @@ type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
 const RESET_CONFIRMATION = 'RESET_MESH_STATE';
 const E2E_ANVIL_MAX_PERSISTED_STATES = 256;
+const DEFAULT_E2E_TEST_TIMEOUT_MS = 660_000;
 
 type QaCodeFingerprint = {
   gitHead: string | null;
@@ -390,7 +391,9 @@ const parseArgs = (): CliArgs => {
   const basePortRaw = Number(getFlag('base-port') || '20000');
   const defaultStackTimeoutMs = Math.min(420000, 180000 + Math.max(0, shardsRaw - 8) * 15000);
   const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || String(defaultStackTimeoutMs));
-  const testTimeoutRaw = Number(getFlag('test-timeout-ms') || (longMode ? '1200000' : '360000'));
+  const testTimeoutRaw = Number(
+    getFlag('test-timeout-ms') || String(longMode ? 1_200_000 : DEFAULT_E2E_TEST_TIMEOUT_MS),
+  );
   const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
   const maxMmConcurrencyRaw = Number(getFlag('max-mm-concurrency') || String(Math.min(2, shardsRaw || defaultShards)));
@@ -430,7 +433,11 @@ const parseArgs = (): CliArgs => {
     basePort: Number.isFinite(basePortRaw) && basePortRaw > 0 ? Math.floor(basePortRaw) : 20000,
     stackTimeoutMs: Number.isFinite(stackTimeoutRaw) && stackTimeoutRaw > 0 ? Math.floor(stackTimeoutRaw) : 180000,
     testTimeoutMs:
-      Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0 ? Math.floor(testTimeoutRaw) : longMode ? 1200000 : 360000,
+      Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0
+        ? Math.floor(testTimeoutRaw)
+        : longMode
+          ? 1_200_000
+          : DEFAULT_E2E_TEST_TIMEOUT_MS,
     phaseWarnMs: Number.isFinite(phaseWarnRaw) && phaseWarnRaw > 0 ? Math.floor(phaseWarnRaw) : 30000,
     anvilBin: getFlag('anvil-bin') || 'anvil',
     maxFailures: Number.isFinite(maxFailuresRaw) && maxFailuresRaw >= 0 ? Math.floor(maxFailuresRaw) : 1,

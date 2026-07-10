@@ -572,6 +572,20 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain('await stopProcess(api, 120_000);');
   });
 
+  test('isolated e2e outer timeout exceeds every declared Playwright test timeout', () => {
+    const runner = readFileSync(join(repoRoot, 'runtime/scripts/run-e2e-parallel-isolated.ts'), 'utf8');
+    const configured = runner.match(/const DEFAULT_E2E_TEST_TIMEOUT_MS = ([\d_]+);/);
+    expect(configured).not.toBeNull();
+    const outerTimeoutMs = Number(String(configured?.[1] || '').replaceAll('_', ''));
+    const declaredTimeouts = Array.from(new Bun.Glob('tests/e2e*.spec.ts').scanSync({ cwd: repoRoot }))
+      .flatMap((path) => Array.from(
+        readFileSync(join(repoRoot, path), 'utf8').matchAll(/test\.setTimeout\(([\d_]+)\)/g),
+        (match) => Number(String(match[1] || '').replaceAll('_', '')),
+      ));
+    expect(declaredTimeouts.length).toBeGreaterThan(0);
+    expect(outerTimeoutMs).toBeGreaterThan(Math.max(...declaredTimeouts));
+  });
+
   test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     const sources = [
