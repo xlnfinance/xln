@@ -574,42 +574,31 @@ function parseUiAmount(text: string): number {
 async function ensureEntityWorkspaceVisible(page: Page, entityId?: string): Promise<void> {
   if (!entityId) return;
   const canonicalEntityId = entityId.toLowerCase();
-  const compactEntityId = /^0x[0-9a-f]{64}$/.test(canonicalEntityId)
-    ? `${canonicalEntityId.slice(0, 10)}...${canonicalEntityId.slice(-6)}`
-    : canonicalEntityId;
-  const matchesEntityId = (text: string) => {
-    const normalized = String(text || '').toLowerCase();
-    return normalized.includes(canonicalEntityId) || normalized.includes(compactEntityId);
-  };
-  const entityTrigger = page.locator('.hero-context-switcher .dropdown-trigger, .context-switcher .dropdown-trigger, .entity-slot .dropdown-trigger').first();
+  const entityTrigger = page.getByTestId('context-current').first();
   const triggerVisible = await entityTrigger.isVisible({ timeout: 5_000 }).catch(() => false);
-  if (!triggerVisible) {
-    return;
-  }
-  const currentLabel = String((await entityTrigger.textContent()) || '');
-  if (matchesEntityId(currentLabel)) {
-    return;
-  }
+  if (!triggerVisible) return;
+  if (String(await entityTrigger.getAttribute('data-entity-id') || '').toLowerCase() === canonicalEntityId) return;
+
   await entityTrigger.click();
-  let entityOption = page.locator('.entity-row, .signer-item, .dropdown-item').filter({ hasText: entityId }).first();
-  const exactVisible = await entityOption.isVisible({ timeout: 1_000 }).catch(() => false);
-  if (!exactVisible) {
-    entityOption = page.locator('.entity-row, .signer-item, .dropdown-item').filter({ hasText: compactEntityId }).first();
+  const runtimeRows = page.locator('[data-testid="context-runtime-group"]');
+  const runtimeCount = await runtimeRows.count();
+  let entityOption: Locator | null = null;
+  for (let index = 0; index < runtimeCount; index += 1) {
+    await runtimeRows.nth(index).click();
+    const candidate = page.locator(
+      `[data-testid="context-runtime-focus"] [data-testid="context-entity-row"][data-entity-id="${canonicalEntityId}"]`,
+    ).first();
+    if (await candidate.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      entityOption = candidate;
+      break;
+    }
   }
-  const compactVisible = await entityOption.isVisible({ timeout: 1_000 }).catch(() => false);
-  if (!compactVisible) {
-    entityOption = page.locator('.entity-row, .signer-item, .dropdown-item').first();
-  }
-  const optionVisible = await entityOption.isVisible({ timeout: 2_000 }).catch(() => false);
-  if (!optionVisible) {
-    await page.keyboard.press('Escape').catch(() => undefined);
-    return;
-  }
+
+  if (!entityOption) throw new Error(`CONTEXT_ENTITY_NOT_FOUND:${canonicalEntityId}`);
   await entityOption.click();
   await expect.poll(async () => {
-    const text = await entityTrigger.textContent();
-    return matchesEntityId(String(text || ''));
-  }, { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(true);
+    return String(await entityTrigger.getAttribute('data-entity-id') || '').toLowerCase();
+  }, { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(canonicalEntityId);
 }
 
 async function ensureAccountWorkspaceVisible(page: Page, counterpartyId?: string, entityId?: string): Promise<void> {
