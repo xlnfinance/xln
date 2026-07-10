@@ -410,24 +410,11 @@ const yieldMarketMakerApi = async (): Promise<void> => {
   await new Promise<void>(resolve => setTimeout(resolve, MARKET_MAKER_API_YIELD_MS));
 };
 const ORDERBOOK_MAX_BASE_AMOUNT = MAX_ORDERBOOK_QTY_LOTS * SWAP_LOT_SCALE;
-const MARKET_MAKER_DEPTH_MULTIPLIER = (() => {
-  try {
-    const parsed = BigInt(String(process.env['MARKET_MAKER_DEPTH_MULTIPLIER'] || '10'));
-    return parsed > 0n ? parsed : 10n;
-  } catch {
-    return 10n;
-  }
-})();
-const MARKET_MAKER_STABLE_DEPTH_MULTIPLIER = (() => {
-  try {
-    const parsed = BigInt(String(process.env['MARKET_MAKER_STABLE_DEPTH_MULTIPLIER'] || '1000'));
-    return parsed > 0n ? parsed : 1000n;
-  } catch {
-    return 1000n;
-  }
-})();
-const MARKET_MAKER_SIZE_UNIT = MARKET_MAKER_DEPTH_MULTIPLIER * 10n ** 18n;
-const MARKET_MAKER_STABLE_SIZE_UNIT = MARKET_MAKER_STABLE_DEPTH_MULTIPLIER * 10n ** 18n;
+// All resting offers on one bilateral account share the same collateral limit.
+// Size the complete default ladder, not each quote independently, so same-chain
+// plus cross-j depth fits $1M credit even on the five-token jurisdiction.
+const MARKET_MAKER_SIZE_UNIT = 85n * 10n ** 15n;
+const MARKET_MAKER_STABLE_SIZE_UNIT = 85n * 10n ** 18n;
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * MARKET_MAKER_SIZE_UNIT,
@@ -438,13 +425,13 @@ const MARKET_MAKER_LEVEL_BASE_SIZES = [
   240n * MARKET_MAKER_SIZE_UNIT,
   270n * MARKET_MAKER_SIZE_UNIT,
   300n * MARKET_MAKER_SIZE_UNIT,
+  330n * MARKET_MAKER_SIZE_UNIT,
   360n * MARKET_MAKER_SIZE_UNIT,
-  420n * MARKET_MAKER_SIZE_UNIT,
-  500n * MARKET_MAKER_SIZE_UNIT,
-  600n * MARKET_MAKER_SIZE_UNIT,
-  720n * MARKET_MAKER_SIZE_UNIT,
-  840n * MARKET_MAKER_SIZE_UNIT,
-  960n * MARKET_MAKER_SIZE_UNIT,
+  370n * MARKET_MAKER_SIZE_UNIT,
+  380n * MARKET_MAKER_SIZE_UNIT,
+  385n * MARKET_MAKER_SIZE_UNIT,
+  390n * MARKET_MAKER_SIZE_UNIT,
+  395n * MARKET_MAKER_SIZE_UNIT,
 ] as const;
 const MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 28, 36, 48] as const;
 const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
@@ -1054,7 +1041,7 @@ const getMarketMakerOfferLevel = (spec: Pick<MarketMakerOfferSpec, 'offerId'>): 
   return Number.isFinite(level) && level > 0 ? Math.floor(level) : Number.MAX_SAFE_INTEGER;
 };
 
-const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]): MarketMakerOfferSpec[] => {
+export const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]): MarketMakerOfferSpec[] => {
   const specs: MarketMakerOfferSpec[] = [];
   const defaultPairs = buildDefaultEntitySwapPairs(tokenIds);
   for (const hubEntityId of hubEntityIds) {

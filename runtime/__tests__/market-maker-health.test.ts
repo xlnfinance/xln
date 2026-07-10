@@ -8,6 +8,7 @@ import { buildDefaultEntitySwapPairs } from '../account-utils';
 import { buildMarketSnapshotForReplica } from '../market-snapshot';
 import { applyCommand, createBook } from '../orderbook';
 import {
+  buildMarketMakerOfferSpecs,
   buildMarketMakerBootstrapFingerprint,
   buildMarketMakerCrossHealth,
   buildMarketMakerCrossOfferSpecs,
@@ -19,12 +20,34 @@ import {
   type MarketMakerHealth,
   type MarketMakerTokenIdsByContext,
 } from '../orchestrator/mm-node';
+import { getBootstrapCreditAmount } from '../orchestrator/mesh-common';
 import { createEmptyEnv } from '../runtime';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const stackRef = (chainId: number, byte: string): string => `stack:${chainId}:${addr(byte)}`;
+
+test('default market maker depth fits every quote leg and aggregate hold inside bootstrap credit', () => {
+  const specs = buildMarketMakerOfferSpecs(
+    ['0x0000000000000000000000000000000000abcdef'],
+    [1, 2, 3],
+  );
+  const aggregateGiveByToken = new Map<number, bigint>();
+
+  expect(specs).toHaveLength(60);
+  for (const spec of specs) {
+    expect(spec.giveAmount).toBeLessThanOrEqual(getBootstrapCreditAmount(spec.giveTokenId));
+    expect(spec.wantAmount).toBeLessThanOrEqual(getBootstrapCreditAmount(spec.wantTokenId));
+    aggregateGiveByToken.set(
+      spec.giveTokenId,
+      (aggregateGiveByToken.get(spec.giveTokenId) ?? 0n) + spec.giveAmount,
+    );
+  }
+  for (const [tokenId, aggregateGive] of aggregateGiveByToken) {
+    expect(aggregateGive).toBeLessThanOrEqual(getBootstrapCreditAmount(tokenId));
+  }
+});
 
 test('market maker server health treats absent cross topology as neutral', () => {
   const state = createMarketMakerServerState();
@@ -294,6 +317,42 @@ const buildBootstrapTopology = (): {
   const tokenIdsByContext = new Map(contexts.map(context => [context.entityId, [1, 2, 3]]));
   return { env, contexts, visibleHubs, tokenIdsByContext };
 };
+
+test('five-token jurisdiction keeps same-chain and cross depth inside one account credit', () => {
+  const { env, contexts, visibleHubs } = buildBootstrapTopology();
+  const sourceContext = contexts[1]!;
+  const targetContext = contexts[0]!;
+  const sourceHub = visibleHubs[1]!;
+  const targetHub = visibleHubs[0]!;
+  const sourceTokenIds = [1, 2, 3, 4, 5];
+  const targetTokenIds = [1, 2, 3];
+  addReplica(env, sourceContext.entityId, sourceContext.signerId);
+  addReplica(env, targetContext.entityId, targetContext.signerId);
+  const specs = [
+    ...buildMarketMakerOfferSpecs([sourceHub.entityId], sourceTokenIds),
+    ...buildMarketMakerCrossOfferSpecs(
+      env,
+      sourceContext,
+      targetContext,
+      [sourceHub],
+      [targetHub],
+      sourceTokenIds,
+      targetTokenIds,
+    ),
+  ];
+  const aggregateGiveByToken = new Map<number, bigint>();
+
+  expect(specs).toHaveLength(245);
+  for (const spec of specs) {
+    aggregateGiveByToken.set(
+      spec.giveTokenId,
+      (aggregateGiveByToken.get(spec.giveTokenId) ?? 0n) + spec.giveAmount,
+    );
+  }
+  for (const [tokenId, aggregateGive] of aggregateGiveByToken) {
+    expect(aggregateGive).toBeLessThanOrEqual(getBootstrapCreditAmount(tokenId));
+  }
+});
 
 test('runtime market maker health stays red when same-chain offers are committed but cross source offer is pending', () => {
   const { env, contexts, visibleHubs, tokenIdsByContext } = buildBootstrapTopology();
