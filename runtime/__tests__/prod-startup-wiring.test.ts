@@ -570,7 +570,7 @@ describe('production startup wiring', () => {
     expect(runner).not.toContain('await stopProcess(api, 120_000);');
   });
 
-  test('managed runtime teardown drains the runtime loop before stopping network IO', () => {
+  test('managed runtime teardown stops J-event producers before draining runtime and network IO', () => {
     const runtimeMain = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
     const sources = [
       readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8'),
@@ -585,14 +585,14 @@ describe('production startup wiring', () => {
         "if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {",
         'return new Response(safeStringify({ ok: true, runtimeDrained: drained',
       );
+      expect(quiesceBlock.indexOf('stopJurisdictionWatchers(env);')).toBeLessThan(
+        quiesceBlock.indexOf('waitForRuntimeWorkDrained(env, 20_000, 750)'),
+      );
       expect(quiesceBlock.indexOf('waitForRuntimeWorkDrained(env, 20_000, 750)')).toBeLessThan(
         quiesceBlock.indexOf('stopRuntimeLoopAndWait(env, 5_000)'),
       );
       expect(quiesceBlock.indexOf('stopRuntimeLoopAndWait(env, 5_000)')).toBeLessThan(
         quiesceBlock.indexOf('stopP2P(env);'),
-      );
-      expect(quiesceBlock.indexOf('stopP2P(env);')).toBeLessThan(
-        quiesceBlock.indexOf('stopJurisdictionWatchers(env);'),
       );
 
       const shutdownBlock = extractSourceBlock(
@@ -600,11 +600,11 @@ describe('production startup wiring', () => {
         'const shutdown = async',
         'const stopParentWatch = startParentLivenessWatch',
       );
+      expect(shutdownBlock.indexOf('stopJurisdictionWatchers(env);')).toBeLessThan(
+        shutdownBlock.indexOf('stopRuntimeLoopAndWait(env, 10_000)'),
+      );
       expect(shutdownBlock.indexOf('stopRuntimeLoopAndWait(env, 10_000)')).toBeLessThan(
         shutdownBlock.indexOf('stopP2P(env);'),
-      );
-      expect(shutdownBlock.indexOf('stopP2P(env);')).toBeLessThan(
-        shutdownBlock.indexOf('stopJurisdictionWatchers(env);'),
       );
     }
   });

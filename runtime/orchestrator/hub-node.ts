@@ -1714,6 +1714,7 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
         shuttingDown = true;
         if (meshLoop) clearInterval(meshLoop);
+        stopJurisdictionWatchers(env);
         const drained = await waitForRuntimeWorkDrained(env, 10_000);
         if (!drained) {
           console.warn(`[${resolvedArgs.name}] p2p stop timed out waiting for runtime work to drain`);
@@ -1726,13 +1727,13 @@ const run = async (): Promise<void> => {
       if (pathname === '/api/control/runtime/quiesce' && request.method === 'POST') {
         shuttingDown = true;
         if (meshLoop) clearInterval(meshLoop);
+        stopJurisdictionWatchers(env);
         const drained = await waitForRuntimeWorkDrained(env, 20_000, 750);
         if (!drained) {
           console.warn(`[${resolvedArgs.name}] quiesce timed out waiting for runtime work to drain`);
         }
         const idle = await stopRuntimeLoopAndWait(env, 5_000);
         stopP2P(env);
-        stopJurisdictionWatchers(env);
         return new Response(safeStringify({ ok: true, runtimeDrained: drained, runtimeIdle: idle }), { headers });
       }
 
@@ -2455,12 +2456,16 @@ const run = async (): Promise<void> => {
     shuttingDown = true;
     if (meshLoop) clearInterval(meshLoop);
     try {
+      stopJurisdictionWatchers(env);
+      const drained = await waitForRuntimeWorkDrained(env, 10_000);
+      if (!drained) {
+        console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime work to drain`);
+      }
       const idle = await stopRuntimeLoopAndWait(env, 10_000);
       if (!idle) {
         console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
       }
       stopP2P(env);
-      stopJurisdictionWatchers(env);
       await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
       await closeRuntimeDb(env);
       await closeInfraDb(env);

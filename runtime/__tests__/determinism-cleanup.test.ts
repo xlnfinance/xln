@@ -35,6 +35,18 @@ describe('determinism cleanup lifecycle', () => {
     expect(source).toContain('setTimeout(resolve, 2_500)');
   });
 
+  test('rpc watcher cancellation keeps in-flight poll tracked and blocks late event ingress', () => {
+    const source = readSource('runtime/jadapter/rpc.ts');
+    const stopStart = source.indexOf('stopWatching(): void {');
+    const stopEnd = source.indexOf('getBrowserVM(): BrowserVMProvider | null', stopStart);
+    const stopSource = source.slice(stopStart, stopEnd);
+
+    expect(source).toContain('const watcherPollCancelled = (): boolean =>');
+    expect(source).toContain('if (watcherPollCancelled()) return;');
+    expect(source).toContain("step: 'before-process-event-batch'");
+    expect(stopSource).not.toContain('pollInFlight = null;');
+  });
+
   test('determinism check command exits explicitly after a successful gate', () => {
     const source = readSource('runtime/scripts/check-determinism.ts');
 

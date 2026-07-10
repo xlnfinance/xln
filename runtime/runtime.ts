@@ -442,6 +442,7 @@ export const tryOpenFrameDb = (env: Env): Promise<boolean> =>
   tryOpenFrameDbStorage(env, getRuntimeStorageDbDeps());
 
 export const closeRuntimeDb = async (env: Env): Promise<void> => {
+  stopJurisdictionWatchers(env);
   const stopped = await stopRuntimeLoopAndWait(env, 10_000);
   if (!stopped) {
     runtimeLog.warn('db.close.loop_drain_timeout');
@@ -1279,6 +1280,7 @@ export const stopJurisdictionWatchers = (env: Env): void => {
 
 const detachRuntimeEnv = (env: Env): void => {
   const state = env.runtimeState;
+  stopJurisdictionWatchers(env);
   state?.stopLoop?.();
   detachRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
   if (state) {
@@ -1291,7 +1293,6 @@ const detachRuntimeEnv = (env: Env): void => {
     state.wakeRequested = false;
     state.loopActive = false;
   }
-  stopJurisdictionWatchers(env);
   trackedRuntimeEnvs.delete(env);
   stopRuntimeWakeWatchdogIfIdle();
 };

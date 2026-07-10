@@ -2172,13 +2172,17 @@ export async function createRpcAdapter(
         let pollToBlock: number | null = null;
         pollInFlight = (async () => {
           const activeEnv = watcherEnv;
-          if (!activeEnv) return;
+          const pollGeneration = watcherGeneration;
+          const watcherPollCancelled = (): boolean =>
+            watcherStopping || watcherEnv !== activeEnv || watcherGeneration !== pollGeneration;
+          if (!activeEnv || watcherPollCancelled()) return;
           if (isJEventIngressPaused(activeEnv)) {
             pauseJEventWatcherForQuiesce({ step: 'before-block-number' });
             return;
           }
           pollStep = 'eth_blockNumber';
           const currentBlock = parseInt(await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []), 16);
+          if (watcherPollCancelled()) return;
           const safeToBlock = currentBlock - confirmationDepth;
           if (safeToBlock <= 0) return;
           commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
@@ -2203,6 +2207,7 @@ export async function createRpcAdapter(
                 toBlock: safeToBlock,
               })
             : [];
+          if (watcherPollCancelled()) return;
           const tokenByAddress = new Map(watchedTokens.map(token => [token.address, token]));
           const logs = [
             ...depositoryLogs.map(log => ({ kind: 'depository' as const, log })),
@@ -2312,6 +2317,19 @@ export async function createRpcAdapter(
             }
 
             if (rawEvents.length > 0) {
+              if (watcherPollCancelled()) {
+                emitWatcherDebug({
+                  event: 'j_watch_shutdown_poll_aborted',
+                  message: 'watcher cancellation observed before J-event ingress',
+                  chainId: config.chainId,
+                  rpcUrl: config.rpcUrl,
+                  step: 'before-process-event-batch',
+                  fromBlock,
+                  toBlock: safeToBlock,
+                  lastSyncedBlock,
+                });
+                return;
+              }
               if (isJEventIngressPaused(activeEnv)) {
                 pauseJEventWatcherForQuiesce({
                   step: 'before-process-event-batch',
@@ -2356,6 +2374,8 @@ export async function createRpcAdapter(
             commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
             return;
           }
+
+          if (watcherPollCancelled()) return;
 
           // Do not permanently skip a single just-mined tail block on an empty poll.
           // Some RPC backends briefly return no logs for the newest block even after the
@@ -2469,14 +2489,14 @@ export async function createRpcAdapter(
 
     stopWatching(): void {
       watcherStopping = true;
+      watcherGeneration += 1;
       if (watcherInterval) {
         clearInterval(watcherInterval);
         watcherInterval = null;
-        watcherEnv = null;
-        pollInFlight = null;
-        pollNowHandler = null;
-        rpcLog.info('watcher.stopped', { chainId: config.chainId });
       }
+      watcherEnv = null;
+      pollNowHandler = null;
+      rpcLog.info('watcher.stopped', { chainId: config.chainId });
     },
 
     getBrowserVM(): BrowserVMProvider | null {
@@ -2532,6 +2552,7 @@ export async function createRpcAdapter(
   let pollNowHandler: (() => Promise<void>) | null = null;
   let watcherFatalError: string | null = null;
   let watcherStopping = false;
+  let watcherGeneration = 0;
   let lastSyncedBlock = 0;
   let consecutiveTransientWatcherFailures = 0;
   let lastTransientWatcherLogAt = 0;
