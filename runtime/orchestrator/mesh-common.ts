@@ -5,8 +5,18 @@ import { compareStableText } from '../serialization-utils';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
 
 export const HUB_MESH_TOKEN_ID = 1;
-export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
-export const MARKET_MAKER_CREDIT_AMOUNT = 1_000_000_000n * 10n ** 18n;
+export const BOOTSTRAP_USD_NOTIONAL = 1_000_000n;
+export const BOOTSTRAP_WETH_USD_RATE = 1_000n;
+const BOOTSTRAP_TOKEN_UNIT = 10n ** 18n;
+
+export const getBootstrapCreditAmount = (tokenId: number): bigint => {
+  const wholeTokens = tokenId === 2
+    ? BOOTSTRAP_USD_NOTIONAL / BOOTSTRAP_WETH_USD_RATE
+    : BOOTSTRAP_USD_NOTIONAL;
+  return wholeTokens * BOOTSTRAP_TOKEN_UNIT;
+};
+
+export const HUB_MESH_CREDIT_AMOUNT = getBootstrapCreditAmount(HUB_MESH_TOKEN_ID);
 export const DEFAULT_USER_HUB_CREDIT_AMOUNT = 10_000n * 10n ** 18n;
 export const HUB_REQUIRED_TOKEN_COUNT = 3;
 export const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
@@ -322,8 +332,14 @@ export const hasPairMutualCredits = (
   leftEntityId: string,
   rightEntityId: string,
   tokenIds: readonly number[],
-  amount: bigint,
-): boolean => tokenIds.every((tokenId) => hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount));
+  amount: bigint | ((tokenId: number) => bigint),
+): boolean => tokenIds.every((tokenId) => hasPairMutualCredit(
+  env,
+  leftEntityId,
+  rightEntityId,
+  tokenId,
+  typeof amount === 'function' ? amount(tokenId) : amount,
+));
 
 export const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Record<string, string> => {
   const entries = Array.from(reserves.entries())

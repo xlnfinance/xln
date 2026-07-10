@@ -3,12 +3,21 @@ import { describe, expect, test } from 'bun:test';
 import {
   buildMarketMakerConsensusConfig,
   deriveMarketMakerEntityId,
+  getBootstrapCreditAmount,
   isCanonicalAccountOpener,
 } from '../orchestrator/mesh-common';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 
 describe('mesh account bootstrap ownership', () => {
+  test('targets the same $1M notional for stablecoins and WETH at $1,000', () => {
+    const unit = 10n ** 18n;
+
+    expect(getBootstrapCreditAmount(1)).toBe(1_000_000n * unit);
+    expect(getBootstrapCreditAmount(3)).toBe(1_000_000n * unit);
+    expect(getBootstrapCreditAmount(2)).toBe(1_000n * unit);
+  });
+
   test('assigns exactly one canonical opener per bilateral account', () => {
     const lower = entityId('11');
     const upper = entityId('22');

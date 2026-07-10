@@ -52,11 +52,11 @@ import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
   HUB_DEFAULT_MIN_TRADE_SIZE,
-  MARKET_MAKER_CREDIT_AMOUNT,
   HUB_REQUIRED_TOKEN_COUNT,
   buildMarketMakerConsensusConfig,
   deriveMarketMakerEntityId,
   getAccountMachine,
+  getBootstrapCreditAmount,
   getCreditGrantedByEntity,
   getEntityOutCapacity,
   getEntityReplicaById,
@@ -1530,7 +1530,7 @@ const ensureMarketMakerHubConnectivity = async (
             targetEntityId: hubEntityId,
             watchSeed: deriveMarketMakerAccountWatchSeed(hubEntityId),
             tokenId: openTokenId,
-            creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
+            creditAmount: getBootstrapCreditAmount(openTokenId),
           },
         },
         ...extraCreditTokenIds.map((tokenId) => ({
@@ -1538,7 +1538,7 @@ const ensureMarketMakerHubConnectivity = async (
           data: {
             counterpartyEntityId: hubEntityId,
             tokenId,
-            amount: MARKET_MAKER_CREDIT_AMOUNT,
+            amount: getBootstrapCreditAmount(tokenId),
           },
         })),
       ];
@@ -1560,17 +1560,18 @@ const ensureMarketMakerHubConnectivity = async (
     if (!mmAccount) continue;
 
     for (const tokenId of tokenIds) {
-      if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
-      if (hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
+      const creditAmount = getBootstrapCreditAmount(tokenId);
+      if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, creditAmount)) continue;
+      if (hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, creditAmount)) continue;
       const hubOutCapacity = getEntityOutCapacity(mmAccount, hubEntityId, tokenId);
 
-      if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
+      if (hubOutCapacity < creditAmount) {
         if (!pushLocalConnectivityTx(mmEntityId, mmSignerId, {
           type: 'extendCredit',
           data: {
             counterpartyEntityId: hubEntityId,
             tokenId,
-            amount: MARKET_MAKER_CREDIT_AMOUNT,
+            amount: creditAmount,
           },
         })) {
           break collectCreditInputs;
@@ -1597,7 +1598,7 @@ const isMarketMakerConnectivityReady = (
   const account = getAccountMachine(env, mmEntityId, hubEntityId);
   if (!isAccountConsensusReady(account)) return false;
   return tokenIds.every((tokenId) =>
-    hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT),
+    hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, getBootstrapCreditAmount(tokenId)),
   );
 });
 
@@ -2771,7 +2772,7 @@ export const getMarketMakerHealth = (
         hubGranted: account ? getCreditGrantedByEntity(account, hubEntityId, tokenId).toString() : '0',
         mmOutCapacity: account ? getEntityOutCapacity(account, mmEntityId, tokenId).toString() : '0',
         hubOutCapacity: account ? getEntityOutCapacity(account, hubEntityId, tokenId).toString() : '0',
-        mutualReady: hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT),
+        mutualReady: hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, getBootstrapCreditAmount(tokenId)),
       })),
     };
   });

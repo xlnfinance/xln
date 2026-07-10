@@ -104,12 +104,12 @@ import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
   getAccountMachine,
+  getBootstrapCreditAmount,
   getCreditGrantedByEntity,
   getEntityOutCapacity,
   getEntityReplicaById,
   HUB_DEFAULT_MIN_TRADE_SIZE,
   HUB_DEFAULT_SUPPORTED_PAIRS,
-  HUB_MESH_CREDIT_AMOUNT,
   HUB_MESH_TOKEN_ID,
   HUB_REQUIRED_TOKEN_COUNT,
   HUB_RESERVE_TARGET_UNITS,
@@ -157,7 +157,6 @@ type SupportPeerIdentity = {
   chainId?: number;
   depositoryAddress?: string;
   jurisdictionRef: string;
-  creditAmount: bigint;
 };
 
 type HubPairHealth = {
@@ -436,15 +435,13 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
         ...(chainId !== null ? { chainId } : {}),
         ...(depositoryAddress ? { depositoryAddress } : {}),
         jurisdictionRef,
-        creditAmount: BigInt(String(entry?.creditAmount || HUB_MESH_CREDIT_AMOUNT)),
       };
     }).filter((entry) =>
       entry.name &&
       entry.entityId &&
       entry.signerId &&
       entry.jurisdictionName &&
-      entry.jurisdictionRef &&
-      entry.creditAmount > 0n,
+      entry.jurisdictionRef,
     );
   } catch {
     return [];
@@ -1387,7 +1384,7 @@ const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: st
       hasAccount: hasAccount(env, selfEntityId, peer.entityId),
       grantedByMe: grantedByMe.toString(),
       grantedByPeer: grantedByPeer.toString(),
-      ready: hasPairMutualCredits(env, selfEntityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
+      ready: hasPairMutualCredits(env, selfEntityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, getBootstrapCreditAmount),
     };
   });
 };
@@ -2270,11 +2267,11 @@ const run = async (): Promise<void> => {
               entityTxs: [
                 {
                   type: 'openAccount',
-                  data: { targetEntityId: peer.entityId, tokenId: openTokenId, creditAmount: peer.creditAmount },
+                  data: { targetEntityId: peer.entityId, tokenId: openTokenId, creditAmount: getBootstrapCreditAmount(openTokenId) },
                 },
                 ...extraCreditTokenIds.map((tokenId) => ({
                   type: 'extendCredit' as const,
-                  data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
+                  data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
                 })),
               ],
             });
@@ -2282,7 +2279,7 @@ const run = async (): Promise<void> => {
           }
           if (!localAccount || !canWrite) continue;
           const missingTokenIds = supportPeerTokenIds.filter((tokenId) =>
-            getCreditGrantedByEntity(localAccount, owner.entityId, tokenId) < peer.creditAmount,
+            getCreditGrantedByEntity(localAccount, owner.entityId, tokenId) < getBootstrapCreditAmount(tokenId),
           );
           if (missingTokenIds.length > 0) {
             creditInputs.push({
@@ -2290,7 +2287,7 @@ const run = async (): Promise<void> => {
               signerId: owner.signerId,
               entityTxs: missingTokenIds.map((tokenId) => ({
                 type: 'extendCredit' as const,
-                data: { counterpartyEntityId: peer.entityId, tokenId, amount: peer.creditAmount },
+                data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
               })),
             });
           }
@@ -2312,18 +2309,18 @@ const run = async (): Promise<void> => {
             entityTxs: [
               {
                 type: 'openAccount',
-                data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: HUB_MESH_CREDIT_AMOUNT },
+                data: { targetEntityId: peer.entityId, tokenId: HUB_MESH_TOKEN_ID, creditAmount: getBootstrapCreditAmount(HUB_MESH_TOKEN_ID) },
               },
               ...DEFAULT_ACCOUNT_TOKEN_IDS.slice(1).map((tokenId) => ({
                 type: 'extendCredit' as const,
-                data: { counterpartyEntityId: peer.entityId, tokenId, amount: HUB_MESH_CREDIT_AMOUNT },
+                data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
               })),
             ],
           });
         }
         if (!localAccount || !canWrite) continue;
         const missingTokenIds = DEFAULT_ACCOUNT_TOKEN_IDS.filter((tokenId) =>
-          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < HUB_MESH_CREDIT_AMOUNT,
+          getCreditGrantedByEntity(localAccount, bootstrap.entityId, tokenId) < getBootstrapCreditAmount(tokenId),
         );
         if (missingTokenIds.length > 0) {
           creditInputs.push({
@@ -2331,7 +2328,7 @@ const run = async (): Promise<void> => {
             signerId: bootstrap.signerId,
             entityTxs: missingTokenIds.map((tokenId) => ({
               type: 'extendCredit' as const,
-              data: { counterpartyEntityId: peer.entityId, tokenId, amount: HUB_MESH_CREDIT_AMOUNT },
+              data: { counterpartyEntityId: peer.entityId, tokenId, amount: getBootstrapCreditAmount(tokenId) },
             })),
           });
         }
@@ -2387,7 +2384,7 @@ const run = async (): Promise<void> => {
       const allCreditReady =
         peers.length === Math.max(0, resolvedArgs.meshHubNames.length - 1) &&
         peers.every(peer =>
-          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
+          hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, getBootstrapCreditAmount),
         );
       if (allCreditReady && !creditReadyMarked) {
         finishTiming('mesh_credit', startedAtFor('mesh_credit') ?? startTiming('mesh_credit'));

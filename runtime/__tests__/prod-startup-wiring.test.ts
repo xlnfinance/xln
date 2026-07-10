@@ -236,7 +236,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('selectWritableJurisdictionKey(jurisdictions, undefined, [rpcUrl, publicRpcUrl])');
     expect(hubNode).not.toContain("targetKey = 'arrakis'");
     expect(hubNode).toContain('const jurisdictionRef = getJurisdictionIdentityRef({ chainId, depositoryAddress });');
-    expect(hubNode).toContain('entry.jurisdictionRef &&');
+    expect(hubNode).toContain('entry.jurisdictionRef,');
     expect(mmNode).toContain('.filter(profile => profile.jurisdictionRef.length > 0)');
     expect(hubNode).toContain('return getJurisdictionIdentityRef(profile.metadata?.jurisdiction) === targetRef;');
     expect(hubNode).toContain('const peerJurisdiction = profile.metadata?.jurisdiction || identity;');
@@ -277,8 +277,7 @@ describe('production startup wiring', () => {
     expect(hubNode.indexOf('prewarmLocalHubSignerKeys();')).toBeLessThan(hubNode.indexOf('startRuntimeLoop(env, {'));
     expect(hubNode).toContain('const hasLiveJAdapterForJurisdiction = (env: Env, jurisdictionName: string): boolean =>');
     expect(hubNode).toContain('if (!hasLiveJAdapterForJurisdiction(env, secondaryName)) {');
-    expect(orchestrator).toContain('MARKET_MAKER_CREDIT_AMOUNT.toString()');
-    expect(orchestrator).not.toContain("creditAmount: '50000000000000000000000000'");
+    expect(orchestrator).not.toContain('creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString()');
     expect(mmNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(mmNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(mmNode).toContain('buildMarketMakerConsensusConfig(signerId, entityJurisdiction)');
@@ -509,7 +508,7 @@ describe('production startup wiring', () => {
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_NEW_CROSS_REQUESTS_PER_ENTITY_INPUT');
     expect(mmNode).not.toContain('MARKET_MAKER_MAX_CONNECTIVITY_TXS_PER_ENTITY_INPUT');
     expect(mmNode).toContain('collectQueuedSwapOfferIds(env, mmEntityId, hubEntityId)');
-    expect(mmNode).toContain('hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)');
+    expect(mmNode).toContain('hasQueuedExtendCredit(env, mmEntityId, hubEntityId, tokenId, creditAmount)');
     expect(mmNode).toContain('const hasSourceAccountCrossOffer = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {');
     expect(mmNode).toContain('if (hasSourceAccountCrossOffer(env, route)) return true;');
     expect(mmNode).not.toContain('const isMarketMakerBootstrapReady = (health: MarketMakerHealth | null): boolean => {');

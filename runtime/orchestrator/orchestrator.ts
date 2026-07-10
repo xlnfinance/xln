@@ -96,7 +96,6 @@ import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
 import {
   HUB_MESH_CREDIT_AMOUNT,
-  MARKET_MAKER_CREDIT_AMOUNT,
   deriveMarketMakerEntityId,
   type MarketMakerEntityJurisdictionConfig,
 } from './mesh-common';
@@ -919,7 +918,6 @@ type MarketMakerSupportPeerIdentity = {
   jurisdictionName: string;
   chainId: number;
   depositoryAddress: string;
-  creditAmount: string;
 };
 
 const resolveLocalMarketMakerRpcUrl = (value: string): string => {
@@ -963,7 +961,6 @@ const buildMarketMakerIdentity = (
     jurisdictionName: jurisdiction.name,
     chainId: Number(jurisdiction.chainId || 0),
     depositoryAddress: jurisdiction.contracts.depository,
-    creditAmount: MARKET_MAKER_CREDIT_AMOUNT.toString(),
   };
 };
 
