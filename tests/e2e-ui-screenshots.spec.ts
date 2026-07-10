@@ -91,7 +91,10 @@ async function openSettingsTab(page: Page): Promise<void> {
   const tab = page.getByTestId('tab-settings').first();
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.click();
-  await expect(page.getByRole('button', { name: 'Display' }).first()).toBeVisible({ timeout: 20_000 });
+  const display = page.getByRole('button', { name: 'Display' }).first();
+  await expect(display).toBeVisible({ timeout: 20_000 });
+  await display.click();
+  await expect(page.getByTestId('settings-time-machine-toggle')).toBeVisible({ timeout: 20_000 });
 }
 
 async function openAccountWorkspaceTab(page: Page, tabId: string): Promise<void> {
@@ -457,6 +460,9 @@ test('ui screenshot smoke captures operator admin surfaces', async ({ page }, te
     return summary.ok === true && Number(summary.count || 0) >= 5 && Number(summary.failedCount || 0) === 0;
   }, null, { timeout: 120_000 });
   await expect(page.getByTestId('context-current')).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId('context-current').click();
+  await expect(page.getByTestId('context-runtime-rail')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('context-runtime-focus')).toBeVisible({ timeout: 30_000 });
   await captureUxPage(page, testInfo, 'desktop-remote-runtime-import.png', {
     title: 'desktop remote runtime import',
     group: 'Remote Runtime Import',
@@ -464,12 +470,26 @@ test('ui screenshot smoke captures operator admin surfaces', async ({ page }, te
     platform: 'desktop',
     tags: ['remote-runtime', 'wallet', 'bulk-import'],
   });
+  await page.keyboard.press('Escape');
 
   await page.addInitScript(() => {
     localStorage.setItem('xln-settings', JSON.stringify({ showTimeMachine: true }));
   });
-  await page.goto(`${APP_BASE_URL}/embed`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('context-current')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.time-machine')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: 30_000 });
+  const persistedHeight = await page.evaluate(async () => {
+    const adapter = (window as any).__xln?.adapter;
+    if (!adapter) throw new Error('XLN_RUNTIME_ADAPTER_DEBUG_SURFACE_MISSING');
+    const head = await adapter.query.head<{ latestHeight?: number }>();
+    return Number(head.latestHeight || 0);
+  });
+  expect(persistedHeight).toBeGreaterThan(0);
+  await page.getByTestId('time-machine-remote-height').fill(String(persistedHeight));
+  await page.getByTestId('time-machine-remote-scan-button').click();
+  await expect(page.getByTestId('time-machine-remote-scan-status')).toContainText(`h${persistedHeight}`, { timeout: 30_000 });
+  await expect(page.getByTestId('time-machine-remote-scan-status')).not.toContainText(/failed|not found/i);
   await captureUxPage(page, testInfo, 'desktop-time-machine.png', {
     title: 'desktop time machine',
     group: 'Time Machine',
