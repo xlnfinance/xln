@@ -6,7 +6,6 @@
   import { DISPLAY, TIME_MACHINE } from '@xln/runtime/constants';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
-  import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
   import {
@@ -33,7 +32,6 @@
   export let timeIndex: Writable<number> | Readable<number>;
   export let isLive: Writable<boolean> | Readable<boolean>;
   export let env: Writable<Env | null> | Readable<Env | null>; // For state export
-  export let showRuntimeSelector = false;
 
   // Type guard to check if store is writable
   function isWritable<T>(store: Writable<T> | Readable<T>): store is Writable<T> {
@@ -667,12 +665,6 @@
 </script>
 
 <div class="time-machine">
-  {#if showRuntimeSelector}
-    <div class="runtime-selector">
-      <RuntimeDropdown />
-    </div>
-  {/if}
-
   <!-- Frame Navigation (LEFT - most used) -->
   <div class="frame-nav">
     <button on:click={localTimeOperations.goToHistoryStart} title="Go to start (Home)">

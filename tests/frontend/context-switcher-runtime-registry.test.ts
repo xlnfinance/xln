@@ -1,5 +1,17 @@
 import { expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+
+test('ContextSwitcher renders one compact runtime rail and one focused jurisdiction/entity pane', () => {
+  const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
+
+  expect(source).toContain('focusedRuntimeId');
+  expect(source).toContain('data-testid="context-runtime-rail"');
+  expect(source).toContain('data-testid="context-runtime-focus"');
+  expect(source).toContain('Choose a runtime, then an entity');
+  expect(source).not.toContain('<div class="runtime-list">');
+  expect(existsSync('frontend/src/lib/components/Runtime/RuntimeDropdown.svelte')).toBe(false);
+  expect(existsSync('frontend/src/lib/components/Runtime/runtime-dropdown-view.ts')).toBe(false);
+});
 
 test('ContextSwitcher hydrates the shared remote runtime registry before showing rows', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
@@ -18,7 +30,7 @@ test('ContextSwitcher hydrates the shared remote runtime registry before showing
   expect(source).toContain('data-testid="context-runtime-group"');
   expect(source).toContain('data-testid="context-runtime-label"');
   expect(source).toContain('data-testid="context-runtime-source"');
-  expect(source).toContain('{runtimeGroup.source}');
+  expect(source).toContain("runtimeGroup.source === 'remote' ? 'Remote' : 'Browser'");
   expect(source).toContain('`${normalizeId(entity.runtimeId)}:${normalizeId(entity.entityId)}`');
   expect(source).toContain('data-testid="context-jurisdiction-group"');
   expect(source).toContain('data-testid="context-jurisdiction-label"');
@@ -60,7 +72,8 @@ test('ContextSwitcher remote rows switch runtime and selected projected entity t
 test('ContextSwitcher labels projection-only remote runtimes instead of saying no runtime selected', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
 
-  expect(source).toContain('currentGroup\n      ? resolveRuntimeMeta(currentGroup)\n      : \'No runtime selected\'');
+  expect(source).toContain("currentGroup.runtimeLabel, currentEntity?.jurisdiction || 'Unassigned'");
+  expect(source).toContain(": 'No runtime selected';");
 });
 
 test('ContextSwitcher does not pick the first sorted projection entity as the remote runtime identity', () => {
@@ -84,7 +97,7 @@ test('ContextSwitcher keeps local controls visible and gates runtime mutations b
   expect(source).toContain('{#if runtimeMutationControlsEnabled && allowAddEntity}');
   expect(source).toContain('{#if runtimeMutationControlsEnabled && allowAddJurisdiction}');
   expect(source).toContain('{#if allowAddRuntime}');
-  expect(source).toContain('<button class="reset-btn" on:click={handleReset}>Reset All Data</button>');
+  expect(source).toContain('<button class="reset-btn" on:click={handleReset}>Reset all data</button>');
   expect(source).not.toContain("mutatingLocalControlsEnabled = $runtimeControllerHandle.mode !== 'remote'");
 });
 
@@ -92,7 +105,7 @@ test('ContextSwitcher only adds projection entities owned by the matching runtim
   const source = readFileSync('frontend/src/lib/components/Entity/ContextSwitcher.svelte', 'utf8');
 
   expect(source).toContain('const projectionRuntimeId = normalizeId(summary?.runtimeId)');
-  expect(source).toContain('if (projectionRuntimeId !== normalizeId(runtimeId)) continue;');
+  expect(source).toContain('if (projectionRuntimeId && projectionRuntimeId !== normalizeId(runtimeId)) continue;');
 });
 
 test('remote empty entity state still exposes the context runtime switcher', () => {

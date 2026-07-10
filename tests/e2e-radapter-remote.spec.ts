@@ -1040,19 +1040,19 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
     { name: 'H3' },
   ];
   const importedAt = Date.now();
-  const entries: Array<{ label: string; entityLabel: string; access: 'read'; wsUrl: string; token: string; runtimeId: string; authLevel: 'inspect'; height: number; entityCount: number; importedAt: number }> = [];
+  const entries: Array<{ label: string; entityLabel: string; access: 'admin'; wsUrl: string; token: string; runtimeId: string; authLevel: 'admin'; height: number; entityCount: number; importedAt: number }> = [];
   for (const spec of specs) {
     const endpoint = await resolveHubRuntimeEndpoint(page, baseline, spec.name);
     const wsUrl = endpoint.wsUrl;
-    const capability = await resolveRuntimeImportCapability(page, endpoint, 'read');
+    const capability = await resolveRuntimeImportCapability(page, endpoint, 'admin');
     entries.push({
       label: `${spec.name} dropdown`,
       entityLabel: spec.name,
-      access: 'read',
+      access: 'admin',
       wsUrl,
       token: capability.token,
       runtimeId: endpoint.runtimeId,
-      authLevel: 'inspect',
+      authLevel: 'admin',
       height: 0,
       entityCount: 1,
       importedAt,
@@ -1064,7 +1064,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
     localStorage.setItem(storageKey, JSON.stringify(entries));
     localStorage.setItem('xln-runtime-adapter-mode', 'remote');
     localStorage.setItem('xln-runtime-adapter-ws', first.wsUrl);
-    localStorage.setItem('xln-runtime-adapter-access', 'read');
+    localStorage.setItem('xln-runtime-adapter-access', 'admin');
     sessionStorage.setItem('xln-runtime-adapter-key', first.token);
   }, { storageKey: REMOTE_RUNTIME_IMPORT_STORAGE_KEY, entries });
 
@@ -1083,7 +1083,8 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
       if (trigger?.getAttribute('aria-expanded') !== 'true' || !menu) return false;
       const groups = Array.from(menu.querySelectorAll('[data-testid="context-runtime-group"]'));
       if (groups.length < expectedRuntimeIds.length) return false;
-      if (!menu.querySelector('[data-testid="context-jurisdiction-group"]')) return false;
+      if (!menu.querySelector('[data-testid="context-runtime-rail"]')) return false;
+      if (!menu.querySelector('[data-testid="context-runtime-focus"]')) return false;
       if (menu.querySelector('.runtime-main') || menu.querySelector('.runtime-delete')) return false;
       return expectedRuntimeIds.every((runtimeId) => {
         const group = groups.find((candidate) => candidate.getAttribute('data-runtime-id') === runtimeId);
@@ -1092,28 +1093,38 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
     }, entries.map((entry) => entry.runtimeId), { timeout: REMOTE_E2E_WAIT_MS });
   };
 
-  const clickRuntimeRow = async (runtimeId: string, entityLabel: string): Promise<void> => {
+  const focusRuntimeRow = async (runtimeId: string, entityLabel: string): Promise<void> => {
     await openContextTree();
+    await page.evaluate((targetRuntimeId) => {
+      const row = document.querySelector(
+        `[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`,
+      ) as HTMLElement | null;
+      if (!row) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
+      row.click();
+    }, runtimeId);
     await page.waitForFunction(({ targetRuntimeId, targetLabel }) => {
       const label = String(targetLabel || '').toLowerCase();
-      const menu = document.querySelector('.dropdown-menu');
-      const group = menu?.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
-      if (!group) return false;
-      return Array.from(group.querySelectorAll('[data-testid="context-entity-row"]'))
+      const focus = document.querySelector('[data-testid="context-runtime-focus"]');
+      if (!focus) return false;
+      return Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]'))
         .some((row) =>
           row.getAttribute('data-runtime-id') === targetRuntimeId &&
           String(row.textContent || '').toLowerCase().includes(label),
         );
     }, { targetRuntimeId: runtimeId, targetLabel: entityLabel }, { timeout: REMOTE_E2E_WAIT_MS });
+  };
+
+  const clickRuntimeRow = async (runtimeId: string, entityLabel: string): Promise<void> => {
+    await focusRuntimeRow(runtimeId, entityLabel);
     await page.evaluate(({ targetRuntimeId, targetLabel }) => {
       const label = String(targetLabel || '').toLowerCase();
       const menu = document.querySelector('.dropdown-menu');
       if (!menu) throw new Error('CONTEXT_MENU_MISSING');
       if (menu.querySelector('.runtime-main')) throw new Error('LEGACY_RUNTIME_MAIN_PRESENT');
       if (menu.querySelector('.runtime-delete')) throw new Error('LEGACY_RUNTIME_DELETE_PRESENT');
-      const group = menu.querySelector(`[data-testid="context-runtime-group"][data-runtime-id="${targetRuntimeId}"]`);
-      if (!group) throw new Error(`REMOTE_RUNTIME_GROUP_MISSING:${targetRuntimeId}`);
-      const row = Array.from(group.querySelectorAll('[data-testid="context-entity-row"]'))
+      const focus = menu.querySelector('[data-testid="context-runtime-focus"]');
+      if (!focus) throw new Error('CONTEXT_RUNTIME_FOCUS_MISSING');
+      const row = Array.from(focus.querySelectorAll('[data-testid="context-entity-row"]'))
         .find((candidate) =>
           candidate.getAttribute('data-runtime-id') === targetRuntimeId &&
           String(candidate.textContent || '').toLowerCase().includes(label),
@@ -1137,7 +1148,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
         };
         const runtimeView = (view as any).__xln?.view;
         if (String(runtimeView?.runtimeId || '') !== runtimeId || Number(runtimeView?.height || 0) < 1) return false;
-        if ((view as any).__xln?.adapter?.status().authLevel !== 'inspect') return false;
+        if ((view as any).__xln?.adapter?.status().authLevel !== 'admin') return false;
         const expected = label.toLowerCase();
         const entities = runtimeView?.entities ?? runtimeView?.frame?.entities ?? [];
         return entities.some((entity) =>
@@ -1162,7 +1173,7 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
     });
     expect(state.runtimeId).toBe(entry.runtimeId);
     expect(state.height).toBeGreaterThan(0);
-    expect(state.authLevel).toBe('inspect');
+    expect(state.authLevel).toBe('admin');
     expect(state.activeWsUrl).toBe(entry.wsUrl);
     expect(state.contextRuntimeId).toBe(entry.runtimeId);
   };
@@ -1174,19 +1185,26 @@ test('context dropdown groups H1 H2 H3 remote runtimes', async ({ page }) => {
     return Array.from(menu.querySelectorAll('[data-testid="context-runtime-group"]')).map((group) => ({
       runtimeId: group.getAttribute('data-runtime-id') || '',
       source: group.querySelector('[data-testid="context-runtime-source"]')?.textContent?.trim().toLowerCase() || '',
-      jurisdictionCount: group.querySelectorAll('[data-testid="context-jurisdiction-group"]').length,
-      rows: Array.from(group.querySelectorAll('[data-testid="context-entity-row"]')).map((row) => ({
-        runtimeId: row.getAttribute('data-runtime-id') || '',
-        text: String(row.textContent || '').toLowerCase(),
-      })),
     }));
   });
   for (const entry of entries) {
     const group = tree.find((candidate) => candidate.runtimeId === entry.runtimeId);
     expect(group, `runtime group ${entry.entityLabel}`).toBeTruthy();
     expect(group?.source).toContain('remote');
-    expect(group?.jurisdictionCount).toBeGreaterThan(0);
-    expect(group?.rows.some((row) =>
+    await focusRuntimeRow(entry.runtimeId, entry.entityLabel);
+    const focus = await page.evaluate((runtimeId) => {
+      const panel = document.querySelector('[data-testid="context-runtime-focus"]');
+      return {
+        jurisdictionCount: panel?.querySelectorAll('[data-testid="context-jurisdiction-group"]').length || 0,
+        rows: Array.from(panel?.querySelectorAll('[data-testid="context-entity-row"]') || []).map((row) => ({
+          runtimeId: row.getAttribute('data-runtime-id') || '',
+          text: String(row.textContent || '').toLowerCase(),
+        })),
+        runtimeId,
+      };
+    }, entry.runtimeId);
+    expect(focus.jurisdictionCount).toBeGreaterThan(0);
+    expect(focus.rows.some((row) =>
       row.runtimeId === entry.runtimeId &&
       row.text.includes(entry.entityLabel.toLowerCase()),
     )).toBe(true);
