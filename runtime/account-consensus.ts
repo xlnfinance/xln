@@ -279,6 +279,23 @@ async function buildDuplicateCommittedFrameAck(
   ) {
     return null;
   }
+  const pendingResponse = accountMachine.pendingAccountInput;
+  const pendingResponseAck = pendingResponse ? accountInputAck(pendingResponse) : undefined;
+  if (
+    pendingResponse &&
+    pendingResponseAck &&
+    Number(pendingResponseAck.height) === receivedHeight &&
+    pendingResponse.toEntityId.toLowerCase() === input.fromEntityId.toLowerCase()
+  ) {
+    events.push(
+      `↩️ Re-sent cached response for duplicate committed frame ${String(receivedHeight)}`,
+    );
+    return {
+      success: true,
+      response: structuredClone(pendingResponse),
+      events,
+    };
+  }
   const cachedAck = accountMachine.lastOutboundFrameAck;
   if (
     cachedAck &&

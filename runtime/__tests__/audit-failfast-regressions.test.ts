@@ -3746,6 +3746,57 @@ describe('audit fail-fast regressions', () => {
     expect(result.response).toEqual(accountMachine.lastOutboundFrameAck.response);
   });
 
+  test('applyAccountInput re-sends bundled ACK plus frame when that response was lost', async () => {
+    const seed = 'account-frame-duplicate-bundled-response';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    const accountMachine = makeProposalAccount([], left.entityId, right.entityId);
+    accountMachine.currentHeight = 10;
+    accountMachine.currentFrame = {
+      ...accountMachine.currentFrame,
+      height: 10,
+      stateHash: `0x${'ef'.repeat(32)}`,
+    };
+    const pendingFrame = {
+      ...accountMachine.currentFrame,
+      height: 11,
+      prevFrameHash: accountMachine.currentFrame.stateHash,
+      stateHash: `0x${'ab'.repeat(32)}`,
+    };
+    accountMachine.pendingFrame = pendingFrame;
+    accountMachine.pendingAccountInput = {
+      kind: 'frame_ack',
+      fromEntityId: left.entityId,
+      toEntityId: right.entityId,
+      ack: { height: 10, frameHanko: `0x${'12'.repeat(65)}` },
+      proposal: { frame: pendingFrame, frameHanko: `0x${'34'.repeat(65)}` },
+    };
+    delete accountMachine.lastOutboundFrameAck;
+
+    const result = await applyAccountInput(env, accountMachine, {
+      kind: 'frame',
+      fromEntityId: right.entityId,
+      toEntityId: left.entityId,
+      signerId: right.signerId,
+      proposal: {
+        frame: {
+          ...accountMachine.currentFrame,
+          prevFrameHash: `0x${'56'.repeat(32)}`,
+        },
+        frameHanko: `0x${'78'.repeat(65)}`,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.response).toEqual(accountMachine.pendingAccountInput);
+    expect(result.response?.kind).toBe('frame_ack');
+    expect(accountMachine.currentHeight).toBe(10);
+    expect(accountMachine.pendingFrame?.height).toBe(11);
+  });
+
   test('applyAccountInput fails loud when the full duplicate ACK cache was lost', async () => {
     const seed = 'account-frame-duplicate-reack-cache-miss';
     const env = createEmptyEnv(seed);
