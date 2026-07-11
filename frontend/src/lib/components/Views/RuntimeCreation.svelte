@@ -45,7 +45,10 @@
     formatLiveRuntimeImportStatus,
     formatMemoryLabel,
     formatRuntimeDurationRounded,
+    countMnemonicWords,
     generateBase58Secret,
+    hasSupportedMnemonicWordCount,
+    normalizeMnemonicPhrase,
     parseLiveRuntimeChoices,
     shouldRetryLiveRuntimeDiscovery,
     type LiveRuntimeChoice,
@@ -58,6 +61,12 @@
 
   function logRuntimeCreationDiagnostic(message: string, details?: unknown): void {
     errorLog.log(message, 'Runtime Creation', details);
+  }
+
+  function isScenarioPreview(): boolean {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('locktest') === '1' && params.get('scenarioPreview') === '1';
   }
 
   function suggestPassphrase(): void {
@@ -73,6 +82,7 @@
     const entropy = new Uint8Array(32);
     crypto.getRandomValues(entropy);
     mnemonicInput = await entropyToMnemonic(entropy);
+    derivationError = '';
   }
 
   // ============================================================================
@@ -80,10 +90,21 @@
   // ============================================================================
 
   type Phase = 'input' | 'deriving' | 'recovery';
-  type InputMode = 'brainvault' | 'mnemonic';
+  type InputMode = 'brainvault' | 'mnemonic' | 'testnet';
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
+
+  function selectInputMode(next: InputMode): void {
+    if (phase !== 'input') return;
+    inputMode = next;
+    if (next !== 'testnet' || liveRuntimesLoaded || liveRuntimesLoading) return;
+    if (isScenarioPreview()) {
+      liveRuntimesLoaded = true;
+      return;
+    }
+    void discoverLiveRuntimes(true);
+  }
 
   // Visual scheme for the standalone auth screen: 'dark' (default "vault") or 'light' (minimalist fintech skin)
   type AuthScheme = 'dark' | 'light';
@@ -374,6 +395,7 @@
   // ============================================================================
 
   onMount(() => {
+    if (isScenarioPreview()) return;
     // Screen 1 only creates/selects a runtime, then exits immediately to Screen 2.
     // Never show a post-seed "ready" screen here; account configuration owns that step.
     vaultOperations.initialize();
@@ -600,21 +622,15 @@
         tier: 'Custom',
         attackCost: `$${(shardInput * 13000).toLocaleString()}`
       };
+  $: mnemonicWordCount = countMnemonicWords(mnemonicInput);
   $: canDerive = inputMode === 'brainvault'
     ? (name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH)
-    : mnemonicInput.trim().split(/\s+/).filter(w => w).length >= 12;
+    : inputMode === 'mnemonic' && hasSupportedMnemonicWordCount(mnemonicInput);
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
   // Projected ETA based on the current requested worker target.
   $: projectedRemainingMs = shardCount > 0
     ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(effectiveTargetWorkerCount, 1)) * estimatedShardTimeMs)
     : 0;
-
-  // Shard grid dimensions (for visualization)
-  // Exact grid dimensions per factor (1:1 shard-to-cube mapping up to factor 5)
-  // Factor 1 = 1×1, Factor 2 = 2×2, Factor 3 = 4×4, Factor 4 = 8×8, Factor 5 = 16×16
-  // Factor 6+ uses aggregation to keep grid manageable
-  $: visualShardCount = factor <= 5 ? shardCount : Math.min(shardCount, 64 * 64);
-  $: shardsPerCell = Math.ceil(shardCount / visualShardCount);
 
   // ============================================================================
   // DERIVATION LOGIC
@@ -753,7 +769,10 @@
     if (inputMode === 'mnemonic') {
       phase = 'deriving';
       try {
-        const cleanMnemonic = mnemonicInput.trim().split(/\s+/).join(' ');
+        const cleanMnemonic = normalizeMnemonicPhrase(mnemonicInput);
+        if (!hasSupportedMnemonicWordCount(cleanMnemonic)) {
+          throw new Error('Enter exactly 12 or 24 BIP39 words.');
+        }
         mnemonic24 = cleanMnemonic;
         // Imported mnemonic is canonical as entered; no extra compatibility phrase.
         mnemonic12 = '';
@@ -1050,9 +1069,11 @@
       scheme = 'light';
     }
 
-    // Auto-discover live runtimes (hubs) for the connect dropdown.
-    // Silent: a login screen without a reachable runtime server must not show a fetch error.
-    void discoverLiveRuntimes(true);
+    // Testnet-only discovery starts when its tab opens. Main wallet entry never calls
+    // operator endpoints that do not exist on a production-only frontend.
+    if (isScenarioPreview()) {
+      liveRuntimesLoaded = true;
+    }
 
     // Run async init
     (async () => {
@@ -1113,15 +1134,22 @@
         </button>
       </div>
 
-  <!-- Header - minimalist (no logo, clean fintech UI) -->
-  <div class="header" class:deriving={phase === 'deriving'}>
-  </div>
-
   <!-- Main Content -->
   <div class="main-content">
+    <div class="auth-brand" class:deriving={phase === 'deriving'}>
+      <img
+        src="/img/logo.png"
+        alt="xln"
+        width="92"
+        height="80"
+        decoding="async"
+      />
+    </div>
+
     <!-- INPUT SECTION - Always visible at top -->
     {#if phase === 'input' || phase === 'deriving'}
       <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
+        {#if phase === 'input'}
         {#if embedded && savedVaults.length > 0}
           <div class="creation-context-bar">
             <div class="creation-context-copy">Create another wallet</div>
@@ -1131,74 +1159,301 @@
           </div>
         {/if}
 
-        <div class="wallet-create-title">
-          <div>
-            <h2>{inputMode === 'mnemonic' ? 'Import xln wallet' : 'Create xln wallet'}</h2>
-            <p>{inputMode === 'mnemonic'
-              ? 'Recover from an existing mnemonic. New wallets start from the main creation form.'
-              : 'Enter a display name and secret. The wallet opens automatically when derivation finishes.'}</p>
-          </div>
-        </div>
-
         <div class="input-mode-tabs" role="tablist" aria-label="Wallet setup mode">
           <button
+            id="wallet-mode-brainvault"
             type="button"
             role="tab"
             aria-selected={inputMode === 'brainvault'}
+            aria-controls="wallet-panel-brainvault"
+            tabindex={inputMode === 'brainvault' ? 0 : -1}
             class:selected={inputMode === 'brainvault'}
-            on:click={() => inputMode = 'brainvault'}
+            disabled={phase !== 'input'}
+            on:click={() => selectInputMode('brainvault')}
           >
-            BrainVault
+            Brain Vault
           </button>
           <button
+            id="wallet-mode-mnemonic"
             type="button"
             role="tab"
             aria-selected={inputMode === 'mnemonic'}
+            aria-controls="wallet-panel-mnemonic"
+            tabindex={inputMode === 'mnemonic' ? 0 : -1}
             class:selected={inputMode === 'mnemonic'}
-            on:click={() => inputMode = 'mnemonic'}
+            disabled={phase !== 'input'}
+            on:click={() => selectInputMode('mnemonic')}
           >
             Mnemonic
           </button>
+          <button
+            id="wallet-mode-testnet"
+            type="button"
+            role="tab"
+            aria-selected={inputMode === 'testnet'}
+            aria-controls="wallet-panel-testnet"
+            tabindex={inputMode === 'testnet' ? 0 : -1}
+            class:selected={inputMode === 'testnet'}
+            disabled={phase !== 'input'}
+            on:click={() => selectInputMode('testnet')}
+          >
+            Testnet
+          </button>
         </div>
 
-        <div class="quick-login-section">
-          <div class="quick-login-header">
-            <span class="ql-title">Quick login</span>
-            <span class="ql-temp">sandbox · resets on reload</span>
-          </div>
-          <div class="quick-login-grid">
-            {#each DEMO_GROUPS as group, gi}
-              {#if gi > 0}
-                <span class="ql-divider" aria-hidden="true"></span>
-              {/if}
-              <div class="ql-group">
-                {#each group as account}
-                  <button
-                    class="quick-login-btn role-{account.role}"
-                    class:wide={account.label.length > 2}
-                    type="button"
-                    title={account.role === 'hub' ? 'Hub' : account.role === 'app' ? 'App entity' : 'User'}
-                    on:click={() => {
-                      name = account.name;
-                      passphrase = account.password;
-                      shardInput = account.factor;
-                      inputMode = 'brainvault';
-                      createLoginType = 'demo';
-                      setTimeout(() => startDerivation(), 100);
-                    }}
-                  >
-                    {account.label}
-                  </button>
-                {/each}
-              </div>
-            {/each}
+        <div class="wallet-create-title">
+          <div>
+            <h1>{inputMode === 'brainvault'
+              ? 'Create xln wallet'
+              : inputMode === 'mnemonic'
+                ? 'Create or restore from seed'
+                : 'Testnet controls'}</h1>
+            <p>{inputMode === 'brainvault'
+              ? 'Open the same wallet anywhere from the same public name, private secret, and work factor.'
+              : inputMode === 'mnemonic'
+                ? 'Generate a new 24-word seed, or continue with a 12- or 24-word seed you already have.'
+                : 'Disposable identities, remote runtimes, and local reset tools. Never use production funds here.'}</p>
           </div>
         </div>
+
+        {#if inputMode === 'brainvault'}
+        <div
+          id="wallet-panel-brainvault"
+          class="mode-panel"
+          role="tabpanel"
+          aria-labelledby="wallet-mode-brainvault"
+        >
+        <!-- Name Input -->
+        <div class="input-group">
+          <label for="name">Vault name <span class="label-aside">public derivation input</span></label>
+          <span class="input-hint">Capitalization and spaces matter. Use the exact same name on every device.</span>
+          <div class="input-wrapper">
+            <input
+              type="text"
+              id="name"
+              bind:value={name}
+              placeholder={t('vault.name.placeholder')}
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+        </div>
+
+        <!-- Passphrase Input -->
+        <div class="input-group">
+          <label for="passphrase">Secret passphrase</label>
+          <span class="input-hint">Private and exact. It stays on this device.</span>
+          <div class="input-wrapper">
+            <input
+              type={showPassphrase ? 'text' : 'password'}
+              id="passphrase"
+              bind:value={passphrase}
+              placeholder={t('vault.password.placeholder')}
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button
+              class="toggle-visibility"
+              on:click={() => showPassphrase = !showPassphrase}
+              type="button"
+              aria-label="Toggle passphrase visibility"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                {#if showPassphrase}
+                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                {:else}
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                {/if}
+              </svg>
+            </button>
+            <button
+              class="suggest-btn"
+              on:click={suggestPassphrase}
+              type="button"
+              title="Generate a random passphrase"
+              aria-label="Generate a random passphrase"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M20 7h-9m9 10h-9M4 7h.01M4 17h.01M7 4l-3 3 3 3M7 17l-3 3 3 3"/>
+              </svg>
+            </button>
+          </div>
+          {#if passphrase}
+            <div class="strength-meter">
+              <div
+                class="strength-bar"
+                style="width: {Math.min(100, passwordStrength.bits)}%; background: {passwordStrength.color}"
+              ></div>
+            </div>
+            <span class="strength-text" style="color: {passwordStrength.color}">
+              Secret strength: {passwordStrength.rating} · estimated {totalSecurityBits} bits
+            </span>
+          {/if}
+        </div>
+
+        <!-- Advanced options - collapsed by default to keep the screen minimal -->
+        <button
+          type="button"
+          class="advanced-toggle"
+          class:open={showAdvanced}
+          aria-expanded={showAdvanced}
+          on:click={() => showAdvanced = !showAdvanced}
+        >
+          <span class="advanced-toggle-main">
+            <span class="advanced-toggle-label">Security work factor</span>
+            <span class="advanced-toggle-summary">{factorInfo.tier} · {factorInfo.shards.toLocaleString()} shards · {factorInfo.time}</span>
+          </span>
+          <svg class="advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+
+        {#if showAdvanced}
+          <div class="input-group factor-group advanced-panel">
+            <div class="factor-buttons">
+              {#each FACTOR_INFO as info}
+                <button
+                  type="button"
+                  class="factor-btn"
+                  class:selected={shardInput === info.factor}
+                  on:click={() => shardInput = info.factor}
+                >
+                  <span class="factor-num">{info.factor}</span>
+                  <span class="factor-tier">{info.tier}</span>
+                </button>
+              {/each}
+              <button
+                type="button"
+                class="factor-btn custom-btn"
+                class:selected={!isPreset}
+                on:click={() => { if (isPreset) shardInput = 6; }}
+              >
+                <span class="factor-num">⚙</span>
+                <span class="factor-tier">Custom</span>
+              </button>
+            </div>
+
+            {#if !isPreset}
+              <div class="custom-shard-input">
+                <input
+                  type="number"
+                  id="shards"
+                  min="6"
+                  max="100000"
+                  bind:value={shardInput}
+                  placeholder="6"
+                />
+                <span class="custom-label">shards</span>
+              </div>
+            {/if}
+
+            <p class="warning-text">Recovery requires the exact same vault name, passphrase, and work factor.</p>
+          </div>
+        {/if}
+        </div>
+        {:else if inputMode === 'mnemonic'}
+        <div
+          id="wallet-panel-mnemonic"
+          class="mode-panel mnemonic-panel"
+          role="tabpanel"
+          aria-labelledby="wallet-mode-mnemonic"
+        >
+          <div class="mnemonic-generate-row">
+            <div>
+              <span class="section-eyebrow">New wallet</span>
+              <strong>Create a fresh seed</strong>
+              <p>Generated locally from cryptographic randomness.</p>
+            </div>
+            <button
+              class="generate-mnemonic-btn"
+              on:click={generateRandomMnemonic}
+              type="button"
+            >
+              Generate 24-word seed
+            </button>
+          </div>
+
+          <div class="mnemonic-divider"><span>or paste an existing seed</span></div>
+
+          <div class="input-group mnemonic-input-group">
+            <div class="mnemonic-label-row">
+              <label for="mnemonic">Seed phrase</label>
+              <span class:ready={hasSupportedMnemonicWordCount(mnemonicInput)}>
+                {mnemonicWordCount === 0 ? '12 or 24 words' : `${mnemonicWordCount} words`}
+              </span>
+            </div>
+            <span class="input-hint">Paste exactly 12 or 24 BIP39 words.</span>
+            <div class="input-wrapper">
+              <textarea
+                id="mnemonic"
+                bind:value={mnemonicInput}
+                placeholder="Enter your seed words…"
+                rows="4"
+                autocomplete="off"
+                spellcheck="false"
+              ></textarea>
+            </div>
+          </div>
+
+          {#if mnemonicInput}
+            <div class="warning-box">
+              <p><strong>Keep it offline.</strong> Anyone with these words controls this wallet.</p>
+            </div>
+          {/if}
+        </div>
+        {:else}
+        <div
+          id="wallet-panel-testnet"
+          class="mode-panel testnet-panel"
+          role="tabpanel"
+          aria-labelledby="wallet-mode-testnet"
+          data-testid="testnet-tools-panel"
+        >
+          <div class="testnet-banner">
+            <span>Sandbox only</span>
+            <p>These shortcuts are intentionally separated from the real wallet entry flow.</p>
+          </div>
+
+          <div class="quick-login-section">
+            <div class="quick-login-header">
+              <span class="ql-title">Demo identities</span>
+              <span class="ql-temp">A–E · disposable</span>
+            </div>
+            <div class="quick-login-grid">
+              {#each DEMO_GROUPS as group, gi}
+                {#if gi > 0}
+                  <span class="ql-divider" aria-hidden="true"></span>
+                {/if}
+                <div class="ql-group">
+                  {#each group as account}
+                    <button
+                      class="quick-login-btn role-{account.role}"
+                      class:wide={account.label.length > 2}
+                      type="button"
+                      title={account.role === 'hub' ? 'Hub' : account.role === 'app' ? 'App entity' : 'User'}
+                      on:click={() => {
+                        name = account.name;
+                        passphrase = account.password;
+                        shardInput = account.factor;
+                        inputMode = 'brainvault';
+                        createLoginType = 'demo';
+                        setTimeout(() => startDerivation(), 100);
+                      }}
+                    >
+                      {account.label}
+                    </button>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+          </div>
 
           <!-- Connect to a live remote runtime through the shared admin action path. -->
           <div class="live-runtime-section" data-testid="live-runtime-section">
             <div class="live-runtime-header">
-              <span class="ql-title">Connect to live runtime</span>
+              <span class="ql-title">Remote runtimes</span>
               <button
                 type="button"
                 class="live-refresh"
@@ -1246,264 +1501,99 @@
               <div class="live-runtime-error">{liveRuntimesError}</div>
             {/if}
           </div>
-
-        {#if inputMode === 'brainvault'}
-        <!-- Name Input -->
-        <div class="input-group">
-          <label for="name">Name <span class="label-aside">for seed derivation</span></label>
-	          <span class="input-hint">Becomes the wallet and public entity name.</span>
-          <div class="input-wrapper">
-            <input
-              type="text"
-              id="name"
-              bind:value={name}
-              placeholder={t('vault.name.placeholder')}
-              autocomplete="off"
-              spellcheck="false"
-            />
-          </div>
-        </div>
-
-        <!-- Passphrase Input -->
-        <div class="input-group">
-          <label for="passphrase">{t('vault.password.label')}</label>
-	          <span class="input-hint">Used locally to derive the wallet seed.</span>
-          <div class="input-wrapper">
-            <input
-              type={showPassphrase ? 'text' : 'password'}
-              id="passphrase"
-              bind:value={passphrase}
-              placeholder={t('vault.password.placeholder')}
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button
-              class="toggle-visibility"
-              on:click={() => showPassphrase = !showPassphrase}
-              type="button"
-              aria-label="Toggle passphrase visibility"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                {#if showPassphrase}
-                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
-                  <line x1="1" y1="1" x2="23" y2="23"/>
-                {:else}
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                  <circle cx="12" cy="12" r="3"/>
-                {/if}
-              </svg>
-            </button>
-            <button
-              class="suggest-btn"
-              on:click={suggestPassphrase}
-              type="button"
-              title="Suggest random passphrase"
-              aria-label="Suggest random passphrase"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M20 7h-9m9 10h-9M4 7h.01M4 17h.01M7 4l-3 3 3 3M7 17l-3 3 3 3"/>
-              </svg>
-            </button>
-          </div>
-          {#if passphrase}
-            <div class="strength-meter">
-              <div
-                class="strength-bar"
-                style="width: {Math.min(100, passwordStrength.bits)}%; background: {passwordStrength.color}"
-              ></div>
-            </div>
-            <span class="strength-text" style="color: {passwordStrength.color}">
-              {passwordStrength.bits} bits phrase + {workFactorBits} bits work factor = {totalSecurityBits} bits
-            </span>
-          {/if}
-        </div>
-
-        <!-- Advanced options - collapsed by default to keep the screen minimal -->
-        <button
-          type="button"
-          class="advanced-toggle"
-          class:open={showAdvanced}
-          aria-expanded={showAdvanced}
-          on:click={() => showAdvanced = !showAdvanced}
-        >
-          <span class="advanced-toggle-main">
-            <span class="advanced-toggle-label">Security work factor</span>
-            <span class="advanced-toggle-summary">{factorInfo.tier} · {factorInfo.shards.toLocaleString()} shards · {factorInfo.time}</span>
-          </span>
-          <svg class="advanced-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-
-        {#if showAdvanced}
-          <div class="input-group factor-group advanced-panel">
-            <div class="factor-buttons">
-              {#each FACTOR_INFO as info, i}
-                <button
-                  type="button"
-                  class="factor-btn"
-                  class:selected={shardInput === info.factor}
-                  on:click={() => shardInput = info.factor}
-                >
-                  <span class="factor-num">{info.factor}</span>
-                  <span class="factor-tier">{info.tier}</span>
-                </button>
-              {/each}
+          {#if hasAnyPersistedState}
+            <div class="testnet-maintenance">
+              <div>
+                <span class="section-eyebrow">Local test state</span>
+                <p>Clear wallets, runtimes, settings, and browser databases on this device.</p>
+              </div>
               <button
                 type="button"
-                class="factor-btn custom-btn"
-                class:selected={!isPreset}
-                on:click={() => { if (isPreset) shardInput = 6; }}
+                class="testnet-reset-btn"
+                on:click={handleResetEverything}
               >
-                <span class="factor-num">⚙</span>
-                <span class="factor-tier">Custom</span>
+                Reset local data
               </button>
             </div>
-
-            {#if !isPreset}
-              <div class="custom-shard-input">
-                <input
-                  type="number"
-                  id="shards"
-                  min="6"
-                  max="100000"
-                  bind:value={shardInput}
-                  placeholder="6"
-                />
-                <span class="custom-label">shards</span>
-              </div>
-            {/if}
-
-            <p class="warning-text">Your inputs generate a unique wallet. Encrypted backups and last-resort dispute services can be configured after the runtime is created.</p>
-          </div>
-        {/if}
-        {:else}
-        <!-- Mnemonic Input Mode -->
-        <button type="button" class="back-to-create" on:click={() => inputMode = 'brainvault'}>
-          Back to wallet creation
-        </button>
-        <div class="input-group">
-          <label for="mnemonic">Mnemonic (12 or 24 words)</label>
-          <span class="input-hint">Enter your BIP39 mnemonic phrase</span>
-          <div class="input-wrapper">
-            <textarea
-              id="mnemonic"
-              bind:value={mnemonicInput}
-              placeholder="word1 word2 word3..."
-              rows="3"
-              autocomplete="off"
-              spellcheck="false"
-            ></textarea>
-          </div>
-        </div>
-
-        <!-- Generate Random Mnemonic Button -->
-        <button
-          class="generate-mnemonic-btn"
-          on:click={generateRandomMnemonic}
-          type="button"
-        >
-          Generate Random Mnemonic
-        </button>
-
-        <div class="warning-box">
-          <p><strong>Backup required.</strong> Write down these words on paper and store securely. Anyone with this mnemonic controls your funds.</p>
+          {/if}
         </div>
         {/if}
 
         <!-- Derive Button - only visible in input phase -->
-        {#if phase === 'input'}
+        {#if inputMode !== 'testnet'}
           <button
             class="derive-btn"
             disabled={!canDerive}
             on:click={startDerivation}
           >
-	            Open / restore wallet
+            {inputMode === 'brainvault' ? 'Derive wallet' : 'Continue with seed'}
           </button>
           {#if derivationError}
             <div class="matrix-status error">{derivationError}</div>
           {/if}
-          {#if hasAnyPersistedState}
-            <button
-              class="reset-link"
-              on:click={handleResetEverything}
-            >
-              Reset everything
-            </button>
-          {/if}
+        {/if}
         {/if}
 
         {#if phase === 'deriving'}
           <div class="input-progress">
             <div class="clean-progress-container">
               <div class="simple-progress">
-                <div class="pyramid-logo" style="--progress: {progress}%">
-                </div>
-                <div class="pyramid-progress-text">{Math.floor(progress)}%</div>
-
-                <div class="pyramid-stats">
-                  <div class="stat-row">
-                    <span class="stat-label">STATUS</span>
-                    <span class="stat-value">{creatingRuntime ? 'CREATING RUNTIME' : recoveryChecking ? 'CHECKING BACKUPS' : 'DERIVING SEED'}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">SHARDS</span>
-                    <span class="stat-value">{shardsCompleted}/{shardCount}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">THREADS</span>
-                    <span class="stat-value">{activeWorkerCount}/{usableWorkerCap}</span>
-                  </div>
-                  <div class="stat-row">
-                    <span class="stat-label">MEMORY</span>
-                    <span class="stat-value">{formatMemoryLabel(allocatedMemoryMB)}</span>
-                  </div>
-                </div>
-
-                <div class="pyramid-progress-bar">
-                  <div class="pyramid-progress-fill" style="width: {progress}%"></div>
+                <div class="derivation-status">
+                  <span class="section-eyebrow">{recoveryChecking
+                    ? 'Recovery search'
+                    : creatingRuntime
+                      ? 'Opening wallet'
+                      : inputMode === 'brainvault'
+                        ? 'Brain Vault derivation'
+                        : 'Seed validation'}</span>
+                  <strong>{recoveryChecking
+                    ? 'Finding the latest encrypted backup'
+                    : creatingRuntime
+                      ? 'Preparing your local runtime'
+                      : inputMode === 'brainvault'
+                        ? 'Turning memory into a wallet'
+                        : 'Checking your seed phrase'}</strong>
+                  <p>{recoveryChecking
+                    ? 'Asking your configured watchtowers and saved remote runtimes.'
+                    : inputMode === 'brainvault'
+                      ? 'Keep this tab open until every shard is complete.'
+                      : 'The same recovery path follows for every seed.'}</p>
                 </div>
 
-                <div class="speed-control">
-                  <div class="speed-header">
-                    <span class="speed-label">SPEED</span>
-                    <span class="speed-eta">ETA: {formatRuntimeDurationRounded(projectedRemainingMs)}</span>
-                  </div>
-                  <div class="speed-slider-wrapper">
-                    <input
-                      type="range"
-                      min="1"
-                      max={usableWorkerCap}
-                      bind:value={targetWorkerCount}
-                      on:input={adjustWorkers}
-                      class="speed-slider"
-                    />
-                  </div>
-                  <div class="speed-details">
-                    <span class="speed-threads">{activeWorkerCount} active / {usableWorkerCap} cap</span>
-                    <span class="speed-memory">{formatMemoryLabel(allocatedMemoryMB)} RAM</span>
-                  </div>
-                  {#if workerLimitNotice}
-                    <div class="speed-warning">{workerLimitNotice}</div>
-                  {/if}
-                </div>
-              </div>
+                {#if inputMode === 'brainvault' && !recoveryChecking && !creatingRuntime}
+                  <div class="pyramid-progress-text">{Math.floor(progress)}%</div>
 
-              <div class="mini-shard-grid" style="--cols: {Math.ceil(Math.sqrt(visualShardCount))}">
-                {#each Array(visualShardCount) as _, cellIdx}
-                  {@const startShard = cellIdx * shardsPerCell}
-                  {@const endShard = Math.min(startShard + shardsPerCell, shardCount)}
-                  {@const cellShards = shardStatus.slice(startShard, endShard)}
-                  {@const completedInCell = cellShards.filter(s => s === 'complete').length}
-                  {@const computingInCell = cellShards.filter(s => s === 'computing').length}
-                  {@const cellProgress = completedInCell / cellShards.length}
-                  <div
-                    class="mini-shard"
-                    class:pending={cellProgress === 0 && computingInCell === 0}
-                    class:computing={computingInCell > 0}
-                    class:complete={cellProgress === 1}
-                  ></div>
-                {/each}
+                  <div class="pyramid-progress-bar">
+                    <div class="pyramid-progress-fill" style="width: {progress}%"></div>
+                  </div>
+
+                  <div class="speed-control">
+                    <div class="speed-header">
+                      <span class="speed-label">Compute</span>
+                      <span class="speed-eta">{formatRuntimeDurationRounded(projectedRemainingMs)} left</span>
+                    </div>
+                    <div class="speed-slider-wrapper">
+                      <input
+                        type="range"
+                        min="1"
+                        max={usableWorkerCap}
+                        bind:value={targetWorkerCount}
+                        on:input={adjustWorkers}
+                        class="speed-slider"
+                        aria-label="Brain Vault worker count"
+                      />
+                    </div>
+                    <div class="speed-details">
+                      <span>{shardsCompleted}/{shardCount} shards</span>
+                      <span>{activeWorkerCount} worker{activeWorkerCount === 1 ? '' : 's'} · {formatMemoryLabel(allocatedMemoryMB)}</span>
+                    </div>
+                    {#if workerLimitNotice}
+                      <div class="speed-warning">{workerLimitNotice}</div>
+                    {/if}
+                  </div>
+                {:else}
+                  <div class="derivation-orbit" aria-hidden="true"></div>
+                {/if}
               </div>
 
               <div class="anim-controls">
@@ -1622,23 +1712,26 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 14px;
+    margin-bottom: 22px;
   }
 
+  .wallet-create-title h1,
   .wallet-create-title h2 {
-    margin: 0 0 6px;
+    margin: 0 0 8px;
     color: rgba(255, 255, 255, 0.94);
-    font-size: 24px;
-    line-height: 1.12;
-    letter-spacing: 0;
+    font-size: 26px;
+    line-height: 1.16;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
   }
 
   .wallet-create-title p {
     margin: 0;
     max-width: 560px;
-    color: rgba(255, 255, 255, 0.54);
-    font-size: 13px;
-    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 14px;
+    line-height: 1.55;
+    text-wrap: pretty;
   }
 
   .back-to-create {
@@ -1819,24 +1912,26 @@
 
   .input-mode-tabs {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
-    margin-bottom: 12px;
+    margin-bottom: 24px;
     padding: 4px;
     border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
+    border-radius: 10px;
     background: rgba(255, 255, 255, 0.025);
   }
 
   .input-mode-tabs button {
-    min-height: 34px;
+    min-height: 44px;
+    padding: 8px 10px;
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     background: transparent;
     color: rgba(255, 255, 255, 0.64);
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     cursor: pointer;
+    transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
   }
 
   .input-mode-tabs button:hover {
@@ -1850,8 +1945,173 @@
     color: rgba(255, 218, 150, 0.96);
   }
 
+  .input-mode-tabs button:disabled {
+    cursor: default;
+  }
+
+  .input-mode-tabs button:focus-visible,
+  .quick-login-btn:focus-visible,
+  .live-refresh:focus-visible,
+  .live-connect-btn:focus-visible,
+  .generate-mnemonic-btn:focus-visible,
+  .testnet-reset-btn:focus-visible {
+    outline: 2px solid rgba(255, 214, 150, 0.9);
+    outline-offset: 2px;
+  }
+
+  .mode-panel {
+    min-width: 0;
+  }
+
+  .mnemonic-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .mnemonic-panel + .derive-btn {
+    margin-top: 18px;
+  }
+
+  .mnemonic-generate-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 18px;
+    padding: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .mnemonic-generate-row > div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .mnemonic-generate-row strong {
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 15px;
+  }
+
+  .mnemonic-generate-row p,
+  .testnet-maintenance p,
+  .testnet-banner p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .section-eyebrow {
+    color: rgba(208, 168, 98, 0.8);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .mnemonic-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: rgba(255, 255, 255, 0.34);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .mnemonic-divider::before,
+  .mnemonic-divider::after {
+    content: '';
+    height: 1px;
+    flex: 1;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .mnemonic-input-group {
+    margin-bottom: 0;
+  }
+
+  .mnemonic-label-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .mnemonic-label-row > span {
+    color: rgba(255, 255, 255, 0.38);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mnemonic-label-row > span.ready {
+    color: rgba(119, 220, 169, 0.9);
+  }
+
+  .testnet-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .testnet-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(251, 191, 36, 0.18);
+    border-radius: 9px;
+    background: rgba(251, 191, 36, 0.055);
+  }
+
+  .testnet-banner > span {
+    flex: 0 0 auto;
+    color: rgba(253, 215, 150, 0.92);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .testnet-maintenance {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .testnet-maintenance > div {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .testnet-reset-btn {
+    min-height: 44px;
+    padding: 10px 14px;
+    border: 1px solid rgba(244, 63, 94, 0.25);
+    border-radius: 8px;
+    background: rgba(244, 63, 94, 0.06);
+    color: rgba(253, 164, 175, 0.92);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .testnet-reset-btn:hover {
+    border-color: rgba(244, 63, 94, 0.45);
+    background: rgba(244, 63, 94, 0.11);
+    color: rgba(255, 195, 205, 1);
+  }
+
   .quick-login-section {
-    margin-bottom: 14px;
+    margin-bottom: 0;
     padding: 10px 12px 12px;
     background: rgba(255, 255, 255, 0.012);
     border: 1px dashed rgba(255, 255, 255, 0.14);
@@ -1902,8 +2162,9 @@
   }
   .quick-login-btn {
     flex: 0 0 auto;
-    min-width: 38px;
-    padding: 7px 9px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 9px 11px;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 7px;
@@ -1912,7 +2173,6 @@
     font-size: 13px;
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-    min-height: 32px;
   }
   .quick-login-btn.wide {
     padding-left: 12px;
@@ -2009,8 +2269,8 @@
 
   /* Connect to live runtime (radapter) */
   .live-runtime-section {
-    margin-bottom: 14px;
-    padding: 10px 12px 12px;
+    margin-bottom: 0;
+    padding: 12px;
     background: rgba(255, 255, 255, 0.012);
     border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 8px;
@@ -2026,8 +2286,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 44px;
+    height: 44px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 6px;
     background: transparent;
@@ -2048,7 +2308,7 @@
   .live-runtime-select {
     flex: 1;
     min-width: 0;
-    min-height: 36px;
+    min-height: 44px;
     padding: 8px 10px;
     background: rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -2063,7 +2323,7 @@
   }
   .live-connect-btn {
     flex: 0 0 auto;
-    min-height: 36px;
+    min-height: 44px;
     padding: 8px 14px;
     background: rgba(255, 200, 100, 0.1);
     border: 1px solid rgba(255, 200, 100, 0.3);
@@ -2101,6 +2361,10 @@
     overflow: visible;
   }
 
+  :global(body:has(.brainvault-wrapper) [data-testid='xln-mascot-layer']) {
+    display: none;
+  }
+
   .brainvault-wrapper.embedded {
     height: auto;
     min-height: 0;
@@ -2110,7 +2374,7 @@
   .brainvault-container {
     flex: 1;
     width: 100%;
-    padding: 20px;
+    padding: 28px 20px 48px;
     background: #000;
     background-image:
       radial-gradient(ellipse at 50% 0%, rgba(180, 140, 80, 0.08) 0%, transparent 50%),
@@ -2122,6 +2386,50 @@
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
+  }
+
+  .auth-brand {
+    width: 92px;
+    height: 80px;
+    margin: 4px auto 22px;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    transition: opacity 0.24s ease, transform 0.24s ease, height 0.24s ease, margin 0.24s ease;
+  }
+
+  .auth-brand img {
+    display: block;
+    width: 92px;
+    height: auto;
+    opacity: 0.92;
+    filter: drop-shadow(0 0 18px rgba(218, 176, 104, 0.18));
+    animation: auth-mark-arrive 0.7s ease-out both;
+  }
+
+  .auth-brand.deriving {
+    height: 40px;
+    margin-bottom: 12px;
+    opacity: 0.52;
+    transform: scale(0.56);
+  }
+
+  @keyframes auth-mark-arrive {
+    from { opacity: 0; transform: translateY(-8px) scale(0.94); }
+    to { opacity: 0.92; transform: translateY(0) scale(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .auth-brand,
+    .auth-brand img {
+      animation: none;
+      transition: none;
+    }
+
+    .derivation-orbit {
+      animation: none;
+      border-color: rgba(255, 214, 150, 0.55);
+    }
   }
 
   .brainvault-wrapper.embedded .brainvault-container {
@@ -2150,10 +2458,6 @@
     gap: 8px;
   }
 
-  .brainvault-wrapper.embedded .input-progress .pyramid-logo {
-    display: none;
-  }
-
   .brainvault-wrapper.embedded .input-progress .pyramid-progress-text {
     font-size: 36px;
     color: rgba(255, 255, 255, 0.9);
@@ -2167,32 +2471,14 @@
     background: linear-gradient(90deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.5));
   }
 
-  .brainvault-wrapper.embedded .mini-shard-grid {
-    display: none;
-  }
-
   .brainvault-wrapper.embedded .anim-controls {
     position: static;
     transform: none;
     margin-top: 8px;
   }
 
-  .header {
-    text-align: center;
-    margin-bottom: 0;
-    position: relative;
-    z-index: 1;
-    flex-shrink: 0;
-    transition: all 0.8s ease;
-  }
-
-  /* Header shrinks during derivation to give space to the show */
-  .header.deriving {
-    margin-bottom: 12px;
-  }
-
   .main-content {
-    max-width: 520px;
+    max-width: 600px;
     width: 100%;
     margin: 0 auto;
     position: relative;
@@ -2223,16 +2509,15 @@
 
   /* Glass Card - Sacred Chamber */
   .glass-card {
-    background: rgba(10, 8, 6, 0.9);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgba(10, 8, 6, 0.97);
     border: 1px solid rgba(180, 140, 80, 0.15);
     border-radius: 2px;
-    padding: 24px;
+    padding: 30px;
     box-shadow:
       0 0 80px rgba(180, 140, 80, 0.05),
       inset 0 1px 0 rgba(180, 140, 80, 0.1);
     position: relative;
+    box-sizing: border-box;
   }
 
   .input-section {
@@ -2273,25 +2558,40 @@
 
   /* Generate Mnemonic Button */
   .generate-mnemonic-btn {
-    width: 100%;
-    padding: 14px 24px;
-    margin-bottom: 20px;
+    width: auto;
+    min-height: 44px;
+    padding: 11px 16px;
+    margin: 0;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     color: rgba(255, 255, 255, 0.88);
-    font-size: 14px;
-    font-weight: 600;
-    letter-spacing: 0.5px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0;
     cursor: pointer;
-    transition: all 0.2s ease;
-    text-transform: uppercase;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    white-space: nowrap;
   }
 
   .generate-mnemonic-btn:hover {
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 200, 100, 0.24);
     color: rgba(255, 200, 100, 0.95);
+  }
+
+  .warning-box {
+    padding: 12px 14px;
+    border: 1px solid rgba(251, 191, 36, 0.2);
+    border-radius: 9px;
+    background: rgba(251, 191, 36, 0.06);
+    color: rgba(253, 215, 150, 0.82);
+  }
+
+  .warning-box p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   .input-progress {
@@ -2311,25 +2611,46 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 16px;
+    gap: 18px;
+    width: 100%;
   }
 
-  .input-progress .pyramid-logo {
-    width: 96px;
-    height: 96px;
+  .derivation-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    max-width: 430px;
+    text-align: center;
+  }
+
+  .derivation-status strong {
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 20px;
+    line-height: 1.25;
+    text-wrap: balance;
+  }
+
+  .derivation-status p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  .derivation-orbit {
+    width: 42px;
+    height: 42px;
+    border: 1px solid rgba(255, 200, 100, 0.18);
+    border-top-color: rgba(255, 214, 150, 0.92);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
   }
 
   .input-progress .pyramid-progress-text {
     font-size: 48px;
     letter-spacing: 2px;
-  }
-
-  .input-progress .pyramid-stats {
-    gap: 20px;
-  }
-
-  .input-progress .mini-shard-grid {
-    margin: 16px auto 0;
   }
 
   .input-progress .speed-control {
@@ -2586,14 +2907,14 @@
   .derive-btn {
     width: 100%;
     padding: 18px;
-    background: transparent;
-    border: 1px solid rgba(180, 140, 80, 0.4);
+    background: rgba(180, 140, 80, 0.12);
+    border: 1px solid rgba(180, 140, 80, 0.5);
     border-radius: 2px;
     font-size: 13px;
     font-weight: 400;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: rgba(180, 140, 80, 0.9);
+    color: rgba(245, 215, 160, 0.96);
     cursor: pointer;
     transition: all 0.4s ease;
     position: relative;
@@ -2642,22 +2963,6 @@
     cursor: not-allowed;
   }
 
-  /* Deriving Phase */
-  .glass-card.deriving h2 {
-    text-align: center;
-    color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 24px;
-  }
-
-  .pyramid-logo {
-    position: relative;
-    width: 120px;
-    height: 120px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
   .pyramid-progress-text {
     font-size: 64px;
     font-weight: 200;
@@ -2667,31 +2972,6 @@
     text-shadow:
       0 0 20px rgba(255, 200, 100, 0.6),
       0 0 40px rgba(255, 180, 80, 0.4);
-  }
-
-  .pyramid-stats {
-    display: flex;
-    gap: 32px;
-    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-  }
-
-  .stat-row {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .stat-label {
-    font-size: 10px;
-    letter-spacing: 2px;
-    color: rgba(255, 255, 255, 0.4);
-    text-transform: uppercase;
-  }
-
-  .stat-value {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.9);
   }
 
   .pyramid-progress-bar {
@@ -2767,83 +3047,10 @@
     letter-spacing: 0.5px;
   }
 
-  .speed-threads, .speed-memory {
-    opacity: 0.8;
-  }
-
   .speed-warning {
     font-size: 10px;
     line-height: 1.35;
     color: rgba(255, 184, 112, 0.9);
-  }
-
-  .mini-shard-grid {
-    display: grid;
-    grid-template-columns: repeat(var(--cols, 16), 16px);
-    gap: 3px;
-    width: fit-content;
-    margin: 24px auto 0;
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 12px;
-    border: 1px solid rgba(255, 200, 100, 0.1);
-  }
-
-  .mini-shard {
-    width: 16px;
-    height: 16px;
-    border-radius: 3px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
-    transform-style: preserve-3d;
-  }
-
-  .mini-shard.pending {
-    background: linear-gradient(135deg,
-      rgba(40, 35, 30, 0.6) 0%,
-      rgba(60, 50, 40, 0.4) 100%);
-    border: 1px solid rgba(100, 80, 60, 0.2);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
-  }
-
-  .mini-shard.computing {
-    background: linear-gradient(135deg,
-      rgba(168, 85, 247, 0.8) 0%,
-      rgba(139, 92, 246, 0.6) 100%);
-    border: 1px solid rgba(168, 85, 247, 0.9);
-    box-shadow:
-      0 0 12px rgba(168, 85, 247, 0.6),
-      0 0 20px rgba(168, 85, 247, 0.3),
-      inset 0 1px 2px rgba(255, 255, 255, 0.3);
-    animation: cube-pulse 1s ease-in-out infinite;
-  }
-
-  .mini-shard.complete {
-    background: linear-gradient(135deg,
-      rgba(52, 211, 153, 0.9) 0%,
-      rgba(16, 185, 129, 0.8) 100%);
-    border: 1px solid rgba(52, 211, 153, 1);
-    box-shadow:
-      0 0 8px rgba(52, 211, 153, 0.4),
-      inset 0 1px 2px rgba(255, 255, 255, 0.4),
-      inset 0 -1px 2px rgba(0, 0, 0, 0.2);
-  }
-
-  @keyframes cube-pulse {
-    0%, 100% {
-      transform: scale(1) translateZ(0);
-      box-shadow:
-        0 0 12px rgba(168, 85, 247, 0.6),
-        0 0 20px rgba(168, 85, 247, 0.3),
-        inset 0 1px 2px rgba(255, 255, 255, 0.3);
-    }
-    50% {
-      transform: scale(1.15) translateZ(4px);
-      box-shadow:
-        0 0 16px rgba(168, 85, 247, 0.8),
-        0 0 28px rgba(168, 85, 247, 0.5),
-        inset 0 1px 2px rgba(255, 255, 255, 0.5);
-    }
   }
 
   .anim-controls {
@@ -2907,8 +3114,66 @@
 
   /* Responsive */
   @media (max-width: 600px) {
+    .brainvault-container {
+      padding: max(18px, env(safe-area-inset-top)) 14px max(28px, env(safe-area-inset-bottom));
+    }
+
+    .auth-brand {
+      width: 76px;
+      height: 66px;
+      margin: 8px auto 18px;
+    }
+
+    .auth-brand img {
+      width: 76px;
+    }
+
     .glass-card {
       padding: 20px;
+    }
+
+    .wallet-create-title {
+      margin-bottom: 18px;
+    }
+
+    .wallet-create-title h1,
+    .wallet-create-title h2 {
+      font-size: 23px;
+    }
+
+    .input-mode-tabs {
+      gap: 4px;
+      margin-bottom: 20px;
+    }
+
+    .input-mode-tabs button {
+      padding: 8px 5px;
+      font-size: 12px;
+    }
+
+    .mnemonic-generate-row,
+    .testnet-maintenance {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+
+    .generate-mnemonic-btn,
+    .testnet-reset-btn {
+      width: 100%;
+    }
+
+    .testnet-banner {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .live-runtime-row {
+      flex-direction: column;
+    }
+
+    .live-connect-btn {
+      width: 100%;
     }
 
     .quick-login-grid {
@@ -2917,7 +3182,7 @@
 
     .quick-login-btn {
       font-size: 12px;
-      min-height: 34px;
+      min-height: 44px;
     }
 
     .factor-buttons {
@@ -2971,8 +3236,8 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 30px;
-    height: 30px;
+    width: 44px;
+    height: 44px;
     border: none;
     border-radius: 999px;
     background: transparent;
@@ -3009,6 +3274,10 @@
     --l-accent-ring: rgba(79, 70, 229, 0.16);
     --l-field: #f8fafc;
     --l-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px rgba(15, 23, 42, 0.07);
+    --theme-input-bg: var(--l-field);
+    --theme-input-border: var(--l-border-strong);
+    --theme-input-text: var(--l-text);
+    --theme-text-primary: var(--l-text);
   }
 
   /* Page + card surfaces */
@@ -3031,6 +3300,11 @@
   .scheme-light .glass-card::before {
     background: linear-gradient(90deg, transparent, var(--l-accent-ring), transparent);
     opacity: 0.7;
+  }
+
+  .scheme-light .auth-brand img {
+    filter: invert(1) drop-shadow(0 0 16px rgba(79, 70, 229, 0.12));
+    opacity: 0.82;
   }
 
   /* Embedded mode (UserModePanel login) styles container/card dark at higher specificity;
@@ -3056,6 +3330,7 @@
   }
 
   /* Titles + copy */
+  .scheme-light .wallet-create-title h1,
   .scheme-light .wallet-create-title h2 { color: var(--l-text); }
   .scheme-light .wallet-create-title p { color: var(--l-text-2); }
   .scheme-light .creation-context-copy { color: var(--l-text-3); }
@@ -3075,6 +3350,37 @@
     border-color: var(--l-border);
     color: var(--l-accent);
     box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+
+  .scheme-light .mnemonic-generate-row {
+    background: var(--l-field);
+    border-color: var(--l-border);
+  }
+  .scheme-light .mnemonic-generate-row strong { color: var(--l-text); }
+  .scheme-light .mnemonic-generate-row p,
+  .scheme-light .testnet-maintenance p,
+  .scheme-light .testnet-banner p { color: var(--l-text-2); }
+  .scheme-light .section-eyebrow { color: var(--l-accent); }
+  .scheme-light .mnemonic-divider { color: var(--l-text-3); }
+  .scheme-light .mnemonic-divider::before,
+  .scheme-light .mnemonic-divider::after { background: var(--l-border); }
+  .scheme-light .mnemonic-label-row > span { color: var(--l-text-3); }
+  .scheme-light .mnemonic-label-row > span.ready { color: #047857; }
+  .scheme-light .testnet-banner {
+    background: rgba(217, 119, 6, 0.07);
+    border-color: rgba(217, 119, 6, 0.2);
+  }
+  .scheme-light .testnet-banner > span { color: #a16207; }
+  .scheme-light .testnet-maintenance { border-top-color: var(--l-border); }
+  .scheme-light .testnet-reset-btn {
+    background: rgba(220, 38, 38, 0.05);
+    border-color: rgba(220, 38, 38, 0.2);
+    color: #b91c1c;
+  }
+  .scheme-light .testnet-reset-btn:hover {
+    background: rgba(220, 38, 38, 0.1);
+    border-color: rgba(220, 38, 38, 0.35);
+    color: #991b1b;
   }
 
   /* Quick login */
@@ -3151,6 +3457,7 @@
     background: var(--l-field);
     border-color: var(--l-border-strong);
     color: var(--l-text);
+    color-scheme: light !important;
   }
   .scheme-light .live-runtime-select:focus {
     border-color: var(--l-accent);
@@ -3182,6 +3489,7 @@
     border: 1px solid var(--l-border-strong);
     border-radius: 10px;
     color: var(--l-text);
+    color-scheme: light !important;
   }
   .scheme-light .input-wrapper input:focus,
   .scheme-light .input-wrapper textarea:focus,
@@ -3296,13 +3604,16 @@
   }
 
   /* Deriving phase */
-  .scheme-light .glass-card.deriving h2 { color: var(--l-text); }
+  .scheme-light .derivation-status strong { color: var(--l-text); }
+  .scheme-light .derivation-status p { color: var(--l-text-2); }
+  .scheme-light .derivation-orbit {
+    border-color: rgba(79, 70, 229, 0.14);
+    border-top-color: var(--l-accent);
+  }
   .scheme-light .pyramid-progress-text {
     color: var(--l-accent);
     text-shadow: none;
   }
-  .scheme-light .stat-label { color: var(--l-text-3); }
-  .scheme-light .stat-value { color: var(--l-text); }
   .scheme-light .pyramid-progress-bar { background: rgba(15, 23, 42, 0.08); }
   .scheme-light .pyramid-progress-fill {
     background: linear-gradient(90deg, var(--l-accent) 0%, #818cf8 100%);
@@ -3315,15 +3626,6 @@
   .scheme-light .speed-label { color: var(--l-accent); }
   .scheme-light .speed-eta { color: var(--l-text); text-shadow: none; }
   .scheme-light .speed-details { color: var(--l-text-3); }
-  .scheme-light .mini-shard-grid {
-    background: rgba(15, 23, 42, 0.03);
-    border-color: var(--l-border);
-  }
-  .scheme-light .mini-shard.pending {
-    background: rgba(15, 23, 42, 0.06);
-    border-color: var(--l-border);
-    box-shadow: none;
-  }
   .scheme-light .control-btn {
     border-color: var(--l-border-strong);
     color: var(--l-text-2);

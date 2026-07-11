@@ -3,8 +3,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  countMnemonicWords,
   estimatePasswordStrength,
   formatLiveRuntimeImportStatus,
+  hasSupportedMnemonicWordCount,
+  normalizeMnemonicPhrase,
   parseLiveRuntimeChoices,
 } from '../../frontend/src/lib/components/Views/runtime-creation-model';
 
@@ -28,6 +31,17 @@ describe('runtime creation live runtime discovery', () => {
   test('keeps password strength estimation exported for RuntimeCreation', () => {
     expect(estimatePasswordStrength('').rating).toBe('weak');
     expect(estimatePasswordStrength('correct horse battery staple').bits).toBeGreaterThan(100);
+  });
+
+  test('accepts only the supported 12-word and 24-word mnemonic lengths', () => {
+    const words12 = Array.from({ length: 12 }, (_, index) => `word${index + 1}`).join(' ');
+    const words24 = Array.from({ length: 24 }, (_, index) => `word${index + 1}`).join('\n');
+
+    expect(normalizeMnemonicPhrase(`  ${words12}  `)).toBe(words12);
+    expect(countMnemonicWords(words24)).toBe(24);
+    expect(hasSupportedMnemonicWordCount(words12)).toBe(true);
+    expect(hasSupportedMnemonicWordCount(words24)).toBe(true);
+    expect(hasSupportedMnemonicWordCount(`${words12} extra`)).toBe(false);
   });
 
   test('parses suggested H/MM/Custody runtime choices through the shared import parser', () => {
@@ -83,5 +97,22 @@ describe('runtime creation live runtime discovery', () => {
     expect(source).toContain('Auto-discovery suppresses transport failures only');
     expect(source).not.toContain('swallows errors');
     expect(source).not.toContain('next.length === 0 && payload.ready === false');
+  });
+
+  test('keeps demo, remote-runtime, and reset controls behind the Testnet tab', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'frontend/src/lib/components/Views/RuntimeCreation.svelte'),
+      'utf8',
+    );
+    const testnetPanelIndex = source.indexOf('id="wallet-panel-testnet"');
+
+    expect(source).toContain("type InputMode = 'brainvault' | 'mnemonic' | 'testnet';");
+    expect(source).toContain("selectInputMode('testnet')");
+    expect(source).toContain("if (next !== 'testnet' || liveRuntimesLoaded || liveRuntimesLoading) return;");
+    expect(source).toContain('src="/img/logo.png"');
+    expect(testnetPanelIndex).toBeGreaterThan(0);
+    expect(source.indexOf('class="quick-login-section"')).toBeGreaterThan(testnetPanelIndex);
+    expect(source.indexOf('data-testid="live-runtime-section"')).toBeGreaterThan(testnetPanelIndex);
+    expect(source.indexOf('class="testnet-reset-btn"')).toBeGreaterThan(testnetPanelIndex);
   });
 });

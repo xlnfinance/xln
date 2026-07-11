@@ -79,6 +79,20 @@ export function generateBase58Secret(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => BASE58[byte % BASE58.length]!).join('');
 }
 
+export function normalizeMnemonicPhrase(value: string): string {
+  return String(value || '').trim().split(/\s+/).filter(Boolean).join(' ');
+}
+
+export function countMnemonicWords(value: string): number {
+  const normalized = normalizeMnemonicPhrase(value);
+  return normalized ? normalized.split(' ').length : 0;
+}
+
+export function hasSupportedMnemonicWordCount(value: string): boolean {
+  const wordCount = countMnemonicWords(value);
+  return wordCount === 12 || wordCount === 24;
+}
+
 export function formatUSD(value: number): string {
   if (value === 0) return '$0';
   if (value < 0.01) return '<$0.01';
