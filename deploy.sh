@@ -790,9 +790,8 @@ if [ "${free_kb:-0}" -lt $((10 * 1024 * 1024)) ]; then
   logger -t xln-storage-guard "low disk free: ${free_kb}KB"
 fi
 
-anvil_tmp_bytes="$(du -sk /root/xln/data/anvil-tmp /root/.foundry/anvil/tmp 2>/dev/null | awk '{sum+=$1} END {print sum+0}')"
-if [ "${anvil_tmp_bytes:-0}" -gt $((8 * 1024 * 1024)) ]; then
-  logger -t xln-storage-guard "anvil tmp high-water mark: ${anvil_tmp_bytes}KB"
+if ! ANVIL_STORAGE_BUDGET_GIB=10 /root/xln/scripts/enforce-anvil-storage-budget.sh >/dev/null 2>&1; then
+  logger -t xln-storage-guard "anvil storage exceeded 10GiB after temp cleanup"
 fi
 
 journalctl --vacuum-size=200M >/dev/null 2>&1 || true

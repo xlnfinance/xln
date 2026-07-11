@@ -1545,6 +1545,10 @@ describe('production startup wiring', () => {
     const anvil2 = readFileSync(join(repoRoot, 'scripts/start-anvil2.sh'), 'utf8');
     expect(anvil).toContain('ANVIL_CHAIN_ID="${ANVIL_CHAIN_ID:-31337}"');
     expect(anvil).toContain('--chain-id "$ANVIL_CHAIN_ID"');
+    expect(anvil).toContain('--prune-history "$ANVIL_PRUNE_HISTORY"');
+    expect(anvil).toContain('--state "$ANVIL_STATE"');
+    expect(anvil).toContain('--state-interval "$ANVIL_STATE_INTERVAL"');
+    expect(anvil).not.toContain('--mixed-mining');
     expect(anvil2).toContain('ANVIL_CHAIN_ID="${ANVIL2_CHAIN_ID:-31338}"');
     expect(anvil2).toContain('ANVIL_STATE="${ANVIL2_STATE:-$REPO_ROOT/data/anvil2-state.json}"');
   });

@@ -13,7 +13,8 @@ ANVIL_BLOCK_TIME="${ANVIL_BLOCK_TIME:-1}"
 ANVIL_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 ANVIL_CHAIN_ID="${ANVIL_CHAIN_ID:-31337}"
 ANVIL_TMPDIR="${ANVIL_TMPDIR:-$REPO_ROOT/data/anvil-tmp}"
-ANVIL_MAX_PERSISTED_STATES="${ANVIL_MAX_PERSISTED_STATES:-2}"
+ANVIL_PRUNE_HISTORY="${ANVIL_PRUNE_HISTORY:-128}"
+ANVIL_STATE_INTERVAL="${ANVIL_STATE_INTERVAL:-300}"
 
 kill_by_port() {
     local port="$1"
@@ -31,7 +32,7 @@ export TMPDIR="$ANVIL_TMPDIR"
 
 # Create directories if missing
 mkdir -p "$(dirname "$ANVIL_STATE")" "$(dirname "$ANVIL_LOG")" "$ANVIL_TMPDIR"
-find "$ANVIL_TMPDIR" -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+"$REPO_ROOT/scripts/enforce-anvil-storage-budget.sh"
 
 # Reset flag
 if [ "$1" = "--reset" ]; then
@@ -41,30 +42,19 @@ fi
 
 kill_by_port "$ANVIL_PORT"
 
-# Start anvil
 if [ -f "$ANVIL_STATE" ]; then
     echo "📂 Loading state from $ANVIL_STATE"
-    anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
-          --chain-id "$ANVIL_CHAIN_ID" \
-          --mixed-mining \
-          --quiet \
-          --block-time "$ANVIL_BLOCK_TIME" \
-          --block-gas-limit 60000000 \
-          --code-size-limit 65536 \
-          --max-persisted-states "$ANVIL_MAX_PERSISTED_STATES" \
-          --load-state "$ANVIL_STATE" \
-          --dump-state "$ANVIL_STATE" \
-          2>&1 | tee -a "$ANVIL_LOG"
 else
     echo "🆕 Starting fresh anvil (no state file)"
-    anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
-          --chain-id "$ANVIL_CHAIN_ID" \
-          --mixed-mining \
-          --quiet \
-          --block-time "$ANVIL_BLOCK_TIME" \
-          --block-gas-limit 60000000 \
-          --code-size-limit 65536 \
-          --max-persisted-states "$ANVIL_MAX_PERSISTED_STATES" \
-          --dump-state "$ANVIL_STATE" \
-          2>&1 | tee -a "$ANVIL_LOG"
 fi
+
+anvil --host 0.0.0.0 --port "$ANVIL_PORT" \
+      --chain-id "$ANVIL_CHAIN_ID" \
+      --quiet \
+      --block-time "$ANVIL_BLOCK_TIME" \
+      --block-gas-limit 60000000 \
+      --code-size-limit 65536 \
+      --prune-history "$ANVIL_PRUNE_HISTORY" \
+      --state "$ANVIL_STATE" \
+      --state-interval "$ANVIL_STATE_INTERVAL" \
+      2>&1 | tee -a "$ANVIL_LOG"
