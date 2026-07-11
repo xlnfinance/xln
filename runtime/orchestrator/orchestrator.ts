@@ -118,6 +118,7 @@ import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../failure-taxonomy';
+import { STORAGE_WRITER_LOCK_TTL_MS } from '../runtime-storage-dbs';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -181,6 +182,7 @@ const marketMakerReadyRestartLimit = Math.max(
   0,
   Math.floor(Number(process.env['XLN_MARKET_MAKER_READY_RESTARTS'] ?? '2')),
 );
+const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;
 const HUB_BOOTSTRAP_PAUSE_STORAGE = process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] ?? '1';
 const HUB_READY_SNAPSHOT_TIMEOUT_MS = Math.max(
   5_000,
@@ -2132,6 +2134,10 @@ const waitForMarketMakerReady = async (): Promise<void> => {
           `code=${String(marketMakerChild.exitCode)} signal=${String(marketMakerChild.exitSignal)} ` +
           `phase=${String(marketMakerChild.lastStartupPhase)}`,
         );
+        // A crashed writer may leave a valid lease behind until its fencing TTL
+        // expires. Reusing the namespace sooner would correctly fail closed and
+        // waste the retry, so wait out the lease before spawning its successor.
+        await delay(MARKET_MAKER_RESTART_FENCING_GRACE_MS);
         await spawnMarketMaker();
         await delay(500);
         continue;

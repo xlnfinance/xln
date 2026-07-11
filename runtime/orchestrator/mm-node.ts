@@ -3196,14 +3196,9 @@ const run = async (): Promise<void> => {
   configureMarketMakerStorage(env);
   configureMarketMakerRuntimeLogging(env);
   prewarmLocalMarketMakerSignerKeys();
-  const p2p = startP2P(env, {
-    relayUrls: [resolvedArgs.relayUrl],
-    wsUrl: directWsUrl,
-    allowDirectClients: false,
-    preferRelayForEntityInput: true,
-    gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
-  });
-  if (!p2p) throw new Error('P2P_START_FAILED');
+  // Bootstrap the local state machine before exposing this runtime to remote
+  // entity_input delivery. Persisted hub routes can send immediately when P2P
+  // connects, so every advertised MM entity must already exist at that point.
   startRuntimeLoop(env, {
     tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
     maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
@@ -3789,7 +3784,7 @@ const run = async (): Promise<void> => {
   });
 
   startupPhase = 'start-p2p';
-  const configuredP2P = startP2P(env, {
+  const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
     allowDirectClients: false,
@@ -3797,7 +3792,7 @@ const run = async (): Promise<void> => {
     advertiseEntityIds: mmContexts.map(context => context.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });
-  if (configuredP2P !== p2p) throw new Error('P2P_IDENTITY_CHANGED_DURING_BOOTSTRAP');
+  if (!p2p) throw new Error('P2P_START_FAILED');
 
   let shuttingDown = false;
   let loopInFlight = false;

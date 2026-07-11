@@ -675,16 +675,36 @@ describe('production startup wiring', () => {
     }
   });
 
-  test('restored hub and market-maker runtimes attach P2P before starting their loops', () => {
-    for (const sourcePath of ['runtime/orchestrator/hub-node.ts', 'runtime/orchestrator/mm-node.ts']) {
-      const source = readFileSync(join(repoRoot, sourcePath), 'utf8');
-      const p2pStart = source.indexOf('const p2p = startP2P(env, {');
-      const p2pReady = source.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", p2pStart);
-      const runtimeLoopStart = source.indexOf('startRuntimeLoop(env, {', p2pReady);
-      expect(p2pStart).toBeGreaterThan(0);
-      expect(p2pReady).toBeGreaterThan(p2pStart);
-      expect(runtimeLoopStart).toBeGreaterThan(p2pReady);
-    }
+  test('hub exposes restored entities before its loop while MM imports every entity before P2P', () => {
+    const hubSource = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const hubP2PStart = hubSource.indexOf('const p2p = startP2P(env, {');
+    const hubP2PReady = hubSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", hubP2PStart);
+    const hubLoopStart = hubSource.indexOf('startRuntimeLoop(env, {', hubP2PReady);
+    expect(hubP2PStart).toBeGreaterThan(0);
+    expect(hubP2PReady).toBeGreaterThan(hubP2PStart);
+    expect(hubLoopStart).toBeGreaterThan(hubP2PReady);
+
+    const mmSource = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
+    const mmLoopStart = mmSource.indexOf('startRuntimeLoop(env, {');
+    const mmPrimaryContext = mmSource.indexOf('const primaryMmContext = await createMarketMakerEntityContext(', mmLoopStart);
+    const mmSecondaryContexts = mmSource.indexOf('for (const [index, secondary] of secondaryJurisdictions.entries())', mmPrimaryContext);
+    const mmP2PStart = mmSource.indexOf('const p2p = startP2P(env, {', mmSecondaryContexts);
+    const mmP2PReady = mmSource.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", mmP2PStart);
+    expect(mmLoopStart).toBeGreaterThan(0);
+    expect(mmPrimaryContext).toBeGreaterThan(mmLoopStart);
+    expect(mmSecondaryContexts).toBeGreaterThan(mmPrimaryContext);
+    expect(mmP2PStart).toBeGreaterThan(mmSecondaryContexts);
+    expect(mmP2PReady).toBeGreaterThan(mmP2PStart);
+
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    expect(orchestrator).toContain(
+      'const MARKET_MAKER_RESTART_FENCING_GRACE_MS = STORAGE_WRITER_LOCK_TTL_MS + 1_000;',
+    );
+    const restartLog = orchestrator.indexOf('[MESH] restarting MM during readiness');
+    const restartGrace = orchestrator.indexOf('await delay(MARKET_MAKER_RESTART_FENCING_GRACE_MS);', restartLog);
+    const restartSpawn = orchestrator.indexOf('await spawnMarketMaker();', restartGrace);
+    expect(restartGrace).toBeGreaterThan(restartLog);
+    expect(restartSpawn).toBeGreaterThan(restartGrace);
   });
 
   test('deploy starts and checks the production Tron chain', () => {
