@@ -1455,10 +1455,6 @@ const run = async (): Promise<void> => {
   configureHubRuntimeLogging(env);
   configureHubBootstrapStorage(env);
   prewarmLocalHubSignerKeys();
-  startRuntimeLoop(env, {
-    tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
-    maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
-  });
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
   let bootstrap: { entityId: string; signerId: string } | null = null;
@@ -2128,6 +2124,10 @@ const run = async (): Promise<void> => {
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
   });
   if (!p2p) throw new Error('P2P_START_FAILED');
+  startRuntimeLoop(env, {
+    tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
+    maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
+  });
   finishTiming('p2p_connect', p2pConnectStartedAt);
 
   const totalMeshStartedAt = startTiming('mesh_ready_total');

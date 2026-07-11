@@ -667,6 +667,18 @@ describe('production startup wiring', () => {
     }
   });
 
+  test('restored hub and market-maker runtimes attach P2P before starting their loops', () => {
+    for (const sourcePath of ['runtime/orchestrator/hub-node.ts', 'runtime/orchestrator/mm-node.ts']) {
+      const source = readFileSync(join(repoRoot, sourcePath), 'utf8');
+      const p2pStart = source.indexOf('const p2p = startP2P(env, {');
+      const p2pReady = source.indexOf("if (!p2p) throw new Error('P2P_START_FAILED');", p2pStart);
+      const runtimeLoopStart = source.indexOf('startRuntimeLoop(env, {', p2pReady);
+      expect(p2pStart).toBeGreaterThan(0);
+      expect(p2pReady).toBeGreaterThan(p2pStart);
+      expect(runtimeLoopStart).toBeGreaterThan(p2pReady);
+    }
+  });
+
   test('deploy starts and checks the production Tron chain', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
@@ -697,6 +709,8 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M');
     expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=0');
     expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=1');
+    expect(deploy.match(/git clean -fd -e data\/ -e db\/ -e db-tmp\//g)).toHaveLength(2);
+    expect(deploy).not.toMatch(/git clean -fd;/);
     expect(deploy).not.toContain('pm2 restart xln-server');
     expect(packageJson.scripts['deploy:prod:runtime']).toContain('--code-only');
     expect(packageJson.scripts['deploy:prod:runtime:code']).toContain('--code-only');

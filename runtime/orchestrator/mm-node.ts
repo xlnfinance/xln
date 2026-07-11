@@ -3192,9 +3192,17 @@ const run = async (): Promise<void> => {
 	  registerEnvChangeCallback(env, (changedEnv) => {
 	    runtimeIngressReceipts.observeLatestRuntimeFrame(changedEnv);
 	  });
-	  configureMarketMakerStorage(env);
+  configureMarketMakerStorage(env);
   configureMarketMakerRuntimeLogging(env);
   prewarmLocalMarketMakerSignerKeys();
+  const p2p = startP2P(env, {
+    relayUrls: [resolvedArgs.relayUrl],
+    wsUrl: directWsUrl,
+    allowDirectClients: false,
+    preferRelayForEntityInput: true,
+    gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
+  });
+  if (!p2p) throw new Error('P2P_START_FAILED');
   startRuntimeLoop(env, {
     tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
     maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
@@ -3780,7 +3788,7 @@ const run = async (): Promise<void> => {
   });
 
   startupPhase = 'start-p2p';
-  const p2p = startP2P(env, {
+  const configuredP2P = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
     allowDirectClients: false,
@@ -3788,7 +3796,7 @@ const run = async (): Promise<void> => {
     advertiseEntityIds: mmContexts.map(context => context.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });
-  if (!p2p) throw new Error('P2P_START_FAILED');
+  if (configuredP2P !== p2p) throw new Error('P2P_IDENTITY_CHANGED_DURING_BOOTSTRAP');
 
   let shuttingDown = false;
   let loopInFlight = false;
