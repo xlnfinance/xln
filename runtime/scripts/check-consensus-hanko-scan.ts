@@ -62,9 +62,12 @@ assertOrder(accountConsensus, accountConsensusPath, [
   'clonedMachine,',
   'true,',
   "assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'receiver/validate');",
-  'const stateMismatch = verifyReceiverStateMatchesFrame',
-  'const bilateralMismatch = verifyReceiverBilateralDeltas',
   'const frameHashMismatch = await verifySenderFrameHash',
+  'accountStateRoot: computeAccountStateRoot(clonedMachine, getAccountStateDomain(env, accountMachine)),',
+  'const localStateHash = await createFrameHash(localFrame);',
+  'if (localStateHash !== receivedFrame.stateHash)',
+  'const localProofBodyHash = buildAccountProofBody(clonedMachine).proofBodyHash;',
+  'const frameSealError = disputeSealRequirementError(',
 ]);
 
 assertOrder(accountConsensus, accountConsensusPath, [
@@ -95,8 +98,13 @@ assertIncludes(entityConsensus, 'entityOutbox.push(...commitOutputs);', entityCo
 assertIncludes(entityConsensus, 'jOutbox.push(...commitJOutputs);', entityConsensusPath);
 
 assertIncludes(accountFrame, 'canonicalJurisdictionEventsHash(events)', accountFramePath);
-assertIncludes(accountFrame, 'const encoded = safeStringify(frameData);', accountFramePath);
-assertIncludes(accountFrame, 'return ethers.keccak256(ethers.toUtf8Bytes(encoded));', accountFramePath);
+assertOrder(accountFrame, accountFramePath, [
+  "return computeCanonicalMerkleRoot('account.frame', [",
+  "['transition', {",
+  "['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],",
+  "['deltas', frame.deltas],",
+  "['accountStateRoot', frame.accountStateRoot],",
+]);
 assertIncludes(entityFrame, 'const encoded = safeStringify(frameData);', entityFramePath);
 assertIncludes(entityFrame, 'const hash = ethers.keccak256(ethers.toUtf8Bytes(encoded));', entityFramePath);
 assertIncludes(entityFrame, 'lastFinalizedJHeight: newState.lastFinalizedJHeight,', entityFramePath);
