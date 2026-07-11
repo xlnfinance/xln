@@ -880,6 +880,7 @@ run_local_deploy() {
       pkill -KILL -f 'runtime/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
 
       if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
+        export XLN_MESH_PRESERVE_STATE_ON_RESET=0
         echo "[deploy] resetting production anvil + runtime state"
         rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
         rm -f data/anvil-state.json data/anvil2-state.json
@@ -890,6 +891,7 @@ run_local_deploy() {
         run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
         run_or_fail_deploy "failed to start anvil2 via pm2" pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset
       else
+        export XLN_MESH_PRESERVE_STATE_ON_RESET=1
         echo "[deploy] restarting production services without resetting anvil/runtime state"
         if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
           pm2 delete anvil >/dev/null 2>&1 || true

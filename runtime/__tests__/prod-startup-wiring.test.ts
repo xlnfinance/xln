@@ -33,6 +33,7 @@ describe('production startup wiring', () => {
     expect(script).toContain('export XLN_STORAGE_WRITE_TIMEOUT_MS=${XLN_STORAGE_WRITE_TIMEOUT_MS:-60000}');
     expect(script).toContain('export XLN_HUB_BOOTSTRAP_PAUSE_STORAGE=${XLN_HUB_BOOTSTRAP_PAUSE_STORAGE:-1}');
     expect(script).toContain('export XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS=${XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS:-60000}');
+    expect(script).toContain('export XLN_MESH_BOOTSTRAP_TICK_TIMEOUT_MS=${XLN_MESH_BOOTSTRAP_TICK_TIMEOUT_MS:-120000}');
     expect(script).toContain('export XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT=${XLN_MARKET_MAKER_PERSIST_READY_SNAPSHOT:-1}');
     expect(script).toContain('export XLN_CUSTODY_PUBLIC_RPC_URL=${XLN_CUSTODY_PUBLIC_RPC_URL:-wss://custody.xln.finance/rpc}');
     expect(script).toContain('export MARKET_MAKER_MAX_LEVELS_PER_PAIR=${MARKET_MAKER_MAX_LEVELS_PER_PAIR:-10}');
@@ -692,6 +693,8 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M');
     expect(deploy).toContain('pm2 delete xln-server >/dev/null 2>&1 || true');
     expect(deploy).toContain('run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M');
+    expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=0');
+    expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=1');
     expect(deploy).not.toContain('pm2 restart xln-server');
     expect(packageJson.scripts['deploy:prod:runtime']).toContain('--code-only');
     expect(packageJson.scripts['deploy:prod:runtime:code']).toContain('--code-only');
