@@ -5,6 +5,12 @@
 Mission: Fintech-grade, deterministic. J/E/A trilayer correctness before features. Pure functions only.
 ALWAYS: `bun run check` before commit. Test in browser F12 console. Never swallow errors.
 
+## FROZEN CORE
+
+- Never run `bun run frozen-core:approve`; only the project owner may approve a frozen-file change interactively.
+- A `FROZEN_CORE_VIOLATION` is a hard stop. Report the old/new hashes and wait for owner approval.
+- Do not edit `frozen-core.json` manually or bypass/remove `frozen-core:check` from any gate.
+
 ## 🚫 ZERO TOLERANCE: NO HACKS, NO WORKAROUNDS
 
 **ABSOLUTE RULE - violation = stop and report immediately:**

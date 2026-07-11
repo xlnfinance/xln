@@ -66,6 +66,7 @@ const SOUNDCHECK_TARGETS = [
 const quickSteps: GateStep[] = [
   { name: 'frontend generated aliases', command: 'cd frontend && bunx svelte-kit sync', timeoutMs: 60_000 },
   { name: 'source checks', command: 'bun run check:src', timeoutMs: 120_000 },
+  { name: 'release integrity tests', command: 'bun run test:release-integrity', timeoutMs: 30_000 },
   { name: 'runtime core unit tests', command: `bun test ${RUNTIME_CORE_TESTS}`, timeoutMs: 180_000 },
   {
     name: 'runtime soundcheck',
@@ -99,9 +100,13 @@ const releaseSteps: GateStep[] = [
 ];
 
 const profileSteps: Record<GateProfile, GateStep[]> = {
-  quick: quickSteps,
-  ci: ciSteps,
-  release: releaseSteps,
+  quick: [...quickSteps, { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 }],
+  ci: [...ciSteps, { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 }],
+  release: [
+    ...releaseSteps,
+    { name: 'frozen core final', command: 'bun run frozen-core:check', timeoutMs: 30_000 },
+    { name: 'Foundation release Hanko', command: 'bun run foundation-release:verify', timeoutMs: 30_000 },
+  ],
 };
 
 function parseProfile(): GateProfile {

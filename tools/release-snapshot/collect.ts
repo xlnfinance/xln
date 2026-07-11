@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { extname, posix, relative, resolve } from 'node:path';
-import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readlinkSync } from 'node:fs';
 
 import type {
   AggregateMetrics,
@@ -12,6 +12,7 @@ import type {
   ReleaseSnapshot,
   TreeNode,
 } from './types.ts';
+import { collectFrozenCore, readFrozenManifest } from '../frozen-core/core.ts';
 
 type SccFile = {
   Language?: string;
@@ -328,6 +329,17 @@ function graphAnalysis(files: FileSnapshot[]): { cycles: string[][]; longest: st
   return { cycles: [...cycles.values()].sort((a, b) => a.join().localeCompare(b.join())), longest };
 }
 
+function codeSnapshotRoot(files: FileSnapshot[]): string {
+  const hash = createHash('sha256');
+  hash.update('xln:code-snapshot:v1\0');
+  for (const file of [...files].sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)) {
+    hash.update(file.path);
+    hash.update('\0');
+    hash.update(Buffer.from(file.sha256, 'hex'));
+  }
+  return `0x${hash.digest('hex')}`;
+}
+
 export function collectSnapshot(input: {
   root: string;
   version: string;
@@ -350,6 +362,10 @@ export function collectSnapshot(input: {
   connectFiles(files);
   const tree = buildTree(files, input.previous);
   const graph = graphAnalysis(files);
+  const frozenManifestPath = resolve(root, 'frozen-core.json');
+  const frozenCore = existsSync(frozenManifestPath)
+    ? collectFrozenCore(root, readFrozenManifest(frozenManifestPath), input.version)
+    : undefined;
   const previousPaths = new Set(input.previous?.files.map((file) => file.path) ?? []);
   const currentPaths = new Set(files.map((file) => file.path));
   const modified = files.filter((file) => previousPaths.has(file.path) && file.delta && Object.values(file.delta).some(Boolean)).length;
@@ -374,6 +390,7 @@ export function collectSnapshot(input: {
     },
     repository: {
       name: 'xln',
+      merkleRoot: codeSnapshotRoot(files),
       metrics: tree.metrics,
       delta: tree.delta,
       changes: {
@@ -393,5 +410,6 @@ export function collectSnapshot(input: {
     tree,
     files,
     excluded,
+    ...(frozenCore ? { frozenCore } : {}),
   };
 }

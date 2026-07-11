@@ -85,6 +85,7 @@ export type ReleaseSnapshot = {
   };
   repository: {
     name: 'xln';
+    merkleRoot: string;
     metrics: AggregateMetrics;
     delta: MetricDelta | null;
     changes: {
@@ -102,6 +103,8 @@ export type ReleaseSnapshot = {
   tree: TreeNode;
   files: FileSnapshot[];
   excluded: ExcludedFile[];
+  frozenCore?: FrozenCoreSnapshot;
+  attestation?: ReleaseAttestation;
 };
 
 export type ReleaseManifestEntry = {
@@ -113,6 +116,9 @@ export type ReleaseManifestEntry = {
   sourceCommit: string;
   metrics: AggregateMetrics;
   modules: Record<string, AggregateMetrics>;
+  codeSnapshotRoot?: string;
+  frozenCore?: FrozenCoreSnapshot;
+  attestation?: ReleaseAttestation;
 };
 
 export type ReleaseManifest = {
@@ -120,3 +126,5 @@ export type ReleaseManifest = {
   latest: string;
   releases: ReleaseManifestEntry[];
 };
+import type { ReleaseAttestation } from '../../frontend/src/lib/releases/release-signature.ts';
+import type { FrozenCoreSnapshot } from '../frozen-core/types.ts';

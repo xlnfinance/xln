@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 
 import { collectSnapshot } from './release-snapshot/collect.ts';
 import { writeManifest, writeReleaseMarkdown } from './release-snapshot/render.ts';
+import { signReleaseSnapshot } from './release-snapshot/sign.ts';
 import type { ReleaseSnapshot } from './release-snapshot/types.ts';
 
 type Args = {
@@ -14,6 +15,8 @@ type Args = {
   markdown: string;
   previous?: string;
   releasesDir: string;
+  signingKeys?: string;
+  board: string;
 };
 
 function usage(message?: string): never {
@@ -39,6 +42,8 @@ function parseArgs(argv: string[]): Args {
     markdown: resolve(values.get('markdown') || `${releasesDir}/${version}.md`),
     previous: values.get('previous') ? resolve(values.get('previous')!) : undefined,
     releasesDir,
+    signingKeys: values.get('signing-keys') ? resolve(values.get('signing-keys')!) : undefined,
+    board: resolve(values.get('board') || 'foundation-release-board.json'),
   };
 }
 
@@ -47,6 +52,7 @@ const previous = args.previous
   ? JSON.parse(readFileSync(args.previous, 'utf8')) as ReleaseSnapshot
   : undefined;
 const snapshot = collectSnapshot({ root: args.root, version: args.version, previous });
+if (args.signingKeys) signReleaseSnapshot(snapshot, args.board, args.signingKeys);
 
 mkdirSync(dirname(args.output), { recursive: true });
 mkdirSync(dirname(args.markdown), { recursive: true });
@@ -60,4 +66,5 @@ console.log([
   `${snapshot.repository.metrics.code} LOC`,
   `${snapshot.repository.metrics.complexity} complexity`,
   `${snapshot.excluded.length} excluded`,
+  snapshot.attestation ? `hanko ${snapshot.attestation.signerCount}/${snapshot.attestation.board.members.length} verified` : 'unsigned',
 ].join(' | '));

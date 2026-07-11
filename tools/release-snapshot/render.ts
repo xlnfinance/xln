@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { MetricDelta, ReleaseManifest, ReleaseSnapshot, TreeNode } from './types.ts';
+import { renderFrozenTree } from '../frozen-core/core.ts';
 
 const SNAPSHOT_START = '<!-- release-snapshot:start -->';
 const SNAPSHOT_END = '<!-- release-snapshot:end -->';
@@ -64,6 +65,18 @@ function snapshotBlock(snapshot: ReleaseSnapshot): string {
     '',
     `Snapshot: ${number(metrics.files)} files, ${number(metrics.code)} code LOC, ${number(metrics.complexity)} complexity, test/source ratio ${(metrics.testCodeRatio * 100).toFixed(1)}%.`,
     `Change set: ${number(changes.added)} added, ${number(changes.modified)} modified, ${number(changes.removed)} removed.`,
+    ...(snapshot.frozenCore ? [
+      '',
+      '```text',
+      renderFrozenTree(snapshot.frozenCore),
+      '```',
+      '',
+      `Frozen core: ${snapshot.frozenCore.status}. Root ${snapshot.frozenCore.rootHash}.`,
+    ] : []),
+    ...(snapshot.attestation ? [
+      '',
+      `Foundation Hanko: VERIFIED ${snapshot.attestation.signerCount}/${snapshot.attestation.board.members.length}, entity ${snapshot.attestation.board.entityId}.`,
+    ] : []),
     SNAPSHOT_END,
   ].join('\n');
 }
@@ -101,6 +114,9 @@ export function writeManifest(releasesDir: string): ReleaseManifest {
       modules: Object.fromEntries((snapshot.tree.children ?? [])
         .filter((node) => node.kind === 'directory')
         .map((node) => [node.path, node.metrics])),
+      codeSnapshotRoot: snapshot.repository.merkleRoot,
+      ...(snapshot.frozenCore ? { frozenCore: snapshot.frozenCore } : {}),
+      ...(snapshot.attestation ? { attestation: snapshot.attestation } : {}),
     }));
   if (!releases[0]) throw new Error(`No release snapshots found in ${dataDir}`);
   const manifest: ReleaseManifest = { schemaVersion: 1, latest: releases[0].version, releases };

@@ -2,8 +2,36 @@
 
 All notable XLN changes are documented here.
 
-The project is still pre-mainnet. Version `0.1.6` marks the current runtime,
-remote projection, developer visualization, and release-observability baseline.
+The project is still pre-mainnet. Version `0.1.7` adds frozen-core integrity and
+xln Foundation Hanko attestations to the release-observability baseline.
+
+## [0.1.7] - 2026-07-11
+
+### Frozen Core Integrity
+
+- Added a separate raw-byte SHA-256 Merkle tree for explicitly frozen files.
+- Froze `runtime/runtime.ts` as the first protected runtime entrypoint.
+- Added fail-closed checks for content, path, executable-mode, deletion, and
+  rename changes.
+- Added interactive owner approval with mandatory per-file comments and no
+  non-interactive bypass.
+- Added non-blocking dependency-boundary warnings for mutable imports.
+
+### Foundation Release Hanko
+
+- Added exact `EntityProvider.HankoBytes` release attestations with packed
+  secp256k1 signatures, placeholders, board weights, and threshold claims.
+- Added an initial random 2-of-3 xln Foundation lazy entity board.
+- Bound every signed release to version, Git commit, full code snapshot root,
+  frozen-core root, and generation timestamp.
+- Added fail-loud frontend and CLI verification with tamper tests.
+- Added frozen-core and Foundation Hanko checks to release gates.
+
+### Release History
+
+- Added the frozen-core hash tree as the second tree in each release snapshot.
+- Added `UNCHANGED` and `APPROVED CHANGE` history states.
+- Added Foundation verification status to the Releases interface.
 
 ## [0.1.6] - 2026-07-11
 

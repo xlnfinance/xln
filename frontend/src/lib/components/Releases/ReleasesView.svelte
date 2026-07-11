@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { marked } from 'marked';
-  import { Braces, Download, GitCommitHorizontal } from 'lucide-svelte';
+  import { Braces, Download, GitCommitHorizontal, History, ShieldAlert, ShieldCheck } from 'lucide-svelte';
+  import { verifyReleaseAttestation, type ReleaseAttestation } from '$lib/releases/release-signature';
 
   type Metrics = {
     code: number;
@@ -20,6 +21,7 @@
     sourceCommit: string;
     metrics: Metrics;
     modules: Record<string, Metrics>;
+    attestation?: ReleaseAttestation;
   };
 
   type Manifest = {
@@ -47,6 +49,9 @@
   let error = $state('');
 
   let selectedRelease = $derived(manifest?.releases.find((release) => release.version === selectedVersion) ?? null);
+  let selectedVerification = $derived(selectedRelease?.attestation
+    ? verifyReleaseAttestation(selectedRelease.attestation) ? 'verified' : 'invalid'
+    : 'historical');
   let scopes = $derived.by(() => {
     const names = new Set<string>();
     for (const release of manifest?.releases ?? []) Object.keys(release.modules).forEach((name) => names.add(name));
@@ -111,6 +116,8 @@
       const response = await fetch('/docs-catalog/releases/manifest.json', { cache: 'no-store' });
       if (!response.ok) throw new Error(`Release manifest request failed: ${response.status}`);
       manifest = await response.json() as Manifest;
+      const invalidRelease = manifest.releases.find((release) => release.attestation && !verifyReleaseAttestation(release.attestation));
+      if (invalidRelease) throw new Error(`INVALID FOUNDATION HANKO: release ${invalidRelease.version}`);
       await loadRelease(manifest.latest);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
@@ -135,6 +142,15 @@
       <div class="release-identity">
         <strong>{selectedRelease.tag}</strong>
         <span>{selectedRelease.sourceCommit.slice(0, 12)}</span>
+        <span class="verification" class:verified={selectedVerification === 'verified'} class:invalid={selectedVerification === 'invalid'}>
+          {#if selectedVerification === 'verified'}
+            <ShieldCheck size={14} /> Foundation verified
+          {:else if selectedVerification === 'invalid'}
+            <ShieldAlert size={14} /> Invalid signature
+          {:else}
+            <History size={14} /> Historical unsigned
+          {/if}
+        </span>
       </div>
     {/if}
   </header>
@@ -222,6 +238,9 @@
   .release-identity { display: grid; justify-items: end; gap: 6px; font-family: 'SF Mono', monospace; }
   .release-identity strong { color: #71d59b; font-size: 18px; }
   .release-identity span { color: #859189; font-size: 12px; }
+  .release-identity .verification { display: inline-flex; align-items: center; gap: 5px; color: #859189; }
+  .release-identity .verification.verified { color: #71d59b; }
+  .release-identity .verification.invalid { color: #ff8585; }
   .metrics-band { padding: 26px 0 20px; border-bottom: 1px solid #26312b; }
   .metric-controls { display: flex; align-items: end; gap: 16px; }
   label { display: grid; gap: 7px; color: #859189; font: 600 11px/1.2 'SF Mono', monospace; text-transform: uppercase; }
