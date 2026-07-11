@@ -162,7 +162,8 @@ check_watchtower() {
 }
 
 check_jurisdictions() {
-  local file="$REPO_ROOT/db/runtime/prod-mesh/jurisdictions.json"
+  local rdb_root="${XLN_RDB_ROOT:-$REPO_ROOT/db}"
+  local file="$rdb_root/runtime/prod-mesh/jurisdictions.json"
   if [ ! -f "$file" ]; then
     fail "jurisdictions file missing: $file"
     return 0

@@ -730,7 +730,7 @@ EOF
 ensure_production_host_hygiene() {
   echo "[deploy] enforcing production log and memory hygiene"
 
-  install -d /root/xln/data /root/xln/data/anvil-tmp
+  install -d -m 700 /var/lib/xln /var/lib/xln/jdb /var/lib/xln/jdb/tmp /var/lib/xln/rdb
 
   if command -v crontab >/dev/null 2>&1; then
     crontab -l 2>/dev/null | grep -v '/root/xln/auto-redeploy.sh' | crontab - 2>/dev/null || true
@@ -774,7 +774,7 @@ find /root/xln/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null 
 find /root/xln/e2e/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find /root/xln/tests/test-results -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
 find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
-find /root/xln/data/anvil-tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+find /var/lib/xln/jdb/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
 if [ -d /root/.foundry/anvil/tmp ]; then
   find /root/.foundry/anvil/tmp -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
 fi
@@ -790,7 +790,7 @@ if [ "${free_kb:-0}" -lt $((10 * 1024 * 1024)) ]; then
   logger -t xln-storage-guard "low disk free: ${free_kb}KB"
 fi
 
-if ! ANVIL_STORAGE_BUDGET_GIB=10 /root/xln/scripts/enforce-anvil-storage-budget.sh >/dev/null 2>&1; then
+if ! XLN_JDB_ROOT=/var/lib/xln/jdb ANVIL_STORAGE_BUDGET_GIB=10 /root/xln/scripts/enforce-anvil-storage-budget.sh >/dev/null 2>&1; then
   logger -t xln-storage-guard "anvil storage exceeded 10GiB after temp cleanup"
 fi
 
@@ -812,7 +812,7 @@ EOF
 find /root/.pm2/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
 find /root/xln/logs -type f -name '*.log' -exec truncate -s 0 {} \; 2>/dev/null || true
 find /root/.foundry/anvil/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
-find /root/xln/data/anvil-tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
+find /var/lib/xln/jdb/tmp -mindepth 1 -mmin +180 -exec rm -rf {} + 2>/dev/null || true
 if [ -d /root/.foundry/anvil/tmp ]; then
   find /root/.foundry/anvil/tmp -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
 fi
@@ -858,7 +858,7 @@ run_local_deploy() {
       run_or_fail_deploy "failed to enforce production host hygiene" ensure_production_host_hygiene
       run_or_fail_deploy "failed to configure production direct hub ports" ensure_production_direct_hub_ports
       run_or_fail_deploy "failed to enforce nginx site consistency" ensure_production_nginx_site_consistency
-      mkdir -p db/runtime db/custody data logs
+      mkdir -p logs
       pkill -TERM -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
       pkill -TERM -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
       sleep 1
@@ -878,11 +878,47 @@ run_local_deploy() {
       pkill -KILL -f 'runtime/orchestrator/mm-node.ts' >/dev/null 2>&1 || true
       pkill -KILL -f 'runtime/orchestrator/orchestrator.ts' >/dev/null 2>&1 || true
 
+      export XLN_STATE_ROOT="${XLN_STATE_ROOT:-/var/lib/xln}"
+      export XLN_JDB_ROOT="${XLN_JDB_ROOT:-$XLN_STATE_ROOT/jdb}"
+      export XLN_RDB_ROOT="${XLN_RDB_ROOT:-$XLN_STATE_ROOT/rdb}"
+      install -d -m 700 "$XLN_STATE_ROOT" "$XLN_JDB_ROOT" "$XLN_RDB_ROOT"
+
+      migrate_production_path() {
+        local source="$1"
+        local destination="$2"
+        [ -e "$source" ] || return 0
+        if [ -e "$destination" ]; then
+          echo "PRODUCTION_STATE_MIGRATION_COLLISION: source=$source destination=$destination" >&2
+          return 1
+        fi
+        install -d -m 700 "$(dirname "$destination")"
+        mv "$source" "$destination"
+      }
+
+      if [ -e data/anvil-state.json ] || [ -e data/anvil2-state.json ]; then
+        pm2 delete anvil >/dev/null 2>&1 || true
+        pm2 delete anvil2 >/dev/null 2>&1 || true
+        lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -TERM 2>/dev/null || true
+        lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -TERM 2>/dev/null || true
+        sleep 2
+      fi
+      run_or_fail_deploy "failed to migrate production JDB" migrate_production_path data/anvil-state.json "$XLN_JDB_ROOT/anvil-state.json"
+      run_or_fail_deploy "failed to migrate production JDB2" migrate_production_path data/anvil2-state.json "$XLN_JDB_ROOT/anvil2-state.json"
+      run_or_fail_deploy "failed to migrate production runtime DB" migrate_production_path db/runtime "$XLN_RDB_ROOT/runtime"
+      run_or_fail_deploy "failed to migrate production custody DB" migrate_production_path db/custody "$XLN_RDB_ROOT/custody"
+      run_or_fail_deploy "failed to migrate production watchtower DB" migrate_production_path db/watchtower "$XLN_RDB_ROOT/watchtower"
+      run_or_fail_deploy "failed to migrate production custody temp DB" migrate_production_path db-tmp/prod-custody "$XLN_RDB_ROOT/custody-tmp"
+      run_or_fail_deploy "failed to migrate production storage history" migrate_production_path data/storage-health-history.json "$XLN_RDB_ROOT/storage-health-history.json"
+      rm -rf data/anvil-tmp
+      rmdir data db db-tmp 2>/dev/null || true
+      chmod -R go-rwx "$XLN_STATE_ROOT"
+      touch "$XLN_STATE_ROOT/.checkout-state-migrated"
+
       if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
         export XLN_MESH_PRESERVE_STATE_ON_RESET=0
         echo "[deploy] resetting production anvil + runtime state"
-        rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
-        rm -f data/anvil-state.json data/anvil2-state.json
+        rm -rf "$XLN_RDB_ROOT/runtime/prod-main" "$XLN_RDB_ROOT/runtime/prod-mesh" "$XLN_RDB_ROOT/custody/prod" "$XLN_RDB_ROOT/custody-tmp"
+        rm -f "$XLN_JDB_ROOT/anvil-state.json" "$XLN_JDB_ROOT/anvil2-state.json"
         lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         lsof -ti TCP:8546 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
         pm2 delete anvil >/dev/null 2>&1 || true
@@ -957,8 +993,9 @@ if [ -n "$REMOTE_HOST" ]; then
   # Remote deploy is the canonical rebuild path for production. Keep it self-healing:
   # some servers may retain /root/xln but lose .git metadata after disk cleanup or
   # manual recovery. In that case we must re-bootstrap the checkout before rebuilding
-  # frontend/runtime. WAL/snapshots live under data/, so repo recovery is safe.
-  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git reset --hard; git clean -fd -e data/ -e db/ -e db-tmp/; git checkout -B main origin/main; git reset --hard origin/main; git clean -fd -e data/ -e db/ -e db-tmp/; ./deploy.sh"
+  # frontend/runtime. The first rollout preserves legacy checkout state for migration;
+  # later rollouts clean it because production persistence lives in /var/lib/xln.
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git reset --hard; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; git checkout -B main origin/main; git reset --hard origin/main; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; ./deploy.sh"
   if [ "$FRESH" = "1" ]; then
     remote_cmd="$remote_cmd --fresh"
   fi

@@ -10,11 +10,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
+RDB_ROOT="${XLN_RDB_ROOT:-$REPO_ROOT/db}"
 
 export PATH="${HOME}/.bun/bin:$PATH"
 export XLN_WATCHTOWER_PORT="${XLN_WATCHTOWER_PORT:-9100}"
 export XLN_WATCHTOWER_HOST="${XLN_WATCHTOWER_HOST:-127.0.0.1}"
-export XLN_WATCHTOWER_DB_PATH="${XLN_WATCHTOWER_DB_PATH:-$REPO_ROOT/db/watchtower/prod-main}"
+export XLN_WATCHTOWER_DB_PATH="${XLN_WATCHTOWER_DB_PATH:-$RDB_ROOT/watchtower/prod-main}"
 export XLN_WATCHTOWER_MAX_BYTES="${XLN_WATCHTOWER_MAX_BYTES:-4194304}"
 export XLN_WATCHTOWER_MAX_BUNDLES="${XLN_WATCHTOWER_MAX_BUNDLES:-3}"
 export XLN_WATCHTOWER_ID="${XLN_WATCHTOWER_ID:-xln-official-watchtower}"
@@ -22,12 +23,12 @@ export XLN_WATCHTOWER_SWEEP_INTERVAL_MS="${XLN_WATCHTOWER_SWEEP_INTERVAL_MS:-300
 export XLN_WATCHTOWER_ALLOWED_RPC_URLS="${XLN_WATCHTOWER_ALLOWED_RPC_URLS:-http://127.0.0.1:8545/,http://127.0.0.1:8546/,https://xln.finance/rpc,https://xln.finance/rpc2,https://xln.finance/rpc3,https://xln.finance/rpc4,https://xln.finance/rpc5,https://xln.finance/rpc6,https://xln.finance/rpc7,https://xln.finance/rpc8}"
 export XLN_WATCHTOWER_ENABLE_LAST_RESORT="${XLN_WATCHTOWER_ENABLE_LAST_RESORT:-1}"
 export XLN_WATCHTOWER_OPERATOR_API="${XLN_WATCHTOWER_OPERATOR_API:-0}"
-export XLN_WATCHTOWER_PRIVATE_KEY_FILE="${XLN_WATCHTOWER_PRIVATE_KEY_FILE:-$REPO_ROOT/db/watchtower/private-key}"
+export XLN_WATCHTOWER_PRIVATE_KEY_FILE="${XLN_WATCHTOWER_PRIVATE_KEY_FILE:-$RDB_ROOT/watchtower/private-key}"
 
 # Push-wake (detect DisputeStarted -> notify victim device). Default OFF so the
 # tower keeps its current behavior until an operator opts in and wires a sender.
 export XLN_PUSH_ENABLE="${XLN_PUSH_ENABLE:-0}"
-export XLN_PUSH_DB_PATH="${XLN_PUSH_DB_PATH:-$REPO_ROOT/db/watchtower/push-main}"
+export XLN_PUSH_DB_PATH="${XLN_PUSH_DB_PATH:-$RDB_ROOT/watchtower/push-main}"
 export XLN_PUSH_SWEEP_INTERVAL_MS="${XLN_PUSH_SWEEP_INTERVAL_MS:-15000}"
 # When XLN_PUSH_WEBHOOK_URL is set the tower POSTs notifications there (fan out to
 # APNs/FCM); otherwise it falls back to a console sender (logs only).

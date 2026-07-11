@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/lib/start-common.sh"
 source "$REPO_ROOT/scripts/lib/port-layout.sh"
+RDB_ROOT="${XLN_RDB_ROOT:-$REPO_ROOT/db}"
 
 MAIN_RPC_PORT="${ANVIL_PORT:-$(xln_rpc_port)}"
 MAIN_API_PORT="${XLN_SERVER_PORT:-$(xln_web_port)}"
@@ -24,9 +25,9 @@ export CUSTODY_JURISDICTION_ID=${CUSTODY_JURISDICTION_ID:-arrakis}
 export CUSTODY_DAEMON_RUNTIME_SEED=${CUSTODY_DAEMON_RUNTIME_SEED:-xln-prod-custody-runtime}
 export CUSTODY_DAEMON_PORT=${CUSTODY_DAEMON_PORT:-$DEFAULT_CUSTODY_DAEMON_PORT}
 export CUSTODY_PORT=${CUSTODY_PORT:-$DEFAULT_CUSTODY_PORT}
-export CUSTODY_DB_ROOT=${CUSTODY_DB_ROOT:-$REPO_ROOT/db/custody/prod}
+export CUSTODY_DB_ROOT=${CUSTODY_DB_ROOT:-$RDB_ROOT/custody/prod}
 export XLN_USE_PREDEPLOYED_ADDRESSES=${XLN_USE_PREDEPLOYED_ADDRESSES:-true}
-export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$REPO_ROOT/db/runtime/prod-main/jurisdictions.json}
+export XLN_JURISDICTIONS_PATH=${XLN_JURISDICTIONS_PATH:-$RDB_ROOT/runtime/prod-main/jurisdictions.json}
 
 mkdir -p "$CUSTODY_DB_ROOT"
 xln_ensure_jurisdictions_path "$XLN_JURISDICTIONS_PATH"

@@ -55,7 +55,8 @@ const STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES = Math.max(50, Number(process.env['XLN
 const STORAGE_HEALTH_SCAN_MAX_MS = Math.max(5, Number(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_MS'] || '25'));
 const STORAGE_HISTORY_WINDOW_MS = 26 * 60 * 60 * 1000;
 const STORAGE_ONE_HOUR_MS = 60 * 60 * 1000;
-const STORAGE_HISTORY_PATH = join(process.cwd(), 'data', 'storage-health-history.json');
+const RDB_ROOT = process.env['XLN_RDB_ROOT'] || join(process.cwd(), 'db');
+const STORAGE_HISTORY_PATH = process.env['XLN_STORAGE_HISTORY_PATH'] || join(RDB_ROOT, 'storage-health-history.json');
 const FOUNDRY_ANVIL_TMP_PATH = process.env['ANVIL_TMPDIR'] || join(homedir(), '.foundry', 'anvil', 'tmp');
 const TRACKED_STORAGE_PATHS: TrackedStoragePath[] = [
   { name: 'pm2Logs', kind: 'log', path: '/root/.pm2/logs' },
@@ -63,8 +64,8 @@ const TRACKED_STORAGE_PATHS: TrackedStoragePath[] = [
   { name: 'runtimeArtifacts', kind: 'log', path: join(process.cwd(), '.logs') },
   { name: 'playwrightReport', kind: 'log', path: join(process.cwd(), 'playwright-report') },
   { name: 'testResults', kind: 'log', path: join(process.cwd(), 'test-results') },
-  { name: 'runtimeDb', kind: 'db', path: join(process.cwd(), 'db', 'runtime') },
-  { name: 'custodyDb', kind: 'db', path: join(process.cwd(), 'db', 'custody') },
+  { name: 'runtimeDb', kind: 'db', path: join(RDB_ROOT, 'runtime') },
+  { name: 'custodyDb', kind: 'db', path: join(RDB_ROOT, 'custody') },
   { name: 'foundryAnvilTmp', kind: 'temp', path: FOUNDRY_ANVIL_TMP_PATH },
 ];
 

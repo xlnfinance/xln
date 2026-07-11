@@ -700,7 +700,12 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('if [ "$RESET_PRODUCTION_MESH" = "1" ]; then');
     expect(deploy).toContain('echo "[deploy] restarting production services without resetting anvil/runtime state"');
     expect(deploy).toContain('echo "[deploy] resetting production anvil + runtime state"');
-    expect(deploy).toContain('rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody');
+    expect(deploy).toContain('export XLN_JDB_ROOT="${XLN_JDB_ROOT:-$XLN_STATE_ROOT/jdb}"');
+    expect(deploy).toContain('export XLN_RDB_ROOT="${XLN_RDB_ROOT:-$XLN_STATE_ROOT/rdb}"');
+    expect(deploy).toContain('PRODUCTION_STATE_MIGRATION_COLLISION');
+    expect(deploy).toContain('rmdir data db db-tmp 2>/dev/null || true');
+    expect(deploy).toContain('chmod -R go-rwx "$XLN_STATE_ROOT"');
+    expect(deploy).toContain('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
     expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset');
     expect(deploy).toContain('pm2 start scripts/start-anvil2.sh --name anvil2 --interpreter bash --max-memory-restart 512M -- --reset');
     expect(deploy).toContain('pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M');
@@ -710,7 +715,7 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=0');
     expect(deploy).toContain('export XLN_MESH_PRESERVE_STATE_ON_RESET=1');
     expect(deploy.match(/git clean -fd -e data\/ -e db\/ -e db-tmp\//g)).toHaveLength(2);
-    expect(deploy).not.toMatch(/git clean -fd;/);
+    expect(deploy.match(/if \[ -f \/var\/lib\/xln\/\.checkout-state-migrated \]; then git clean -fd; else/g)).toHaveLength(2);
     expect(deploy).not.toContain('pm2 restart xln-server');
     expect(packageJson.scripts['deploy:prod:runtime']).toContain('--code-only');
     expect(packageJson.scripts['deploy:prod:runtime:code']).toContain('--code-only');
@@ -1532,7 +1537,7 @@ describe('production startup wiring', () => {
   test('fresh deploy stops runtime processes before deleting runtime state', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const stopIndex = deploy.indexOf('pm2 delete xln-server');
-    const deleteIndex = deploy.indexOf('rm -rf db/runtime/prod-main db/runtime/prod-mesh');
+    const deleteIndex = deploy.indexOf('rm -rf "$XLN_RDB_ROOT/runtime/prod-main"');
     expect(stopIndex).toBeGreaterThan(0);
     expect(deleteIndex).toBeGreaterThan(0);
     expect(stopIndex).toBeLessThan(deleteIndex);
@@ -1549,8 +1554,9 @@ describe('production startup wiring', () => {
     expect(anvil).toContain('--state "$ANVIL_STATE"');
     expect(anvil).toContain('--state-interval "$ANVIL_STATE_INTERVAL"');
     expect(anvil).not.toContain('--mixed-mining');
+    expect(anvil).toContain('JDB_ROOT="${XLN_JDB_ROOT:-$REPO_ROOT/data}"');
     expect(anvil2).toContain('ANVIL_CHAIN_ID="${ANVIL2_CHAIN_ID:-31338}"');
-    expect(anvil2).toContain('ANVIL_STATE="${ANVIL2_STATE:-$REPO_ROOT/data/anvil2-state.json}"');
+    expect(anvil2).toContain('ANVIL_STATE="${ANVIL2_STATE:-${XLN_JDB_ROOT:-$REPO_ROOT/data}/anvil2-state.json}"');
   });
 
   test('explicit hub action proxy uses cached hub child without synchronous health polling', async () => {
