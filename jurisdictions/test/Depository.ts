@@ -915,6 +915,145 @@ describe("Depository", function () {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
   });
 
+  it("carries cooperative ondelta diffs into the next dispute exactly once", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+
+    const fund = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({
+        reserveToCollateral: [{
+          tokenId,
+          receivingEntity: left.entityId,
+          pairs: [{ entity: right.entityId, amount: 300n }],
+        }],
+      }),
+    );
+    await depository.connect(left.signer).processBatch(fund.encodedBatch, fund.hankoData, fund.nonce);
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const settlementNonce = 1n;
+    const diffs = [{
+      tokenId,
+      leftDiff: 100n,
+      rightDiff: 0n,
+      collateralDiff: -100n,
+      ondeltaDiff: -100n,
+    }];
+    const settlementSig = signEntityHash(
+      right.entityId,
+      await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs),
+      right.privateKey,
+    );
+    const settlement = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({
+        settlements: [{
+          leftEntity: left.entityId,
+          rightEntity: right.entityId,
+          diffs,
+          forgiveDebtsInTokenIds: [],
+          sig: settlementSig,
+          entityProvider: ethers.ZeroAddress,
+          hankoData: "0x",
+          nonce: settlementNonce,
+        }],
+      }),
+    );
+    await depository.connect(left.signer).processBatch(
+      settlement.encodedBatch,
+      settlement.hankoData,
+      settlement.nonce,
+    );
+
+    const afterCooperative = await depository._collaterals(acctKey, tokenId);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(800n);
+    expect(afterCooperative.collateral).to.equal(200n);
+    expect(afterCooperative.ondelta).to.equal(200n);
+
+    const disputeNonce = 2n;
+    const finalNonce = 3n;
+    const proof = proofBody([-50n], [tokenId]);
+    const proofHash = proofBodyHash(proof);
+    const startSig = signEntityHash(
+      right.entityId,
+      await disputeProofHash(depository, acctKey, disputeNonce, proofHash),
+      right.privateKey,
+    );
+    const disputeStart = {
+      counterentity: right.entityId,
+      nonce: disputeNonce,
+      proofbodyHash: proofHash,
+      watchSeed: TEST_WATCH_SEED,
+      sig: startSig,
+      starterInitialArguments: "0x",
+      starterIncrementedArguments: "0x",
+    };
+    const start = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ disputeStarts: [disputeStart] }),
+    );
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    const finalSig = signEntityHash(
+      right.entityId,
+      await disputeProofHash(depository, acctKey, finalNonce, proofHash),
+      right.privateKey,
+    );
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce,
+      initialProofbodyHash: proofHash,
+      finalProofbody: proof,
+      leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: "0x",
+      starterIncrementedArguments: "0x",
+      sig: finalSig,
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+    const finalize = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ disputeFinalizations: [finalization] }),
+    );
+    await depository.connect(left.signer).processBatch(
+      finalize.encodedBatch,
+      finalize.hankoData,
+      finalize.nonce,
+    );
+
+    const afterDispute = await depository._collaterals(acctKey, tokenId);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
+    expect(afterDispute.collateral).to.equal(0n);
+    expect(afterDispute.ondelta).to.equal(0n);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(950n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(50n);
+
+    const replay = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ disputeStarts: [disputeStart] }),
+    );
+    await expect(
+      depository.connect(left.signer).processBatch(replay.encodedBatch, replay.hankoData, replay.nonce),
+    ).to.be.revertedWithCustomError(depository, "E2");
+  });
+
   it("binds starter initial and incremented dispute arguments independently", async function () {
     const starterInitialArguments = abi.encode(["bytes[]"], [[encodeDeltaTransformerArguments([1])]]);
     const starterIncrementedArguments = abi.encode(["bytes[]"], [[encodeDeltaTransformerArguments([2])]]);
