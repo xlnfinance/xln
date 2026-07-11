@@ -10,6 +10,13 @@ export type MascotViewport = Readonly<{
   insetLeft?: number;
 }>;
 
+export type MascotVisualViewport = Readonly<{
+  width: number;
+  height: number;
+  offsetTop: number;
+  offsetLeft: number;
+}>;
+
 export type MascotPanelRect = Readonly<{
   x: number;
   y: number;
@@ -30,6 +37,22 @@ const DOCK_SIDES: readonly XlnMascotDockSide[] = ['left', 'right', 'top', 'botto
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(Math.max(Number.isFinite(value) ? value : min, min), Math.max(min, max));
+
+export function resolveMascotViewport(
+  layoutWidth: number,
+  layoutHeight: number,
+  visual?: MascotVisualViewport | null,
+): MascotViewport {
+  if (!visual) return { width: layoutWidth, height: layoutHeight };
+  return {
+    width: layoutWidth,
+    height: layoutHeight,
+    insetTop: Math.max(0, visual.offsetTop),
+    insetLeft: Math.max(0, visual.offsetLeft),
+    insetRight: Math.max(0, layoutWidth - visual.offsetLeft - visual.width),
+    insetBottom: Math.max(0, layoutHeight - visual.offsetTop - visual.height),
+  };
+}
 
 export function normalizeXlnMascotDock(value: unknown): XlnMascotDockPlacement {
   if (!value || typeof value !== 'object') return { ...DEFAULT_XLN_MASCOT_DOCK };
@@ -110,8 +133,12 @@ export function resolveMascotPanelRect(
 ): MascotPanelRect {
   const placement = normalizeXlnMascotDock(placementInput);
   const edge = MASCOT_EDGE_GAP;
-  const width = Math.min(380, Math.max(280, viewport.width - edge * 2));
-  const height = Math.min(540, Math.max(360, viewport.height - edge * 2));
+  const minX = (viewport.insetLeft ?? 0) + edge;
+  const minY = (viewport.insetTop ?? 0) + edge;
+  const maxX = viewport.width - (viewport.insetRight ?? 0) - edge;
+  const maxY = viewport.height - (viewport.insetBottom ?? 0) - edge;
+  const width = Math.max(0, Math.min(380, maxX - minX));
+  const height = Math.max(0, Math.min(540, maxY - minY));
   const centeredX = mascotPoint.x + MASCOT_SIZE / 2 - width / 2;
   const centeredY = mascotPoint.y + MASCOT_SIZE / 2 - height / 2;
   let x = centeredX;
@@ -121,8 +148,8 @@ export function resolveMascotPanelRect(
   if (placement.side === 'top') y = mascotPoint.y + MASCOT_SIZE + MASCOT_PANEL_GAP;
   if (placement.side === 'bottom') y = mascotPoint.y - height - MASCOT_PANEL_GAP;
   return {
-    x: clamp(x, edge, viewport.width - edge - width),
-    y: clamp(y, edge, viewport.height - edge - height),
+    x: clamp(x, minX, maxX - width),
+    y: clamp(y, minY, maxY - height),
     width,
     height,
   };

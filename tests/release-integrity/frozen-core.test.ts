@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { buildFrozenTree, collectFrozenCore, createFrozenManifest, hashFrozenFile } from '../../tools/frozen-core/core.ts';
 
@@ -10,6 +10,7 @@ const roots: string[] = [];
 function fixture(): string {
   const root = mkdtempSync(join(tmpdir(), 'xln-frozen-core-'));
   roots.push(root);
+  writeFileSync(join(root, 'VERSION'), '0.1.7\n');
   mkdirSync(join(root, 'runtime'), { recursive: true });
   writeFileSync(join(root, 'runtime/helper.ts'), 'export const value = 7;\n');
   writeFileSync(join(root, 'runtime/runtime.ts'), "import { value } from './helper';\nexport const result = value;\n");
@@ -61,5 +62,24 @@ describe('frozen core integrity', () => {
 
     expect(collectFrozenCore(root, manifest, '0.1.7').status).toBe('APPROVED CHANGE');
     expect(collectFrozenCore(root, manifest, '0.1.8').status).toBe('UNCHANGED');
+  });
+
+  test('refuses to overwrite an existing frozen-core manifest through init', () => {
+    const root = fixture();
+    const manifestPath = join(root, 'frozen-core.json');
+    const sentinel = '{"ownerApproved":true}\n';
+    writeFileSync(manifestPath, sentinel);
+
+    const result = Bun.spawnSync([
+      process.execPath,
+      resolve(import.meta.dir, '../../tools/frozen-core.ts'),
+      'init',
+      'runtime/runtime.ts',
+      '--reason=attacker reset attempt',
+    ], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(new TextDecoder().decode(result.stderr)).toContain('FROZEN_CORE_ALREADY_INITIALIZED');
+    expect(readFileSync(manifestPath, 'utf8')).toBe(sentinel);
   });
 });

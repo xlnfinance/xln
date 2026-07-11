@@ -8,11 +8,13 @@ import { ethers } from 'ethers';
 
 import {
   createFoundationReleaseBoard,
-  verifyReleaseAttestation,
-  type ReleaseAttestation,
+  isCanonicalFoundationBoard,
+  verifyReleaseSnapshot,
+  type FoundationReleaseBoard,
 } from '../frontend/src/lib/releases/release-signature.ts';
 import type { FoundationReleaseKeys } from './release-snapshot/sign.ts';
 import type { ReleaseSnapshot } from './release-snapshot/types.ts';
+import { assertReleaseTagBindsSource } from './release-snapshot/source-policy.ts';
 
 const command = process.argv[2];
 const value = (name: string, fallback: string): string =>
@@ -35,14 +37,30 @@ if (command === 'init') {
   process.exit(0);
 }
 
-if (command === 'verify') {
+if (command === 'verify' || command === 'publish-check') {
   const snapshotPath = value('snapshot', `docs/releases/data/${readFileSync('VERSION', 'utf8').trim()}.json`);
+  const board = JSON.parse(readFileSync(boardPath, 'utf8')) as FoundationReleaseBoard;
+  // --board selects the expected copy, not a replacement trust root. Accepting any supplied
+  // board would restore the self-signed-board attack this verifier exists to prevent.
+  if (!isCanonicalFoundationBoard(board)) throw new Error(`FOUNDATION_RELEASE_BOARD_NOT_TRUSTED:${boardPath}`);
   const snapshot = JSON.parse(readFileSync(snapshotPath, 'utf8')) as ReleaseSnapshot;
-  if (!snapshot.attestation) throw new Error(`RELEASE_ATTESTATION_MISSING:${snapshotPath}`);
-  const valid = verifyReleaseAttestation(snapshot.attestation as ReleaseAttestation);
+  const valid = verifyReleaseSnapshot(snapshot, board);
+  if (!snapshot.attestation) {
+    if (!valid) throw new Error(`RELEASE_ATTESTATION_MISSING:${snapshotPath}`);
+    if (command === 'publish-check') {
+      assertReleaseTagBindsSource(process.cwd(), snapshot.release.version, snapshot.release.sourceCommit);
+      console.log(`Release tag binds source: v${snapshot.release.version} ${snapshot.release.sourceCommit}`);
+    }
+    console.log(`Historical unsigned release: ${snapshot.release.version}`);
+    process.exit(0);
+  }
   if (!valid) throw new Error(`RELEASE_ATTESTATION_INVALID:${snapshotPath}`);
+  if (command === 'publish-check') {
+    assertReleaseTagBindsSource(process.cwd(), snapshot.release.version, snapshot.release.sourceCommit);
+    console.log(`Release tag binds source: v${snapshot.release.version} ${snapshot.release.sourceCommit}`);
+  }
   console.log(`Foundation Hanko verified: ${snapshot.release.version} ${snapshot.attestation.envelopeHash}`);
   process.exit(0);
 }
 
-throw new Error('Usage: bun tools/foundation-release.ts <init|verify> [--board=path] [--keys=path] [--snapshot=path]');
+throw new Error('Usage: bun tools/foundation-release.ts <init|verify|publish-check> [--board=path] [--keys=path] [--snapshot=path]');

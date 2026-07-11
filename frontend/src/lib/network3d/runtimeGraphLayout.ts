@@ -10,7 +10,24 @@ export type RuntimeGraphPlacedNode = {
   source: RuntimeGraphPositionSource;
 };
 
+export type RuntimeGraphLayoutCache = Readonly<{
+  signature: string;
+  positions: ReadonlyMap<string, RuntimeGraphPlacedNode>;
+}>;
+
 type MutablePoint = { x: number; y: number; z: number; fixed: boolean };
+
+export const connectedRuntimeGraphEntityIds = (graph: MergedRuntimeGraph): Set<string> => {
+  const nodeIds = new Set(graph.nodes.map((node) => node.entityId));
+  const connected = new Set<string>();
+  for (const account of graph.accounts) {
+    const { leftEntityId, rightEntityId } = account.selected;
+    if (!nodeIds.has(leftEntityId) || !nodeIds.has(rightEntityId)) continue;
+    connected.add(leftEntityId);
+    connected.add(rightEntityId);
+  }
+  return connected;
+};
 
 const hashText = (value: string): number => {
   let hash = 2166136261;
@@ -40,6 +57,24 @@ const finitePosition = (position: RuntimeGraphPosition | null | undefined): Runt
   if (![position.x, position.y, position.z].every(Number.isFinite)) return null;
   return { ...position };
 };
+
+export const runtimeGraphLayoutSignature = (
+  graph: MergedRuntimeGraph,
+  userPositions: ReadonlyMap<string, RuntimeGraphPosition> = new Map(),
+): string => JSON.stringify([
+  [...graph.nodes]
+    .sort((left, right) => left.entityId.localeCompare(right.entityId))
+    .map((node) => [
+      node.entityId,
+      node.selected.isHub,
+      finitePosition(node.selected.position),
+      finitePosition(userPositions.get(node.entityId)),
+    ]),
+  graph.accounts
+    .map((account): [string, string] => [account.selected.leftEntityId, account.selected.rightEntityId])
+    .sort(([leftA, rightA], [leftB, rightB]) =>
+      leftA.localeCompare(leftB) || rightA.localeCompare(rightB)),
+]);
 
 const separation = (leftId: string, rightId: string): { x: number; y: number; z: number } => {
   const hash = hashText(`${leftId}:${rightId}`);
@@ -154,4 +189,14 @@ export const layoutRuntimeGraph = (
       source: user ? 'user' : runtime ? 'runtime' : 'layout',
     }];
   }));
+};
+
+export const resolveRuntimeGraphLayout = (
+  graph: MergedRuntimeGraph,
+  userPositions: ReadonlyMap<string, RuntimeGraphPosition> = new Map(),
+  previous: RuntimeGraphLayoutCache | null = null,
+): RuntimeGraphLayoutCache => {
+  const signature = runtimeGraphLayoutSignature(graph, userPositions);
+  if (previous?.signature === signature) return previous;
+  return { signature, positions: layoutRuntimeGraph(graph, userPositions) };
 };

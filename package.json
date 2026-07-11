@@ -160,6 +160,7 @@
     "frozen-core:approve": "bun tools/frozen-core.ts approve",
     "foundation-release:init": "bun tools/foundation-release.ts init",
     "foundation-release:verify": "bun tools/foundation-release.ts verify",
+    "foundation-release:publish-check": "bun tools/foundation-release.ts publish-check",
     "test:release-integrity": "bun test tests/release-integrity/*.test.ts && bun runtime/scripts/run-with-test-cleanup.ts --reason=release-hanko-contract --child-cwd=jurisdictions -- bunx hardhat test test/ReleaseHanko.test.ts",
     "visualcheck": "bun tools/visualcheck.ts",
     "build:tsc": "bun node_modules/@typescript/native/bin/tsc",

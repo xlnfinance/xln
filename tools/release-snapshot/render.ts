@@ -6,6 +6,14 @@ import { renderFrozenTree } from '../frozen-core/core.ts';
 
 const SNAPSHOT_START = '<!-- release-snapshot:start -->';
 const SNAPSHOT_END = '<!-- release-snapshot:end -->';
+const EDITORIAL_NOTICE_START = '<!-- release-editorial-notice:start -->';
+const EDITORIAL_NOTICE_END = '<!-- release-editorial-notice:end -->';
+
+export const RELEASE_EDITORIAL_NOTICE = [
+  EDITORIAL_NOTICE_START,
+  '> **Verification boundary:** Foundation Hanko verifies only the version, source commit, code snapshot root, frozen-core root, and timestamp. Snapshot metrics are cross-checked against the manifest; editorial release notes below are unsigned.',
+  EDITORIAL_NOTICE_END,
+].join('\n');
 
 function number(value: number): string {
   return Math.round(value).toLocaleString('en-US');
@@ -83,18 +91,27 @@ function snapshotBlock(snapshot: ReleaseSnapshot): string {
 
 export function writeReleaseMarkdown(path: string, snapshot: ReleaseSnapshot): void {
   const block = snapshotBlock(snapshot);
+  const verifiedSection = `${block}\n\n${RELEASE_EDITORIAL_NOTICE}`;
   if (!existsSync(path)) {
-    writeFileSync(path, `${block}\n\n# xln ${snapshot.release.version}\n\n## Release Notes\n\nRelease notes pending.\n`);
+    writeFileSync(path, `${verifiedSection}\n\n# xln ${snapshot.release.version}\n\n## Release Notes\n\nRelease notes pending.\n`);
     return;
   }
   const current = readFileSync(path, 'utf8');
   const start = current.indexOf(SNAPSHOT_START);
   const end = current.indexOf(SNAPSHOT_END);
+  const noticeStart = current.indexOf(EDITORIAL_NOTICE_START);
+  const noticeEnd = current.indexOf(EDITORIAL_NOTICE_END);
+  const withoutNotice = noticeStart >= 0 && noticeEnd >= noticeStart
+    ? `${current.slice(0, noticeStart)}${current.slice(noticeEnd + EDITORIAL_NOTICE_END.length)}`
+    : current;
   if (start < 0 || end < start) {
-    writeFileSync(path, `${block}\n\n${current.trimStart()}`);
+    writeFileSync(path, `${verifiedSection}\n\n${withoutNotice.trimStart()}`);
     return;
   }
-  writeFileSync(path, `${current.slice(0, start)}${block}${current.slice(end + SNAPSHOT_END.length)}`);
+  const cleanStart = withoutNotice.indexOf(SNAPSHOT_START);
+  const cleanEnd = withoutNotice.indexOf(SNAPSHOT_END, cleanStart);
+  const suffixStart = cleanEnd + SNAPSHOT_END.length;
+  writeFileSync(path, `${withoutNotice.slice(0, cleanStart)}${verifiedSection}\n\n${withoutNotice.slice(suffixStart).trimStart()}`);
 }
 
 export function writeManifest(releasesDir: string): ReleaseManifest {

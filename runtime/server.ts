@@ -101,6 +101,11 @@ import { handleRuntimeInputControl, handleRuntimeInputStatus } from './server/ru
 import { handleSignerRegistration } from './server/signer-control';
 import { fetchRpcCode, probeLocalAnvilContractStack } from './server/stack-probe';
 import { handleRuntimeActivityRequest } from './server/activity-api';
+import {
+  createAssistantProxyFromEnv,
+  resolveAssistantDirectClientIp,
+  resolveAssistantRateClientId,
+} from './server/assistant-proxy';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from './loopback-url';
 
 // Global J-adapter instance (set during startup)
@@ -118,6 +123,7 @@ let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | nu
 let processGuardsInstalled = false;
 const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
 const serverLog = createStructuredLogger('server');
+const assistantProxy = createAssistantProxyFromEnv(serverLog);
 const tokenCatalogController = createTokenCatalogController({
   getAdapter: () => globalJAdapter,
 });
@@ -369,12 +375,15 @@ const handleRpcMessage = createServerRpcMessageHandler({
   buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
 });
 
-const handleApi = async (req: Request, pathname: string, env: Env | null): Promise<Response> => {
+const handleApi = async (req: Request, pathname: string, env: Env | null, clientId: string): Promise<Response> => {
   const headers = JSON_HEADERS;
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers });
   }
+
+  const assistantResponse = await assistantProxy.handle(req, pathname, clientId);
+  if (assistantResponse) return assistantResponse;
 
   if (pathname === '/api/control/entities' && req.method === 'GET') {
     const authError = requireDaemonControlAuth(req, env);
@@ -840,7 +849,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         pathname === '/rpc'
       ) {
         try {
-          return await handleApi(req, pathname, env);
+          const directClientIp = resolveAssistantDirectClientIp(server, req);
+          const clientId = resolveAssistantRateClientId(req, directClientIp);
+          return await handleApi(req, pathname, env, clientId);
         } catch (error) {
           const message = (error as Error)?.message || 'API handler failed';
           serverLog.error('api.unhandled_route_error', { pathname, message });

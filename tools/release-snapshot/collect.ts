@@ -46,7 +46,6 @@ const GENERATED_PREFIXES = [
   'build/',
 ];
 const GENERATED_FILES = new Set([
-  'bun.lock',
   'frontend/static/runtime.js',
   'frontend/src/lib/generated/version.ts',
 ]);
@@ -73,7 +72,7 @@ function listRepositoryFiles(root: string): string[] {
     .sort();
 }
 
-function exclusion(path: string): ExcludedFile['reason'] | null {
+export function releaseSnapshotExclusion(path: string): ExcludedFile['reason'] | null {
   if (path.startsWith(RELEASE_ARTIFACT_PREFIX)) return 'release-artifact';
   if (GENERATED_FILES.has(path) || GENERATED_PREFIXES.some((prefix) => path.startsWith(prefix))) return 'generated';
   if (path.startsWith('.archive/') || path.startsWith('vendor/')) return 'vendor';
@@ -349,7 +348,7 @@ export function collectSnapshot(input: {
   const listed = listRepositoryFiles(root);
   const excluded: ExcludedFile[] = [];
   const included = listed.filter((path) => {
-    const reason = exclusion(path);
+    const reason = releaseSnapshotExclusion(path);
     if (!reason) return true;
     const absolute = resolve(root, path);
     excluded.push({ path, bytes: lstatSync(absolute).size, reason });

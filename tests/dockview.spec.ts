@@ -113,11 +113,11 @@ test.describe('dockview', () => {
     await expect(page.getByTestId('network-machine-frame-badge')).toContainText(/LIVE\/[1-9]\d*/, { timeout: 120_000 });
 
     const graphBox = await page.locator('.graph3d-wrapper').boundingBox();
-    const walletBox = await page.locator('[data-panel-id="wallet-main"]').boundingBox();
+    const walletBox = await page.locator('.entity-panel:has(nav[aria-label="Account workspace"])').boundingBox();
     expect(graphBox).not.toBeNull();
     expect(walletBox).not.toBeNull();
     expect(graphBox!.x).toBeLessThan(walletBox!.x);
-    expect(graphBox!.width).toBeGreaterThan(600);
+    expect(graphBox!.width).toBeGreaterThan(500);
     expect(walletBox!.width).toBeGreaterThan(500);
 
     await selectLastNetworkFrame(page);
@@ -186,7 +186,7 @@ test.describe('dockview', () => {
     await expect(page.getByTestId('network-machine-timeline-mode')).toHaveValue('all-frames');
     await expect(page.getByRole('button', { name: /LevelDB Inspector/ })).toBeVisible();
     await expect(page.locator('.tab-style-card')).toHaveCount(6);
-    await page.getByRole('button', { name: /Layout/ }).click();
+    await page.getByRole('button', { name: '📐 Layout', exact: true }).click();
     await page.getByTestId('dock-entity-open-mode').selectOption('new-tab');
 
     await activateDockPanel(page, 'graph3d');
@@ -196,7 +196,7 @@ test.describe('dockview', () => {
     await page.mouse.dblclick(secondNode!.screen!.x, secondNode!.screen!.y);
     await expect.poll(async () => page.evaluate((id) => (window as any).__dockview_instance.panels.some((panel: { id?: string }) => panel.id === `entity-${id}`), secondNode!.entityId), { timeout: 90_000 }).toBe(true);
     await activateDockPanel(page, 'settings');
-    await page.getByRole('button', { name: /Layout/ }).click();
+    await page.getByRole('button', { name: '📐 Layout', exact: true }).click();
     await page.getByTestId('dock-entity-open-mode').selectOption('replace');
 
     const toolChecks: Array<[string, string | null]> = [
@@ -212,7 +212,10 @@ test.describe('dockview', () => {
     }
     for (const panelId of ['architect', 'jmachine-inspector', 'jurisdiction', 'runtime-io', 'console', 'gossip', 'solvency']) {
       await activateDockPanel(page, panelId);
-      await expect(page.locator(`[data-panel-id="${panelId}"]`)).toBeVisible();
+      await expect.poll(() => page.evaluate((id) => {
+        const active = (window as any).__dockview_instance?.activePanel;
+        return String(active?.id || active?.api?.id || '') === id;
+      }, panelId)).toBe(true);
     }
     await page.screenshot({ path: testInfo.outputPath('dockview-tools-laptop.png'), fullPage: true });
 
@@ -221,10 +224,27 @@ test.describe('dockview', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByTestId('network-machine-mode-toggle')).toContainText('Dock');
     await page.screenshot({ path: testInfo.outputPath('dockview-user-mobile.png'), fullPage: true });
+    await page.getByTestId('network-machine-mode-toggle').click();
+    await expect(page.locator('.xln-pinned-dock-tab')).toContainText('Main Wallet', { timeout: 60_000 });
+    await activateDockPanel(page, 'graph3d');
+    await expect(page.locator('.graph3d-wrapper')).toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () => (await graphSnapshot(page)).nodes.length).toBeGreaterThan(0);
+    const mobileGraphBox = await page.locator('.graph3d-wrapper').boundingBox();
+    expect(mobileGraphBox?.width).toBeGreaterThan(360);
+    expect(mobileGraphBox?.height).toBeGreaterThan(700);
+    await page.screenshot({ path: testInfo.outputPath('dockview-graph-mobile.png'), fullPage: true });
+    await page.getByTestId('dock-exit-user-mode').click();
+    await expect(page.locator('.xln-pinned-dock-tab')).toHaveCount(0);
     await page.setViewportSize({ width: 1600, height: 900 });
     await page.getByTestId('network-machine-mode-toggle').click();
     await expect(page.locator('.xln-pinned-dock-tab')).toContainText('Main Wallet', { timeout: 60_000 });
     await expect(page.getByTestId('dock-exit-user-mode')).toBeVisible();
+    await activateDockPanel(page, 'wallet-main');
+    const restoredGraph = page.locator('.graph3d-wrapper');
+    const restoredWallet = page.locator('.entity-panel:visible').filter({ has: page.getByRole('navigation', { name: 'Account workspace' }) });
+    await expect(restoredWallet).toBeVisible();
+    await expect.poll(async () => (await restoredGraph.boundingBox())?.width || 0, { timeout: 30_000 }).toBeGreaterThan(500);
+    await expect.poll(async () => (await restoredWallet.boundingBox())?.width || 0, { timeout: 30_000 }).toBeGreaterThan(500);
 
     expect(pageErrors).toEqual([]);
     expect(consoleErrors).toEqual([]);

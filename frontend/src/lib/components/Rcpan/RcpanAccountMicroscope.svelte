@@ -71,7 +71,7 @@
       <div
         class="external-flow treasury-flow target-{display.treasuryTopUp.target}"
         style={`--flow-color:${display.treasuryTopUp.color}`}
-        data-testid="microscope-treasury-flow"
+        data-testid="microscope-reserve-flow"
       >
         <span class="flow-source">{display.treasuryTopUp.sourceLabel}</span>
         <span class="flow-copy">

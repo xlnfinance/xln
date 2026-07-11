@@ -50,22 +50,54 @@ describe('RCPAN account microscope finance', () => {
     expect(frame.current.hubReserve).toBe(USDC.hubReserve - USDC.grossAmount * 30n / 100n);
   });
 
-  test('scenario 3 queues debt, then tops reserve up, then enforces it', () => {
+  test('scenario 3 queues debt, increases reserve through two requests, then enforces FIFO', () => {
     const settled = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'settled'));
-    const halfTopUp = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'treasury-topup', 500));
+    const firstRequestHalf = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'rebalance-request-1', 500));
+    const secondRequestStart = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'rebalance-request-2'));
+    const secondRequestHalf = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'rebalance-request-2', 500));
+    const enforcementStart = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'debt-enforcement'));
     const halfEnforced = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'debt-enforcement', 500));
     const repaid = deriveRcpanFinanceFrame(USDC, timeline('debt-recovery', 'repaid'));
     const expectedDebt = USDC.grossAmount * 35n / 100n;
+    const firstRequest = expectedDebt / 2n;
+    const secondRequest = expectedDebt - firstRequest;
 
     expect(settled.initial.collateral).toBe(USDC.grossAmount * 30n / 100n);
     expect(settled.finalization.reservePaid.rightToLeft).toBe(expectedDebt);
     expect(settled.current.debt).toBe(expectedDebt);
-    expect(halfTopUp.current.hubReserve).toBe(expectedDebt / 2n);
-    expect(halfTopUp.current.debt).toBe(expectedDebt);
+    expect(firstRequestHalf.current.hubReserve).toBe(firstRequest / 2n);
+    expect(firstRequestHalf.externalRequestTopUp).toBe(firstRequest / 2n);
+    expect(firstRequestHalf.current.debt).toBe(expectedDebt);
+    expect(secondRequestStart.current.hubReserve).toBe(firstRequest);
+    expect(secondRequestStart.externalRequestTopUp).toBe(0n);
+    expect(secondRequestStart.current.debt).toBe(expectedDebt);
+    expect(secondRequestHalf.current.hubReserve).toBe(firstRequest + secondRequest / 2n);
+    expect(secondRequestHalf.externalRequestTopUp).toBe(secondRequest / 2n);
+    expect(secondRequestHalf.current.debt).toBe(expectedDebt);
+    expect(enforcementStart.current.hubReserve).toBe(expectedDebt);
+    expect(enforcementStart.current.debt).toBe(expectedDebt);
     expect(halfEnforced.current.debt).toBe(expectedDebt / 2n);
     expect(halfEnforced.current.userReserve).toBe(settled.current.userReserve + expectedDebt / 2n);
     expect(repaid.current.debt).toBe(0n);
     expect(repaid.current.userReserve).toBe(USDC.userReserve + USDC.grossAmount);
+  });
+
+  test('scenario 3 exposes two distinct rebalance flows before enforcement', () => {
+    const controls = { ...cloneMicroscopeControls(), scenarioMode: 'debt-recovery' as const };
+    const first = deriveRcpanMicroscopeFrame(timeline('debt-recovery', 'rebalance-request-1', 500), controls);
+    const second = deriveRcpanMicroscopeFrame(timeline('debt-recovery', 'rebalance-request-2', 500), controls);
+    const enforcement = deriveRcpanMicroscopeFrame(timeline('debt-recovery', 'debt-enforcement'), controls);
+
+    expect(first.rcpan.account.treasuryTopUp.visible).toBe(true);
+    expect(first.rcpan.account.treasuryTopUp.sourceLabel).toBe('Rebalance #1');
+    expect(first.rcpan.account.treasuryTopUp.tokenSymbol).toContain('request 1 of 2');
+    expect(first.rcpan.court.phase.title).toContain('request 1 of 2');
+    expect(second.rcpan.account.treasuryTopUp.visible).toBe(true);
+    expect(second.rcpan.account.treasuryTopUp.sourceLabel).toBe('Rebalance #2');
+    expect(second.rcpan.account.treasuryTopUp.tokenSymbol).toContain('request 2 of 2');
+    expect(second.rcpan.court.phase.title).toContain('request 2 of 2');
+    expect(enforcement.rcpan.account.treasuryTopUp.visible).toBe(false);
+    expect(enforcement.rcpan.account.enforceDebt.visible).toBe(true);
   });
 
   test('supports one through four independent token lanes', () => {

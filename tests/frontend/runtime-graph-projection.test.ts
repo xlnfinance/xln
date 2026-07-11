@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import {
   mergeRuntimeGraphProjections,
+  projectRuntimeGraphFrame,
   projectRuntimeViewFrame,
+  requireActionableGraphNodeRuntimeId,
+  resolveActionableGraphNodeRuntimeId,
   type RuntimeGraphAccountState,
   type RuntimeGraphNodeState,
   type RuntimeGraphProjection,
@@ -13,7 +19,11 @@ import {
   selectMergedTimelineEvent,
   runtimeTimelineColor,
 } from '../../frontend/src/lib/network3d/runtimeGraphTimeline';
-import { layoutRuntimeGraph } from '../../frontend/src/lib/network3d/runtimeGraphLayout';
+import {
+  connectedRuntimeGraphEntityIds,
+  layoutRuntimeGraph,
+  resolveRuntimeGraphLayout,
+} from '../../frontend/src/lib/network3d/runtimeGraphLayout';
 import {
   GRAPH_POSITION_OVERRIDES_KEY,
   readGraphPositionOverrides,
@@ -93,7 +103,7 @@ const projection = (
 });
 
 describe('RuntimeGraphProjection', () => {
-  test('Merged deduplicates entities and keeps provenance plus normal desynchronization', () => {
+  test('Merged summary-only entities keep provenance without claiming unverifiable desynchronization', () => {
     const merged = mergeRuntimeGraphProjections([
       projection('browser-a', [node('browser-a', 'a', 5, 1_000)]),
       projection('remote-b', [node('remote-b', 'a', 4, 2_000)]),
@@ -102,19 +112,62 @@ describe('RuntimeGraphProjection', () => {
     expect(merged.nodes).toHaveLength(1);
     expect(merged.nodes[0]?.selected.runtimeId).toBe('remote-b');
     expect(merged.nodes[0]?.provenance).toEqual(['browser-a', 'remote-b']);
-    expect(merged.nodes[0]?.desynchronized).toBe(true);
+    expect(merged.nodes[0]?.desynchronized).toBe(false);
   });
 
-  test('Merged deduplicates J-Machines and keeps runtime provenance', () => {
+  test('merged rendering and wallet navigation prefer an actionable core over a newer summary-only peer', () => {
+    const summaryOnly = node('remote-a', 'hub-b', 9, 2_000, true);
+    const actionable = node('remote-b', 'hub-b', 8, 1_000, true);
+    actionable.core = {
+      entityId: 'hub-b',
+      signerId: 'hub-b-signer',
+      reserves: new Map([[1, 12n]]),
+    } as never;
+    actionable.signerId = 'hub-b-signer';
+    const merged = mergeRuntimeGraphProjections([
+      projection('remote-a', [summaryOnly]),
+      projection('remote-b', [actionable]),
+    ], 'timestamp');
+    const mergedNode = merged.nodes[0];
+
+    expect(mergedNode?.selected.runtimeId).toBe('remote-b');
+    expect(mergedNode?.desynchronized).toBe(false);
+    const rendered = materializeRuntimeGraphReplicas(merged);
+    expect(rendered.get('hub-b:hub-b-signer')?.state.reserves).toEqual(new Map([[1, 12n]]));
+    expect(resolveActionableGraphNodeRuntimeId(mergedNode, 'remote-a')).toBe('remote-b');
+    expect(resolveActionableGraphNodeRuntimeId(mergedNode, 'remote-b')).toBe('remote-b');
+    expect(resolveActionableGraphNodeRuntimeId(
+      mergeRuntimeGraphProjections([projection('remote-a', [summaryOnly])], 'timestamp').nodes[0],
+      'remote-a',
+    )).toBe('');
+    expect(() => requireActionableGraphNodeRuntimeId(
+      mergeRuntimeGraphProjections([projection('remote-a', [summaryOnly])], 'timestamp').nodes[0],
+      'remote-a',
+    )).toThrow('GRAPH_ENTITY_NOT_ACTIONABLE:hub-b');
+  });
+
+  test('Merged J-Machine summaries keep provenance without treating null projections as conflicts', () => {
     const first = projection('browser-a', [node('browser-a', 'a', 5, 1_000)]);
     first.jMachines = [{ ...source('browser-a', 5, 1_000), jMachineId: 'testnet', name: 'Testnet', position: null, machine: { blockNumber: 5 } }];
     const second = projection('remote-b', [node('remote-b', 'b', 4, 2_000)]);
     second.jMachines = [{ ...source('remote-b', 4, 2_000), jMachineId: 'testnet', name: 'Testnet', position: null, machine: null }];
     const merged = mergeRuntimeGraphProjections([first, second], 'timestamp');
     expect(merged.jMachines).toHaveLength(1);
-    expect(merged.jMachines[0]?.selected.runtimeId).toBe('remote-b');
+    expect(merged.jMachines[0]?.selected.runtimeId).toBe('browser-a');
     expect(merged.jMachines[0]?.provenance).toEqual(['browser-a', 'remote-b']);
-    expect(merged.jMachines[0]?.desynchronized).toBe(true);
+    expect(merged.jMachines[0]?.desynchronized).toBe(false);
+  });
+
+  test('Merged J-Machines report divergence when two materialized machine states differ', () => {
+    const first = projection('browser-a', [node('browser-a', 'a', 5, 1_000)]);
+    first.jMachines = [{ ...source('browser-a', 5, 1_000), jMachineId: 'testnet', name: 'Testnet', position: null, machine: { blockNumber: 5 } }];
+    const sameBlockLaterRuntime = projection('browser-c', [node('browser-c', 'c', 8, 3_000)]);
+    sameBlockLaterRuntime.jMachines = [{ ...source('browser-c', 5, 3_000), jMachineId: 'testnet', name: 'Testnet', position: null, machine: { blockNumber: 5 } }];
+    const second = projection('browser-b', [node('browser-b', 'b', 4, 2_000)]);
+    second.jMachines = [{ ...source('browser-b', 4, 2_000), jMachineId: 'testnet', name: 'Testnet', position: null, machine: { blockNumber: 4 } }];
+
+    expect(mergeRuntimeGraphProjections([first, sameBlockLaterRuntime], 'timestamp').jMachines[0]?.desynchronized).toBe(false);
+    expect(mergeRuntimeGraphProjections([first, second], 'timestamp').jMachines[0]?.desynchronized).toBe(true);
   });
 
   test('account canonicity selects left, right, hub, height, or timestamp deterministically', () => {
@@ -169,6 +222,113 @@ describe('RuntimeGraphProjection', () => {
     expect(result.nodes.map((item) => item.entityId)).toEqual(['a', 'b']);
     expect(result.accounts[0]).toMatchObject({ accountId: 'a:b', observerEntityId: 'a', height: 7 });
     expect(result.source).toMatchObject({ runtimeId: 'remote-a', timestamp: 1_234 });
+  });
+
+  test('remote graph-frame projects every local and summary-only peer node', () => {
+    const frame = {
+      height: 9,
+      timestamp: 1_234,
+      entities: [
+        {
+          summary: { entityId: 'a', label: 'Alice', height: 9, jurisdiction: { name: 'Testnet' } },
+          core: {
+            entityId: 'a',
+            signerId: 'alice-signer',
+            height: 9,
+            timestamp: 1_234,
+            profile: { name: 'Alice' },
+          },
+          accounts: {
+            items: [{
+              leftEntity: 'a',
+              rightEntity: 'b',
+              currentHeight: 7,
+              currentFrame: { height: 7, accountStateRoot: 'root-a' },
+            }],
+            nextCursor: null,
+          },
+        },
+        {
+          summary: { entityId: 'b', label: 'Bob', height: 8, jurisdiction: { name: 'Testnet' } },
+          core: null,
+          accounts: { items: [], nextCursor: null },
+        },
+      ],
+    } as never;
+
+    const result = projectRuntimeGraphFrame(frame, { runtimeId: 'remote-a', adapterKind: 'remote' });
+    expect(result.nodes.map((item) => item.entityId)).toEqual(['a', 'b']);
+    expect(result.nodes.find((item) => item.entityId === 'a')).toMatchObject({ signerId: 'alice-signer' });
+    expect(result.nodes.find((item) => item.entityId === 'b')).toMatchObject({ label: 'Bob', core: null });
+    expect(result.accounts).toHaveLength(1);
+    expect(result.accounts[0]).toMatchObject({ accountId: 'a:b', observerEntityId: 'a', height: 7 });
+    expect(result.source).toMatchObject({ runtimeId: 'remote-a', timestamp: 1_234 });
+  });
+
+  test('account desynchronization includes the canonical account-state root', () => {
+    const left = account('remote-left', 'a', 7, 1_000);
+    left.account = {
+      status: 'active',
+      currentHeight: 7,
+      currentFrame: { height: 7, accountStateRoot: 'root-left' },
+    };
+    const right = account('remote-right', 'b', 7, 1_000);
+    right.account = {
+      status: 'active',
+      currentHeight: 7,
+      currentFrame: { height: 7, accountStateRoot: 'root-right' },
+    };
+    const merged = mergeRuntimeGraphProjections([
+      projection('remote-left', [node('remote-left', 'a', 7, 1_000)], [left]),
+      projection('remote-right', [node('remote-right', 'b', 7, 1_000)], [right]),
+    ], 'timestamp');
+
+    expect(merged.accounts[0]?.desynchronized).toBe(true);
+  });
+
+  test('node desynchronization includes reserves that drive rendered node size', () => {
+    const left = node('remote-left', 'a', 7, 1_000);
+    left.core = { reserves: new Map([[1, 100n]]) } as never;
+    const right = node('remote-right', 'a', 7, 1_000);
+    right.core = { reserves: new Map([[1, 200n]]) } as never;
+    const merged = mergeRuntimeGraphProjections([
+      projection('remote-left', [left]),
+      projection('remote-right', [right]),
+    ], 'timestamp');
+
+    expect(merged.nodes[0]?.desynchronized).toBe(true);
+  });
+
+  test('Graph3D projection effect explicitly tracks every asynchronous graph source', async () => {
+    const frontendRequire = createRequire(new URL('../../frontend/package.json', import.meta.url));
+    const compilerPath = frontendRequire.resolve('svelte/compiler');
+    const { compile } = await import(pathToFileURL(compilerPath).href) as typeof import('svelte/compiler');
+    const source = readFileSync(
+      new URL('../../frontend/src/lib/view/panels/Graph3DPanel.svelte', import.meta.url),
+      'utf8',
+    );
+    const compiled = compile(source, {
+      generate: 'client',
+      dev: true,
+      filename: 'Graph3DPanel.svelte',
+    }).js.code;
+    const projectionWrite = compiled.indexOf('$.set(graphProjections');
+    const effectStart = compiled.lastIndexOf('$.legacy_pre_effect', projectionWrite);
+    expect(projectionWrite).toBeGreaterThan(effectStart);
+    const dependencyBlock = compiled.slice(effectStart, projectionWrite);
+
+    for (const dependency of [
+      '$runtimes()',
+      '$activeRuntimeId()',
+      '$runtimeControllerHandle()',
+      '$runtimeGraphScope()',
+      '$networkMachineRuntime()',
+      '$runtimeGraphLiveFrameCache()',
+      '$.get(env)',
+    ]) {
+      expect(dependencyBlock).toContain(dependency);
+    }
+    expect(dependencyBlock).not.toContain('$.legacy_pre_effect(() => {}');
   });
 });
 
@@ -333,6 +493,39 @@ describe('NetworkMachine runtime indexes', () => {
 });
 
 describe('deterministic graph placement', () => {
+  test('reuses layout work while balances change but invalidates on topology or user position changes', () => {
+    const base = mergeRuntimeGraphProjections([
+      projection('browser-a', [node('browser-a', 'a', 1, 1), node('browser-a', 'b', 1, 1)], [
+        account('browser-a', 'a', 1, 1),
+      ]),
+    ], 'timestamp');
+    const first = resolveRuntimeGraphLayout(base);
+    const balanceOnly = structuredClone(base);
+    balanceOnly.nodes[0]!.selected.height = 2;
+    const reused = resolveRuntimeGraphLayout(balanceOnly, new Map(), first);
+    expect(reused).toBe(first);
+
+    const moved = resolveRuntimeGraphLayout(base, new Map([['a', { x: 9, y: 8, z: 7 }]]), first);
+    expect(moved).not.toBe(first);
+    expect(moved.positions.get('a')).toMatchObject({ source: 'user', position: { x: 9, y: 8, z: 7 } });
+
+    const topologyChanged = structuredClone(base);
+    topologyChanged.accounts = [];
+    expect(resolveRuntimeGraphLayout(topologyChanged, new Map(), first)).not.toBe(first);
+  });
+
+  test('camera focus includes the account topology without isolated summary-only nodes', () => {
+    const graph = mergeRuntimeGraphProjections([
+      projection('browser-a', [
+        node('browser-a', 'a', 1, 1, true),
+        node('browser-a', 'b', 1, 1),
+        node('browser-a', 'summary-only', 1, 1),
+      ], [account('browser-a', 'a', 1, 1)]),
+    ], 'timestamp');
+
+    expect(Array.from(connectedRuntimeGraphEntityIds(graph)).sort()).toEqual(['a', 'b']);
+  });
+
   test('same projection always produces the same 3D layout without random input', () => {
     const graph = mergeRuntimeGraphProjections([
       projection('browser-a', [

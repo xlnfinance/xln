@@ -21,7 +21,8 @@ const RCPAN_PHASE_COPY: Readonly<Record<RcpanMicroscopePhase, PhaseCopy>> = {
   challenge: { title: 'Newest valid proof wins', detail: 'H1 may replace it only with a newer co-signed state.', tone: 'warning' },
   finalizing: { title: 'Code allocates every token', detail: 'Collateral first, liquid reserve next, explicit debt last.', tone: 'active' },
   settled: { title: 'Escrow is cleared into reserves', detail: 'Collateral leaves the account and node reserves update.', tone: 'success' },
-  'treasury-topup': { title: 'Treasury restores H1 reserve', detail: 'A separate reserve top-up makes the queued debt payable.', tone: 'warning' },
+  'rebalance-request-1': { title: 'Reserve rises · request 1 of 2', detail: 'An independent rebalance adds reserve; FIFO debt stays queued.', tone: 'warning' },
+  'rebalance-request-2': { title: 'Reserve rises · request 2 of 2', detail: 'A second rebalance completes funding before enforcement.', tone: 'warning' },
   'debt-enforcement': { title: 'FIFO debt is enforced', detail: 'enforceDebts() moves available reserve to User.', tone: 'active' },
   repaid: { title: 'Debt is cleared', detail: 'User is paid; H1 has no hidden shortfall.', tone: 'success' },
 };
@@ -33,7 +34,8 @@ const FCUAN_PHASE_COPY: Readonly<Record<RcpanMicroscopePhase, PhaseCopy>> = {
   challenge: { title: 'No cryptographic challenge path', detail: 'The dispute leaves the account system.', tone: 'danger' },
   finalizing: { title: 'No programmable allocation', detail: 'The fixed rail cannot split collateral and reserves.', tone: 'danger' },
   settled: { title: 'Exposure remains with H1', detail: 'The operator record did not become a reserve payout.', tone: 'danger' },
-  'treasury-topup': { title: 'Treasury action is off-ledger', detail: 'No account-level debt object connects it to User.', tone: 'danger' },
+  'rebalance-request-1': { title: 'Rebalance is unrelated to User', detail: 'No account-level debt object connects this reserve to the claim.', tone: 'danger' },
+  'rebalance-request-2': { title: 'A second rebalance changes nothing', detail: 'The operator still has no executable FIFO obligation.', tone: 'danger' },
   'debt-enforcement': { title: 'No enforceDebts() path', detail: 'Recovery depends on an external process.', tone: 'danger' },
   repaid: { title: 'No deterministic account recovery', detail: 'A later payment is not linked to this claim by code.', tone: 'danger' },
 };
@@ -58,7 +60,8 @@ function rcpanVerdict(frame: MicroscopeFinanceFrame, timeline: RcpanTimelineStat
   if (timeline.phase === 'dispute-open') return 'Proof submitted';
   if (timeline.phase === 'challenge') return 'Challenge window';
   if (timeline.phase === 'finalizing') return 'Allocating';
-  if (timeline.phase === 'treasury-topup') return 'Reserve top-up';
+  if (timeline.phase === 'rebalance-request-1') return 'Reserve request 1/2';
+  if (timeline.phase === 'rebalance-request-2') return 'Reserve request 2/2';
   if (timeline.phase === 'debt-enforcement') return 'Paying FIFO debt';
   if (timeline.phase === 'repaid') return 'Debt cleared';
   return frame.current.debt > 0n ? 'Debt queued' : 'Paid to reserves';
@@ -67,7 +70,7 @@ function rcpanVerdict(frame: MicroscopeFinanceFrame, timeline: RcpanTimelineStat
 function rowTone(frame: MicroscopeFinanceFrame, timeline: RcpanTimelineState): MicroscopeCourtRow['tone'] {
   if (timeline.phase === 'payment') return 'idle';
   if (timeline.phase === 'settled' && frame.current.debt > 0n) return 'danger';
-  if (['challenge', 'treasury-topup'].includes(timeline.phase)) return 'warning';
+  if (['challenge', 'rebalance-request-1', 'rebalance-request-2'].includes(timeline.phase)) return 'warning';
   if (['signed', 'settled', 'repaid'].includes(timeline.phase)) return 'success';
   return 'active';
 }

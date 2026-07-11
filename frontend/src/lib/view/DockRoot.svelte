@@ -53,6 +53,7 @@
   type MountedComponent = ReturnType<typeof mount> | null;
 
   const graphInitSignal = writable<boolean>(embedMode);
+  const MOBILE_DOCK_MAX_WIDTH = 760;
   const pendingEntityData = new Map<string, EntityPanelSeed>();
   const ENV_ONLY_PANEL_NAMES = new Set([
     'architect',
@@ -155,6 +156,7 @@
 
   onMount(() => {
     graphInitSignal.set(true);
+    const mobileDockLayout = !embedMode && window.innerWidth <= MOBILE_DOCK_MAX_WIDTH;
 
     dockview = new DockviewComponent(container, {
       className: 'dockview-theme-dark',
@@ -345,7 +347,7 @@
 
     const savedLayout = localStorage.getItem('xln-workspace-layout');
     let shouldRestoreLayout = false;
-    if (savedLayout) {
+    if (savedLayout && !mobileDockLayout) {
       try {
         const config = JSON.parse(savedLayout);
         if (config.dockview) shouldRestoreLayout = true;
@@ -372,22 +374,31 @@
         component: 'wallet',
         tabComponent: 'pinned-tab',
         title: 'Main Wallet',
-        position: { direction: 'right', referencePanel: 'graph3d' },
+        position: mobileDockLayout
+          ? { direction: 'within', referencePanel: 'graph3d' }
+          : { direction: 'right', referencePanel: 'graph3d' },
+        inactive: mobileDockLayout,
       });
 
       ensurePanel({
         id: 'architect',
         component: 'architect',
         title: '🎬 Architect',
-        position: { direction: 'below', referencePanel: 'wallet-main' },
-        initialHeight: Math.max(240, Math.floor(window.innerHeight * 0.32)),
+        position: mobileDockLayout
+          ? { direction: 'within', referencePanel: 'graph3d' }
+          : { direction: 'below', referencePanel: 'wallet-main' },
+        ...(mobileDockLayout
+          ? { inactive: true }
+          : { initialHeight: Math.max(240, Math.floor(window.innerHeight * 0.32)) }),
       });
 
       ensurePanel({
         id: 'jurisdiction',
         component: 'jurisdiction',
         title: '🏛️ J-Machine',
-        position: { direction: 'right', referencePanel: 'architect' },
+        position: mobileDockLayout
+          ? { direction: 'within', referencePanel: 'graph3d' }
+          : { direction: 'right', referencePanel: 'architect' },
         inactive: true,
       });
 
@@ -436,6 +447,7 @@
     const graph3dApi = dockview.getPanel('graph3d');
     if (graph3dApi) {
       setTimeout(() => {
+        if (mobileDockLayout) return;
         const widthPercent = embedMode ? 1.0 : 0.50;
         graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
       }, 100);
@@ -448,6 +460,10 @@
 
     dockview.onDidLayoutChange(() => {
       if (saveLayoutTimer) clearTimeout(saveLayoutTimer);
+      if (mobileDockLayout) {
+        saveLayoutTimer = null;
+        return;
+      }
       saveLayoutTimer = setTimeout(() => {
         try {
           const config = {

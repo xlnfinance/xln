@@ -1,5 +1,5 @@
 import type { BookState, BookOrderState, PriceBucketState, PriceLevelState } from '../orderbook';
-import type { EntityReplica, EntityState, Env, ExternalWalletState } from '../types';
+import type { AccountTx, EntityReplica, EntityState, Env, ExternalWalletState } from '../types';
 import type { JBatch, JBatchState, SentJBatch } from '../j-batch';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
@@ -18,6 +18,7 @@ import type {
 } from '../storage/types';
 import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../sorted-index';
 import { RuntimeAdapterError } from './errors';
+import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
 import {
   deriveRuntimeRecoveryLookupKey,
@@ -121,6 +122,80 @@ export type RuntimeAdapterViewFrame = {
   entities: RuntimeAdapterEntitySummary[];
   activeEntityId: string | null;
   activeEntity: RuntimeAdapterViewEntityFrame | null;
+};
+
+export type RuntimeAdapterGraphEntityCore = {
+  entityId: string;
+  signerId?: string;
+  height: number;
+  timestamp: number;
+  prevFrameHash?: string;
+  reserves: StorageEntityCoreDoc['reserves'];
+  profile: Pick<StorageEntityCoreDoc['profile'], 'name' | 'isHub'>;
+  isHub?: boolean;
+};
+
+export type RuntimeAdapterGraphAccountActivity = {
+  type: string;
+  tokenId?: number;
+  amount?: bigint;
+  fromEntityId?: string;
+  toEntityId?: string;
+};
+
+export type RuntimeAdapterGraphAccountFrame = Pick<
+  StorageAccountDoc['currentFrame'],
+  'height' | 'timestamp' | 'jHeight' | 'prevFrameHash' | 'accountStateRoot' | 'stateHash' | 'byLeft'
+> & {
+  accountTxs: RuntimeAdapterGraphAccountActivity[];
+  accountTxCount: number;
+};
+
+export type RuntimeAdapterGraphAccount = {
+  leftEntity: string;
+  rightEntity: string;
+  status: StorageAccountDoc['status'];
+  mempool: RuntimeAdapterGraphAccountActivity[];
+  mempoolCount: number;
+  currentFrame: RuntimeAdapterGraphAccountFrame;
+  deltas: StorageAccountDoc['deltas'];
+  currentHeight: number;
+  pendingFrame?: RuntimeAdapterGraphAccountFrame;
+  rollbackCount: number;
+  lastRollbackFrameHash?: string;
+  activeDispute?: {
+    startedByLeft: boolean;
+    disputeTimeout: number;
+    initialDisputeNonce: number;
+  };
+};
+
+export type RuntimeAdapterGraphAccountPage = Omit<RuntimeAdapterAccountPage, 'items' | 'summary'> & {
+  items: RuntimeAdapterGraphAccount[];
+};
+
+export type RuntimeAdapterGraphEntityFrame = {
+  summary: RuntimeAdapterEntitySummary;
+  core: RuntimeAdapterGraphEntityCore | null;
+  accounts: RuntimeAdapterGraphAccountPage;
+};
+
+/**
+ * Complete, bounded graph projection for one runtime frame.
+ *
+ * Unlike view-frame this payload is not scoped to the currently inspected
+ * entity. Local entities carry every account observation within the global
+ * graph bound; discovered gossip/account peers are retained as summary-only
+ * nodes. If either bound is exceeded, the consumer gets E_BAD_QUERY instead
+ * of a partial topology.
+ */
+export type RuntimeAdapterGraphFrame = {
+  head: StorageHead;
+  runtimeId: string;
+  height: number;
+  timestamp: number;
+  stateHash: string;
+  entities: RuntimeAdapterGraphEntityFrame[];
 };
 
 export type RuntimeAdapterHistoryFrameBatch = {
@@ -1333,6 +1408,214 @@ const projectViewFrame = async (
   };
 };
 
+const projectGraphEntityCore = (core: StorageEntityCoreDoc): RuntimeAdapterGraphEntityCore => ({
+  entityId: core.entityId,
+  ...withDefinedProp('signerId', core.signerId),
+  height: core.height,
+  timestamp: core.timestamp,
+  ...withDefinedProp('prevFrameHash', core.prevFrameHash),
+  reserves: new Map(core.reserves),
+  profile: { name: core.profile.name, isHub: core.profile.isHub },
+  isHub: core.profile.isHub || Boolean(core.orderbookHubProfile),
+});
+
+const GRAPH_ACCOUNT_ACTIVITY_SAMPLE_LIMIT = 2;
+
+const projectGraphAccountActivity = (tx: AccountTx): RuntimeAdapterGraphAccountActivity => {
+  const data = tx.data && typeof tx.data === 'object'
+    ? tx.data as unknown as Record<string, unknown>
+    : {};
+  const tokenId = Number(data['tokenId']);
+  const amount = data['amount'];
+  const fromEntityId = typeof data['fromEntityId'] === 'string' ? data['fromEntityId'] : undefined;
+  const toEntityId = typeof data['toEntityId'] === 'string' ? data['toEntityId'] : undefined;
+  return {
+    type: tx.type,
+    ...(Number.isSafeInteger(tokenId) && tokenId >= 0 ? { tokenId } : {}),
+    ...(typeof amount === 'bigint' ? { amount } : {}),
+    ...withDefinedProp('fromEntityId', fromEntityId),
+    ...withDefinedProp('toEntityId', toEntityId),
+  };
+};
+
+const projectGraphAccountActivities = (
+  txs: readonly AccountTx[],
+): RuntimeAdapterGraphAccountActivity[] => txs
+  .slice(-GRAPH_ACCOUNT_ACTIVITY_SAMPLE_LIMIT)
+  .map(projectGraphAccountActivity);
+
+const projectGraphAccountFrame = (
+  frame: StorageAccountDoc['currentFrame'],
+): RuntimeAdapterGraphAccountFrame => ({
+  height: frame.height,
+  timestamp: frame.timestamp,
+  jHeight: frame.jHeight,
+  prevFrameHash: frame.prevFrameHash,
+  accountStateRoot: frame.accountStateRoot,
+  stateHash: frame.stateHash,
+  ...withDefinedProp('byLeft', frame.byLeft),
+  accountTxs: projectGraphAccountActivities(frame.accountTxs),
+  accountTxCount: frame.accountTxs.length,
+});
+
+const projectGraphAccount = (doc: StorageAccountDoc): RuntimeAdapterGraphAccount => ({
+  leftEntity: doc.leftEntity,
+  rightEntity: doc.rightEntity,
+  status: doc.status,
+  mempool: projectGraphAccountActivities(doc.mempool),
+  mempoolCount: doc.mempool.length,
+  currentFrame: projectGraphAccountFrame(doc.currentFrame),
+  deltas: new Map(doc.deltas),
+  currentHeight: doc.currentHeight,
+  ...(doc.pendingFrame ? { pendingFrame: projectGraphAccountFrame(doc.pendingFrame) } : {}),
+  rollbackCount: doc.rollbackCount,
+  ...withDefinedProp('lastRollbackFrameHash', doc.lastRollbackFrameHash),
+  ...(doc.activeDispute ? {
+    activeDispute: {
+      startedByLeft: doc.activeDispute.startedByLeft,
+      disputeTimeout: doc.activeDispute.disputeTimeout,
+      initialDisputeNonce: doc.activeDispute.initialNonce,
+    },
+  } : {}),
+});
+
+export const assertRuntimeAdapterGraphFrameWireBudget = (frame: RuntimeAdapterGraphFrame): number => {
+  const encoded = encodeRuntimeAdapterMessage({
+    v: 1,
+    inReplyTo: 'graph-frame-budget',
+    ok: true,
+    payload: frame,
+  });
+  const maxBytes = runtimeAdapterMaxMessageBytes();
+  if (encoded.byteLength > maxBytes) {
+    throw new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      `graph-frame response exceeds wire budget: ${encoded.byteLength} bytes > ${maxBytes}`,
+    );
+  }
+  return encoded.byteLength;
+};
+
+const projectGraphFrame = async (
+  ctx: RuntimeAdapterResolveContext,
+  query?: RuntimeAdapterReadQuery,
+): Promise<RuntimeAdapterGraphFrame> => {
+  const requestedHeight = readAtHeight(query);
+  const currentEnvHeight = envHeight(ctx.env);
+  const isCurrentHeight = requestedHeight === null || requestedHeight === currentEnvHeight;
+  if (!isCurrentHeight && !ctx.readHead) {
+    throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical graph reads');
+  }
+  const persistedHead = !isCurrentHeight ? await ctx.readHead!() : null;
+  if (!isCurrentHeight && !persistedHead) {
+    throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${requestedHeight}`);
+  }
+  if (!isCurrentHeight) assertRequestedHeightAvailable(requestedHeight!, persistedHead!, 'graph-frame');
+
+  const head = persistedHead ?? await readBestHead(ctx);
+  const height = requestedHeight ?? currentEnvHeight;
+  const heightQuery = requestedHeight !== null && height > 0 ? { ...query, atHeight: height } : query;
+  const summaries = await listEntitySummaries(ctx, heightQuery, { allowPartial: false });
+  const localEntityIds = isCurrentHeight
+    ? new Set(Array.from(ctx.env.eReplicas?.values?.() ?? []).map((replica) => normalizeEntityId(replica.entityId)))
+    : null;
+  const entityLimit = readBoundedLimit(query?.limit, 500);
+  if (summaries.length > entityLimit) {
+    throw new RuntimeAdapterError(
+      'E_BAD_QUERY',
+      `graph-frame has ${summaries.length} entities; limit is ${entityLimit}. Select a runtime/filter before rendering`,
+    );
+  }
+
+  const accountsLimit = readBoundedLimit(query?.accountsLimit, 500);
+  const entities: RuntimeAdapterGraphEntityFrame[] = [];
+  let accountObservationCount = 0;
+  for (const summary of summaries) {
+    if (localEntityIds && !localEntityIds.has(normalizeEntityId(summary.entityId))) {
+      entities.push({
+        summary,
+        core: null,
+        accounts: { items: [], ...emptyPageMeta(accountsLimit) },
+      });
+      continue;
+    }
+    const stored = await loadViewPageForHeight(ctx, summary.entityId, height, isCurrentHeight, {
+      ...heightQuery,
+      accountsLimit,
+      booksLimit: 1,
+    });
+    const totalAccounts = Math.max(stored.accounts.items.length, Number(stored.accounts.totalItems ?? 0));
+    if (stored.accounts.nextCursor || totalAccounts > stored.accounts.items.length) {
+      throw new RuntimeAdapterError(
+        'E_BAD_QUERY',
+        `graph-frame entity ${summary.entityId} has ${totalAccounts} accounts; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+      );
+    }
+    accountObservationCount += stored.accounts.items.length;
+    if (accountObservationCount > accountsLimit) {
+      throw new RuntimeAdapterError(
+        'E_BAD_QUERY',
+        `graph-frame has ${accountObservationCount} account observations; limit is ${accountsLimit}. Select a runtime/filter before rendering`,
+      );
+    }
+    const accountPage = { ...stored.accounts };
+    delete accountPage.summary;
+    entities.push({
+      summary,
+      core: projectGraphEntityCore(stored.core),
+      accounts: { ...accountPage, items: stored.accounts.items.map(projectGraphAccount) },
+    });
+  }
+
+  const knownEntityIds = new Set(entities.map((entity) => normalizeEntityId(entity.summary.entityId)));
+  for (const entity of [...entities]) {
+    for (const account of entity.accounts.items) {
+      for (const endpoint of [account.leftEntity, account.rightEntity]) {
+        const endpointId = normalizeEntityId(endpoint);
+        if (!endpointId || knownEntityIds.has(endpointId)) continue;
+        if (entities.length >= entityLimit) {
+          throw new RuntimeAdapterError(
+            'E_BAD_QUERY',
+            `graph-frame has more than ${entityLimit} account endpoints. Select a runtime/filter before rendering`,
+          );
+        }
+        knownEntityIds.add(endpointId);
+        entities.push({
+          summary: {
+            entityId: endpointId,
+            ...(ctx.env.runtimeId ? { runtimeId: normalizeEntityId(ctx.env.runtimeId) } : {}),
+            label: endpointId,
+            height,
+          },
+          core: null,
+          accounts: { items: [], ...emptyPageMeta(accountsLimit) },
+        });
+      }
+    }
+  }
+  entities.sort((left, right) => compareAscii(left.summary.entityId, right.summary.entityId));
+
+  const record = ctx.readFrame ? await ctx.readFrame(height) : null;
+  const fallbackTimestamp = entities.reduce(
+    (latest, entity) => Math.max(latest, Number(entity.core?.timestamp || 0)),
+    isCurrentHeight ? Number(ctx.env.timestamp || 0) : 0,
+  );
+  const timestamp = Math.max(
+    0,
+    Math.floor(Number(record?.timestamp ?? fallbackTimestamp)),
+  );
+  const frame: RuntimeAdapterGraphFrame = {
+    head,
+    runtimeId: normalizeEntityId(String(ctx.env.runtimeId || '')),
+    height,
+    timestamp,
+    stateHash: String(record?.stateHash || ''),
+    entities,
+  };
+  assertRuntimeAdapterGraphFrameWireBudget(frame);
+  return frame;
+};
+
 const projectHistoryFrameBatch = async (
   ctx: RuntimeAdapterResolveContext,
   query?: RuntimeAdapterReadQuery,
@@ -1569,6 +1852,10 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
   if (parts.length === 1 && parts[0] === 'view-frame') {
     return await projectViewFrame(ctx, query) as T;
+  }
+
+  if (parts.length === 1 && parts[0] === 'graph-frame') {
+    return await projectGraphFrame(ctx, query) as T;
   }
 
   if (parts.length === 1 && parts[0] === 'history-frame-batch') {

@@ -21,9 +21,13 @@ function trackBrowserIssues(page: Page): BrowserIssue[] {
 async function loadRcpan(page: Page, theme: 'dark' | 'light'): Promise<BrowserIssue[]> {
   const issues = trackBrowserIssues(page);
   await page.addInitScript((selectedTheme) => {
-    localStorage.setItem('xln-settings', JSON.stringify({ theme: selectedTheme }));
+    localStorage.setItem('xln-settings', JSON.stringify({
+      theme: selectedTheme,
+      showXlnMascot: true,
+    }));
   }, theme);
   await page.goto('/rcpan', { waitUntil: 'networkidle' });
+  await expect(page.getByTestId('xln-mascot-root')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'A balance you can take to court.' })).toBeVisible();
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
   await pause(page);
@@ -62,10 +66,17 @@ async function runToPhase(page: Page, scenario: Scenario, phase: string): Promis
   await pause(page);
 }
 
-async function capture(page: Page, testInfo: TestInfo, name: string, selector?: string): Promise<void> {
-  const path = testInfo.outputPath(`${name}.png`);
-  if (selector) await page.locator(selector).screenshot({ path, animations: 'allow' });
-  else await page.screenshot({ path, fullPage: true, animations: 'allow' });
+async function capture(
+  page: Page,
+  testInfo: TestInfo,
+  name: string,
+  selector?: string,
+  animations: 'allow' | 'disabled' = 'disabled',
+): Promise<void> {
+  const path = testInfo.outputPath(`${name}.jpg`);
+  const image = { path, type: 'jpeg' as const, quality: 92, animations };
+  if (selector) await page.locator(selector).screenshot(image);
+  else await page.screenshot({ ...image, fullPage: true });
 }
 
 async function assertNoOverflow(page: Page): Promise<void> {
@@ -73,8 +84,58 @@ async function assertNoOverflow(page: Page): Promise<void> {
   expect(dimensions.document, 'page must not overflow horizontally').toBeLessThanOrEqual(dimensions.viewport);
 }
 
+async function assertMicroscopeNodesContained(page: Page): Promise<void> {
+  const violations = await page.locator('.microscope-stage').evaluateAll((stages) => stages.flatMap((stage, stageIndex) => {
+    const boundary = stage.getBoundingClientRect();
+    return [...stage.querySelectorAll('.reserve-orbit, .node-identity')].flatMap((element) => {
+      const rect = element.getBoundingClientRect();
+      const clippedLeft = rect.left < boundary.left - 1;
+      const clippedRight = rect.right > boundary.right + 1;
+      return clippedLeft || clippedRight
+        ? [{
+          stageIndex,
+          className: element.className,
+          left: Math.round(rect.left),
+          right: Math.round(rect.right),
+          boundaryLeft: Math.round(boundary.left),
+          boundaryRight: Math.round(boundary.right),
+        }]
+        : [];
+    });
+  }));
+  expect(violations, 'reserve nodes and their captions must stay inside the microscope stage').toEqual([]);
+}
+
+async function assertHeroContentContained(page: Page): Promise<void> {
+  await expect(page.locator('.sales-hero-inner')).toHaveCount(1);
+  await expect(page.locator('.sales-hero-summary')).toHaveCount(1);
+  await expect(page.locator('.sales-hero .sales-action')).toHaveCount(2);
+  const violations = await page.locator(
+    '.sales-hero-inner, .sales-hero-summary, .sales-hero .sales-action',
+  ).evaluateAll((elements) => {
+    const hero = document.querySelector('.sales-hero');
+    if (!hero) return [{ selector: '.sales-hero', reason: 'missing' }];
+    const boundary = hero.getBoundingClientRect();
+    const visibleLeft = Math.max(0, boundary.left);
+    const visibleRight = Math.min(window.innerWidth, boundary.right);
+    return elements.flatMap((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.left < visibleLeft - 1 || rect.right > visibleRight + 1
+        ? [{
+            selector: element.className,
+            left: Math.round(rect.left),
+            right: Math.round(rect.right),
+            visibleLeft: Math.round(visibleLeft),
+            visibleRight: Math.round(visibleRight),
+          }]
+        : [];
+    });
+  });
+  expect(violations, 'hero copy and CTAs must stay inside the visible iPhone hero').toEqual([]);
+}
+
 async function assertCoreSurface(page: Page): Promise<void> {
-  await expect(page.locator('.topbar-links > a')).toHaveText(['App', 'Docs', 'RCPAN']);
+  await expect(page.locator('.topbar-links > a')).toHaveText(['App', 'Docs', 'RCPAN', 'Releases']);
   await expect(page.getByRole('link', { name: 'RCPAN', exact: true })).toHaveClass(/active/);
   await expect(page.locator('.system-story')).toHaveCount(2);
   await expect(page.locator('.system-story').nth(0).locator('.reserve-node')).toHaveCount(2);
@@ -86,6 +147,7 @@ async function assertCoreSurface(page: Page): Promise<void> {
   await expect(page.locator('.fcuan-story .proof-state b')).toHaveText('No shared proof');
   await expect(page.getByText('Why xln is a different kind of L2')).toBeVisible();
   await assertNoOverflow(page);
+  await assertMicroscopeNodesContained(page);
 }
 
 async function newViewportPage(browser: Browser, width: number, height: number, deviceScaleFactor = 1) {
@@ -104,7 +166,7 @@ test.describe('RCPAN dispute microscope', () => {
     await wide.page.locator('button[aria-label="Play simulation"]').click();
     await wide.page.waitForTimeout(260);
     await pause(wide.page);
-    await capture(wide.page, testInfo, 'wide-light-payment-moving', '.microscope-section');
+    await capture(wide.page, testInfo, 'wide-light-payment-moving', '.microscope-section', 'allow');
 
     await runToPhase(wide.page, 'full-collateral', 'settled');
     await expect(wide.page.locator('.rcpan-story .system-number')).toContainText('$0');
@@ -121,15 +183,29 @@ test.describe('RCPAN dispute microscope', () => {
 
     await runToPhase(laptop.page, 'reserve-backed', 'dispute open');
     await expect(laptop.page.getByTestId('microscope-court-request').last()).toBeVisible();
+    await expect(laptop.page.getByTestId('microscope-dispute-outline').last()).toBeVisible();
+    await assertMicroscopeNodesContained(laptop.page);
     await capture(laptop.page, testInfo, 'laptop-dark-dispute-request', '.microscope-section');
 
     await runToPhase(laptop.page, 'debt-recovery', 'settled');
     await expect(laptop.page.getByTestId('microscope-debt-object').last()).toContainText('FIFO debt object');
     await capture(laptop.page, testInfo, 'laptop-dark-debt-queued', '.microscope-section');
 
-    await runToPhase(laptop.page, 'debt-recovery', 'treasury topup');
-    await expect(laptop.page.getByTestId('microscope-treasury-flow')).toBeVisible();
-    await capture(laptop.page, testInfo, 'laptop-dark-treasury-topup', '.rcpan-story');
+    await runToPhase(laptop.page, 'debt-recovery', 'rebalance request 1');
+    const firstReserveRequest = laptop.page.getByTestId('microscope-reserve-flow');
+    await expect(firstReserveRequest).toBeVisible();
+    await expect(firstReserveRequest).toContainText('Rebalance #1');
+    await expect(firstReserveRequest).toContainText('request 1 of 2');
+    await expect(laptop.page.locator('.rcpan-story .phase-header')).toContainText('request 1 of 2');
+    await capture(laptop.page, testInfo, 'laptop-dark-rebalance-request-1', '.rcpan-story');
+
+    await runToPhase(laptop.page, 'debt-recovery', 'rebalance request 2');
+    const secondReserveRequest = laptop.page.getByTestId('microscope-reserve-flow');
+    await expect(secondReserveRequest).toBeVisible();
+    await expect(secondReserveRequest).toContainText('Rebalance #2');
+    await expect(secondReserveRequest).toContainText('request 2 of 2');
+    await expect(laptop.page.locator('.rcpan-story .phase-header')).toContainText('request 2 of 2');
+    await capture(laptop.page, testInfo, 'laptop-dark-rebalance-request-2', '.rcpan-story');
 
     await runToPhase(laptop.page, 'debt-recovery', 'debt enforcement');
     await expect(laptop.page.getByTestId('microscope-enforce-flow')).toBeVisible();
@@ -149,6 +225,7 @@ test.describe('RCPAN dispute microscope', () => {
     const page = await context.newPage();
     const issues = await loadRcpan(page, 'dark');
     await assertCoreSurface(page);
+    await assertHeroContentContained(page);
     await capture(page, testInfo, 'iphone-dark-full-page');
     await capture(page, testInfo, 'iphone-dark-hero', '.sales-hero');
 

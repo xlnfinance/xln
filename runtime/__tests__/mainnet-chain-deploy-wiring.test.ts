@@ -16,7 +16,7 @@ describe('mainnet chain deployment wiring', () => {
   });
 
   test('hardhat has explicit Ethereum testnet and mainnet networks', () => {
-    const config = readFileSync(join(repoRoot, 'jurisdictions/hardhat.config.cjs'), 'utf8');
+    const config = readFileSync(join(repoRoot, 'jurisdictions/hardhat.config.ts'), 'utf8');
     expect(config).toContain('"ethereum-sepolia"');
     expect(config).toContain('requiredRpcPlaceholder("ETH_SEPOLIA_RPC")');
     expect(config).toContain('chainId: 11155111');
@@ -25,6 +25,21 @@ describe('mainnet chain deployment wiring', () => {
     expect(config).toContain('chainId: 1');
     expect(config).toContain('DEPLOYER_PRIVATE_KEY');
     expect(config).toContain('key.startsWith("0x") ? key : `0x${key}`');
+  });
+
+  test('hardhat TypeScript tests use the Node 20 compatible CommonJS loader', () => {
+    const pkg = JSON.parse(readFileSync(join(repoRoot, 'jurisdictions/package.json'), 'utf8')) as {
+      type?: string;
+    };
+    const tsconfig = JSON.parse(readFileSync(join(repoRoot, 'jurisdictions/tsconfig.json'), 'utf8')) as {
+      compilerOptions: { module: string };
+      'ts-node': { esm: boolean; moduleTypes: Record<string, string> };
+    };
+    expect(pkg.type).toBeUndefined();
+    expect(tsconfig.compilerOptions.module).toBe('commonjs');
+    expect(tsconfig['ts-node'].esm).toBe(false);
+    expect(tsconfig['ts-node'].moduleTypes['../runtime/**/*.ts']).toBe('cjs');
+    expect(tsconfig['ts-node'].moduleTypes['../frontend/**/*.ts']).toBe('cjs');
   });
 
   test('chain matrix deploys real TRON profile through TronWeb and public TRON chain IDs', () => {

@@ -17,7 +17,7 @@
 		if (!browser) return;
 		const disposeRangeSliderProgress = installRangeSliderProgress();
 		void initializeNativeShell();
-		if (!skipDeployLabel) {
+		if (!skipDeployLabel && chromeMode === 'site') {
 			void loadDeployLabel();
 		}
 		return () => {
@@ -48,7 +48,9 @@
 	});
 
 	let showTopbar = $derived(!isEmbed && chromeMode === 'site');
-	let showXlnMascot = $derived(!isEmbed && $page.url.pathname.startsWith('/app'));
+	let showXlnMascot = $derived(!isEmbed && (
+		$page.url.pathname === '/app' || $page.url.pathname.startsWith('/app/')
+	));
 	let deployLabel = $state('');
 
 	async function loadDeployLabel(): Promise<void> {

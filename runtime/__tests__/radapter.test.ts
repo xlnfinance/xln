@@ -8,10 +8,18 @@ import {
   verifyRuntimeAdapterAuthCredential,
   verifyRuntimeAdapterAuthKey,
 } from '../radapter/auth';
-import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../radapter/codec';
+import {
+  decodeRuntimeAdapterMessage,
+  encodeRuntimeAdapterMessage,
+  runtimeAdapterMaxMessageBytes,
+} from '../radapter/codec';
 import { EmbeddedRuntimeAdapter } from '../radapter/embedded';
 import { RemoteRuntimeAdapter } from '../radapter/remote';
-import { resolveRuntimeAdapterRead } from '../radapter/resolve';
+import {
+  assertRuntimeAdapterGraphFrameWireBudget,
+  resolveRuntimeAdapterRead,
+  type RuntimeAdapterGraphFrame,
+} from '../radapter/resolve';
 import {
   decryptRuntimeRecoveryBundle,
   deriveRuntimeRecoveryLookupKey,
@@ -44,7 +52,7 @@ import type {
   StorageMerkleRootDoc,
   StorageSnapshotManifest,
 } from '../storage/types';
-import type { Delta, EntityReplica, Env, RuntimeInput } from '../types';
+import type { AccountTx, Delta, EntityReplica, Env, RuntimeInput } from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
 import { createGossipLayer, type Profile } from '../networking/gossip';
@@ -122,6 +130,7 @@ const makeEnv = (): Env => ({
               accountTxs: [],
               prevFrameHash: 'genesis',
               stateHash: '0x1',
+              accountStateRoot: `0x${'01'.repeat(32)}`,
               deltas: [],
             },
             deltas: new Map(),
@@ -696,6 +705,264 @@ test('runtime adapter view-frame includes live gossip summaries for visible acco
   expect(peer?.isHub).toBe(true);
   expect(peer?.jurisdiction?.name).toBe('Testnet');
   expect(peer?.jurisdiction?.chainId).toBe(31337);
+});
+
+test('runtime adapter graph-frame keeps gossip peers and complete local account edges', async () => {
+  const env = makeEnv();
+  env.runtimeId = 'runtime:h1';
+  env.gossip = createGossipLayer();
+  env.gossip.announce(makeHubProfile(entityId, 'H1'));
+  env.gossip.announce(makeHubProfile(counterpartyId, 'H2'));
+  const account = Array.from(env.eReplicas.values())[0]!.state.accounts.get(counterpartyId)!;
+  account.deltas.set(1, makeTestDelta(1, 25n));
+  const activityTxs: AccountTx[] = [10n, 20n, 30n].map((amount) => ({
+    type: 'direct_payment',
+    data: {
+      tokenId: 1,
+      amount,
+      fromEntityId: entityId,
+      toEntityId: counterpartyId,
+      route: [entityId, counterpartyId],
+      description: `full payload ${amount}`,
+    },
+  }));
+  account.mempool = activityTxs;
+  account.currentFrame.accountTxs = activityTxs;
+  account.pendingFrame = {
+    ...account.currentFrame,
+    height: account.currentFrame.height + 1,
+    accountTxs: activityTxs,
+  };
+
+  const frame = await resolveRuntimeAdapterRead<RuntimeAdapterGraphFrame>({
+    env,
+    loadEntityViewPage: makeTestViewPageLoader(env),
+  }, 'graph-frame', {
+    limit: 10,
+    accountsLimit: 10,
+  });
+
+  expect(frame.runtimeId).toBe('runtime:h1');
+  expect(frame.height).toBe(7);
+  expect(frame.timestamp).toBe(700);
+  expect(frame.stateHash).toBe('');
+  expect(frame.entities.map((entry) => entry.summary.entityId)).toEqual([entityId, counterpartyId]);
+  const local = frame.entities.find((entry) => entry.summary.entityId === entityId);
+  expect(local?.core?.entityId).toBe(entityId);
+  expect(local?.core?.reserves).toEqual(new Map([[1, 100n]]));
+  expect(local?.accounts.items).toHaveLength(1);
+  expect(local?.accounts.items[0]).toMatchObject({ leftEntity: entityId, rightEntity: counterpartyId });
+  expect(local?.accounts.items[0]?.deltas.get(1)?.ondelta).toBe(25n);
+  expect(local?.accounts.items[0]?.currentFrame.accountStateRoot).toBe(`0x${'01'.repeat(32)}`);
+  expect(local?.accounts.items[0]?.mempoolCount).toBe(3);
+  expect(local?.accounts.items[0]?.mempool.map((activity) => activity.amount)).toEqual([20n, 30n]);
+  expect(local?.accounts.items[0]?.currentFrame.accountTxCount).toBe(3);
+  expect(local?.accounts.items[0]?.currentFrame.accountTxs.map((activity) => activity.amount)).toEqual([20n, 30n]);
+  expect(local?.accounts.items[0]?.pendingFrame?.accountTxCount).toBe(3);
+  expect(local?.accounts.items[0]?.pendingFrame?.accountTxs.map((activity) => activity.amount)).toEqual([20n, 30n]);
+  expect(local?.accounts.items[0]?.currentFrame.accountTxs[0]).toEqual({
+    type: 'direct_payment',
+    tokenId: 1,
+    amount: 20n,
+    fromEntityId: entityId,
+    toEntityId: counterpartyId,
+  });
+  expect(local?.accounts.items[0]?.currentFrame.accountTxs[0]).not.toHaveProperty('route');
+  expect(local?.accounts.items[0]?.currentFrame.accountTxs[0]).not.toHaveProperty('description');
+  for (const heavyCoreField of ['messages', 'nonces', 'proposals', 'entityEncPrivKey', 'jBlockChain', 'lockBook']) {
+    expect(local?.core).not.toHaveProperty(heavyCoreField);
+  }
+  for (const heavyAccountField of [
+    'watchSeed',
+    'locks',
+    'swapOffers',
+    'pendingSignatures',
+    'proofBody',
+    'pendingWithdrawals',
+    'rebalancePolicy',
+    'globalCreditLimits',
+    'jEventChain',
+  ]) {
+    expect(local?.accounts.items[0]).not.toHaveProperty(heavyAccountField);
+  }
+  const peer = frame.entities.find((entry) => entry.summary.entityId === counterpartyId);
+  expect(peer?.summary.label).toBe('H2');
+  expect(peer?.core).toBeNull();
+  expect(peer?.accounts.items).toEqual([]);
+
+  await expect(resolveRuntimeAdapterRead({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'graph-frame', {
+    limit: 1,
+    accountsLimit: 10,
+  })).rejects.toThrow('graph-frame has 2 entities; limit is 1');
+});
+
+test('runtime adapter graph-frame wire DTO stays below budget near topology limits', () => {
+  const entityCount = 496;
+  const accountCount = 500;
+  const tokenIds = [1, 2, 3, 4];
+  const ids = Array.from(
+    { length: entityCount },
+    (_, index) => `0x${(index + 1).toString(16).padStart(64, '0')}`,
+  );
+  let remainingAccounts = accountCount;
+  const entities: RuntimeAdapterGraphFrame['entities'] = ids.map((id, entityIndex) => {
+    const accountsForEntity = Math.min(remainingAccounts, entityIndex < 4 ? 2 : 1);
+    remainingAccounts -= accountsForEntity;
+    const accounts = Array.from({ length: accountsForEntity }, (_, accountIndex) => {
+      const peerId = ids[(entityIndex + accountIndex + 1) % ids.length]!;
+      const frameHash = `0x${(entityIndex + 1).toString(16).padStart(64, '0')}`;
+      const activities = [1, 2].map((tokenId) => ({
+        type: 'direct_payment',
+        tokenId,
+        amount: BigInt((entityIndex + 1) * tokenId),
+        fromEntityId: id,
+        toEntityId: peerId,
+      }));
+      return {
+        leftEntity: id,
+        rightEntity: peerId,
+        status: 'active' as const,
+        mempool: activities,
+        mempoolCount: activities.length,
+        currentFrame: {
+          height: 42,
+          timestamp: 4_200,
+          jHeight: 40,
+          prevFrameHash: frameHash,
+          accountStateRoot: frameHash,
+          stateHash: frameHash,
+          byLeft: true,
+          accountTxs: activities,
+          accountTxCount: activities.length,
+        },
+        deltas: new Map(tokenIds.map((tokenId) => [
+          tokenId,
+          makeTestDelta(tokenId, BigInt((entityIndex + 1) * tokenId)),
+        ])),
+        currentHeight: 42,
+        rollbackCount: 0,
+      };
+    });
+    return {
+      summary: {
+        entityId: id,
+        runtimeId: 'runtime:scale-test',
+        label: `Entity ${entityIndex + 1}`,
+        height: 42,
+        isHub: entityIndex % 10 === 0,
+      },
+      core: {
+        entityId: id,
+        height: 42,
+        timestamp: 4_200,
+        reserves: new Map(tokenIds.map((tokenId) => [tokenId, BigInt((entityIndex + 1) * tokenId * 1_000)])),
+        profile: { name: `Entity ${entityIndex + 1}`, isHub: entityIndex % 10 === 0 },
+        isHub: entityIndex % 10 === 0,
+      },
+      accounts: {
+        items: accounts,
+        nextCursor: null,
+        totalItems: accounts.length,
+        limit: accountCount,
+      },
+    };
+  });
+  expect(remainingAccounts).toBe(0);
+  expect(entities).toHaveLength(entityCount);
+  expect(entities.reduce((total, entity) => total + entity.accounts.items.length, 0)).toBe(accountCount);
+  expect(entities.every((entity) => entity.accounts.items.every((account) => account.deltas.size <= 4))).toBe(true);
+
+  const frame: RuntimeAdapterGraphFrame = {
+    head: {
+      schemaVersion: 1,
+      latestHeight: 42,
+      latestMaterializedHeight: 42,
+      latestSnapshotHeight: 40,
+      snapshotPeriodFrames: 5,
+      retainSnapshots: 3,
+      epochMaxBytes: 1_073_741_824,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 262_144,
+    },
+    runtimeId: 'runtime:scale-test',
+    height: 42,
+    timestamp: 4_200,
+    stateHash: `0x${'42'.repeat(32)}`,
+    entities,
+  };
+
+  const encodedBytes = assertRuntimeAdapterGraphFrameWireBudget(frame);
+  expect(encodedBytes).toBeLessThan(runtimeAdapterMaxMessageBytes());
+
+  const overBudgetFrame: RuntimeAdapterGraphFrame = {
+    ...frame,
+    entities: frame.entities.map((entity, index) => index === 0
+      ? {
+          ...entity,
+          summary: {
+            ...entity.summary,
+            label: 'x'.repeat(runtimeAdapterMaxMessageBytes()),
+          },
+        }
+      : entity),
+  };
+  expect(() => assertRuntimeAdapterGraphFrameWireBudget(overBudgetFrame)).toThrow(
+    'graph-frame response exceeds wire budget',
+  );
+});
+
+test('runtime adapter graph-frame synthesizes missing account endpoint nodes', async () => {
+  const env = makeEnv();
+  const frame = await resolveRuntimeAdapterRead<{
+    entities: Array<{ summary: { entityId: string; label: string }; core: unknown | null }>;
+  }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'graph-frame', {
+    limit: 10,
+    accountsLimit: 10,
+  });
+
+  expect(frame.entities.map((entry) => entry.summary.entityId)).toEqual([entityId, counterpartyId]);
+  expect(frame.entities.find((entry) => entry.summary.entityId === counterpartyId)).toMatchObject({
+    summary: { label: counterpartyId },
+    core: null,
+  });
+});
+
+test('runtime adapter historical graph-frame derives fallback timestamp from the selected frame', async () => {
+  const env = makeEnv();
+  env.runtimeId = 'runtime:h1';
+  const liveLoader = makeTestViewPageLoader(env);
+  const historicalHeight = 6;
+  const historicalTimestamp = 600;
+  const loadEntityViewPage = async (
+    requestedEntityId: string,
+    height: number,
+    query?: Parameters<ReturnType<typeof makeTestViewPageLoader>>[2],
+  ) => {
+    if (height !== historicalHeight) return null;
+    const live = await liveLoader(requestedEntityId, env.height, query);
+    if (!live) return null;
+    return {
+      ...live,
+      core: { ...live.core, height: historicalHeight, timestamp: historicalTimestamp },
+    };
+  };
+
+  const frame = await resolveRuntimeAdapterRead<{
+    height: number;
+    timestamp: number;
+    stateHash: string;
+  }>({
+    env,
+    readHead: async () => ({ latestHeight: env.height } as StorageHead),
+    readFrame: async () => null,
+    listEntityIdsAtHeight: async () => [entityId],
+    loadEntityViewPage,
+  }, 'graph-frame', { atHeight: historicalHeight, limit: 10, accountsLimit: 10 });
+
+  expect(frame.height).toBe(historicalHeight);
+  expect(frame.timestamp).toBe(historicalTimestamp);
+  expect(frame.timestamp).not.toBe(env.timestamp);
+  expect(frame.stateHash).toBe('');
 });
 
 test('runtime adapter entity summaries preserve gossip jurisdiction for live hub replicas', async () => {
@@ -2798,6 +3065,21 @@ test('remote adapter can inspect and control a hub over the rpc wire', async () 
     expect(view.activeEntity.summary.label).toBe('H1 Hub');
     expect(view.activeEntity.accounts.items).toHaveLength(1);
     expect(view.activeEntity.accounts.nextCursor).toBe(null);
+
+    const graph = await adapter.read<{
+      height: number;
+      stateHash: string;
+      entities: Array<{
+        summary: { entityId: string };
+        core: { entityId: string } | null;
+        accounts: { items: unknown[] };
+      }>;
+    }>('graph-frame', { limit: 10, accountsLimit: 10 });
+    expect(graph.height).toBe(7);
+    expect(graph.stateHash).toBe('');
+    expect(graph.entities.map((entry) => entry.summary.entityId)).toEqual([entityId, counterpartyId]);
+    expect(graph.entities.find((entry) => entry.summary.entityId === entityId)?.accounts.items).toHaveLength(1);
+    expect(graph.entities.find((entry) => entry.summary.entityId === counterpartyId)?.core).toBeNull();
 
     const input: RuntimeInput = {
       runtimeTxs: [],

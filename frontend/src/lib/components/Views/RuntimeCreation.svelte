@@ -2361,10 +2361,6 @@
     overflow: visible;
   }
 
-  :global(body:has(.brainvault-wrapper) [data-testid='xln-mascot-layer']) {
-    display: none;
-  }
-
   .brainvault-wrapper.embedded {
     height: auto;
     min-height: 0;

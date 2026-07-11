@@ -6,14 +6,18 @@ import {
   normalizeXlnMascotDock,
   resolveMascotPanelRect,
   resolveMascotPoint,
+  resolveMascotViewport,
   snapMascotToEdge,
 } from '../../frontend/src/lib/components/XlnMascot/mascot-geometry';
-import { parseAssistantSseLine } from '../../frontend/src/lib/ai/xln-assistant-client';
+import {
+  parseAssistantSseLine,
+  streamXlnAssistantReply,
+} from '../../frontend/src/lib/ai/xln-assistant-client';
 import { rankXlnGuideDocs } from '../../frontend/src/lib/ai/xln-guide-context';
 import {
-  parseXlnAssistantProxyRequest,
-  sanitizeXlnAssistantCatalog,
-} from '../../frontend/src/lib/server/xln-assistant-proxy';
+  parseAssistantChatRequest,
+  sanitizeAssistantCatalog,
+} from '../../runtime/server/assistant-proxy-input';
 
 const desktop = { width: 1440, height: 900 };
 const phone = { width: 393, height: 852, insetTop: 47, insetBottom: 34 };
@@ -48,16 +52,27 @@ describe('xln mascot geometry', () => {
     expect(clampMascotPoint(phonePoint, phone)).toEqual(phonePoint);
   });
 
-  test('opens the chat inward and inside all viewport edges', () => {
+  test('opens the chat inward and inside every safe visible edge', () => {
     for (const side of ['left', 'right', 'top', 'bottom'] as const) {
-      const placement = { version: 1 as const, side, offsetRatio: 0.5 };
-      const point = resolveMascotPoint(placement, phone);
-      const panel = resolveMascotPanelRect(placement, point, phone);
-      expect(panel.x).toBeGreaterThanOrEqual(12);
-      expect(panel.y).toBeGreaterThanOrEqual(12);
-      expect(panel.x + panel.width).toBeLessThanOrEqual(phone.width - 12);
-      expect(panel.y + panel.height).toBeLessThanOrEqual(phone.height - 12);
+      for (const offsetRatio of [0, 0.5, 1]) {
+        const placement = { version: 1 as const, side, offsetRatio };
+        const point = resolveMascotPoint(placement, phone);
+        const panel = resolveMascotPanelRect(placement, point, phone);
+        expect(panel.x).toBeGreaterThanOrEqual((phone.insetLeft ?? 0) + 12);
+        expect(panel.y).toBeGreaterThanOrEqual((phone.insetTop ?? 0) + 12);
+        expect(panel.x + panel.width).toBeLessThanOrEqual(phone.width - (phone.insetRight ?? 0) - 12);
+        expect(panel.y + panel.height).toBeLessThanOrEqual(phone.height - (phone.insetBottom ?? 0) - 12);
+      }
     }
+    const keyboardViewport = resolveMascotViewport(393, 852, {
+      width: 393,
+      height: 318,
+      offsetTop: 0,
+      offsetLeft: 0,
+    });
+    const placement = { version: 1 as const, side: 'bottom' as const, offsetRatio: 0.8 };
+    const compact = resolveMascotPanelRect(placement, resolveMascotPoint(placement, keyboardViewport), keyboardViewport);
+    expect(compact.y + compact.height).toBeLessThanOrEqual(318 - 12);
   });
 
   test('supports keyboard edge and offset movement', () => {
@@ -75,31 +90,64 @@ describe('xln assistant boundaries', () => {
     expect(parseAssistantSseLine('event: ping')).toEqual({ content: '', done: false });
   });
 
-  test('validates chat roles, sizes and model ids', () => {
-    expect(parseXlnAssistantProxyRequest({
+  test('cancels an upstream stream that stays open after SSE completion', async () => {
+    const originalFetch = globalThis.fetch;
+    let cancelReason: unknown;
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"content":"hello xln"}\n\ndata: [DONE]\n\n'));
+      },
+      cancel(reason) {
+        cancelReason = reason;
+      },
+    });
+    const chunks: string[] = [];
+    globalThis.fetch = (async () => new Response(body, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    })) as typeof fetch;
+    try {
+      const answer = await streamXlnAssistantReply({
+        model: 'qwen3-coder:latest',
+        messages: [{ role: 'user', content: 'hello' }],
+        onContent: (content) => chunks.push(content),
+      });
+      expect(answer).toBe('hello xln');
+      expect(chunks).toEqual(['hello xln']);
+      expect(cancelReason).toBe('AI_STREAM_DONE');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('validates chat roles, sizes and model ids', async () => {
+    const request = (body: unknown) => new Request('http://xln.test/api/assistant/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const allowed = new Set(['qwen3-coder:latest']);
+    expect((await parseAssistantChatRequest(request({
       model: 'qwen3-coder:latest',
       messages: [{ role: 'user', content: 'Explain RCPAN' }],
-    }).messages).toHaveLength(1);
-    expect(() => parseXlnAssistantProxyRequest({ model: '../bad model', messages: [] })).toThrow();
-    expect(() => parseXlnAssistantProxyRequest({
+    }), allowed)).messages).toHaveLength(1);
+    await expect(parseAssistantChatRequest(request({ model: '../bad model', messages: [] }), allowed)).rejects.toThrow();
+    await expect(parseAssistantChatRequest(request({
       model: 'qwen3-coder:latest',
       messages: [{ role: 'tool', content: 'execute payment' }],
-    })).toThrow();
+    }), allowed)).rejects.toThrow();
   });
 
   test('publishes only available, well-formed local models', () => {
-    expect(sanitizeXlnAssistantCatalog({
+    expect(sanitizeAssistantCatalog({
       default_model: 'qwen3-coder:latest',
       models: [
         { id: 'qwen3-coder:latest', name: 'Qwen', available: true },
         { id: 'missing', available: false },
         { id: '../invalid model', available: true },
       ],
-    })).toEqual({
-      provider: 'local',
-      defaultModel: 'qwen3-coder:latest',
-      models: [{ id: 'qwen3-coder:latest', name: 'Qwen' }],
-    });
+    }, ['qwen3-coder:latest'])).toEqual([{ id: 'qwen3-coder:latest', name: 'Qwen' }]);
   });
 
   test('ranks public xln docs against the question and route', () => {

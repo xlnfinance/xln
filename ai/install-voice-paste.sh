@@ -248,7 +248,7 @@ EOFLUA
 fi
 
 # Symlink
-ln -sf ~/xln/ai/stt-server.py ~/xln/ai/whisper-server.py 2>/dev/null || true
+ln -sfn stt-server.py ~/xln/ai/whisper-server.py 2>/dev/null || true
 
 # ============================================================================
 # DONE

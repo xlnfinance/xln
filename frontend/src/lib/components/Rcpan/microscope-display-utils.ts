@@ -89,7 +89,13 @@ export function buildMicroscopeLane(
   pendingOutDebtMode: MicroscopeTokenLane['pendingOutDebtMode'],
 ): MicroscopeTokenLane {
   const paymentVisible = controls.showPaymentTrail
-    && !['settled', 'treasury-topup', 'debt-enforcement', 'repaid'].includes(timeline.phase);
+    && ![
+      'settled',
+      'rebalance-request-1',
+      'rebalance-request-2',
+      'debt-enforcement',
+      'repaid',
+    ].includes(timeline.phase);
   if (!Number.isFinite(controls.packetMs) || controls.packetMs <= 0) {
     throw new Error('RCPAN_DISPLAY_INVALID: packetMs must be positive');
   }

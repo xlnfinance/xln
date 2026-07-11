@@ -3,9 +3,10 @@ import type {
   Env,
   EnvSnapshot,
   RuntimeAdapterEntitySummary,
+  RuntimeAdapterGraphEntityCore,
+  RuntimeAdapterGraphFrame,
   RuntimeAdapterViewFrame,
 } from '@xln/runtime/xln-api';
-import type { StorageEntityCoreDoc } from '@xln/runtime/storage/types';
 
 export type RuntimeGraphAdapterKind = 'browser' | 'remote';
 export type RuntimeGraphCanonicity = 'timestamp' | 'height' | 'left' | 'right' | 'hub';
@@ -33,7 +34,7 @@ export type RuntimeGraphNodeState = RuntimeGraphSource & {
   jurisdiction: string;
   position: RuntimeGraphPosition | null;
   replica: EntityReplica | null;
-  core: StorageEntityCoreDoc | null;
+  core: RuntimeAdapterGraphEntityCore | null;
 };
 
 export type RuntimeGraphAccountState = RuntimeGraphSource & {
@@ -103,11 +104,43 @@ type RuntimeGraphEnvFrame = Env | EnvSnapshot;
 
 const text = (value: unknown): string => String(value || '').trim();
 const id = (value: unknown): string => text(value).toLowerCase();
+
+export const resolveActionableGraphNodeRuntimeId = (
+  node: MergedRuntimeGraphNode | null | undefined,
+  activeRuntimeId: string,
+): string => {
+  if (!node) return '';
+  const activeId = id(activeRuntimeId);
+  const actionableStates = node.states.filter((state) => state.core !== null || state.replica !== null);
+  return actionableStates.find((state) => state.runtimeId === activeId)?.runtimeId
+    ?? actionableStates[0]?.runtimeId
+    ?? '';
+};
+
+export const requireActionableGraphNodeRuntimeId = (
+  node: MergedRuntimeGraphNode | null | undefined,
+  activeRuntimeId: string,
+): string => {
+  const runtimeId = resolveActionableGraphNodeRuntimeId(node, activeRuntimeId);
+  if (!runtimeId) throw new Error(`GRAPH_ENTITY_NOT_ACTIONABLE:${node?.entityId || 'unknown'}`);
+  return runtimeId;
+};
+
 const integer = (value: unknown): number => {
   const parsed = Math.floor(Number(value || 0));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 };
 const sortedUnique = (values: string[]): string[] => Array.from(new Set(values)).sort();
+const reserveVersion = (value: unknown): string => {
+  const entries = value instanceof Map
+    ? Array.from(value.entries())
+    : value && typeof value === 'object' ? Object.entries(value as Record<string, unknown>) : [];
+  return entries
+    .map(([tokenId, amount]) => [String(tokenId), String(amount)] as const)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([tokenId, amount]) => `${tokenId}:${amount}`)
+    .join(',');
+};
 const sourceOf = (options: ProjectionOptions, height: number, timestamp: number): RuntimeGraphSource => ({
   runtimeId: id(options.runtimeId),
   label: text(options.label) || id(options.runtimeId),
@@ -230,19 +263,17 @@ export const projectRuntimeEnv = (env: RuntimeGraphEnvFrame, options: Projection
 
 const nodeFromSummary = (
   summary: RuntimeAdapterEntitySummary,
-  frame: RuntimeAdapterViewFrame,
   source: RuntimeGraphSource,
+  core: RuntimeAdapterGraphEntityCore | null,
 ): RuntimeGraphNodeState => {
   const entityId = id(summary.entityId);
-  const active = id(frame.activeEntityId) === entityId ? frame.activeEntity : null;
-  const core = active?.core ?? null;
   const coreProfile = core?.profile as { name?: string; isHub?: boolean } | undefined;
   return {
     ...source,
     entityId,
     label: text(summary.label || coreProfile?.name) || entityId,
     signerId: text(summary.signerId || core?.signerId),
-    isHub: summary.isHub === true || coreProfile?.isHub === true || Boolean(core?.orderbookHubProfile),
+    isHub: summary.isHub === true || coreProfile?.isHub === true || core?.isHub === true,
     jurisdiction: jurisdictionName(summary.jurisdiction),
     height: integer(core?.height ?? summary.height ?? source.height),
     timestamp: integer(core?.timestamp ?? source.timestamp),
@@ -257,11 +288,43 @@ export const projectRuntimeViewFrame = (
   options: ProjectionOptions,
 ): RuntimeGraphProjection => {
   const source = sourceOf(options, frame.height, frame.activeEntity?.core?.timestamp ?? frame.height);
-  const nodes = frame.entities.map((summary) => nodeFromSummary(summary, frame, source))
+  const nodes = frame.entities.map((summary) => nodeFromSummary(
+    summary,
+    source,
+    id(frame.activeEntityId) === id(summary.entityId) ? frame.activeEntity?.core ?? null : null,
+  ))
     .sort((left, right) => left.entityId.localeCompare(right.entityId));
   const activeNode = nodes.find((node) => node.entityId === id(frame.activeEntityId));
   const accounts = !activeNode ? [] : frame.activeEntity!.accounts.items
     .map((account) => accountState(source, activeNode, account.leftEntity === activeNode.entityId ? account.rightEntity : account.leftEntity, account));
+  const jMachines = sortedUnique(nodes.map((node) => node.jurisdiction).filter(Boolean)).map((name) => ({
+    ...source,
+    jMachineId: id(name),
+    name,
+    position: null,
+    machine: null,
+  }));
+  return { source, nodes, accounts, jMachines };
+};
+
+export const projectRuntimeGraphFrame = (
+  frame: RuntimeAdapterGraphFrame,
+  options: ProjectionOptions,
+): RuntimeGraphProjection => {
+  const source = sourceOf(options, frame.height, frame.timestamp);
+  const nodes = frame.entities.map((entity) => nodeFromSummary(entity.summary, source, entity.core))
+    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+  const nodeById = new Map(nodes.map((node) => [node.entityId, node]));
+  const accounts = frame.entities.flatMap((entity) => {
+    const observer = nodeById.get(id(entity.summary.entityId));
+    if (!observer) throw new Error(`RUNTIME_GRAPH_ENTITY_PROJECTION_MISSING:${entity.summary.entityId}`);
+    return entity.accounts.items.map((account) => accountState(
+      source,
+      observer,
+      id(account.leftEntity) === observer.entityId ? account.rightEntity : account.leftEntity,
+      account,
+    ));
+  });
   const jMachines = sortedUnique(nodes.map((node) => node.jurisdiction).filter(Boolean)).map((name) => ({
     ...source,
     jMachineId: id(name),
@@ -295,11 +358,42 @@ const compareState = (
 
 const stateVersion = (state: RuntimeGraphNodeState | RuntimeGraphAccountState): string =>
   'accountId' in state
-    ? `${state.height}|${String((state.account as { status?: unknown })?.status || '')}`
-    : `${state.height}|${state.timestamp}|${state.label}|${state.signerId}|${state.isHub}|${state.jurisdiction}`;
+    ? (() => {
+        const account = state.account as {
+          status?: unknown;
+          currentFrame?: { accountStateRoot?: unknown; stateHash?: unknown; height?: unknown };
+          pendingFrame?: { accountStateRoot?: unknown; stateHash?: unknown; height?: unknown };
+          currentHeight?: unknown;
+          rollbackCount?: unknown;
+          lastRollbackFrameHash?: unknown;
+        } | null;
+        return [
+          state.height,
+          account?.status,
+          account?.currentHeight,
+          account?.currentFrame?.height,
+          account?.currentFrame?.accountStateRoot,
+          account?.currentFrame?.stateHash,
+          account?.pendingFrame?.height,
+          account?.pendingFrame?.accountStateRoot,
+          account?.pendingFrame?.stateHash,
+          account?.rollbackCount,
+          account?.lastRollbackFrameHash,
+        ].map((value) => String(value ?? '')).join('|');
+      })()
+    : [
+        state.height,
+        state.timestamp,
+        state.label,
+        state.signerId,
+        state.isHub,
+        state.jurisdiction,
+        state.replica?.state?.prevFrameHash ?? state.core?.prevFrameHash,
+        reserveVersion(state.replica?.state?.reserves ?? state.core?.reserves),
+      ].map((value) => String(value ?? '')).join('|');
 
 const jMachineVersion = (state: RuntimeGraphJMachineState): string =>
-  `${state.height}|${state.timestamp}|${state.name}|${state.position?.x ?? ''}|${state.position?.y ?? ''}|${state.position?.z ?? ''}`;
+  `${state.height}|${state.name}|${state.position?.x ?? ''}|${state.position?.y ?? ''}|${state.position?.z ?? ''}`;
 
 export const mergeRuntimeGraphProjections = (
   projections: RuntimeGraphProjection[],
@@ -317,7 +411,14 @@ export const mergeRuntimeGraphProjections = (
   }
   const nodes = Array.from(nodeGroups, ([entityId, states]) => {
     const ordered = [...states].sort((left, right) => compareState(left, right, canonicity));
-    return { entityId, selected: ordered[0]!, states: ordered, provenance: sortedUnique(states.map((state) => state.runtimeId)), desynchronized: new Set(states.map(stateVersion)).size > 1 };
+    const actionable = ordered.filter((state) => state.core !== null || state.replica !== null);
+    return {
+      entityId,
+      selected: actionable[0] ?? ordered[0]!,
+      states: ordered,
+      provenance: sortedUnique(states.map((state) => state.runtimeId)),
+      desynchronized: actionable.length > 1 && new Set(actionable.map(stateVersion)).size > 1,
+    };
   }).sort((left, right) => left.entityId.localeCompare(right.entityId));
   const accounts = Array.from(accountGroups, ([accountId, states]) => {
     const ordered = [...states].sort((left, right) => compareState(left, right, canonicity));
@@ -325,7 +426,14 @@ export const mergeRuntimeGraphProjections = (
   }).sort((left, right) => left.accountId.localeCompare(right.accountId));
   const jMachines = Array.from(jMachineGroups, ([jMachineId, states]) => {
     const ordered = [...states].sort((left, right) => compareState(left, right, canonicity));
-    return { jMachineId, selected: ordered[0]!, states: ordered, provenance: sortedUnique(states.map((state) => state.runtimeId)), desynchronized: new Set(states.map(jMachineVersion)).size > 1 };
+    const materialized = ordered.filter((state) => state.machine !== null);
+    return {
+      jMachineId,
+      selected: materialized[0] ?? ordered[0]!,
+      states: ordered,
+      provenance: sortedUnique(states.map((state) => state.runtimeId)),
+      desynchronized: materialized.length > 1 && new Set(materialized.map(jMachineVersion)).size > 1,
+    };
   }).sort((left, right) => left.jMachineId.localeCompare(right.jMachineId));
   return { scope, canonicity, sources: included.map((item) => item.source), nodes, accounts, jMachines };
 };

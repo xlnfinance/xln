@@ -87,7 +87,8 @@
 
   .logo-glint {
     background: linear-gradient(105deg, transparent 30%, rgba(255, 255, 255, 0.95) 47%, transparent 62%);
-    transform: translateX(-125%);
+    background-position: 150% 0;
+    background-size: 300% 100%;
     animation: mascot-glint 4.8s ease-in-out infinite;
   }
 
@@ -119,9 +120,9 @@
   }
 
   @keyframes mascot-glint {
-    0%, 60% { transform: translateX(-125%); opacity: 0; }
+    0%, 60% { background-position: 150% 0; opacity: 0; }
     70% { opacity: 0.9; }
-    88%, 100% { transform: translateX(125%); opacity: 0; }
+    88%, 100% { background-position: -50% 0; opacity: 0; }
   }
 
   @keyframes mascot-think {
@@ -133,5 +134,23 @@
   @media (prefers-reduced-motion: reduce) {
     .logo-stage,
     .logo-glint { animation: none; }
+  }
+
+  @media (max-width: 520px) {
+    .mascot-button {
+      width: 52px;
+      height: 52px;
+      border-radius: 16px;
+    }
+
+    .logo-stage {
+      width: 35px;
+      height: 32px;
+    }
+
+    .presence-dot {
+      right: 5px;
+      bottom: 5px;
+    }
   }
 </style>

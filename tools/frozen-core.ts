@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 
@@ -25,6 +25,9 @@ function writeManifest(value: unknown): void {
 }
 
 if (command === 'init') {
+  // init is genesis-only. Re-running it after a mutation would bless the changed bytes with
+  // no owner approval record, so an existing manifest is an unconditional hard stop.
+  if (existsSync(manifestPath)) throw new Error(`FROZEN_CORE_ALREADY_INITIALIZED:${manifestPath}`);
   const paths = process.argv.slice(3).filter((arg) => !arg.startsWith('--'));
   const reason = process.argv.find((arg) => arg.startsWith('--reason='))?.slice('--reason='.length) || 'Explicitly frozen by project owner.';
   if (!paths.length) throw new Error('Usage: bun tools/frozen-core.ts init <file> [...] --reason=<reason>');

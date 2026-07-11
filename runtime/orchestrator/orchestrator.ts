@@ -31,6 +31,11 @@ import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type
 import { maybeHandleQaRequest } from '../qa/api';
 import { serveRuntimeBundle, serveStatic } from '../server/static-assets';
 import { handleWatchtowerProxy } from '../server/watchtower-proxy';
+import {
+  createAssistantProxyFromEnv,
+  resolveAssistantDirectClientIp,
+  resolveAssistantRateClientId,
+} from '../server/assistant-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
 import {
@@ -528,6 +533,7 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const meshLog = createStructuredLogger('mesh.orchestrator');
+const assistantProxy = createAssistantProxyFromEnv(meshLog);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -2381,6 +2387,11 @@ const server = Bun.serve({
     if (request.method === 'OPTIONS') {
       return new Response(null, { headers });
     }
+
+    const directClientIp = resolveAssistantDirectClientIp(serverRef, request);
+    const assistantClientId = resolveAssistantRateClientId(request, directClientIp);
+    const assistantResponse = await assistantProxy.handle(request, pathname, assistantClientId);
+    if (assistantResponse) return assistantResponse;
 
     if (request.headers.get('upgrade') === 'websocket' && pathname === '/relay') {
       const upgraded = serverRef.upgrade(request, { data: { type: 'relay', clientIp: resolveRequestClientIp(request) } });

@@ -181,6 +181,11 @@ import type { RuntimeEntityInputRoutingResult } from './runtime-output-routing';
 import type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
+  RuntimeAdapterGraphAccount,
+  RuntimeAdapterGraphAccountActivity,
+  RuntimeAdapterGraphAccountPage,
+  RuntimeAdapterGraphEntityCore,
+  RuntimeAdapterGraphFrame,
   RuntimeAdapterHistoryFrameBatch,
   RuntimeAdapterViewFrame,
   resolveRuntimeAdapterRead,
@@ -223,6 +228,11 @@ export type VerifyRuntimeChainResult = {
 export type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
+  RuntimeAdapterGraphAccount,
+  RuntimeAdapterGraphAccountActivity,
+  RuntimeAdapterGraphAccountPage,
+  RuntimeAdapterGraphEntityCore,
+  RuntimeAdapterGraphFrame,
   RuntimeAdapterHistoryFrameBatch,
 	  RuntimeAdapterViewFrame,
 	  RuntimeAdapterActivityPage,

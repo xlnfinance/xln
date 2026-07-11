@@ -50,6 +50,11 @@ jobs:
       - name: Build contracts
         run: bun run env:build
 
+      - name: Verify frontend contract artifacts
+        run: |
+          bun frontend/copy-static-files.js --contracts-only --require-all-contract-sources
+          git diff --exit-code -- frontend/static/contracts
+
       - name: Run full contract tests
         run: bun run test:contracts:full
 
@@ -106,15 +111,17 @@ jobs:
         with:
           path: |
             ~/.bun/install/cache
+            node_modules
             frontend/node_modules
-          key: ${{ runner.os }}-frontend-bun-${{ hashFiles('frontend/bun.lock', 'frontend/package.json') }}
+          key: ${{ runner.os }}-frontend-bun-${{ hashFiles('bun.lock', 'package.json', 'frontend/bun.lock', 'frontend/package.json') }}
           restore-keys: |
             ${{ runner.os }}-frontend-bun-
 
-      - name: Install frontend dependencies
+      - name: Install root and frontend dependencies
         run: |
+          bun install --frozen-lockfile
           cd frontend
-          bun install
+          bun install --frozen-lockfile
 
       - name: Check frontend
         run: |

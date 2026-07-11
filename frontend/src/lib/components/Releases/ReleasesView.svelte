@@ -2,7 +2,15 @@
   import { onMount } from 'svelte';
   import { marked } from 'marked';
   import { Braces, Download, GitCommitHorizontal, History, ShieldAlert, ShieldCheck } from 'lucide-svelte';
-  import { verifyReleaseAttestation, type ReleaseAttestation } from '$lib/releases/release-signature';
+  import {
+    requiresFoundationAttestation,
+    verifyReleaseManifestEntry,
+    verifyReleaseManifestPolicy,
+    verifyReleaseManifestSnapshotBinding,
+    type ReleaseAttestation,
+    type ReleaseSnapshotClaim,
+  } from '$lib/releases/release-signature';
+  import { sanitizeRenderedHtml } from '$lib/security/safe-markdown';
 
   type Metrics = {
     code: number;
@@ -21,6 +29,8 @@
     sourceCommit: string;
     metrics: Metrics;
     modules: Record<string, Metrics>;
+    codeSnapshotRoot?: string;
+    frozenCore?: { rootHash: string };
     attestation?: ReleaseAttestation;
   };
 
@@ -50,8 +60,8 @@
 
   let selectedRelease = $derived(manifest?.releases.find((release) => release.version === selectedVersion) ?? null);
   let selectedVerification = $derived(selectedRelease?.attestation
-    ? verifyReleaseAttestation(selectedRelease.attestation) ? 'verified' : 'invalid'
-    : 'historical');
+    ? verifyReleaseManifestEntry(selectedRelease) ? 'verified' : 'invalid'
+    : selectedRelease && requiresFoundationAttestation(selectedRelease.version) ? 'invalid' : 'historical');
   let scopes = $derived.by(() => {
     const names = new Set<string>();
     for (const release of manifest?.releases ?? []) Object.keys(release.modules).forEach((name) => names.add(name));
@@ -93,7 +103,16 @@
     selectedVersion = version;
     const response = await fetch(release.markdown, { cache: 'no-store' });
     if (!response.ok) throw new Error(`Release document request failed: ${response.status}`);
-    renderedMarkdown = await marked.parse(await response.text(), { gfm: true }) as string;
+    renderedMarkdown = sanitizeRenderedHtml(await marked.parse(await response.text(), { gfm: true }) as string);
+  }
+
+  async function verifyReleaseSnapshot(release: ReleaseEntry): Promise<void> {
+    const response = await fetch(release.snapshot, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`Release snapshot request failed: ${response.status}`);
+    const snapshot = await response.json() as ReleaseSnapshotClaim;
+    if (!verifyReleaseManifestSnapshotBinding(release, snapshot)) {
+      throw new Error(`INVALID FOUNDATION HANKO: release ${release.version}`);
+    }
   }
 
   async function selectRelease(version: string): Promise<void> {
@@ -115,9 +134,15 @@
     try {
       const response = await fetch('/docs-catalog/releases/manifest.json', { cache: 'no-store' });
       if (!response.ok) throw new Error(`Release manifest request failed: ${response.status}`);
-      manifest = await response.json() as Manifest;
-      const invalidRelease = manifest.releases.find((release) => release.attestation && !verifyReleaseAttestation(release.attestation));
+      const loadedManifest = await response.json() as Manifest;
+      if (!verifyReleaseManifestPolicy(loadedManifest)) throw new Error('INVALID FOUNDATION HANKO: release manifest policy');
+      const invalidRelease = loadedManifest.releases.find((release) => !verifyReleaseManifestEntry(release));
       if (invalidRelease) throw new Error(`INVALID FOUNDATION HANKO: release ${invalidRelease.version}`);
+      // Every metric rendered by the chart must equal its source snapshot. New
+      // releases additionally require Hanko; historical releases remain visibly
+      // unsigned but still cannot drift independently from their snapshot JSON.
+      await Promise.all(loadedManifest.releases.map(verifyReleaseSnapshot));
+      manifest = loadedManifest;
       await loadRelease(manifest.latest);
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
@@ -144,7 +169,7 @@
         <span>{selectedRelease.sourceCommit.slice(0, 12)}</span>
         <span class="verification" class:verified={selectedVerification === 'verified'} class:invalid={selectedVerification === 'invalid'}>
           {#if selectedVerification === 'verified'}
-            <ShieldCheck size={14} /> Foundation verified
+            <ShieldCheck size={14} /> Foundation code root verified
           {:else if selectedVerification === 'invalid'}
             <ShieldAlert size={14} /> Invalid signature
           {:else}

@@ -73,7 +73,8 @@ function rcpanCaption(timeline: RcpanTimelineState): string {
   if (timeline.phase === 'payment') return 'Payment changes the signed account; liquid reserves stay put.';
   if (timeline.phase === 'signed') return 'User and H1 now hold the same portable receipt.';
   if (disputeActive(timeline)) return 'User can take that receipt to programmable settlement.';
-  if (timeline.phase === 'treasury-topup') return 'Treasury adds reserve in a separate, visible operation.';
+  if (timeline.phase === 'rebalance-request-1') return 'A first independent request increases H1 reserve; FIFO debt stays queued.';
+  if (timeline.phase === 'rebalance-request-2') return 'A second independent request finishes funding H1 reserve; debt still waits for enforcement.';
   if (timeline.phase === 'debt-enforcement') return 'The queued FIFO debt is paid from H1 reserve.';
   if (timeline.phase === 'repaid') return 'Debt is zero and the recovered value is in User reserve.';
   return 'Collateral is gone from escrow and reappears in entity reserves.';
@@ -101,7 +102,11 @@ function rcpanDebt(
     label: repaid ? 'FIFO debt cleared' : 'FIFO debt object',
     detail: repaid ? 'Paid by enforceDebts()' : 'Explicit, ordered, and payable from future H1 reserve',
     amountLabel: repaid ? '$0' : formatUsdMicros(debtUsdMicros),
-    tone: repaid ? 'success' : timeline.phase === 'treasury-topup' ? 'warning' : 'danger',
+    tone: repaid
+      ? 'success'
+      : ['rebalance-request-1', 'rebalance-request-2'].includes(timeline.phase)
+        ? 'warning'
+        : 'danger',
   };
 }
 
@@ -136,15 +141,23 @@ export function deriveRcpanMicroscopeFrame(
   const fcuanUserReserves: readonly TokenReserveDisplayInput[] = fcuanFrames.map((frame) => ({ token: frame.token, amount: frame.userReserve }));
   const fcuanHubReserves: readonly TokenReserveDisplayInput[] = fcuanFrames.map((frame) => ({ token: frame.token, amount: frame.hubReserve }));
 
-  const topUp = totalTokenUsd(rcpanFrames.map((frame) => ({ token: frame.token, amount: frame.externalTopUp })));
-  const treasuryFlow: MicroscopeExternalFlow = timeline.phase === 'treasury-topup'
+  const requestTopUp = totalTokenUsd(rcpanFrames.map((frame) => ({
+    token: frame.token,
+    amount: frame.externalRequestTopUp,
+  })));
+  const rebalanceRequest = timeline.phase === 'rebalance-request-1'
+    ? 1
+    : timeline.phase === 'rebalance-request-2'
+      ? 2
+      : 0;
+  const treasuryFlow: MicroscopeExternalFlow = rebalanceRequest > 0
     ? {
       visible: true,
       target: 'right',
-      sourceLabel: 'Treasury',
-      actionLabel: 'Top up H1 reserve',
-      tokenSymbol: `across ${tokens.length} asset${tokens.length === 1 ? '' : 's'}`,
-      amountLabel: formatUsdMicros(topUp),
+      sourceLabel: `Rebalance #${rebalanceRequest}`,
+      actionLabel: 'Increase H1 reserve',
+      tokenSymbol: `request ${rebalanceRequest} of 2 · across ${tokens.length} asset${tokens.length === 1 ? '' : 's'}`,
+      amountLabel: formatUsdMicros(requestTopUp),
       color: palette.court,
     }
     : hiddenFlow(palette.court);

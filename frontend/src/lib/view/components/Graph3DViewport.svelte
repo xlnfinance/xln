@@ -27,6 +27,7 @@
   export let canonicity: RuntimeGraphCanonicity = 'timestamp';
   export let sourceCount = 0;
   export let desyncCount = 0;
+  export let projectionError = '';
   export let timelineRuntimeId = '';
   export let timelineRuntimeColor = '';
   export let timelineHeight = 0;
@@ -79,16 +80,25 @@
     <span class="sr-only" data-testid="graph-runtime-node-summary">{runtimeNodeLabels.join(' · ')}</span>
   </div>
 
-  {#if timelineRuntimeId}
-    <div
-      class="timeline-runtime-highlight"
-      data-testid="network-machine-runtime-highlight"
-      style={`--runtime-color:${timelineRuntimeColor}`}
-    >
-      <span class="runtime-dot"></span>
-      <strong>{timelineRuntimeId}</strong>
-      <span>h{timelineHeight}</span>
-      <time datetime={new Date(timelineTimestamp).toISOString()}>{new Date(timelineTimestamp).toISOString()}</time>
+  {#if projectionError || timelineRuntimeId}
+    <div class="runtime-status-stack">
+      {#if projectionError}
+        <div class="projection-error" role="alert" data-testid="graph-projection-error">
+          {projectionError}
+        </div>
+      {/if}
+      {#if timelineRuntimeId}
+        <div
+          class="timeline-runtime-highlight"
+          data-testid="network-machine-runtime-highlight"
+          style={`--runtime-color:${timelineRuntimeColor}`}
+        >
+          <span class="runtime-dot"></span>
+          <strong>{timelineRuntimeId}</strong>
+          <span>h{timelineHeight}</span>
+          <time datetime={new Date(timelineTimestamp).toISOString()}>{new Date(timelineTimestamp).toISOString()}</time>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -189,13 +199,31 @@
     white-space: nowrap;
   }
 
+  .runtime-status-stack {
+    position: absolute;
+    top: 82px;
+    left: 12px;
+    z-index: 13;
+    display: grid;
+    gap: 8px;
+    max-width: min(560px, calc(100% - 24px));
+  }
+
+  .projection-error {
+    padding: 9px 11px;
+    border: 1px solid rgba(255, 91, 113, 0.55);
+    border-radius: 7px;
+    background: rgba(40, 8, 14, 0.94);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    color: #ffb8c2;
+    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    overflow-wrap: anywhere;
+    backdrop-filter: blur(10px);
+  }
+
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 
   .timeline-runtime-highlight {
-    position: absolute;
-    left: 12px;
-    top: 82px;
-    z-index: 12;
     display: flex;
     align-items: center;
     gap: 7px;
@@ -210,6 +238,35 @@
   .timeline-runtime-highlight strong { color: var(--runtime-color); }
   .timeline-runtime-highlight time { color: #738b9f; }
   .runtime-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--runtime-color); box-shadow: 0 0 12px var(--runtime-color); }
+
+  @media (max-width: 640px) {
+    .runtime-projection-controls {
+      right: 10px;
+      left: 10px;
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+
+    .runtime-projection-controls label {
+      flex: 1 1 130px;
+    }
+
+    .runtime-projection-controls select {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .runtime-status-stack {
+      top: 126px;
+      right: 10px;
+      left: 10px;
+      max-width: none;
+    }
+
+    .timeline-runtime-highlight time {
+      display: none;
+    }
+  }
 
   :global(.graph3d-panel canvas) {
     display: block;

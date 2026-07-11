@@ -1,4 +1,5 @@
 .rcpan-page {
+  --theme-text-muted: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 84%, var(--theme-text-primary, #f4f4f5));
   min-height: 100vh;
   overflow: clip;
   color: var(--theme-text-primary, #f4f4f5);

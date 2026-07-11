@@ -1,1 +1,1 @@
-/Users/zigota/xln/ai/stt-server.py
+stt-server.py

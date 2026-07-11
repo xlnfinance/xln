@@ -12,10 +12,13 @@
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
   import { compareStableText } from '$lib/utils/stableSort';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
-  import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
+  import { activeRuntimeId, runtimeOperations, runtimes, type Runtime } from '$lib/stores/runtimeStore';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeView } from '$lib/stores/runtimeViewStore';
-  import { runtimeGraphLiveFrameCache } from '$lib/network3d/runtimeGraphFrameCache';
+  import {
+    runtimeGraphLiveFrameCache,
+    watchRuntimeGraphFrameCache,
+  } from '$lib/network3d/runtimeGraphFrameCache';
   import {
     runtimeGraphCanonicity,
     runtimeGraphControlOperations,
@@ -29,17 +32,26 @@
   } from '$lib/network3d/graphSelectionGesture';
   import { ImmersiveWalletSurface } from '$lib/network3d/ImmersiveWalletSurface';
   import { registerDebugSurface } from '$lib/utils/debugSurface';
-  import { networkMachineRuntime } from '$lib/stores/networkMachineRuntimeStore';
+  import {
+    networkMachineRuntime,
+    type NetworkMachineRuntimeState,
+  } from '$lib/stores/networkMachineRuntimeStore';
+  import type { RuntimeAdapterGraphFrame } from '@xln/runtime/xln-api';
   import {
     mergeRuntimeGraphProjections,
+    projectRuntimeGraphFrame,
     projectRuntimeEnv,
-    projectRuntimeViewFrame,
+    requireActionableGraphNodeRuntimeId,
     type MergedRuntimeGraph,
     type RuntimeGraphCanonicity,
     type RuntimeGraphProjection,
   } from '$lib/network3d/runtimeGraphProjection';
   import { materializeRuntimeGraphReplicas } from '$lib/network3d/runtimeGraphRender';
-  import { layoutRuntimeGraph } from '$lib/network3d/runtimeGraphLayout';
+  import {
+    connectedRuntimeGraphEntityIds,
+    resolveRuntimeGraphLayout,
+    type RuntimeGraphLayoutCache,
+  } from '$lib/network3d/runtimeGraphLayout';
   import {
     readGraphPositionOverrides,
     writeGraphPositionOverride,
@@ -103,36 +115,58 @@
   })();
   let graphPositionOverrides = readGraphPositionOverrides(typeof localStorage === 'undefined' ? null : localStorage);
   let graphProjections: RuntimeGraphProjection[] = [];
+  let graphProjectionError = '';
   let mergedRuntimeGraph: MergedRuntimeGraph = mergeRuntimeGraphProjections([], $runtimeGraphCanonicity);
   let graphReplicaProjection = new Map<string, any>();
+  let autoFittedGraphSignature = '';
+  let forceLayoutCache: RuntimeGraphLayoutCache | null = null;
 
-  function buildRuntimeGraphProjections(): RuntimeGraphProjection[] {
+  type RuntimeGraphProjectionInputs = {
+    runtimeMap: Map<string, Runtime>;
+    activeRuntimeId: string;
+    controllerRuntimeId: string;
+    scope: string;
+    networkState: NetworkMachineRuntimeState;
+    liveRemoteFrames: Map<string, RuntimeAdapterGraphFrame>;
+    currentEnv: any;
+  };
+
+  function buildRuntimeGraphProjections(input: RuntimeGraphProjectionInputs): RuntimeGraphProjection[] {
     const projections: RuntimeGraphProjection[] = [];
-    const activeId = String($activeRuntimeId || $runtimeControllerHandle.runtimeId || '').trim().toLowerCase();
-    const networkStep = $runtimeGraphScope === 'merged' ? $networkMachineRuntime.selectedStep : null;
-    for (const runtime of $runtimes.values()) {
+    const activeId = String(input.activeRuntimeId || input.controllerRuntimeId || '').trim().toLowerCase();
+    const networkStep = input.scope === 'merged' ? input.networkState.selectedStep : null;
+    for (const runtime of input.runtimeMap.values()) {
       const runtimeId = String(runtime.id || '').trim().toLowerCase();
       if (runtime.type === 'local') {
         const selected = networkStep
-          ? $networkMachineRuntime.browserFrames.get(runtimeId)
-          : runtimeId === activeId && env ? env : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
+          ? input.networkState.browserFrames.get(runtimeId)
+          : runtimeId === activeId && input.currentEnv
+            ? input.currentEnv
+            : (unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env);
         if (selected) projections.push(projectRuntimeEnv(selected, { runtimeId, label: runtime.label, adapterKind: 'browser' }));
         continue;
       }
-      const activeFrame = runtimeId === activeId ? $runtimeView.frame : null;
       const frame = networkStep
-        ? $networkMachineRuntime.remoteFrames.get(runtimeId) ?? null
-        : activeFrame ?? $runtimeGraphLiveFrameCache.get(runtimeId) ?? null;
-      if (frame) projections.push(projectRuntimeViewFrame(frame, { runtimeId, label: runtime.label, adapterKind: 'remote' }));
+        ? input.networkState.remoteFrames.get(runtimeId) ?? null
+        : input.liveRemoteFrames.get(runtimeId) ?? null;
+      if (frame) projections.push(projectRuntimeGraphFrame(frame, { runtimeId, label: runtime.label, adapterKind: 'remote' }));
     }
-    const envRuntimeId = String(env?.runtimeId || activeId || 'browser').trim().toLowerCase();
-    if (!networkStep && env && !projections.some((projection) => projection.source.runtimeId === envRuntimeId)) {
-      projections.push(projectRuntimeEnv(env, { runtimeId: envRuntimeId, label: 'Browser', adapterKind: 'browser' }));
+    const envRuntimeId = String(input.currentEnv?.runtimeId || activeId || 'browser').trim().toLowerCase();
+    if (!networkStep && input.currentEnv && !projections.some((projection) => projection.source.runtimeId === envRuntimeId)) {
+      projections.push(projectRuntimeEnv(input.currentEnv, { runtimeId: envRuntimeId, label: 'Browser', adapterKind: 'browser' }));
     }
     return projections;
   }
 
-  $: graphProjections = buildRuntimeGraphProjections();
+  $: graphProjections = buildRuntimeGraphProjections({
+    runtimeMap: $runtimes,
+    activeRuntimeId: $activeRuntimeId,
+    controllerRuntimeId: $runtimeControllerHandle.runtimeId,
+    scope: $runtimeGraphScope,
+    networkState: $networkMachineRuntime,
+    liveRemoteFrames: $runtimeGraphLiveFrameCache,
+    currentEnv: env,
+  });
   $: if ($runtimeGraphScope !== 'merged' && !graphProjections.some((item) => item.source.runtimeId === $runtimeGraphScope)) {
     runtimeGraphControlOperations.setScope('merged');
   }
@@ -312,6 +346,7 @@
   let availableTokens: number[] = []; // Will be populated from actual token data
   let rendererMode: GraphRendererMode = 'webgl';
   let labelScale: number = 2.0;
+  let entitySizeMultiplier: number = 1.0;
   let lightningSpeed: number = 100;
   let forceLayoutEnabled: boolean = true;
   let gridSize: number = 300;
@@ -790,7 +825,14 @@
           controls.update();
         }
       }
-      else if (key === 'entityLabelScale') labelScale = value;
+      else if (key === 'entityLabelScale') {
+        labelScale = value;
+        lastLabelUpdateTimeIndex = Number.NaN;
+      }
+      else if (key === 'entitySizeMultiplier') {
+        entitySizeMultiplier = value;
+        lastLabelUpdateTimeIndex = Number.NaN;
+      }
       else if (key === 'lightningSpeed') lightningSpeed = value;
       else if (key === 'rendererMode') rendererMode = value;
       else if (key === 'forceLayoutEnabled') forceLayoutEnabled = value;
@@ -809,6 +851,8 @@
       cameraDistance = 500;
       cameraTarget = { x: 0, y: 0, z: 0 };
       labelScale = 2.0;
+      entitySizeMultiplier = 1.0;
+      lastLabelUpdateTimeIndex = Number.NaN;
       lightningSpeed = 100;
       rendererMode = 'webgl';
       forceLayoutEnabled = true;
@@ -844,7 +888,21 @@
     const unsubscribe1 = runtimeFrameEnv.subscribe(debouncedUpdate);
     const unsubscribe2 = runtimeFrameTimeIndex.subscribe(debouncedUpdate);
     const unsubscribe3 = runtimeFrameHistory.subscribe(debouncedUpdate);
-    const unsubscribe4 = runtimes.subscribe(debouncedUpdate);
+    let stopRemoteGraphWatch = (): void => {};
+    const restartRemoteGraphWatch = (runtimeMap: Map<string, Runtime>): void => {
+      stopRemoteGraphWatch();
+      stopRemoteGraphWatch = watchRuntimeGraphFrameCache(runtimeMap, {
+        onApplied: () => { graphProjectionError = ''; },
+        onError: (error) => {
+          graphProjectionError = error instanceof Error ? error.message : String(error || 'Remote graph projection failed');
+          console.error('REMOTE_GRAPH_PROJECTION_FAILED', error);
+        },
+      });
+    };
+    const unsubscribe4 = runtimes.subscribe((runtimeMap) => {
+      debouncedUpdate();
+      restartRemoteGraphWatch(runtimeMap);
+    });
     const unsubscribe5 = runtimeView.subscribe(debouncedUpdate);
     const unsubscribe6 = runtimeGraphLiveFrameCache.subscribe(debouncedUpdate);
     const unsubscribe7 = networkMachineRuntime.subscribe(debouncedUpdate);
@@ -864,6 +922,7 @@
       unsubscribe5();
       unsubscribe6();
       unsubscribe7();
+      stopRemoteGraphWatch();
       panelBridge.off('scenario:loaded', handleScenarioLoaded);
       panelBridge.off('vr:toggle', handleVRToggle);
       panelBridge.off('broadcast:toggle', handleBroadcastToggle);
@@ -1378,23 +1437,27 @@
       }
     }
   }
-  function fitCameraToEntities() {
+  function fitCameraToEntities(preferredEntityIds: ReadonlySet<string> = new Set()) {
     if (!camera || !controls || entities.length === 0) return;
+    const preferredEntities = entities.filter((entity) => preferredEntityIds.has(entity.id));
+    const focusEntities = preferredEntities.length >= 2 ? preferredEntities : entities;
     const box = new THREE.Box3();
-    entities.forEach(entity => {
+    focusEntities.forEach(entity => {
       box.expandByPoint(entity.position);
     });
     const center = new THREE.Vector3();
     box.getCenter(center);
     const size = new THREE.Vector3();
     box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const distance = Math.max(maxDim * 1.5, 50); // Min 50 units away
-    camera.position.set(
-      center.x,
-      center.y + distance * 0.7,  // Above
-      center.z + distance * 0.7   // Behind
-    );
+    const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+    const verticalTangent = Math.tan(verticalFov / 2);
+    const horizontalTangent = verticalTangent * Math.max(camera.aspect, 0.1);
+    const projectedHeight = Math.hypot(size.y, size.z);
+    const fitWidth = size.x / (2 * horizontalTangent);
+    const fitHeight = projectedHeight / (2 * verticalTangent);
+    const distance = Math.max(fitWidth, fitHeight, 36) * 1.65;
+    const viewDirection = new THREE.Vector3(0, 1, 1).normalize();
+    camera.position.copy(center).addScaledVector(viewDirection, distance);
     controls.target.copy(center);
     controls.update();
   }
@@ -1519,6 +1582,15 @@
       const isHub = top3Hubs.has(profile.entityId);
       createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub, currentReplicas);
     });
+    const graphSignature = [
+      ...mergedRuntimeGraph.sources.map((source) => source.runtimeId),
+      ...mergedRuntimeGraph.nodes.map((node) => node.entityId),
+      ...mergedRuntimeGraph.accounts.map((account) => account.accountId),
+    ].join('|');
+    if (!savedSettings.camera && graphSignature && graphSignature !== autoFittedGraphSignature) {
+      fitCameraToEntities(connectedRuntimeGraphEntityIds(mergedRuntimeGraph));
+      autoFittedGraphSignature = graphSignature;
+    }
     if (connections.length > 0) {
       connections.forEach(connection => {
         graphWorld.remove(connection.line);
@@ -1662,8 +1734,8 @@
       return applySimpleRadialLayout(profiles, connectionMap);
     }
     void capacityMap;
-    const placed = layoutRuntimeGraph(mergedRuntimeGraph, graphPositionOverrides);
-    return new Map(Array.from(placed, ([entityId, node]) => [
+    forceLayoutCache = resolveRuntimeGraphLayout(mergedRuntimeGraph, graphPositionOverrides, forceLayoutCache);
+    return new Map(Array.from(forceLayoutCache.positions, ([entityId, node]) => [
       entityId,
       new THREE.Vector3(node.position.x, node.position.y, node.position.z),
     ]));
@@ -1781,6 +1853,8 @@
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
+    const entitySize = getEntitySizeForToken(profile.entityId, selectedTokenId);
+    mesh.scale.setScalar(entitySize);
     if (isFed) {
       const glowGeometry = new THREE.RingGeometry(1.2, 1.5, 32);
       const glowMaterial = new THREE.MeshBasicMaterial({
@@ -1798,7 +1872,7 @@
     mesh.userData['baseMaterial'] = material;
     graphWorld.add(mesh);
     const labelSprite = createEntityLabel(profile.entityId);
-    labelSprite.position.set(0, 1.8, 0); // Local position above unit sphere (scales with mesh)
+    positionEntityLabel(labelSprite, entitySize);
     mesh.add(labelSprite); // Child of mesh = auto-sync position
     entities.push({
       id: profile.entityId,
@@ -2355,12 +2429,24 @@
     group.quaternion.copy(quaternion);
     return group;
   }
-  function createEntityLabel(entityId: string): THREE.Sprite {
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d')!;
-    canvas.width = 512;
-    canvas.height = 128;
-    const entityName = getEntityShortName(entityId);
+  function positionEntityLabel(label: THREE.Sprite, entitySize: number): void {
+    if (!Number.isFinite(entitySize) || entitySize <= 0) {
+      throw new Error(`GRAPH_ENTITY_SIZE_INVALID:${entitySize}`);
+    }
+    const worldHeight = Number(label.userData['worldHeight']);
+    if (!Number.isFinite(worldHeight) || worldHeight <= 0) {
+      throw new Error(`GRAPH_LABEL_HEIGHT_INVALID:${worldHeight}`);
+    }
+    label.scale.set((worldHeight * 4) / entitySize, worldHeight / entitySize, 1);
+    label.position.set(0, (entitySize + worldHeight / 2 + 1) / entitySize, 0);
+  }
+  function entityLabelContent(entityId: string) {
+    const projectedLabel = String(
+      mergedRuntimeGraph.nodes.find((node) => node.entityId === entityId)?.selected.label || '',
+    ).trim();
+    const entityName = projectedLabel && projectedLabel.toLowerCase() !== entityId.toLowerCase()
+      ? projectedLabel
+      : getEntityShortName(entityId);
     const currentReplicas = getTimeAwareReplicas();
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
@@ -2370,30 +2456,45 @@
       const totalReserves = graphTotalReserves(replica);
       balanceStr = formatGraphReserveBadge(totalReserves);
     }
-    const labelText = entityName + balanceStr;
+    return {
+      flag,
+      labelText: entityName + balanceStr,
+      key: `${entityName}|${flag}|${balanceStr}|${labelScale}|${isVRActive ? 'vr' : 'screen'}`,
+    };
+  }
+  function createEntityLabel(entityId: string, content = entityLabelContent(entityId)): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 512;
+    canvas.height = 128;
+    const { flag, labelText } = content;
     context.clearRect(0, 0, canvas.width, canvas.height);
     if (flag) {
-      context.font = `${48 * labelScale}px sans-serif`;
+      context.font = '56px sans-serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
+      context.fillStyle = '#ffffff';
       context.fillText(flag, 256, 32); // Top half (centered at 512/2=256)
-      context.font = `bold ${18 * labelScale}px sans-serif`;
+      context.font = 'bold 32px sans-serif';
       context.strokeStyle = '#000000';
-      context.lineWidth = 3;
+      context.lineWidth = 5;
       context.strokeText(labelText, 256, 90);
       context.fillStyle = '#FFD700'; // Gold for Fed
       context.fillText(labelText, 256, 90);
     } else {
-      context.font = `bold ${24 * labelScale}px sans-serif`;
+      context.font = 'bold 64px sans-serif';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       context.strokeStyle = '#000000';
-      context.lineWidth = 3;
+      context.lineWidth = 5;
       context.strokeText(labelText, 256, 64);
       context.fillStyle = '#00ff88';
       context.fillText(labelText, 256, 64);
     }
     const texture = new THREE.CanvasTexture(canvas);
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
     texture.needsUpdate = true;
     const spriteMaterial = new THREE.SpriteMaterial({
       map: texture,
@@ -2403,8 +2504,9 @@
     });
     const sprite = new THREE.Sprite(spriteMaterial);
     const vrMultiplier = isVRActive ? 3.0 : 1.0;
-    const baseScale = 1.5 * labelScale * vrMultiplier;
-    sprite.scale.set(baseScale * 4, baseScale, 1); // 4:1 aspect ratio for emoji + text
+    const worldHeight = 2.2 * labelScale * vrMultiplier;
+    sprite.userData['worldHeight'] = worldHeight;
+    sprite.userData['contentKey'] = content.key;
     return sprite;
   }
   function createMempoolIndicator(entityId: string): THREE.Sprite {
@@ -2428,6 +2530,20 @@
     sprite.userData['context'] = context;
     return sprite;
   }
+  function positionMempoolIndicator(indicator: THREE.Sprite, entitySize: number): void {
+    if (!Number.isFinite(entitySize) || entitySize <= 0) {
+      throw new Error(`GRAPH_ENTITY_SIZE_INVALID:${entitySize}`);
+    }
+    const worldWidth = 2.4;
+    const worldHeight = 1.2;
+    indicator.scale.set(worldWidth / entitySize, worldHeight / entitySize, 1);
+    indicator.position.set((entitySize + worldWidth / 2 + 0.5) / entitySize, 0, 0);
+  }
+  function graphAccountMempoolCount(account: any): number {
+    const projectedCount = Number(account?.mempoolCount);
+    if (Number.isSafeInteger(projectedCount) && projectedCount >= 0) return projectedCount;
+    return Array.isArray(account?.mempool) ? account.mempool.length : 0;
+  }
   function updateMempoolIndicators() {
     const currentReplicas = getTimeAwareReplicas();
     entities.forEach(entity => {
@@ -2439,8 +2555,8 @@
       let accountMempoolOut = 0;
       let accountMempoolIn = 0;
       if (replica?.state?.accounts) {
-        for (const [counterpartyId, accountMachine] of replica.state.accounts) {
-          const pending = accountMachine?.mempool?.length || 0;
+        for (const [, accountMachine] of replica.state.accounts) {
+          const pending = graphAccountMempoolCount(accountMachine);
           accountMempoolOut += pending;
         }
       }
@@ -2449,8 +2565,9 @@
         if (otherEntityId === entity.id) continue;
         if (otherReplica?.state?.accounts) {
           const accountToUs = otherReplica.state.accounts.get(entity.id);
-          if (accountToUs?.mempool?.length > 0) {
-            accountMempoolIn += accountToUs.mempool.length;
+          const incoming = graphAccountMempoolCount(accountToUs);
+          if (incoming > 0) {
+            accountMempoolIn += incoming;
           }
         }
       }
@@ -2464,10 +2581,9 @@
       }
       if (!entity.mempoolIndicator) {
         entity.mempoolIndicator = createMempoolIndicator(entity.id);
-        const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
-        entity.mempoolIndicator.position.set(entitySize + 0.5, 0, 0); // Right side of entity
         entity.mesh.add(entity.mempoolIndicator);
       }
+      positionMempoolIndicator(entity.mempoolIndicator, entity.mesh.scale.x);
       entity.mempoolIndicator.visible = true;
       const canvas = entity.mempoolIndicator.userData['canvas'] as HTMLCanvasElement;
       const context = entity.mempoolIndicator.userData['context'] as CanvasRenderingContext2D;
@@ -2497,7 +2613,9 @@
       lastLabelUpdateTimeIndex = currentTimeIndex;
     }
     entities.forEach(entity => {
-      if (!entity.label || forceRecreateLabels) {
+      const content = entityLabelContent(entity.id);
+      const contentChanged = entity.label?.userData['contentKey'] !== content.key;
+      if (!entity.label || forceRecreateLabels || contentChanged) {
         if (entity.label) {
           entity.mesh.remove(entity.label);
           if (entity.label.material?.map) {
@@ -2505,17 +2623,14 @@
           }
           entity.label.material?.dispose();
         }
-        entity.label = createEntityLabel(entity.id);
-        const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
-        entity.label.position.set(0, entitySize + 0.8, 0);
+        entity.label = createEntityLabel(entity.id, content);
         entity.mesh.add(entity.label);
       }
       if (entity.label.parent !== entity.mesh) {
         graphWorld.remove(entity.label);
-        const labelEntitySize = getEntitySizeForToken(entity.id, selectedTokenId);
-        entity.label.position.set(0, labelEntitySize + 0.8, 0);
         entity.mesh.add(entity.label);
       }
+      positionEntityLabel(entity.label, entity.mesh.scale.x);
       const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(
         (k: any) => k.startsWith(entity.id + ':')
       );
@@ -2623,10 +2738,10 @@
       }
     }
     applyCollisionRepulsion();
+    animateEntityPulses();
     updateEntityLabels();
     updateMempoolIndicators();
     animateParticles();
-    animateEntityPulses();
     if (gridPulseIntensity > 0 && gridHelper) {
       gridPulseIntensity *= 0.95; // Exponential decay
       if (gridPulseIntensity < 0.01) gridPulseIntensity = 0;
@@ -3009,7 +3124,7 @@
     if (intersects.length > 0) {
       const intersectedObject = intersects[0]?.object;
       if (!intersectedObject) return;
-      const entity = entities.find(e => e.mesh === intersectedObject);
+      const entity = entityFromObject(intersectedObject);
       if (!entity) return;
       event.preventDefault();
       if (controls) {
@@ -3079,14 +3194,14 @@
       if (!intersectedObject) {
         throw new Error('FINTECH-SAFETY: No intersected object found');
       }
-      const entity = entities.find(e => e.mesh === intersectedObject);
+      const entity = entityFromObject(intersectedObject);
       if (!entity) {
         tooltip.visible = false;
         dualTooltip.visible = false;
         return;
       }
-      if (hoveredObject !== intersectedObject) {
-        hoveredObject = intersectedObject;
+      if (hoveredObject !== entity.mesh) {
+        hoveredObject = entity.mesh;
         const balanceInfo = getEntityBalanceInfo(entity.id);
         tooltip = {
           visible: true,
@@ -3094,7 +3209,7 @@
           y: event.clientY,
           content: balanceInfo || 'No reserves'
         };
-        const mesh = intersectedObject as THREE.Mesh;
+        const mesh = entity.mesh;
         const material = mesh.material as THREE.MeshLambertMaterial;
         if (!material?.emissive) {
           throw new Error('FINTECH-SAFETY: Entity material missing emissive property');
@@ -3201,7 +3316,7 @@
       if (!intersectedObject) {
         throw new Error('FINTECH-SAFETY: No intersected object in click');
       }
-      const entity = entities.find(e => e.mesh === intersectedObject);
+      const entity = entityFromObject(intersectedObject);
       if (!entity || !entity.id) {
         return;
       }
@@ -3243,11 +3358,18 @@
     panelBridge.emit('entity:selected', { entityId: entity.id });
   }
 
-  function openGraphEntityWallet(entity: GraphEntityData): void {
+  async function openGraphEntityWallet(entity: GraphEntityData): Promise<void> {
     selectGraphEntity(entity);
     saveBirdViewSettings(false);
-    const entityName = getEntityName(entity.id);
-    const signerId = getSignerIdForEntity(entity.id);
+    const mergedNode = mergedRuntimeGraph.nodes.find((node) => node.entityId === entity.id);
+    const targetRuntimeId = requireActionableGraphNodeRuntimeId(mergedNode, $activeRuntimeId);
+    if (targetRuntimeId !== $activeRuntimeId) {
+      if (!$runtimes.has(targetRuntimeId)) throw new Error(`GRAPH_ENTITY_RUNTIME_MISSING:${targetRuntimeId}`);
+      await runtimeOperations.selectRuntime(targetRuntimeId);
+    }
+    const actionableState = mergedNode?.states.find((state) => state.runtimeId === targetRuntimeId);
+    const entityName = mergedNode?.selected.label || getEntityName(entity.id);
+    const signerId = actionableState?.signerId || getSignerIdForEntity(entity.id);
     if (isVRActive && immersiveWalletSurface) {
       immersiveWalletSurface.open({ entityId: entity.id, entityName: entityName || entity.id, signerId: signerId || entity.id });
     }
@@ -3258,8 +3380,15 @@
     });
   }
 
+  function requestGraphEntityWallet(entity: GraphEntityData): void {
+    void openGraphEntityWallet(entity).catch((error) => {
+      graphProjectionError = error instanceof Error ? error.message : String(error);
+      console.error('Failed to open graph entity wallet:', error);
+    });
+  }
+
   function handleGraphGestureOutcome(outcome: GraphGestureOutcome, entity: GraphEntityData): void {
-    if (outcome === 'open') openGraphEntityWallet(entity);
+    if (outcome === 'open') requestGraphEntityWallet(entity);
     else if (outcome === 'select' || outcome === 'drag-end') selectGraphEntity(entity);
   }
 
@@ -3326,20 +3455,16 @@
     const entityMeshes = entities.map(e => e.mesh);
     const intersects = raycaster.intersectObjects(entityMeshes);
     if (intersects.length > 0) {
-      let intersectedObject = intersects[0]?.object;
+      const intersectedObject = intersects[0]?.object;
       if (!intersectedObject) {
         throw new Error('FINTECH-SAFETY: No intersected object in double-click');
       }
-      let entity = entities.find(e => e.mesh === intersectedObject);
-      while (!entity && intersectedObject.parent && intersectedObject.parent !== scene) {
-        intersectedObject = intersectedObject.parent;
-        entity = entities.find(e => e.mesh === intersectedObject);
-      }
+      const entity = entityFromObject(intersectedObject);
       if (!entity) {
         console.warn('Double-click: Could not find entity for object', intersectedObject);
         return; // Gracefully ignore instead of throwing
       }
-      openGraphEntityWallet(entity);
+      requestGraphEntityWallet(entity);
     }
   }
   function onTouchStart(event: TouchEvent) {
@@ -3355,7 +3480,7 @@
       if (intersects.length > 0) {
         const intersectedObject = intersects[0]?.object;
         if (!intersectedObject) return;
-        const entity = entities.find(e => e.mesh === intersectedObject);
+        const entity = entityFromObject(intersectedObject);
         if (!entity) return;
         if (controls) {
           controls.enabled = false;
@@ -3483,29 +3608,34 @@
       saveBirdViewSettings();
     }
   }
-  const DOLLARS_PER_PX = 500_000; // $500K = 1.0 radius
+  const DOLLARS_PER_PX = 500_000; // $500K = 1.0 reserve radius unit
   const EMPTY_SIZE = 0.4;         // $0 entities - still visible
   const MIN_SIZE = 0.5;           // Minimum for funded entities
   const MAX_SIZE = 2.7;           // Cap for whales
   const VISUAL_POWER = 0.6;       // Scaling curve (0.5=sqrt, 0.33=cbrt)
+  const GRAPH_ENTITY_DISPLAY_SCALE = 1.6;
   let lastLabelUpdateTimeIndex = -999; // Track for label updates on frame change
+  function scaleEntityRadius(reserveRadius: number): number {
+    return reserveRadius * GRAPH_ENTITY_DISPLAY_SCALE * entitySizeMultiplier;
+  }
   function getEntitySizeForToken(entityId: string, _tokenId: number): number {
     const currentReplicas = getTimeAwareReplicas();
     for (const [key, replica] of currentReplicas) {
       const replicaEntityId = key.split(':')[0] || key;
       if (replicaEntityId !== entityId) continue;
       if (!replica?.state?.reserves) {
-        return EMPTY_SIZE;
+        return scaleEntityRadius(EMPTY_SIZE);
       }
       const totalReserves = graphTotalReserves(replica);
       const reserveValueUSD = Number(totalReserves) / 1e18;
       if (reserveValueUSD <= 0) {
-        return EMPTY_SIZE;
+        return scaleEntityRadius(EMPTY_SIZE);
       }
       const ratio = Math.max(1, reserveValueUSD / DOLLARS_PER_PX);
-      return Math.max(MIN_SIZE, Math.min(MIN_SIZE * Math.pow(ratio, VISUAL_POWER), MAX_SIZE));
+      const reserveRadius = Math.max(MIN_SIZE, Math.min(MIN_SIZE * Math.pow(ratio, VISUAL_POWER), MAX_SIZE));
+      return scaleEntityRadius(reserveRadius);
     }
-    return EMPTY_SIZE; // Entity not found in replicas
+    return scaleEntityRadius(EMPTY_SIZE); // Entity not found in replicas
   }
   function checkEntityHasReserves(entityId: string): boolean {
     return graphEntityHasReserves(getTimeAwareReplicas(), entityId);
@@ -3823,6 +3953,7 @@
   canonicity={$runtimeGraphCanonicity}
   sourceCount={mergedRuntimeGraph.sources.length}
   desyncCount={graphDesyncCount}
+  projectionError={graphProjectionError}
   runtimeNodeLabels={mergedRuntimeGraph.nodes.map((node) => node.selected.label)}
   timelineRuntimeId={$networkMachineRuntime.selectedStep?.activeRuntimeId ?? ''}
   timelineRuntimeColor={$networkMachineRuntime.selectedStep?.activeRuntimeColor ?? ''}

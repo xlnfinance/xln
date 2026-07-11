@@ -11,6 +11,7 @@
     normalizeXlnMascotDock,
     resolveMascotPanelRect,
     resolveMascotPoint,
+    resolveMascotViewport,
     snapMascotToEdge,
     type MascotPoint,
     type MascotViewport,
@@ -39,16 +40,12 @@
 
   function readViewport(): MascotViewport {
     const visual = window.visualViewport;
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    return {
-      width,
-      height,
-      insetTop: visual?.offsetTop ?? 0,
-      insetLeft: visual?.offsetLeft ?? 0,
-      insetRight: visual ? Math.max(0, width - visual.offsetLeft - visual.width) : 0,
-      insetBottom: visual ? Math.max(0, height - visual.offsetTop - visual.height) : 0,
-    };
+    return resolveMascotViewport(window.innerWidth, window.innerHeight, visual ? {
+      width: visual.width,
+      height: visual.height,
+      offsetTop: visual.offsetTop,
+      offsetLeft: visual.offsetLeft,
+    } : null);
   }
 
   function updateViewport(): void {
@@ -131,6 +128,7 @@
     window.addEventListener('pointerup', finishPointer);
     window.addEventListener('pointercancel', handlePointerCancel);
     window.visualViewport?.addEventListener('resize', updateViewport);
+    window.visualViewport?.addEventListener('scroll', updateViewport);
   });
 
   onDestroy(() => {
@@ -139,6 +137,7 @@
     window.removeEventListener('pointerup', finishPointer);
     window.removeEventListener('pointercancel', handlePointerCancel);
     window.visualViewport?.removeEventListener('resize', updateViewport);
+    window.visualViewport?.removeEventListener('scroll', updateViewport);
   });
 </script>
 
@@ -190,10 +189,20 @@
     pointer-events: auto;
   }
 
-  .mascot-root { width: 64px; height: 64px; }
+  .mascot-root { width: 64px; height: 64px; pointer-events: none; }
+  .mascot-root :global(button) { pointer-events: auto; }
   .chat-position { display: grid; }
 
   @media (max-width: 520px) {
     .mascot-layer { z-index: 9000; }
+    .mascot-root {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .mascot-root[data-dock-side='left'] { justify-content: flex-start; }
+    .mascot-root[data-dock-side='right'] { justify-content: flex-end; }
+    .mascot-root[data-dock-side='top'] { align-items: flex-start; }
+    .mascot-root[data-dock-side='bottom'] { align-items: flex-end; }
   }
 </style>

@@ -49,13 +49,19 @@ function cleanDir(pathname) {
   ensureDir(pathname);
 }
 
-function copyContracts() {
+function copyContracts(requireAllSources) {
   for (const file of files) {
     const srcPath = fromFrontend(file.src);
     const destPath = fromFrontend(file.dest);
 
     if (!existsSync(srcPath)) {
-      console.log(`[static] source file not found: ${file.src}`);
+      if (requireAllSources) {
+        throw new Error(`CONTRACT_SOURCE_REQUIRED:${srcPath}. Build every contract before verifying bundled artifacts.`);
+      }
+      if (!existsSync(destPath) || statSync(destPath).size === 0) {
+        throw new Error(`CONTRACT_STATIC_MISSING:${destPath}. Run ./scripts/sync-contract-artifacts.sh to generate it.`);
+      }
+      console.log(`[static] using bundled ${file.dest}; source artifact is not present`);
       continue;
     }
 
@@ -319,12 +325,10 @@ function generateLlmsStaticFiles() {
   const llmsPath = fromFrontend('static/llms.txt');
   const rebuildRequested = process.env.XLN_REBUILD_LLMS === '1' || process.argv.includes('--rebuild-llms');
   const llmsVerbose = process.env.XLN_STATIC_VERBOSE === '1' || process.argv.includes('--verbose');
-  if (!rebuildRequested && existsSync(llmsPath) && statSync(llmsPath).size > 0) {
+  const llmsContextPresent = existsSync(llmsPath) && statSync(llmsPath).size > 0;
+  if (!rebuildRequested && llmsContextPresent) {
     console.log('[static] llms static context present; skipping rebuild (set XLN_REBUILD_LLMS=1 to refresh)');
     return;
-  }
-  if (!rebuildRequested) {
-    throw new Error(`LLMS_CONTEXT_STATIC_MISSING:${llmsPath}. Run XLN_REBUILD_LLMS=1 ./scripts/sync-contract-artifacts.sh to generate it.`);
   }
 
   const generatorPath = resolve(REPO_ROOT, 'scripts/debug/gpt.cjs');
@@ -357,9 +361,14 @@ function generateLlmsStaticFiles() {
   }
 }
 
-copyContracts();
-copyScenarios();
-copyDocsAndManifest();
-generateLlmsStaticFiles();
+const contractsOnly = process.argv.includes('--contracts-only');
+const requireAllContractSources = process.argv.includes('--require-all-contract-sources');
+
+copyContracts(requireAllContractSources);
+if (!contractsOnly) {
+  copyScenarios();
+  copyDocsAndManifest();
+  generateLlmsStaticFiles();
+}
 
 console.log('[static] files copied for build');

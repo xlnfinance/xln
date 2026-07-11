@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "es2020",
-    "module": "esnext",
+    "module": "commonjs",
     "moduleResolution": "node",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
@@ -11,6 +11,10 @@
     "resolveJsonModule": true
   },
   "ts-node": {
-    "esm": true
+    "esm": false,
+    "moduleTypes": {
+      "../frontend/**/*.ts": "cjs",
+      "../runtime/**/*.ts": "cjs"
+    }
   }
 }

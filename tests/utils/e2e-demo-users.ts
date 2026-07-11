@@ -799,6 +799,7 @@ export async function gotoApp(
           isVisible('[data-testid="app-runtime-ready"]');
         const runtimeCreationVisible =
           isVisible('#runtime-creation') ||
+          isVisible('.brainvault-wrapper') ||
           isVisible('.quick-login-grid') ||
           Boolean(Array.from(document.querySelectorAll('button')).find((button) => {
             const label = (button.textContent || '').trim().toLowerCase();

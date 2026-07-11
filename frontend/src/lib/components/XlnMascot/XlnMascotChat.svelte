@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
   import { ArrowUp, ExternalLink, RotateCw, X } from 'lucide-svelte';
+  import './xln-mascot-chat.css';
   import {
     loadXlnAssistantCatalog,
     streamXlnAssistantReply,
@@ -8,6 +9,7 @@
     type XlnAssistantMessage,
   } from '$lib/ai/xln-assistant-client';
   import { buildXlnGuideMessages, suggestedXlnGuideQuestions } from '$lib/ai/xln-guide-context';
+  import { renderSafeMarkdown } from '$lib/security/safe-markdown';
 
   export let pathname = '/app';
   export let messages: XlnAssistantMessage[] = [];
@@ -42,16 +44,21 @@
     error = '';
     onPresence('idle');
     try {
-      catalog = await loadXlnAssistantCatalog(controller.signal);
-      selectedModel = catalog.defaultModel;
+      const nextCatalog = await loadXlnAssistantCatalog(controller.signal);
+      if (requestController !== controller) return;
+      catalog = nextCatalog;
+      selectedModel = nextCatalog.defaultModel;
       onPresence('ready');
     } catch (reason) {
+      if (requestController !== controller || (reason instanceof DOMException && reason.name === 'AbortError')) return;
       catalog = null;
       error = reason instanceof Error ? reason.message : 'Local AI is offline.';
       onPresence('offline');
     } finally {
-      if (requestController === controller) requestController = null;
-      checking = false;
+      if (requestController === controller) {
+        requestController = null;
+        checking = false;
+      }
     }
   }
 
@@ -165,7 +172,7 @@
       {#each messages as message}
         <article class:assistant={message.role === 'assistant'} class:user={message.role === 'user'}>
           <span>{message.role === 'assistant' ? 'xln' : 'You'}</span>
-          <p>{message.content || 'Thinking…'}</p>
+          <div class="message-markdown">{@html renderSafeMarkdown(message.content || 'Thinking…')}</div>
         </article>
       {/each}
     {/if}
@@ -201,5 +208,3 @@
     <small>Local-only v1. No keys, signatures or private runtime state are shared.</small>
   </form>
 </section>
-
-<style src="./xln-mascot-chat.css"></style>

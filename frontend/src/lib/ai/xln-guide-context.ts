@@ -64,24 +64,29 @@ function docsUrl(path: string): string {
   return `/docs-catalog/${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 
-async function loadGrounding(query: string, pathname: string, signal?: AbortSignal): Promise<string> {
+export async function loadXlnGuideGrounding(query: string, pathname: string, signal?: AbortSignal): Promise<string> {
   const manifestResponse = await fetch('/docs-catalog/manifest.json', {
     cache: 'force-cache',
     ...(signal ? { signal } : {}),
   });
-  if (!manifestResponse.ok) return '';
+  if (!manifestResponse.ok) {
+    throw new Error(`XLN docs manifest is unavailable (${manifestResponse.status}).`);
+  }
   const manifest = await manifestResponse.json() as DocsManifest;
   const ranked = rankXlnGuideDocs(query, pathname, manifest.items ?? []);
+  if (ranked.length === 0) throw new Error('XLN docs catalog has no live guide sources.');
   const documents = await Promise.all(ranked.map(async entry => {
     const response = await fetch(docsUrl(entry.path), {
       cache: 'force-cache',
       ...(signal ? { signal } : {}),
     });
-    if (!response.ok) return '';
+    if (!response.ok) throw new Error(`XLN guide source is unavailable (${response.status}): ${entry.title}`);
     const text = (await response.text()).slice(0, 2_800);
     return `SOURCE: ${entry.title}\nDOC: /docs?doc=${encodeURIComponent(entry.id)}\n${text}`;
   }));
-  return documents.filter(Boolean).join('\n\n---\n\n').slice(0, 6_200);
+  const grounding = documents.filter(Boolean).join('\n\n---\n\n').slice(0, 6_200);
+  if (!grounding) throw new Error('XLN guide sources are empty.');
+  return grounding;
 }
 
 export async function buildXlnGuideMessages(input: Readonly<{
@@ -90,7 +95,7 @@ export async function buildXlnGuideMessages(input: Readonly<{
   history: readonly XlnAssistantMessage[];
   signal?: AbortSignal;
 }>): Promise<XlnAssistantMessage[]> {
-  const grounding = await loadGrounding(input.query, input.pathname, input.signal).catch(() => '');
+  const grounding = await loadXlnGuideGrounding(input.query, input.pathname, input.signal);
   const system = [
     'You are the compact xln guide embedded in the xln application.',
     'Reply in the user\'s language. Be direct and normally stay under 180 words.',

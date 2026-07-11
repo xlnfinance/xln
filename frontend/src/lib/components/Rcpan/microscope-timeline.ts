@@ -7,7 +7,8 @@ export type RcpanMicroscopePhase =
   | 'challenge'
   | 'finalizing'
   | 'settled'
-  | 'treasury-topup'
+  | 'rebalance-request-1'
+  | 'rebalance-request-2'
   | 'debt-enforcement'
   | 'repaid';
 
@@ -68,7 +69,8 @@ export const RCPAN_SCENARIOS: readonly RcpanScenarioDefinition[] = [
     hubShortfallLiquidityBps: 5_000n,
     phases: [
       ...COMMON_PHASES,
-      'treasury-topup',
+      'rebalance-request-1',
+      'rebalance-request-2',
       'debt-enforcement',
       'repaid',
     ],
@@ -82,7 +84,8 @@ const PHASE_WEIGHTS: Readonly<Record<RcpanMicroscopePhase, number>> = {
   challenge: 1.05,
   finalizing: 1.1,
   settled: 1.15,
-  'treasury-topup': 1,
+  'rebalance-request-1': 1,
+  'rebalance-request-2': 1,
   'debt-enforcement': 1,
   repaid: 1.2,
 };

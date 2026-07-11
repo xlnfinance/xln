@@ -6,6 +6,13 @@ import { dirname, resolve } from 'node:path';
 import { collectSnapshot } from './release-snapshot/collect.ts';
 import { writeManifest, writeReleaseMarkdown } from './release-snapshot/render.ts';
 import { signReleaseSnapshot } from './release-snapshot/sign.ts';
+import {
+  assertCleanReleaseSource,
+  assertReleaseSourcePublished,
+  assertReleaseUnpublished,
+  assertReleaseSigningConfigured,
+  assertReleaseVersionMatchesSource,
+} from './release-snapshot/source-policy.ts';
 import type { ReleaseSnapshot } from './release-snapshot/types.ts';
 
 type Args = {
@@ -48,6 +55,11 @@ function parseArgs(argv: string[]): Args {
 }
 
 const args = parseArgs(process.argv.slice(2));
+assertCleanReleaseSource(args.root);
+assertReleaseSourcePublished(args.root);
+assertReleaseVersionMatchesSource(args.root, args.version);
+assertReleaseSigningConfigured(args.version, args.signingKeys);
+assertReleaseUnpublished(args.root, args.version, args.output);
 const previous = args.previous
   ? JSON.parse(readFileSync(args.previous, 'utf8')) as ReleaseSnapshot
   : undefined;

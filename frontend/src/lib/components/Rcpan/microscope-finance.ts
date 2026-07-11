@@ -18,7 +18,10 @@ export type MicroscopeFinanceFrame = Readonly<{
   initial: Readonly<{ userReserve: bigint; hubReserve: bigint; collateral: bigint }>;
   current: Readonly<{ userReserve: bigint; hubReserve: bigint; collateral: bigint; debt: bigint }>;
   final: Readonly<{ userReserve: bigint; hubReserve: bigint; debt: bigint }>;
+  /** Cumulative external reserve increase across completed/current rebalance requests. */
   externalTopUp: bigint;
+  /** Reserve increase attributable only to the currently animated request. */
+  externalRequestTopUp: bigint;
 }>;
 
 export type FcuanFinanceFrame = Readonly<{
@@ -68,7 +71,13 @@ function paidProgress(timeline: RcpanTimelineState): number {
 }
 
 function isPostFinalization(timeline: RcpanTimelineState): boolean {
-  return ['settled', 'treasury-topup', 'debt-enforcement', 'repaid'].includes(timeline.phase);
+  return [
+    'settled',
+    'rebalance-request-1',
+    'rebalance-request-2',
+    'debt-enforcement',
+    'repaid',
+  ].includes(timeline.phase);
 }
 
 function settlementProgress(timeline: RcpanTimelineState): number {
@@ -81,28 +90,44 @@ function deriveCurrentReserves(
   initialUser: bigint,
   initialHub: bigint,
   finalization: DisputeTokenFinalization,
-): Readonly<{ userReserve: bigint; hubReserve: bigint; debt: bigint; topUp: bigint }> {
+): Readonly<{
+  userReserve: bigint;
+  hubReserve: bigint;
+  debt: bigint;
+  topUp: bigint;
+  requestTopUp: bigint;
+}> {
   const settled = settlementProgress(timeline);
   let userReserve = visualLerp(initialUser, finalization.after.reserves.left, settled);
   let hubReserve = visualLerp(initialHub, finalization.after.reserves.right, settled);
   let debt = visualLerp(0n, finalization.newDebt.rightToLeft, settled);
   let topUp = 0n;
 
-  if (timeline.phase === 'treasury-topup') {
-    topUp = visualLerp(0n, finalization.newDebt.rightToLeft, timeline.phaseProgress);
+  const totalDebt = finalization.newDebt.rightToLeft;
+  const firstRequest = totalDebt / 2n;
+  const secondRequest = totalDebt - firstRequest;
+  let requestTopUp = 0n;
+
+  if (timeline.phase === 'rebalance-request-1') {
+    requestTopUp = visualLerp(0n, firstRequest, timeline.phaseProgress);
+    topUp = requestTopUp;
+    hubReserve += topUp;
+  } else if (timeline.phase === 'rebalance-request-2') {
+    requestTopUp = visualLerp(0n, secondRequest, timeline.phaseProgress);
+    topUp = firstRequest + requestTopUp;
     hubReserve += topUp;
   } else if (timeline.phase === 'debt-enforcement') {
-    const paid = visualLerp(0n, finalization.newDebt.rightToLeft, timeline.phaseProgress);
-    topUp = finalization.newDebt.rightToLeft;
+    const paid = visualLerp(0n, totalDebt, timeline.phaseProgress);
+    topUp = totalDebt;
     hubReserve += topUp - paid;
     userReserve += paid;
     debt -= paid;
   } else if (timeline.phase === 'repaid') {
-    topUp = finalization.newDebt.rightToLeft;
-    userReserve += finalization.newDebt.rightToLeft;
+    topUp = totalDebt;
+    userReserve += totalDebt;
     debt = 0n;
   }
-  return { userReserve, hubReserve, debt, topUp };
+  return { userReserve, hubReserve, debt, topUp, requestTopUp };
 }
 
 export function deriveRcpanFinanceFrame(
@@ -148,6 +173,7 @@ export function deriveRcpanFinanceFrame(
       debt: 0n,
     },
     externalTopUp: reserves.topUp,
+    externalRequestTopUp: reserves.requestTopUp,
   };
 }
 

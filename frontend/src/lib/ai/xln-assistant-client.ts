@@ -57,6 +57,10 @@ export async function loadXlnAssistantCatalog(signal?: AbortSignal): Promise<Xln
   });
   if (!response.ok) throw await responseError(response);
   const payload = await response.json() as Record<string, unknown>;
+  if (payload['available'] === false) {
+    throw new Error(typeof payload['message'] === 'string' ? payload['message'] : 'Local AI is offline.');
+  }
+  if (payload['provider'] !== 'local') throw new Error('Assistant returned an invalid provider.');
   const rawModels = Array.isArray(payload['models']) ? payload['models'] : [];
   const models = rawModels.flatMap((raw): XlnAssistantModel[] => {
     if (!raw || typeof raw !== 'object') return [];
@@ -90,26 +94,40 @@ export async function streamXlnAssistantReply(input: Readonly<{
   let buffer = '';
   let answer = '';
   let done = false;
-  while (!done) {
-    const chunk = await reader.read();
-    buffer += decoder.decode(chunk.value, { stream: !chunk.done });
-    const lines = buffer.split(/\r?\n/);
-    buffer = chunk.done ? '' : lines.pop() ?? '';
-    for (const line of lines) {
-      const event = parseAssistantSseLine(line);
+  let cancelAfterDone = false;
+  try {
+    while (!done) {
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = chunk.done ? '' : lines.pop() ?? '';
+      for (const line of lines) {
+        const event = parseAssistantSseLine(line);
+        if (event.content) {
+          answer += event.content;
+          input.onContent(event.content);
+        }
+        if (event.done) {
+          done = true;
+          cancelAfterDone = !chunk.done;
+          break;
+        }
+      }
+      if (chunk.done) break;
+    }
+    if (!done && buffer.trim()) {
+      const event = parseAssistantSseLine(buffer);
       if (event.content) {
         answer += event.content;
         input.onContent(event.content);
       }
       if (event.done) done = true;
     }
-    if (chunk.done) break;
-  }
-  if (buffer.trim()) {
-    const event = parseAssistantSseLine(buffer);
-    if (event.content) {
-      answer += event.content;
-      input.onContent(event.content);
+  } finally {
+    try {
+      if (cancelAfterDone) await reader.cancel('AI_STREAM_DONE');
+    } finally {
+      reader.releaseLock();
     }
   }
   if (!answer.trim()) throw new Error('Assistant returned no text.');

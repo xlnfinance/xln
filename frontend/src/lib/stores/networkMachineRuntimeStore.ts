@@ -1,5 +1,5 @@
 import { get, writable } from 'svelte/store';
-import type { EnvSnapshot, RuntimeAdapterViewFrame } from '@xln/runtime/xln-api';
+import type { EnvSnapshot, RuntimeAdapterGraphFrame } from '@xln/runtime/xln-api';
 import { compileNetworkMachine, type NetworkMachine, type NetworkMachineStep } from '$lib/network3d/networkMachine';
 import {
   disconnectNetworkTimelineReaders,
@@ -18,7 +18,7 @@ export type NetworkMachineRuntimeState = {
   selectedStepIndex: number;
   selectedStep: NetworkMachineStep | null;
   browserFrames: Map<string, EnvSnapshot>;
-  remoteFrames: Map<string, RuntimeAdapterViewFrame>;
+  remoteFrames: Map<string, RuntimeAdapterGraphFrame>;
 };
 
 const emptyState = (): NetworkMachineRuntimeState => ({
@@ -77,14 +77,14 @@ export const networkMachineRuntimeOperations = {
     try {
       const runtimeMap = get(runtimes);
       const browserFrames = new Map<string, EnvSnapshot>();
-      const remoteFrames = new Map<string, RuntimeAdapterViewFrame>();
+      const remoteFrames = new Map<string, RuntimeAdapterGraphFrame>();
       for (const [id, selected] of step.selection.byRuntime) {
         if (!selected) continue;
         const runtime = runtimeMap.get(id);
         if (!runtime) throw new Error(`NETWORK_MACHINE_RUNTIME_MISSING:${id}`);
         const frame = await readNetworkRuntimeFrame(runtime, selected.height);
         if (runtime.type === 'local') browserFrames.set(id, frame as EnvSnapshot);
-        else remoteFrames.set(id, frame as RuntimeAdapterViewFrame);
+        else remoteFrames.set(id, frame as RuntimeAdapterGraphFrame);
       }
       if (requestId !== selectionRequestId) return step;
       networkMachineRuntime.set({

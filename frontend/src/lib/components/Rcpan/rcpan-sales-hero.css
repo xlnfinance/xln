@@ -1,3 +1,10 @@
+.sales-hero,
+.sales-hero *,
+.sales-hero *::before,
+.sales-hero *::after {
+  box-sizing: border-box;
+}
+
 .sales-hero {
   color: var(--theme-text-primary, #f4f4f5);
   border-bottom: 1px solid color-mix(in srgb, var(--theme-card-border, #27272a) 78%, transparent);

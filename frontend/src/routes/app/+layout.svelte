@@ -59,8 +59,9 @@
   let embedBootReady = $state(false);
   let resettingEverything = $state(false);
   let bootGeneration = $state(0);
-  let lockTestMode = $state(false);
-  let scenarioPreviewMode = $state(false);
+  const initialSearchParams = browser ? new URLSearchParams(window.location.search) : null;
+  let lockTestMode = $state(initialSearchParams?.get('locktest') === '1' && canUseLockTestMode());
+  let scenarioPreviewMode = $state(initialSearchParams?.get('scenarioPreview') === '1');
   let currentHash = $state('');
   let pendingRemoteRuntime = $state<RemoteRuntimeRequest | null>(null);
   let remoteRuntimeAuthInput = $state('');

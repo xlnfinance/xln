@@ -551,7 +551,7 @@
           on:change={(event) => settingsOperations.setShowTimeMachine((event.currentTarget as HTMLInputElement).checked)}
         />
       </label>
-      <label class="settings-control settings-control--toggle">
+      <label class="settings-control settings-control--toggle settings-control--mascot">
         <span class="settings-control-copy">
           <strong>xln guide</strong>
           <small>Show the draggable logo and local AI mini-chat.</small>
@@ -1184,6 +1184,10 @@
     .settings-head {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .settings-control--mascot {
+      padding-right: 64px;
     }
   }
 </style>
