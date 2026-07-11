@@ -213,16 +213,12 @@ export async function executeCrontab(
     if (timeSinceLastRun >= task.intervalMs) {
       const handler = CRONTAB_TASK_HANDLERS[task.method];
       if (!handler) throw new Error(`Unknown crontab task method: ${task.method}`);
-      try {
-        const outputs = await handler(env, replica, task, context);
-        allOutputs.push(...outputs);
-        task.lastRun = now;
-        markEntityCrontabDirty(env, replica);
-        if (outputs.length > 0) {
-          crontabLog.debug('task.outputs', { method: task.method, outputs: outputs.length });
-        }
-      } catch (error) {
-        crontabLog.warn('task.failed', { method: task.method, error: (error as Error).message });
+      const outputs = await handler(env, replica, task, context);
+      allOutputs.push(...outputs);
+      task.lastRun = now;
+      markEntityCrontabDirty(env, replica);
+      if (outputs.length > 0) {
+        crontabLog.debug('task.outputs', { method: task.method, outputs: outputs.length });
       }
     }
   }

@@ -55,26 +55,45 @@ const changed = manifest.files.map((expected) => ({ expected, current: hashFroze
 if (!changed.length) throw new Error('FROZEN_CORE_NO_CHANGES_TO_APPROVE');
 
 const prompt = createInterface({ input: process.stdin, output: process.stdout });
-for (const change of changed) {
-  console.log(`\n${change.expected.path}\nold ${change.expected.contentHash}\nnew ${change.current.contentHash}`);
-  const confirmation = await prompt.question(`Type APPROVE ${change.expected.path}: `);
-  if (confirmation !== `APPROVE ${change.expected.path}`) throw new Error(`FROZEN_CORE_APPROVAL_REJECTED:${change.expected.path}`);
-  const comment = (await prompt.question('Approval comment: ')).trim();
-  if (comment.length < 12) throw new Error('FROZEN_CORE_APPROVAL_COMMENT_TOO_SHORT');
-  const approval: FrozenApproval = {
-    path: change.expected.path,
-    oldContentHash: change.expected.contentHash,
-    newContentHash: change.current.contentHash,
-    oldLeafHash: change.expected.leafHash,
-    newLeafHash: change.current.leafHash,
-    release,
-    approvedAt: new Date().toISOString(),
-    comment,
-  };
-  Object.assign(change.expected, change.current);
-  manifest.approvals.push(approval);
+try {
+  for (const change of changed) {
+    console.log(`\n${change.expected.path}\nold ${change.expected.contentHash}\nnew ${change.current.contentHash}`);
+    const fullConfirmation = `APPROVE ${change.expected.path}`;
+    const acceptedConfirmations = changed.length === 1
+      ? new Set(['APPROVE', fullConfirmation])
+      : new Set([fullConfirmation]);
+    const confirmationPrompt = changed.length === 1
+      ? 'Type APPROVE: '
+      : `Type ${fullConfirmation}: `;
+
+    while (true) {
+      const confirmation = (await prompt.question(confirmationPrompt)).trim();
+      if (acceptedConfirmations.has(confirmation)) break;
+      console.error(
+        changed.length === 1
+          ? 'Not approved. Type exactly: APPROVE'
+          : `Not approved. Type exactly: ${fullConfirmation}`,
+      );
+    }
+
+    const comment = (await prompt.question('Approval comment (optional): ')).trim();
+
+    const approval: FrozenApproval = {
+      path: change.expected.path,
+      oldContentHash: change.expected.contentHash,
+      newContentHash: change.current.contentHash,
+      oldLeafHash: change.expected.leafHash,
+      newLeafHash: change.current.leafHash,
+      release,
+      approvedAt: new Date().toISOString(),
+      comment,
+    };
+    Object.assign(change.expected, change.current);
+    manifest.approvals.push(approval);
+  }
+} finally {
+  prompt.close();
 }
-prompt.close();
 manifest.rootHash = buildFrozenTree(manifest.files).hash;
 writeManifest(manifest);
 console.log(`Frozen core approved for release ${release}: ${changed.length} file(s)`);

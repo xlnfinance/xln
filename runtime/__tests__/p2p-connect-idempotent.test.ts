@@ -16,9 +16,6 @@ const makeDetachedP2P = (client: FakeRelayClient): RuntimeP2P & Record<string, u
   p2p.startPolling = () => {
     p2p.startedPolling = Number(p2p.startedPolling || 0) + 1;
   };
-  p2p.startRetryLoop = () => {
-    p2p.startedRetryLoop = Number(p2p.startedRetryLoop || 0) + 1;
-  };
   p2p.closeClients = () => {
     p2p.closedClients = Number(p2p.closedClients || 0) + 1;
   };
@@ -37,7 +34,6 @@ test('RuntimeP2P connect is idempotent while relay client is connecting', () => 
   expect(p2p.closedClients).toBeUndefined();
   expect(p2p.registeredVisibility).toBe(1);
   expect(p2p.startedPolling).toBe(1);
-  expect(p2p.startedRetryLoop).toBe(1);
 });
 
 test('RuntimeP2P connect is idempotent while relay client is open', () => {
@@ -52,5 +48,4 @@ test('RuntimeP2P connect is idempotent while relay client is open', () => {
   expect(p2p.closedClients).toBeUndefined();
   expect(p2p.registeredVisibility).toBe(1);
   expect(p2p.startedPolling).toBe(1);
-  expect(p2p.startedRetryLoop).toBe(1);
 });

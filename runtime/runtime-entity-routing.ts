@@ -20,7 +20,6 @@ export type RuntimeEntityRoutingDeps = {
   hasLocalSignerForEntitySigner(env: Env, entityId: string, signerId: string): boolean;
   resolveSoleLocalSignerForEntity(env: Env, entityId: string): string | null;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
-  startRuntimeLoop(env: Env): void;
 };
 
 const normalizeEntityKey = (value: string): string => String(value || '').toLowerCase();
@@ -259,9 +258,6 @@ export const handleInboundP2PEntityInput = (
   deps.enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
   env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
 
-  if (!runtimeState.loopActive && !env.scenarioMode) {
-    deps.startRuntimeLoop(env);
-  }
 };
 
 export const createRuntimeOutputRoutingDeps = (

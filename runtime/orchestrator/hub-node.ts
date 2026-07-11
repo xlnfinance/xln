@@ -78,6 +78,7 @@ import {
   startP2P,
   stopP2P,
   stopJurisdictionWatchers,
+  resumeRuntimeLoop,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
   waitForRuntimeWorkDrained,
@@ -1734,9 +1735,8 @@ const run = async (): Promise<void> => {
         const restoreRuntimeAfterSnapshotFailure = (): void => {
           env.runtimeState = env.runtimeState ?? {};
           env.runtimeState.persistencePaused = previousPaused;
-          env.runtimeState.persistenceQuiescing = false;
           if (wasLoopActive) {
-            startRuntimeLoop(env, {
+            resumeRuntimeLoop(env, {
               tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
               maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
             });
@@ -1754,8 +1754,7 @@ const run = async (): Promise<void> => {
         try {
           await persistRestoredEnvToDB(env);
           env.runtimeState.persistencePaused = false;
-          env.runtimeState.persistenceQuiescing = false;
-          startRuntimeLoop(env, {
+          resumeRuntimeLoop(env, {
             tickDelayMs: HUB_RUNTIME_TICK_DELAY_MS,
             maxEntityTxsPerFrame: HUB_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
           });

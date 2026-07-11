@@ -32,6 +32,7 @@ import {
   startP2P,
   stopP2P,
   stopJurisdictionWatchers,
+  resumeRuntimeLoop,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
   waitForRuntimeWorkDrained,
@@ -4234,7 +4235,7 @@ const run = async (): Promise<void> => {
     const wasLoopActive = Boolean(env.runtimeState?.loopActive);
     const restartRuntimeLoopIfNeeded = (): void => {
       if (!wasLoopActive) return;
-      startRuntimeLoop(env, {
+      resumeRuntimeLoop(env, {
         tickDelayMs: MARKET_MAKER_RUNTIME_TICK_DELAY_MS,
         maxEntityInputsPerFrame: MARKET_MAKER_MAX_ENTITY_INPUTS_PER_RUNTIME_FRAME,
         maxEntityTxsPerFrame: MARKET_MAKER_MAX_ENTITY_TXS_PER_RUNTIME_FRAME,
@@ -4259,7 +4260,6 @@ const run = async (): Promise<void> => {
       nodeLog.info('bootstrap.ready_snapshot.persisted', { height: env.height });
     } finally {
       env.runtimeConfig = previousRuntimeConfig;
-      if (env.runtimeState) env.runtimeState.persistenceQuiescing = false;
       restartRuntimeLoopIfNeeded();
     }
   };

@@ -98,6 +98,19 @@ const makeReplica = (entityId: string, timestamp: number, signerId = '1'): Entit
     },
   }) as EntityReplica;
 
+const addSignableReplica = (
+  env: Env,
+  timestamp: number,
+  signerLabel = '1',
+): { entityId: string; signerId: string; replica: EntityReplica } => {
+  const signerId = deriveSignerAddressSync(env.runtimeSeed!, signerLabel).toLowerCase();
+  registerSignerKey(signerId, deriveSignerKeySync(env.runtimeSeed!, signerLabel));
+  const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+  const replica = makeReplica(entityId, timestamp, signerId);
+  env.eReplicas.set(`${entityId}:${signerId}`, replica);
+  return { entityId, signerId, replica };
+};
+
 describe('runtime ingress timestamp', () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -289,9 +302,7 @@ describe('runtime ingress timestamp', () => {
     env.timestamp = 1_000;
     addTestJurisdiction(env);
 
-    const existingEntityId = `0x${'11'.repeat(32)}`;
-    const replica = makeReplica(existingEntityId, 1_000);
-    env.eReplicas.set(`${existingEntityId}:1`, replica);
+    const { entityId: existingEntityId, signerId, replica } = addSignableReplica(env, 1_000);
 
     scheduleHook(replica.state.crontabState!, {
       id: 'watchdog:due-after-ingress',
@@ -334,8 +345,10 @@ describe('runtime ingress timestamp', () => {
     expect(env.timestamp).toBeLessThan(futureIngressTimestamp);
     expect(env.timestamp).toBeGreaterThan(10_000);
     expect(env.timestamp).toBeLessThanOrEqual(getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
-    const updatedReplica = env.eReplicas.get(`${existingEntityId}:1`);
+    const updatedReplica = env.eReplicas.get(`${existingEntityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(false);
+    expect(env.history.at(-1)?.runtimeInput.entityInputs.some(input =>
+      input.entityTxs?.some(tx => tx.type === 'scheduledWake'))).toBe(true);
   });
 
   test('direct live process inputs stamp R-frame from block creation time', async () => {
@@ -439,9 +452,7 @@ describe('runtime ingress timestamp', () => {
     env.quietRuntimeLogs = true;
     env.timestamp = 1_000;
 
-    const entityId = `0x${'55'.repeat(32)}`;
-    const replica = makeReplica(entityId, 1_000);
-    env.eReplicas.set(`${entityId}:1`, replica);
+    const { entityId, signerId, replica } = addSignableReplica(env, 1_000);
 
     scheduleHook(replica.state.crontabState!, {
       id: 'watchdog:due-after-empty-ingress',
@@ -453,15 +464,17 @@ describe('runtime ingress timestamp', () => {
     enqueueRuntimeInput(env, {
       timestamp: 20_000,
       runtimeTxs: [],
-      entityInputs: [{ entityId, signerId: '1', entityTxs: [] }],
+      entityInputs: [{ entityId, signerId, entityTxs: [] }],
     });
 
     await process(env);
 
     expect(env.timestamp).toBeGreaterThanOrEqual(10_000);
     expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
-    const updatedReplica = env.eReplicas.get(`${entityId}:1`);
+    const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-empty-ingress')).toBe(false);
+    expect(env.history.at(-1)?.runtimeInput.entityInputs.some(input =>
+      input.entityTxs?.some(tx => tx.type === 'scheduledWake'))).toBe(true);
   });
 
   test('idle runtime loop does not advance logical time from wall clock', async () => {
@@ -500,9 +513,7 @@ describe('runtime ingress timestamp', () => {
     env.quietRuntimeLogs = true;
     env.timestamp = Date.now();
 
-    const entityId = `0x${'88'.repeat(32)}`;
-    const replica = makeReplica(entityId, env.timestamp);
-    env.eReplicas.set(`${entityId}:1`, replica);
+    const { entityId, signerId, replica } = addSignableReplica(env, env.timestamp);
 
     const dueAt = env.timestamp + 30;
     scheduleHook(replica.state.crontabState!, {
@@ -522,7 +533,7 @@ describe('runtime ingress timestamp', () => {
     }
 
     expect(env.timestamp).toBeGreaterThanOrEqual(dueAt);
-    const updatedReplica = env.eReplicas.get(`${entityId}:1`);
+    const updatedReplica = env.eReplicas.get(`${entityId}:${signerId}`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:idle-loop-due-after-wall-clock')).toBe(false);
   });
 

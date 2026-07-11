@@ -334,6 +334,68 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
+  test('restores the bounded transport outbox from the latest committed frame', async () => {
+    const seed = `storage-transport-outbox ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    const signer = deriveSignerAddressSync(seed, '1').toLowerCase();
+    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    const localEntityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'storage-transport-outbox',
+      address: 'browservm://storage-transport-outbox',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    installTestJurisdiction(env, jurisdiction);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId: localEntityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    const pendingOutput = {
+      runtimeId: `0x${'71'.repeat(20)}`,
+      entityId: `0x${'72'.repeat(32)}`,
+      signerId: `0x${'73'.repeat(20)}`,
+      entityTxs: [],
+    };
+    env.height += 1;
+    env.timestamp += 1;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, [pendingOutput]);
+    const journal = await readPersistedFrameJournal(env, env.height);
+    expect(journal?.runtimeOutputs).toEqual([pendingOutput]);
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    const restored = await loadEnvFromDB(runtimeId, seed);
+    expect(restored?.pendingNetworkOutputs).toEqual([pendingOutput]);
+    if (restored) {
+      await closeRuntimeDb(restored);
+      await closeInfraDb(restored);
+    }
+  });
+
   test('production refuses storage safety override flags', async () => {
     const env = await createSavedEmptyEnv('storage-production-safety-flags');
     const runtimeId = env.runtimeId!;

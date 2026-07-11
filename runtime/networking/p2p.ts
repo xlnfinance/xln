@@ -1,7 +1,8 @@
 /**
  * P2P is a dumb encrypted transport. Replay protection and tx validity belong
  * to entity/account consensus; this layer only authenticates runtime sockets,
- * verifies signed gossip profiles, and bounds disconnected-peer queues.
+ * verifies signed gossip profiles, and hands envelopes to an open transport.
+ * Durable retry ownership belongs to the runtime outbox, never this adapter.
  */
 
 import type { Env, RoutedEntityInput } from '../types';
@@ -29,13 +30,7 @@ import {
   sameWsUrl,
   uniqueTransportValues,
 } from './p2p-endpoints';
-import {
-  classifyUndeliveredDelivery,
-  deliveryAccepted,
-  deliveryFailure,
-  isDeliveryDelivered,
-  type DeliveryResult,
-} from '../delivery-result';
+import { deliveryAccepted, deliveryFailure, isDeliveryDelivered, type DeliveryResult } from '../delivery-result';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -78,22 +73,6 @@ type GossipResponsePayload = {
 type GossipRefreshMode = 'incremental' | 'full';
 export type EntityInputDeliveryTransport = 'direct' | 'relay';
 export type EntityInputDeliveryResult = DeliveryResult & { transport: EntityInputDeliveryTransport };
-type PendingEntityInputEntry = {
-  input: RoutedEntityInput;
-  enqueuedAt: number;
-  ingressTimestamp?: number;
-};
-type PendingEntityInputFlushResult = {
-  delivery: EntityInputDeliveryResult;
-  retain: boolean;
-  refreshGossip: boolean;
-  event?: {
-    level: 'warn' | 'error';
-    code: string;
-    message: string;
-    ageMs?: number;
-  };
-};
 
 const normalizeGossipPollMs = (value: number | undefined): number => {
   if (!Number.isFinite(Number(value))) return GOSSIP_POLL_MS;
@@ -206,65 +185,6 @@ const p2pShouldRefreshGossip = (delivery: DeliveryResult): boolean =>
 const p2pSendThrowDebugCode = (delivery: DeliveryResult): string =>
   p2pShouldRefreshGossip(delivery) ? 'P2P_NO_PUBKEY_DELIVERY_FAILED' : 'P2P_SEND_THROW';
 
-const p2pPendingExpiredResult = (
-  transport: EntityInputDeliveryTransport,
-  ageMs: number,
-): EntityInputDeliveryResult =>
-  p2pDeliveryResult(
-    deliveryFailure({
-      category: 'TransientRace',
-      code: 'P2P_PENDING_EXPIRED',
-      message: `Pending entity input expired after ${ageMs}ms`,
-      terminal: true,
-    }),
-    transport,
-  );
-
-const p2pPendingDeliveryDisposition = (delivery: EntityInputDeliveryResult) =>
-  classifyUndeliveredDelivery(delivery, {
-    retry: 'P2P_PENDING_DELIVERY_RETRY',
-    terminal: 'P2P_PENDING_DELIVERY_DROPPED',
-  });
-
-const p2pPendingFlushResult = (
-  delivery: EntityInputDeliveryResult,
-  message: string,
-): PendingEntityInputFlushResult => {
-  if (isDeliveryDelivered(delivery)) {
-    return {
-      delivery,
-      retain: false,
-      refreshGossip: false,
-    };
-  }
-  const disposition = p2pPendingDeliveryDisposition(delivery);
-  return {
-    delivery,
-    retain: disposition.retry,
-    refreshGossip: p2pShouldRefreshGossip(delivery),
-    event: {
-      level: disposition.level,
-      code: disposition.code,
-      message,
-    },
-  };
-};
-
-const p2pPendingExpiredFlushResult = (
-  delivery: EntityInputDeliveryResult,
-  ageMs: number,
-): PendingEntityInputFlushResult => ({
-  delivery,
-  retain: false,
-  refreshGossip: false,
-  event: {
-    level: 'warn',
-    code: 'P2P_PENDING_EXPIRED',
-    message: delivery.failure?.message ?? delivery.code,
-    ageMs,
-  },
-});
-
 const normalizeId = (value: string): string => value.toLowerCase();
 const getReplicaSignerId = (replicaKey: string): string => {
   const idx = replicaKey.lastIndexOf(':');
@@ -275,8 +195,6 @@ const GOSSIP_POLL_MS = 250; // Keep interactive account flows responsive without
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
 const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
-const PENDING_FLUSH_RETRY_MS = 500;
-const PENDING_ENTITY_INPUT_MAX_AGE_MS = 5 * 60 * 1000;
 const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
 
 const isInactiveTabStandby = (): boolean => {
@@ -305,9 +223,8 @@ export class RuntimeP2P {
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
   private directClientErrors = new Map<string, { at: number; error: string }>();
-  private pendingByRuntime = new Map<string, PendingEntityInputEntry[]>();
+  private verifiedProfileRoutes = new Map<string, { runtimeId: string; lastUpdated: number }>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
-  private retryInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
   private focusHandler: (() => void) | null = null;
   private encryptionKeyPair: P2PKeyPair;
@@ -391,7 +308,6 @@ export class RuntimeP2P {
   connect() {
     this.registerVisibilityReconnect();
     this.startPolling();
-    this.startRetryLoop();
     if (this.hasRelayConnectionActivity()) return;
     this.closeClients();
     for (const url of this.relayUrls) {
@@ -416,7 +332,6 @@ export class RuntimeP2P {
           return this.resolveTargetEncryptionKey(targetRuntimeId);
         },
         onOpen: () => {
-          this.flushPending();
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
           this.syncDirectPeerConnections();
@@ -442,7 +357,6 @@ export class RuntimeP2P {
 
   close() {
     this.stopPolling();
-    this.stopRetryLoop();
     this.unregisterVisibilityReconnect();
     this.peerRuntimeEncPubKeys.clear();
     if (this.announceTimer) {
@@ -452,7 +366,6 @@ export class RuntimeP2P {
     this.pendingAnnounceEntities.clear();
     this.closeClients();
     this.closeDirectClients();
-    this.pendingByRuntime.clear();
   }
 
   private startPolling() {
@@ -471,7 +384,7 @@ export class RuntimeP2P {
       const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
       this.requestSeedGossip('incremental');
       void this.maybeHeartbeatAnnounce();
-      logSlowBrowserTimer('p2p.seed-poll.interval', startedAt, `queue=${this.pendingByRuntime.size}`);
+      logSlowBrowserTimer('p2p.seed-poll.interval', startedAt);
     }, this.gossipPollMs);
   }
 
@@ -508,7 +421,6 @@ export class RuntimeP2P {
         return;
       }
       this.requestSeedGossip('incremental');
-      this.flushPending();
     };
     this.visibilityHandler = resume;
     this.focusHandler = resume;
@@ -527,41 +439,33 @@ export class RuntimeP2P {
     }
   }
 
-  private startRetryLoop() {
-    if (this.retryInterval) return;
-    this.retryInterval = setInterval(() => {
-      const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
-      if (this.pendingByRuntime.size > 0) {
-        this.flushPending();
-      }
-      logSlowBrowserTimer('p2p.retry-interval', startedAt, `queue=${this.pendingByRuntime.size}`);
-    }, PENDING_FLUSH_RETRY_MS);
-  }
-
-  private stopRetryLoop() {
-    if (this.retryInterval) {
-      clearInterval(this.retryInterval);
-      this.retryInterval = null;
-    }
-  }
-
   getQueueState(): { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> } {
-    let totalMessages = 0;
-    let oldestAt = Infinity;
+    const pending = this.env.pendingNetworkOutputs ?? [];
     const perTarget: Record<string, number> = {};
-    for (const [targetId, queue] of this.pendingByRuntime.entries()) {
-      totalMessages += queue.length;
-      if (queue.length > 0) perTarget[targetId] = queue.length;
-      for (const entry of queue) {
-        if (entry.enqueuedAt < oldestAt) oldestAt = entry.enqueuedAt;
-      }
+    for (const output of pending) {
+      const targetId = String(output.runtimeId || 'unresolved');
+      perTarget[targetId] = (perTarget[targetId] ?? 0) + 1;
     }
     return {
-      targetCount: this.pendingByRuntime.size,
-      totalMessages,
-      oldestEntryAge: totalMessages > 0 ? Date.now() - oldestAt : 0,
+      targetCount: Object.keys(perTarget).length,
+      totalMessages: pending.length,
+      oldestEntryAge: 0,
       perTarget,
     };
+  }
+
+  getVerifiedRuntimeRoute(entityId: string): { runtimeId: string; lastUpdated: number } | null {
+    return this.verifiedProfileRoutes.get(String(entityId || '').toLowerCase()) ?? null;
+  }
+
+  private rememberVerifiedProfileRoute(profile: Profile): void {
+    const key = profile.entityId.toLowerCase();
+    const existing = this.verifiedProfileRoutes.get(key);
+    if (existing && existing.lastUpdated >= profile.lastUpdated) return;
+    this.verifiedProfileRoutes.set(key, {
+      runtimeId: normalizeRuntimeId(profile.runtimeId),
+      lastUpdated: profile.lastUpdated,
+    });
   }
 
   getReconnectState(): { attempt: number; nextAt: number } | null {
@@ -607,7 +511,7 @@ export class RuntimeP2P {
   ): EntityInputDeliveryResult {
     const sent = client.sendEntityInputRaw(targetRuntimeId, input, ingressTimestamp);
     return sent
-      ? p2pDeliveryResult(deliveryAccepted('P2P_ENTITY_INPUT_DELIVERED'), transport)
+      ? p2pDeliveryResult(deliveryAccepted('P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT'), transport)
       : p2pSendFalseDelivery(transport);
   }
 
@@ -765,65 +669,6 @@ export class RuntimeP2P {
       client: this.getActiveClient(),
       transport: 'relay',
     };
-  }
-
-  private flushPendingEntry(
-    client: Pick<RuntimeWsClient, 'sendEntityInputRaw'>,
-    targetRuntimeId: string,
-    entry: PendingEntityInputEntry,
-    transport: EntityInputDeliveryTransport,
-  ): PendingEntityInputFlushResult {
-    const ageMs = Date.now() - entry.enqueuedAt;
-    if (ageMs > PENDING_ENTITY_INPUT_MAX_AGE_MS) {
-      return p2pPendingExpiredFlushResult(p2pPendingExpiredResult(transport, ageMs), ageMs);
-    }
-    try {
-      const delivery = this.deliverEntityInput(client, targetRuntimeId, entry.input, entry.ingressTimestamp, transport);
-      return p2pPendingFlushResult(delivery, delivery.failure?.message ?? delivery.code);
-    } catch (error) {
-      const message = String((error as Error)?.message || error || '');
-      return p2pPendingFlushResult(p2pSendThrowResult(transport, message), message);
-    }
-  }
-
-  private emitPendingFlushEvent(
-    targetRuntimeId: string,
-    entry: PendingEntityInputEntry,
-    transport: EntityInputDeliveryTransport,
-    result: PendingEntityInputFlushResult,
-  ): void {
-    if (!result.event) return;
-    this.sendDebugEvent({
-      level: result.event.level,
-      code: result.event.code,
-      message: result.event.message,
-      targetRuntimeId,
-      entityId: entry.input.entityId,
-      transport,
-      ...(result.event.ageMs !== undefined ? { ageMs: result.event.ageMs } : {}),
-      delivery: result.delivery,
-    });
-    if (result.refreshGossip) {
-      this.refreshGossip();
-    }
-  }
-
-  private flushPending() {
-    for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      const { client, transport } = this.resolveTransportClient(targetRuntimeId);
-      if (!client || !client.isOpen()) continue;
-      const remaining: PendingEntityInputEntry[] = [];
-      for (const entry of queue) {
-        const result = this.flushPendingEntry(client, targetRuntimeId, entry, transport);
-        this.emitPendingFlushEvent(targetRuntimeId, entry, transport, result);
-        if (result.retain) remaining.push(entry);
-      }
-      if (remaining.length > 0) {
-        this.pendingByRuntime.set(targetRuntimeId, remaining);
-      } else {
-        this.pendingByRuntime.delete(targetRuntimeId);
-      }
-    }
   }
 
   private requestSeedGossip(mode: GossipRefreshMode = 'incremental') {
@@ -1191,7 +1036,13 @@ export class RuntimeP2P {
       }
       const existingProfiles = this.env.gossip?.getProfiles?.() || [];
       const existing = existingProfiles.find((existingProfile) => existingProfile.entityId === sanitized.entityId);
-      if (existing && existing.lastUpdated >= sanitized.lastUpdated) {
+      const verifiedRoute = this.getVerifiedRuntimeRoute(sanitized.entityId);
+      if (
+        existing &&
+        existing.lastUpdated >= sanitized.lastUpdated &&
+        verifiedRoute &&
+        verifiedRoute.lastUpdated >= sanitized.lastUpdated
+      ) {
         continue;
       }
 
@@ -1249,6 +1100,7 @@ export class RuntimeP2P {
         }
       }
 
+      this.rememberVerifiedProfileRoute(sanitized);
       this.env.gossip?.announce?.(sanitized);
       accepted++;
       acceptedProfiles.push(sanitized);
@@ -1265,9 +1117,6 @@ export class RuntimeP2P {
       if (publicKey && isHexPublicKey(publicKey)) {
         registerSignerPublicKey(sanitized.entityId, publicKey);
       }
-    }
-    if (accepted > 0 && this.pendingByRuntime.size > 0) {
-      this.flushPending();
     }
     if (accepted > 0) {
       this.syncDirectPeerConnections();
@@ -1400,7 +1249,6 @@ export class RuntimeP2P {
       },
       onOpen: () => {
         this.directClientErrors.delete(normalizedTargetRuntimeId);
-        this.flushPending();
       },
       onEntityInput: async (from, input, timestamp) => {
         await this.ensureProfilesForInput(input);

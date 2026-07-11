@@ -21,6 +21,14 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('quick and smoke gates rebuild after their own artifact cleanup', () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts['test:all:quick']).not.toContain('--skip-build');
+    expect(packageJson.scripts['test:all:smoke']).not.toContain('--skip-build');
+  });
   test('start-server exposes the secondary Tron RPC to the orchestrator and children', () => {
     const script = readFileSync(join(repoRoot, 'scripts/start-server.sh'), 'utf8');
     expect(script).toContain('RPC2_PORT="${ANVIL2_PORT:-$(xln_rpc2_port)}"');
@@ -163,7 +171,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain("process.env['XLN_HUB_READY_SNAPSHOT_TIMEOUT_MS'] || '60000'");
     expect(orchestrator).toContain('XLN_HUB_BOOTSTRAP_PAUSE_STORAGE: HUB_BOOTSTRAP_PAUSE_STORAGE');
     expect(orchestrator).toContain("XLN_LOG_LEVEL: process.env['XLN_HUB_LOG_LEVEL'] ?? process.env['XLN_LOG_LEVEL'] ?? 'warn'");
-    expect(runtimeEntityRouting).toContain('deps.startRuntimeLoop(env);');
+    expect(runtimeEntityRouting).not.toContain('deps.startRuntimeLoop(env);');
     expect(runtimeEntityRouting).not.toContain('processRuntime(env)');
     expect(runtimeEntityRouting).not.toContain('queueMicrotask(() =>');
     expect(runtimeMainSource).toContain('const shouldExitOnRuntimeFatal = (runtimeProcess = getRuntimeProcessGlobal()): boolean =>');

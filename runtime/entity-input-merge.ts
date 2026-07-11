@@ -78,6 +78,18 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   return merged;
 };
 
+const prioritizeScheduledWake = (txs: EntityTx[]): EntityTx[] => {
+  const wakes = txs.filter(tx => tx.type === 'scheduledWake');
+  if (wakes.length === 0) return txs;
+  const canonicalWake = safeStringify(wakes[0]);
+  if (wakes.some(wake => safeStringify(wake) !== canonicalWake)) {
+    throw new Error('SCHEDULED_WAKE_CONFLICTING_INPUTS');
+  }
+  // The wake was computed from frame-start state. Run it before user/network
+  // txs so a tx that replaces the same hook cannot invalidate or consume it.
+  return [wakes[0]!, ...txs.filter(tx => tx.type !== 'scheduledWake')];
+};
+
 const canonicalEntityInputSortKey = (input: RoutedEntityInput): string => safeStringify({
   entityId: String(input.entityId || '').toLowerCase(),
   signerId: String(input.signerId || '').toLowerCase(),
@@ -205,9 +217,7 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
 
   const mergedInputs = Array.from(merged.values());
   return sortMergedEntityInputs([...mergedInputs, ...conflicts].map(input => {
-    if (input.entityTxs && input.entityTxs.length > 1) {
-      return { ...input, entityTxs: mergeJEventTxs(input.entityTxs) };
-    }
-    return input;
+    if (!input.entityTxs || input.entityTxs.length === 0) return input;
+    return { ...input, entityTxs: prioritizeScheduledWake(mergeJEventTxs(input.entityTxs)) };
   }));
 };

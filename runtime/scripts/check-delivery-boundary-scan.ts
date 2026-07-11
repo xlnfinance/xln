@@ -194,17 +194,20 @@ for (const [path, markers] of [
     'enqueueEntityInputDelivery(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;',
     'export type RuntimeEntityInputRoutingResult = {',
     'delivery: DeliveryResult;',
+    'export const buildPendingNetworkOutputs',
+    'export const rescheduleDeferredOutputs',
+    'NETWORK_OUTBOX_CAPACITY_EXCEEDED',
     'requireDeliveryResult(',
     'requireDeliveryDelivered(',
     'isDeliveryDelivered(directDelivery)',
+    'shouldRetryDelivery(p2pDelivery)',
   ]],
   ['runtime/networking/p2p.ts', [
     'enqueueEntityInputDelivery(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): EntityInputDeliveryResult',
     'sendEntityInputRaw',
-    'classifyUndeliveredDelivery(delivery,',
     "delivery.code === 'P2P_NO_PUBKEY'",
-    'private flushPendingEntry(',
-    'private flushPending()',
+    'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
+    'Durable retry ownership belongs to the runtime outbox',
   ]],
   ['runtime/networking/ws-client.ts', [
     'sendEntityInputRaw(to: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean',
@@ -236,6 +239,10 @@ for (const [path, markers] of [
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
 }
+
+const p2pSource = readText('runtime/networking/p2p.ts');
+assertNotIncludes(p2pSource, 'pendingByRuntime', 'runtime/networking/p2p.ts');
+assertNotIncludes(p2pSource, 'flushPending', 'runtime/networking/p2p.ts');
 
 const runtimeTs = readText('runtime/runtime.ts');
 assertIncludes(runtimeTs, '): RuntimeEntityInputRoutingResult => {', 'runtime/runtime.ts');

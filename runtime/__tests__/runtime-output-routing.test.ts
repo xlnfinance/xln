@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { handleInboundP2PEntityInput, resolveRuntimeIdForEntity } from '../runtime-entity-routing';
-import { dispatchEntityOutputs, planEntityOutputs, sendEntityInputWithRouting } from '../runtime-output-routing';
+import {
+  buildRouteOutputKey,
+  dispatchEntityOutputs,
+  planEntityOutputs,
+  rescheduleDeferredOutputs,
+  sendEntityInputWithRouting,
+  splitPendingOutputsByRetryWindow,
+} from '../runtime-output-routing';
 import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../delivery-result';
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
 
@@ -8,6 +15,111 @@ const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 
 describe('runtime output routing', () => {
+  test('uses existing proposal identity to distinguish transport envelopes', () => {
+    const base = {
+      entityId: entityId('10'),
+      signerId: runtimeId('11'),
+      entityTxs: [],
+    } satisfies RoutedEntityInput;
+    const first = {
+      ...base,
+      proposedFrame: { height: 1, hash: '0xaaa', txs: [], newState: {} as never },
+    } as RoutedEntityInput;
+    const second = {
+      ...base,
+      proposedFrame: { height: 1, hash: '0xbbb', txs: [], newState: {} as never },
+    } as RoutedEntityInput;
+
+    expect(buildRouteOutputKey(first)).not.toBe(buildRouteOutputKey(second));
+  });
+
+  test('backs off retryable envelopes without treating them as fatal', () => {
+    const output = {
+      runtimeId: runtimeId('12'),
+      entityId: entityId('13'),
+      signerId: runtimeId('14'),
+      entityTxs: [],
+    } satisfies RoutedEntityInput;
+    const env = {
+      timestamp: 1_000,
+      pendingNetworkOutputs: [],
+      runtimeState: {},
+    } as unknown as Env;
+    const deps = {
+      ensureRuntimeState: (targetEnv: Env) => targetEnv.runtimeState!,
+    } as any;
+
+    const pending = rescheduleDeferredOutputs(env, [], [output], [], deps);
+    expect(pending).toEqual([output]);
+    expect(splitPendingOutputsByRetryWindow(env, pending, deps)).toEqual({ ready: [], waiting: [output] });
+  });
+
+  test('rebinds a durable output to the entity current runtime instead of creating a poison loop', () => {
+    const persistedRuntimeId = runtimeId('15');
+    const resolvedRuntimeId = runtimeId('16');
+    const warnings: string[] = [];
+    const output = {
+      runtimeId: persistedRuntimeId,
+      entityId: entityId('17'),
+      signerId: runtimeId('18'),
+      entityTxs: [],
+    } satisfies RoutedEntityInput;
+    const env = {
+      runtimeId: runtimeId('19'),
+      warn: (_scope: string, code: string) => warnings.push(code),
+    } as unknown as Env;
+
+    const planned = planEntityOutputs(env, [output], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
+      getP2P: () => ({
+        enqueueEntityInputDelivery: () => deliveryAccepted('TEST_DELIVERED'),
+        getVerifiedRuntimeRoute: () => ({ runtimeId: resolvedRuntimeId, lastUpdated: 2 }),
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => resolvedRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => resolvedRuntimeId,
+    });
+
+    expect(planned.remoteOutputs[0]?.targetRuntimeId).toBe(resolvedRuntimeId);
+    expect(planned.remoteOutputs[0]?.output.runtimeId).toBe(resolvedRuntimeId);
+    expect(warnings).toEqual(['ROUTE_TARGET_RUNTIME_REBOUND']);
+  });
+
+  test('does not rebind a durable output from an unverified runtime hint', () => {
+    const persistedRuntimeId = runtimeId('1a');
+    const hintedRuntimeId = runtimeId('1b');
+    const warnings: string[] = [];
+    const output = {
+      runtimeId: persistedRuntimeId,
+      entityId: entityId('1c'),
+      signerId: runtimeId('1d'),
+      entityTxs: [],
+    } satisfies RoutedEntityInput;
+    const env = {
+      runtimeId: runtimeId('1e'),
+      warn: (_scope: string, code: string) => warnings.push(code),
+    } as unknown as Env;
+
+    const planned = planEntityOutputs(env, [output], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState ??= {},
+      getP2P: () => null,
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => hintedRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => hintedRuntimeId,
+    });
+
+    expect(planned.remoteOutputs[0]?.targetRuntimeId).toBe(persistedRuntimeId);
+    expect(warnings).toEqual(['ROUTE_TARGET_RUNTIME_CHANGE_UNVERIFIED']);
+  });
+
   test('falls back to encrypted P2P delivery after direct dispatch misses', () => {
     const targetRuntimeId = runtimeId('22');
     const warnings: string[] = [];
@@ -365,7 +477,7 @@ describe('runtime output routing', () => {
     expect(queued[0]?.entityId).toBe(localEntityId);
   });
 
-  test('fails fast when P2P does not confirm delivery', () => {
+  test('defers when P2P reports a retryable transport failure', () => {
     const targetRuntimeId = runtimeId('77');
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
@@ -389,7 +501,7 @@ describe('runtime output routing', () => {
       },
     } as unknown as Env;
 
-    expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => ({
         enqueueEntityInputDelivery: () => deliveryFailure({
@@ -406,20 +518,13 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    })).toThrow(/ROUTE_SEND_NOT_DELIVERED/);
-
-    const routeError = errors.find(entry => entry.code === 'ROUTE_SEND_FAILED');
-    expect(routeError).toBeDefined();
-    expect(routeError?.delivery).toMatchObject({
-      outcome: 'failed',
-      code: 'P2P_SEND_RETURNED_FALSE',
-      retryable: true,
-      fatal: false,
-      terminal: false,
     });
+
+    expect(deferred).toEqual([output]);
+    expect(errors).toHaveLength(0);
   });
 
-  test('fails fast when neither direct dispatch nor P2P is available', () => {
+  test('defers when neither direct dispatch nor P2P is available', () => {
     const targetRuntimeId = runtimeId('44');
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
@@ -436,7 +541,7 @@ describe('runtime output routing', () => {
       warn: () => {},
     } as unknown as Env;
 
-    expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+    const deferred = dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
       ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
@@ -446,7 +551,43 @@ describe('runtime output routing', () => {
       resolveSoleLocalSignerForEntity: () => null,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
-    })).toThrow(/ROUTE_NO_P2P/);
+    });
+    expect(deferred).toEqual([output]);
+  });
+
+  test('fails fast when P2P reports a routing contradiction', () => {
+    const targetRuntimeId = runtimeId('81');
+    const output: DeliverableEntityInput = {
+      runtimeId: targetRuntimeId,
+      entityId: entityId('82'),
+      signerId: runtimeId('83'),
+      entityTxs: [],
+    };
+    const env = {
+      runtimeId: runtimeId('11'),
+      timestamp: 5678,
+      runtimeState: {},
+      warn: () => {},
+      error: () => {},
+    } as unknown as Env;
+
+    expect(() => dispatchEntityOutputs(env, [{ output, targetRuntimeId }], {
+      ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+      getP2P: () => ({
+        enqueueEntityInputDelivery: () => deliveryFailure({
+          category: 'Contradiction',
+          code: 'P2P_ROUTE_CORRUPT',
+          terminal: true,
+        }),
+      }),
+      enqueueRuntimeInputs: () => {},
+      extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
+      hasLocalSignerForEntitySigner: () => false,
+      resolveSoleLocalSignerForEntity: () => null,
+      resolveRuntimeIdForEntity: () => targetRuntimeId,
+      resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
+    })).toThrow(/ROUTE_SEND_NOT_DELIVERED/);
   });
 
   test('retargets trigger-only local outputs to the exact sole local signer before enqueue', () => {

@@ -49,9 +49,9 @@ import {
   type NormalizedOrderbookOffer,
   type WorkingOrderbookOffer,
 } from './swap-execution';
+import { assertScheduledWakeFrameOrder } from './runtime-scheduled-wake';
 import { replaceOrderbookPair, type OrderbookExtState } from './orderbook';
 import {
-  executeCrontab,
   initCrontab,
   scheduleHook as scheduleCrontabHook,
   cancelHook as cancelCrontabHook,
@@ -1162,15 +1162,6 @@ export const applyEntityInput = async (
     markStorageEntityDirty(env, workingReplica.state.entityId);
   }
 
-  const hasManualBroadcast = Boolean(entityInput.entityTxs?.some(tx => tx.type === 'j_broadcast'));
-  const crontabOutputs = await executeCrontab(env, workingReplica, workingReplica.state.crontabState, {
-    manualBroadcastInInput: hasManualBroadcast,
-  });
-  if (crontabOutputs.length > 0) {
-    entityLog.debug('crontab.outputs', { count: crontabOutputs.length });
-    entityOutbox.push(...crontabOutputs);
-  }
-
   // Add transactions to mempool (mutable for performance)
   if (entityInput.entityTxs?.length) {
     const voteTransactions = entityInput.entityTxs.filter(tx => tx.type === 'vote');
@@ -2095,6 +2086,7 @@ export const applyEntityFrame = async (
     context: string;
   }>;
 }> => {
+  assertScheduledWakeFrameOrder(entityTxs);
   const frameProfileStartMs = getPerfMs();
   const frameProfileMarks: Record<string, number> = {};
   const frameProfileTxTotals = new Map<string, { count: number; elapsedMs: number }>();

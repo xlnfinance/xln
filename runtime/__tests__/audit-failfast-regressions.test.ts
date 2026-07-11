@@ -208,10 +208,10 @@ const attachSigningReplica = (
       mempool: [],
       isProposer: true,
       state: {
-        entityId,
+        ...makeEntityState(entityId),
         config: makeSingleSignerConfigFor(signerId),
       },
-    } as unknown as EntityReplica,
+    } satisfies EntityReplica,
   );
 };
 

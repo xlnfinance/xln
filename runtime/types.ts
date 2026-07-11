@@ -585,6 +585,7 @@ export interface Env {
     };
   } | undefined;
   runtimeState?: {
+    lifecyclePhase?: 'booting' | 'running' | 'quiescing' | 'stopped' | 'halted';
     loopActive?: boolean;
     halted?: boolean;
     fatalDebugPayload?: {
@@ -598,6 +599,17 @@ export interface Env {
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
     clockPrimed?: boolean;
+    scheduledWakeIndex?: {
+      heap: Array<{
+        dueAt: number;
+        entityId: string;
+        signerId: string;
+        generation: number;
+      }>;
+      generations: Map<string, number>;
+      replicas: Map<string, EntityReplica>;
+      initialized: boolean;
+    };
     persistencePaused?: boolean;
     persistenceQuiescing?: boolean;
     lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
@@ -626,6 +638,10 @@ export interface Env {
     infraDbOpenPromise?: Promise<boolean> | null | undefined;
     infraDbClosing?: boolean;
     infraDbPendingWrites?: Set<Promise<void>>;
+    runtimeSyncChannel?: {
+      postMessage(message: unknown): void;
+      close(): void;
+    } | null;
     logState?: {
       nextId: number;
       mirrorToConsole?: boolean;
@@ -766,7 +782,7 @@ export interface Env {
   pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
   skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
   networkInbox?: RoutedEntityInput[];   // Inbound network messages queued for next tick
-  pendingNetworkOutputs?: RoutedEntityInput[]; // Legacy persisted queue; live runtime treats non-empty values as fatal.
+  pendingNetworkOutputs?: RoutedEntityInput[]; // Durable, bounded at-least-once transport outbox.
   lockRuntimeSeed?: boolean;      // Prevent runtime seed updates during scenarios
 
   // Frame-scoped structured logs (captured into snapshot, then reset)

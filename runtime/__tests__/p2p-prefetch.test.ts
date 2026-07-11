@@ -27,7 +27,6 @@ test('enqueueEntityInputDelivery starts profile prefetch before transport resolu
   p2p.clients = [];
   p2p.directClients = new Map();
   p2p.directClientUrls = new Map();
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -44,7 +43,6 @@ test('enqueueEntityInputDelivery starts profile prefetch before transport resolu
 
   expect(prefetched).toBe(true);
   expect(resolvedAfterPrefetch).toBe(true);
-  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length || 0).toBe(0);
 });
 
 test('enqueueEntityInputDelivery reports typed delivery result when no transport is open', () => {
@@ -65,7 +63,6 @@ test('enqueueEntityInputDelivery reports typed delivery result when no transport
   p2p.directClients = new Map();
   p2p.directClientUrls = new Map();
   p2p.directClientErrors = new Map();
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -115,7 +112,6 @@ test('enqueueEntityInputDelivery reports typed delivery result when transport se
   p2p.directClients = new Map();
   p2p.directClientUrls = new Map();
   p2p.directClientErrors = new Map();
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -174,7 +170,6 @@ test('enqueueEntityInputDelivery refreshes gossip from typed no-pubkey delivery 
   p2p.directClients = new Map();
   p2p.directClientUrls = new Map();
   p2p.directClientErrors = new Map();
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -232,7 +227,6 @@ test('enqueueEntityInputDelivery uses official relay when advertised hub direct 
   p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
   p2p.clients = [relayClient];
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -247,7 +241,7 @@ test('enqueueEntityInputDelivery uses official relay when advertised hub direct 
 
   expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 1234)).toMatchObject({
     outcome: 'delivered',
-    code: 'P2P_ENTITY_INPUT_DELIVERED',
+    code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     transport: 'relay',
   });
 
@@ -259,7 +253,6 @@ test('enqueueEntityInputDelivery uses official relay when advertised hub direct 
     event !== null &&
     (event as { code?: string }).code === 'P2P_ENTITY_INPUT_NOT_DELIVERED',
   )).toBe(false);
-  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length || 0).toBe(0);
 });
 
 test('enqueueEntityInputDelivery returns typed success with transport', () => {
@@ -284,7 +277,6 @@ test('enqueueEntityInputDelivery returns typed success with transport', () => {
   p2p.directClients = new Map();
   p2p.directClientUrls = new Map();
   p2p.directClientErrors = new Map();
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -294,7 +286,7 @@ test('enqueueEntityInputDelivery returns typed success with transport', () => {
 
   expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 2345)).toMatchObject({
     outcome: 'delivered',
-    code: 'P2P_ENTITY_INPUT_DELIVERED',
+    code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     retryable: false,
     fatal: false,
     terminal: true,
@@ -337,7 +329,6 @@ test('enqueueEntityInputDelivery prefers open direct transport over relay', () =
   p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
   p2p.clients = [relayClient];
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -347,7 +338,7 @@ test('enqueueEntityInputDelivery prefers open direct transport over relay', () =
 
   expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 5678)).toMatchObject({
     outcome: 'delivered',
-    code: 'P2P_ENTITY_INPUT_DELIVERED',
+    code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     transport: 'direct',
   });
   expect(directSent).toHaveLength(1);
@@ -390,7 +381,6 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
   p2p.directClientUrls = new Map([[TARGET_RUNTIME_ID, 'wss://hub.example/direct']]);
   p2p.directClientErrors = new Map();
   p2p.clients = [relayClient];
-  p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
     entityId: SOURCE_ENTITY_ID,
@@ -406,7 +396,7 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
 
   expect(p2p.enqueueEntityInputDelivery(TARGET_RUNTIME_ID, input, 6789)).toMatchObject({
     outcome: 'delivered',
-    code: 'P2P_ENTITY_INPUT_DELIVERED',
+    code: 'P2P_ENTITY_INPUT_HANDED_TO_TRANSPORT',
     transport: 'relay',
   });
   expect(relaySent).toHaveLength(1);
@@ -415,187 +405,39 @@ test('enqueueEntityInputDelivery uses relay when direct transport is not authori
   expect(directSent).toHaveLength(0);
 });
 
-test('flushPending retains retryable typed delivery failures', () => {
+test('getQueueState reports the runtime-owned durable outbox', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
-  const debugEvents: unknown[] = [];
-  const relayClient = {
-    isOpen: () => true,
-    sendEntityInputRaw: () => false,
-  };
-  const input: RoutedEntityInput = {
-    entityId: SOURCE_ENTITY_ID,
-    signerId: '0x2222222222222222222222222222222222222222',
-    entityTxs: [],
+  p2p.env = {
+    pendingNetworkOutputs: [{
+      runtimeId: TARGET_RUNTIME_ID,
+      entityId: SOURCE_ENTITY_ID,
+      signerId: '0x2222222222222222222222222222222222222222',
+      entityTxs: [],
+    }],
   };
 
-  p2p.sendDebugEvent = (payload: unknown) => {
-    debugEvents.push(payload);
-    return true;
-  };
-  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
-  p2p.pendingByRuntime = new Map([[
-    TARGET_RUNTIME_ID,
-    [{ input, enqueuedAt: Date.now(), ingressTimestamp: 7777 }],
-  ]]);
-
-  (p2p as any).flushPending();
-
-  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)).toHaveLength(1);
-  expect(debugEvents.at(-1)).toMatchObject({
-    level: 'warn',
-    code: 'P2P_PENDING_DELIVERY_RETRY',
-    targetRuntimeId: TARGET_RUNTIME_ID,
-    entityId: SOURCE_ENTITY_ID,
-    transport: 'relay',
-    delivery: {
-      outcome: 'failed',
-      code: 'P2P_SEND_RETURNED_FALSE',
-      retryable: true,
-      fatal: false,
-      terminal: false,
-    },
+  expect(p2p.getQueueState()).toEqual({
+    targetCount: 1,
+    totalMessages: 1,
+    oldestEntryAge: 0,
+    perTarget: { [TARGET_RUNTIME_ID]: 1 },
   });
 });
 
-test('flushPending refreshes gossip from typed no-pubkey delivery code', () => {
+test('verified profile routes advance monotonically and never replay backward', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
-  const debugEvents: unknown[] = [];
-  let refreshes = 0;
-  const relayClient = {
-    isOpen: () => true,
-    sendEntityInputRaw: () => {
-      throw new Error('P2P_NO_PUBKEY missing gossip profile');
-    },
-  };
-  const input: RoutedEntityInput = {
+  p2p.verifiedProfileRoutes = new Map();
+  const profile = (runtimeId: string, lastUpdated: number) => ({
     entityId: SOURCE_ENTITY_ID,
-    signerId: '0x2222222222222222222222222222222222222222',
-    entityTxs: [],
-  };
-
-  p2p.sendDebugEvent = (payload: unknown) => {
-    debugEvents.push(payload);
-    return true;
-  };
-  p2p.refreshGossip = () => {
-    refreshes += 1;
-  };
-  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
-  p2p.pendingByRuntime = new Map([[
-    TARGET_RUNTIME_ID,
-    [{ input, enqueuedAt: Date.now(), ingressTimestamp: 7778 }],
-  ]]);
-
-  (p2p as any).flushPending();
-
-  expect(refreshes).toBe(1);
-  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)).toHaveLength(1);
-  expect(debugEvents.at(-1)).toMatchObject({
-    level: 'warn',
-    code: 'P2P_PENDING_DELIVERY_RETRY',
-    targetRuntimeId: TARGET_RUNTIME_ID,
-    entityId: SOURCE_ENTITY_ID,
-    transport: 'relay',
-    delivery: {
-      outcome: 'failed',
-      code: 'P2P_NO_PUBKEY',
-      retryable: true,
-      fatal: false,
-      terminal: false,
-    },
+    runtimeId,
+    lastUpdated,
   });
-});
 
-test('flushPending drops terminal typed delivery failures', () => {
-  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
-  const debugEvents: unknown[] = [];
-  const relayClient = {
-    isOpen: () => true,
-    sendEntityInputRaw: () => {
-      throw new Error('socket exploded');
-    },
-  };
-  const input: RoutedEntityInput = {
-    entityId: SOURCE_ENTITY_ID,
-    signerId: '0x2222222222222222222222222222222222222222',
-    entityTxs: [],
-  };
+  p2p.rememberVerifiedProfileRoute(profile(TARGET_RUNTIME_ID, 20));
+  p2p.rememberVerifiedProfileRoute(profile('0x3333333333333333333333333333333333333333', 10));
 
-  p2p.sendDebugEvent = (payload: unknown) => {
-    debugEvents.push(payload);
-    return true;
-  };
-  p2p.refreshGossip = () => undefined;
-  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
-  p2p.pendingByRuntime = new Map([[
-    TARGET_RUNTIME_ID,
-    [{ input, enqueuedAt: Date.now(), ingressTimestamp: 8888 }],
-  ]]);
-
-  (p2p as any).flushPending();
-
-  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)).toBeUndefined();
-  expect(debugEvents.at(-1)).toMatchObject({
-    level: 'error',
-    code: 'P2P_PENDING_DELIVERY_DROPPED',
-    targetRuntimeId: TARGET_RUNTIME_ID,
-    entityId: SOURCE_ENTITY_ID,
-    transport: 'relay',
-    delivery: {
-      outcome: 'failed',
-      code: 'P2P_SEND_THROW',
-      retryable: false,
-      fatal: true,
-      terminal: true,
-    },
-  });
-});
-
-test('flushPending emits typed terminal delivery when pending input expires', () => {
-  const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
-  const debugEvents: unknown[] = [];
-  const relayClient = {
-    isOpen: () => true,
-    sendEntityInputRaw: () => {
-      throw new Error('expired pending input should not reach transport send');
-    },
-  };
-  const input: RoutedEntityInput = {
-    entityId: SOURCE_ENTITY_ID,
-    signerId: '0x2222222222222222222222222222222222222222',
-    entityTxs: [],
-  };
-
-  p2p.sendDebugEvent = (payload: unknown) => {
-    debugEvents.push(payload);
-    return true;
-  };
-  p2p.resolveTransportClient = () => ({ client: relayClient, transport: 'relay' });
-  p2p.pendingByRuntime = new Map([[
-    TARGET_RUNTIME_ID,
-    [{ input, enqueuedAt: Date.now() - 301_000, ingressTimestamp: 9999 }],
-  ]]);
-
-  (p2p as any).flushPending();
-
-  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)).toBeUndefined();
-  expect(debugEvents.at(-1)).toMatchObject({
-    level: 'warn',
-    code: 'P2P_PENDING_EXPIRED',
-    targetRuntimeId: TARGET_RUNTIME_ID,
-    entityId: SOURCE_ENTITY_ID,
-    transport: 'relay',
-    delivery: {
-      outcome: 'failed',
-      code: 'P2P_PENDING_EXPIRED',
-      retryable: true,
-      fatal: false,
-      terminal: true,
-      transport: 'relay',
-      failure: {
-        category: 'TransientRace',
-        code: 'P2P_PENDING_EXPIRED',
-      },
-    },
+  expect(p2p.getVerifiedRuntimeRoute(SOURCE_ENTITY_ID)).toEqual({
+    runtimeId: TARGET_RUNTIME_ID,
+    lastUpdated: 20,
   });
 });

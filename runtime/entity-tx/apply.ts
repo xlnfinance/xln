@@ -87,6 +87,7 @@ import {
   handleAdmitCrossJurisdictionBookOrderEntityTx,
   handleRemoveCrossJurisdictionBookOrderEntityTx,
 } from './handlers/cross-j-book-order';
+import { handleScheduledWakeEntityTx } from './handlers/scheduled-wake';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 
@@ -183,6 +184,7 @@ const handleJBroadcastEntityTx: EntityTxDispatcher = async (env, entityState, en
 // This table is intentionally boring: adding a new EntityTx should mean adding
 // one row here and keeping domain behavior inside runtime/entity-tx/handlers.
 const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
+  scheduledWake: (env, state, tx) => handleScheduledWakeEntityTx(env, state, tx as Extract<EntityTx, { type: 'scheduledWake' }>),
   chat: (_env, state, tx) => handleChatEntityTx(state, tx as Extract<EntityTx, { type: 'chat' }>),
   chatMessage: (_env, state, tx) => handleChatMessageEntityTx(state, tx as Extract<EntityTx, { type: 'chatMessage' }>),
   propose: (_env, state, tx) => handleProposeEntityTx(state, tx as Extract<EntityTx, { type: 'propose' }>),

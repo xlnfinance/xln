@@ -7,6 +7,8 @@ import {
 import { createStructuredLogger, shortId } from './logger';
 import { normalizeRuntimeId } from './networking/runtime-id';
 import { txFingerprint } from './state-helpers';
+import { compareStableText, safeStringify } from './serialization-utils';
+import { getWallClockMs } from './utils';
 import { validateDeliverableEntityInput } from './validation-utils';
 import {
   deliveryAccepted,
@@ -15,17 +17,38 @@ import {
   isDeliveryDelivered,
   requireDeliveryDelivered,
   requireDeliveryResult,
+  shouldRetryDelivery,
   type DeliveryResult,
 } from './delivery-result';
 
 const routeLog = createStructuredLogger('network.route');
 
 export const buildRouteOutputKey = (output: RoutedEntityInput): string => {
-  const txPart = (output.entityTxs || [])
-    .map(tx => txFingerprint(tx))
-    .join('|');
-  return `${output.entityId}:${output.signerId || ''}:${txPart}`;
+  const precommits = output.hashPrecommits
+    ? [...output.hashPrecommits.entries()]
+      .sort(([left], [right]) => compareStableText(left, right))
+      .map(([signerId, signatures]) => [signerId, [...signatures]])
+    : [];
+  return safeStringify({
+    runtimeId: output.runtimeId ?? '',
+    entityId: output.entityId,
+    signerId: output.signerId,
+    from: output.from ?? '',
+    txs: (output.entityTxs || []).map(tx => txFingerprint(tx)),
+    proposedFrame: output.proposedFrame
+      ? {
+          height: output.proposedFrame.height,
+          hash: output.proposedFrame.hash,
+          committed: signatureMapSize(output.proposedFrame.collectedSigs) > 0,
+        }
+      : null,
+    precommits,
+  });
 };
+
+export const MAX_PENDING_NETWORK_OUTPUTS = 10_000;
+const NETWORK_RETRY_BASE_MS = 1_000;
+const NETWORK_RETRY_MAX_MS = 30_000;
 
 export const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
   signatureMapSize(output.proposedFrame?.collectedSigs) > 0;
@@ -58,6 +81,7 @@ export type PlannedRemoteOutput = {
 
 type RuntimeP2PDispatch = {
   enqueueEntityInputDelivery(targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number): DeliveryResult;
+  getVerifiedRuntimeRoute?(entityId: string): { runtimeId: string; lastUpdated: number } | null;
 };
 
 export type RuntimeDirectEntityInputDispatchResult = DeliveryResult;
@@ -196,6 +220,58 @@ export const splitPendingOutputsByRetryWindow = (
   return { ready, waiting };
 };
 
+export const getNextNetworkRetryTimestamp = (
+  env: Env,
+  deps: RuntimeOutputRoutingDeps,
+): number | null => {
+  const pending = env.pendingNetworkOutputs ?? [];
+  if (pending.length === 0) return null;
+  const meta = getDeferredNetworkMeta(env, deps);
+  let nextRetryAt = Infinity;
+  for (const output of pending) {
+    nextRetryAt = Math.min(nextRetryAt, meta.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0);
+  }
+  return Number.isFinite(nextRetryAt) ? nextRetryAt : null;
+};
+
+export const hasReadyPendingNetworkOutputs = (
+  env: Env,
+  deps: RuntimeOutputRoutingDeps,
+  now = getWallClockMs(),
+): boolean => {
+  const nextRetryAt = getNextNetworkRetryTimestamp(env, deps);
+  return nextRetryAt !== null && nextRetryAt <= now;
+};
+
+const outputDeliveryPriority = (output: RoutedEntityInput): number => {
+  if (carriesEntityCommitNotification(output)) return 0;
+  if (output.hashPrecommits && output.hashPrecommits.size > 0) return 0;
+  const txTypes = new Set((output.entityTxs ?? []).map(tx => tx.type));
+  if ([...txTypes].some(type => type === 'j_event' || type.startsWith('dispute'))) return 0;
+  if (output.proposedFrame) return 1;
+  if (txTypes.has('accountInput')) return 2;
+  return 3;
+};
+
+export const buildPendingNetworkOutputs = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+  const deduped = new Map<string, RoutedEntityInput>();
+  for (const output of outputs) {
+    const key = buildRouteOutputKey(output);
+    const existing = deduped.get(key);
+    if (existing) mergeRoutedEntityOutput(existing, output);
+    else deduped.set(key, { ...output });
+  }
+  const pending = [...deduped.values()].sort((left, right) =>
+    outputDeliveryPriority(left) - outputDeliveryPriority(right) ||
+    compareStableText(buildRouteOutputKey(left), buildRouteOutputKey(right)));
+  if (pending.length > MAX_PENDING_NETWORK_OUTPUTS) {
+    throw new Error(
+      `NETWORK_OUTBOX_CAPACITY_EXCEEDED: pending=${pending.length} max=${MAX_PENDING_NETWORK_OUTPUTS}`,
+    );
+  }
+  return pending;
+};
+
 export const rescheduleDeferredOutputs = (
   env: Env,
   attemptedPending: RoutedEntityInput[],
@@ -213,15 +289,15 @@ export const rescheduleDeferredOutputs = (
     }
   }
 
-  if (failed.length > 0 || waiting.length > 0) {
-    const sample = [...failed, ...waiting][0];
-    throw new Error(
-      `DEFERRED_NETWORK_OUTPUTS_FATAL: failed=${failed.length} waiting=${waiting.length} ` +
-      `sampleEntity=${sample?.entityId ?? ''}`,
-    );
+  const nowMs = Math.max(getRuntimeNowMs(env), getWallClockMs());
+  for (const output of failed) {
+    const key = buildRouteOutputKey(output);
+    const attempts = (meta.get(key)?.attempts ?? 0) + 1;
+    const delayMs = Math.min(NETWORK_RETRY_MAX_MS, NETWORK_RETRY_BASE_MS * (2 ** Math.min(attempts - 1, 5)));
+    meta.set(key, { attempts, nextRetryAt: nowMs + delayMs });
   }
 
-  return [];
+  return buildPendingNetworkOutputs([...failed, ...waiting]);
 };
 
 export const planEntityOutputs = (
@@ -322,7 +398,32 @@ export const planEntityOutputs = (
       }
     }
 
-    const targetRuntimeId = deps.resolveRuntimeIdForEntity(env, outputToRoute.entityId);
+    const persistedTargetRuntimeId = normalizeRuntimeId(String(outputToRoute.runtimeId || ''));
+    const resolvedTargetRuntimeId = deps.resolveRuntimeIdForEntity(env, outputToRoute.entityId);
+    const verifiedTargetRuntimeId = normalizeRuntimeId(
+      deps.getP2P(env)?.getVerifiedRuntimeRoute?.(outputToRoute.entityId)?.runtimeId ?? '',
+    );
+    if (
+      persistedTargetRuntimeId &&
+      resolvedTargetRuntimeId &&
+      persistedTargetRuntimeId !== resolvedTargetRuntimeId
+    ) {
+      if (verifiedTargetRuntimeId && verifiedTargetRuntimeId === resolvedTargetRuntimeId) {
+        env.warn?.('network', 'ROUTE_TARGET_RUNTIME_REBOUND', {
+          entityId: outputToRoute.entityId,
+          persistedRuntimeId: persistedTargetRuntimeId,
+          resolvedRuntimeId: resolvedTargetRuntimeId,
+        });
+        outputToRoute = { ...outputToRoute, runtimeId: resolvedTargetRuntimeId };
+      } else {
+        env.warn?.('network', 'ROUTE_TARGET_RUNTIME_CHANGE_UNVERIFIED', {
+          entityId: outputToRoute.entityId,
+          persistedRuntimeId: persistedTargetRuntimeId,
+          resolvedRuntimeId: resolvedTargetRuntimeId,
+        });
+      }
+    }
+    const targetRuntimeId = normalizeRuntimeId(String(outputToRoute.runtimeId || '')) || resolvedTargetRuntimeId;
     routeLog.debug('plan.output', {
       entity: shortId(outputToRoute.entityId),
       runtime: targetRuntimeId ? shortId(targetRuntimeId, 8) : 'unknown',
@@ -426,11 +527,12 @@ export const dispatchEntityOutputs = (
       // hop is exactly between the two runtimes bound by the route topology.
     }
     if (!p2p) {
-      env.error?.('network', 'ROUTE_NO_P2P', {
+      env.warn?.('network', 'ROUTE_DEFERRED_NO_P2P', {
         entityId: output.entityId,
         runtimeId: targetRuntimeId,
       });
-      throw new Error(`ROUTE_NO_P2P: entity=${output.entityId} runtime=${targetRuntimeId}`);
+      deferredOutputs.push(output);
+      continue;
     }
     routeLog.debug('p2p.enqueue', {
       runtime: shortId(targetRuntimeId, 8),
@@ -440,17 +542,41 @@ export const dispatchEntityOutputs = (
     let p2pDelivery: DeliveryResult | null = null;
     try {
       p2pDelivery = enqueueP2PEntityInputDelivery(p2p, targetRuntimeId, output, env.timestamp);
-      requireDeliveryDelivered(
-        p2pDelivery,
-        (delivery) =>
-          `ROUTE_SEND_NOT_DELIVERED: entity=${output.entityId} runtime=${targetRuntimeId} ` +
-          `code=${delivery.code} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
-      );
+      if (isDeliveryDelivered(p2pDelivery)) continue;
+      if (shouldRetryDelivery(p2pDelivery)) {
+        env.warn?.('network', 'ROUTE_SEND_DEFERRED', {
+          entityId: output.entityId,
+          runtimeId: targetRuntimeId,
+          delivery: p2pDelivery,
+        });
+        deferredOutputs.push(output);
+        continue;
+      }
+      requireDeliveryDelivered(p2pDelivery, (delivery) =>
+        `ROUTE_SEND_NOT_DELIVERED: entity=${output.entityId} runtime=${targetRuntimeId} ` +
+        `code=${delivery.code} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const transientTransportFailure = [
+        'P2P_ENTITY_INPUT_NOT_DELIVERED',
+        'P2P_ENTITY_INPUT_SEND_THROW',
+        'P2P_TRANSPORT',
+        'WebSocket',
+      ].some(marker => message.includes(marker));
+      if ((p2pDelivery !== null && shouldRetryDelivery(p2pDelivery)) || transientTransportFailure) {
+        env.warn?.('network', 'ROUTE_SEND_DEFERRED', {
+          entityId: output.entityId,
+          runtimeId: targetRuntimeId,
+          error: message,
+          ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
+        });
+        deferredOutputs.push(output);
+        continue;
+      }
       env.error?.('network', 'ROUTE_SEND_FAILED', {
         entityId: output.entityId,
         runtimeId: targetRuntimeId,
-        error: (error as Error).message,
+        error: message,
         ...(p2pDelivery ? { delivery: p2pDelivery } : {}),
       });
       throw error;
@@ -466,9 +592,6 @@ export const sendEntityInputWithRouting = (
 ): RuntimeEntityInputRoutingResult => {
   const state = deps.ensureRuntimeState(env);
   const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
-  if (pendingBeforePlan.length > 0) {
-    throw new Error(`PENDING_NETWORK_OUTPUTS_FATAL: count=${pendingBeforePlan.length}`);
-  }
   const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
     env,
     pendingBeforePlan,

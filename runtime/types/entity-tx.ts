@@ -8,6 +8,24 @@ import type { PaymentDeliveryMode } from './payment';
 
 export type EntityTx =
   | {
+      /**
+       * Consensus-visible scheduler marker. The local runtime may create it
+       * only for its proposer replica; validators replay the same crontab work
+       * from this exact payload when checking the proposed entity frame.
+       */
+      type: 'scheduledWake';
+      data: {
+        version: 1;
+        proposerSignerId: string;
+        dueAt: number;
+        jobs: Array<{
+          kind: 'hook' | 'task';
+          id: string;
+          dueAt: number;
+        }>;
+      };
+    }
+  | {
       type: 'chat';
       data: { from: string; message: string };
     }

@@ -52,7 +52,7 @@ import {
   normalizeEntityId,
 } from './keys';
 import { createStructuredLogger } from '../logger';
-import type { Env, RuntimeInput, RuntimeFrameDbRecord } from '../types';
+import type { Env, RoutedEntityInput, RuntimeInput, RuntimeFrameDbRecord } from '../types';
 import type {
   PerfDeps,
   RuntimeDbLike,
@@ -299,6 +299,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   env: Env;
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
+  currentFrameOutputs?: RoutedEntityInput[];
   frameDbRecords?: RuntimeFrameDbRecord[];
   tryOpenDb: (env: Env) => Promise<boolean>;
   getRuntimeDb: (env: Env) => RuntimeDbLike;
@@ -431,6 +432,9 @@ export const saveRuntimeFrameToStorage = async (options: {
       canonicalEntityHashes: canonicalHashes.canonicalEntityHashes,
     } : {}),
     runtimeInput: appliedRuntimeInput,
+    ...(options.currentFrameOutputs && options.currentFrameOutputs.length > 0
+      ? { runtimeOutputs: structuredClone(options.currentFrameOutputs) }
+      : {}),
     ...(shouldMaterialize && overlayRecords.length > 0
       ? { overlayRecords: overlayRecords.map((record) => ({ ...record })) }
       : {}),

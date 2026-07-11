@@ -1,5 +1,5 @@
 import { deserializeTaggedJson } from '../serialization-utils';
-import type { FrameLogEntry, RuntimeInput } from '../types';
+import type { FrameLogEntry, RoutedEntityInput, RuntimeInput } from '../types';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 
 export type RuntimeWalDb = {
@@ -31,6 +31,7 @@ export type PersistedFrameJournal = {
   height: number;
   timestamp: number;
   runtimeInput: RuntimeInput;
+  runtimeOutputs?: RoutedEntityInput[];
   runtimeStateHash?: string;
   logs: FrameLogEntry[];
 };
@@ -60,6 +61,9 @@ export const decodePersistedFrameJournal = (
         : fallbackHeight,
     timestamp: Number.isFinite(Number(decoded.timestamp)) ? Number(decoded.timestamp) : 0,
     runtimeInput,
+    ...(Array.isArray(decoded.runtimeOutputs)
+      ? { runtimeOutputs: structuredClone(decoded.runtimeOutputs) }
+      : {}),
     logs,
   };
   if (typeof decoded.runtimeStateHash === 'string') frame.runtimeStateHash = decoded.runtimeStateHash;

@@ -42,6 +42,36 @@ describe('mergeEntityInputs', () => {
     expect(merged[1]?.entityTxs?.map((tx) => (tx.data as { name: string }).name)).toEqual(['a', 'b']);
   });
 
+  test('runs one canonical scheduled wake before txs that can replace its due hooks', () => {
+    const wake = {
+      type: 'scheduledWake',
+      data: { version: 1, proposerSignerId: '1', dueAt: 100, jobs: [{ kind: 'hook', id: 'due', dueAt: 100 }] },
+    } as never;
+    const accountInput = { type: 'accountInput', data: {} } as never;
+    const target = entityId('4');
+
+    const merged = mergeEntityInputs([
+      { entityId: target, signerId: '1', entityTxs: [accountInput] },
+      { entityId: target, signerId: '1', entityTxs: [wake] },
+      { entityId: target, signerId: '1', entityTxs: [wake] },
+    ]);
+
+    expect(merged[0]?.entityTxs?.map(tx => tx.type)).toEqual(['scheduledWake', 'accountInput']);
+  });
+
+  test('rejects conflicting scheduled wake payloads for one entity frame', () => {
+    const target = entityId('5');
+    const wake = (dueAt: number) => ({
+      type: 'scheduledWake',
+      data: { version: 1, proposerSignerId: '1', dueAt, jobs: [{ kind: 'hook', id: 'due', dueAt }] },
+    } as never);
+
+    expect(() => mergeEntityInputs([
+      { entityId: target, signerId: '1', entityTxs: [wake(100)] },
+      { entityId: target, signerId: '1', entityTxs: [wake(200)] },
+    ])).toThrow('SCHEDULED_WAKE_CONFLICTING_INPUTS');
+  });
+
   test('uses structured logging without direct console output', () => {
     const source = readFileSync(join(process.cwd(), 'runtime/entity-input-merge.ts'), 'utf8');
 

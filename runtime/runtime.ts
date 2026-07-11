@@ -166,7 +166,11 @@ import {
   type CrossJurisdictionSwapSubmitResult,
 } from './runtime-jurisdiction-api';
 import {
+  buildPendingNetworkOutputs,
   dispatchEntityOutputs,
+  getNextNetworkRetryTimestamp,
+  hasReadyPendingNetworkOutputs,
+  MAX_PENDING_NETWORK_OUTPUTS,
   planEntityOutputs,
   rescheduleDeferredOutputs,
   sendEntityInputWithRouting,
@@ -174,6 +178,7 @@ import {
   type RuntimeEntityInputRoutingResult,
   type RuntimeOutputRoutingDeps,
 } from './runtime-output-routing';
+import { runtimeInputRequiresOutboxCapacity } from './runtime-admission';
 import {
   createRuntimeOutputRoutingDeps,
   handleInboundP2PEntityInput as routeInboundP2PEntityInput,
@@ -188,6 +193,16 @@ import {
   hasDueEntityHooks as hasDueRuntimeEntityHooks,
   type RuntimeWakeDeps,
 } from './runtime-wake';
+import {
+  assertScheduledWakeTxAuthorized,
+  deleteScheduledWakeIndex,
+  rebuildScheduledWakeIndex,
+  refreshScheduledWakeIndex,
+} from './runtime-scheduled-wake';
+import {
+  inferRuntimeLifecyclePhase,
+  transitionRuntimeLifecycle,
+} from './runtime-lifecycle';
 import {
   enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
@@ -384,6 +399,7 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
 const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
+      lifecyclePhase: 'booting',
       loopActive: false,
       halted: false,
       loopPromise: null,
@@ -403,11 +419,12 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState.entityRuntimeHints) {
     env.runtimeState.entityRuntimeHints = new Map();
   }
+  if (!env.runtimeState.lifecyclePhase) {
+    env.runtimeState.lifecyclePhase = inferRuntimeLifecyclePhase(env.runtimeState);
+  }
   if (!env.runtimeState.watcherDedupCounter) {
     env.runtimeState.watcherDedupCounter = { value: 0 };
   }
-  trackedRuntimeEnvs.add(env);
-  ensureRuntimeWakeWatchdogStarted();
   return env.runtimeState;
 };
 
@@ -660,8 +677,8 @@ export const hasRuntimeWork = (env: Env): boolean => {
   if ((mempool.queuedAt ?? 0) > (env.timestamp ?? 0)) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
-  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
-  if (collectAccountMempoolWakeInputs(env).length > 0) return true;
+  if (hasReadyPendingNetworkOutputs(env, getRuntimeOutputRoutingDeps(), getWallClockMs())) return true;
+  if (hasAccountMempoolWakeInput(env)) return true;
   // Check for due scheduled hooks (setTimeout-like entity pings)
   if (hasDueEntityHooks(env)) return true;
   return false;
@@ -682,6 +699,15 @@ const collectAccountMempoolWakeInputs = (env: Env): EntityInput[] => {
     wakeInputs.push({ entityId, signerId, entityTxs: [] });
   }
   return wakeInputs;
+};
+
+const hasAccountMempoolWakeInput = (env: Env): boolean => {
+  for (const replica of env.eReplicas?.values?.() ?? []) {
+    for (const account of replica.state?.accounts?.values?.() ?? []) {
+      if (account.mempool.length > 0 && !account.pendingFrame) return true;
+    }
+  }
+  return false;
 };
 
 const prioritizeJEventFrame = (
@@ -832,53 +858,12 @@ const hasDueEntityHooks = (env: Env): boolean =>
 const getEarliestWallClockDueTimestamp = (env: Env): number | null =>
   getEarliestRuntimeWallClockDueTimestamp(env, getRuntimeWakeDeps());
 
-const getNextWallClockWakeTimestamp = (env: Env): number | null =>
-  getNextRuntimeWallClockWakeTimestamp(env, getRuntimeWakeDeps());
-
-const RUNTIME_WAKE_WATCHDOG_MS = 1000;
-const trackedRuntimeEnvs = new Set<Env>();
-let runtimeWakeWatchdog: ReturnType<typeof setInterval> | null = null;
-const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void => {
-  if (typeof window === 'undefined' || typeof performance === 'undefined') return;
-  const elapsedMs = performance.now() - startedAt;
-  if (elapsedMs < 32) return;
-  const suffix = extra ? ` ${extra}` : '';
-  runtimeLog.warn('timer.slow', { label, elapsedMs: Number(elapsedMs.toFixed(1)), extra: suffix.trim() });
-};
-
-const ensureRuntimeWakeWatchdogStarted = (): void => {
-  if (runtimeWakeWatchdog) return;
-  runtimeWakeWatchdog = setInterval(() => {
-    const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
-    const wallClockNow = getWallClockMs();
-    for (const env of trackedRuntimeEnvs) {
-      if (env.scenarioMode) continue;
-      const dueTimestamp = getEarliestWallClockDueTimestamp(env);
-      if (dueTimestamp === null || dueTimestamp > wallClockNow) continue;
-      const state = ensureRuntimeState(env);
-      if (state.halted) continue;
-      const mempool = ensureRuntimeMempool(env);
-      mempool.queuedAt =
-        mempool.queuedAt === undefined
-          ? dueTimestamp
-          : Math.max(mempool.queuedAt, dueTimestamp);
-      state.clockPrimed = true;
-      generateHookPings(env, dueTimestamp, dueTimestamp);
-      if (state.loopActive) {
-        requestRuntimeLoopWake(env);
-      } else {
-        startRuntimeLoop(env);
-      }
-    }
-    logSlowBrowserTimer('runtime.wake-watchdog', startedAt, `envs=${trackedRuntimeEnvs.size}`);
-  }, RUNTIME_WAKE_WATCHDOG_MS);
-};
-
-const stopRuntimeWakeWatchdogIfIdle = (): void => {
-  if (runtimeWakeWatchdog && trackedRuntimeEnvs.size === 0) {
-    clearInterval(runtimeWakeWatchdog);
-    runtimeWakeWatchdog = null;
-  }
+const getNextWallClockWakeTimestamp = (env: Env): number | null => {
+  const entityDueAt = getNextRuntimeWallClockWakeTimestamp(env, getRuntimeWakeDeps());
+  const networkDueAt = getNextNetworkRetryTimestamp(env, getRuntimeOutputRoutingDeps());
+  if (entityDueAt === null) return networkDueAt;
+  if (networkDueAt === null) return entityDueAt;
+  return Math.min(entityDueAt, networkDueAt);
 };
 
 const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = env.timestamp ?? 0): void => {
@@ -1022,7 +1007,13 @@ const quarantineLiveRuntimeInput = (
  *   3. broadcast — J-batch execution + E-output P2P dispatch (side effects)
  *   4. sleep     — configurable delay (0 = no wait, just yield)
  */
-export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxEntityInputsPerFrame?: number; maxEntityTxsPerFrame?: number }): () => void {
+export type RuntimeLoopConfig = {
+  tickDelayMs?: number;
+  maxEntityInputsPerFrame?: number;
+  maxEntityTxsPerFrame?: number;
+};
+
+export function startRuntimeLoop(env: Env, config?: RuntimeLoopConfig): () => void {
   if (env.scenarioMode) return () => {};
   const state = ensureRuntimeState(env);
   if (config?.maxEntityInputsPerFrame !== undefined) {
@@ -1041,12 +1032,15 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxE
       delete state.maxEntityTxsPerFrame;
     }
   }
-  if (state.halted) return state.stopLoop ?? (() => {});
-  if (state.loopActive) return state.stopLoop ?? (() => {});
+  const lifecyclePhase = inferRuntimeLifecyclePhase(state);
+  if (lifecyclePhase === 'halted') return state.stopLoop ?? (() => {});
+  if (lifecyclePhase === 'running') return state.stopLoop ?? (() => {});
+  if (lifecyclePhase === 'quiescing' && state.persistenceQuiescing) return state.stopLoop ?? (() => {});
   const runtimeLoopTickDelayMs = Math.max(0, Math.floor(Number(config?.tickDelayMs ?? 0)));
   let running = true;
   let loopPromise: Promise<void> | null = null;
-  state.loopActive = true;
+  transitionRuntimeLifecycle(state, 'running');
+  rebuildScheduledWakeIndex(env);
   // J-watchers are a runtime concern, not a UI/store concern.
   // The runtime loop is the single canonical owner of watcher lifecycle for
   // the current env. This keeps restored runtimes, fresh runtimes, and
@@ -1087,7 +1081,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxE
           const message = error instanceof Error ? error.message : String(error);
           const stack = error instanceof Error ? error.stack : undefined;
           runtimeLog.error('loop.error', { message, ...(stack ? { stack } : {}) });
-          state.halted = true;
+          transitionRuntimeLifecycle(state, 'halted');
           state.fatalDebugPayload = {
             message,
             ...(stack ? { stack } : {}),
@@ -1149,7 +1143,9 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxE
           { message: haltedMessage },
         );
       }
-      state.loopActive = false;
+      if (inferRuntimeLifecyclePhase(state) === 'running') {
+        transitionRuntimeLifecycle(state, 'stopped');
+      }
       state.stopLoop = null;
       if (state.loopPromise === loopPromise) state.loopPromise = null;
       state.wakeLoop = null;
@@ -1169,6 +1165,9 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number; maxE
 
 export const stopRuntimeLoopAndWait = async (env: Env, timeoutMs = 10_000): Promise<boolean> => {
   const state = env.runtimeState;
+  if (state && inferRuntimeLifecyclePhase(state) !== 'halted') {
+    transitionRuntimeLifecycle(state, 'quiescing');
+  }
   state?.stopLoop?.();
   const startedAt = Date.now();
   const loopPromise = state?.loopPromise ?? null;
@@ -1181,6 +1180,20 @@ export const stopRuntimeLoopAndWait = async (env: Env, timeoutMs = 10_000): Prom
   }
   const remaining = Math.max(0, timeoutMs - (Date.now() - startedAt));
   return waitForRuntimeProcessingIdle(env, remaining);
+};
+
+export const resumeRuntimeLoop = (env: Env, config?: RuntimeLoopConfig): (() => void) => {
+  const state = ensureRuntimeState(env);
+  const phase = inferRuntimeLifecyclePhase(state);
+  if (phase === 'halted') throw new Error('RUNTIME_RESUME_HALTED');
+  if (phase === 'running') return state.stopLoop ?? (() => {});
+  if (phase === 'quiescing') {
+    if (state.loopPromise || state.processingPromise) {
+      throw new Error('RUNTIME_RESUME_BEFORE_QUIESCE_DRAINED');
+    }
+    transitionRuntimeLifecycle(state, 'stopped');
+  }
+  return startRuntimeLoop(env, config);
 };
 
 export const waitForRuntimeWorkDrained = async (
@@ -1285,6 +1298,11 @@ const detachRuntimeEnv = (env: Env): void => {
   state?.stopLoop?.();
   detachRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
   if (state) {
+    try {
+      state.runtimeSyncChannel?.close();
+    } finally {
+      state.runtimeSyncChannel = null;
+    }
     state.lastP2PConfig = null;
     state.pendingP2PConfig = null;
     state.directEntityInputDispatch = null;
@@ -1292,10 +1310,11 @@ const detachRuntimeEnv = (env: Env): void => {
     state.stopLoop = null;
     state.wakeLoop = null;
     state.wakeRequested = false;
-    state.loopActive = false;
+    if (inferRuntimeLifecyclePhase(state) !== 'halted') {
+      transitionRuntimeLifecycle(state, 'stopped');
+    }
   }
-  trackedRuntimeEnvs.delete(env);
-  stopRuntimeWakeWatchdogIfIdle();
+  deleteScheduledWakeIndex(env);
 };
 
 /**
@@ -1431,6 +1450,14 @@ export const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInp
   if (runtimeInput.entityInputs.length > 10000) {
     throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
   }
+  const pendingNetworkOutputs = env.pendingNetworkOutputs?.length ?? 0;
+  const hasNewLocalFinancialCommand = runtimeInputRequiresOutboxCapacity(runtimeInput.entityInputs);
+  if (pendingNetworkOutputs >= MAX_PENDING_NETWORK_OUTPUTS && hasNewLocalFinancialCommand) {
+    throw new Error(
+      `RUNTIME_INPUT_ADMISSION_REJECTED: NETWORK_OUTBOX_BACKPRESSURE ` +
+      `pending=${pendingNetworkOutputs} max=${MAX_PENDING_NETWORK_OUTPUTS}`,
+    );
+  }
   const importedReplicaSigners = new Map<string, Set<string>>();
   for (const runtimeTx of runtimeInput.runtimeTxs) {
     if (runtimeTx.type !== 'importReplica') continue;
@@ -1443,6 +1470,7 @@ export const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInp
   }
 
   runtimeInput.entityInputs.forEach((input, index) => {
+    for (const tx of input.entityTxs ?? []) assertScheduledWakeTxAuthorized(tx, false);
     const validated = normalizeRuntimeEntityInput(env, validateEntityInput(input), `runtimeInput[${index}]`);
     const localSignerIds = [
       ...getLocalSignerIdsForEntity(env, validated.entityId),
@@ -1487,7 +1515,6 @@ function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
     hasLocalSignerForEntitySigner,
     resolveSoleLocalSignerForEntity,
     getP2P,
-    startRuntimeLoop,
   };
 }
 
@@ -1652,6 +1679,8 @@ const applyRuntimeInput = async (
     const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
     const validatedEntityInputs = runtimeInput.entityInputs.map((input, i) => {
       try {
+        const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
+        for (const tx of input.entityTxs ?? []) assertScheduledWakeTxAuthorized(tx, isReplay);
         return normalizeRuntimeEntityInput(env, validateEntityInput(input), `runtimeInput[${i}]`);
       } catch (error) {
         logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput[${i}] before merge!`, {
@@ -2238,6 +2267,7 @@ const replayRecoveryFrameJournals = async (
       envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
       try {
         await applyRuntimeInput(env, frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] });
+        env.pendingNetworkOutputs = structuredClone(frame.runtimeOutputs ?? []);
       } finally {
         envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
       }
@@ -2777,6 +2807,10 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         entityOutbox = result.entityOutbox;
         jOutbox = [...jOutbox, ...result.jOutbox];
         appliedRuntimeInputForPersistence = result.appliedRuntimeInput;
+        refreshScheduledWakeIndex(
+          env,
+          new Set(runtimeInput.entityInputs.map(input => input.entityId.toLowerCase())),
+        );
         for (const runtimeTx of runtimeInput.runtimeTxs) {
           if (runtimeTx.type === 'importReplica') {
             changedEntityIds.add(runtimeTx.entityId.toLowerCase());
@@ -2820,9 +2854,6 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
 
     const outputRoutingDeps = getRuntimeOutputRoutingDeps();
     const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
-    if (pendingBeforePlan.length > 0) {
-      throw new Error(`PENDING_NETWORK_OUTPUTS_FATAL: count=${pendingBeforePlan.length}`);
-    }
     const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
       env,
       pendingBeforePlan,
@@ -2835,7 +2866,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     processProfileMetrics.deferredOutputs = deferredOutputs.length;
     processProfileMetrics.jOutputs = jOutbox.length;
     markProcessProfile('planOutputs');
-    env.pendingNetworkOutputs = [];
+    env.pendingNetworkOutputs = buildPendingNetworkOutputs([
+      ...waitingPendingOutputs,
+      ...deferredOutputs,
+      ...remoteOutputs.map(({ output }) => output),
+    ]);
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
       if (!quietRuntimeLogs) {
@@ -2906,7 +2941,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
         runtimeLog.debug('storage.save.start', { height: env.height });
       }
       try {
-        const saveOutcome = await saveEnvToDB(env, appliedRuntimeInputForPersistence, entityOutbox);
+        const saveOutcome = await saveEnvToDB(
+          env,
+          appliedRuntimeInputForPersistence,
+          env.pendingNetworkOutputs,
+        );
         if (saveOutcome.staleWriterStopped) {
           processProfileOutcome = 'stale-writer-stopped';
           clearPendingAuditEvents(env);
@@ -3076,7 +3115,7 @@ const withStorageWriteTimeout = async <T>(
 export const saveEnvToDB = async (
   env: Env,
   currentFrameInput?: RuntimeInput,
-  _currentFrameOutputs?: RoutedEntityInput[],
+  currentFrameOutputs?: RoutedEntityInput[],
 ): Promise<{ staleWriterStopped: boolean }> => {
   if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
@@ -3096,11 +3135,12 @@ export const saveEnvToDB = async (
       frameDbRecords: pendingFrameDbRecords,
       stopStaleWriterOnHeadAhead: runtimeIsBrowser && !env.scenarioMode,
       ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
+      ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
     })),
   );
   if (saveResult.staleWriterStopped) {
     const state = ensureRuntimeState(env);
-    state.halted = true;
+    transitionRuntimeLifecycle(state, 'halted');
     state.fatalDebugPayload = {
       message:
         `STALE_RUNTIME_WRITER_STOPPED: frame=${env.height} runtime=${String(env.runtimeId || '').slice(0, 12)}`,
@@ -3117,12 +3157,12 @@ export const saveEnvToDB = async (
     dropOverlay(env, saveResult.materializedOverlayRecords);
   }
   if (runtimeIsBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
-    const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
-    runtimeSyncChannel.postMessage({
+    const state = ensureRuntimeState(env);
+    state.runtimeSyncChannel ??= new BroadcastChannel('xln-runtime-sync');
+    state.runtimeSyncChannel.postMessage({
       runtimeId: env.runtimeId,
       height: env.height,
     });
-    runtimeSyncChannel.close();
   }
   return { staleWriterStopped: false };
 };
@@ -3408,6 +3448,7 @@ const loadEnvFromStorage = async (
     env.timestamp = frame.timestamp;
     env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
     env.runtimeMempool = undefined;
+    env.pendingNetworkOutputs = structuredClone(frame.runtimeOutputs ?? []);
     await restoreOverlayFromFrameLog(env, targetHeight);
     await hydrateAccountFrameHistoryViews(env);
     let restoredFrameLogs: FrameLogEntry[] = [];
@@ -3772,6 +3813,7 @@ export const readPersistedFrameJournal = async (env: Env, height: number): Promi
     height: frame.height,
     timestamp: frame.timestamp,
     runtimeInput: frame.runtimeInput,
+    ...(frame.runtimeOutputs?.length ? { runtimeOutputs: structuredClone(frame.runtimeOutputs) } : {}),
     logs,
   };
 };

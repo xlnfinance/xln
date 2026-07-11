@@ -3,7 +3,7 @@ import { expect, test } from 'bun:test';
 import { createEmptyEnv, process as processRuntime, registerRecoveryBackupBarrier, sendEntityInput } from '../runtime.ts';
 import { deliveryAccepted } from '../delivery-result';
 
-test('stale pending network outputs fail fast instead of retrying after backup recovery', async () => {
+test('persisted pending network outputs retry after backup recovery', async () => {
   const env = createEmptyEnv('recovery-barrier-seed');
   env.runtimeId = '0x1111111111111111111111111111111111111111';
   env.dbNamespace = `recovery-barrier-${Date.now()}`;
@@ -12,7 +12,11 @@ test('stale pending network outputs fail fast instead of retrying after backup r
 
   const targetEntityId = `0x${'ab'.repeat(32)}`;
   const targetSignerId = `0x${'01'.repeat(20)}`;
-  env.pendingNetworkOutputs = [{ entityId: targetEntityId, signerId: targetSignerId }];
+  env.pendingNetworkOutputs = [{
+    runtimeId: '0x2222222222222222222222222222222222222222',
+    entityId: targetEntityId,
+    signerId: targetSignerId,
+  }];
   env.runtimeState = {
     ...(env.runtimeState || {}),
     loopActive: false,
@@ -28,9 +32,9 @@ test('stale pending network outputs fail fast instead of retrying after backup r
   let dispatchCount = 0;
   registerRecoveryBackupBarrier(env, async () => {});
 
-  await expect(processRuntime(env)).rejects.toThrow('PENDING_NETWORK_OUTPUTS_FATAL');
-  expect(dispatchCount).toBe(0);
-  expect(env.pendingNetworkOutputs.length).toBe(1);
+  await processRuntime(env);
+  expect(dispatchCount).toBe(1);
+  expect(env.pendingNetworkOutputs.length).toBe(0);
 });
 
 test('direct remote sends fail closed while recovery backup barrier is active', () => {
