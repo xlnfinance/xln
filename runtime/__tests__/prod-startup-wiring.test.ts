@@ -199,17 +199,10 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] Sibling hub ready');
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] deploying fresh RPC contract stack');
     expect(hubNode).not.toContain('`[${resolvedArgs.name}] token registered');
-    for (const [marker, nextMarker] of [
-      ["if (pathname === '/api/lending/offer'", "if (pathname === '/api/lending/borrow'"],
-      ["if (pathname === '/api/lending/borrow'", "if (pathname === '/api/lending/repay'"],
-      ["if (pathname === '/api/lending/repay'", "if (pathname === '/api/tokens'"],
-    ] as const) {
-      const lendingBlock = extractSourceBlock(hubNode, marker, nextMarker);
-      expect(lendingBlock).toContain('validateRuntimeInputAdmission');
-      expect(lendingBlock).toContain('registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt)');
-      expect(lendingBlock).toContain('getCurrentRuntimeHeight: currentRuntimeHeight');
-      expect(lendingBlock).toContain('buildRuntimeInputStatusUrl: runtimeInputStatusUrl');
-    }
+    expect(hubNode).not.toContain("pathname === '/api/lending/offer'");
+    expect(hubNode).not.toContain("pathname === '/api/lending/borrow'");
+    expect(hubNode).not.toContain("pathname === '/api/lending/repay'");
+    expect(hubNode).toContain("pathname === '/api/lending/state'");
     expect(hubNode).toContain('const readRpcUrls = (): Record<number, string> => {');
     expect(hubNode).toContain("const match = raw.match(/^\\/(?:api\\/)?rpc([2-8])?(?:\\?.*)?$/);");
     expect(hubNode).toContain('visibleDirectSupportPeers');
@@ -736,7 +729,6 @@ describe('production startup wiring', () => {
     expect(orchestrator).not.toContain('await persistHubReadySnapshots();\n    publishRuntimeImportManifest();');
     expect(orchestrator).toContain('resetState.inProgress = false;\n  }\n  await publishRuntimeImportManifest();');
 
-    expect(existsSync(join(repoRoot, 'frontend/src/lib/components/Runtime/RemoteRuntimeManager.svelte'))).toBe(false);
     expect(existsSync(join(repoRoot, 'frontend/src/routes/radapter/manage/+page.svelte'))).toBe(false);
     expect(appLayout).toContain('async function importRemoteRuntimesIntoApp');
     expect(appLayout).toContain('fetchRemoteRuntimeImportSource(source)');

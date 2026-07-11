@@ -5,6 +5,7 @@ import { formatEntityId } from '../../utils';
 import { createStructuredLogger, logError, shortId } from '../../logger';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import type { MempoolOp } from './account';
+import { requireTrustedPaymentGateway } from '../../payment-delivery';
 
 type DirectPaymentEntityTx = Extract<EntityTx, { type: 'directPayment' }>;
 
@@ -49,6 +50,11 @@ export const handleDirectPaymentEntityTx = async (
   trace('initialized');
 
   let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
+  const deliveryMode = entityTx.data.deliveryMode;
+  const trustedGatewayEntityId = entityTx.data.trustedGatewayEntityId;
+  if (deliveryMode && deliveryMode !== 'trusted') {
+    throw directPaymentInvariant('DELIVERY_MODE_INVALID', String(deliveryMode));
+  }
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     logError(
       'ENTITY_TX',
@@ -100,6 +106,10 @@ export const handleDirectPaymentEntityTx = async (
     );
   }
 
+  if (deliveryMode === 'trusted') {
+    requireTrustedPaymentGateway(route, targetEntityId, trustedGatewayEntityId);
+  }
+
   if (route.length === 1 && route[0] === targetEntityId) {
     trace('final_destination', { entity: shortId(entityState.entityId), tokenId, amount: amount.toString() });
     addMessage(newState, `💰 Received payment of ${amount} (token ${tokenId})`);
@@ -131,6 +141,8 @@ export const handleDirectPaymentEntityTx = async (
       description: description || `Payment to ${formatEntityId(targetEntityId)}`,
       fromEntityId: entityState.entityId,
       toEntityId: nextHop,
+      ...(deliveryMode ? { deliveryMode } : {}),
+      ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
     },
   };
 

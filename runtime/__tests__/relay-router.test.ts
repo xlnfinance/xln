@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { Profile } from '../networking/gossip';
 import { relayRoute } from '../relay-router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay-store';
-import { hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';
+import { deserializeWsMessage, hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account-crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../networking/p2p-crypto';
 import { createLocalDeliveryHandler } from '../relay-local-delivery';
@@ -94,9 +94,9 @@ describe('relay-router gossip fanout', () => {
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       verifyProfile: async () => ({ valid: true }),
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -139,9 +139,9 @@ describe('relay-router gossip fanout', () => {
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
       verifyProfile: async () => ({ valid: true }),
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -211,9 +211,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -265,8 +265,8 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
-        const message = JSON.parse(raw);
+      send: (ws: FakeWs, raw: Uint8Array) => {
+        const message = deserializeWsMessage(raw);
         if ((message as { id?: string }).id === 'pending-ack' && failPendingOnce) {
           failPendingOnce = false;
           return false;
@@ -334,9 +334,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -372,9 +372,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -398,9 +398,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -444,8 +444,8 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
-        const message = JSON.parse(raw);
+      send: (ws: FakeWs, raw: Uint8Array) => {
+        const message = deserializeWsMessage(raw);
         const bucket = sentBySocket.get(ws) ?? [];
         bucket.push(message);
         sentBySocket.set(ws, bucket);
@@ -510,9 +510,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -561,9 +561,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -616,9 +616,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -667,9 +667,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -716,9 +716,9 @@ describe('relay-router gossip fanout', () => {
       localDeliver: async () => {
         throw new Error('NO_LOCAL_REPLICA: entityId=0xabc');
       },
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -762,9 +762,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -818,9 +818,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };
@@ -839,9 +839,9 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
-      send: (ws: FakeWs, raw: string) => {
+      send: (ws: FakeWs, raw: Uint8Array) => {
         const bucket = sentBySocket.get(ws) ?? [];
-        bucket.push(JSON.parse(raw));
+        bucket.push(deserializeWsMessage(raw));
         sentBySocket.set(ws, bucket);
       },
     };

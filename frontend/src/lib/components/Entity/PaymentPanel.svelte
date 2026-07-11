@@ -8,6 +8,7 @@
     RoutedEntityInput as EntityInputPayload,
     Env,
     PaymentRoute,
+    PaymentDeliveryMode,
     Profile as GossipProfile,
     RuntimeInput,
   } from '@xln/runtime/xln-api';
@@ -51,6 +52,7 @@
   let amount = '';
   let tokenId = 1;
   let description = '';
+  let deliveryMode: PaymentDeliveryMode = 'async';
   let descriptionLocked = false;
   let invoiceValue = '';
   let invoiceError = '';
@@ -96,6 +98,11 @@
     { value: 1_000, label: 'Repeat 1s' },
     { value: 10_000, label: 'Repeat 10s' },
     { value: 60_000, label: 'Repeat 1m' },
+  ];
+  const DELIVERY_MODES: Array<{ value: PaymentDeliveryMode; label: string; title: string }> = [
+    { value: 'instant', label: 'Instant', title: 'Short-lived atomic payment. Every hop and recipient must be online.' },
+    { value: 'async', label: 'Async', title: 'Default. Keeps the refundable payment in the bilateral inbox for up to 24 hours.' },
+    { value: 'trusted', label: 'Trusted', title: 'Irrevocable delivery through the final gateway. Use only when you trust that hub.' },
   ];
   // If a hop does not publish fee metadata, use a conservative default so
   // unknown peers cannot appear artificially cheaper than known hubs.
@@ -1258,23 +1265,45 @@
       const resolvedSignerId = resolvePaymentSignerId(currentEnv);
 
       const descriptionValue = description.trim();
-      const { secret, hashlock } = generateSecretHashlock();
-      const queuedHashlock: string | null = hashlock;
+      const isTrusted = deliveryMode === 'trusted';
+      const conditionalDeliveryMode = deliveryMode === 'instant' ? 'instant' as const : 'async' as const;
+      const trustedGatewayEntityId = route.path.length >= 3
+        ? route.path[route.path.length - 2]
+        : undefined;
+      if (isTrusted && !trustedGatewayEntityId) {
+        throw new Error('Trusted delivery requires a route through a recipient gateway');
+      }
+      const secretPair = isTrusted ? null : generateSecretHashlock();
+      const queuedHashlock: string | null = secretPair?.hashlock ?? null;
       const paymentInput: EntityInputPayload = {
         entityId,
         signerId: resolvedSignerId,
-        entityTxs: [{
-          type: 'htlcPayment' as const,
-          data: {
-            targetEntityId: routeTargetEntityId,
-            tokenId,
-            amount: route.recipientAmount,
-            route: route.path,
-            secret,
-            hashlock,
-            ...(descriptionValue ? { description: descriptionValue } : {}),
-          },
-        }],
+        entityTxs: isTrusted
+          ? [{
+              type: 'directPayment' as const,
+              data: {
+                targetEntityId: routeTargetEntityId,
+                tokenId,
+                amount: route.recipientAmount,
+                route: route.path,
+                deliveryMode: 'trusted' as const,
+                trustedGatewayEntityId: trustedGatewayEntityId!,
+                ...(descriptionValue ? { description: descriptionValue } : {}),
+              },
+            }]
+          : [{
+              type: 'htlcPayment' as const,
+              data: {
+                targetEntityId: routeTargetEntityId,
+                tokenId,
+                amount: route.recipientAmount,
+                route: route.path,
+                secret: secretPair!.secret,
+                hashlock: secretPair!.hashlock,
+                deliveryMode: conditionalDeliveryMode,
+                ...(descriptionValue ? { description: descriptionValue } : {}),
+              },
+            }],
       };
 
       if (!submitRuntimeInput) throw new Error('Payment command path is not connected');
@@ -1359,6 +1388,7 @@
     !sendingPayment &&
     !paySuccess &&
     !preflightError &&
+    (deliveryMode !== 'trusted' || !activeRoute || activeRoute.path.length >= 3) &&
     (!isSelfRecipient || hasSelectedRoute());
 
   $: activeRoute = selectedRouteIndex >= 0 && routes[selectedRouteIndex]
@@ -1475,6 +1505,24 @@
       </button>
     </div>
   </div>
+
+  <div class="delivery-mode" role="group" aria-label="Payment delivery mode">
+    {#each DELIVERY_MODES as mode}
+      <button
+        type="button"
+        class:active={deliveryMode === mode.value}
+        data-testid={`payment-mode-${mode.value}`}
+        aria-pressed={deliveryMode === mode.value}
+        title={mode.title}
+        disabled={findingRoutes || sendingPayment}
+        on:click={() => { deliveryMode = mode.value; preflightError = null; }}
+      >{mode.label}</button>
+    {/each}
+  </div>
+
+  {#if deliveryMode === 'trusted' && activeRoute && activeRoute.path.length < 3}
+    <div class="form-error">Trusted delivery requires a gateway route.</div>
+  {/if}
 
   <!-- ── Note (liquid glass) ── -->
   {#if showNoteField || descriptionLocked || description}
@@ -1662,6 +1710,38 @@
   }
   .pay-section + .pay-section {
     border-top: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  .delivery-mode {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    padding: 3px;
+    margin: 4px 0 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .delivery-mode button {
+    min-width: 0;
+    height: 34px;
+    border: 0;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .delivery-mode button.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.96);
+  }
+
+  .delivery-mode button:disabled {
+    cursor: default;
+    opacity: 0.55;
   }
 
   .pay-field-label {

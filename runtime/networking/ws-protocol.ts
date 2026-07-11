@@ -19,6 +19,7 @@
 
 import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
 import { keccak256, toUtf8Bytes } from 'ethers';
+import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 
 export type RuntimeWsMessageType =
   | 'hello'
@@ -58,27 +59,22 @@ export type RuntimeWsMessage = {
   error?: string;
 };
 
-export const serializeWsMessage = (msg: RuntimeWsMessage): string => {
-  try {
-    return serializeTaggedJson(msg);
-  } catch (error) {
-    return serializeTaggedJson({
-      type: 'error',
-      error: `serialize failed: ${(error as Error).message}`,
-    });
-  }
-};
+export const serializeWsMessage = (msg: RuntimeWsMessage): Uint8Array =>
+  encodeBinaryPayload(msg, 'msgpack');
 
-export const deserializeWsMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage => {
-  const text =
-    typeof raw === 'string'
+export const serializeWsMessageForDebug = (msg: RuntimeWsMessage): string =>
+  serializeTaggedJson(msg);
+
+export const deserializeWsMessage = (
+  raw: string | Buffer | Uint8Array | ArrayBuffer,
+): RuntimeWsMessage => {
+  if (typeof raw === 'string') return deserializeTaggedJson<RuntimeWsMessage>(raw);
+  const bytes = raw instanceof ArrayBuffer
+    ? new Uint8Array(raw)
+    : raw instanceof Uint8Array
       ? raw
-      : raw instanceof ArrayBuffer
-        ? new TextDecoder().decode(new Uint8Array(raw))
-        : typeof Buffer !== 'undefined'
-          ? Buffer.from(raw as Buffer).toString()
-          : String(raw);
-  return deserializeTaggedJson<RuntimeWsMessage>(text);
+      : new Uint8Array(raw);
+  return decodeBinaryPayload<RuntimeWsMessage>(bytes);
 };
 
 let messageCounter = 0;

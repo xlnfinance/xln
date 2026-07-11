@@ -102,6 +102,16 @@ export const runtimeViewFrameMatchesAtHeight = (
   return Math.max(0, Math.floor(Number(frame.height || 0))) === atHeight;
 };
 
+export const runtimeViewNeedsHeightRefresh = (
+  view: Pick<RuntimeView, 'atHeight' | 'frame'>,
+  status: RuntimeAdapterStatus,
+  nextHeight: number,
+): boolean => {
+  if (view.atHeight !== null || status !== 'connected' || !view.frame) return false;
+  const frameHeight = Math.max(0, Math.floor(Number(view.frame.height || 0)));
+  return nextHeight > frameHeight;
+};
+
 export const assertRuntimeViewIsLive = (view: Pick<RuntimeView, 'atHeight'>): void => {
   if (view.atHeight === null) return;
   throw new Error(`RUNTIME_COMMAND_REQUIRES_LIVE_VIEW: selected=h${view.atHeight}`);
@@ -230,14 +240,13 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
     if (!runtimeViewFrameMatchesAtHeight(frame, expectedAtHeight)) {
       throw new Error(`RuntimeView returned h${Number(frame.height || 0)} for selected h${expectedAtHeight}`);
     }
-    const current = get(runtimeControllerHandle);
     const next: RuntimeView = {
-      runtimeId: current.id,
-      mode: current.mode,
-      authLevel: current.authLevel,
-      status: current.status,
+      runtimeId: handle.id,
+      mode: handle.mode,
+      authLevel: handle.authLevel,
+      status: handle.status,
       atHeight: expectedAtHeight,
-      height: expectedAtHeight ?? Math.max(Number(current.height || 0), Number(frame.height || 0), Number(head.latestHeight || 0)),
+      height: expectedAtHeight ?? Math.max(Number(handle.height || 0), Number(frame.height || 0), Number(head.latestHeight || 0)),
       loading: false,
       error: null,
       head,
@@ -245,11 +254,12 @@ export const refreshRuntimeView = async (inputQuery: RuntimeAdapterReadQuery = {
       entities: frame.entities ?? [],
       activeEntityId: String(frame.activeEntityId || frame.activeEntity?.summary?.entityId || '').trim().toLowerCase(),
     };
-    if (!requestStillCurrent()) return get(runtimeView);
-    runtimeView.set(next);
+    // A superseded read still owns its result. Latest-wins applies only to the
+    // shared store; callers must never receive another request's transient state.
+    if (requestStillCurrent()) runtimeView.set(next);
     return next;
   } catch (error) {
-    if (!requestStillCurrent()) return get(runtimeView);
+    if (!requestStillCurrent()) throw error;
     const current = get(runtimeControllerHandle);
     const next: RuntimeView = {
       ...emptyRuntimeView(expectedAtHeight),
@@ -345,10 +355,11 @@ runtimeAdapterHeight.subscribe((height) => {
     height: view.atHeight ?? Math.max(view.height, nextHeight),
   }));
   const handle = get(runtimeControllerHandle);
-  if (selectedRuntimeViewHeight !== null) return;
-  if (handle.status !== 'connected' || nextHeight <= 0) return;
-  const frameHeight = Math.max(0, Math.floor(Number(get(runtimeView).frame?.height || 0)));
-  if (nextHeight <= frameHeight) return;
+  const view = get(runtimeView);
+  // The adapter switcher owns the initial projection. Starting an automatic
+  // height refresh before that frame exists races the initial read and can
+  // make its caller observe a transient frame=null as a successful result.
+  if (!runtimeViewNeedsHeightRefresh(view, handle.status, nextHeight)) return;
   pendingHeightRefresh = Math.max(pendingHeightRefresh, nextHeight);
   void refreshRuntimeViewAfterHeightAdvance();
 });

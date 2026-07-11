@@ -13,7 +13,6 @@ import type { EntityState, EntityInput, AccountTx, Env, EntityTx, HtlcNoteKey } 
 import { cloneEntityState } from '../../state-helpers';
 import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { calculateRequiredInboundForDesiredForward } from '../../htlc-utils';
-import { HTLC } from '../../constants';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
 import { getTokenCapacity } from '../../routing/capacity';
 import { deriveDelta } from '../../account-utils';
@@ -21,6 +20,7 @@ import { NobleCryptoProvider } from '../../crypto-noble';
 import { createOnionEnvelopes, type HtlcEnvelope } from '../../htlc-envelope-types';
 import { getRuntimeJurisdictionHeight } from '../../j-height';
 import { compareStableText, safeStringify } from '../../serialization-utils';
+import { resolvePaymentDeadlineWindow } from '../../payment-delivery';
 import { getReplicaByEntityId } from '../../replica-utils';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../logger';
 
@@ -78,6 +78,10 @@ export async function handleHtlcPayment(
 
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
+  const deliveryMode = entityTx.data.deliveryMode ?? 'async';
+  if (deliveryMode !== 'instant' && deliveryMode !== 'async') {
+    throw new Error(`HTLC_PAYMENT_DELIVERY_MODE_INVALID:${String(deliveryMode)}`);
+  }
   const desiredRecipientAmount: bigint = typeof amount === 'bigint' ? amount : BigInt(String(amount));
   amount = desiredRecipientAmount;
   const paymentStartedAtMs =
@@ -332,16 +336,17 @@ export async function handleHtlcPayment(
     // against the runtime-wide chain tip when deciding whether a forwarded lock is still valid.
     const totalHops = route.length - 1; // Minus sender
     const hopIndex = 0; // We're always hop 0 (sender) in this handler
-    const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
-    // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
-    const expiryMs = Math.max(120_000, minExpiryMs);
     const runtimeJHeight = getRuntimeJurisdictionHeight(
       env,
       newState.lastFinalizedJHeight || 0,
       newState.config.jurisdiction?.name,
     );
-    const baseTimelock = BigInt(newState.timestamp + expiryMs);
-    const baseHeight = runtimeJHeight + 50;
+    const { baseTimelock, baseHeight } = resolvePaymentDeadlineWindow({
+      mode: deliveryMode,
+      runtimeJHeight,
+      timestamp: newState.timestamp,
+      totalHops,
+    });
 
     timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
     revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
@@ -545,6 +550,7 @@ export async function handleHtlcPayment(
       revealBeforeHeight,
       amount: finalizedSenderLockAmount,
       tokenId,
+      deliveryMode,
       envelope  // Onion envelope (cleartext JSON in Phase 2)
     },
   };

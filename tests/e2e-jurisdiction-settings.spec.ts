@@ -149,6 +149,11 @@ test('settings can add custom jurisdiction from canonical JSON and import it int
 });
 
 test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive', async ({ page }) => {
+  const pageErrors: Error[] = [];
+  page.on('pageerror', (error) => {
+    pageErrors.push(error);
+    console.error('[J-SETTINGS-BROWSERVM] pageerror', error.stack || error.message);
+  });
   console.log('[J-SETTINGS-BROWSERVM] open app');
   await gotoApp(page);
   await dismissOnboardingIfVisible(page);
@@ -193,4 +198,28 @@ test('settings can add BrowserVM jurisdiction and keep Graph3D visual path alive
   await page.goto(`${APP_BASE_URL}/embed`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('.graph3d-wrapper')).toBeVisible({ timeout: INIT_TIMEOUT });
   await expect(page.locator('.graph3d-panel canvas')).toHaveCount(1, { timeout: INIT_TIMEOUT });
+  await page.waitForTimeout(1_000);
+  const restoredJMachineShape = await page.evaluate(() => {
+    type JMachineShape = { blockNumber?: unknown; mempool?: unknown };
+    type RuntimeShape = {
+      jReplicas?: Map<string, JMachineShape>;
+      history?: Array<{ jReplicas?: Map<string, JMachineShape> }>;
+    };
+    const target = window as typeof window & {
+      __xln?: { env?: RuntimeShape | null };
+    };
+    const inspect = (replicas?: Map<string, JMachineShape>) => Array.from(replicas?.values?.() ?? []).map((replica) => ({
+      hasBlockNumber: typeof replica.blockNumber === 'bigint',
+      hasMempool: Array.isArray(replica.mempool),
+    }));
+    const env = target.__xln?.env;
+    return {
+      current: inspect(env?.jReplicas),
+      history: (env?.history ?? []).slice(-2).flatMap((frame) => inspect(frame.jReplicas)),
+    };
+  });
+  expect(restoredJMachineShape.current.length).toBeGreaterThan(0);
+  expect([...restoredJMachineShape.current, ...restoredJMachineShape.history]
+    .every((machine) => machine.hasBlockNumber && machine.hasMempool)).toBe(true);
+  expect(pageErrors.map((error) => error.stack || error.message)).toEqual([]);
 });

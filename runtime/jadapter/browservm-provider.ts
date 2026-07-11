@@ -1007,7 +1007,7 @@ export class BrowserVMProvider {
   ): Promise<string> {
     // Get current nonce from chain
     const accountInfo = await this.getAccountInfo(initiatorEntityId, counterpartyEntityId);
-    const onChainNonce = accountInfo.nonce + 1n;
+    const jNonce = accountInfo.nonce + 1n;
 
     // Determine canonical left/right order
     const isLeft = isLeftEntity(initiatorEntityId, counterpartyEntityId);
@@ -1025,7 +1025,7 @@ export class BrowserVMProvider {
         BrowserVMProvider.MessageType.CooperativeUpdate,
         this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000',
         accountKey,
-        onChainNonce,
+        jNonce,
         diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
         forgiveDebtsInTokenIds,
       ]
@@ -1035,7 +1035,7 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] signSettlement:`);
     console.log(`  hash: ${hash}`);
     console.log(`  accountKey: ${accountKey} (${(accountKey.length - 2) / 2} bytes)`);
-    console.log(`  nonce: ${onChainNonce}`);
+    console.log(`  nonce: ${jNonce}`);
     console.log(`  diffs: ${JSON.stringify(diffs.map(d => ({ tokenId: d.tokenId, leftDiff: d.leftDiff.toString(), rightDiff: d.rightDiff.toString(), collateralDiff: d.collateralDiff.toString(), ondeltaDiff: d.ondeltaDiff.toString() })))}`);
     console.log(`  encodedMsg length: ${(encodedMsg.length - 2) / 2} bytes`);
     console.log(`  encodedMsg first 200: ${encodedMsg.slice(0, 200)}`);

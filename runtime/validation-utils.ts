@@ -389,7 +389,6 @@ function validateRebalanceFeeStateMap(value: unknown, fieldName: string): void {
     if (typeof feeState['requestedByLeft'] !== 'boolean') {
       throw new FinancialDataCorruptionError(`${fieldName}[${String(tokenId)}].requestedByLeft must be boolean`);
     }
-    validateNumber(feeState['jBatchSubmittedAt'], `${fieldName}[${String(tokenId)}].jBatchSubmittedAt`);
   }
 }
 
@@ -649,6 +648,26 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
   if (obj['swapClosedOrders'] !== undefined) {
     validateMapInstance(obj['swapClosedOrders'], `${context}.swapClosedOrders`);
   }
+  if (obj['lendingIntents'] !== undefined) {
+    validateMapInstance(obj['lendingIntents'], `${context}.lendingIntents`);
+    const allowedIntents = new Set([
+      'fund',
+      'borrow',
+      'repay',
+      'credit-grant',
+      'credit-revoke',
+      'close-request',
+      'close-payout',
+    ]);
+    for (const [intentId, kind] of (obj['lendingIntents'] as Map<unknown, unknown>).entries()) {
+      if (typeof intentId !== 'string' || typeof kind !== 'string' || !allowedIntents.has(kind)) {
+        throw new FinancialDataCorruptionError(`${context}.lendingIntents contains invalid receipt`, {
+          intentId,
+          kind,
+        });
+      }
+    }
+  }
   const globalCreditLimits = validateObject(obj['globalCreditLimits'], `${context}.globalCreditLimits`);
   if (typeof globalCreditLimits['ownLimit'] !== 'bigint') {
     throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.ownLimit must be bigint`);
@@ -672,6 +691,10 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
   validateMapInstance(obj['pendingWithdrawals'], `${context}.pendingWithdrawals`);
   validateBigIntMapValues(obj['requestedRebalance'], `${context}.requestedRebalance`);
   validateRebalanceFeeStateMap(obj['requestedRebalanceFeeState'], `${context}.requestedRebalanceFeeState`);
+  const shadow = validateObject(obj['shadow'], `${context}.shadow`);
+  const rebalanceShadow = validateObject(shadow['rebalance'], `${context}.shadow.rebalance`);
+  validateMapInstance(rebalanceShadow['policy'], `${context}.shadow.rebalance.policy`);
+  validateMapInstance(rebalanceShadow['submittedAtByToken'], `${context}.shadow.rebalance.submittedAtByToken`);
 
   // Validate all deltas in the map
   const deltas = obj['deltas'] as Map<unknown, unknown>;

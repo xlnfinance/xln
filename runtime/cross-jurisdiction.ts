@@ -1137,8 +1137,11 @@ export function cloneCrossJurisdictionAccountInputRoute(input: AccountInput): Ac
   if (input.kind !== 'frame' && input.kind !== 'frame_ack') return input;
   return {
     ...input,
-    newAccountFrame: cloneCrossJurisdictionAccountFrameRoute(input.newAccountFrame),
-  } as AccountInput;
+    proposal: {
+      ...input.proposal,
+      frame: cloneCrossJurisdictionAccountFrameRoute(input.proposal.frame),
+    },
+  };
 }
 
 export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRoute): string {

@@ -14,6 +14,7 @@ import { generateLazyEntityId } from '../entity-factory';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 import { serializeTaggedJson } from '../serialization-utils';
 import type { BrowserVMState, EntityReplica, JReplica } from '../types';
+import { accountInputProposal } from '../account-consensus/flush';
 
 type RuntimeCheckpointSnapshot = {
   height?: number;
@@ -375,13 +376,13 @@ async function main() {
         key,
         hasPendingAccountInput: Boolean(account.pendingAccountInput),
         pendingAccountInputType: account.pendingAccountInput ? typeof account.pendingAccountInput : 'none',
-        pendingNewAccountFrameType: account.pendingAccountInput?.newAccountFrame
-          ? Array.isArray(account.pendingAccountInput.newAccountFrame)
+        pendingNewAccountFrameType: account.pendingAccountInput && accountInputProposal(account.pendingAccountInput)?.frame
+          ? Array.isArray(accountInputProposal(account.pendingAccountInput)?.frame)
             ? 'array'
-            : typeof account.pendingAccountInput.newAccountFrame
+            : typeof accountInputProposal(account.pendingAccountInput)?.frame
           : 'none',
-        pendingNewAccountFrameSerialized: account.pendingAccountInput?.newAccountFrame
-          ? render(account.pendingAccountInput.newAccountFrame)
+        pendingNewAccountFrameSerialized: account.pendingAccountInput && accountInputProposal(account.pendingAccountInput)?.frame
+          ? render(accountInputProposal(account.pendingAccountInput)?.frame)
           : null,
       }))
     : [];
@@ -390,13 +391,13 @@ async function main() {
         key,
         hasPendingAccountInput: Boolean(account.pendingAccountInput),
         pendingAccountInputType: account.pendingAccountInput ? typeof account.pendingAccountInput : 'none',
-        pendingNewAccountFrameType: account.pendingAccountInput?.newAccountFrame
-          ? Array.isArray(account.pendingAccountInput.newAccountFrame)
+        pendingNewAccountFrameType: account.pendingAccountInput && accountInputProposal(account.pendingAccountInput)?.frame
+          ? Array.isArray(accountInputProposal(account.pendingAccountInput)?.frame)
             ? 'array'
-            : typeof account.pendingAccountInput.newAccountFrame
+            : typeof accountInputProposal(account.pendingAccountInput)?.frame
           : 'none',
-        pendingNewAccountFrameSerialized: account.pendingAccountInput?.newAccountFrame
-          ? render(account.pendingAccountInput.newAccountFrame)
+        pendingNewAccountFrameSerialized: account.pendingAccountInput && accountInputProposal(account.pendingAccountInput)?.frame
+          ? render(accountInputProposal(account.pendingAccountInput)?.frame)
           : null,
       }))
     : [];

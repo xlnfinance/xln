@@ -26,8 +26,8 @@ function isFinalizeOpStillLive(
   if (!account?.activeDispute) return false;
   const initialNonce = Number(initialNonceRaw ?? 0);
   if (!Number.isFinite(initialNonce) || initialNonce <= 0) return false;
-  const onChainSettlementNonce = Number(account.onChainSettlementNonce ?? 0);
-  return initialNonce > onChainSettlementNonce;
+  const jNonce = Number(account.jNonce ?? 0);
+  return initialNonce > jNonce;
 }
 
 export function hasActiveDisputeForCounterparty(state: EntityState, counterpartyEntityId: unknown): boolean {

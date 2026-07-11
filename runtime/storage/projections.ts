@@ -98,6 +98,7 @@ export const projectEntityCoreDoc = (
   ...withProp('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withProp('orderbookHubProfile', state.orderbookExt?.hubProfile),
   ...withProp('orderbookReferrals', state.orderbookExt?.referrals),
+  ...withProp('lending', state.lending),
 });
 
 const cloneHankoWitness = (hankoWitness?: EntityReplica['hankoWitness']): EntityReplica['hankoWitness'] | undefined => {
@@ -119,6 +120,8 @@ export const projectReplicaMeta = (replica: EntityReplica): StorageReplicaMeta =
   entityId: normalizeEntityId(replica.entityId),
   signerId: normalizeEntityId(replica.signerId),
   isProposer: replica.isProposer,
+  ...withProp('mempool', replica.mempool),
+  ...withProp('position', replica.position),
   ...withProp('proposal', replica.proposal),
   ...withProp('lockedFrame', replica.lockedFrame),
   ...withProp('validatorComputedState', replica.validatorComputedState),
@@ -136,6 +139,8 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   locks: account.locks,
   swapOffers: publicSwapOffers(account.swapOffers),
   pulls: account.pulls,
+  ...withProp('subcontracts', account.subcontracts),
+  ...withProp('lendingIntents', account.lendingIntents),
   globalCreditLimits: account.globalCreditLimits,
   currentHeight: account.currentHeight,
   pendingSignatures: account.pendingSignatures,
@@ -147,11 +152,11 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   proofHeader: account.proofHeader,
   proofBody: account.proofBody,
   disputeConfig: account.disputeConfig,
-  onChainSettlementNonce: account.onChainSettlementNonce,
+  jNonce: account.jNonce,
   pendingWithdrawals: account.pendingWithdrawals,
   requestedRebalance: account.requestedRebalance,
   requestedRebalanceFeeState: account.requestedRebalanceFeeState,
-  rebalancePolicy: account.rebalancePolicy,
+  shadow: account.shadow,
   ...withProp('pendingFrame', account.pendingFrame ? cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame) : undefined),
   ...withProp('pendingAccountInput', account.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput) : undefined),
   ...withProp('lastOutboundFrameAck', account.lastOutboundFrameAck),
@@ -173,13 +178,12 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   ...withProp('disputeProofNoncesByHash', account.disputeProofNoncesByHash),
   ...withProp('disputeProofBodiesByHash', account.disputeProofBodiesByHash),
   ...withProp('disputeArgumentSnapshotsByHash', account.disputeArgumentSnapshotsByHash),
+  ...withProp('disputePrepare', account.disputePrepare),
   ...withProp('settlementWorkspace', account.settlementWorkspace),
   ...withProp('activeDispute', account.activeDispute),
   ...withProp('swapOrderHistory', publicSwapHistory(account.swapOrderHistory)),
   ...withProp('swapClosedOrders', publicSwapHistory(account.swapClosedOrders)),
   ...withProp('counterpartyRebalanceFeePolicy', account.counterpartyRebalanceFeePolicy),
-  ...withProp('activeRebalanceQuote', account.activeRebalanceQuote),
-  ...withProp('pendingRebalanceRequest', account.pendingRebalanceRequest),
 });
 
 export const projectAccountDoc = (account: AccountMachine): StorageAccountDoc => {

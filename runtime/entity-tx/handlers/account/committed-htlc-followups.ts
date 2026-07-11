@@ -262,6 +262,7 @@ export async function applyCommittedHtlcLockFollowup(
         revealBeforeHeight: forwardHeight,
         amount: forwardAmount,
         tokenId: lock.tokenId,
+        ...(accountTx.data.deliveryMode ? { deliveryMode: accountTx.data.deliveryMode } : {}),
         envelope: envelope.innerEnvelope,
       },
     },
@@ -285,6 +286,8 @@ export function applyPendingForwardFollowup(ctx: HtlcFollowupContext): void {
           description: forward.description || 'Forwarded payment',
           fromEntityId: state.entityId,
           toEntityId: nextHop,
+          ...(forward.deliveryMode ? { deliveryMode: forward.deliveryMode } : {}),
+          ...(forward.trustedGatewayEntityId ? { trustedGatewayEntityId: forward.trustedGatewayEntityId } : {}),
         },
       },
     });

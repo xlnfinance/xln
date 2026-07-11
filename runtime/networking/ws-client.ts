@@ -13,7 +13,7 @@ const wsLog = createStructuredLogger('runtime.wsClient');
 interface BrowserWebSocket {
   binaryType: string;
   readyState: number;
-  send(data: string | ArrayBuffer | Blob): void;
+  send(data: string | ArrayBuffer | ArrayBufferView | Blob): void;
   close(): void;
   onopen: ((this: WebSocket, ev: Event) => any) | null;
   onmessage: ((this: WebSocket, ev: MessageEvent) => any) | null;
@@ -24,7 +24,7 @@ interface BrowserWebSocket {
 interface NodeWebSocket {
   binaryType?: string;
   readyState?: number;
-  send(data: string | Buffer): void;
+  send(data: string | Buffer | Uint8Array): void;
   close(): void;
   on(event: 'open', cb: () => void): void;
   on(event: 'message', cb: (data: Buffer) => void): void;

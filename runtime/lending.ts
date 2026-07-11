@@ -17,9 +17,6 @@ export const LENDING_TERM_MS: Record<LendingTermId, number> = {
   '1m': 30 * 24 * 60 * 60 * 1000,
 };
 
-const LENDING_FUND_MEMO_PREFIX = 'xln:lending:fund:';
-const LENDING_REPAY_MEMO_PREFIX = 'xln:lending:repay:';
-
 const ENTITY_ID_RE = /^0x[0-9a-fA-F]{64}$/;
 
 export const isLendingEntityId = (value: unknown): value is string =>
@@ -43,27 +40,6 @@ export const computeLendingInterest = (principal: bigint, interestBps: number): 
   const numerator = principal * BigInt(interestBps);
   const raw = numerator / 10_000n;
   return raw === 0n ? 1n : raw;
-};
-
-export const buildLendingFundingMemo = (positionId: string): string =>
-  `${LENDING_FUND_MEMO_PREFIX}${positionId}`;
-
-export const buildLendingRepayMemo = (loanId: string): string =>
-  `${LENDING_REPAY_MEMO_PREFIX}${loanId}`;
-
-export const parseLendingPaymentMemo = (
-  value: unknown,
-): { kind: 'fund'; id: string } | { kind: 'repay'; id: string } | null => {
-  const memo = typeof value === 'string' ? value.trim() : '';
-  if (memo.startsWith(LENDING_FUND_MEMO_PREFIX)) {
-    const id = memo.slice(LENDING_FUND_MEMO_PREFIX.length);
-    return id ? { kind: 'fund', id } : null;
-  }
-  if (memo.startsWith(LENDING_REPAY_MEMO_PREFIX)) {
-    const id = memo.slice(LENDING_REPAY_MEMO_PREFIX.length);
-    return id ? { kind: 'repay', id } : null;
-  }
-  return null;
 };
 
 const lendingHash = (parts: readonly unknown[]): string =>
@@ -95,6 +71,7 @@ export const buildLendingLoanId = (input: {
   amount: bigint;
   termId: LendingTermId;
   openedAt: number;
+  requestId?: string;
 }): string => `loan-${lendingHash([
   'loan',
   input.hubEntityId.toLowerCase(),
@@ -103,6 +80,7 @@ export const buildLendingLoanId = (input: {
   input.amount.toString(),
   input.termId,
   input.openedAt,
+  input.requestId ?? '',
 ]).slice(2, 18)}`;
 
 export const ensureLendingState = (state: EntityState): LendingState => {
@@ -191,7 +169,7 @@ export const summarizeLendingState = (
   const availableAmount = allPools.reduce((sum, position) => sum + position.availableAmount, 0n);
   const borrowedAmount = allPools.reduce((sum, position) => sum + position.borrowedAmount, 0n);
   const activePrincipalAmount = allLoans
-    .filter(loan => loan.status === 'active' || loan.status === 'repaying')
+    .filter(loan => loan.status === 'opening' || loan.status === 'active' || loan.status === 'closing')
     .reduce((sum, loan) => sum + loan.principalAmount, 0n);
   return {
     pools,

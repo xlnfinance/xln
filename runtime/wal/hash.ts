@@ -37,8 +37,11 @@ const buildPersistedEnvHashInput = (snapshot: Record<string, unknown>): Record<s
         const [name, rawReplica] = entry as [unknown, Record<string, unknown>];
         if (typeof name !== 'string') return entry;
         const replica = rawReplica ? { ...rawReplica } : rawReplica;
-        if (replica && typeof replica === 'object' && 'mempool' in replica) {
+        if (replica && typeof replica === 'object') {
           delete replica['mempool'];
+          replica['blockNumber'] = 0n;
+          replica['lastBlockTimestamp'] = 0;
+          delete replica['blockReady'];
         }
         return [name, replica ?? null] as [string, unknown];
       }).filter((entry): entry is [string, unknown] => Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string'))

@@ -230,6 +230,7 @@ test.describe('xln mascot assistant', () => {
   });
 
   test('streams a real docs-grounded answer through the production proxy', async ({ page }, testInfo) => {
+    // XLN_ALLOW_SKIP: requires the explicitly enabled external local AI service.
     test.skip(!REAL_AI, 'Set XLN_REAL_AI_E2E=1 with the local xln AI service running.');
     const issues = await loadMascot(page, 'dark');
     await page.getByTestId('xln-mascot-toggle').click();

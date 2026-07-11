@@ -821,6 +821,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     locks: new Map(Array.from((account.locks ?? new Map()).entries()).map(([key, lock]) => [key, { ...lock }])),
     swapOffers: new Map(Array.from((account.swapOffers ?? new Map()).entries()).map(([key, offer]) => [key, { ...offer }])),
     pulls: new Map(Array.from((account.pulls ?? new Map()).entries()).map(([key, pull]) => [key, { ...pull }])),
+    ...(account.lendingIntents instanceof Map
+      ? { lendingIntents: new Map(account.lendingIntents) }
+      : {}),
     ...(account.swapOrderHistory instanceof Map
       ? {
           swapOrderHistory: new Map(
@@ -873,7 +876,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       events: Array.isArray(entry.events) ? [...entry.events] : [],
     })),
     lastFinalizedJHeight: account.lastFinalizedJHeight,
-    onChainSettlementNonce: account.onChainSettlementNonce,
+    jNonce: account.jNonce,
     pendingWithdrawals: new Map(account.pendingWithdrawals ?? []), // Phase 2: Clone withdrawal tracking
     requestedRebalance: new Map(account.requestedRebalance ?? []), // Phase 3: Clone rebalance hints
     requestedRebalanceFeeState: new Map(
@@ -882,14 +885,19 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
         { ...feeState },
       ]),
     ),
-    rebalancePolicy: new Map(account.rebalancePolicy || []),
+    shadow: {
+      rebalance: {
+        policy: new Map(account.shadow.rebalance.policy),
+        submittedAtByToken: new Map(account.shadow.rebalance.submittedAtByToken),
+        ...(account.shadow.rebalance.activeQuote
+          ? { activeQuote: { ...account.shadow.rebalance.activeQuote } }
+          : {}),
+        ...(account.shadow.rebalance.pendingRequest
+          ? { pendingRequest: { ...account.shadow.rebalance.pendingRequest } }
+          : {}),
+      },
+    },
   };
-  if (account.activeRebalanceQuote) {
-    result.activeRebalanceQuote = { ...account.activeRebalanceQuote };
-  }
-  if (account.pendingRebalanceRequest) {
-    result.pendingRebalanceRequest = { ...account.pendingRebalanceRequest };
-  }
 
   if (account.pendingFrame) {
     result.pendingFrame = cloneAccountFrame(account.pendingFrame);
@@ -899,13 +907,14 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     try {
       result.pendingAccountInput = structuredClone(account.pendingAccountInput);
     } catch {
-      const clonedInput: AccountMachine['pendingAccountInput'] = {
-        ...account.pendingAccountInput,
-      };
-      if (account.pendingAccountInput.settleAction) {
-        clonedInput.settleAction = cloneAccountSettleAction(account.pendingAccountInput.settleAction);
+      if (account.pendingAccountInput.kind === 'settle') {
+        result.pendingAccountInput = {
+          ...account.pendingAccountInput,
+          settleAction: cloneAccountSettleAction(account.pendingAccountInput.settleAction),
+        };
+      } else {
+        result.pendingAccountInput = { ...account.pendingAccountInput };
       }
-      result.pendingAccountInput = clonedInput;
     }
   }
 

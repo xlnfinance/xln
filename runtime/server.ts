@@ -47,6 +47,7 @@ import {
   removeClient,
 } from './relay-store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './relay-router';
+import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from './networking/ws-protocol';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import { createStructuredLogger, shortId } from './logger';
@@ -85,12 +86,7 @@ import { buildHubDiscoveryPayload } from './server/hub-discovery';
 import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './server/gossip-profiles';
 import { maybeHandleDebugDumpsRequest } from './server/debug-dumps';
 import { handleCreditRequest } from './server/credit-request';
-import {
-  handleLendingBorrowRequest,
-  handleLendingOfferRequest,
-  handleLendingRepayRequest,
-  handleLendingStateRequest,
-} from './server/lending';
+import { handleLendingStateRequest } from './server/lending';
 import { handleWatchtowerProxy } from './server/watchtower-proxy';
 import { handleOffchainFaucet } from './server/offchain-faucet';
 import { handleReserveFaucet } from './server/reserve-faucet';
@@ -766,46 +762,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null, client
       activeHubEntityIds: relayStore.activeHubEntityIds,
     });
   }
-  if (pathname === '/api/lending/offer' && req.method === 'POST') {
-    return handleLendingOfferRequest({
-      req,
-      env,
-      headers,
-      activeHubEntityIds: relayStore.activeHubEntityIds,
-      enqueueRuntimeInput,
-      validateRuntimeInputAdmission,
-      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-      getCurrentRuntimeHeight: currentRuntimeHeight,
-      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-    });
-  }
-  if (pathname === '/api/lending/borrow' && req.method === 'POST') {
-    return handleLendingBorrowRequest({
-      req,
-      env,
-      headers,
-      activeHubEntityIds: relayStore.activeHubEntityIds,
-      enqueueRuntimeInput,
-      validateRuntimeInputAdmission,
-      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-      getCurrentRuntimeHeight: currentRuntimeHeight,
-      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-    });
-  }
-  if (pathname === '/api/lending/repay' && req.method === 'POST') {
-    return handleLendingRepayRequest({
-      req,
-      env,
-      headers,
-      activeHubEntityIds: relayStore.activeHubEntityIds,
-      enqueueRuntimeInput,
-      validateRuntimeInputAdmission,
-      registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-      getCurrentRuntimeHeight: currentRuntimeHeight,
-      buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-    });
-  }
-
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
@@ -904,15 +860,24 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       message(ws: RelaySocket, message) {
         const data = ws.data;
         try {
-          const msg = data.type === 'rpc'
-            ? decodeRuntimeAdapterMessage<Record<string, unknown>>(message)
-            : JSON.parse(message.toString());
+          let msg: RuntimeWsMessage | Record<string, unknown>;
+          if (data.type === 'rpc') {
+            msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(message);
+          } else {
+            try {
+              msg = deserializeWsMessage(message as string | Buffer | ArrayBuffer);
+            } catch (binaryError) {
+              const candidate = JSON.parse(message.toString()) as Record<string, unknown>;
+              if (!isMarketMessageType(candidate['type'])) throw binaryError;
+              msg = candidate;
+            }
+          }
           const routeRelayMessage = () => {
             if (!routerConfig) {
-              ws.send(safeStringify({ type: 'error', error: 'Runtime transport not ready' }));
+              ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
               return;
             }
-            Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
+            Promise.resolve(relayRoute(routerConfig, ws, msg as RuntimeWsMessage)).catch(error => {
               const reason = (error as Error).message || 'relay handler error';
               serverLog.error('ws.relay_handler_error', { reason, type: msg?.type });
               pushDebugEvent(relayStore, {
@@ -926,7 +891,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
                 },
               });
               try {
-                ws.send(safeStringify({ type: 'error', error: 'Relay handler exception' }));
+                ws.send(serializeWsMessage({ type: 'error', error: 'Relay handler exception' }));
               } catch {
                 // Socket may already be closed; ignore.
               }
@@ -955,12 +920,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
                 });
                 return;
               }
-              ws.send(safeStringify({ type: 'error', error: 'Runtime transport not ready' }));
+              ws.send(serializeWsMessage({ type: 'error', error: 'Runtime transport not ready' }));
               return;
             }
             routeRelayMessage();
           } else if (data.type === 'rpc') {
-            Promise.resolve(handleRpcMessage(ws, msg, env)).catch(error => {
+            Promise.resolve(handleRpcMessage(ws, msg as Record<string, unknown>, env)).catch(error => {
               const reason = (error as Error).message || 'rpc handler error';
               serverLog.error('ws.rpc_handler_error', { reason, type: msg?.type });
               pushDebugEvent(relayStore, {
@@ -984,13 +949,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           });
           pushDebugEvent(relayStore, {
             event: 'error',
-            reason: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid JSON',
+            reason: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid relay message',
             details: { wsType: data.type, len: byteLength, error: (error as Error).message },
           });
           if (data.type === 'rpc') {
             closeInvalidRuntimeAdapterMessage(ws, error);
           } else {
-            ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
+            ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
           }
         }
       },

@@ -4,14 +4,16 @@ import { createFrameHash } from '../account-consensus-frame';
 import { createEntityFrameHash } from '../entity-consensus-frame';
 import type { AccountFrame, EntityState, EntityTx } from '../types';
 
-const ACCOUNT_FRAME_GOLDEN_HASH = '0x70b214f5aaf0c3ec118e25b1f88a4a0e99baf4b1a64d4ff87cb11fdc5be3cb43';
-const ENTITY_FRAME_GOLDEN_HASH = '0xc93f59617c87873da25bd4b3826acc02ff15a67b2cf231ced0e60abbdc3a3416';
+const ACCOUNT_FRAME_GOLDEN_HASH = '0x24608c6f58a8ad49080c316a4e1d04fe272704cec4b6e091deadf5929e83ff79';
+const ENTITY_FRAME_GOLDEN_HASH = '0x78b892cd33fbee1594e3140768eaa0ff355f15b36c4fdd44770f5c7469c5673f';
 
 const makeAccountFrameFixture = (): AccountFrame => ({
   height: 7,
   timestamp: 1_700_000_000_123,
   jHeight: 42,
+  byLeft: true,
   prevFrameHash: `0x${'11'.repeat(32)}`,
+  accountStateRoot: `0x${'33'.repeat(32)}`,
   accountTxs: [
     { type: 'set_credit_limit', data: { tokenId: 1, amount: 1234n } } as any,
     { type: 'direct_payment', data: { tokenId: 1, amount: 55n, nonce: 'payment-1' } } as any,
@@ -47,7 +49,13 @@ const makeEntityStateFixture = (accountHash: string): EntityState => ({
   reserves: new Map([[1, 123456n], [2, 789n]]),
   accounts: new Map([[
     `0x${'bb'.repeat(32)}`,
-    { currentHeight: 7, currentFrame: { stateHash: accountHash } } as any,
+    {
+      status: 'active',
+      currentHeight: 7,
+      currentFrame: { stateHash: accountHash },
+      pendingWithdrawals: new Map(),
+      shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    } as any,
   ]]),
   deferredAccountProposals: new Map(),
   lastFinalizedJHeight: 42,
@@ -74,8 +82,10 @@ describe('frame hash golden fixtures', () => {
     const entityTxs: EntityTx[] = [{
       type: 'accountInput',
       data: {
-        accountId: `0x${'bb'.repeat(32)}`,
-        newAccountFrame: accountFrame,
+        kind: 'frame',
+        fromEntityId: `0x${'aa'.repeat(32)}`,
+        toEntityId: `0x${'bb'.repeat(32)}`,
+        proposal: { frame: accountFrame, frameHanko: '0x1234' },
       },
     } as any];
 

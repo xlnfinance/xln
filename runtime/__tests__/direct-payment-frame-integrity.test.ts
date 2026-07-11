@@ -34,7 +34,7 @@ async function makeAccount(): Promise<AccountMachine> {
     collateral: 1_000n,
   };
   return {
-    proofHeader: { fromEntity: RIGHT, toEntity: LEFT, nonce: 1 },
+    proofHeader: { fromEntity: RIGHT, toEntity: LEFT, nextProofNonce: 1 },
     leftEntity: LEFT,
     rightEntity: RIGHT,
     leftEntityId: LEFT,

@@ -435,14 +435,13 @@ const eventFromAccountFrameTx = (
         rawType: txType,
       });
     case 'request_collateral':
-    case 'set_rebalance_policy':
       return makeEvent(journal, index, {
         kind: 'offchain',
         type: 'account',
         source: 'runtime_input',
         direction: 'neutral',
-        title: txType === 'request_collateral' ? 'Collateral requested' : 'Rebalance policy updated',
-        subtitle: `${bigintText(data['amount']) ?? bigintText(data['r2cRequestSoftLimit']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'}`,
+        title: 'Collateral requested',
+        subtitle: `${bigintText(data['amount']) ?? '0'} token ${numberValue(data['tokenId']) ?? '?'}`,
         status: 'updated',
         ...base,
         tokenId: numberValue(data['tokenId']),
@@ -471,7 +470,7 @@ const eventsFromAccountInput = (
   data: RawRecord,
   viewedEntityId: string,
 ): RuntimeActivityEvent[] => {
-  const frame = recordValue(data['newAccountFrame']);
+  const frame = recordValue(recordValue(data['proposal'])['frame']);
   const accountTxs = Array.isArray(frame['accountTxs']) ? frame['accountTxs'] as RawRecord[] : [];
   return accountTxs.map((accountTx, offset) =>
     eventFromAccountFrameTx(journal, startIndex + offset, inputEntityId, data, accountTx, viewedEntityId)

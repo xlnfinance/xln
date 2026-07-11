@@ -1079,7 +1079,7 @@ async function readRebalanceSnapshot(
         currentHeight?: number;
         lastFinalizedJHeight?: number;
         requestedRebalance?: Map<number, unknown>;
-        rebalancePolicy?: Map<number, unknown>;
+        shadow?: { rebalance?: { policy?: Map<number, unknown> } };
         deltas?: Map<number, unknown>;
         leftEntity?: string;
         rightEntity?: string;
@@ -1106,7 +1106,7 @@ async function readRebalanceSnapshot(
     if (!account) return null;
     const delta = account.deltas?.get?.(tokenId);
     if (!delta || typeof delta !== 'object') return null;
-    const policy = account.rebalancePolicy?.get?.(tokenId);
+    const policy = account.shadow?.rebalance?.policy?.get?.(tokenId);
     const policyRecord = policy && typeof policy === 'object' ? policy as Record<string, unknown> : null;
     const deltaRecord = delta as Record<string, unknown>;
     const owner = normalizeEntityId(identity.entityId);

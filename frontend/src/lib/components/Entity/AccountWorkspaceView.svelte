@@ -387,6 +387,7 @@
       accountIds={workspaceAccountIds}
       {entityNames}
       isLive={activeIsLive}
+      {submitRuntimeInput}
     />
 
   {:else if accountWorkspaceTab === 'history'}

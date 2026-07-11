@@ -43,6 +43,25 @@ const cloneJStateRoot = (
   return new Uint8Array(normalized);
 };
 
+const normalizeJBlockNumber = (value: unknown): bigint => {
+  try {
+    const blockNumber = BigInt(value as bigint | number | string);
+    return blockNumber >= 0n ? blockNumber : 0n;
+  } catch {
+    return 0n;
+  }
+};
+
+const normalizeNonNegativeNumber = (value: unknown, fallback: number): number => {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) && normalized >= 0 ? normalized : fallback;
+};
+
+const normalizeFiniteNumber = (value: unknown, fallback: number): number => {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : fallback;
+};
+
 export const buildCanonicalEntityReplicaSnapshot = (
   replica: EntityReplica,
   options?: { compactTransient?: boolean },
@@ -63,18 +82,24 @@ export const buildCanonicalEntityReplicaSnapshot = (
 
 export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   name: jr.name,
-  // J events carry consensus evidence with explicit blockNumber/blockHash.
-  // The live replica cursor is adapter liveness state, not replay state: RPC
-  // watchers can observe a different latest tip between equivalent runs.
-  blockNumber: 0n,
+  // Storage can reconstruct jurisdiction identity before its external adapter
+  // is attached. Canonical snapshots must still be complete JReplica values;
+  // zero means no local tip has been observed yet, not an invented chain tip.
+  blockNumber: normalizeJBlockNumber(jr.blockNumber),
   stateRoot: cloneJStateRoot(jr.stateRoot, { rpcBacked: Boolean(jr.rpcs?.length) }),
-  mempool: [],
-  blockDelayMs: jr.blockDelayMs,
-  lastBlockTimestamp: 0,
+  mempool: Array.isArray(jr.mempool) ? structuredClone(jr.mempool) : [],
+  blockDelayMs: normalizeNonNegativeNumber(jr.blockDelayMs, 300),
+  ...(jr.blockTimeMs !== undefined ? { blockTimeMs: jr.blockTimeMs } : {}),
+  lastBlockTimestamp: normalizeNonNegativeNumber(jr.lastBlockTimestamp, 0),
+  ...(jr.blockReady !== undefined ? { blockReady: jr.blockReady } : {}),
   ...(jr.defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks: jr.defaultDisputeDelayBlocks } : {}),
   ...(jr.rpcs ? { rpcs: [...jr.rpcs] } : {}),
   ...(jr.chainId !== undefined ? { chainId: jr.chainId } : {}),
-  position: { ...jr.position },
+  position: {
+    x: normalizeFiniteNumber(jr.position?.x, 0),
+    y: normalizeFiniteNumber(jr.position?.y, 50),
+    z: normalizeFiniteNumber(jr.position?.z, 0),
+  },
   ...(jr.depositoryAddress ? { depositoryAddress: jr.depositoryAddress } : {}),
   ...(jr.entityProviderAddress ? { entityProviderAddress: jr.entityProviderAddress } : {}),
   ...(jr.contracts
@@ -89,29 +114,43 @@ export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
     : {}),
 });
 
-const cloneRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => ({
-  runtimeTxs: [...runtimeInput.runtimeTxs],
-  entityInputs: runtimeInput.entityInputs.map(input => ({
-    entityId: input.entityId,
-    signerId: input.signerId,
-    ...(input.entityTxs ? { entityTxs: [...input.entityTxs] } : {}),
-    ...(input.hashPrecommits
-      ? { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }
-      : {}),
-    ...(input.proposedFrame ? { proposedFrame: input.proposedFrame } : {}),
-  })),
+const cloneEntityInput = <T extends RoutedEntityInput>(input: T): T => ({
+  ...input,
+  ...(input.entityTxs ? { entityTxs: [...input.entityTxs] } : {}),
+  ...(input.hashPrecommits
+    ? { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }
+    : {}),
+}) as T;
+
+const cloneRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput => ({
+  ...runtimeInput,
+  runtimeTxs: [...(runtimeInput?.runtimeTxs ?? [])],
+  entityInputs: (runtimeInput?.entityInputs ?? []).map(input => cloneEntityInput(input)),
+  ...(runtimeInput?.jInputs
+    ? { jInputs: runtimeInput.jInputs.map(input => ({ ...input, jTxs: [...input.jTxs] })) }
+    : {}),
 });
 
 const cloneRuntimeOutputs = (runtimeOutputs: RoutedEntityInput[]): RoutedEntityInput[] =>
-  runtimeOutputs.map(output => ({
-    entityId: output.entityId,
-    signerId: output.signerId,
-    ...(output.entityTxs ? { entityTxs: [...output.entityTxs] } : {}),
-    ...(output.hashPrecommits
-      ? { hashPrecommits: new Map(Array.from(output.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }
-      : {}),
-    ...(output.proposedFrame ? { proposedFrame: output.proposedFrame } : {}),
-  }));
+  runtimeOutputs.map(output => cloneEntityInput(output));
+
+const buildDurableRuntimeStateSnapshot = (env: Env): Record<string, unknown> | undefined => {
+  const state = env.runtimeState;
+  if (!state) return undefined;
+  const durable = {
+    ...(state.halted !== undefined ? { halted: state.halted } : {}),
+    ...(state.fatalDebugPayload ? { fatalDebugPayload: structuredClone(state.fatalDebugPayload) } : {}),
+    ...(state.clockPrimed !== undefined ? { clockPrimed: state.clockPrimed } : {}),
+    ...(state.maxEntityInputsPerFrame !== undefined ? { maxEntityInputsPerFrame: state.maxEntityInputsPerFrame } : {}),
+    ...(state.maxEntityTxsPerFrame !== undefined ? { maxEntityTxsPerFrame: state.maxEntityTxsPerFrame } : {}),
+    ...(state.pendingAuditEvents ? { pendingAuditEvents: structuredClone(state.pendingAuditEvents) } : {}),
+    ...(state.quarantinedRuntimeInputs ? { quarantinedRuntimeInputs: structuredClone(state.quarantinedRuntimeInputs) } : {}),
+    ...(state.pendingFrameDbRecords ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) } : {}),
+    ...(state.deferredNetworkMeta ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
+    ...(state.pendingCommittedJOutbox ? { pendingCommittedJOutbox: structuredClone(state.pendingCommittedJOutbox) } : {}),
+  };
+  return Object.keys(durable).length > 0 ? durable : undefined;
+};
 
 const cloneProfiles = (profiles: Profile[] | undefined): Profile[] | undefined => {
   if (!profiles || profiles.length === 0) return undefined;
@@ -136,6 +175,13 @@ export const buildCanonicalRuntimeStateSnapshot = (
   ...(env.dbNamespace ? { dbNamespace: env.dbNamespace } : {}),
   ...(env.activeJurisdiction ? { activeJurisdiction: env.activeJurisdiction } : {}),
   ...(options?.browserVMState ?? env.browserVMState ? { browserVMState: options?.browserVMState ?? env.browserVMState } : {}),
+  ...(env.runtimeConfig ? { runtimeConfig: structuredClone(env.runtimeConfig) } : {}),
+  ...(buildDurableRuntimeStateSnapshot(env) ? { runtimeState: buildDurableRuntimeStateSnapshot(env) } : {}),
+  runtimeInput: cloneRuntimeInput(env.runtimeMempool ?? env.runtimeInput),
+  ...(env.pendingOutputs ? { pendingOutputs: cloneRuntimeOutputs(env.pendingOutputs) } : {}),
+  ...(env.networkInbox ? { networkInbox: cloneRuntimeOutputs(env.networkInbox) } : {}),
+  ...(env.pendingNetworkOutputs ? { pendingNetworkOutputs: cloneRuntimeOutputs(env.pendingNetworkOutputs) } : {}),
+  ...(env.lockRuntimeSeed !== undefined ? { lockRuntimeSeed: env.lockRuntimeSeed } : {}),
   eReplicas: Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
     replicaKey,
     buildCanonicalEntityReplicaSnapshot(
@@ -154,12 +200,45 @@ export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown
 };
 
 export const buildRuntimeRecoveryCheckpointSnapshot = (env: Env): Record<string, unknown> => {
-  const snapshot = buildCanonicalRuntimeStateSnapshot(env, { compactTransient: true });
+  const snapshot = buildCanonicalRuntimeStateSnapshot(env);
   const gossipProfiles = cloneProfiles(env.gossip?.getProfiles?.());
   return {
     ...snapshot,
     ...(gossipProfiles ? { gossip: { profiles: gossipProfiles } } : {}),
   };
+};
+
+export const restoreDurableRuntimeSnapshot = (
+  env: Env,
+  snapshot: Record<string, unknown>,
+): void => {
+  const runtimeInput = snapshot['runtimeInput'];
+  if (runtimeInput && typeof runtimeInput === 'object') {
+    const restoredInput = structuredClone(runtimeInput) as RuntimeInput;
+    env.runtimeInput = restoredInput;
+    env.runtimeMempool = restoredInput;
+  }
+  if (snapshot['runtimeConfig'] && typeof snapshot['runtimeConfig'] === 'object') {
+    env.runtimeConfig = structuredClone(snapshot['runtimeConfig']) as Env['runtimeConfig'];
+  }
+  if (snapshot['runtimeState'] && typeof snapshot['runtimeState'] === 'object') {
+    env.runtimeState = {
+      ...(env.runtimeState ?? {}),
+      ...(structuredClone(snapshot['runtimeState']) as NonNullable<Env['runtimeState']>),
+    };
+  }
+  env.pendingOutputs = Array.isArray(snapshot['pendingOutputs'])
+    ? structuredClone(snapshot['pendingOutputs']) as RoutedEntityInput[]
+    : [];
+  env.networkInbox = Array.isArray(snapshot['networkInbox'])
+    ? structuredClone(snapshot['networkInbox']) as RoutedEntityInput[]
+    : [];
+  env.pendingNetworkOutputs = Array.isArray(snapshot['pendingNetworkOutputs'])
+    ? structuredClone(snapshot['pendingNetworkOutputs']) as RoutedEntityInput[]
+    : [];
+  if (typeof snapshot['lockRuntimeSeed'] === 'boolean') {
+    env.lockRuntimeSeed = snapshot['lockRuntimeSeed'];
+  }
 };
 
 export const buildCanonicalEnvSnapshot = (

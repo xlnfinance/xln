@@ -4,6 +4,7 @@ import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionCloseProof
 import type { LendingTermId } from './lending';
 import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
+import type { PaymentDeliveryMode } from './payment';
 
 export type EntityTx =
   | {
@@ -83,6 +84,8 @@ export type EntityTx =
         amount: bigint;
         route: string[]; // Full path from source to target
         description?: string;
+        deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>;
+        trustedGatewayEntityId?: string;
       };
     }
   | {
@@ -93,6 +96,7 @@ export type EntityTx =
         amount: bigint;
         route: string[]; // Full path from source to target
         description?: string;
+        deliveryMode?: Exclude<PaymentDeliveryMode, 'trusted'>;
         startedAtMs?: number;
         secret?: string;   // Optional - generated if not provided
         hashlock?: string; // Optional - generated if not provided
@@ -202,7 +206,7 @@ export type EntityTx =
       type: 'reopenDisputedAccount';
       data: {
         counterpartyEntityId: string;
-        onChainNonce?: number;
+        jNonce?: number;
       };
     }
   | {
@@ -447,37 +451,38 @@ export type EntityTx =
   | {
       type: 'lendingOffer';
       data: {
-        lenderEntityId: string;
+        positionId: string;
+        hubEntityId: string;
         tokenId: number;
         amount: bigint;
         termId: LendingTermId;
         interestBps: number;
-        positionId?: string;
       };
     }
   | {
       type: 'lendingBorrow';
       data: {
-        borrowerEntityId: string;
+        requestId: string;
+        hubEntityId: string;
         tokenId: number;
         amount: bigint;
         termId: LendingTermId;
         maxInterestBps?: number;
-        loanId?: string;
       };
     }
   | {
       type: 'lendingRepay';
       data: {
-        borrowerEntityId: string;
+        hubEntityId: string;
         loanId: string;
-        amount?: bigint;
+        tokenId: number;
+        amount: bigint;
       };
     }
   | {
       type: 'lendingClosePosition';
       data: {
-        lenderEntityId: string;
+        hubEntityId: string;
         positionId: string;
       };
     }
@@ -502,7 +507,7 @@ export type EntityTx =
       };
     }
   | {
-      // User sets rebalance policy on bilateral account (pushes set_rebalance_policy AccountTx)
+      // User sets entity-private rebalance automation policy.
       type: 'setRebalancePolicy';
       data: {
         counterpartyEntityId: string;

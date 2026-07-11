@@ -5,9 +5,13 @@ import { cancelHook as cancelScheduledHook } from '../../../entity-crontab';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { buildHtlcFinalizedEventPayload } from '../../../htlc-events';
 import {
+  buildLendingLoanId,
   ensureLendingState,
+  getAccountOutCapacity,
   getCreditGrantedByAccountOwner,
-  parseLendingPaymentMemo,
+  LENDING_TERM_MS,
+  selectBestLendingPool,
+  computeLendingInterest,
 } from '../../../lending';
 import { createStructuredLogger } from '../../../logger';
 import type { MempoolOp } from './orderbook-queue';
@@ -48,110 +52,211 @@ function emitOriginatedHtlcFinalized(
   });
 }
 
-const setCreditLimitOp = (
+const lendingCreditOp = (
   accountId: string,
-  tokenId: number,
-  amount: bigint,
+  data: Extract<AccountTx, { type: 'lending_credit' }>['data'],
 ): MempoolOp => ({
   accountId,
   tx: {
-    type: 'set_credit_limit',
-    data: { tokenId, amount },
+    type: 'lending_credit',
+    data,
   },
 });
 
-function applyCommittedLendingPaymentFollowup(
+function applyCommittedLendingFollowup(
   newState: EntityState,
   counterpartyId: string,
   accountTx: AccountTx,
   committedFrame: AccountFrame,
   mempoolOps: MempoolOp[],
 ): void {
-  if (accountTx.type !== 'direct_payment') return;
-  const memo = parseLendingPaymentMemo(accountTx.data.description);
-  if (!memo) return;
-
-  const fromEntityId = normalizeEntityRef(accountTx.data.fromEntityId);
-  const toEntityId = normalizeEntityRef(accountTx.data.toEntityId);
   const hubEntityId = normalizeEntityRef(newState.entityId);
-  const isHubRecipient = toEntityId === hubEntityId;
-  const hasLendingState = Boolean(newState.lending);
-
-  if (!isHubRecipient && !hasLendingState) return;
+  if (newState.profile?.isHub !== true) return;
+  if (!('hubEntityId' in accountTx.data) || normalizeEntityRef(accountTx.data.hubEntityId) !== hubEntityId) return;
+  const account = newState.accounts.get(normalizeEntityRef(counterpartyId));
+  if (!account) throw new Error(`LENDING_ACCOUNT_MISSING:${counterpartyId}`);
+  const proposer = normalizeEntityRef(committedFrame.byLeft ? account.leftEntity : account.rightEntity);
   const lending = ensureLendingState(newState);
   const now = Math.max(
     Math.floor(Number(committedFrame.timestamp || 0)),
     Math.floor(Number(newState.timestamp || 0)),
   );
 
-  if (memo.kind === 'fund') {
-    const position = lending.pools.get(memo.id);
-    if (!position) {
-      if (isHubRecipient && newState.profile?.isHub === true) {
-        throw new Error(`LENDING_FUNDING_POSITION_MISSING: ${memo.id}`);
-      }
+  if (accountTx.type === 'lending_fund') {
+    if (proposer !== normalizeEntityRef(accountTx.data.lenderEntityId) || proposer !== normalizeEntityRef(counterpartyId)) {
+      throw new Error(`LENDING_FUND_PROPOSER_MISMATCH:${accountTx.data.positionId}`);
+    }
+    const existing = lending.pools.get(accountTx.data.positionId);
+    if (existing) throw new Error(`LENDING_POSITION_ALREADY_EXISTS:${accountTx.data.positionId}`);
+    lending.pools.set(accountTx.data.positionId, {
+      positionId: accountTx.data.positionId,
+      hubEntityId,
+      lenderEntityId: proposer,
+      tokenId: accountTx.data.tokenId,
+      principalAmount: accountTx.data.amount,
+      availableAmount: accountTx.data.amount,
+      borrowedAmount: 0n,
+      interestBps: accountTx.data.interestBps,
+      termId: accountTx.data.termId,
+      termMs: LENDING_TERM_MS[accountTx.data.termId],
+      createdAt: now,
+      updatedAt: now,
+      status: 'open',
+    });
+    return;
+  }
+
+  if (accountTx.type === 'lending_borrow_request') {
+    if (proposer !== normalizeEntityRef(accountTx.data.borrowerEntityId) || proposer !== normalizeEntityRef(counterpartyId)) {
+      throw new Error(`LENDING_BORROW_PROPOSER_MISMATCH:${accountTx.data.requestId}`);
+    }
+    const pool = selectBestLendingPool(
+      lending,
+      accountTx.data.tokenId,
+      accountTx.data.amount,
+      accountTx.data.termId,
+      accountTx.data.maxInterestBps,
+    );
+    if (!pool) throw new Error(`LENDING_LIQUIDITY_UNAVAILABLE:${accountTx.data.requestId}`);
+    const loanId = buildLendingLoanId({
+      hubEntityId,
+      borrowerEntityId: proposer,
+      tokenId: accountTx.data.tokenId,
+      amount: accountTx.data.amount,
+      termId: accountTx.data.termId,
+      openedAt: now,
+      requestId: accountTx.data.requestId,
+    });
+    if (lending.loans.has(loanId)) throw new Error(`LENDING_LOAN_ALREADY_EXISTS:${loanId}`);
+    const interestAmount = computeLendingInterest(accountTx.data.amount, pool.interestBps);
+    pool.availableAmount -= accountTx.data.amount;
+    pool.borrowedAmount += accountTx.data.amount;
+    pool.updatedAt = now;
+    lending.loans.set(loanId, {
+      requestId: accountTx.data.requestId,
+      loanId,
+      hubEntityId,
+      borrowerEntityId: proposer,
+      lenderEntityId: pool.lenderEntityId,
+      positionId: pool.positionId,
+      tokenId: accountTx.data.tokenId,
+      principalAmount: accountTx.data.amount,
+      interestAmount,
+      repaymentAmount: accountTx.data.amount + interestAmount,
+      repaidAmount: 0n,
+      interestBps: pool.interestBps,
+      termId: pool.termId,
+      termMs: pool.termMs,
+      openedAt: now,
+      dueAt: now + pool.termMs,
+      updatedAt: now,
+      status: 'opening',
+    });
+    const currentLimit = getCreditGrantedByAccountOwner(account, hubEntityId, accountTx.data.tokenId);
+    mempoolOps.push(lendingCreditOp(proposer, {
+      action: 'grant',
+      loanId,
+      hubEntityId,
+      borrowerEntityId: proposer,
+      tokenId: accountTx.data.tokenId,
+      creditLimit: currentLimit + accountTx.data.amount,
+    }));
+    return;
+  }
+
+  if (accountTx.type === 'lending_credit') {
+    if (proposer !== hubEntityId) throw new Error(`LENDING_CREDIT_PROPOSER_MISMATCH:${accountTx.data.loanId}`);
+    const loan = lending.loans.get(accountTx.data.loanId);
+    if (!loan) throw new Error(`LENDING_CREDIT_LOAN_MISSING:${accountTx.data.loanId}`);
+    if (accountTx.data.action === 'grant') {
+      if (loan.status !== 'opening') throw new Error(`LENDING_GRANT_STATUS_INVALID:${loan.loanId}:${loan.status}`);
+      loan.status = 'active';
+      loan.updatedAt = now;
       return;
     }
-    if (position.status === 'open') return;
-    if (position.status !== 'funding') {
-      throw new Error(`LENDING_FUNDING_STATUS_INVALID: ${memo.id}:${position.status}`);
-    }
-    if (
-      normalizeEntityRef(position.lenderEntityId) !== fromEntityId ||
-      normalizeEntityRef(position.hubEntityId) !== toEntityId ||
-      position.tokenId !== accountTx.data.tokenId ||
-      position.principalAmount !== accountTx.data.amount ||
-      normalizeEntityRef(counterpartyId) !== fromEntityId
-    ) {
-      throw new Error(`LENDING_FUNDING_PAYMENT_MISMATCH: ${memo.id}`);
-    }
-    position.availableAmount = position.principalAmount;
-    position.borrowedAmount = 0n;
-    position.status = 'open';
-    position.updatedAt = now;
+    if (loan.status !== 'closing') throw new Error(`LENDING_REVOKE_STATUS_INVALID:${loan.loanId}:${loan.status}`);
+    const pool = lending.pools.get(loan.positionId);
+    if (!pool) throw new Error(`LENDING_POOL_MISSING_FOR_LOAN:${loan.loanId}`);
+    if (pool.borrowedAmount < loan.principalAmount) throw new Error(`LENDING_POOL_BORROWED_UNDERFLOW:${pool.positionId}`);
+    loan.repaidAmount = loan.repaymentAmount;
+    loan.status = 'repaid';
+    loan.updatedAt = now;
+    pool.borrowedAmount -= loan.principalAmount;
+    pool.availableAmount += loan.repaymentAmount;
+    pool.updatedAt = now;
     return;
   }
 
-  const loan = lending.loans.get(memo.id);
-  if (!loan) {
-    if (isHubRecipient && newState.profile?.isHub === true) {
-      throw new Error(`LENDING_REPAY_LOAN_MISSING: ${memo.id}`);
+  if (accountTx.type === 'lending_repay') {
+    if (proposer !== normalizeEntityRef(accountTx.data.borrowerEntityId) || proposer !== normalizeEntityRef(counterpartyId)) {
+      throw new Error(`LENDING_REPAY_PROPOSER_MISMATCH:${accountTx.data.loanId}`);
     }
+    const loan = lending.loans.get(accountTx.data.loanId);
+    if (!loan || loan.status !== 'active') throw new Error(`LENDING_REPAY_LOAN_NOT_ACTIVE:${accountTx.data.loanId}`);
+    const remaining = loan.repaymentAmount - loan.repaidAmount;
+    if (loan.borrowerEntityId !== proposer || loan.tokenId !== accountTx.data.tokenId || accountTx.data.amount !== remaining) {
+      throw new Error(`LENDING_REPAYMENT_MISMATCH:${accountTx.data.loanId}`);
+    }
+    loan.status = 'closing';
+    loan.updatedAt = now;
+    const currentLimit = getCreditGrantedByAccountOwner(account, hubEntityId, loan.tokenId);
+    mempoolOps.push(lendingCreditOp(proposer, {
+      action: 'revoke',
+      loanId: loan.loanId,
+      hubEntityId,
+      borrowerEntityId: proposer,
+      tokenId: loan.tokenId,
+      creditLimit: currentLimit > loan.principalAmount ? currentLimit - loan.principalAmount : 0n,
+    }));
     return;
   }
-  if (loan.status === 'repaid') return;
-  if (loan.status !== 'repaying') {
-    throw new Error(`LENDING_REPAY_STATUS_INVALID: ${memo.id}:${loan.status}`);
-  }
-  const remaining = loan.repaymentAmount - loan.repaidAmount;
-  if (
-    normalizeEntityRef(loan.borrowerEntityId) !== fromEntityId ||
-    normalizeEntityRef(loan.hubEntityId) !== toEntityId ||
-    loan.tokenId !== accountTx.data.tokenId ||
-    accountTx.data.amount !== remaining ||
-    normalizeEntityRef(counterpartyId) !== fromEntityId
-  ) {
-    throw new Error(`LENDING_REPAY_PAYMENT_MISMATCH: ${memo.id}`);
-  }
-  const pool = lending.pools.get(loan.positionId);
-  if (!pool) throw new Error(`LENDING_POOL_MISSING_FOR_LOAN: ${loan.loanId}`);
-  if (pool.borrowedAmount < loan.principalAmount) {
-    throw new Error(`LENDING_POOL_BORROWED_UNDERFLOW: ${loan.positionId}`);
+
+  if (accountTx.type === 'lending_close_request') {
+    if (proposer !== normalizeEntityRef(accountTx.data.lenderEntityId) || proposer !== normalizeEntityRef(counterpartyId)) {
+      throw new Error(`LENDING_CLOSE_PROPOSER_MISMATCH:${accountTx.data.positionId}`);
+    }
+    const pool = lending.pools.get(accountTx.data.positionId);
+    if (!pool || pool.status !== 'open' || pool.lenderEntityId !== proposer) {
+      throw new Error(`LENDING_CLOSE_POSITION_NOT_OPEN:${accountTx.data.positionId}`);
+    }
+    if (pool.borrowedAmount !== 0n) throw new Error(`LENDING_CLOSE_ACTIVE_LOANS:${pool.positionId}`);
+    if (pool.availableAmount === 0n) {
+      pool.status = 'closed';
+      pool.updatedAt = now;
+      return;
+    }
+    const payoutCapacity = getAccountOutCapacity(account, hubEntityId, pool.tokenId);
+    if (payoutCapacity < pool.availableAmount) {
+      throw new Error(`LENDING_CLOSE_PAYOUT_CAPACITY: available=${payoutCapacity} required=${pool.availableAmount}`);
+    }
+    pool.status = 'closing';
+    pool.updatedAt = now;
+    mempoolOps.push({
+      accountId: proposer,
+      tx: {
+        type: 'lending_close_payout',
+        data: {
+          positionId: pool.positionId,
+          hubEntityId,
+          lenderEntityId: proposer,
+          tokenId: pool.tokenId,
+          amount: pool.availableAmount,
+        },
+      },
+    });
+    return;
   }
 
-  loan.repaidAmount = loan.repaymentAmount;
-  loan.status = 'repaid';
-  loan.updatedAt = now;
-  pool.borrowedAmount -= loan.principalAmount;
-  pool.availableAmount += loan.repaymentAmount;
+  if (accountTx.type !== 'lending_close_payout') return;
+  if (proposer !== hubEntityId) throw new Error(`LENDING_PAYOUT_PROPOSER_MISMATCH:${accountTx.data.positionId}`);
+  const pool = lending.pools.get(accountTx.data.positionId);
+  if (!pool || pool.status !== 'closing') throw new Error(`LENDING_PAYOUT_POSITION_NOT_CLOSING:${accountTx.data.positionId}`);
+  if (pool.lenderEntityId !== normalizeEntityRef(accountTx.data.lenderEntityId) || pool.tokenId !== accountTx.data.tokenId || pool.availableAmount !== accountTx.data.amount) {
+    throw new Error(`LENDING_PAYOUT_MISMATCH:${accountTx.data.positionId}`);
+  }
+  pool.availableAmount = 0n;
+  pool.status = 'closed';
   pool.updatedAt = now;
-
-  const account = newState.accounts.get(loan.borrowerEntityId);
-  if (account?.deltas.has(loan.tokenId)) {
-    const currentLimit = getCreditGrantedByAccountOwner(account, newState.entityId, loan.tokenId);
-    const nextLimit = currentLimit > loan.principalAmount ? currentLimit - loan.principalAmount : 0n;
-    mempoolOps.push(setCreditLimitOp(loan.borrowerEntityId, loan.tokenId, nextLimit));
-  }
 }
 
 export function applyCommittedAccountFrameFollowups(
@@ -170,7 +275,7 @@ export function applyCommittedAccountFrameFollowups(
 
   for (const accountTx of committedFrame.accountTxs) {
     if (HEAVY_LOGS) accountFollowupLog.debug('frame.tx', { type: accountTx.type });
-    applyCommittedLendingPaymentFollowup(newState, counterpartyId, accountTx, committedFrame, mempoolOps);
+    applyCommittedLendingFollowup(newState, counterpartyId, accountTx, committedFrame, mempoolOps);
 
     // Account frames are canonical once committed; keep entity-local indexes in
     // sync here instead of mutating them while the account proposal is still tentative.

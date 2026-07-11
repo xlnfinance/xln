@@ -1,5 +1,6 @@
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson } from '../serialization-utils';
 import type { FrameLogEntry, RuntimeInput } from '../types';
+import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 
 export type RuntimeWalDb = {
   get: (key: Buffer) => Promise<Buffer>;
@@ -36,15 +37,16 @@ export type PersistedFrameJournal = {
 
 const makeDbKey = (namespace: string, key: string): Buffer => Buffer.from(`${namespace}:${key}`);
 
-export const encodePersistedFrameJournal = (frame: PersistedFrameJournal): string => {
-  return serializeTaggedJson(frame);
-};
+export const encodePersistedFrameJournal = (frame: PersistedFrameJournal): Uint8Array =>
+  encodeBinaryPayload(frame, 'msgpack');
 
 export const decodePersistedFrameJournal = (
-  payload: string,
+  payload: string | Uint8Array,
   fallbackHeight: number,
 ): PersistedFrameJournal | null => {
-  const decoded = deserializeTaggedJson<PersistedFrameJournal>(payload);
+  const decoded = typeof payload === 'string'
+    ? deserializeTaggedJson<PersistedFrameJournal>(payload)
+    : decodeBinaryPayload<PersistedFrameJournal>(payload);
   if (!decoded || typeof decoded !== 'object') return null;
   const runtimeInput =
     decoded.runtimeInput && typeof decoded.runtimeInput === 'object'
@@ -148,8 +150,8 @@ export const buildPersistedFrameWriteOps = (options: {
   namespace: string;
   schemaVersion: number;
   height: number;
-  frameJournal: string;
-  checkpointSnapshot?: string;
+  frameJournal: string | Uint8Array;
+  checkpointSnapshot?: string | Uint8Array;
 }): RuntimeWalPutOp[] => {
   const ops: RuntimeWalPutOp[] = [
     {
@@ -225,7 +227,7 @@ export const readPersistedFrameJournalFromDb = async (
   if (targetHeight <= 0) return null;
   try {
     const frameBuffer = await readPersistedFrameJournalBuffer(db, namespace, targetHeight);
-    return decodePersistedFrameJournal(frameBuffer.toString(), targetHeight);
+    return decodePersistedFrameJournal(frameBuffer, targetHeight);
   } catch (error) {
     if (isDbUnavailableError(error)) return null;
     const code = String((error as { code?: unknown })?.code ?? '');

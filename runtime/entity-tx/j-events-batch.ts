@@ -146,12 +146,9 @@ export async function applyHankoBatchProcessedEvent(opts: {
   }
 
   for (const [accountId, account] of newState.accounts.entries()) {
-    if (!account.requestedRebalanceFeeState) continue;
-    for (const feeState of account.requestedRebalanceFeeState.values()) {
-      if ((feeState.jBatchSubmittedAt || 0) > 0) {
-        feeState.jBatchSubmittedAt = 0;
-        dirtyAccounts.add(String(accountId).toLowerCase());
-      }
+    if (account.shadow.rebalance.submittedAtByToken.size > 0) {
+      account.shadow.rebalance.submittedAtByToken.clear();
+      dirtyAccounts.add(String(accountId).toLowerCase());
     }
   }
   jEventBatchLog.warn('failed_on_chain', { nonce });

@@ -324,16 +324,16 @@ test('payment panel submits RuntimeInput through shared command path', () => {
   expect(accountWorkspaceSource).toContain('{submitRuntimeInput}');
 });
 
-test('server-side lending requests publish upstream runtime ingress receipts', () => {
+test('lending mutations use the signer runtime command path instead of unauthenticated server POSTs', () => {
   const source = readFileSync('frontend/src/lib/components/Entity/LendingPanel.svelte', 'utf8');
 
-  expect(source).toContain('recordRuntimeIngressReceipt');
-  expect(source).toContain('runtimeControllerHandle');
-  expect(source).toContain("postLending('/api/lending/offer'");
-  expect(source).toContain("postLending('/api/lending/borrow'");
-  expect(source).toContain("postLending('/api/lending/repay'");
-  expect(source).toContain('receipt: result.receipt');
-  expect(source).toContain('statusUrl: result.statusUrl ?? null');
+  expect(source).toContain('export let submitRuntimeInput');
+  expect(source).toContain('await submitRuntimeInput({');
+  expect(source).toContain("type: 'lendingOffer'");
+  expect(source).toContain("type: 'lendingBorrow'");
+  expect(source).toContain("type: 'lendingRepay'");
+  expect(source).not.toContain("postLending('/api/lending/");
+  expect(source).not.toContain('recordRuntimeIngressReceipt');
 });
 
 test('server-side faucet requests publish upstream runtime ingress receipts when provided', () => {

@@ -5,8 +5,8 @@
  * and delegates to callbacks for local delivery and sending.
  */
 
-import { safeStringify } from './serialization-utils';
 import { asFailFastPayload, failfastAssert } from './networking/failfast';
+import { serializeWsMessage, type RuntimeWsMessage } from './networking/ws-protocol';
 import {
   type RelaySocketLike,
   type RelaySendResult,
@@ -31,7 +31,6 @@ import {
 import type { Profile } from './networking/gossip';
 import { verifyProfileSignature, type ProfileVerifyResult } from './networking/profile-signing';
 import { verifyHelloAuth } from './networking/hello-auth';
-import type { RuntimeWsMessage } from './networking/ws-protocol';
 import { isDeliveryDelivered, type DeliveryResult } from './delivery-result';
 import { createStructuredLogger } from './logger';
 
@@ -107,8 +106,8 @@ export type RelayRouterConfig = {
   localRuntimeId: string;
   /** Called when an entity_input is addressed to this runtime. */
   localDeliver: (from: string | undefined, msg: RuntimeWsMessage) => Promise<void>;
-  /** Thin wrapper: (ws, data: string) => boolean | number | void */
-  send: (ws: RelaySocketLike, data: string) => RelaySendResult;
+  /** Thin wrapper over the binary production WebSocket codec. */
+  send: (ws: RelaySocketLike, data: Uint8Array) => RelaySendResult;
   /** Hook to mirror gossip into env. */
   onGossipStore?: (profile: Profile) => void;
   /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
@@ -123,10 +122,10 @@ const flushPendingToSocket = <Socket>(
   store: RelayStore,
   runtimeId: string,
   ws: Socket,
-  send: (ws: Socket, data: string) => RelaySendResult,
+  send: (ws: Socket, data: Uint8Array) => RelaySendResult,
 ): number => {
   const result = deliverPendingMessages(store, runtimeId, (pendingMsg) =>
-    send(ws, safeStringify(pendingMsg)),
+    send(ws, serializeWsMessage(pendingMsg as RuntimeWsMessage)),
   );
   if (result.failure) {
     pushDebugEvent(store, {
@@ -163,7 +162,7 @@ const sendRelayDelivery = (
     return requireRelayDeliveryMetadata('stale-target', 'TARGET_SOCKET_NOT_OPEN');
   }
   try {
-    const result = config.send(ws, safeStringify(msg));
+    const result = config.send(ws, serializeWsMessage(msg as RuntimeWsMessage));
     if (isRelaySendResultFailure(result)) {
       return requireRelayDeliveryMetadata('send-failed', 'RELAY_SEND_FALSE');
     }
@@ -198,7 +197,7 @@ export const relayRoute = async (
       reason: ff.code,
       details: ff,
     });
-    send(ws, safeStringify({ type: 'error', error: `${ff.code}: ${ff.message}` }));
+    send(ws, serializeWsMessage({ type: 'error', error: `${ff.code}: ${ff.message}` }));
     return;
   }
 
@@ -222,7 +221,7 @@ export const relayRoute = async (
       reason: 'RELAY_FROM_RUNTIME_MISMATCH',
       details: { traceId, rememberedRuntimeId },
     });
-    send(ws, safeStringify({ type: 'error', error: 'Relay socket runtime mismatch' }));
+    send(ws, serializeWsMessage({ type: 'error', error: 'Relay socket runtime mismatch' }));
     return;
   }
 
@@ -260,7 +259,7 @@ export const relayRoute = async (
       reason: 'MISSING_FROM_ENCRYPTION_PUBKEY',
       details: { traceId },
     });
-    send(ws, safeStringify({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
+    send(ws, serializeWsMessage({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
     return;
   }
   if (from && fromEncryptionPubKey && rememberedRuntimeId === fromKey) {
@@ -298,7 +297,7 @@ export const relayRoute = async (
         reason: 'Invalid runtimeId in hello',
         details: { traceId },
       });
-      send(ws, safeStringify({ type: 'error', error: 'Invalid runtimeId in hello' }));
+      send(ws, serializeWsMessage({ type: 'error', error: 'Invalid runtimeId in hello' }));
       return;
     }
     if (config.requireHelloAuth !== false) {
@@ -313,7 +312,7 @@ export const relayRoute = async (
           reason: 'HELLO_AUTH_INVALID',
           details: { traceId, authError },
         });
-        send(ws, safeStringify({ type: 'error', error: authError }));
+        send(ws, serializeWsMessage({ type: 'error', error: authError }));
         return;
       }
     }
@@ -360,7 +359,7 @@ export const relayRoute = async (
         reason: 'GOSSIP_ANNOUNCE_UNREGISTERED_RUNTIME',
         details: { traceId },
       });
-      send(ws, safeStringify({ type: 'error', error: 'Gossip announce requires registered relay hello' }));
+      send(ws, serializeWsMessage({ type: 'error', error: 'Gossip announce requires registered relay hello' }));
       return;
     }
     const payloadRecord = payload && typeof payload === 'object' ? payload as { profiles?: unknown } : {};
@@ -440,14 +439,14 @@ export const relayRoute = async (
       for (const [runtimeId, client] of store.clients.entries()) {
         if (!client?.ws) continue;
         if (fromKey && runtimeId === fromKey) continue;
-        send(client.ws, safeStringify({
+        send(client.ws, serializeWsMessage({
           type: 'gossip_update',
           id: `gossip_update_${Date.now()}`,
           from: store.serverId,
           to: runtimeId,
           timestamp: Date.now(),
           payload: { profiles: broadcastProfiles },
-          inReplyTo: id,
+          ...(id ? { inReplyTo: id } : {}),
         }));
         broadcastTargets += 1;
       }
@@ -486,14 +485,14 @@ export const relayRoute = async (
         traceId,
       },
     });
-    send(ws, safeStringify({
+    send(ws, serializeWsMessage({
       type: 'gossip_response',
       id: `gossip_${Date.now()}`,
       from: store.serverId,
-      to: from,
+      ...(from ? { to: from } : {}),
       timestamp: Date.now(),
       payload: { profiles },
-      inReplyTo: id,
+      ...(id ? { inReplyTo: id } : {}),
     }));
     return;
   }
@@ -512,7 +511,7 @@ export const relayRoute = async (
 
   // ----- ping -----
   if (type === 'ping') {
-    send(ws, safeStringify({ type: 'pong', inReplyTo: id }));
+    send(ws, serializeWsMessage({ type: 'pong', ...(id ? { inReplyTo: id } : {}) }));
     return;
   }
 
@@ -527,7 +526,7 @@ export const relayRoute = async (
         reason: 'Missing target runtimeId',
         details: { traceId },
       });
-      send(ws, safeStringify({ type: 'error', error: 'Missing target runtimeId' }));
+      send(ws, serializeWsMessage({ type: 'error', error: 'Missing target runtimeId' }));
       return;
     }
 
@@ -542,7 +541,7 @@ export const relayRoute = async (
         delivery: relayDeliveryMetadata('rejected', 'ENTITY_INPUT_MUST_BE_ENCRYPTED'),
         details: { traceId },
       });
-      send(ws, safeStringify({ type: 'error', error: 'entity_input must be encrypted' }));
+      send(ws, serializeWsMessage({ type: 'error', error: 'entity_input must be encrypted' }));
       return;
     }
 
@@ -614,7 +613,7 @@ export const relayRoute = async (
         // Re-queuing poisoned ciphertext for the same local runtime just causes
         // endless pending loops and hides the true root cause.
         if (NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS.some((part) => reason.includes(part))) {
-          send(ws, safeStringify({ type: 'error', error: reason }));
+          send(ws, serializeWsMessage({ type: 'error', error: reason }));
           return;
         }
         // Fall through to queue
@@ -637,11 +636,11 @@ export const relayRoute = async (
           ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
         },
       });
-      send(ws, safeStringify({
+      send(ws, serializeWsMessage({
         type: 'error',
         error: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
-        inReplyTo: id,
-        to,
+        ...(id ? { inReplyTo: id } : {}),
+        ...(to ? { to } : {}),
       }));
       return;
     }
@@ -659,11 +658,11 @@ export const relayRoute = async (
         reason,
         details: { traceId },
       });
-      send(ws, safeStringify({
+      send(ws, serializeWsMessage({
         type: 'error',
         error: reason,
-        inReplyTo: id,
-        to,
+        ...(id ? { inReplyTo: id } : {}),
+        ...(to ? { to } : {}),
       }));
       return;
     }
@@ -701,5 +700,5 @@ export const relayRoute = async (
     reason: `Unknown message type: ${type}`,
     details: { traceId },
   });
-  send(ws, safeStringify({ type: 'error', error: `Unknown message type: ${type}` }));
+  send(ws, serializeWsMessage({ type: 'error', error: `Unknown message type: ${type}` }));
 };

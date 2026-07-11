@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { deriveEncryptionKeyPair, decryptJSON, pubKeyToHex } from '../networking/p2p-crypto';
+import { deserializeWsMessage } from '../networking/ws-protocol';
 import { cacheEncryptionKey, createRelayStore, registerClient } from '../relay-store';
 import {
   hasConnectedEncryptedRelayClient,
@@ -28,9 +29,10 @@ const makeSocket = (options: { readyState?: number; sendResult?: boolean | numbe
     sent,
     ws: {
       readyState: options.readyState ?? 1,
-      send(raw: string) {
+      send(raw: Uint8Array) {
         if (options.sendThrows) throw new Error(options.sendThrows);
-        sent.push(JSON.parse(raw) as SentMessage);
+        expect(raw[0]).toBe(0x01);
+        sent.push(deserializeWsMessage(raw) as SentMessage);
         return options.sendResult ?? true;
       },
     },

@@ -5,7 +5,7 @@ import { applyAccountTx } from '../account-tx/apply';
 import type { AccountMachine, AccountTx } from '../types';
 
 const makeAccount = (): AccountMachine => ({
-  proofHeader: { fromEntity: 'left', toEntity: 'right', nonce: 3 },
+  proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 3 },
   leftEntityId: 'left',
   rightEntityId: 'right',
   status: 'active',

@@ -44,6 +44,7 @@ const GENERATED_TEST_ARTIFACT_DIRS = [
   '.logs/gates',
   '.logs/bench-radapter',
   '.tmp-tests',
+  'db-tmp',
   'build',
   'frontend/.svelte-kit/output',
   'native/dist',
@@ -217,7 +218,8 @@ export const cleanupFoundryIfOverBudget = (
     throw new Error(`FOUNDRY_BUDGET_EXCEEDED_NO_SAFE_TARGET: home=${foundryHome} bytes>${maxBytes}`);
   }
   const livePids = activeAnvilPids();
-  if (livePids.length > 0) {
+  const defaultFoundryHome = resolve(join(homedir(), '.foundry'));
+  if (foundryHome === defaultFoundryHome && livePids.length > 0) {
     throw new Error(`FOUNDRY_ANVIL_TMP_CLEANUP_BLOCKED: activeAnvilPids=${livePids.join(',')}`);
   }
 

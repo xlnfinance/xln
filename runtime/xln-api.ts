@@ -51,6 +51,7 @@ export type {
   AccountTx,
   SettlementDiff,
   CrossJurisdictionSwapRoute,
+  PaymentDeliveryMode,
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
 export type { StorageFrameRecord, StorageHead } from './storage/types';

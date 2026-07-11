@@ -137,7 +137,7 @@ export const handleOpenAccountEntityTx = (
       proofHeader: {
         fromEntity: entityState.entityId,
         toEntity: counterpartyId,
-        nonce: 1,
+        nextProofNonce: 1,
       },
       proofBody: { tokenIds: [], deltas: [] },
       disputeConfig: {
@@ -147,7 +147,12 @@ export const handleOpenAccountEntityTx = (
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
-      rebalancePolicy: new Map(),
+      shadow: {
+        rebalance: {
+          policy: new Map(),
+          submittedAtByToken: new Map(),
+        },
+      },
       locks: new Map(),
       swapOffers: new Map(),
       pulls: new Map(),
@@ -157,7 +162,7 @@ export const handleOpenAccountEntityTx = (
       rightJObservations: [],
       jEventChain: [],
       lastFinalizedJHeight: 0,
-      onChainSettlementNonce: 0,
+      jNonce: 0,
     });
     markStorageAccountDirty(env, newState.entityId, counterpartyId);
     markStorageEntityDirty(env, newState.entityId);
@@ -205,19 +210,10 @@ export const handleOpenAccountEntityTx = (
   if (autopilotHardLimit < autopilotSoftLimit) autopilotHardLimit = autopilotSoftLimit;
   if (autopilotMaxFee < 0n) autopilotMaxFee = jurisdictionPolicyDefaults.maxAcceptableFee;
   for (const policyTokenId of defaultTokenIds) {
-    localAccount.rebalancePolicy.set(policyTokenId, {
+    localAccount.shadow.rebalance.policy.set(policyTokenId, {
       r2cRequestSoftLimit: autopilotSoftLimit,
       hardLimit: autopilotHardLimit,
       maxAcceptableFee: autopilotMaxFee,
-    });
-    localAccount.mempool.push({
-      type: 'set_rebalance_policy',
-      data: {
-        tokenId: policyTokenId,
-        r2cRequestSoftLimit: autopilotSoftLimit,
-        hardLimit: autopilotHardLimit,
-        maxAcceptableFee: autopilotMaxFee,
-      },
     });
   }
 

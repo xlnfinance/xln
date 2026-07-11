@@ -10,7 +10,7 @@ import {
   resolveEncryptionPublicKeyHex,
   type RelayStore,
 } from '../relay-store';
-import { safeStringify } from '../serialization-utils';
+import { serializeWsMessage } from '../networking/ws-protocol';
 import {
   deliveryAccepted,
   deliveryDeferred,
@@ -136,7 +136,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
     const target = relayStore.clients.get(targetKey);
     const messageSeq = nextWsTimestamp(relayStore);
     const msg = {
-      type: 'entity_input',
+      type: 'entity_input' as const,
       id: `srv_${messageSeq}`,
       from: fromRuntimeId,
       fromEncryptionPubKey: fromPubKeyHex,
@@ -151,7 +151,7 @@ export const sendEntityInputDirectViaRelaySocketDelivery = (
       txs: input.entityTxs?.length ?? 0,
     };
     if (target && isRelaySocketOpen(target.ws)) {
-      const result = target.ws.send(safeStringify(msg));
+      const result = target.ws.send(serializeWsMessage(msg));
       if (isRelaySendResultFailure(result)) {
         pushDirectRelayDeliveryEvent(relayStore, {
           fromRuntimeId,

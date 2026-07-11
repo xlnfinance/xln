@@ -4,10 +4,7 @@ import { safeStringify } from '../serialization-utils';
 import type { HubChild } from './orchestrator-types';
 
 type ProxyHubEndpoint =
-  | '/api/faucet/offchain'
-  | '/api/lending/offer'
-  | '/api/lending/borrow'
-  | '/api/lending/repay';
+  | '/api/faucet/offchain';
 
 type ProxyEntityHubEndpoint =
   | '/api/external-wallet/snapshot';

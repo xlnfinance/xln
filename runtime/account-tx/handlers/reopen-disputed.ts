@@ -5,28 +5,28 @@ export function handleReopenDisputed(
   accountTx: Extract<AccountTx, { type: 'reopen_disputed' }>,
 ): { success: boolean; events: string[]; error?: string } {
   const events: string[] = [];
-  const requestedOnChainNonce = Number(accountTx.data.onChainNonce);
+  const requestedJNonce = Number(accountTx.data.jNonce);
 
-  if (!Number.isFinite(requestedOnChainNonce) || requestedOnChainNonce < 0) {
-    return { success: false, events, error: `Invalid reopen onChainNonce: ${String(accountTx.data.onChainNonce)}` };
+  if (!Number.isFinite(requestedJNonce) || requestedJNonce < 0) {
+    return { success: false, events, error: `Invalid reopen jNonce: ${String(accountTx.data.jNonce)}` };
   }
 
   if (accountMachine.activeDispute) {
     return { success: false, events, error: 'Cannot reopen while activeDispute exists' };
   }
 
-  const knownOnChainNonce = Number(accountMachine.onChainSettlementNonce ?? 0);
-  if (requestedOnChainNonce < knownOnChainNonce) {
+  const knownJNonce = Number(accountMachine.jNonce ?? 0);
+  if (requestedJNonce < knownJNonce) {
     return {
       success: false,
       events,
-      error: `Reopen nonce stale: requested=${requestedOnChainNonce}, known=${knownOnChainNonce}`,
+      error: `Reopen nonce stale: requested=${requestedJNonce}, known=${knownJNonce}`,
     };
   }
 
-  accountMachine.onChainSettlementNonce = requestedOnChainNonce;
-  if (accountMachine.proofHeader.nonce <= requestedOnChainNonce) {
-    accountMachine.proofHeader.nonce = requestedOnChainNonce + 1;
+  accountMachine.jNonce = requestedJNonce;
+  if (accountMachine.proofHeader.nextProofNonce <= requestedJNonce) {
+    accountMachine.proofHeader.nextProofNonce = requestedJNonce + 1;
   }
 
   // Drop stale counterpart proofs from pre-dispute epoch.
@@ -38,7 +38,7 @@ export function handleReopenDisputed(
   accountMachine.status = 'active';
 
   events.push(
-    `🔓 Account reopened (onChainNonce=${requestedOnChainNonce}, nextProofNonce=${accountMachine.proofHeader.nonce})`,
+    `🔓 Account reopened (jNonce=${requestedJNonce}, nextProofNonce=${accountMachine.proofHeader.nextProofNonce})`,
   );
   return { success: true, events };
 }

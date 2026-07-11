@@ -1,7 +1,7 @@
 export type LendingTermId = '1h' | '1d' | '1m';
 
-export type LendingPoolStatus = 'funding' | 'open' | 'closed';
-export type LendingLoanStatus = 'active' | 'repaying' | 'repaid';
+export type LendingPoolStatus = 'open' | 'closing' | 'closed';
+export type LendingLoanStatus = 'opening' | 'active' | 'closing' | 'repaid';
 
 export interface LendingPoolPosition {
   positionId: string;
@@ -20,6 +20,7 @@ export interface LendingPoolPosition {
 }
 
 export interface LendingLoan {
+  requestId: string;
   loanId: string;
   hubEntityId: string;
   borrowerEntityId: string;

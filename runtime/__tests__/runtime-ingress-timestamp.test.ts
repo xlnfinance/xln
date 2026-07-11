@@ -8,6 +8,7 @@ import { processEventBatch } from '../jadapter/watcher';
 import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { AccountMachine, EntityReplica, Env, JurisdictionConfig } from '../types';
+import { getWallClockMs } from '../utils';
 
 const TEST_JURISDICTION = {
   address: `0x${'22'.repeat(20)}`,
@@ -332,7 +333,7 @@ describe('runtime ingress timestamp', () => {
 
     expect(env.timestamp).toBeLessThan(futureIngressTimestamp);
     expect(env.timestamp).toBeGreaterThan(10_000);
-    expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
+    expect(env.timestamp).toBeLessThanOrEqual(getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
     const updatedReplica = env.eReplicas.get(`${existingEntityId}:1`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(false);
   });

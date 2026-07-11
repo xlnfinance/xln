@@ -31,7 +31,7 @@ const assertAccountFrames = async (
   if (currentFrame.height !== account.currentHeight) {
     throw new Error(`[STRICT] ${label}: currentFrame.height ${currentFrame.height} != currentHeight ${account.currentHeight}`);
   }
-  // NOTE: proofHeader.nonce is the unified on-chain nonce (not tied to frame height).
+  // NOTE: proofHeader.nextProofNonce is the unified on-chain nonce (not tied to frame height).
   // Frame height tracking is via account.currentHeight only.
 
   assertFrameShape(currentFrame, `${label} currentFrame`);

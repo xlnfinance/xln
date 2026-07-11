@@ -499,7 +499,9 @@ async function createRuntimeViaUi(
     await factorOneButton.click({ force: true });
   }
 
-  const createButton = page.getByRole('button', { name: /Create XLN wallet|Open XLN wallet|Open \/ restore wallet/i }).first();
+  const createButton = page.getByRole('button', {
+    name: /Derive wallet|Create XLN wallet|Open XLN wallet|Open \/ restore wallet/i,
+  }).first();
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click({ force: true });
   await page.waitForTimeout(400);

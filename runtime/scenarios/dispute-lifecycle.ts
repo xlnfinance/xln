@@ -366,16 +366,16 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
       env,
     );
 
-    const aliceOnChainNonce = Number(aliceAfterFinalize?.onChainSettlementNonce || 0);
-    const hubOnChainNonce = Number(hubAfterFinalize?.onChainSettlementNonce || 0);
+    const aliceOnChainNonce = Number(aliceAfterFinalize?.jNonce || 0);
+    const hubOnChainNonce = Number(hubAfterFinalize?.jNonce || 0);
     assert(
-      Number(aliceAfterFinalize?.proofHeader?.nonce || 0) >= aliceOnChainNonce + 1,
-      'Alice proofHeader.nonce must be onChain+1 after finalize',
+      Number(aliceAfterFinalize?.proofHeader?.nextProofNonce || 0) >= aliceOnChainNonce + 1,
+      'Alice proofHeader.nextProofNonce must be onChain+1 after finalize',
       env,
     );
     assert(
-      Number(hubAfterFinalize?.proofHeader?.nonce || 0) >= hubOnChainNonce + 1,
-      'Hub proofHeader.nonce must be onChain+1 after finalize',
+      Number(hubAfterFinalize?.proofHeader?.nextProofNonce || 0) >= hubOnChainNonce + 1,
+      'Hub proofHeader.nextProofNonce must be onChain+1 after finalize',
       env,
     );
 

@@ -54,6 +54,12 @@ import { buildAccountProofBody, createDisputeProofHashWithNonce } from './proof-
 import { signEntityHashes, verifyHankoForHash } from './hanko/signing';
 import { getReplicaByEntityId } from './replica-utils';
 import { computeAccountStateRoot } from './account-state-root';
+import {
+  accountInputAck,
+  accountInputDisputeSeal,
+  accountInputProposal,
+  accountInputReferenceHeight,
+} from './account-consensus/flush';
 export { proposeAccountFrame } from './account-consensus/propose';
 export type {
   AccountConsensusFrameResult,
@@ -81,16 +87,10 @@ async function validateCounterpartyDisputeSeal(
   env: Env,
   accountMachine: AccountMachine,
   input: AccountInput,
+  seal: ReturnType<typeof accountInputDisputeSeal>,
   context: string,
 ): Promise<ValidatedCounterpartyDisputeSeal | undefined> {
-  if (!input.newDisputeHanko) return undefined;
-  if (
-    input.disputeProofNonce === undefined ||
-    !input.newDisputeHash ||
-    !input.newDisputeProofBodyHash
-  ) {
-    throw new Error(`${context}:DISPUTE_SEAL_INCOMPLETE`);
-  }
+  if (!seal) return undefined;
 
   const depositoryAddress = getAccountDepositoryAddress(env, accountMachine);
   if (!isAddress20(depositoryAddress)) {
@@ -104,29 +104,29 @@ async function validateCounterpartyDisputeSeal(
   // proofbodyHash, and make us store metadata that later fails on-chain.
   const expectedHash = createDisputeProofHashWithNonce(
     accountMachine,
-    input.newDisputeProofBodyHash,
+    seal.proofBodyHash,
     depositoryAddress,
-    input.disputeProofNonce,
+    seal.proofNonce,
   );
-  if (String(input.newDisputeHash).toLowerCase() !== expectedHash.toLowerCase()) {
+  if (String(seal.hash).toLowerCase() !== expectedHash.toLowerCase()) {
     throw new Error(`${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
       kind: input.kind,
       currentHeight: accountMachine.currentHeight,
       pendingHeight: accountMachine.pendingFrame?.height ?? null,
-      inputHeight: input.height ?? null,
-      newFrameHeight: input.newAccountFrame?.height ?? null,
-      localNonce: accountMachine.proofHeader.nonce,
-      signedNonce: input.disputeProofNonce,
-      proofBodyHash: input.newDisputeProofBodyHash,
+      inputHeight: accountInputAck(input)?.height ?? null,
+      newFrameHeight: accountInputProposal(input)?.frame.height ?? null,
+      localNonce: accountMachine.proofHeader.nextProofNonce,
+      signedNonce: seal.proofNonce,
+      proofBodyHash: seal.proofBodyHash,
       expected: expectedHash,
-      received: input.newDisputeHash,
+      received: seal.hash,
       from: shortId(input.fromEntityId),
       to: shortId(input.toEntityId),
     })}`);
   }
 
   const { valid } = await verifyHankoForHash(
-    input.newDisputeHanko,
+    seal.hanko,
     expectedHash,
     input.fromEntityId,
     env,
@@ -136,10 +136,10 @@ async function validateCounterpartyDisputeSeal(
   }
 
   return {
-    hanko: input.newDisputeHanko,
-    nonce: input.disputeProofNonce,
+    hanko: seal.hanko,
+    nonce: seal.proofNonce,
     hash: expectedHash,
-    proofBodyHash: input.newDisputeProofBodyHash,
+    proofBodyHash: seal.proofBodyHash,
   };
 }
 
@@ -159,6 +159,8 @@ function storeCounterpartyDisputeSeal(
 const disputeSealRequirementError = (
   expectedProofBodyHash: string | undefined,
   previousCounterpartyProofBodyHash: string | undefined,
+  previousCounterpartyProofNonce: number | undefined,
+  jNonce: number,
   seal: ValidatedCounterpartyDisputeSeal | undefined,
 ): string | undefined => {
   if (!expectedProofBodyHash) return seal ? 'DISPUTE_SEAL_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
@@ -166,8 +168,9 @@ const disputeSealRequirementError = (
     return `DISPUTE_SEAL_PROOFBODY_MISMATCH: expected=${expectedProofBodyHash} received=${seal.proofBodyHash}`;
   }
   const proofChanged = expectedProofBodyHash.toLowerCase() !== previousCounterpartyProofBodyHash?.toLowerCase();
-  if (proofChanged && !seal) {
-    return `DISPUTE_SEAL_REQUIRED: proofBodyHash=${expectedProofBodyHash}`;
+  const proofNonceConsumed = Number(previousCounterpartyProofNonce ?? 0) <= jNonce;
+  if ((proofChanged || proofNonceConsumed) && !seal) {
+    return `DISPUTE_SEAL_REQUIRED: proofBodyHash=${expectedProofBodyHash} jNonce=${jNonce}`;
   }
   return undefined;
 };
@@ -177,21 +180,25 @@ type AccountInputHeightNormalization =
   | { normalizedInputHeight?: undefined; error: string };
 
 function normalizeAccountInputHeight(input: AccountInput): AccountInputHeightNormalization {
+  const referenceHeight = accountInputReferenceHeight(input);
   const normalizedInputHeight =
-    input.height === undefined || input.height === null ? undefined : Number(input.height as number | string);
+    referenceHeight === undefined || referenceHeight === null ? undefined : Number(referenceHeight);
   if (normalizedInputHeight !== undefined && !Number.isFinite(normalizedInputHeight)) {
-    return { error: `Invalid account input height: ${String(input.height)}` };
+    return { error: `Invalid account input height: ${String(referenceHeight)}` };
   }
   return { normalizedInputHeight };
 }
 
 function getDisputeHankoShapeError(input: AccountInput): string | undefined {
-  if (input.newDisputeHanko === undefined || input.newDisputeHanko === null) return undefined;
-  if (typeof input.newDisputeHanko !== 'string') return 'Invalid dispute hanko type';
-  const hankoHex = input.newDisputeHanko.toLowerCase();
-  const normalized = hankoHex.startsWith('0x') ? hankoHex.slice(2) : hankoHex;
-  if (normalized.length === 0) return 'Invalid dispute hanko (empty)';
-  if (normalized.length % 2 !== 0) return 'Invalid dispute hanko (odd length)';
+  const seals = [accountInputAck(input)?.disputeSeal, accountInputProposal(input)?.disputeSeal, accountInputDisputeSeal(input)];
+  for (const seal of seals) {
+    if (!seal) continue;
+    if (typeof seal.hanko !== 'string') return 'Invalid dispute hanko type';
+    const hankoHex = seal.hanko.toLowerCase();
+    const normalized = hankoHex.startsWith('0x') ? hankoHex.slice(2) : hankoHex;
+    if (normalized.length === 0) return 'Invalid dispute hanko (empty)';
+    if (normalized.length % 2 !== 0) return 'Invalid dispute hanko (odd length)';
+  }
   return undefined;
 }
 
@@ -226,18 +233,20 @@ function classifyAccountInputReplay(
   accountMachine: AccountMachine,
   input: AccountInput,
 ): AccountInputReplayClassification {
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
   const currentHeight = Number(accountMachine.currentHeight ?? 0);
   const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
   const inputHeight =
-    input.height === undefined || input.height === null
+    ack?.height === undefined || ack.height === null
       ? 0
-      : Number(input.height);
+      : Number(ack.height);
   const newFrameHeight =
-    input.newAccountFrame === undefined || input.newAccountFrame === null
+    proposal?.frame === undefined || proposal.frame === null
       ? undefined
-      : Number(input.newAccountFrame.height);
+      : Number(proposal.frame.height);
   const ackIsStale =
-    Boolean(input.prevHanko) &&
+    Boolean(ack?.frameHanko) &&
     inputHeight > 0 &&
     (
       (pendingHeight > 0 && inputHeight < pendingHeight) ||
@@ -298,7 +307,9 @@ async function handleReplayOrObsoleteAccountInput(
   replay: AccountInputReplayClassification,
   events: string[],
 ): Promise<HandleAccountInputResult | undefined> {
-  if (input.newAccountFrame !== undefined && input.newAccountFrame !== null) {
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
+  if (proposal) {
     // Network delivery is at-least-once. If the peer retries an already
     // committed frame because our ACK was lost, re-ACK before the generic stale
     // guards. The safety gate is exact: same height and same committed stateHash.
@@ -307,7 +318,7 @@ async function handleReplayOrObsoleteAccountInput(
       input,
       events,
       replay.currentHeight,
-      input.newAccountFrame,
+      proposal.frame,
     );
     if (duplicateAck) return duplicateAck;
   }
@@ -327,7 +338,7 @@ async function handleReplayOrObsoleteAccountInput(
     });
     return { success: true, events };
   }
-  if (!input.prevHanko && replay.frameIsStale) {
+  if (!ack && replay.frameIsStale) {
     accountLog.debug('input.stale_frame_ignored', {
       currentHeight: replay.currentHeight,
       inputHeight: replay.inputHeight,
@@ -337,8 +348,8 @@ async function handleReplayOrObsoleteAccountInput(
     return { success: true, events };
   }
   if (
-    input.prevHanko &&
-    !input.newAccountFrame &&
+    ack &&
+    !proposal &&
     !accountMachine.pendingFrame &&
     (accountMachine.status ?? 'active') !== 'active'
   ) {
@@ -372,12 +383,16 @@ async function handlePendingFrameAck(
   timedOutHashlocks: string[],
   committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>,
 ): Promise<PendingFrameAckResult> {
-  if (!(accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && input.prevHanko)) {
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
+  if (!(accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && ack)) {
     return { kind: 'not_applicable' };
   }
   const ackSealError = disputeSealRequirementError(
     accountMachine.currentDisputeProofBodyHash,
     accountMachine.counterpartyDisputeProofBodyHash,
+    accountMachine.counterpartyDisputeProofNonce,
+    Number(accountMachine.jNonce ?? 0),
     validatedCounterpartyDisputeSeal,
   );
   if (ackSealError) {
@@ -388,7 +403,7 @@ async function handlePendingFrameAck(
   const frameHash = accountMachine.pendingFrame.stateHash;
 
   // HANKO ACK VERIFICATION: Verify hanko instead of single signature
-  const ackHanko = input.prevHanko;
+  const ackHanko = ack.frameHanko;
   if (!ackHanko) {
     return { kind: 'return', result: { success: false, error: 'Missing ACK hanko', events } };
   }
@@ -484,10 +499,10 @@ async function handlePendingFrameAck(
   // CRITICAL: Deep-copy entire pendingFrame to prevent mutation issues
   accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
   accountMachine.currentHeight = accountMachine.pendingFrame.height;
-  if (input.newDisputeHanko) {
+  if (ack.disputeSeal) {
     storeCounterpartyDisputeSeal(accountMachine, validatedCounterpartyDisputeSeal);
     accountLog.debug('hanko.dispute_ack_stored', {
-      nonce: input.disputeProofNonce,
+      nonce: ack.disputeSeal.proofNonce,
       from: shortId(input.fromEntityId),
     });
   }
@@ -543,7 +558,7 @@ async function handlePendingFrameAck(
   kickHubRebalanceAfterFrameFinalize(env, accountMachine.proofHeader.fromEntity);
 
   // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
-  if (!input.newAccountFrame) {
+  if (!proposal) {
     if (accountMachine.mempool.length > 0) {
       const proposeResult = await proposeAccountFrame(env, accountMachine);
       if (proposeResult.success && proposeResult.accountInput) {
@@ -615,13 +630,15 @@ function resolveAccountAckTarget(
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): AccountAckTarget {
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
   const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
   const bundledNewFrameHeight =
-    input.newAccountFrame === undefined || input.newAccountFrame === null
+    proposal?.frame === undefined || proposal.frame === null
       ? undefined
-      : Number(input.newAccountFrame.height);
+      : Number(proposal.frame.height);
   const ackTargetsPendingFrame =
-    Boolean(input.prevHanko) &&
+    Boolean(ack) &&
     Boolean(accountMachine.pendingFrame) &&
     // Normal ACK-only message.
     (normalizedInputHeight === pendingHeight ||
@@ -639,12 +656,14 @@ function isSameHeightSimultaneousProposalAck(
   input: AccountInput,
   normalizedInputHeight: number | undefined,
 ): boolean {
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
   const pendingFrameHeight = Number(accountMachine.pendingFrame?.height ?? 0);
   return (
-    Boolean(input.prevHanko) &&
-    Boolean(input.newAccountFrame) &&
+    Boolean(ack) &&
+    Boolean(proposal) &&
     pendingFrameHeight > 0 &&
-    Number(input.newAccountFrame?.height ?? 0) === pendingFrameHeight &&
+    Number(proposal?.frame.height ?? 0) === pendingFrameHeight &&
     Number(normalizedInputHeight ?? 0) === pendingFrameHeight - 1
   );
 }
@@ -658,7 +677,9 @@ function handleUnmatchedAck(
   committedFrames: AccountCommittedFrame[],
   phase: 'before_frame' | 'after_frame',
 ): HandleAccountInputResult | undefined {
-  if (!input.prevHanko || ackProcessed) return undefined;
+  const ack = accountInputAck(input);
+  const proposal = accountInputProposal(input);
+  if (!ack || ackProcessed) return undefined;
   if (phase === 'before_frame') {
     if (!accountMachine.pendingFrame || isSameHeightSimultaneousProposalAck(accountMachine, input, normalizedInputHeight)) {
       return undefined;
@@ -680,12 +701,12 @@ function handleUnmatchedAck(
         `Unmatched ACK with pending frame: ` +
         `inputHeight=${String(normalizedInputHeight ?? 'none')} ` +
         `pending=${String(pending)} ` +
-        `newFrame=${String(input.newAccountFrame?.height ?? 'none')}`,
+        `newFrame=${String(proposal?.frame.height ?? 'none')}`,
       events,
     };
   }
 
-  if (input.newAccountFrame) return undefined;
+  if (proposal) return undefined;
   const pending = accountMachine.pendingFrame?.height ?? 'none';
   const nextHeightAckWithoutPending =
     normalizedInputHeight !== undefined &&
@@ -785,7 +806,7 @@ async function verifyIncomingFrameHanko(
   receivedFrame: AccountFrame,
   events: string[],
 ): Promise<HandleAccountInputResult | undefined> {
-  const hankoToVerify = input.newHanko;
+  const hankoToVerify = accountInputProposal(input)?.frameHanko;
   if (!hankoToVerify) {
     return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
   }
@@ -818,7 +839,7 @@ async function preflightIncomingAccountFrame(
   events: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<IncomingFramePreflightResult> {
-  const receivedFrame = input.newAccountFrame;
+  const receivedFrame = accountInputProposal(input)?.frame;
   if (!receivedFrame) {
     throw new Error('preflightIncomingAccountFrame called without newAccountFrame');
   }
@@ -1089,6 +1110,8 @@ async function validateIncomingFrameOnClone(
   const frameSealError = disputeSealRequirementError(
     localProofBodyHash,
     accountMachine.counterpartyDisputeProofBodyHash,
+    accountMachine.counterpartyDisputeProofNonce,
+    Number(clonedMachine.jNonce ?? accountMachine.jNonce ?? 0),
     validatedCounterpartyDisputeSeal,
   );
   if (frameSealError) {
@@ -1177,7 +1200,7 @@ async function commitIncomingFrameOnRealState(
 
   accountMachine.currentFrame = structuredClone(receivedFrame);
   accountMachine.currentHeight = receivedFrame.height;
-  if (input.newDisputeHanko && !ackProcessed) {
+  if (accountInputProposal(input)?.disputeSeal && !ackProcessed) {
     storeCounterpartyDisputeSeal(accountMachine, validatedCounterpartyDisputeSeal);
     accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
   }
@@ -1214,44 +1237,26 @@ async function commitIncomingFrameOnRealState(
 }
 
 function mergeBatchedProposalIntoAck(
-  response: AccountInput,
+  response: Extract<AccountInput, { kind: 'ack' }>,
   proposeResult: ProposeAccountFrameResult,
   events: string[],
-): void {
-  response.kind = 'frame_ack';
-  if (proposeResult.accountInput?.newAccountFrame) {
-    response.newAccountFrame = proposeResult.accountInput.newAccountFrame;
-  }
-  if (proposeResult.accountInput?.newHanko) {
-    response.newHanko = proposeResult.accountInput.newHanko;
-  }
-  if (proposeResult.accountInput?.newDisputeHanko) {
-    response.newDisputeHanko = proposeResult.accountInput.newDisputeHanko;
-  } else {
-    delete response.newDisputeHanko;
-  }
-  if (proposeResult.accountInput?.newDisputeHash) {
-    response.newDisputeHash = proposeResult.accountInput.newDisputeHash;
-  } else {
-    delete response.newDisputeHash;
-  }
-  if (proposeResult.accountInput?.newDisputeProofBodyHash) {
-    response.newDisputeProofBodyHash = proposeResult.accountInput.newDisputeProofBodyHash;
-  } else {
-    delete response.newDisputeProofBodyHash;
-  }
-  if (proposeResult.accountInput?.disputeProofNonce !== undefined) {
-    response.disputeProofNonce = proposeResult.accountInput.disputeProofNonce;
-  } else {
-    delete response.disputeProofNonce;
-  }
-
-  const newFrameId = proposeResult.accountInput?.newAccountFrame?.height || 0;
+): Extract<AccountInput, { kind: 'frame_ack' }> {
+  const proposal = proposeResult.accountInput && accountInputProposal(proposeResult.accountInput);
+  if (!proposal) throw new Error('ACCOUNT_FLUSH_PROPOSAL_MISSING');
+  const newFrameId = proposal.frame.height;
   events.push(`📤 Batched ACK + frame ${newFrameId}`);
+  return {
+    kind: 'frame_ack',
+    fromEntityId: response.fromEntityId,
+    toEntityId: response.toEntityId,
+    ...(response.watchSeed ? { watchSeed: response.watchSeed } : {}),
+    ack: response.ack,
+    proposal,
+  };
 }
 
 type IncomingFrameAckMaterial = {
-  response: AccountInput;
+  response: Extract<AccountInput, { kind: 'ack' }>;
   outboundAck: {
     height: number;
     counterpartyEntityId: string;
@@ -1289,13 +1294,19 @@ async function buildIncomingFrameAckMaterial(
     return { kind: 'return', result: { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events } };
   }
   const ackProofResult = buildAccountProofBody(accountMachine);
-  const proofChanged = ackProofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase();
+  const proofChanged =
+    ackProofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase() ||
+    Number(accountMachine.currentDisputeProofNonce ?? 0) <= Number(accountMachine.jNonce ?? 0);
+  const ackSignedNonce = Math.max(
+    Number(accountMachine.proofHeader.nextProofNonce ?? 0),
+    Number(accountMachine.jNonce ?? 0) + 1,
+  );
   const ackDisputeHash = proofChanged
     ? createDisputeProofHashWithNonce(
       accountMachine,
       ackProofResult.proofBodyHash,
       ackDepositoryAddress,
-      accountMachine.proofHeader.nonce,
+      ackSignedNonce,
     )
     : undefined;
   const [confirmationHanko, ackDisputeHanko] = await signEntityHashes(env, ackEntityId, ackSignerId, [
@@ -1306,7 +1317,6 @@ async function buildIncomingFrameAckMaterial(
     return { kind: 'return', result: { success: false, error: 'Failed to build ACK hanko', events } };
   }
 
-  const ackSignedNonce = accountMachine.proofHeader.nonce;
   if (proofChanged) {
     if (!ackDisputeHanko || !ackDisputeHash) {
       return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
@@ -1328,36 +1338,44 @@ async function buildIncomingFrameAckMaterial(
   }
 
   const ackDisputeSeal = proofChanged && ackDisputeHanko && ackDisputeHash ? {
-    newDisputeHanko: ackDisputeHanko,
-    newDisputeHash: ackDisputeHash,
-    newDisputeProofBodyHash: ackProofResult.proofBodyHash,
-    disputeProofNonce: ackSignedNonce,
-  } : {};
+    hanko: ackDisputeHanko,
+    hash: ackDisputeHash,
+    proofBodyHash: ackProofResult.proofBodyHash,
+    proofNonce: ackSignedNonce,
+  } : (
+    accountMachine.currentDisputeProofHanko &&
+    accountMachine.currentDisputeHash &&
+    accountMachine.currentDisputeProofBodyHash?.toLowerCase() === ackProofResult.proofBodyHash.toLowerCase() &&
+    Number(accountMachine.currentDisputeProofNonce ?? 0) > Number(accountMachine.jNonce ?? 0)
+      ? {
+          hanko: accountMachine.currentDisputeProofHanko,
+          hash: accountMachine.currentDisputeHash,
+          proofBodyHash: accountMachine.currentDisputeProofBodyHash,
+          proofNonce: accountMachine.currentDisputeProofNonce!,
+        }
+      : undefined
+  );
+
+  const response: Extract<AccountInput, { kind: 'ack' }> = {
+    kind: 'ack',
+    fromEntityId: accountMachine.proofHeader.fromEntity,
+    toEntityId: input.fromEntityId,
+    watchSeed: accountMachine.watchSeed,
+    ack: {
+      height: receivedFrame.height,
+      frameHanko: confirmationHanko,
+      ...(ackDisputeSeal ? { disputeSeal: ackDisputeSeal } : {}),
+    },
+  };
 
   return {
     kind: 'continue',
     material: {
-      response: {
-        kind: 'ack',
-        fromEntityId: accountMachine.proofHeader.fromEntity,
-        toEntityId: input.fromEntityId,
-        watchSeed: accountMachine.watchSeed,
-        height: receivedFrame.height,
-        prevHanko: confirmationHanko,
-        ...ackDisputeSeal,
-      } as AccountInput,
+      response,
       outboundAck: {
         height: receivedFrame.height,
         counterpartyEntityId: input.fromEntityId,
-        response: {
-          kind: 'ack',
-          fromEntityId: accountMachine.proofHeader.fromEntity,
-          toEntityId: input.fromEntityId,
-          watchSeed: accountMachine.watchSeed,
-          height: receivedFrame.height,
-          prevHanko: confirmationHanko,
-          ...ackDisputeSeal,
-        },
+        response: structuredClone(response),
       },
       ...(ackDisputeHash ? { ackDisputeHash } : {}),
       ackDisputeHanko,
@@ -1372,10 +1390,9 @@ async function maybeBatchAckWithNewFrame(
   env: Env,
   accountMachine: AccountMachine,
   input: AccountInput,
-  response: AccountInput,
+  response: Extract<AccountInput, { kind: 'ack' }>,
   events: string[],
-): Promise<{ batchedWithNewFrame: boolean; proposeResult: ProposeAccountFrameResult | undefined }> {
-  let batchedWithNewFrame = false;
+): Promise<{ response: AccountInput; proposeResult: ProposeAccountFrameResult | undefined }> {
   let proposeResult: ProposeAccountFrameResult | undefined;
 
   if (HEAVY_LOGS) {
@@ -1387,33 +1404,26 @@ async function maybeBatchAckWithNewFrame(
     });
   }
   if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
-    proposeResult = await proposeAccountFrame(env, accountMachine, true);
+    proposeResult = await proposeAccountFrame(env, accountMachine);
 
     if (proposeResult.success && proposeResult.accountInput) {
-      batchedWithNewFrame = true;
-      mergeBatchedProposalIntoAck(response, proposeResult, events);
+      return { response: mergeBatchedProposalIntoAck(response, proposeResult, events), proposeResult };
     }
   }
 
-  return { batchedWithNewFrame, proposeResult };
+  return { response, proposeResult };
 }
 
-function storeAckResponseState(
+function storeAckDisputeState(
   accountMachine: AccountMachine,
   material: IncomingFrameAckMaterial,
-  batchedWithNewFrame: boolean,
 ): void {
-  if (!batchedWithNewFrame) {
-    accountMachine.lastOutboundFrameAck = material.outboundAck;
-    if (material.proofChanged && material.ackDisputeHanko && material.ackDisputeHash) {
-      accountMachine.currentDisputeProofHanko = material.ackDisputeHanko;
-      accountMachine.currentDisputeProofNonce = material.ackSignedNonce;
-      accountMachine.currentDisputeProofBodyHash = material.ackProofBodyHash;
-      accountMachine.currentDisputeHash = material.ackDisputeHash;
-    }
-    return;
+  if (material.proofChanged && material.ackDisputeHanko && material.ackDisputeHash) {
+    accountMachine.currentDisputeProofHanko = material.ackDisputeHanko;
+    accountMachine.currentDisputeProofNonce = material.ackSignedNonce;
+    accountMachine.currentDisputeProofBodyHash = material.ackProofBodyHash;
+    accountMachine.currentDisputeHash = material.ackDisputeHash;
   }
-  delete accountMachine.lastOutboundFrameAck;
 }
 
 function buildIncomingFrameReturnPayload(
@@ -1449,9 +1459,9 @@ function buildIncomingFrameReturnPayload(
 
   if (HEAVY_LOGS) {
     accountLog.debug('return.response', {
-      height: response.height,
-      prevHanko: Boolean(response.prevHanko),
-      newFrame: Boolean(response.newAccountFrame),
+      height: accountInputReferenceHeight(response),
+      prevHanko: Boolean(accountInputAck(response)?.frameHanko),
+      newFrame: Boolean(accountInputProposal(response)),
     });
   }
   return {
@@ -1481,20 +1491,22 @@ async function buildAckResponseForIncomingFrame(
   const ackMaterial = await buildIncomingFrameAckMaterial(env, accountMachine, input, receivedFrame, events);
   if (ackMaterial.kind === 'return') return ackMaterial.result;
   const { material } = ackMaterial;
-  const { batchedWithNewFrame, proposeResult } = await maybeBatchAckWithNewFrame(
+  storeAckDisputeState(accountMachine, material);
+  if (material.proofChanged) accountMachine.proofHeader.nextProofNonce = material.ackSignedNonce + 1;
+  const { response, proposeResult } = await maybeBatchAckWithNewFrame(
     env,
     accountMachine,
     input,
     material.response,
     events,
   );
-
-  storeAckResponseState(accountMachine, material, batchedWithNewFrame);
-  if (material.proofChanged) ++accountMachine.proofHeader.nonce;
+  const batchedWithNewFrame = response.kind === 'frame_ack';
+  if (batchedWithNewFrame) delete accountMachine.lastOutboundFrameAck;
+  else accountMachine.lastOutboundFrameAck = material.outboundAck;
   return buildIncomingFrameReturnPayload(
     input,
     receivedFrame,
-    material.response,
+    response,
     validation,
     proposeResult,
     batchedWithNewFrame,
@@ -1517,7 +1529,7 @@ async function handleIncomingAccountFrame(
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<IncomingFrameResult> {
-  if (!input.newAccountFrame) {
+  if (!accountInputProposal(input)) {
     return { kind: 'not_applicable' };
   }
 
@@ -1615,13 +1627,14 @@ export async function applyAccountInput(
   );
   if (replayGateResult) return replayGateResult;
 
-  let validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
+  let validatedCounterpartyAckDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
   try {
-    validatedCounterpartyDisputeSeal = await validateCounterpartyDisputeSeal(
+    validatedCounterpartyAckDisputeSeal = await validateCounterpartyDisputeSeal(
       env,
       accountMachine,
       input,
-      String(input.kind || 'ACCOUNT_INPUT').toUpperCase(),
+      accountInputAck(input)?.disputeSeal,
+      'ACCOUNT_ACK',
     );
   } catch (error) {
     return { success: false, error: (error as Error).message, events };
@@ -1634,7 +1647,7 @@ export async function applyAccountInput(
     accountMachine,
     input,
     ackHeight,
-    validatedCounterpartyDisputeSeal,
+    validatedCounterpartyAckDisputeSeal,
     events,
     timedOutHashlocks,
     committedFrames,
@@ -1657,13 +1670,42 @@ export async function applyAccountInput(
   );
   if (unmatchedPendingAck) return unmatchedPendingAck;
 
+  let validatedCounterpartyProposalDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
+  try {
+    validatedCounterpartyProposalDisputeSeal = await validateCounterpartyDisputeSeal(
+      env,
+      accountMachine,
+      input,
+      accountInputProposal(input)?.disputeSeal,
+      'ACCOUNT_PROPOSAL',
+    );
+  } catch (error) {
+    return { success: false, error: (error as Error).message, events };
+  }
+
+  if (input.kind === 'dispute') {
+    try {
+      const standaloneSeal = await validateCounterpartyDisputeSeal(
+        env,
+        accountMachine,
+        input,
+        input.disputeSeal,
+        'ACCOUNT_DISPUTE',
+      );
+      storeCounterpartyDisputeSeal(accountMachine, standaloneSeal);
+      return { success: true, events };
+    } catch (error) {
+      return { success: false, error: (error as Error).message, events };
+    }
+  }
+
   const incomingFrameResult = await handleIncomingAccountFrame(
     env,
     accountMachine,
     input,
     normalizedInputHeight,
     replay.currentHeight,
-    validatedCounterpartyDisputeSeal,
+    validatedCounterpartyProposalDisputeSeal,
     ackProcessed,
     events,
     timedOutHashlocks,

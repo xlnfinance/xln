@@ -251,14 +251,14 @@ const makeAccount = (leftEntity: string, rightEntity: string, height: number, ti
   rightJObservations: [],
   jEventChain: [],
   lastFinalizedJHeight: 0,
-  proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nonce: height },
+  proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: height },
   proofBody: { tokenIds: [], deltas: [] },
   disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-  onChainSettlementNonce: 0,
+  jNonce: 0,
   pendingWithdrawals: new Map(),
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
-  rebalancePolicy: new Map(),
+  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 });
 
 const makeAccountDoc = (leftEntity: string, rightEntity: string, height: number, timestamp: number): StorageAccountDoc =>

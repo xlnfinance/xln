@@ -66,13 +66,13 @@ export async function handleJAbortSentBatch(
         const account = [...newState.accounts.entries()].find(
           ([k]) => k.toLowerCase() === cpId,
         )?.[1];
-        const onChainNonce = account?.onChainSettlementNonce ?? 0;
-        if (c2r.nonce <= onChainNonce) {
+        const jNonce = account?.jNonce ?? 0;
+        if (c2r.nonce <= jNonce) {
           jBatchActionLog.warn('abort.drop_stale_c2r', {
             entity: shortId(entityState.entityId),
             counterparty: shortId(cpId),
             signedNonce: c2r.nonce,
-            onChainNonce,
+            jNonce,
           });
           // Also clear the workspace so user can re-propose
           if (account?.settlementWorkspace) {
@@ -97,12 +97,7 @@ export async function handleJAbortSentBatch(
 
   // Release stale "submitted" latches if operator aborts the in-flight batch.
   for (const account of newState.accounts.values()) {
-    if (!account.requestedRebalanceFeeState) continue;
-    for (const feeState of account.requestedRebalanceFeeState.values()) {
-      if ((feeState.jBatchSubmittedAt || 0) > 0) {
-        feeState.jBatchSubmittedAt = 0;
-      }
-    }
+    account.shadow.rebalance.submittedAtByToken.clear();
   }
   if (droppedFinalizeCounterparties.size > 0) {
     for (const [counterpartyId, account] of newState.accounts.entries()) {

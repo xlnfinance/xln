@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   buildGraphAvailableRoutes,
+  findGraphJReplica,
   findGraphReplicaByEntityId,
   formatGraphDualConnectionAccountInfo,
   formatGraphDualConnectionAccountInfoFromReplicas,
@@ -22,6 +23,14 @@ import {
 } from '../../frontend/src/lib/view/panels/graph3d-helpers';
 
 describe('graph3d helpers', () => {
+  test('finds J replicas in canonical maps and legacy arrays', () => {
+    const tron = { name: 'Tron', blockNumber: 9n };
+    expect(findGraphJReplica(new Map([['Tron', tron]]), 'Tron')).toBe(tron);
+    expect(findGraphJReplica([tron], 'Tron')).toBe(tron);
+    expect(findGraphJReplica([['Tron', tron]], 'Tron')).toBe(tron);
+    expect(findGraphJReplica(new Map([['Tron', tron]]), 'Testnet')).toBeUndefined();
+  });
+
   test('normalizes reserve maps and snapshot objects', () => {
     const reserveMap = new Map<string | number, bigint>([
       ['1', 10n],

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { computeAccountStateRoot } from '../account-state-root';
+import { computeAccountShadowRoot, computeAccountStateRoot } from '../account-state-root';
 import { buildAccountProofBody } from '../proof-builder';
 import type { AccountMachine } from '../types';
 import { createDefaultDelta } from '../validation-utils';
@@ -19,7 +19,7 @@ const account = (): AccountMachine => ({
   pulls: new Map(),
   swapOffers: new Map(),
   globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-  onChainSettlementNonce: 0,
+  jNonce: 0,
   disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
   lastFinalizedJHeight: 0,
   leftJObservations: [],
@@ -27,12 +27,12 @@ const account = (): AccountMachine => ({
   jEventChain: [],
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
-  rebalancePolicy: new Map(),
+  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   mempool: [],
   pendingSignatures: [],
   currentFrame: {} as never,
   currentHeight: 0,
-  proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nonce: 1 },
+  proofHeader: { fromEntity: LEFT, toEntity: RIGHT, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
   pendingWithdrawals: new Map(),
 } as AccountMachine);
@@ -71,6 +71,113 @@ describe('canonical account state root', () => {
     base.disputeProofBodiesByHash = { '0x01': { local: true } };
 
     expect(computeAccountStateRoot(base, DOMAIN)).toBe(root);
+  });
+
+  test('moves entity-owned lifecycle state out of the bilateral root', () => {
+    const base = account();
+    const bilateralRoot = computeAccountStateRoot(base, DOMAIN);
+    const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
+
+    const settlement = structuredClone(base);
+    settlement.settlementWorkspace = {
+      version: 1,
+      status: 'awaiting_counterparty',
+      lastModifiedByLeft: true,
+      ops: [],
+      createdAt: 10,
+      lastUpdatedAt: 10,
+      executorIsLeft: true,
+    } as never;
+    expect(computeAccountStateRoot(settlement, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountShadowRoot(new Map([[RIGHT, settlement]]))).not.toBe(overlayRoot);
+
+    const disputed = structuredClone(base);
+    disputed.status = 'disputed';
+    disputed.activeDispute = {
+      startedByLeft: true,
+      initialProofbodyHash: `0x${'55'.repeat(32)}`,
+      initialNonce: 1,
+      disputeTimeout: 20,
+      jNonce: 1,
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+    };
+    expect(computeAccountStateRoot(disputed, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountShadowRoot(new Map([[RIGHT, disputed]]))).not.toBe(overlayRoot);
+
+    const withdrawal = structuredClone(base);
+    withdrawal.pendingWithdrawals.set('withdraw-1', {
+      requestId: 'withdraw-1',
+      tokenId: 1,
+      amount: 5n,
+      requestedAt: 10,
+      direction: 'outgoing',
+      status: 'pending',
+    });
+    expect(computeAccountStateRoot(withdrawal, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountShadowRoot(new Map([[RIGHT, withdrawal]]))).not.toBe(overlayRoot);
+  });
+
+  test('keeps hankos and signatures outside bilateral and entity overlay roots', () => {
+    const base = account();
+    base.settlementWorkspace = {
+      version: 1,
+      status: 'ready_to_submit',
+      lastModifiedByLeft: true,
+      ops: [],
+      createdAt: 10,
+      lastUpdatedAt: 10,
+      executorIsLeft: true,
+      postSettlementDisputeProof: {
+        disputeHash: `0x${'66'.repeat(32)}`,
+        proofBodyHash: `0x${'77'.repeat(32)}`,
+        nonce: 2,
+      },
+    };
+    base.pendingWithdrawals.set('withdraw-1', {
+      requestId: 'withdraw-1',
+      tokenId: 1,
+      amount: 5n,
+      requestedAt: 10,
+      direction: 'outgoing',
+      status: 'approved',
+    });
+    const bilateralRoot = computeAccountStateRoot(base, DOMAIN);
+    const overlayRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
+
+    base.settlementWorkspace.leftHanko = '0x1234';
+    base.settlementWorkspace.rightHanko = '0x5678';
+    base.settlementWorkspace.postSettlementDisputeProof!.leftHanko = '0x9abc';
+    base.settlementWorkspace.postSettlementDisputeProof!.rightHanko = '0xdef0';
+    base.pendingWithdrawals.get('withdraw-1')!.signature = '0xbeef';
+
+    expect(computeAccountStateRoot(base, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).toBe(overlayRoot);
+  });
+
+  test('separates bilateral state from entity-private automation state', () => {
+    const base = account();
+    const bilateralRoot = computeAccountStateRoot(base, DOMAIN);
+    const shadowRoot = computeAccountShadowRoot(new Map([[RIGHT, base]]));
+
+    base.shadow.rebalance.policy.set(1, {
+      r2cRequestSoftLimit: 500n,
+      hardLimit: 10_000n,
+      maxAcceptableFee: 15n,
+    });
+    base.shadow.rebalance.submittedAtByToken.set(1, 123);
+
+    expect(computeAccountStateRoot(base, DOMAIN)).toBe(bilateralRoot);
+    expect(computeAccountShadowRoot(new Map([[RIGHT, base]]))).not.toBe(shadowRoot);
+  });
+
+  test('commits bilateral lending receipts while excluding local lifecycle state', () => {
+    const base = account();
+    const root = computeAccountStateRoot(base, DOMAIN);
+
+    base.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
+
+    expect(computeAccountStateRoot(base, DOMAIN)).not.toBe(root);
   });
 
   test('commits generic custom transformers and preserves opaque ProofBody batches', () => {

@@ -544,7 +544,7 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
     watchSeed?: unknown;
     batchNonce?: number;
     disputeTimeout?: unknown;
-    onChainNonce?: unknown;
+    jNonce?: unknown;
   };
   const { sender, counterentity, nonce, proofbodyHash } = data;
   const {
@@ -570,16 +570,16 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
       Number(blockNumber || 0) +
       getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, newState.config.jurisdiction?.name, 5)
     );
-  const onChainNonce = Number(data.onChainNonce ?? nonce);
+  const jNonce = Number(data.jNonce ?? nonce);
 
   // Unified nonce: initialNonce = the nonce used in disputeStart (from event).
-  // onChainNonce defaults to the dispute nonce when no richer event payload exists.
+  // jNonce defaults to the dispute nonce when no richer event payload exists.
   account.activeDispute = {
     startedByLeft: isDisputeStartedByLeft(senderStr, account.leftEntity, account.rightEntity),
     initialProofbodyHash: String(proofbodyHash),
     initialNonce: Number(nonce),
     disputeTimeout,
-    onChainNonce,
+    jNonce,
     starterInitialArguments: data.starterInitialArguments || '0x',
     starterIncrementedArguments: data.starterIncrementedArguments || '0x',
     observedOnChain: true,
@@ -587,7 +587,7 @@ async function applyDisputeStartedJEvent(context: FinalizedJEventContext): Promi
     ...(data.batchNonce !== undefined ? { batchNonce: Number(data.batchNonce) } : {}),
     finalizeQueued: false,
   };
-  account.onChainSettlementNonce = Math.max(Number(account.onChainSettlementNonce ?? 0), onChainNonce);
+  account.jNonce = Math.max(Number(account.jNonce ?? 0), jNonce);
 
   const localProof = buildAccountProofBody(account);
   const onChainProofHash = String(account.activeDispute.initialProofbodyHash || '').toLowerCase();
@@ -722,7 +722,7 @@ function applyDisputeFinalizedJEvent(
   const evidenceIsUnsignedUnilateral = evidenceSig === '' || evidenceSig === '0x';
   const finalProofMatchesInitial =
     finalProofbodyHash.toLowerCase() === String(initialProofbodyHash || '').toLowerCase();
-  const eventOnChainNonce = primaryFinalizationEvidence
+  const eventJNonce = primaryFinalizationEvidence
     ? evidenceIsUnsignedUnilateral
       ? initialNonceNumber + 1
       : Number.isFinite(evidenceFinalNonce)
@@ -731,11 +731,11 @@ function applyDisputeFinalizedJEvent(
     : finalProofMatchesInitial
       ? initialNonceNumber + 1
       : initialNonceNumber;
-  const finalizedOnChainNonce = Math.max(
-    Number(account.onChainSettlementNonce ?? 0),
-    eventOnChainNonce,
+  const finalizedJNonce = Math.max(
+    Number(account.jNonce ?? 0),
+    eventJNonce,
   );
-  account.onChainSettlementNonce = finalizedOnChainNonce;
+  account.jNonce = finalizedJNonce;
   if (account.activeDispute) {
     delete account.activeDispute;
     addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
@@ -746,8 +746,8 @@ function applyDisputeFinalizedJEvent(
   } else {
     jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
   }
-  if (account.proofHeader.nonce <= finalizedOnChainNonce) {
-    account.proofHeader.nonce = finalizedOnChainNonce + 1;
+  if (account.proofHeader.nextProofNonce <= finalizedJNonce) {
+    account.proofHeader.nextProofNonce = finalizedJNonce + 1;
   }
   account.status = 'disputed';
   delete account.pendingFrame;
@@ -780,7 +780,7 @@ function applyDisputeFinalizedJEvent(
         disputeFinalizations: [{
           counterentity: counterpartyId,
           initialNonce: Number(initialNonce || 0),
-          finalNonce: finalizedOnChainNonce,
+          finalNonce: finalizedJNonce,
           initialProofbodyHash: String(initialProofbodyHash || '0x'),
           finalProofbody: {
             watchSeed: account.watchSeed,

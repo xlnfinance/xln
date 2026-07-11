@@ -67,19 +67,19 @@ function makeAccountMachine(offer: SwapOffer): AccountMachine {
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    proofHeader: { fromEntity: 'maker', toEntity: 'hub', nonce: 0 },
+    proofHeader: { fromEntity: 'maker', toEntity: 'hub', nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
     frameHistory: [],
     pendingWithdrawals: new Map(),
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
     leftJObservations: [],
     rightJObservations: [],
     jEventChain: [],
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
+    jNonce: 0,
   };
 }
 
@@ -1473,7 +1473,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const takerAccount = makeAccountMachine(takerOffer);
     takerAccount.leftEntity = 'taker-entity';
     takerAccount.rightEntity = 'hub-entity';
-    takerAccount.proofHeader = { fromEntity: 'taker-entity', toEntity: 'hub-entity', nonce: 0 };
+    takerAccount.proofHeader = { fromEntity: 'taker-entity', toEntity: 'hub-entity', nextProofNonce: 0 };
 
     const entityState = {
       entityId: 'hub-entity',

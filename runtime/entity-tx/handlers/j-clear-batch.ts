@@ -50,13 +50,8 @@ export async function handleJClearBatch(
 
   // Manual recovery: release stale "submitted" latches so hub can retry requests.
   for (const account of newState.accounts.values()) {
-    if (!account.requestedRebalanceFeeState) continue;
-    for (const feeState of account.requestedRebalanceFeeState.values()) {
-      if ((feeState.jBatchSubmittedAt || 0) > 0) {
-        feeState.jBatchSubmittedAt = 0;
-        resetSubmittedMarkers++;
-      }
-    }
+    resetSubmittedMarkers += account.shadow.rebalance.submittedAtByToken.size;
+    account.shadow.rebalance.submittedAtByToken.clear();
   }
   if (droppedFinalizeCounterparties.size > 0) {
     for (const [counterpartyId, account] of newState.accounts.entries()) {

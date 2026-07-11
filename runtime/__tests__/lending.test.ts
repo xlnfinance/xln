@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createEmptyEnv } from '../runtime';
-import { applyEntityTx } from '../entity-tx/apply';
-import type { AccountMachine, ConsensusConfig, EntityState } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import { applyAccountTx } from '../account-tx/apply';
+import { createEntityFrameHash } from '../entity-consensus-frame';
 import { applyCommittedAccountFrameFollowups, type MempoolOp } from '../entity-tx/handlers/account';
+import type { AccountFrame, AccountMachine, AccountTx, ConsensusConfig, EntityState } from '../types';
+import { createDefaultDelta } from '../validation-utils';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const HUB = entity('10');
@@ -12,6 +12,8 @@ const LENDER = entity('20');
 const BORROWER = entity('30');
 const SIGNER = `0x${'44'.repeat(20)}`;
 const FRAME_HASH = `0x${'55'.repeat(32)}`;
+const POSITION_ID = 'lend-1111111111111111';
+const BORROW_REQUEST_ID = 'borrow-2222222222222222';
 
 const makeConfig = (): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -20,8 +22,8 @@ const makeConfig = (): ConsensusConfig => ({
   shares: { [SIGNER]: 1n },
 });
 
-const makeState = (entityId: string, isHub = false): EntityState => ({
-  entityId,
+const makeState = (): EntityState => ({
+  entityId: HUB,
   height: 0,
   timestamp: 1_000,
   nonces: new Map(),
@@ -36,13 +38,7 @@ const makeState = (entityId: string, isHub = false): EntityState => ({
   jBlockChain: [],
   entityEncPubKey: `0x${'11'.repeat(32)}`,
   entityEncPrivKey: `0x${'22'.repeat(32)}`,
-  profile: {
-    name: isHub ? 'Hub' : 'User',
-    isHub,
-    avatar: '',
-    bio: '',
-    website: '',
-  },
+  profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },
   htlcRoutes: new Map(),
   htlcFeesEarned: 0n,
   htlcNotes: new Map(),
@@ -51,196 +47,201 @@ const makeState = (entityId: string, isHub = false): EntityState => ({
   pendingSwapFillRatios: new Map(),
 });
 
-const makeAccount = (leftEntity: string, rightEntity: string): AccountMachine => ({
-  leftEntity,
-  rightEntity,
-  status: 'active',
-  mempool: [],
-  currentFrame: {
-    height: 1,
-    timestamp: 1_000,
-    jHeight: 0,
-    accountTxs: [],
-    prevFrameHash: FRAME_HASH,
-    deltas: [],
-    stateHash: FRAME_HASH,
-    byLeft: true,
-  },
-  deltas: new Map([[1, createDefaultDelta(1)]]),
-  globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-  currentHeight: 1,
-  pendingSignatures: [],
-  rollbackCount: 0,
-  proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nonce: 1 },
-  proofBody: { tokenIds: [], deltas: [] },
-  disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
-  pendingWithdrawals: new Map(),
-  requestedRebalance: new Map(),
-  requestedRebalanceFeeState: new Map(),
-  rebalancePolicy: new Map(),
-  locks: new Map(),
-  swapOffers: new Map(),
-  pulls: new Map(),
-  swapOrderHistory: new Map(),
-  swapClosedOrders: new Map(),
-  leftJObservations: [],
-  rightJObservations: [],
-  jEventChain: [],
-  lastFinalizedJHeight: 0,
-  onChainSettlementNonce: 0,
-});
-
-const fundAccountCapacity = (account: AccountMachine, tokenId: number, amount: bigint): void => {
-  const delta = account.deltas.get(tokenId) ?? createDefaultDelta(tokenId);
-  delta.collateral = amount;
-  account.deltas.set(tokenId, delta);
-};
-
-const commitAccountTx = (
-  state: EntityState,
-  counterpartyId: string,
-  tx: MempoolOp['tx'],
-): MempoolOp[] => {
-  const followupOps: MempoolOp[] = [];
-  applyCommittedAccountFrameFollowups(
-    state,
-    counterpartyId,
-    {
-      height: 2,
-      timestamp: state.timestamp,
+const makeAccount = (counterparty: string): AccountMachine => {
+  const delta = createDefaultDelta(1);
+  delta.collateral = 20_000n;
+  delta.leftCreditLimit = 20_000n;
+  delta.rightCreditLimit = 20_000n;
+  return {
+    leftEntity: HUB,
+    rightEntity: counterparty,
+    watchSeed: `0x${'99'.repeat(32)}`,
+    status: 'active',
+    mempool: [],
+    currentFrame: {
+      height: 1,
+      timestamp: 1_000,
       jHeight: 0,
-      accountTxs: [tx],
+      accountTxs: [],
       prevFrameHash: FRAME_HASH,
       deltas: [],
       stateHash: FRAME_HASH,
+      accountStateRoot: `0x${'66'.repeat(32)}`,
       byLeft: true,
     },
-    followupOps,
-  );
-  return followupOps;
+    deltas: new Map([[1, delta]]),
+    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
+    currentHeight: 1,
+    pendingSignatures: [],
+    rollbackCount: 0,
+    proofHeader: { fromEntity: HUB, toEntity: counterparty, nextProofNonce: 1 },
+    proofBody: { tokenIds: [], deltas: [] },
+    disputeConfig: { leftDisputeDelay: 576, rightDisputeDelay: 576 },
+    pendingWithdrawals: new Map(),
+    requestedRebalance: new Map(),
+    requestedRebalanceFeeState: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
+    locks: new Map(),
+    swapOffers: new Map(),
+    pulls: new Map(),
+    swapOrderHistory: new Map(),
+    swapClosedOrders: new Map(),
+    leftJObservations: [],
+    rightJObservations: [],
+    jEventChain: [],
+    lastFinalizedJHeight: 0,
+    jNonce: 0,
+  };
 };
 
-describe('hub lending pools', () => {
-  test('offer, borrow, and repay update pool state and credit-limit ops', async () => {
-    const env = createEmptyEnv('lending-unit');
-    env.timestamp = 1_000;
-    const state = makeState(HUB, true);
-    state.accounts.set(LENDER, makeAccount(HUB, LENDER));
-    state.accounts.set(BORROWER, makeAccount(HUB, BORROWER));
-    fundAccountCapacity(state.accounts.get(LENDER)!, 1, 20_000n);
-    fundAccountCapacity(state.accounts.get(BORROWER)!, 1, 20_000n);
+const frame = (tx: AccountTx, byLeft: boolean, timestamp: number): AccountFrame => ({
+  height: 2,
+  timestamp,
+  jHeight: 0,
+  accountTxs: [tx],
+  prevFrameHash: FRAME_HASH,
+  deltas: [],
+  stateHash: FRAME_HASH,
+  accountStateRoot: `0x${'66'.repeat(32)}`,
+  byLeft,
+});
 
-    const offered = await applyEntityTx(env, state, {
-      type: 'lendingOffer',
+const commit = async (
+  state: EntityState,
+  counterparty: string,
+  tx: AccountTx,
+  byLeft: boolean,
+  timestamp: number,
+): Promise<MempoolOp[]> => {
+  const result = await applyAccountTx(state.accounts.get(counterparty)!, tx, byLeft, timestamp, 0, false);
+  expect(result.success, result.error).toBe(true);
+  const followups: MempoolOp[] = [];
+  applyCommittedAccountFrameFollowups(state, counterparty, frame(tx, byLeft, timestamp), followups);
+  return followups;
+};
+
+describe('payer-authenticated hub lending', () => {
+  test('fund, borrow, grant, repay, and revoke finalize only after matching bilateral commits', async () => {
+    const state = makeState();
+    state.accounts.set(LENDER, makeAccount(LENDER));
+    state.accounts.set(BORROWER, makeAccount(BORROWER));
+
+    const fundTx: AccountTx = {
+      type: 'lending_fund',
       data: {
+        positionId: POSITION_ID,
+        hubEntityId: HUB,
         lenderEntityId: LENDER,
         tokenId: 1,
         amount: 10_000n,
         termId: '1d',
         interestBps: 100,
       },
-    });
-    expect(offered.skippedError).toBeUndefined();
-    const position = Array.from(offered.newState.lending?.pools.values() ?? [])[0]!;
-    expect(position.status).toBe('funding');
-    expect(position.availableAmount).toBe(0n);
-    expect(position.borrowedAmount).toBe(0n);
-    expect(offered.mempoolOps?.[0]).toEqual({
-      accountId: LENDER,
-      tx: {
-        type: 'direct_payment',
-        data: {
-          tokenId: 1,
-          amount: 10_000n,
-          route: [LENDER, HUB],
-          description: `xln:lending:fund:${position.positionId}`,
-          fromEntityId: LENDER,
-          toEntityId: HUB,
-        },
-      },
-    });
+    };
+    expect(await commit(state, LENDER, fundTx, false, 1_000)).toEqual([]);
+    const pool = state.lending!.pools.get(POSITION_ID)!;
+    expect(pool).toMatchObject({ status: 'open', availableAmount: 10_000n, borrowedAmount: 0n });
 
-    const fundingFollowups = commitAccountTx(offered.newState, LENDER, offered.mempoolOps![0]!.tx);
-    expect(fundingFollowups).toEqual([]);
-    expect(offered.newState.lending?.pools.get(position.positionId)?.status).toBe('open');
-    expect(offered.newState.lending?.pools.get(position.positionId)?.availableAmount).toBe(10_000n);
-
-    env.timestamp = 2_000;
-    const borrowed = await applyEntityTx(env, offered.newState, {
-      type: 'lendingBorrow',
+    const borrowTx: AccountTx = {
+      type: 'lending_borrow_request',
       data: {
+        requestId: BORROW_REQUEST_ID,
+        hubEntityId: HUB,
         borrowerEntityId: BORROWER,
         tokenId: 1,
         amount: 2_500n,
         termId: '1d',
         maxInterestBps: 150,
       },
-    });
-    expect(borrowed.skippedError).toBeUndefined();
-    const loan = Array.from(borrowed.newState.lending?.loans.values() ?? [])[0]!;
+    };
+    const [grant] = await commit(state, BORROWER, borrowTx, false, 2_000);
+    expect(grant?.tx.type).toBe('lending_credit');
+    const loan = Array.from(state.lending!.loans.values())[0]!;
+    expect(loan).toMatchObject({ status: 'opening', principalAmount: 2_500n, repaymentAmount: 2_525n });
+    expect(pool).toMatchObject({ availableAmount: 7_500n, borrowedAmount: 2_500n });
+
+    await commit(state, BORROWER, grant!.tx, true, 2_001);
     expect(loan.status).toBe('active');
-    expect(loan.interestAmount).toBe(25n);
-    expect(loan.repaymentAmount).toBe(2_525n);
-    expect(borrowed.newState.lending?.pools.get(position.positionId)?.availableAmount).toBe(7_500n);
-    expect(borrowed.newState.lending?.pools.get(position.positionId)?.borrowedAmount).toBe(2_500n);
-    expect(borrowed.mempoolOps?.[0]).toEqual({
-      accountId: BORROWER,
-      tx: { type: 'set_credit_limit', data: { tokenId: 1, amount: 2_500n } },
-    });
 
-    borrowed.newState.accounts.get(BORROWER)!.deltas.get(1)!.rightCreditLimit = 2_500n;
-    env.timestamp = 3_000;
-    const repaid = await applyEntityTx(env, borrowed.newState, {
-      type: 'lendingRepay',
+    const repayTx: AccountTx = {
+      type: 'lending_repay',
       data: {
-        borrowerEntityId: BORROWER,
         loanId: loan.loanId,
-      },
-    });
-    expect(repaid.skippedError).toBeUndefined();
-    expect(repaid.newState.lending?.loans.get(loan.loanId)?.status).toBe('repaying');
-    expect(repaid.mempoolOps?.[0]).toEqual({
-      accountId: BORROWER,
-      tx: {
-        type: 'direct_payment',
-        data: {
-          tokenId: 1,
-          amount: 2_525n,
-          route: [BORROWER, HUB],
-          description: `xln:lending:repay:${loan.loanId}`,
-          fromEntityId: BORROWER,
-          toEntityId: HUB,
-        },
-      },
-    });
-    const repaymentFollowups = commitAccountTx(repaid.newState, BORROWER, repaid.mempoolOps![0]!.tx);
-    expect(repaid.newState.lending?.loans.get(loan.loanId)?.status).toBe('repaid');
-    expect(repaid.newState.lending?.pools.get(position.positionId)?.borrowedAmount).toBe(0n);
-    expect(repaid.newState.lending?.pools.get(position.positionId)?.availableAmount).toBe(10_025n);
-    expect(repaymentFollowups[0]).toEqual({
-      accountId: BORROWER,
-      tx: { type: 'set_credit_limit', data: { tokenId: 1, amount: 0n } },
-    });
-  });
-
-  test('borrow returns terminal no-liquidity state without throwing', async () => {
-    const env = createEmptyEnv('lending-no-liquidity');
-    env.timestamp = 1_000;
-    const state = makeState(HUB, true);
-    state.accounts.set(BORROWER, makeAccount(HUB, BORROWER));
-
-    const result = await applyEntityTx(env, state, {
-      type: 'lendingBorrow',
-      data: {
+        hubEntityId: HUB,
         borrowerEntityId: BORROWER,
         tokenId: 1,
-        amount: 100n,
-        termId: '1h',
+        amount: 2_525n,
       },
+    };
+    const [revoke] = await commit(state, BORROWER, repayTx, false, 3_000);
+    expect(revoke?.tx).toMatchObject({ type: 'lending_credit', data: { action: 'revoke', loanId: loan.loanId } });
+    expect(loan.status).toBe('closing');
+    expect(pool).toMatchObject({ availableAmount: 7_500n, borrowedAmount: 2_500n });
+
+    await commit(state, BORROWER, revoke!.tx, true, 3_001);
+    expect(loan).toMatchObject({ status: 'repaid', repaidAmount: 2_525n });
+    expect(pool).toMatchObject({ availableAmount: 10_025n, borrowedAmount: 0n });
+
+    const closeTx: AccountTx = {
+      type: 'lending_close_request',
+      data: { positionId: POSITION_ID, hubEntityId: HUB, lenderEntityId: LENDER },
+    };
+    const [payout] = await commit(state, LENDER, closeTx, false, 4_000);
+    expect(payout?.tx).toMatchObject({
+      type: 'lending_close_payout',
+      data: { positionId: POSITION_ID, amount: 10_025n },
     });
-    expect(result.skippedError).toBeUndefined();
-    expect(result.newState.lending?.loans.size ?? 0).toBe(0);
-    expect(result.newState.messages.at(-1)).toContain('Loan rejected');
-    expect(result.mempoolOps).toBeUndefined();
+    expect(pool.status).toBe('closing');
+
+    await commit(state, LENDER, payout!.tx, true, 4_001);
+    expect(pool).toMatchObject({ status: 'closed', availableAmount: 0n, borrowedAmount: 0n });
+  });
+
+  test('rejects forged payer direction and duplicate financial intents before moving delta twice', async () => {
+    const state = makeState();
+    state.accounts.set(LENDER, makeAccount(LENDER));
+    const account = state.accounts.get(LENDER)!;
+    const tx: AccountTx = {
+      type: 'lending_fund',
+      data: {
+        positionId: POSITION_ID,
+        hubEntityId: HUB,
+        lenderEntityId: LENDER,
+        tokenId: 1,
+        amount: 1_000n,
+        termId: '1d',
+        interestBps: 100,
+      },
+    };
+
+    await expect(applyAccountTx(account, tx, true)).rejects.toThrow('LENDING_LENDER_NOT_PROPOSER');
+    const first = await applyAccountTx(account, tx, false);
+    expect(first.success).toBe(true);
+    const offdeltaAfterFirst = account.deltas.get(1)!.offdelta;
+    await expect(applyAccountTx(account, tx, false)).rejects.toThrow('LENDING_INTENT_REPLAY');
+    expect(account.deltas.get(1)!.offdelta).toBe(offdeltaAfterFirst);
+  });
+
+  test('entity frame hash commits hub lending state', async () => {
+    const state = makeState();
+    const before = await createEntityFrameHash(FRAME_HASH, 1, 1_000, [], state);
+    state.lending = { pools: new Map(), loans: new Map() };
+    state.lending.pools.set(POSITION_ID, {
+      positionId: POSITION_ID,
+      hubEntityId: HUB,
+      lenderEntityId: LENDER,
+      tokenId: 1,
+      principalAmount: 1_000n,
+      availableAmount: 1_000n,
+      borrowedAmount: 0n,
+      interestBps: 100,
+      termId: '1d',
+      termMs: 86_400_000,
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      status: 'open',
+    });
+    const after = await createEntityFrameHash(FRAME_HASH, 1, 1_000, [], state);
+    expect(after).not.toBe(before);
   });
 });

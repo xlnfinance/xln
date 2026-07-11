@@ -1072,11 +1072,11 @@ export async function lockAhb(env: Env): Promise<void> {
     }]);
     await converge(env);
 
-    // Verify policy was set on both sides
-    const [, hubAfterPolicy] = findReplica(env, hub.id);
-    const bobAccount = hubAfterPolicy.state.accounts.get(bob.id);
-    if (!bobAccount?.rebalancePolicy) {
-      throw new Error('❌ ASSERT FAIL: Rebalance policy not set on H-B account');
+    // Policy is entity-private shadow state and must not be sent to Hub.
+    const [, bobAfterPolicy] = findReplica(env, bob.id);
+    const bobAccount = bobAfterPolicy.state.accounts.get(hub.id);
+    if (!bobAccount?.shadow.rebalance.policy.size) {
+      throw new Error('❌ ASSERT FAIL: Rebalance policy not set in Bob shadow state');
     }
     console.log(`✅ Rebalance policy set: r2cRequestSoftLimit=$100K, maxFee=$10`);
 

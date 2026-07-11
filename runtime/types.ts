@@ -66,6 +66,7 @@ export type {
   HankoString,
   HankoVerificationResult,
 } from './types/hanko';
+export type { PaymentDeliveryMode } from './types/payment';
 export type {
   LendingLoan,
   LendingLoanStatus,
@@ -78,7 +79,10 @@ export type {
   AccountDelta,
   AccountEvent,
   AccountFrame,
+  AccountFrameAck,
+  AccountFrameProposal,
   AccountInput,
+  AccountDisputeSeal,
   AccountMachine,
   AccountSettleAction,
   AccountSnapshot,
@@ -109,6 +113,7 @@ export {
   REFERENCE_TOKEN_ID,
 } from './types/rebalance';
 export type {
+  AccountRebalanceShadowState,
   HubRebalanceConfig,
   RebalancePolicy,
   RebalanceQuote,

@@ -11,7 +11,7 @@
  * 5. settle_reject: Clears workspace without executing
  */
 
-import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, SettlementOp, AccountInput } from '../../types';
+import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, SettlementOp, AccountSettleAction } from '../../types';
 import { cloneEntityState, addMessage, getAccountPerspective, resolveEntityProposerId } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -32,9 +32,9 @@ const settleLog = createStructuredLogger('entity.settle');
  * outrank a fresh cooperative settlement on-chain.
  */
 const getNextSettlementNonce = (account: AccountMachine): number => {
-  const onChainNonce = account.onChainSettlementNonce ?? 0;
-  const proofNonce = account.proofHeader?.nonce ?? 0;
-  return Math.max(onChainNonce, proofNonce) + 1;
+  const jNonce = account.jNonce ?? 0;
+  const proofNonce = account.proofHeader?.nextProofNonce ?? 0;
+  return Math.max(jNonce, proofNonce) + 1;
 };
 
 /**
@@ -54,8 +54,8 @@ async function signPostSettlementDisputeProof(
   try {
     const nonce = Math.max(
       settlementNonce,
-      account.onChainSettlementNonce ?? 0,
-      account.proofHeader?.nonce ?? 0,
+      account.jNonce ?? 0,
+      account.proofHeader?.nextProofNonce ?? 0,
     ) + 1;
     const { proofBodyHash, proofBodyStruct } = buildAccountProofBody(account);
     const disputeHash = createDisputeProofHashWithNonce(
@@ -193,7 +193,7 @@ export async function handleSettlePropose(
   addMessage(newState, `⚖️ Settlement proposed to ${counterpartyEntityId.slice(-4)} - awaiting response`);
 
   // Send ops to counterparty
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountSettleAction = {
     type: 'propose',
     ops,
     executorIsLeft: workspace.executorIsLeft,
@@ -286,7 +286,7 @@ export async function handleSettleUpdate(
   addMessage(newState, `⚖️ Settlement updated (v${newVersion})`);
 
   // Send update to counterparty
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountSettleAction = {
     type: 'update',
     ops,
     executorIsLeft: account.settlementWorkspace.executorIsLeft,
@@ -362,8 +362,8 @@ export async function handleSettleApprove(
 
   settleLog.debug('approve.nonce_selected', {
     nonce: signedNonce,
-    onChainNonce: account.onChainSettlementNonce ?? 0,
-    proofNonce: account.proofHeader?.nonce ?? 0,
+    jNonce: account.jNonce ?? 0,
+    proofNonce: account.proofHeader?.nextProofNonce ?? 0,
   });
 
   const jurisdiction = entityState.config.jurisdiction;
@@ -415,7 +415,7 @@ export async function handleSettleApprove(
   addMessage(newState, `⚖️ Settlement signed - ready for execution`);
 
   // Send approval to counterparty
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountSettleAction = {
     type: 'approve',
     hanko,
     version: workspace.version,
@@ -544,7 +544,7 @@ export async function handleSettleExecute(
       counterpartyHanko!,
       jurisdiction.entityProviderAddress,
       '0x',
-      workspace.nonceAtSign ?? account.proofHeader.nonce,
+      workspace.nonceAtSign ?? account.proofHeader.nextProofNonce,
       entityState.entityId,
       disableC2RShortcut,
     );
@@ -604,7 +604,7 @@ export async function handleSettleReject(
   settleLog.debug('reject.cleared');
   addMessage(newState, `❌ Settlement rejected${reason ? `: ${reason}` : ''}`);
 
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountSettleAction = {
     type: 'reject',
     ...(reason && { memo: reason }),
   };
@@ -633,7 +633,7 @@ export async function handleSettleReject(
  */
 export async function processSettleAction(
   account: import('../../types').AccountMachine,
-  settleAction: NonNullable<AccountInput['settleAction']>,
+  settleAction: AccountSettleAction,
   fromEntityId: string,
   myEntityId: string,
   entityTimestamp: number,

@@ -623,7 +623,7 @@ export async function handleDisputeStart(
   // This is the bilateral nonce at which the counterparty signed the dispute proof.
   // NOT the on-chain nonce (which is the last event-synced nonce from the J-machine).
   // Priority: exact hash→nonce map > stored counterparty sig nonce > proofHeader fallback.
-  let signedNonce: number = account.proofHeader.nonce;
+  let signedNonce: number = account.proofHeader.nextProofNonce;
   let nonceSource = 'proofHeader';
   const mappedNonce = account.disputeProofNoncesByHash?.[proofBodyHashToUse];
   if (mappedNonce !== undefined) {
@@ -649,7 +649,7 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  const onChainNonce = Number(account.onChainSettlementNonce ?? 0);
+  const jNonce = Number(account.jNonce ?? 0);
   let currentJBlock = getRuntimeJurisdictionHeight(
     env,
     newState.lastFinalizedJHeight ?? 0,
@@ -665,15 +665,15 @@ export async function handleDisputeStart(
     counterparty: shortId(counterpartyEntityId),
     signedNonce,
     nonceSource,
-    onChainNonce,
+    jNonce,
   });
 
   // On-chain requires nonce > stored nonce for disputeStart.
   // If stale, caller must execute manual reopen flow first.
-  if (signedNonce <= onChainNonce) {
-    const msg = `❌ Stale dispute proof nonce ${signedNonce} (on-chain=${onChainNonce}) - reopen required`;
+  if (signedNonce <= jNonce) {
+    const msg = `❌ Stale dispute proof nonce ${signedNonce} (on-chain=${jNonce}) - reopen required`;
     addMessage(newState, msg);
-    disputeLog.warn('start.nonce_stale', { counterparty: shortId(counterpartyEntityId), signedNonce, onChainNonce });
+    disputeLog.warn('start.nonce_stale', { counterparty: shortId(counterpartyEntityId), signedNonce, jNonce });
     return { newState, outputs };
   }
 
@@ -734,8 +734,8 @@ export async function handleDisputeStart(
         counterpartyEntityId,
         signedNonce,
         nonceSource,
-        onChainNonce,
-        proofHeaderNonce: account.proofHeader.nonce,
+        jNonce,
+        proofHeaderNonce: account.proofHeader.nextProofNonce,
         storedCounterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
         proofBodyHash: proofBodyHashToUse,
         disputeHashSource,
@@ -768,15 +768,15 @@ export async function handleDisputeStart(
       const currentProofResult = buildAccountProofBody(account);
       const msg =
         `❌ Counterparty dispute proof invalid for current account snapshot; ` +
-        `nonce=${signedNonce} onChain=${onChainNonce} source=${nonceSource}`;
+        `nonce=${signedNonce} onChain=${jNonce} source=${nonceSource}`;
       addMessage(newState, msg);
       disputeLog.error('start.preflight_failed', {
         entityId: entityState.entityId,
         counterpartyEntityId,
         signedNonce,
         nonceSource,
-        onChainNonce,
-        proofHeaderNonce: account.proofHeader.nonce,
+        jNonce,
+        proofHeaderNonce: account.proofHeader.nextProofNonce,
         counterpartyDisputeProofNonce: account.counterpartyDisputeProofNonce,
         storedProofBodyHash: proofBodyHashToUse,
         storedDisputeHash,
@@ -858,7 +858,7 @@ export async function handleDisputeStart(
       initialProofbodyHash: proofBodyHashToUse,
       initialNonce: signedNonce,
       disputeTimeout: currentJBlock + defaultDisputeDelayBlocks,
-      onChainNonce,
+      jNonce,
       starterInitialArguments,
       starterIncrementedArguments,
       observedOnChain: false,
@@ -876,7 +876,7 @@ export async function handleDisputeStart(
 
   // NOTE: activeDispute will be set when DisputeStarted event arrives from J-machine
   // Event handler will query on-chain state and populate:
-  // - startedByLeft, disputeTimeout, onChainNonce
+  // - startedByLeft, disputeTimeout, jNonce
 
   addMessage(
     newState,

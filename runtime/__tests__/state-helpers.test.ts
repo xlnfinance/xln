@@ -64,6 +64,8 @@ const makeManualFallbackAccount = () => ({
     accountTxs: [],
     prevFrameHash: 'genesis',
     stateHash: 'genesis',
+    accountStateRoot: `0x${'00'.repeat(32)}`,
+    byLeft: true,
     deltas: [],
   },
   deltas: new Map([[1, {
@@ -92,13 +94,13 @@ const makeManualFallbackAccount = () => ({
   rightJObservations: [],
   jEventChain: [],
   lastFinalizedJHeight: 0,
-  proofHeader: { fromEntity: 'left', toEntity: 'right', nonce: 0 },
+  proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 0 },
   proofBody: { tokenIds: [1], deltas: [0n] },
   disputeConfig: {},
   pendingWithdrawals: new Map(),
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
-  rebalancePolicy: new Map(),
+  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   disputeProofBodiesByHash: {
     proof: makeProofBodyStruct(),
   },
@@ -237,11 +239,22 @@ describe('state helper cloning', () => {
 
   test('manual account clone fallback normalizes missing mempool', () => {
     const cloned = cloneAccountMachine({
-      currentFrame: { height: 0, timestamp: 0, accountTxs: [], deltas: [] },
+      currentFrame: {
+        height: 0,
+        timestamp: 0,
+        jHeight: 0,
+        accountTxs: [],
+        prevFrameHash: 'genesis',
+        stateHash: 'genesis',
+        accountStateRoot: `0x${'00'.repeat(32)}`,
+        byLeft: true,
+        deltas: [],
+      },
       deltas: new Map(),
       locks: new Map(),
       swapOffers: new Map(),
       pulls: new Map(),
+      shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
       uncloneable: () => undefined,
     } as any);
 

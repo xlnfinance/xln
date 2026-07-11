@@ -118,7 +118,7 @@ describe('frontend time-machine current env contract', () => {
     await live;
     rejectHistorical(new Error('stale historical read failed'));
 
-    await expect(historical).resolves.toMatchObject({ atHeight: null, frame: { height: 12 } });
+    await expect(historical).rejects.toThrow('stale historical read failed');
     expect(readStore(runtimeView)).toMatchObject({ atHeight: null, height: 12, frame: { height: 12 }, error: null });
   });
 
@@ -137,6 +137,14 @@ describe('frontend time-machine current env contract', () => {
     expect(xlnStore.match(/assertNetworkMachineIsLive\(get\(networkMachineRuntime\)\)/g)).toHaveLength(2);
     expect(chrome).not.toContain('Viewing historical state');
     expect(chrome).not.toContain('history-warning');
+  });
+
+  test('merged graph scope does not replace wallet time travel controls', () => {
+    const source = read('frontend/src/lib/view/core/TimeMachine.svelte');
+
+    expect(source).toContain("$runtimeGraphScope === 'merged' && $appState.mode === 'dev'");
+    expect(source).toContain('data-testid="time-machine-remote-scan"');
+    expect(source).toContain('data-testid="network-machine-mode-toggle"');
   });
 
   test('TimeMachine keeps -1 as the only live cursor sentinel', () => {

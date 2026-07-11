@@ -60,12 +60,7 @@ import {
 } from '../radapter/server';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { redactTokenBearingUrlForLog } from './runtime-import-log';
-import {
-  handleLendingBorrowRequest,
-  handleLendingOfferRequest,
-  handleLendingRepayRequest,
-  handleLendingStateRequest,
-} from '../server/lending';
+import { handleLendingStateRequest } from '../server/lending';
 import { handleRuntimeActivityRequest } from '../server/activity-api';
 import { handleReserveFaucet } from '../server/reserve-faucet';
 import { handleOffchainFaucet } from '../server/offchain-faucet';
@@ -1866,46 +1861,6 @@ const run = async (): Promise<void> => {
           activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
         });
       }
-      if (pathname === '/api/lending/offer' && request.method === 'POST') {
-        return handleLendingOfferRequest({
-          req: request,
-          env,
-          headers,
-          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
-          enqueueRuntimeInput,
-          validateRuntimeInputAdmission,
-          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-          getCurrentRuntimeHeight: currentRuntimeHeight,
-          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-        });
-      }
-      if (pathname === '/api/lending/borrow' && request.method === 'POST') {
-        return handleLendingBorrowRequest({
-          req: request,
-          env,
-          headers,
-          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
-          enqueueRuntimeInput,
-          validateRuntimeInputAdmission,
-          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-          getCurrentRuntimeHeight: currentRuntimeHeight,
-          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-        });
-      }
-      if (pathname === '/api/lending/repay' && request.method === 'POST') {
-        return handleLendingRepayRequest({
-          req: request,
-          env,
-          headers,
-          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
-          enqueueRuntimeInput,
-          validateRuntimeInputAdmission,
-          registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
-          getCurrentRuntimeHeight: currentRuntimeHeight,
-          buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
-        });
-      }
-
       if (pathname === '/api/tokens' && request.method === 'GET') {
         return await externalWalletApi.handleTokens();
       }

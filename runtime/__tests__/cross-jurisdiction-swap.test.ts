@@ -3800,7 +3800,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         starterInitialArguments,
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
-        onChainNonce: 1,
+        jNonce: 1,
       },
     };
     const signed = signJEventObservation(env, user, signer, {
@@ -3915,7 +3915,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         starterInitialArguments,
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
-        onChainNonce: 1,
+        jNonce: 1,
       },
     };
     const signed = signJEventObservation(env, sourceUser, signer, {
@@ -4304,7 +4304,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdHeight: 1,
       createdTimestamp: env.timestamp,
     });
-    targetAccount.proofHeader.nonce = 1;
+    targetAccount.proofHeader.nextProofNonce = 1;
     setDeltaTransformerAddress(addr('99'));
     const targetProof = buildAccountProofBody(targetAccount);
     storeDisputeArgumentSnapshot(
@@ -4479,7 +4479,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         starterInitialArguments: '0x',
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
-        onChainNonce: 1,
+        jNonce: 1,
       },
     };
     const signed = signJEventObservation(env, targetUser, targetSigner, {

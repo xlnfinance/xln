@@ -155,6 +155,25 @@ describe('runtime recovery tower', () => {
 
   test('recovery bundle round-trips checkpoint restore', async () => {
     const { env, runtimeSeed, runtimeId, entityId, jurisdiction } = await buildRuntimeEnv();
+    const queuedInput = {
+      runtimeTxs: [],
+      entityInputs: [],
+      jInputs: [{ jurisdictionName: jurisdiction.name, jTxs: [] }],
+      timestamp: 5_600,
+      queuedAt: 5_500,
+    };
+    env.runtimeInput = queuedInput;
+    env.runtimeMempool = queuedInput;
+    env.runtimeConfig = { minFrameDelayMs: 25, snapshotIntervalFrames: 7 };
+    env.runtimeState = {
+      ...(env.runtimeState ?? {}),
+      clockPrimed: true,
+      maxEntityInputsPerFrame: 123,
+      pendingCommittedJOutbox: [{ jurisdictionName: jurisdiction.name, jTxs: [] }],
+    };
+    env.pendingOutputs = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
+    env.networkInbox = [{ entityId, signerId: runtimeId, runtimeId, entityTxs: [] }];
+    env.lockRuntimeSeed = true;
     const bundle = buildRuntimeRecoveryBundle(env, {
       signers: [{
         index: 0,
@@ -190,6 +209,15 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.height).toBe(env.height);
     expect(restoredEnv.eReplicas.size).toBe(env.eReplicas.size);
     expect(restoredEnv.jReplicas.size).toBe(env.jReplicas.size);
+    expect(restoredEnv.runtimeInput).toEqual(env.runtimeInput);
+    expect(restoredEnv.runtimeMempool).toBe(restoredEnv.runtimeInput);
+    expect(restoredEnv.runtimeConfig).toEqual(env.runtimeConfig);
+    expect(restoredEnv.runtimeState?.clockPrimed).toBe(true);
+    expect(restoredEnv.runtimeState?.maxEntityInputsPerFrame).toBe(123);
+    expect(restoredEnv.runtimeState?.pendingCommittedJOutbox).toEqual(env.runtimeState?.pendingCommittedJOutbox);
+    expect(restoredEnv.pendingOutputs).toEqual(env.pendingOutputs);
+    expect(restoredEnv.networkInbox).toEqual(env.networkInbox);
+    expect(restoredEnv.lockRuntimeSeed).toBe(true);
   });
 
   test('recovery checkpoint carries gossip profiles needed for restored openAccount routing', async () => {
@@ -225,7 +253,7 @@ describe('runtime recovery tower', () => {
     expect(restoredHub?.metadata.jurisdiction?.depositoryAddress).toBe(jurisdiction.depositoryAddress);
   });
 
-  test('recovery bundle omits transient consensus caches and compresses large checkpoints below tower body cap', async () => {
+  test('recovery bundle preserves in-flight consensus state and compresses large checkpoints below tower body cap', async () => {
     const { env, runtimeSeed, runtimeId, entityId, wallet, jurisdiction } = await buildRuntimeEnv();
     const replicaKey = `${entityId}:${runtimeId}`;
     const replica = env.eReplicas.get(replicaKey);
@@ -270,9 +298,9 @@ describe('runtime recovery tower', () => {
     expect(serializeTaggedJson(bundle)).not.toContain(runtimeSeed);
 
     const checkpointReplica = (bundle.checkpoint!['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
-    expect(checkpointReplica?.proposal).toBeUndefined();
-    expect(checkpointReplica?.lockedFrame).toBeUndefined();
-    expect(checkpointReplica?.validatorComputedState).toBeUndefined();
+    expect(checkpointReplica?.proposal).toBeDefined();
+    expect(checkpointReplica?.lockedFrame).toBeDefined();
+    expect(checkpointReplica?.validatorComputedState).toBeDefined();
     expect(serializeTaggedJson(bundle).length, 'test fixture must exceed the tower JSON body cap before compression').toBeGreaterThan(128 * 1024);
 
     const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);

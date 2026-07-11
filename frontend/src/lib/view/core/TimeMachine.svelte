@@ -688,7 +688,7 @@
   }
 </script>
 
-{#if $runtimeGraphScope === 'merged'}
+{#if $runtimeGraphScope === 'merged' && $appState.mode === 'dev'}
   <NetworkMachineTimeline />
 {:else}
 <div class="time-machine">
@@ -855,7 +855,11 @@
       disabled={$history.length === 0}
     />
     <span class="time-label end">{totalTime}</span>
-    <button class="dock-toggle-btn" on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}>
+    <button
+      class="dock-toggle-btn"
+      data-testid="network-machine-mode-toggle"
+      on:click={() => appStateOperations.setMode($appState.mode === 'dev' ? 'user' : 'dev')}
+    >
       {$appState.mode === 'dev' ? 'User' : 'Dock'}
     </button>
   </div>

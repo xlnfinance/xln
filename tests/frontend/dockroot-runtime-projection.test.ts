@@ -29,7 +29,7 @@ test('DockRoot treats Dock mode itself as the developer workspace without a devL
 
   expect(source).toContain("void import('./panels/ArchitectPanel.svelte')");
   expect(source).toContain("title: '🎬 Architect'");
-  expect(source).toContain("position: { direction: 'below', referencePanel: 'wallet-main' }");
+  expect(source).toContain("{ direction: 'below', referencePanel: 'wallet-main' }");
   expect(source).not.toContain('devLabEnabled');
   expect(source).not.toContain('xln-dev-lab');
   expect(source).not.toContain('LEGACY_DEV_PANEL_NAMES');
@@ -43,8 +43,9 @@ test('DockRoot defaults to Graph left plus pinned wallet and tools on the right'
   expect(source).toContain("id: 'wallet-main'");
   expect(source).toContain("component: 'wallet'");
   expect(source).toContain("tabComponent: 'pinned-tab'");
-  expect(source).toContain("position: { direction: 'right', referencePanel: 'graph3d' }");
-  expect(source).toContain("position: { direction: 'below', referencePanel: 'wallet-main' }");
+  expect(source).toContain("{ direction: 'right', referencePanel: 'graph3d' }");
+  expect(source).toContain("{ direction: 'below', referencePanel: 'wallet-main' }");
+  expect(source).toContain("position: { direction: 'within', referencePanel: 'jurisdiction' }");
   for (const panelId of [
     'runtime-io',
     'settings',

@@ -10,6 +10,7 @@ import {
 } from './j-event-observation';
 import { normalizeJurisdictionEvents } from './j-event-normalization';
 import { canonicalAccountTxForFrameHash } from './account-consensus-frame';
+import { computeAccountShadowRoot } from './account-state-root';
 
 export type EntityFrameHashDebugRecord = {
   entityId: string;
@@ -127,8 +128,13 @@ const canonicalAccountInputForFrameHash = (value: unknown): Record<string, unkno
   const data = toRecord(value);
   return {
     ...data,
-    ...(data['newAccountFrame'] !== undefined
-      ? { newAccountFrame: canonicalNestedAccountFrameForFrameHash(data['newAccountFrame']) }
+    ...(data['proposal'] !== undefined
+      ? {
+          proposal: {
+            ...toRecord(data['proposal']),
+            frame: canonicalNestedAccountFrameForFrameHash(toRecord(data['proposal'])['frame']),
+          },
+        }
       : {}),
   };
 };
@@ -238,6 +244,10 @@ export async function createEntityFrameHash(
         height: acct.currentHeight,
         stateHash: acct.currentFrame?.stateHash || 'genesis',
       })),
+    accountShadowRoot: computeAccountShadowRoot(newState.accounts),
+    lendingHash: newState.lending
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(newState.lending)))
+      : null,
     htlcRoutesHash: newState.htlcRoutes.size > 0
       ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
           Array.from(newState.htlcRoutes.entries())

@@ -861,11 +861,18 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
     proofHeader: doc.proofHeader,
     proofBody: compactAccountProofBodyForView(doc.proofBody),
     disputeConfig: doc.disputeConfig,
-    onChainSettlementNonce: doc.onChainSettlementNonce,
+    jNonce: doc.jNonce,
     pendingWithdrawals: compactMapTail(doc.pendingWithdrawals, 20) ?? new Map(),
     requestedRebalance: compactMapHead(doc.requestedRebalance, 100) ?? new Map(),
     requestedRebalanceFeeState: compactMapHead(doc.requestedRebalanceFeeState, 100) ?? new Map(),
-    rebalancePolicy: compactMapHead(doc.rebalancePolicy, 100) ?? new Map(),
+    shadow: {
+      rebalance: {
+        policy: compactMapHead(doc.shadow.rebalance.policy, 100) ?? new Map(),
+        submittedAtByToken: compactMapHead(doc.shadow.rebalance.submittedAtByToken, 100) ?? new Map(),
+        ...(doc.shadow.rebalance.activeQuote ? { activeQuote: doc.shadow.rebalance.activeQuote } : {}),
+        ...(doc.shadow.rebalance.pendingRequest ? { pendingRequest: doc.shadow.rebalance.pendingRequest } : {}),
+      },
+    },
   };
 
   const pulls = compactMapTail(doc.pulls, 20);
@@ -894,8 +901,6 @@ const compactAccountDocForView = (doc: StorageAccountDoc): StorageAccountDoc => 
   if (doc.counterpartySettlementHanko) compact.counterpartySettlementHanko = doc.counterpartySettlementHanko;
   const disputeProofNoncesByHash = compactRecordTail(doc.disputeProofNoncesByHash, 20);
   if (disputeProofNoncesByHash) compact.disputeProofNoncesByHash = disputeProofNoncesByHash;
-  if (doc.activeRebalanceQuote) compact.activeRebalanceQuote = doc.activeRebalanceQuote;
-  if (doc.pendingRebalanceRequest) compact.pendingRebalanceRequest = doc.pendingRebalanceRequest;
   if (doc.counterpartyRebalanceFeePolicy) compact.counterpartyRebalanceFeePolicy = doc.counterpartyRebalanceFeePolicy;
   return compact;
 };

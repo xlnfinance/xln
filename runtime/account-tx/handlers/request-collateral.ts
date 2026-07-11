@@ -128,7 +128,6 @@ export function handleRequestCollateral(
 
   // ── Store request for hub crontab ─────────────────────────────
   // Hub's hubRebalanceHandler will pick this up and add R→C to jBatch.
-  const previousSubmittedAt = existingRequest > 0n ? (existingFeeState?.jBatchSubmittedAt || 0) : 0;
   accountMachine.requestedRebalance.set(tokenId, effectiveRequest);
   accountMachine.requestedRebalanceFeeState.set(tokenId, {
     feeTokenId: feeToken,
@@ -137,10 +136,6 @@ export function handleRequestCollateral(
     policyVersion,
     requestedAt: currentTimestamp,
     requestedByLeft: !!byLeft,
-    // If the previous request is already in J-batch, keep the marker until the
-    // on-chain finalize reduces the pending amount. Otherwise a top-up can send
-    // the full refreshed request twice before the first settlement lands.
-    jBatchSubmittedAt: previousSubmittedAt,
   });
 
   const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';
@@ -186,7 +181,7 @@ export function checkAutoRebalance(
   // below the soft limit.
   const settlementInFlight = !!accountMachine.settlementWorkspace;
 
-  if (accountMachine.rebalancePolicy.size === 0) {
+  if (accountMachine.shadow.rebalance.policy.size === 0) {
     return result;
   }
 
@@ -195,7 +190,7 @@ export function checkAutoRebalance(
     return result;
   }
 
-  for (const [tokenId, policy] of accountMachine.rebalancePolicy.entries()) {
+  for (const [tokenId, policy] of accountMachine.shadow.rebalance.policy.entries()) {
     // Skip manual mode (r2cRequestSoftLimit === hardLimit convention)
     if (policy.r2cRequestSoftLimit === policy.hardLimit) continue;
 

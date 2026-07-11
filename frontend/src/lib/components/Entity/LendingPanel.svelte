@@ -1,10 +1,8 @@
 <script lang="ts">
-  import { get } from 'svelte/store';
   import { Banknote, RefreshCw } from 'lucide-svelte';
+  import type { EntityTx, RuntimeInput } from '@xln/runtime/types';
   import type { EntityReplica } from '$lib/types/ui';
   import { xlnFunctions } from '../../stores/xlnStore';
-  import { recordRuntimeIngressReceipt } from '../../stores/runtimeCommandBus';
-  import { runtimeControllerHandle } from '../../stores/runtimeControllerStore';
   import { toasts } from '../../stores/toastStore';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
@@ -14,6 +12,7 @@
   export let accountIds: string[] = [];
   export let entityNames: Map<string, string> = new Map();
   export let isLive: boolean = false;
+  export let submitRuntimeInput: ((input: RuntimeInput) => Promise<unknown> | unknown) | null = null;
 
   type TermId = '1h' | '1d' | '1m';
 
@@ -61,27 +60,6 @@
     };
   };
 
-  type LendingMutationResponse = {
-    success?: boolean;
-    status?: 'queued' | string;
-    error?: string;
-    requestId?: string;
-    statusUrl?: string;
-    runtimeId?: string | null;
-    receipt?: {
-      id?: string | null;
-      status?: string;
-      counts?: {
-        runtimeTxs?: number;
-        entityInputs?: number;
-        jInputs?: number;
-      };
-      enqueuedHeight?: number | null;
-      observedHeight?: number | null;
-      note?: string | null;
-    };
-  };
-
   const terms: Array<{ id: TermId; label: string }> = [
     { id: '1h', label: '1 hour' },
     { id: '1d', label: '1 day' },
@@ -119,7 +97,7 @@
   $: selectedTokenSymbol = tokenSymbol(selectedTokenId);
   $: pools = state?.pools ?? [];
   $: loans = state?.loans ?? [];
-  $: activeLoans = loans.filter((loan) => loan.status === 'active' || loan.status === 'repaying');
+  $: activeLoans = loans.filter((loan) => loan.status !== 'repaid');
   $: totalAvailable = parseAmount(state?.totals?.availableAmount);
   $: totalBorrowed = parseAmount(state?.totals?.borrowedAmount);
   $: canSubmit = isLive && !!selectedHubEntityId && !!normalizedEntityId && !submitting;
@@ -221,32 +199,32 @@
     }
   }
 
-  async function postLending(path: string, body: Record<string, unknown>): Promise<void> {
+  function newIntentId(prefix: 'lend' | 'borrow'): string {
+    const bytes = new Uint8Array(8);
+    globalThis.crypto.getRandomValues(bytes);
+    return `${prefix}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  }
+
+  async function submitLendingTx(entityTx: EntityTx): Promise<void> {
     if (!canSubmit) {
       throw new Error(isLive ? 'Select hub account first' : 'Lending requires live runtime');
     }
+    if (!submitRuntimeInput) throw new Error('Lending command path is not connected');
+    const signerId = String(replica?.signerId || '').trim();
+    if (!signerId) throw new Error('Lending signer is unavailable');
     submitting = true;
     lastError = '';
     lastSuccess = '';
     try {
-      const response = await fetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+      await submitRuntimeInput({
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: normalizedEntityId,
+          signerId,
+          entityTxs: [entityTx],
+        }],
+        jInputs: [],
       });
-      const result = await readJson(response) as LendingMutationResponse;
-      if (!response.ok || result.success !== true) {
-        throw new Error(String(result.error || `Lending request failed (${response.status})`));
-      }
-      if (result.receipt) {
-        const handle = get(runtimeControllerHandle);
-        recordRuntimeIngressReceipt({
-          runtimeId: result.runtimeId || handle.runtimeId || handle.id || 'remote',
-          mode: 'remote',
-          receipt: result.receipt,
-          statusUrl: result.statusUrl ?? null,
-        });
-      }
       lastSuccess = 'Submitted';
       toasts.success('Lending request submitted');
       await refreshLendingState();
@@ -260,35 +238,46 @@
 
   async function submitLend(): Promise<void> {
     if (lendAmount <= 0n) return;
-    await postLending('/api/lending/offer', {
-      hubEntityId: selectedHubEntityId,
-      lenderEntityId: normalizedEntityId,
-      tokenId: selectedTokenId,
-      amount: lendAmount.toString(),
-      termId: lendTermId,
-      interestBps: Math.max(0, Math.floor(Number(lendInterestBps) || 0)),
+    await submitLendingTx({
+      type: 'lendingOffer',
+      data: {
+        positionId: newIntentId('lend'),
+        hubEntityId: selectedHubEntityId,
+        tokenId: selectedTokenId,
+        amount: lendAmount,
+        termId: lendTermId,
+        interestBps: Math.max(0, Math.floor(Number(lendInterestBps) || 0)),
+      },
     });
     if (!lastError) lendAmount = 0n;
   }
 
   async function submitBorrow(): Promise<void> {
     if (borrowAmount <= 0n) return;
-    await postLending('/api/lending/borrow', {
-      hubEntityId: selectedHubEntityId,
-      borrowerEntityId: normalizedEntityId,
-      tokenId: selectedTokenId,
-      amount: borrowAmount.toString(),
-      termId: borrowTermId,
-      maxInterestBps: Math.max(0, Math.floor(Number(maxBorrowInterestBps) || 0)),
+    await submitLendingTx({
+      type: 'lendingBorrow',
+      data: {
+        requestId: newIntentId('borrow'),
+        hubEntityId: selectedHubEntityId,
+        tokenId: selectedTokenId,
+        amount: borrowAmount,
+        termId: borrowTermId,
+        maxInterestBps: Math.max(0, Math.floor(Number(maxBorrowInterestBps) || 0)),
+      },
     });
     if (!lastError) borrowAmount = 0n;
   }
 
-  async function repayLoan(loanId: string): Promise<void> {
-    await postLending('/api/lending/repay', {
-      hubEntityId: selectedHubEntityId,
-      borrowerEntityId: normalizedEntityId,
-      loanId,
+  async function repayLoan(loan: LendingLoan): Promise<void> {
+    const remaining = parseAmount(loan.repaymentAmount) - parseAmount(loan.repaidAmount);
+    await submitLendingTx({
+      type: 'lendingRepay',
+      data: {
+        hubEntityId: selectedHubEntityId,
+        loanId: loan.loanId,
+        tokenId: loan.tokenId,
+        amount: remaining,
+      },
     });
   }
 
@@ -433,8 +422,8 @@
               <strong>{formatAmount(loan.repaymentAmount, loan.tokenId)} {tokenSymbol(loan.tokenId)}</strong>
               <span>{loan.termId} · {rateLabel(loan.interestBps)} · {loan.status} · due {dueLabel(loan.dueAt)}</span>
             </div>
-            <button class="secondary" type="button" disabled={submitting || loan.status === 'repaying'} on:click={() => repayLoan(loan.loanId)} data-testid="lending-repay-submit">
-              {loan.status === 'repaying' ? 'Repaying' : 'Repay'}
+            <button class="secondary" type="button" disabled={submitting || loan.status === 'closing'} on:click={() => repayLoan(loan)} data-testid="lending-repay-submit">
+              {loan.status === 'closing' ? 'Closing' : loan.status === 'opening' ? 'Opening' : 'Repay'}
             </button>
           </div>
         {/each}

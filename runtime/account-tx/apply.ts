@@ -9,7 +9,6 @@ import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
 import { handleDirectPayment } from './handlers/direct-payment';
 import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
-import { handleSetRebalancePolicy } from './handlers/set-rebalance-policy';
 import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
@@ -21,6 +20,7 @@ import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
+import { handleLendingAccountTx } from './handlers/lending';
 import { canProcessAccountTxForDisputeStatus } from '../account-dispute-policy';
 import { createStructuredLogger } from '../logger';
 
@@ -116,6 +116,14 @@ export async function applyAccountTx(
     case 'direct_payment':
       return handleDirectPayment(accountMachine, accountTx, byLeft);
 
+    case 'lending_fund':
+    case 'lending_borrow_request':
+    case 'lending_repay':
+    case 'lending_credit':
+    case 'lending_close_request':
+    case 'lending_close_payout':
+      return handleLendingAccountTx(accountMachine, accountTx, byLeft);
+
     case 'account_settle':
       // Blockchain settlement - handled separately in entity-tx/handlers/account.ts
       return { success: false, events: ['❌ account_settle must not be processed here'], error: 'account_settle handled externally' };
@@ -168,13 +176,6 @@ export async function applyAccountTx(
       }
       return result;
       }
-
-    case 'set_rebalance_policy':
-      return handleSetRebalancePolicy(
-        accountMachine,
-        accountTx,
-        byLeft,
-      );
 
     case 'reopen_disputed':
       return handleReopenDisputed(accountMachine, accountTx);
@@ -304,7 +305,7 @@ export async function applyAccountTx(
       // This should never be called - frames are handled by frame-level consensus
       accountTxLog.debug('account_frame.rejected', {
         account: counterparty,
-        nonce: accountMachine.proofHeader.nonce,
+        nonce: accountMachine.proofHeader.nextProofNonce,
       });
       return { success: false, error: 'account_frame is not a transaction type', events: [] };
 

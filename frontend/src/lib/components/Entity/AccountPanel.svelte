@@ -158,7 +158,6 @@
   function txTypeLabel(type: string): string {
     const known: Record<string, string> = {
       request_collateral: 'Request Collateral',
-      set_rebalance_policy: 'Set Rebalance Policy',
       reserve_to_collateral: 'Reserve to Collateral',
       account_settle: 'Account Settle',
       j_event_claim: 'J Event Claim',
@@ -193,7 +192,7 @@
       jBlockHash: 'J Block Hash',
       transactionHash: 'Tx Hash',
       workspaceVersion: 'Workspace',
-      onChainNonce: 'Nonce',
+      jNonce: 'Nonce',
       feeTokenId: 'Fee Token',
       feeAmount: 'Fee',
       events: 'Events',
@@ -384,7 +383,7 @@
       'events',
       'blockNumber',
       'transactionHash',
-      'onChainNonce',
+      'jNonce',
     ];
     const keys = Object.keys(data);
     const seen = new Set<string>();

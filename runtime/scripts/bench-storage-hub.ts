@@ -245,16 +245,14 @@ const projectAccountDoc = (account: AccountMachine): Record<string, unknown> => 
   counterpartySettlementHanko: account.counterpartySettlementHanko,
   disputeProofNoncesByHash: account.disputeProofNoncesByHash,
   disputeProofBodiesByHash: account.disputeProofBodiesByHash,
-  onChainSettlementNonce: account.onChainSettlementNonce,
+  jNonce: account.jNonce,
   settlementWorkspace: account.settlementWorkspace,
   activeDispute: account.activeDispute,
   pendingWithdrawals: account.pendingWithdrawals,
   requestedRebalance: account.requestedRebalance,
   requestedRebalanceFeeState: account.requestedRebalanceFeeState,
   counterpartyRebalanceFeePolicy: account.counterpartyRebalanceFeePolicy,
-  rebalancePolicy: account.rebalancePolicy,
-  activeRebalanceQuote: account.activeRebalanceQuote,
-  pendingRebalanceRequest: account.pendingRebalanceRequest,
+  shadow: account.shadow,
 });
 
 const getDirSize = (path: string): number => {

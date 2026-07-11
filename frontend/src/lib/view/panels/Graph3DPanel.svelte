@@ -61,6 +61,7 @@
     formatGraphDualConnectionAccountInfoFromReplicas,
     formatGraphEntityBalanceInfo,
     formatGraphEntityShortNameFromReplicas,
+    findGraphJReplica,
     formatGraphMempoolTxLabel,
     formatGraphReserveBadge,
     getGraphEntityNameFromGossip,
@@ -472,7 +473,7 @@
         jMachineTxBoxes.push(txCube);
       });
       if (prevFrame) {
-        const prevJReplica = prevFrame.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
+        const prevJReplica = findGraphJReplica(prevFrame.jReplicas, activeJurisdiction.name);
         const prevJHeight = Number(prevJReplica?.jHeight || 0);
         const currJHeightNum = Number(currentJHeight);
         if (currJHeightNum > prevJHeight && prevMempoolSize > 0) {
@@ -519,7 +520,7 @@
           let foundHeight = -1;
           for (let frameIdx = maxFrameIdx; frameIdx >= 0; frameIdx--) {
             const frame = runtimeHistory[frameIdx];
-            const frameJReplica = frame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
+            const frameJReplica = findGraphJReplica(frame?.jReplicas, activeJurisdiction.name);
             const frameJHeight = Number(frameJReplica?.jHeight || frameJReplica?.blockNumber || 0);
             if (frameJHeight <= targetHeight && frameJHeight > 0) {
               foundFrame = frameJReplica;

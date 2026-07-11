@@ -175,8 +175,9 @@ describe('runtime activity history', () => {
               kind: 'frame',
               fromEntityId: alice,
               toEntityId: hub,
-              newAccountFrame: {
-                height: 4,
+              proposal: {
+                frame: {
+                  height: 4,
                 timestamp: 1_700_000_035_000,
                 jHeight: 9,
                 prevFrameHash: '0xprev',
@@ -192,9 +193,10 @@ describe('runtime activity history', () => {
                     tokenId: 1,
                   },
                 }],
-                deltas: [],
+                  deltas: [],
+                },
+                frameHanko: '0xhanko',
               },
-              newHanko: '0xhanko',
             },
           }],
         }],

@@ -19,8 +19,6 @@ import type {
   JurisdictionEvent,
   LockBookEntry,
   Proposal,
-  RebalancePolicy,
-  RebalanceQuote,
   RebalanceRequestFeeState,
   RuntimeInput,
   RuntimeOverlayRecord,
@@ -112,6 +110,7 @@ export type StorageEntityCoreDoc = {
   hubRebalanceConfig?: HubRebalanceConfig;
   orderbookHubProfile?: HubProfile;
   orderbookReferrals?: Map<string, EntityReferral>;
+  lending?: EntityState['lending'];
 };
 
 export type StorageAccountDoc = {
@@ -125,6 +124,8 @@ export type StorageAccountDoc = {
   locks: Map<string, HtlcLock>;
   swapOffers: Map<string, SwapOffer>;
   pulls?: AccountMachine['pulls'];
+  subcontracts?: AccountMachine['subcontracts'];
+  lendingIntents?: AccountMachine['lendingIntents'];
   globalCreditLimits: AccountMachine['globalCreditLimits'];
   currentHeight: number;
   pendingFrame?: AccountMachine['pendingFrame'];
@@ -157,7 +158,8 @@ export type StorageAccountDoc = {
   disputeProofNoncesByHash?: AccountMachine['disputeProofNoncesByHash'];
   disputeProofBodiesByHash?: AccountMachine['disputeProofBodiesByHash'];
   disputeArgumentSnapshotsByHash?: AccountMachine['disputeArgumentSnapshotsByHash'];
-  onChainSettlementNonce: number;
+  disputePrepare?: AccountMachine['disputePrepare'];
+  jNonce: number;
   settlementWorkspace?: AccountMachine['settlementWorkspace'];
   activeDispute?: AccountMachine['activeDispute'];
   swapOrderHistory?: AccountMachine['swapOrderHistory'];
@@ -174,9 +176,7 @@ export type StorageAccountDoc = {
   requestedRebalance: Map<number, bigint>;
   requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>;
   counterpartyRebalanceFeePolicy?: AccountMachine['counterpartyRebalanceFeePolicy'];
-  rebalancePolicy: Map<number, RebalancePolicy>;
-  activeRebalanceQuote?: RebalanceQuote;
-  pendingRebalanceRequest?: { tokenId: number; targetAmount: bigint };
+  shadow: AccountMachine['shadow'];
 };
 
 export type StorageDoc =
@@ -263,11 +263,28 @@ export type StorageReplicaMeta = {
   entityId: string;
   signerId?: string;
   isProposer?: boolean;
+  mempool?: EntityReplica['mempool'];
+  position?: EntityReplica['position'];
   proposal?: EntityReplica['proposal'];
   lockedFrame?: EntityReplica['lockedFrame'];
   validatorComputedState?: EntityReplica['validatorComputedState'];
   hankoWitness?: EntityReplica['hankoWitness'];
 };
+
+type AssertNoUnclassifiedPersistenceKeys<T extends never> = T;
+type AccountPersistenceCacheKeys = 'clonedForValidation';
+type EntityPersistenceSplitKeys = 'accounts' | 'orderbookExt';
+type ReplicaPersistenceSplitKeys = 'state';
+
+export type AccountPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
+  Exclude<keyof AccountMachine, keyof StorageAccountDoc | AccountPersistenceCacheKeys>
+>;
+export type EntityPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
+  Exclude<keyof EntityState, keyof StorageEntityCoreDoc | EntityPersistenceSplitKeys>
+>;
+export type ReplicaPersistenceCoverage = AssertNoUnclassifiedPersistenceKeys<
+  Exclude<keyof EntityReplica, keyof StorageReplicaMeta | ReplicaPersistenceSplitKeys>
+>;
 
 export type StorageDiffRecord = {
   height: number;

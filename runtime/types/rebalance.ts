@@ -42,7 +42,13 @@ export interface RebalanceRequestFeeState {
   policyVersion: number;
   requestedAt: number;
   requestedByLeft: boolean;
-  jBatchSubmittedAt: number;
+}
+
+export interface AccountRebalanceShadowState {
+  policy: Map<number, RebalancePolicy>;
+  submittedAtByToken: Map<number, number>;
+  activeQuote?: RebalanceQuote;
+  pendingRequest?: { tokenId: number; targetAmount: bigint };
 }
 
 // Rebalance constants (all amounts in 18-decimal base, matching TOKEN_REGISTRY).

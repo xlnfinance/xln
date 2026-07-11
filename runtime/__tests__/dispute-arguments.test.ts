@@ -55,19 +55,19 @@ function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountMachine {
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    proofHeader: { fromEntity: 'left', toEntity: 'right', nonce: 1 },
+    proofHeader: { fromEntity: 'left', toEntity: 'right', nextProofNonce: 1 },
     proofBody: { tokenIds: [], deltas: [] },
     frameHistory: [],
     pendingWithdrawals: new Map(),
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
     leftJObservations: [],
     rightJObservations: [],
     jEventChain: [],
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
+    jNonce: 0,
   };
 }
 

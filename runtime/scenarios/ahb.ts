@@ -2317,7 +2317,7 @@ export async function ahb(env: Env): Promise<void> {
   // - Higher nonce: ACCEPTED (counter-dispute with newer state)
   // - Lower nonce: REJECTED (regression attack)
   const initialNonce = bobAccountAfterBump.activeDispute.initialNonce;
-  const currentNonce = bobAccountAfterBump.proofHeader.nonce;
+  const currentNonce = bobAccountAfterBump.proofHeader.nextProofNonce;
   assert(
     currentNonce >= initialNonce,
     `H13: nonce must be >= initial for counter-dispute (initial=${initialNonce}, current=${currentNonce})`

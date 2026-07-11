@@ -66,11 +66,11 @@ function applyAccountSettledEvent(account: AccountMachine, event: JurisdictionEv
       const remaining = pendingRequest - fulfilledAmount;
       if (remaining > 0n) {
         account.requestedRebalance.set(tokenIdNum, remaining);
-        const feeState = account.requestedRebalanceFeeState?.get(tokenIdNum);
-        if (feeState) feeState.jBatchSubmittedAt = 0;
+        account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
       } else {
         account.requestedRebalance.delete(tokenIdNum);
         account.requestedRebalanceFeeState?.delete(tokenIdNum);
+        account.shadow.rebalance.submittedAtByToken.delete(tokenIdNum);
       }
     }
   }
@@ -78,8 +78,8 @@ function applyAccountSettledEvent(account: AccountMachine, event: JurisdictionEv
   const eventNonce = event.data.nonce;
   if (eventNonce != null) {
     const eventNonceNum = Number(eventNonce);
-    const prev = account.onChainSettlementNonce ?? 0;
-    if (eventNonceNum > prev) account.onChainSettlementNonce = eventNonceNum;
+    const prev = account.jNonce ?? 0;
+    if (eventNonceNum > prev) account.jNonce = eventNonceNum;
   }
 }
 
@@ -107,9 +107,9 @@ function activatePostSettlementProof(account: AccountMachine, counterpartyId: st
 
   const firstSettled = leftEvents.find((event) => event.type === 'AccountSettled');
   const eventNonce = firstSettled?.data?.nonce;
-  account.onChainSettlementNonce = typeof eventNonce === 'number'
+  account.jNonce = typeof eventNonce === 'number'
     ? eventNonce
-    : ws.nonceAtSign ?? ((account.onChainSettlementNonce || 0) + 1);
+    : ws.nonceAtSign ?? ((account.jNonce || 0) + 1);
   delete account.settlementWorkspace;
 }
 

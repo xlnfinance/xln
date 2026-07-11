@@ -65,7 +65,6 @@ const isCrossJurisdictionPullResolveTx = (
 export async function proposeAccountFrame(
   env: Env,
   accountMachine: AccountMachine,
-  skipNonceIncrement: boolean = false,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
 ): Promise<ProposeAccountFrameResult> {
   const profileStartMs = getPerfMs();
@@ -133,12 +132,20 @@ export async function proposeAccountFrame(
 
   // Clone account machine for validation
   let clonedMachine = cloneAccountMachine(accountMachine);
-  // NOTE: proofHeader.nonce is NOT set here — it's incremented per-message, not per-frame
+  // NOTE: proofHeader.nextProofNonce is NOT set here — it's incremented per-message, not per-frame
 
   // Deterministic J-height for account frame hashing:
   // Use account-level finalized J-height (consensus state), not live replica tip.
   // Replica tip can drift between runtime sessions and break WAL replay hashes.
   const frameJHeight = entityJHeight ?? accountMachine.lastFinalizedJHeight ?? 0;
+  // Every transaction must execute against the exact timestamp committed by
+  // the frame. In rapid multi-runtime flows the previous frame can already be
+  // at env.timestamp, so monotonicity advances this value by one. Applying a
+  // timestamp-bearing tx (for example pull_lock) with env.timestamp first and
+  // publishing previous+1 later makes proposer and receiver commit different
+  // Account state roots.
+  const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
+  const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
 
   const allEvents: string[] = [];
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
@@ -165,7 +172,7 @@ export async function proposeAccountFrame(
       machine,
       accountTx,
       proposerByLeft,
-      env.timestamp, // Will be replaced by frame.timestamp during commit
+      frameTimestamp,
       frameJHeight, // Entity's synced J-height
       true, // isValidation = true (on clone, skip persistent state updates)
       env,
@@ -326,11 +333,7 @@ export async function proposeAccountFrame(
 
   const weAreLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
-  // Ensure monotonic timestamps within account (HTLC safety + multi-runtime compatibility)
-  // In multi-runtime P2P scenarios, different runtimes may have different clock rates
-  // We ensure frames always have increasing timestamps within an account chain
-  const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
-  const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
+  // Ensure monotonic timestamps within account (HTLC safety + multi-runtime compatibility).
   if (frameTimestamp > env.timestamp && HEAVY_LOGS) {
     accountLog.debug('timestamp.monotonic', { frameTimestamp, previousTimestamp, envTimestamp: env.timestamp });
   }
@@ -421,14 +424,23 @@ export async function proposeAccountFrame(
 
   let proofResult: ReturnType<typeof buildAccountProofBody>;
   let disputeHash: string | undefined;
+  let signedProofNonce = 0;
   try {
     proofResult = buildAccountProofBody(clonedMachine);
-    if (proofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase()) {
+    const proofBodyChanged =
+      proofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase();
+    const proofNonceConsumed =
+      Number(accountMachine.currentDisputeProofNonce ?? 0) <= Number(clonedMachine.jNonce ?? 0);
+    if (proofBodyChanged || proofNonceConsumed) {
+      signedProofNonce = Math.max(
+        Number(clonedMachine.proofHeader.nextProofNonce ?? 0),
+        Number(clonedMachine.jNonce ?? 0) + 1,
+      );
       disputeHash = createDisputeProofHashWithNonce(
         clonedMachine,
         proofResult.proofBodyHash,
         depositoryAddress,
-        clonedMachine.proofHeader.nonce,
+        signedProofNonce,
       );
     }
   } catch (error) {
@@ -455,11 +467,11 @@ export async function proposeAccountFrame(
   accountMachine.currentFrameHanko = frameHanko;
   if (proofChanged && disputeHanko && disputeHash) {
     accountMachine.currentDisputeProofHanko = disputeHanko;
-    accountMachine.currentDisputeProofNonce = clonedMachine.proofHeader.nonce;
+    accountMachine.currentDisputeProofNonce = signedProofNonce;
     accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
     accountMachine.currentDisputeHash = disputeHash;
     accountMachine.disputeProofNoncesByHash ??= {};
-    accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = clonedMachine.proofHeader.nonce;
+    accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = signedProofNonce;
     accountMachine.disputeProofBodiesByHash ??= {};
     accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
     storeDisputeArgumentSnapshot(
@@ -467,7 +479,7 @@ export async function proposeAccountFrame(
       captureDisputeArgumentSnapshot(
         clonedMachine,
         proofResult.proofBodyHash,
-        clonedMachine.proofHeader.nonce,
+        signedProofNonce,
         proofResult.proofBodyStruct,
         { appliedAccountTxs: validTxs, appliedFrameHeight: newFrame.height },
       ),
@@ -495,35 +507,46 @@ export async function proposeAccountFrame(
     Number(reusableAck.height) === Number(newFrame.height) - 1 &&
     Number(accountMachine.currentHeight) === Number(reusableAck.height);
   const disputeSeal = proofChanged && disputeHanko && disputeHash ? {
-    newDisputeHanko: disputeHanko,
-    newDisputeHash: disputeHash,
-    newDisputeProofBodyHash: proofResult.proofBodyHash,
-    disputeProofNonce: accountMachine.proofHeader.nonce,
-  } : {};
+    hanko: disputeHanko,
+    hash: disputeHash,
+    proofBodyHash: proofResult.proofBodyHash,
+    proofNonce: signedProofNonce,
+  } : (
+    accountMachine.currentDisputeProofHanko &&
+    accountMachine.currentDisputeHash &&
+    accountMachine.currentDisputeProofBodyHash?.toLowerCase() === proofResult.proofBodyHash.toLowerCase() &&
+    Number(accountMachine.currentDisputeProofNonce ?? 0) > Number(clonedMachine.jNonce ?? 0)
+      ? {
+          hanko: accountMachine.currentDisputeProofHanko,
+          hash: accountMachine.currentDisputeHash,
+          proofBodyHash: accountMachine.currentDisputeProofBodyHash,
+          proofNonce: accountMachine.currentDisputeProofNonce!,
+        }
+      : undefined
+  );
+  const proposal = {
+    frame: outboundFrame,
+    frameHanko,
+    ...(disputeSeal ? { disputeSeal } : {}),
+  };
   const accountInput: AccountInput = shouldBundlePreviousAck ? {
     kind: 'frame_ack',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
     watchSeed: accountMachine.watchSeed,
-    height: reusableAck.height,
-    prevHanko: reusableAck!.response.prevHanko,
-    newAccountFrame: outboundFrame,
-    newHanko: frameHanko,
-    ...disputeSeal,
+    ack: structuredClone(reusableAck.response.ack),
+    proposal,
   } : {
     kind: 'frame',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
     watchSeed: accountMachine.watchSeed,
-    height: newFrame.height,
-    newAccountFrame: outboundFrame,
-    newHanko: frameHanko, // Hanko on frame stateHash
-    ...disputeSeal,
+    proposal,
   };
   if (!shouldBundlePreviousAck && reusableAck && Number(reusableAck.height) < Number(accountMachine.currentHeight)) {
     delete accountMachine.lastOutboundFrameAck;
   }
-  if (proofChanged && !skipNonceIncrement) ++accountMachine.proofHeader.nonce;
+  if (proofChanged) accountMachine.proofHeader.nextProofNonce = signedProofNonce + 1;
   accountMachine.pendingAccountInput = structuredClone(accountInput);
 
   // Collect hashes for entity-quorum signing (multi-signer support)

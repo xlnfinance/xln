@@ -22,7 +22,7 @@ type DirectRuntimeWsOptions = {
 
 export type DirectWebSocket = {
   readyState?: number;
-  send(data: string): boolean | number | void;
+  send(data: string | Uint8Array): boolean | number | void;
   close(code?: number, reason?: string): unknown;
 };
 

@@ -25,6 +25,7 @@ import {
   type RelayStore,
 } from '../relay-store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
+import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { type MarketSnapshotPayload } from '../market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
@@ -2493,16 +2494,6 @@ const server = Bun.serve({
       return await proxyAnyHubGet(request, `${pathname}${url.search}`);
     }
 
-    if (pathname === '/api/lending/offer' && request.method === 'POST') {
-      return await proxyHubApi(request, '/api/lending/offer');
-    }
-    if (pathname === '/api/lending/borrow' && request.method === 'POST') {
-      return await proxyHubApi(request, '/api/lending/borrow');
-    }
-    if (pathname === '/api/lending/repay' && request.method === 'POST') {
-      return await proxyHubApi(request, '/api/lending/repay');
-    }
-
     if (
       (
         pathname === '/api/faucet/erc20' ||
@@ -2777,9 +2768,15 @@ const server = Bun.serve({
       });
     },
     message(ws, raw) {
-      const msgStr = raw.toString();
       try {
-        const msg = JSON.parse(msgStr);
+        let msg: RuntimeWsMessage | Record<string, unknown>;
+        try {
+          msg = deserializeWsMessage(raw as string | Buffer | ArrayBuffer);
+        } catch (binaryError) {
+          const candidate = JSON.parse(raw.toString()) as Record<string, unknown>;
+          if (!isMarketMessageType(candidate['type'])) throw binaryError;
+          msg = candidate;
+        }
         if (isMarketMessageType(msg?.type)) {
           Promise.resolve(marketSubscriptionStack.handleMessage(ws as OrchestratorWebSocket, msg as Record<string, unknown>)).catch(error => {
             const reason = serializeError(error);
@@ -2794,7 +2791,7 @@ const server = Bun.serve({
           });
           return;
         }
-        Promise.resolve(relayRoute(routerConfig, ws as OrchestratorWebSocket, msg)).catch(error => {
+        Promise.resolve(relayRoute(routerConfig, ws as OrchestratorWebSocket, msg as RuntimeWsMessage)).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
             event: 'error',
@@ -2802,17 +2799,17 @@ const server = Bun.serve({
             details: { error: reason, msgType: msg?.type, from: msg?.from, to: msg?.to },
           });
           try {
-            ws.send(safeStringify({ type: 'error', error: reason }));
+            ws.send(serializeWsMessage({ type: 'error', error: reason }));
           } catch {}
         });
       } catch (error) {
         pushDebugEvent(relayStore, {
           event: 'error',
-          reason: 'INVALID_JSON',
+          reason: 'INVALID_RELAY_MESSAGE',
           details: { error: serializeError(error) },
         });
         try {
-          ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
+          ws.send(serializeWsMessage({ type: 'error', error: 'Invalid relay message' }));
         } catch {}
       }
     },

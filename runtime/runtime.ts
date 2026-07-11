@@ -36,6 +36,7 @@ import {
   buildCanonicalEnvSnapshot,
   buildRuntimeCheckpointSnapshot,
   normalizePersistedSnapshotInPlace,
+  restoreDurableRuntimeSnapshot,
 } from './wal/snapshot';
 import { computePersistedEnvStateHash } from './wal/hash';
 import { mergeEntityInputs } from './entity-consensus';
@@ -2205,6 +2206,7 @@ export const restoreEnvFromCheckpointSnapshot = async (
   env.networkInbox = [];
   env.pendingNetworkOutputs = [];
   env.overlay = [];
+  restoreDurableRuntimeSnapshot(env, normalizedSnapshot);
 
   await rehydrateRestoredRuntimeInfra(env, {
     isBrowser: runtimeIsBrowser,
@@ -3388,12 +3390,13 @@ const loadEnvFromStorage = async (
         entityId,
         signerId,
         state,
-        mempool: [],
+        mempool: meta?.mempool ?? [],
         isProposer,
         hankoWitness,
         ...(meta?.proposal ? { proposal: meta.proposal } : {}),
         ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
         ...(meta?.validatorComputedState ? { validatorComputedState: meta.validatorComputedState } : {}),
+        ...(meta?.position ? { position: meta.position } : {}),
       });
     }
 

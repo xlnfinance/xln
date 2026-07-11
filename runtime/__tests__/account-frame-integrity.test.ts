@@ -22,6 +22,8 @@ const frame = (deltas: Delta[]): AccountFrame => ({
   accountTxs: [],
   prevFrameHash: 'genesis',
   stateHash: '0xabc',
+  accountStateRoot: `0x${'11'.repeat(32)}`,
+  byLeft: true,
   deltas,
 });
 

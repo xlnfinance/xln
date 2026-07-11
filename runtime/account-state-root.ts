@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import type { AccountMachine, JurisdictionConfig } from './types';
+import type { AccountMachine, JurisdictionConfig, SettlementWorkspace } from './types';
 import { buildHexKeyedMerkle } from './storage/merkle';
 
 export type AccountStateDomain = {
@@ -93,10 +93,9 @@ export const computeAccountStateRoot = (
     watchSeed: account.watchSeed.toLowerCase(),
   }),
   stateLeaf('financial', {
-    status: account.status,
     deltas: account.deltas,
     globalCreditLimits: account.globalCreditLimits,
-    onChainSettlementNonce: account.onChainSettlementNonce,
+    jNonce: account.jNonce,
     disputeConfig: account.disputeConfig,
   }),
   stateLeaf('commitments', {
@@ -104,6 +103,7 @@ export const computeAccountStateRoot = (
     pulls: account.pulls,
     swapOffers: account.swapOffers,
     subcontracts: account.subcontracts,
+    lendingIntents: account.lendingIntents ?? new Map(),
   }),
   stateLeaf('jurisdiction', {
     lastFinalizedJHeight: account.lastFinalizedJHeight,
@@ -114,7 +114,53 @@ export const computeAccountStateRoot = (
   stateLeaf('rebalance', {
     requestedRebalance: account.requestedRebalance,
     requestedRebalanceFeeState: account.requestedRebalanceFeeState,
-    rebalancePolicy: account.rebalancePolicy,
     counterpartyRebalanceFeePolicy: account.counterpartyRebalanceFeePolicy,
   }),
 ]).root;
+
+const settlementOverlayState = (
+  workspace: SettlementWorkspace | undefined,
+): unknown => {
+  if (!workspace) return undefined;
+  const {
+    leftHanko: _leftHanko,
+    rightHanko: _rightHanko,
+    postSettlementDisputeProof,
+    ...state
+  } = workspace;
+  if (!postSettlementDisputeProof) return state;
+  const {
+    leftHanko: _postLeftHanko,
+    rightHanko: _postRightHanko,
+    ...postSettlementState
+  } = postSettlementDisputeProof;
+  return { ...state, postSettlementDisputeProof: postSettlementState };
+};
+
+const pendingWithdrawalOverlayState = (
+  withdrawals: AccountMachine['pendingWithdrawals'],
+): Map<string, Omit<AccountMachine['pendingWithdrawals'] extends Map<string, infer Entry> ? Entry : never, 'signature'>> =>
+  new Map(Array.from(withdrawals.entries()).map(([requestId, withdrawal]) => {
+    const { signature: _signature, ...state } = withdrawal;
+    return [requestId, state];
+  }));
+
+const accountEntityOverlayState = (account: AccountMachine): unknown => ({
+  status: account.status,
+  disputePrepare: account.disputePrepare,
+  settlementWorkspace: settlementOverlayState(account.settlementWorkspace),
+  activeDispute: account.activeDispute,
+  pendingForward: account.pendingForward,
+  pendingWithdrawals: pendingWithdrawalOverlayState(account.pendingWithdrawals),
+  shadow: account.shadow,
+});
+
+export const computeAccountShadowRoot = (
+  accounts: ReadonlyMap<string, AccountMachine>,
+): string => computeCanonicalMerkleRoot(
+  'entity.account-shadow',
+  Array.from(accounts.entries()).map(([counterpartyId, account]) => [
+    counterpartyId.toLowerCase(),
+    accountEntityOverlayState(account),
+  ] as const),
+);

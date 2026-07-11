@@ -205,15 +205,9 @@ describe('multi-jurisdiction entity binding', () => {
       .filter((tx) => tx.type === 'add_delta')
       .map((tx) => tx.data.tokenId)
       .sort((a, b) => a - b);
-    const policyTokenIds = Array.from(account!.rebalancePolicy.keys()).sort((a, b) => a - b);
-    const policyTxTokenIds = account!.mempool
-      .filter((tx) => tx.type === 'set_rebalance_policy')
-      .map((tx) => tx.data.tokenId)
-      .sort((a, b) => a - b);
-
+    const policyTokenIds = Array.from(account!.shadow.rebalance.policy.keys()).sort((a, b) => a - b);
     expect(addDeltaTokenIds).toEqual(expectedTokenIds);
     expect(policyTokenIds).toEqual(expectedTokenIds);
-    expect(policyTxTokenIds).toEqual(expectedTokenIds);
   });
 
   test('openAccount commits the first bilateral frame for local same-jurisdiction entities', async () => {
@@ -372,8 +366,7 @@ describe('multi-jurisdiction entity binding', () => {
         kind: 'ack',
         fromEntityId: entityB,
         toEntityId: entityA,
-        height: 0,
-        prevHanko: '0x',
+        ack: { height: 0, frameHanko: '0x' },
       },
     } as never);
 
@@ -397,17 +390,19 @@ describe('multi-jurisdiction entity binding', () => {
         kind: 'frame',
         fromEntityId: entityB,
         toEntityId: entityA,
-        height: 2,
-        newHanko: '0x',
-        newAccountFrame: {
-          height: 2,
-          timestamp: 1,
-          jHeight: 0,
-          accountTxs: [],
-          prevFrameHash: `0x${'aa'.repeat(32)}`,
-          stateHash: `0x${'bb'.repeat(32)}`,
-          deltas: [],
-          byLeft: false,
+        proposal: {
+          frameHanko: '0x',
+          frame: {
+            height: 2,
+            timestamp: 1,
+            jHeight: 0,
+            accountTxs: [],
+            prevFrameHash: `0x${'aa'.repeat(32)}`,
+            accountStateRoot: `0x${'cc'.repeat(32)}`,
+            stateHash: `0x${'bb'.repeat(32)}`,
+            deltas: [],
+            byLeft: false,
+          },
         },
       },
     } as never);

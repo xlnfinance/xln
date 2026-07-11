@@ -1,6 +1,7 @@
 import type { EntityInput, HankoString, HashToSign, HashType, JInput, ProposedEntityFrame } from '../types';
 import { compareCanonicalText } from '../swap-execution';
 import { normalizeSignatureMap } from '../consensus-signatures';
+import { accountInputAck, accountInputDisputeSeal, accountInputProposal } from '../account-consensus/flush';
 
 export type HankoWitnessEntry = {
   hanko: HankoString;
@@ -32,23 +33,26 @@ export const attachHankoWitnessToOutputs = (
       const accountInput = tx.data;
       if (!accountInput) continue;
 
-      if (accountInput.newAccountFrame?.stateHash) {
-        const frameHankoEntry = hankoWitness.get(accountInput.newAccountFrame.stateHash);
+      const proposal = accountInputProposal(accountInput);
+      if (proposal?.frame.stateHash) {
+        const frameHankoEntry = hankoWitness.get(proposal.frame.stateHash);
         if (frameHankoEntry) {
-          accountInput.newHanko = frameHankoEntry.hanko;
+          proposal.frameHanko = frameHankoEntry.hanko;
           attachedCount++;
         }
       }
 
-      if (accountInput.newDisputeHash) {
-        const disputeHankoEntry = hankoWitness.get(accountInput.newDisputeHash);
+      const seals = [accountInputAck(accountInput)?.disputeSeal, proposal?.disputeSeal, accountInputDisputeSeal(accountInput)];
+      for (const seal of seals) {
+        if (!seal) continue;
+        const disputeHankoEntry = hankoWitness.get(seal.hash);
         if (disputeHankoEntry) {
-          accountInput.newDisputeHanko = disputeHankoEntry.hanko;
+          seal.hanko = disputeHankoEntry.hanko;
           attachedCount++;
         }
       }
 
-      if (accountInput.settleAction?.type === 'approve' && accountInput.settleAction.hanko) {
+      if (accountInput.kind === 'settle' && accountInput.settleAction.type === 'approve' && accountInput.settleAction.hanko) {
         for (const entry of hankoWitness.values()) {
           if (entry.type === 'settlement' && entry.entityHeight === entityHeight) {
             accountInput.settleAction.hanko = entry.hanko;

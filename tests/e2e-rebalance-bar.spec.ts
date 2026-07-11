@@ -1042,7 +1042,7 @@ async function readRebalanceState(page: Page, hubId: string) {
       const localIsLeft = String(rep.entityId || '').toLowerCase() < String(hubId).toLowerCase();
       const hubIsLeft = String(hubId || '').toLowerCase() < String(rep.entityId || '').toLowerCase();
       const requested = acc.requestedRebalance?.get?.(1) || 0n;
-      const policy = acc.rebalancePolicy?.get?.(1) || null;
+      const policy = acc.shadow?.rebalance?.policy?.get?.(1) || null;
       return {
         entityId: String(rep.entityId || ''),
         delta: {

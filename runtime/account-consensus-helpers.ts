@@ -246,6 +246,34 @@ const parseNumberMaybe = (value: unknown): number | undefined => {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 
+export function resolveAutoRebalanceFeePolicy(
+  env: Env,
+  accountMachine: AccountMachine,
+  counterpartyEntityId: string,
+) {
+  const hubConfig = getReplicaByEntityId(env, counterpartyEntityId)?.state?.hubRebalanceConfig;
+  const accountPolicy = accountMachine.counterpartyRebalanceFeePolicy;
+  return {
+    policyVersion:
+      accountPolicy?.policyVersion ??
+      parseNumberMaybe(hubConfig?.policyVersion) ??
+      1,
+    baseFee:
+      accountPolicy?.baseFee ??
+      parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
+      10n ** 17n,
+    liquidityFeeBps:
+      accountPolicy?.liquidityFeeBps ??
+      parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
+      parseBigIntMaybe(hubConfig?.minFeeBps) ??
+      1n,
+    gasFee:
+      accountPolicy?.gasFee ??
+      parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
+      0n,
+  };
+}
+
 export async function runPostFrameAutoRebalanceCheck(
   env: Env,
   accountMachine: AccountMachine,
@@ -268,14 +296,13 @@ export async function runPostFrameAutoRebalanceCheck(
       }
     };
     const ourReplica = getReplicaByEntityId(env, ourEntityId);
-    const counterpartyReplica = getReplicaByEntityId(env, counterpartyEntityId);
     const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
     const emitSkip = (reason: string) => {
       emitRebalanceDebug({
         status: 'skipped',
         event: 'request_not_queued',
         reason,
-        policyCount: accountMachine.rebalancePolicy?.size || 0,
+        policyCount: accountMachine.shadow.rebalance.policy.size,
         hasPendingFrame: !!accountMachine.pendingFrame,
       });
     };
@@ -285,36 +312,12 @@ export async function runPostFrameAutoRebalanceCheck(
       return [];
     }
 
-    const hubConfig = counterpartyReplica?.state?.hubRebalanceConfig;
-    const accountPolicy = accountMachine.counterpartyRebalanceFeePolicy;
-    const DEFAULT_REBALANCE_BASE_FEE = 10n ** 17n; // 0.1 token (18 decimals)
-    const DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS = 1n; // 0.01%
-    const DEFAULT_REBALANCE_GAS_FEE = 0n;
-    const DEFAULT_REBALANCE_POLICY_VERSION = 1;
-    const baseFee =
-      accountPolicy?.baseFee ??
-      parseBigIntMaybe(hubConfig?.rebalanceBaseFee) ??
-      DEFAULT_REBALANCE_BASE_FEE;
-    const liquidityFeeBps =
-      accountPolicy?.liquidityFeeBps ??
-      parseBigIntMaybe(hubConfig?.rebalanceLiquidityFeeBps) ??
-      parseBigIntMaybe(hubConfig?.minFeeBps) ??
-      DEFAULT_REBALANCE_LIQUIDITY_FEE_BPS;
-    const gasFee =
-      accountPolicy?.gasFee ??
-      parseBigIntMaybe(hubConfig?.rebalanceGasFee) ??
-      DEFAULT_REBALANCE_GAS_FEE;
-    const policyVersion =
-      accountPolicy?.policyVersion ??
-      parseNumberMaybe(hubConfig?.policyVersion) ??
-      DEFAULT_REBALANCE_POLICY_VERSION;
-
-    const rebalanceTxs = checkAutoRebalance(accountMachine, ourEntityId, counterpartyEntityId, {
-      policyVersion,
-      baseFee,
-      liquidityFeeBps,
-      gasFee,
-    });
+    const rebalanceTxs = checkAutoRebalance(
+      accountMachine,
+      ourEntityId,
+      counterpartyEntityId,
+      resolveAutoRebalanceFeePolicy(env, accountMachine, counterpartyEntityId),
+    );
     if (rebalanceTxs.length > 0) {
       emitRebalanceDebug({
         status: 'ok',

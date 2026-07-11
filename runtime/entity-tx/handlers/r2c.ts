@@ -85,7 +85,7 @@ export async function handleR2C(
       return { newState, outputs };
     }
     const account = newState.accounts.get(counterpartyId);
-    const quote = account?.activeRebalanceQuote;
+    const quote = account?.shadow.rebalance.activeQuote;
     r2cLog.debug('quote.validate', {
       entity: shortId(entityState.entityId),
       counterparty: shortId(counterpartyId),
@@ -121,7 +121,7 @@ export async function handleR2C(
     }
     if (currentTimestamp > quote.quoteId + QUOTE_EXPIRY_MS) {
       // Quote expired — clear it
-      delete account!.activeRebalanceQuote;
+      delete account!.shadow.rebalance.activeQuote;
       addMessage(newState, `❌ Rebalance fee: quote expired (age: ${currentTimestamp - quote.quoteId}ms)`);
       return { newState, outputs };
     }
@@ -153,7 +153,7 @@ export async function handleR2C(
     }
 
     // Clear the quote (consumed)
-    delete account!.activeRebalanceQuote;
+    delete account!.shadow.rebalance.activeQuote;
 
     r2cLog.debug('fee.collected', {
       entity: shortId(entityState.entityId),

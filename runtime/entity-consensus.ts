@@ -21,6 +21,7 @@ import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from './utils'
 import { compareStableText, safeStringify } from './serialization-utils';
 import { nodeProcess } from './runtime-platform';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
+import { accountInputReferenceHeight } from './account-consensus/flush';
 import {
   addMessages,
   cloneEntityReplica,
@@ -1654,7 +1655,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
       : { counterparty: 'unknown' };
     if (!accountMachine) continue;
 
-    const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
+    const proposal = await proposeAccountFrame(env, accountMachine, currentEntityState.lastFinalizedJHeight);
     if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
       const normalizedCancels = proposal.swapOffersCancelled.map(({ offerId }) => ({
         accountId: accountKey,
@@ -1721,7 +1722,7 @@ async function proposePendingAccountFrames(context: ProposePendingAccountFramesC
         {
           entityId: currentEntityState.entityId,
           counterpartyId: cpId,
-          frameHeight: proposal.accountInput.height,
+          frameHeight: accountInputReferenceHeight(proposal.accountInput),
           accountKey,
         },
         currentEntityState.entityId,

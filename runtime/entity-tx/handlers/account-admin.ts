@@ -3,6 +3,8 @@ import { createStructuredLogger, shortId } from '../../logger';
 import { normalizeRebalanceMatchingStrategy } from '../../rebalance-policy';
 import { announceLocalEntityProfile } from '../../networking/gossip-helper';
 import { cloneEntityState, addMessage } from '../../state-helpers';
+import { resolveAutoRebalanceFeePolicy } from '../../account-consensus-helpers';
+import { checkAutoRebalance } from '../../account-tx/handlers/request-collateral';
 import type { MempoolOp } from './account';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;
@@ -155,6 +157,7 @@ export const handleSetHubConfigEntityTx = (
 };
 
 export const handleSetRebalancePolicyEntityTx = (
+  env: Env,
   entityState: EntityState,
   entityTx: EntityTxOf<'setRebalancePolicy'>,
 ): AccountAdminResult => {
@@ -166,16 +169,29 @@ export const handleSetRebalancePolicyEntityTx = (
     return { newState: entityState, outputs: [] };
   }
 
+  if (r2cRequestSoftLimit < 0n || hardLimit < r2cRequestSoftLimit || maxAcceptableFee < 0n) {
+    throw new Error(`REBALANCE_POLICY_INVALID: token=${tokenId}`);
+  }
+  const account = newState.accounts.get(counterpartyEntityId)!;
+  account.shadow.rebalance.policy.set(tokenId, {
+    r2cRequestSoftLimit,
+    hardLimit,
+    maxAcceptableFee,
+  });
+
+  const rebalanceTxs = newState.hubRebalanceConfig
+    ? []
+    : checkAutoRebalance(
+        account,
+        newState.entityId,
+        counterpartyEntityId,
+        resolveAutoRebalanceFeePolicy(env, account, counterpartyEntityId),
+      );
+
   return {
     newState,
-    outputs: processingTrigger(entityState),
-    mempoolOps: [{
-      accountId: counterpartyEntityId,
-      tx: {
-        type: 'set_rebalance_policy',
-        data: { tokenId, r2cRequestSoftLimit, hardLimit, maxAcceptableFee },
-      },
-    }],
+    outputs: rebalanceTxs.length > 0 ? processingTrigger(newState) : [],
+    mempoolOps: rebalanceTxs.map((tx) => ({ accountId: counterpartyEntityId, tx })),
   };
 };
 
@@ -223,8 +239,8 @@ export const handleReopenDisputedAccountEntityTx = (
     return { newState: entityState, outputs: [] };
   }
 
-  const onChainNonce = Number(entityTx.data.onChainNonce ?? accountMachine.onChainSettlementNonce ?? 0);
-  addMessage(newState, `🔓 Reopen requested with ${counterpartyEntityId.slice(-4)} at nonce=${onChainNonce}`);
+  const jNonce = Number(entityTx.data.jNonce ?? accountMachine.jNonce ?? 0);
+  addMessage(newState, `🔓 Reopen requested with ${counterpartyEntityId.slice(-4)} at nonce=${jNonce}`);
 
   return {
     newState,
@@ -233,7 +249,7 @@ export const handleReopenDisputedAccountEntityTx = (
       accountId: counterpartyEntityId,
       tx: {
         type: 'reopen_disputed',
-        data: { onChainNonce },
+        data: { jNonce },
       },
     }],
   };

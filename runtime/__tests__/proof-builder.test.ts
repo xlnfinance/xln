@@ -16,13 +16,13 @@ describe('proof-builder dispute hash', () => {
     const leftOriented = {
       leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
       rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
-      proofHeader: { nonce: 1 },
+      proofHeader: { nextProofNonce: 1 },
       watchSeed: TEST_WATCH_SEED,
     };
     const rightOriented = {
       leftEntity: leftOriented.rightEntity,
       rightEntity: leftOriented.leftEntity,
-      proofHeader: { nonce: 1 },
+      proofHeader: { nextProofNonce: 1 },
       watchSeed: TEST_WATCH_SEED,
     };
 
@@ -47,7 +47,7 @@ describe('proof-builder dispute hash', () => {
     const account = {
       leftEntity: '0x1ee7a317604eea0486bd28ef857fa194171f6e844f5933cb13efecf3cd36ec73',
       rightEntity: '0xbf2891acf55a366fb4f28727dfc301b1f5cd70eb0f3b8a029a31b2ac4478e1da',
-      proofHeader: { nonce: 1 },
+      proofHeader: { nextProofNonce: 1 },
       watchSeed: TEST_WATCH_SEED,
     };
     expect(() => createDisputeProofHash(account, PROOF_BODY_HASH, '')).toThrow('MISSING_DEPOSITORY_ADDRESS');

@@ -173,7 +173,7 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   await page.getByRole('button', { name: /Custom/i }).click();
   await page.locator('#shards').fill(String(shards));
 
-  const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open \/ restore wallet|Open (Wallet|Vault))/, exact: false });
+  const openVaultButton = page.getByRole('button', { name: /Derive wallet/i });
   await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
   await openVaultButton.click();
   await createFreshWalletWhenNoBackupExists(page);
@@ -213,7 +213,7 @@ test.describe('brainvault parity', () => {
     await page.getByRole('button', { name: /Security work factor/i }).click();
     await page.getByRole('button', { name: /^1\s+Test$/ }).click();
 
-    const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open \/ restore wallet|Open (Wallet|Vault))/, exact: false });
+    const openVaultButton = page.getByRole('button', { name: /Derive wallet/i });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
     await createFreshWalletWhenNoBackupExists(page);

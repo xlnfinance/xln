@@ -5,6 +5,7 @@ import {
   RuntimeQueryClient,
   clearRuntimeQueryCache,
 } from '../../frontend/src/lib/stores/runtimeQueryClient';
+import { runtimeViewNeedsHeightRefresh } from '../../frontend/src/lib/stores/runtimeViewStore';
 
 test('runtime query client exposes typed projection reads and bounded cache', () => {
   const source = readFileSync('frontend/src/lib/stores/runtimeQueryClient.ts', 'utf8');
@@ -44,7 +45,8 @@ test('runtime view store owns the active projected RuntimeView without Env acces
   expect(source).toContain('const requestStillCurrent = (): boolean =>');
   expect(source).toContain('current.id === expectedRuntimeId');
   expect(source).toContain('current.mode === expectedRuntimeMode');
-  expect(source).toContain('if (!requestStillCurrent()) return get(runtimeView);');
+  expect(source).toContain('if (requestStillCurrent()) runtimeView.set(next);');
+  expect(source).toContain('if (!requestStillCurrent()) throw error;');
   expect(source).toContain('runtimeAdapter.subscribe');
   expect(source).toContain('resetRuntimeView();');
   expect(source).toContain('runtimeAdapterHeight.subscribe');
@@ -54,6 +56,19 @@ test('runtime view store owns the active projected RuntimeView without Env acces
   expect(source).not.toContain('getEnv');
   expect(source).not.toContain('setXlnEnvironment');
   expect(source).not.toContain('runtimeAdapterStore');
+});
+
+test('runtime view height pushes cannot race the initial remote projection', () => {
+  const liveView = {
+    atHeight: null,
+    frame: { height: 10 },
+  };
+
+  expect(runtimeViewNeedsHeightRefresh({ atHeight: null, frame: null }, 'connected', 11)).toBe(false);
+  expect(runtimeViewNeedsHeightRefresh(liveView, 'connecting', 11)).toBe(false);
+  expect(runtimeViewNeedsHeightRefresh({ ...liveView, atHeight: 10 }, 'connected', 11)).toBe(false);
+  expect(runtimeViewNeedsHeightRefresh(liveView, 'connected', 10)).toBe(false);
+  expect(runtimeViewNeedsHeightRefresh(liveView, 'connected', 11)).toBe(true);
 });
 
 test('activity history panel reads activity through RuntimeQueryClient only', () => {

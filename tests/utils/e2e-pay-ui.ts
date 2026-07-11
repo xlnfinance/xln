@@ -173,6 +173,13 @@ export async function prepareUiPayment(
   intent: UiPaymentIntent,
 ): Promise<PreparedUiPayment> {
   await openPayWorkspace(page);
+  const instantMode = page.getByTestId('payment-mode-instant');
+  const asyncMode = page.getByTestId('payment-mode-async');
+  const trustedMode = page.getByTestId('payment-mode-trusted');
+  await expect(instantMode).toBeVisible({ timeout: 10_000 });
+  await expect(asyncMode).toBeVisible({ timeout: 10_000 });
+  await expect(trustedMode).toBeVisible({ timeout: 10_000 });
+  await expect(asyncMode).toHaveAttribute('aria-pressed', 'true');
   await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount);
 
   const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();

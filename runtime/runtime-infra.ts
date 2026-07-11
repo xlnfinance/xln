@@ -4,6 +4,7 @@ import type { BrowserVMProvider, JAdapterConfig } from './jadapter/types';
 import { createJAdapter } from './jadapter';
 import { createJAdapterWithRetry } from './jadapter/retry';
 import { createStructuredLogger } from './logger';
+import { buildCanonicalJReplicaSnapshot } from './wal/snapshot';
 
 const infraLog = createStructuredLogger('runtime.infra');
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
@@ -16,6 +17,17 @@ export const hasLiveJAdapter = (value: unknown): value is JAdapter => {
     typeof candidate.stopWatching === 'function' &&
     typeof candidate.submitTx === 'function'
   );
+};
+
+export const normalizeRestoredJReplicas = (env: Env): void => {
+  if (!env.jReplicas) env.jReplicas = new Map();
+  for (const [name, replica] of env.jReplicas.entries()) {
+    const jadapter = hasLiveJAdapter(replica.jadapter) ? replica.jadapter : undefined;
+    env.jReplicas.set(name, {
+      ...buildCanonicalJReplicaSnapshot(replica),
+      ...(jadapter ? { jadapter } : {}),
+    });
+  }
 };
 
 export const ensureLiveJAdapterForReplica = async (
@@ -91,6 +103,7 @@ export const rehydrateRestoredRuntimeInfra = async (
     setBrowserVMJurisdiction: (env: Env | null, depositoryAddress: string, browserVM?: BrowserVMProvider | null) => void;
   },
 ): Promise<void> => {
+  normalizeRestoredJReplicas(env);
   try {
     await options.loadGossipProfiles(env);
   } catch (error) {

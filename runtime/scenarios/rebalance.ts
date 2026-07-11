@@ -748,7 +748,7 @@ export async function runRebalanceScenario(): Promise<void> {
     const hubExposure = derived?.outPeerCredit ?? 0n;
     const hubOutCollateral = derived?.outCollateral ?? 0n;
     const uncollateralized = hubExposure > hubOutCollateral ? hubExposure - hubOutCollateral : 0n;
-    const nonce = acc?.onChainSettlementNonce || 0;
+    const nonce = acc?.jNonce || 0;
     console.log(
       `  Hub↔${user.name}: delta=${derived?.delta ?? 0n}, outCollateral=${hubOutCollateral}, hubExposure=${hubExposure}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.settlementWorkspace?.status || 'none'}`,
     );
@@ -759,11 +759,11 @@ export async function runRebalanceScenario(): Promise<void> {
   // Invariant: nonce is bilateral-equal for each account.
   for (const user of users) {
     const hubAcc = hubFinal.accounts.get(user.id);
-    const hubNonce = hubAcc?.onChainSettlementNonce || 0;
+    const hubNonce = hubAcc?.jNonce || 0;
     assert(hubNonce >= 0, `Hub↔${user.name} nonce must be non-negative (got ${hubNonce})`, env);
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
-    const userNonce = userAcc?.onChainSettlementNonce || 0;
+    const userNonce = userAcc?.jNonce || 0;
     assert(
       hubNonce === userNonce,
       `Hub↔${user.name} nonce must match counterparty view (hub=${hubNonce}, user=${userNonce})`,

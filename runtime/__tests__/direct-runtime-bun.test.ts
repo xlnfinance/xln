@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync, signDigest } from '../account-crypto';
 import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, pubKeyToHex } from '../networking/p2p-crypto';
-import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
+import { hashHelloMessage, serializeWsMessage, deserializeWsMessage, serializeWsMessageForDebug, type RuntimeWsMessage } from '../networking/ws-protocol';
 import type { RoutedEntityInput } from '../types';
 
 const makeAuthedHello = (seed: string, runtimeId: string, signerId = '1'): RuntimeWsMessage => {
@@ -24,7 +24,7 @@ const makeFakeWs = () => {
   const closed: Array<{ code?: number; reason?: string }> = [];
   const ws = {
     readyState: 1,
-    send(raw: string) {
+    send(raw: string | Uint8Array) {
       sent.push(deserializeWsMessage(raw));
       return true;
     },
@@ -37,6 +37,19 @@ const makeFakeWs = () => {
 };
 
 describe('direct runtime websocket route', () => {
+  test('uses MessagePack on the wire and tagged JSON only for debug', () => {
+    const message: RuntimeWsMessage = {
+      type: 'debug_event',
+      payload: { amount: 7n, values: new Map([['token', 1]]) },
+    };
+    const binary = serializeWsMessage(message);
+
+    expect(binary).toBeInstanceOf(Uint8Array);
+    expect(binary[0]).toBe(0x01);
+    expect(deserializeWsMessage(binary)).toEqual(message);
+    expect(deserializeWsMessage(serializeWsMessageForDebug(message))).toEqual(message);
+  });
+
   test('routes encrypted entity input back through a live direct socket', async () => {
     const serverSeed = 'direct-route-server';
     const clientSeed = 'direct-route-client';

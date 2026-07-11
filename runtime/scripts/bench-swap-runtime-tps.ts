@@ -84,14 +84,14 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountMachine =>
   rightJObservations: [],
   jEventChain: [],
   lastFinalizedJHeight: 0,
-  proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nonce: 1 },
+  proofHeader: { fromEntity: leftEntity, toEntity: rightEntity, nextProofNonce: 1 },
   proofBody: { tokenIds: [], deltas: [] },
   disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-  onChainSettlementNonce: 0,
+  jNonce: 0,
   pendingWithdrawals: new Map(),
   requestedRebalance: new Map(),
   requestedRebalanceFeeState: new Map(),
-  rebalancePolicy: new Map(),
+  shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
 });
 
 const installDelta = (account: AccountMachine, tokenId: number, credit = 10n ** 30n): Delta => {

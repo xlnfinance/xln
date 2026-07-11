@@ -74,7 +74,6 @@ function entityTxTypeLabel(type: string): string {
     openAccount: 'Open Account',
     extendCredit: 'Extend Credit',
     requestCollateral: 'Request Collateral',
-    set_rebalance_policy: 'Set Rebalance Policy',
     r2c: 'Deposit Collateral',
     settle_approve: 'Settle Approve',
     settle_finalize: 'Settle Finalize',
@@ -257,8 +256,6 @@ function summarizeAccountTx(
         : '';
       return fee ? `Requested collateral · ${amount} (+ fee ${fee})` : `Requested collateral · ${amount}`;
     }
-    case 'set_rebalance_policy':
-      return `Updated rebalance policy · soft ${activityTokenAmount(data['tokenId'], data['r2cRequestSoftLimit'], options)} / hard ${activityTokenAmount(data['tokenId'], data['hardLimit'], options)}`;
     case 'set_credit_limit':
       return `Set credit limit · ${activityTokenAmount(data['tokenId'], data['amount'], options)}`;
     case 'add_delta':

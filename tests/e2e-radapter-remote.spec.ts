@@ -826,10 +826,7 @@ test('dev DockRoot Solvency panel reads remote radapter solvency-summary', async
     { timeout: REMOTE_E2E_WAIT_MS },
   );
 
-  await expect(page.locator('body')).toContainText(
-    'Network graph is embedded-only until its projection endpoint is available',
-    { timeout: REMOTE_E2E_WAIT_MS },
-  );
+  await expect(page.getByTestId('network-machine-timeline')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
 
   await page.locator('.dv-tab').filter({ hasText: 'Gossip' }).first().click();
   await expect(page.getByTestId('runtime-gossip-panel')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
@@ -1743,9 +1740,7 @@ test('admin remote runtime control advances live state and exposes past frames',
   const adminKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'admin')).token;
   const readKey = (await resolveRuntimeImportCapability(page, h1Endpoint, 'read')).token;
   await page.addInitScript(() => {
-    const raw = localStorage.getItem('xln-settings');
-    const settings = raw ? JSON.parse(raw) as Record<string, unknown> : {};
-    localStorage.setItem('xln-settings', JSON.stringify({ ...settings, showTimeMachine: true }));
+    localStorage.setItem('xln-settings', JSON.stringify({ showTimeMachine: true }));
   });
   await page.goto(`${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(adminKey)}#accounts`, {
     waitUntil: 'domcontentloaded',
@@ -1772,6 +1767,9 @@ test('admin remote runtime control advances live state and exposes past frames',
     { expectedRuntimeId: h1Endpoint.runtimeId, hubId: h1 },
     { timeout: REMOTE_E2E_WAIT_MS },
   );
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('xln-settings') || '{}').showTimeMachine,
+  )).toBe(true);
 
   const accessBeforeReload = await page.evaluate(() => {
     const view = window as typeof window & {
@@ -2309,6 +2307,8 @@ test('admin remote runtime control advances live state and exposes past frames',
   expect(batchProbe.bookCounts.every((count) => count <= 1)).toBe(true);
   expect(batchProbe.unavailable).toEqual([]);
 
+  await settingsPanel.getByRole('button', { name: 'Display', exact: true }).click();
+  await expect(settingsPanel.getByTestId('settings-time-machine-toggle')).toBeChecked();
   await expect(page.getByTestId('time-machine-remote-scan')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('time-machine-remote-target')).toBeVisible();
   await expect(page.getByTestId('time-machine-remote-target')).toContainText(/hub/i);
@@ -2576,6 +2576,7 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
   const h1Endpoint = await resolveHubRuntimeEndpoint(page, baseline, 'H1');
 
   await page.goto(`${APP_BASE_URL}/app`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('tab', { name: 'Testnet' }).click();
   await expect(page.getByTestId('live-runtime-section')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
   const select = page.getByTestId('live-runtime-select');
   await expect(select).toBeVisible({ timeout: 120_000 });

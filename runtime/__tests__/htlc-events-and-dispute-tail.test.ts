@@ -33,19 +33,19 @@ const makeReplica = (entityId: string, counterpartyId: string): EntityReplica =>
     currentHeight: 0,
     pendingSignatures: [],
     rollbackCount: 0,
-    proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nonce: 0 },
+    proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
     frameHistory: [],
     pendingWithdrawals: new Map(),
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
     leftJObservations: [],
     rightJObservations: [],
     jEventChain: [],
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
+    jNonce: 0,
   };
 
   return {

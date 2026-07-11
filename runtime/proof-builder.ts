@@ -359,7 +359,7 @@ export function buildInitialDisputeProof(
 
   return {
     counterentity: accountMachine.proofHeader.toEntity,
-    nonce: accountMachine.proofHeader.nonce,
+    nonce: accountMachine.proofHeader.nextProofNonce,
     proofbodyHash: proofBodyHash,
     watchSeed: accountMachine.watchSeed,
     sig: counterpartySignature,
@@ -403,7 +403,7 @@ export function encodeDisputeMessage(
       MESSAGE_TYPE_DISPUTE_PROOF,
       depositoryAddress,
       chKey,
-      accountMachine.proofHeader.nonce,
+      accountMachine.proofHeader.nextProofNonce,
       proofBodyHash,
       watchSeed,
     ]

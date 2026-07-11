@@ -275,14 +275,14 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => 
     rightJObservations: [],
     jEventChain: [],
     lastFinalizedJHeight: 0,
-    proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nonce: 0 },
+    proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
+    jNonce: 0,
     pendingWithdrawals: new Map(),
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
   };
 };
 
@@ -292,7 +292,7 @@ const mirrorAccount = (
   counterpartyId: string,
 ): AccountMachine => {
   const mirror = structuredClone(source) as AccountMachine;
-  mirror.proofHeader = { fromEntity: selfId, toEntity: counterpartyId, nonce: 0 };
+  mirror.proofHeader = { fromEntity: selfId, toEntity: counterpartyId, nextProofNonce: 0 };
   return mirror;
 };
 

@@ -84,14 +84,13 @@ export function handleJEventClaim(
     });
   }
 
-  if (!isValidation) {
-    const beforeFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
-    tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
-    const afterFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
-    const settledTokenId = Number(normalizedEvents.find(e => e.type === 'AccountSettled')?.data?.tokenId ?? 1);
-    const delta = accountMachine.deltas.get(settledTokenId);
-    if (afterFinalizedHeight > beforeFinalizedHeight) {
-      if (env) {
+  const beforeFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
+  tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
+  const afterFinalizedHeight = accountMachine.lastFinalizedJHeight || 0;
+  const settledTokenId = Number(normalizedEvents.find(e => e.type === 'AccountSettled')?.data?.tokenId ?? 1);
+  const delta = accountMachine.deltas.get(settledTokenId);
+  if (afterFinalizedHeight > beforeFinalizedHeight && !isValidation) {
+    if (env) {
         env.emit('account_settled_finalized_bilateral', {
           entityId: myEntityId,
           accountId: cpId,
@@ -100,8 +99,8 @@ export function handleJEventClaim(
           collateral: String(delta?.collateral ?? 0n),
           ondelta: String(delta?.ondelta ?? 0n),
         });
-      }
-      emitRebalanceDebug({
+    }
+    emitRebalanceDebug({
         step: 5,
         status: 'ok',
         event: 'account_settled_finalized_bilateral',
@@ -110,8 +109,7 @@ export function handleJEventClaim(
         tokenId: settledTokenId,
         collateral: String(delta?.collateral ?? 0n),
         ondelta: String(delta?.ondelta ?? 0n),
-      });
-    }
+    });
   }
 
   return { success: true, events: [`📥 J-event claim processed`] };

@@ -31,6 +31,7 @@ const makeEntityState = (): EntityState => ({
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(),
       requestedRebalanceFeeState: new Map(),
+      shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
       currentFrame: {
         height: 1,
         timestamp: 1,
@@ -38,6 +39,7 @@ const makeEntityState = (): EntityState => ({
         accountTxs: [],
         prevFrameHash: 'genesis',
         stateHash: `0x${'33'.repeat(32)}`,
+        accountStateRoot: `0x${'44'.repeat(32)}`,
         byLeft: true,
         deltas: [],
       },

@@ -61,6 +61,8 @@ export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountMac
   locks: doc.locks,
   swapOffers: publicSwapOffers(doc.swapOffers),
   ...withProp('pulls', doc.pulls),
+  ...withProp('subcontracts', doc.subcontracts),
+  ...withProp('lendingIntents', doc.lendingIntents),
   globalCreditLimits: doc.globalCreditLimits,
   currentHeight: doc.currentHeight,
   pendingSignatures: doc.pendingSignatures,
@@ -72,11 +74,11 @@ export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountMac
   proofHeader: doc.proofHeader,
   proofBody: doc.proofBody,
   disputeConfig: doc.disputeConfig,
-  onChainSettlementNonce: doc.onChainSettlementNonce,
+  jNonce: doc.jNonce,
   pendingWithdrawals: doc.pendingWithdrawals ?? new Map(),
   requestedRebalance: doc.requestedRebalance ?? new Map(),
   requestedRebalanceFeeState: doc.requestedRebalanceFeeState ?? new Map(),
-  rebalancePolicy: doc.rebalancePolicy ?? new Map(),
+  shadow: doc.shadow,
   ...withProp('swapOrderHistory', publicSwapHistory(doc.swapOrderHistory)),
   ...withProp('swapClosedOrders', publicSwapHistory(doc.swapClosedOrders)),
   ...withProp('pendingFrame', doc.pendingFrame ? cloneCrossJurisdictionAccountFrameRoute(doc.pendingFrame) : undefined),
@@ -100,11 +102,10 @@ export const hydrateAccountDocFromStorage = (doc: StorageAccountDoc): AccountMac
   ...withProp('disputeProofNoncesByHash', doc.disputeProofNoncesByHash),
   ...withProp('disputeProofBodiesByHash', doc.disputeProofBodiesByHash),
   ...withProp('disputeArgumentSnapshotsByHash', doc.disputeArgumentSnapshotsByHash),
+  ...withProp('disputePrepare', doc.disputePrepare),
   ...withProp('settlementWorkspace', doc.settlementWorkspace),
   ...withProp('activeDispute', doc.activeDispute),
   ...withProp('counterpartyRebalanceFeePolicy', doc.counterpartyRebalanceFeePolicy),
-  ...withProp('activeRebalanceQuote', doc.activeRebalanceQuote),
-  ...withProp('pendingRebalanceRequest', doc.pendingRebalanceRequest),
 });
 
 export const hydrateEntityStateFromStorage = (options: {
@@ -167,6 +168,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withProp('pendingCrossJurisdictionFillAcks', publicPendingCrossJurisdictionFillAcks(core.pendingCrossJurisdictionFillAcks)),
     ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(core.crossJurisdictionBookAdmissions)),
     ...withProp('hubRebalanceConfig', core.hubRebalanceConfig),
+    ...withProp('lending', core.lending),
   };
 };
 

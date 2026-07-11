@@ -29,6 +29,7 @@ import type {
   SwapOfferEvent,
 } from './account/orderbook-offers';
 import { canProcessAccountTxForDisputeStatus } from '../../account-dispute-policy';
+import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account-consensus/flush';
 
 export type { MempoolOp } from './account/orderbook-queue';
 export {
@@ -73,12 +74,14 @@ export interface AccountHandlerResult {
 }
 
 export async function applyAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
+  const incomingAck = accountInputAck(input);
+  const incomingProposal = accountInputProposal(input);
   accountHandlerLog.debug('input.apply', {
     from: shortId(input.fromEntityId),
     to: shortId(input.toEntityId),
-    height: input.height,
-    frame: Boolean(input.newAccountFrame),
-    prevHanko: Boolean(input.prevHanko),
+    height: accountInputReferenceHeight(input),
+    frame: Boolean(incomingProposal),
+    prevHanko: Boolean(incomingAck),
   });
 
   // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
@@ -118,11 +121,11 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
     throw new Error(`ACCOUNT_WATCH_SEED_MISMATCH:${counterpartyId}`);
   }
   if (!accountMachine) {
-    if (input.prevHanko && !input.newAccountFrame) {
+    if (incomingAck && !incomingProposal) {
       const error = `ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`;
       throw new Error(error);
     }
-    const incomingFrameHeight = Number(input.newAccountFrame?.height ?? input.height ?? 0);
+    const incomingFrameHeight = Number(accountInputReferenceHeight(input) ?? 0);
     if (incomingFrameHeight > 1) {
       const error =
         `ACCOUNT_SYNC_REQUIRED: entity=${shortId(newState.entityId)} ` +
@@ -170,7 +173,7 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       proofHeader: {
         fromEntity: state.entityId,
         toEntity: counterpartyId,
-        nonce: 1,  // Next unified on-chain nonce to use
+        nextProofNonce: 1,
       },
       proofBody: {
         tokenIds: [],
@@ -178,8 +181,13 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       },
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(), // request_collateral target amounts (prepaid by requester)
-      requestedRebalanceFeeState: new Map(), // Prepaid fee metadata + scheduling hints
-      rebalancePolicy: new Map(), // Rebalance: per-token soft/hard/maxFee
+      requestedRebalanceFeeState: new Map(), // Bilateral prepaid fee metadata
+      shadow: {
+        rebalance: {
+          policy: new Map(),
+          submittedAtByToken: new Map(),
+        },
+      },
       locks: new Map(), // HTLC: Empty locks map
       swapOffers: new Map(), // Swap: Empty offers map
       pulls: new Map(), // Pull: Empty ratio-gated pull map
@@ -196,7 +204,7 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
         leftDisputeDelay: 576,
         rightDisputeDelay: 576,
       },
-      onChainSettlementNonce: 0,
+      jNonce: 0,
     };
     const jurisdiction = state.config?.jurisdiction;
     if (!jurisdiction) {
@@ -226,19 +234,19 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
   // After disputeStart is queued/observed, only control traffic is allowed; the
   // signed calldata hashes are already committed and must not drift.
   if ((accountMachine.status ?? 'active') !== 'active') {
-    const frameTxTypes = input.newAccountFrame?.accountTxs?.map((tx) => tx.type) || [];
+    const frameTxTypes = incomingProposal?.frame.accountTxs.map((tx) => tx.type) || [];
     const allowedWhileDisputed = frameTxTypes.every((txType) =>
       canProcessAccountTxForDisputeStatus(accountMachine.status, txType)
     );
     if (!allowedWhileDisputed) {
       const dropMsg =
         `🛑 Frozen account input dropped for ${counterpartyId.slice(-4)} ` +
-        `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
+        `(height=${accountInputReferenceHeight(input) ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!incomingAck})`;
       accountHandlerLog.error('input.dropped_frozen_account', {
         counterparty: shortId(counterpartyId),
-        height: input.height ?? input.newAccountFrame?.height ?? null,
+        height: accountInputReferenceHeight(input) ?? null,
         txs: frameTxTypes,
-        ack: Boolean(input.prevHanko),
+        ack: Boolean(incomingAck),
       });
       addMessage(newState, dropMsg);
       return {
@@ -258,7 +266,7 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
 
   // === SETTLEMENT WORKSPACE ACTIONS ===
   // Process settleAction before frame consensus (bilateral negotiation)
-  if (input.settleAction) {
+  if (input.kind === 'settle') {
     const result = await processSettleAction(
       accountMachine,
       input.settleAction,
@@ -285,9 +293,9 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
   }
 
   // CHANNEL.TS PATTERN: Apply frame-level consensus only.
-  if (input.height !== undefined || input.newAccountFrame) {
+  if (incomingAck || incomingProposal || input.kind === 'dispute') {
     const pendingBeforeTxs = accountMachine.pendingFrame?.accountTxs?.map(tx => tx.type) || [];
-    const inputFrameTxs = input.newAccountFrame?.accountTxs?.map(tx => tx.type) || [];
+    const inputFrameTxs = incomingProposal?.frame.accountTxs.map(tx => tx.type) || [];
     accountHandlerLog.debug('frame.process', {
       from: shortId(input.fromEntityId),
       pending: accountMachine.pendingFrame ? accountMachine.pendingFrame.height : null,
@@ -304,8 +312,8 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       accountHandlerLog.debug('cross_fill_ack.input_result', {
         entity: shortId(newState.entityId),
         counterparty: shortId(counterpartyId),
-        inputHeight: input.height,
-        hasPrevHanko: Boolean(input.prevHanko),
+        inputHeight: accountInputReferenceHeight(input),
+        hasPrevHanko: Boolean(incomingAck),
         inputFrameTxs,
         pendingBeforeTxs,
         pendingAfter: accountMachine.pendingFrame?.accountTxs?.map(tx => tx.type) || [],
@@ -327,8 +335,8 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
         {
           entityId: newState.entityId,
           counterpartyId,
-          frameHeight: input.newAccountFrame?.height ?? input.height,
-          hasNewFrame: Boolean(input.newAccountFrame),
+          frameHeight: accountInputReferenceHeight(input),
+          hasNewFrame: Boolean(incomingProposal),
         },
         newState.entityId,
       );
@@ -430,7 +438,7 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
 
       // Send response (ACK + optional new frame)
       if (result.response) {
-        accountHandlerLog.debug('response.send', { to: shortId(result.response.toEntityId), height: result.response.height });
+        accountHandlerLog.debug('response.send', { to: shortId(result.response.toEntityId), height: accountInputReferenceHeight(result.response) });
 
         // Get target proposer
         // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
@@ -451,8 +459,8 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
         accountHandlerLog.debug('response.queued', {
           from: shortId(state.entityId),
           to: shortId(result.response.toEntityId),
-          height: result.response.height,
-          prevHanko: Boolean(result.response.prevHanko),
+          height: accountInputReferenceHeight(result.response),
+          prevHanko: Boolean(accountInputAck(result.response)),
         });
       }
     } else {
@@ -463,7 +471,7 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       addMessage(newState, `❌ ${result.error}`);
       throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
     }
-  } else if (!input.settleAction) {
+  } else if (input.kind !== 'settle') {
     // Only error if there was no settleAction either
     // Settlement workspace actions (propose/update/approve/reject) don't require frames
     const error = `ACCOUNT_INPUT_EMPTY: from=${shortId(input.fromEntityId)} to=${shortId(input.toEntityId)}`;

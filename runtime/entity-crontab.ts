@@ -60,6 +60,7 @@ import { getRuntimeJurisdictionHeight } from './j-height';
 import { markStorageAccountDirty, markStorageEntityDirty } from './env-events';
 import { createStructuredLogger, shortHash, shortId } from './logger';
 import { batchAddReserveToCollateral, initJBatch } from './j-batch';
+import { accountInputProposal, accountInputReferenceHeight } from './account-consensus/flush';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 
@@ -75,7 +76,7 @@ export const HUB_MAX_R2C_PER_TICK = 10;
 export const HUB_MAX_C2R_PER_TICK = 10;
 
 const accountInputProposedFrameHeight = (input: AccountInput): number => {
-  const candidate = input.newAccountFrame?.height ?? input.height ?? 0;
+  const candidate = accountInputProposal(input)?.frame.height ?? accountInputReferenceHeight(input) ?? 0;
   const height = Number(candidate);
   return Number.isFinite(height) ? Math.max(0, Math.floor(height)) : 0;
 };
@@ -778,7 +779,7 @@ async function hubRebalanceHandler(
         continue;
       }
       const prepaidFee = feeState.feePaidUpfront;
-      let jBatchSubmittedAt = feeState.jBatchSubmittedAt || 0;
+      let jBatchSubmittedAt = accountMachine.shadow.rebalance.submittedAtByToken.get(tokenId) ?? 0;
       const submittedAgeMs = jBatchSubmittedAt > 0 ? now - jBatchSubmittedAt : 0;
       let submittedBatchStale = jBatchSubmittedAt > 0 && submittedAgeMs >= HUB_SUBMITTED_REQUEST_STALE_MS;
 
@@ -815,7 +816,7 @@ async function hubRebalanceHandler(
           `⚠️ R→C stale submission reset for retry: token=${tokenId} cp=${counterpartyId.slice(-4)} ` +
           `submittedAgeMs=${submittedAgeMs}`,
         );
-        feeState.jBatchSubmittedAt = 0;
+        accountMachine.shadow.rebalance.submittedAtByToken.delete(tokenId);
         jBatchSubmittedAt = 0;
         submittedBatchStale = false;
         markEntityAccountDirty(_env, replica, counterpartyId);
@@ -944,8 +945,8 @@ async function hubRebalanceHandler(
         markEntityCrontabDirty(_env, replica);
         const targetAccount = replica.state.accounts.get(target.counterpartyId);
         const targetFeeState = targetAccount?.requestedRebalanceFeeState?.get(target.tokenId);
-        if (targetFeeState && (targetFeeState.jBatchSubmittedAt || 0) <= 0) {
-          targetFeeState.jBatchSubmittedAt = now;
+        if (targetAccount && targetFeeState && !targetAccount.shadow.rebalance.submittedAtByToken.has(target.tokenId)) {
+          targetAccount.shadow.rebalance.submittedAtByToken.set(target.tokenId, now);
           markEntityAccountDirty(_env, replica, target.counterpartyId);
         }
         queuedCount += 1;

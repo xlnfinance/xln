@@ -20,7 +20,7 @@ export function handleDirectPayment(
   accountTx: Extract<AccountTx, { type: 'direct_payment' }>,
   byLeft: boolean
 ): { success: boolean; events: string[]; error?: string } {
-  const { tokenId, amount, route, description } = accountTx.data;
+  const { tokenId, amount, route, description, deliveryMode, trustedGatewayEntityId } = accountTx.data;
   const events: string[] = [];
 
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
@@ -34,6 +34,12 @@ export function handleDirectPayment(
     const error = `Route too long: ${route.length} hops (max ${FINANCIAL.MAX_ROUTE_HOPS})`;
     directPaymentLog.debug('route_too_long', { hops: route.length, max: FINANCIAL.MAX_ROUTE_HOPS });
     return { success: false, error, events };
+  }
+  if (deliveryMode === 'trusted') {
+    const finalTarget = route?.[route.length - 1];
+    if (!trustedGatewayEntityId || !finalTarget) {
+      return { success: false, error: 'Trusted payment requires a gateway and final recipient', events };
+    }
   }
 
   const delta = ensureDelta(accountMachine, tokenId);
@@ -209,6 +215,8 @@ export function handleDirectPayment(
           amount,
           route: [...route], // Copy to prevent mutation
           ...(description ? { description } : {}),
+          ...(deliveryMode ? { deliveryMode } : {}),
+          ...(trustedGatewayEntityId ? { trustedGatewayEntityId } : {}),
         };
       }
     }

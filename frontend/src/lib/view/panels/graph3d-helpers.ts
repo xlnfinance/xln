@@ -43,6 +43,29 @@ export type GraphScenarioStep = {
   actions: string[];
 };
 
+export type GraphJReplicaLike = {
+  name?: string;
+  jHeight?: number | bigint;
+  blockNumber?: number | bigint;
+  mempool?: unknown[];
+};
+
+export function findGraphJReplica(
+  replicas: Map<string, GraphJReplicaLike> | GraphJReplicaLike[] | Array<[string, GraphJReplicaLike]> | null | undefined,
+  jurisdictionName: string,
+): GraphJReplicaLike | undefined {
+  if (replicas instanceof Map) {
+    return replicas.get(jurisdictionName)
+      ?? Array.from(replicas.values()).find((replica) => replica.name === jurisdictionName);
+  }
+  if (!Array.isArray(replicas)) return undefined;
+  for (const entry of replicas) {
+    const replica = Array.isArray(entry) ? entry[1] : entry;
+    if (replica?.name === jurisdictionName) return replica;
+  }
+  return undefined;
+}
+
 const BANK_NAMES: string[] = [];
 const SP500_TICKERS = [
   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 
 import { computeCanonicalEntityHash, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
-import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
+import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from '../storage/projections';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 
 const entityId = `0x${'11'.repeat(32)}`;
@@ -39,7 +39,7 @@ const makeAccount = (frameStateHash: string): AccountMachine =>
     currentHeight: 1,
     pendingSignatures: [],
     rollbackCount: 0,
-    proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nonce: 0 },
+    proofHeader: { fromEntity: entityId, toEntity: counterpartyId, nextProofNonce: 0 },
     proofBody: { tokenIds: [], deltas: [] },
     frameHistory: [{
       height: 1,
@@ -53,13 +53,13 @@ const makeAccount = (frameStateHash: string): AccountMachine =>
     pendingWithdrawals: new Map(),
     requestedRebalance: new Map(),
     requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
+    shadow: { rebalance: { policy: new Map(), submittedAtByToken: new Map() } },
     leftJObservations: [],
     rightJObservations: [],
     jEventChain: [],
     lastFinalizedJHeight: 0,
     disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
+    jNonce: 0,
   }) as AccountMachine;
 
 const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): Env =>
@@ -171,6 +171,35 @@ test('storage projection round-trip preserves canonical account optional-field s
     route: [entityId, counterpartyId],
     description: 'projection-round-trip',
   };
+  account.lendingIntents = new Map([['lend-0123456789abcdef', 'fund']]);
+  account.subcontracts = new Map([['custom-transformer', {
+    transformerAddress: `0x${'33'.repeat(20)}`,
+    encodedBatch: '0x1234',
+    allowances: [{ deltaIndex: 0, rightAllowance: 3n, leftAllowance: 4n }],
+  }]]);
+  account.disputePrepare = {
+    startedAt: 100,
+    readyAfter: 200,
+    reason: 'projection-round-trip',
+  };
+  state.lending = {
+    pools: new Map([['lend-0123456789abcdef', {
+      positionId: 'lend-0123456789abcdef',
+      hubEntityId: entityId,
+      lenderEntityId: counterpartyId,
+      tokenId: 1,
+      principalAmount: 25n,
+      availableAmount: 25n,
+      borrowedAmount: 0n,
+      interestBps: 100,
+      termId: '1h',
+      termMs: 3_600_000,
+      createdAt: 100,
+      updatedAt: 100,
+      status: 'open',
+    }]]),
+    loans: new Map(),
+  };
 
   expect(account.pulls).toBeUndefined();
   expect(account.swapOrderHistory).toBeUndefined();
@@ -190,5 +219,21 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
   expect(hydratedState.accounts.get(counterpartyId)?.pendingForward).toEqual(account.pendingForward);
+  expect(hydratedState.accounts.get(counterpartyId)?.lendingIntents).toEqual(account.lendingIntents);
+  expect(hydratedState.accounts.get(counterpartyId)?.subcontracts).toEqual(account.subcontracts);
+  expect(hydratedState.accounts.get(counterpartyId)?.disputePrepare).toEqual(account.disputePrepare);
+  expect(hydratedState.lending).toEqual(state.lending);
   expect(after.hash).toBe(before.hash);
+});
+
+test('replica metadata projection preserves in-flight consensus and layout state', () => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  replica.mempool = [{ type: 'broadcast', data: { message: 'pending' } }];
+  replica.position = { x: 1, y: 2, z: 3, jurisdiction: 'Testnet' };
+
+  const meta = projectReplicaMeta(replica);
+
+  expect(meta.mempool).toEqual(replica.mempool);
+  expect(meta.position).toEqual(replica.position);
 });

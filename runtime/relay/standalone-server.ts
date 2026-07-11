@@ -5,7 +5,6 @@
 import { createRelayStore, removeClient, type RelayStore } from '../relay-store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
-import { safeStringify } from '../serialization-utils';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { createStructuredLogger } from '../logger';
 
@@ -73,11 +72,11 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
         try {
           msg = normalizeMessage(message as string | Buffer | ArrayBuffer);
         } catch (error) {
-          ws.send(safeStringify({ type: 'error', error: `Invalid relay message: ${(error as Error).message}` }));
+          ws.send(serializeWsMessage({ type: 'error', error: `Invalid relay message: ${(error as Error).message}` }));
           return;
         }
         Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
-          ws.send(safeStringify({ type: 'error', error: `Relay handler failed: ${(error as Error).message}` }));
+          ws.send(serializeWsMessage({ type: 'error', error: `Relay handler failed: ${(error as Error).message}` }));
         });
       },
       close(ws) {

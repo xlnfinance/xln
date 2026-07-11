@@ -1,8 +1,10 @@
 import type { CrossJurisdictionCloseProof, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { HankoString } from './hanko';
 import type { JurisdictionEvent } from './jurisdiction-events';
+import type { PaymentDeliveryMode } from './payment';
+import type { LendingTermId } from './lending';
 import type { DisputeArgumentSnapshot } from '../dispute-arguments';
-import type { RebalancePolicy, RebalanceQuote, RebalanceRequestFeeState } from './rebalance';
+import type { AccountRebalanceShadowState, RebalanceRequestFeeState } from './rebalance';
 
 export interface AssetBalance {
   amount: bigint; // Balance in smallest unit (wei, cents, shares)
@@ -169,6 +171,15 @@ export interface AccountSubcontract {
   rightArgumentsHash?: string;
 }
 
+export type AccountLendingIntentKind =
+  | 'fund'
+  | 'borrow'
+  | 'repay'
+  | 'credit-grant'
+  | 'credit-revoke'
+  | 'close-request'
+  | 'close-payout';
+
 export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
@@ -189,6 +200,10 @@ export interface AccountMachine {
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
   pulls?: Map<string, PullCommitment>; // pullId → ratio-gated pull details
   subcontracts?: Map<string, AccountSubcontract>; // custom DeltaTransformer clauses
+  // Bilateral idempotency receipts for lending extension commands. Financial
+  // effects and these receipts commit in the same Account frame, so replaying
+  // an intent can never move money twice.
+  lendingIntents?: Map<string, AccountLendingIntentKind>;
   // Durable local lifecycle log for swap UI/history.
   // Keep this in account state so closed/partial orders do not disappear
   // when the short bilateral frameHistory ring buffer prunes old frames.
@@ -234,7 +249,7 @@ export interface AccountMachine {
   proofHeader: {
     fromEntity: string; // Our entity ID
     toEntity: string; // Counterparty entity ID
-    nonce: number;  // Unified on-chain nonce (replaces cooperativeNonce + disputeNonce)
+    nextProofNonce: number; // Next nonce reserved for a fresh dispute proof.
   };
   // Simple proofBody for internal use (computed on demand from deltas/locks/swapOffers)
   proofBody: {
@@ -291,8 +306,8 @@ export interface AccountMachine {
 
   // ON-CHAIN NONCE: Tracks the nonce stored on-chain
   // Starts at 0, set to signedNonce when settlement/dispute succeeds
-  // DISTINCT from proofHeader.nonce (which tracks what value to use next)
-  onChainSettlementNonce: number;
+  // DISTINCT from proofHeader.nextProofNonce (which tracks what value to use next)
+  jNonce: number;
 
   // SETTLEMENT WORKSPACE: Structured negotiation area
   settlementWorkspace?: SettlementWorkspace;
@@ -303,7 +318,7 @@ export interface AccountMachine {
     initialProofbodyHash: string;     // Hash committed in disputeStart
     initialNonce: number;             // Unified nonce from disputeStart (replaces initialDisputeNonce)
     disputeTimeout: number;           // Block number when timeout expires
-    onChainNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
+    jNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
     starterInitialArguments: string;  // Starter-side args for initial proof
     starterIncrementedArguments: string;  // Starter-side args for the one known newer proof, or 0x
     observedOnChain?: boolean;        // false for local placeholder, true after DisputeStarted J-event
@@ -320,6 +335,8 @@ export interface AccountMachine {
     amount: bigint;
     route: string[];
     description?: string;
+    deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>;
+    trustedGatewayEntityId?: string;
   };
 
   // Withdrawal tracking (Phase 2: C→R)
@@ -344,14 +361,12 @@ export interface AccountMachine {
     updatedAt: number;
   };
 
-  // Rebalance policy (per-token soft/hard limits + max acceptable fee)
-  rebalancePolicy: Map<number, RebalancePolicy>; // tokenId → policy
-
-  // Active rebalance quote (one at a time, quoteId = timestamp)
-  activeRebalanceQuote?: RebalanceQuote;
-
-  // Pending manual rebalance request (user-initiated, awaiting hub quote)
-  pendingRebalanceRequest?: { tokenId: number; targetAmount: bigint };
+  // Entity-private automation state. It is persisted and committed by the
+  // owning Entity machine, but excluded from the bilateral Account root and
+  // never sent to the counterparty.
+  shadow: {
+    rebalance: AccountRebalanceShadowState;
+  };
 }
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
@@ -400,66 +415,53 @@ type AccountInputBase = {
   fromEntityId: string;
   toEntityId: string;
   watchSeed?: string;
-
-  // Frame-level consensus (matches Channel.ts FlushMessage structure)
-  height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
-
-  disputeProofNonce?: number;        // nonce at which dispute proof was signed (explicit, replaces counter-1 hack)
 };
 
-type AccountDisputeSeal = {
-  newDisputeHanko?: HankoString;
-  newDisputeHash?: string;
-  newDisputeProofBodyHash?: string;
-  disputeProofNonce?: number;
+export type AccountDisputeSeal = {
+  hanko: HankoString;
+  hash: string;
+  proofBodyHash: string;
+  proofNonce: number;
 };
 
-type AccountInputNoSettlement = {
-  settleAction?: never;
-  newSettlementHanko?: never;
+export type AccountFrameAck = {
+  height: number;
+  frameHanko: HankoString;
+  disputeSeal?: AccountDisputeSeal;
 };
 
-type AccountInputNoFrame = {
-  newAccountFrame?: never;
-  newHanko?: never;
+export type AccountFrameProposal = {
+  frame: AccountFrame;
+  frameHanko: HankoString;
+  disputeSeal?: AccountDisputeSeal;
 };
 
-type AccountInputNoAck = {
-  prevHanko?: never;
-};
-
-// AccountInput - Channel.ts-style bilateral wire message.
-// The discriminant preserves the real protocol shapes while still allowing the
-// existing ACK+next-frame batching path to be represented explicitly.
+// Channel.ts flush semantics: one delivery may acknowledge the previous frame
+// and propose the next frame. Each state epoch carries its own frame Hanko and
+// optional dispute seal. Sharing one seal across ACK + proposal is invalid
+// because the two parts commit different account states.
 export type AccountInput =
-  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoAck & {
+  | (AccountInputBase & {
       kind: 'frame';
-      newAccountFrame: AccountFrame;
-      newHanko: HankoString;
+      proposal: AccountFrameProposal;
     })
-  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoFrame & {
+  | (AccountInputBase & {
       kind: 'ack';
-      prevHanko: HankoString;
+      ack: AccountFrameAck;
     })
-  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & {
+  | (AccountInputBase & {
       kind: 'frame_ack';
-      prevHanko: HankoString;
-      newAccountFrame: AccountFrame;
-      newHanko: HankoString;
+      ack: AccountFrameAck;
+      proposal: AccountFrameProposal;
     })
-  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoFrame & AccountInputNoAck & {
+  | (AccountInputBase & {
       kind: 'dispute';
-      newDisputeHanko: HankoString;
-      newDisputeHash: string;
-      newDisputeProofBodyHash: string;
+      disputeSeal: AccountDisputeSeal;
     })
-  | (AccountInputBase & AccountInputNoFrame & AccountInputNoAck & {
+  | (AccountInputBase & {
       kind: 'settle';
       settleAction: AccountSettleAction;
       newSettlementHanko?: HankoString;
-      newDisputeHanko?: never;
-      newDisputeHash?: never;
-      newDisputeProofBodyHash?: never;
     });
 
 // Delta structure for per-token account state (based on old_src)
@@ -555,7 +557,7 @@ export interface SettlementWorkspace {
     rightHanko?: HankoString;                 // Right's dispute hanko at nonce+1
     disputeHash: string;                      // Exact hash signed by both post-settlement hankos
     proofBodyHash: string;                    // Same as pre-settlement (offdelta unchanged)
-    nonce: number;                            // = onChainSettlementNonce + 1 (replaces cooperativeNonce)
+    nonce: number;                            // = jNonce + 1 (replaces cooperativeNonce)
   };
 }
 
@@ -594,7 +596,70 @@ export type AccountEvent =
 
 // Account transaction types
 export type AccountTx =
-  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string } }
+  | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string; deliveryMode?: Extract<PaymentDeliveryMode, 'trusted'>; trustedGatewayEntityId?: string } }
+  | {
+      type: 'lending_fund';
+      data: {
+        positionId: string;
+        hubEntityId: string;
+        lenderEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        termId: LendingTermId;
+        interestBps: number;
+      };
+    }
+  | {
+      type: 'lending_borrow_request';
+      data: {
+        requestId: string;
+        hubEntityId: string;
+        borrowerEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        termId: LendingTermId;
+        maxInterestBps: number;
+      };
+    }
+  | {
+      type: 'lending_repay';
+      data: {
+        loanId: string;
+        hubEntityId: string;
+        borrowerEntityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
+    }
+  | {
+      type: 'lending_credit';
+      data: {
+        action: 'grant' | 'revoke';
+        loanId: string;
+        hubEntityId: string;
+        borrowerEntityId: string;
+        tokenId: number;
+        creditLimit: bigint;
+      };
+    }
+  | {
+      type: 'lending_close_request';
+      data: {
+        positionId: string;
+        hubEntityId: string;
+        lenderEntityId: string;
+      };
+    }
+  | {
+      type: 'lending_close_payout';
+      data: {
+        positionId: string;
+        hubEntityId: string;
+        lenderEntityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
+    }
   | { type: 'add_delta'; data: { tokenId: number } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
   | { type: 'account_frame'; data: { frame: AccountFrame; processedTransactions: number; fromEntity: string } }
@@ -632,15 +697,6 @@ export type AccountTx =
         policyVersion: number; // Hub fee-policy version used to compute feeAmount
       };
     }
-  | {
-      type: 'set_rebalance_policy';
-      data: {
-        tokenId: number;
-        r2cRequestSoftLimit: bigint;         // Auto-trigger below this
-        hardLimit: bigint;         // Never exceed
-        maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this (USDT)
-      };
-    }
   // === HTLC TRANSACTION TYPES ===
   | {
       type: 'htlc_lock';
@@ -651,6 +707,7 @@ export type AccountTx =
         revealBeforeHeight: number;
         amount: bigint;
         tokenId: number;
+        deliveryMode?: Exclude<PaymentDeliveryMode, 'trusted'>;
         envelope?: import('../htlc-envelope-types').HtlcEnvelope | string | undefined; // Onion routing envelope (string when encrypted)
       };
     }
@@ -801,7 +858,7 @@ export type AccountTx =
   | {
       type: 'reopen_disputed';
       data: {
-        onChainNonce: number;
+        jNonce: number;
       };
     }
   | {

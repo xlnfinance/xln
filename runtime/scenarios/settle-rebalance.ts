@@ -280,7 +280,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   assert(!aliceAccAfterSettle?.settlementWorkspace, 'Workspace should be cleared after execute', env);
 
   // Check nonce incremented
-  const aliceNonce1 = aliceAccAfterSettle?.onChainSettlementNonce || 0;
+  const aliceNonce1 = aliceAccAfterSettle?.jNonce || 0;
   assert(aliceNonce1 >= 1, `Alice nonce should be >= 1 after settlement, got ${aliceNonce1}`, env);
 
   console.log = originalLog;
@@ -605,12 +605,12 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   // Mixed flow nonce expectations:
   // - Alice had manual settlement in Phase 3 => nonce >= 1
   // - Other users may also increment nonce if C→R settlement path executed
-  const aliceNonce = hubFinal.accounts.get(alice.id)?.onChainSettlementNonce || 0;
+  const aliceNonce = hubFinal.accounts.get(alice.id)?.jNonce || 0;
   assert(aliceNonce >= 1, `Hub<>Alice nonce should be >= 1 after manual settlement (got ${aliceNonce})`, env);
   console.log(`  Hub<>Alice nonce=${aliceNonce}`);
   const nonAliceNonces: Array<{ name: string; nonce: number }> = [];
   for (const user of [bob, charlie, dave]) {
-    const nonce = hubFinal.accounts.get(user.id)?.onChainSettlementNonce || 0;
+    const nonce = hubFinal.accounts.get(user.id)?.jNonce || 0;
     nonAliceNonces.push({ name: user.name, nonce });
     console.log(`  Hub<>${user.name} nonce=${nonce}`);
   }
@@ -629,13 +629,13 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   // Counterparty nonce check mirrors hub side.
   const [, aliceReplica] = findReplica(env, alice.id);
   const aliceAcc = aliceReplica.state.accounts.get(hub.id);
-  assert((aliceAcc?.onChainSettlementNonce || 0) >= 1, `Alice<>Hub nonce should be >= 1 after manual settlement`, env);
+  assert((aliceAcc?.jNonce || 0) >= 1, `Alice<>Hub nonce should be >= 1 after manual settlement`, env);
   assert(!aliceAcc?.settlementWorkspace, `Alice<>Hub workspace should be cleared`, env);
   for (const user of [bob, charlie, dave]) {
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
-    const hubNonce = hubFinal.accounts.get(user.id)?.onChainSettlementNonce || 0;
-    const userNonce = userAcc?.onChainSettlementNonce || 0;
+    const hubNonce = hubFinal.accounts.get(user.id)?.jNonce || 0;
+    const userNonce = userAcc?.jNonce || 0;
     assert(
       userNonce === hubNonce,
       `${user.name}<>Hub counterparty nonce should match hub view (user=${userNonce}, hub=${hubNonce})`,
@@ -651,7 +651,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
     const delta = hubFinal.accounts.get(user.id)?.deltas.get(USDC);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
     const derived = delta ? deriveDelta(delta, hubIsLeft) : null;
-    const nonce = hubFinal.accounts.get(user.id)?.onChainSettlementNonce || 0;
+    const nonce = hubFinal.accounts.get(user.id)?.jNonce || 0;
     console.log(`  Hub<>${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, nonce=${nonce}`);
   }
 
