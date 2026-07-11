@@ -40,6 +40,12 @@ history remains in git. Every item below is still open or intentionally heavy.
   custody boundary.
 - Risk: browser or host compromise can expose long-lived signing material;
   rotation and incident containment are not operationally proven.
+- Design constraint: a dumb HSM that signs arbitrary hashes from a compromised
+  runtime does not reduce financial blast radius; the attacker can still ask it
+  to authorize unbounded debt/state. Do not add transport-only HSM complexity.
+  Revisit only as an independently validating policy signer that reconstructs
+  the account domain/state root and enforces entity, token, limit, nonce, and
+  human/threshold approval policy before signing.
 - Acceptance: introduce one `SignerProvider` boundary for account/entity
   hashes; persist signed outputs before commit; replay consumes persisted
   signatures and never calls the signer; raw production keys never enter app

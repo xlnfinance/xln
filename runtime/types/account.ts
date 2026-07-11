@@ -155,6 +155,20 @@ export type HtlcNoteKey = `hashlock:${string}` | `lock:${string}`;
 
 export type AccountStatus = 'active' | 'dispute_preparing' | 'disputed';
 
+export interface AccountSubcontract {
+  transformerAddress: string;
+  encodedBatch: string;
+  allowances: Array<{
+    deltaIndex: number;
+    rightAllowance: bigint;
+    leftAllowance: bigint;
+  }>;
+  // Runtime arguments are late adversarial evidence. Only optional commitments
+  // belong to mutually signed account state; raw secrets stay outside it.
+  leftArgumentsHash?: string;
+  rightArgumentsHash?: string;
+}
+
 export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
@@ -174,6 +188,7 @@ export interface AccountMachine {
   // Swap offers (limit orders)
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
   pulls?: Map<string, PullCommitment>; // pullId → ratio-gated pull details
+  subcontracts?: Map<string, AccountSubcontract>; // custom DeltaTransformer clauses
   // Durable local lifecycle log for swap UI/history.
   // Keep this in account state so closed/partial orders do not disappear
   // when the short bilateral frameHistory ring buffer prunes old frames.
@@ -197,7 +212,7 @@ export interface AccountMachine {
   lastOutboundFrameAck?: {
     height: number;
     counterpartyEntityId: string;
-    prevHanko: HankoString;
+    response: Extract<AccountInput, { kind: 'ack' }>;
   };
 
   // Rollback support for bilateral disagreements
@@ -346,6 +361,7 @@ export interface AccountFrame {
   jHeight: number; // J-machine height agreed for HTLC deadline checks
   accountTxs: AccountTx[]; // Renamed from transitions
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
+  accountStateRoot: string; // Canonical RLP/radix-Merkle root of bilateral AccountMachine state
   stateHash: string;
   byLeft?: boolean; // Who proposed this frame (left or right entity)
   // One source of truth for account-frame token state. Compact offdelta arrays

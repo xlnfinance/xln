@@ -73,18 +73,30 @@ import { resolveEntityProposerId } from '../state-helpers';
 import type { AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
 import { ethers } from 'ethers';
 
-const makeSingleSignerConfig = (): ConsensusConfig => ({
+const makeSingleSignerConfig = (): EntityState['config'] => ({
   mode: 'proposer-based',
   threshold: 1n,
   validators: ['1'],
   shares: { '1': 1n },
+  jurisdiction: {
+    name: 'AuditTestnet',
+    chainId: 31337,
+    depositoryAddress: `0x${'dd'.repeat(20)}`,
+    entityProviderAddress: `0x${'ee'.repeat(20)}`,
+  },
 });
 
-const makeSingleSignerConfigFor = (signerId: string): ConsensusConfig => ({
+const makeSingleSignerConfigFor = (signerId: string): EntityState['config'] => ({
   mode: 'proposer-based',
   threshold: 1n,
   validators: [signerId],
   shares: { [signerId]: 1n },
+  jurisdiction: {
+    name: 'AuditTestnet',
+    chainId: 31337,
+    depositoryAddress: `0x${'dd'.repeat(20)}`,
+    entityProviderAddress: `0x${'ee'.repeat(20)}`,
+  },
 });
 
 const hex20 = (byte: string): string => `0x${byte.repeat(byte.length === 2 ? 20 : 40)}`;
@@ -137,6 +149,7 @@ const makeProposalAccount = (
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       deltas: [],
       stateHash: '',
       byLeft: true,
@@ -175,6 +188,15 @@ const attachSigningReplica = (
   entityId: string,
   signerId: string,
 ): void => {
+  const browserDepository = (env.browserVM as { getDepositoryAddress?: () => string } | undefined)?.getDepositoryAddress?.();
+  if (browserDepository && !env.jReplicas.has('__audit_test__')) {
+    env.jReplicas.set('__audit_test__', {
+      name: '__audit_test__',
+      chainId: 31337,
+      rpcs: [],
+      depositoryAddress: browserDepository,
+    } as never);
+  }
   env.eReplicas.set(
     `${entityId}:${signerId}`,
     {
@@ -3345,7 +3367,13 @@ describe('audit fail-fast regressions', () => {
     accountMachine.lastOutboundFrameAck = {
       height: 10,
       counterpartyEntityId: right.entityId,
-      prevHanko: `0x${'cd'.repeat(65)}`,
+      response: {
+        kind: 'ack',
+        fromEntityId: left.entityId,
+        toEntityId: right.entityId,
+        height: 10,
+        prevHanko: `0x${'cd'.repeat(65)}`,
+      },
     };
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
 
@@ -3354,9 +3382,33 @@ describe('audit fail-fast regressions', () => {
     expect(result.success).toBe(true);
     expect(result.accountInput?.kind).toBe('frame_ack');
     expect(result.accountInput?.height).toBe(10);
-    expect(result.accountInput?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.prevHanko);
+    expect(result.accountInput?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.response.prevHanko);
     expect(result.accountInput?.newAccountFrame.height).toBe(11);
     expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
+  });
+
+  test('credit-limit-only frame reuses unchanged on-chain dispute proof', async () => {
+    const seed = 'account-credit-limit-reuses-proof';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    const accountMachine = makeProposalAccount([
+      { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
+    ], left.entityId, right.entityId);
+    accountMachine.deltas.set(1, createDefaultDelta(1));
+    accountMachine.currentDisputeProofBodyHash = buildAccountProofBody(accountMachine).proofBodyHash;
+    const nonceBefore = accountMachine.proofHeader.nonce;
+    attachSigningReplica(env, left.entityId, left.signerId);
+
+    const result = await proposeAccountFrame(env, accountMachine);
+
+    expect(result.success).toBe(true);
+    expect(result.accountInput?.newDisputeHanko).toBeUndefined();
+    expect(result.accountInput?.newDisputeHash).toBeUndefined();
+    expect(result.accountInput?.newDisputeProofBodyHash).toBeUndefined();
+    expect(accountMachine.proofHeader.nonce).toBe(nonceBefore);
   });
 
   test('account frame property matrix preserves explicit zero jHeight through receive, replay, and ACK commit', async () => {
@@ -3458,7 +3510,13 @@ describe('audit fail-fast regressions', () => {
     accountMachine.lastOutboundFrameAck = {
       height: 8,
       counterpartyEntityId: hex20('22'),
-      prevHanko: `0x${'aa'.repeat(65)}`,
+      response: {
+        kind: 'ack',
+        fromEntityId: hex20('11'),
+        toEntityId: hex20('22'),
+        height: 8,
+        prevHanko: `0x${'aa'.repeat(65)}`,
+      },
     };
     accountMachine.hankoSignature = `0x${'bb'.repeat(65)}`;
     accountMachine.pendingForward = {
@@ -3498,6 +3556,7 @@ describe('audit fail-fast regressions', () => {
       jHeight: 0,
       accountTxs: [{ type: 'add_delta' as const, data: { tokenId: 1 } }],
       prevFrameHash: `0x${'ab'.repeat(32)}`,
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       deltas: [],
       stateHash: `0x${'cd'.repeat(32)}`,
       byLeft: true,
@@ -3544,7 +3603,17 @@ describe('audit fail-fast regressions', () => {
     accountMachine.lastOutboundFrameAck = {
       height: 10,
       counterpartyEntityId: right.entityId,
-      prevHanko: `0x${'12'.repeat(65)}`,
+      response: {
+        kind: 'ack',
+        fromEntityId: left.entityId,
+        toEntityId: right.entityId,
+        height: 10,
+        prevHanko: `0x${'12'.repeat(65)}`,
+        newDisputeHanko: `0x${'13'.repeat(65)}`,
+        newDisputeHash: `0x${'14'.repeat(32)}`,
+        newDisputeProofBodyHash: `0x${'15'.repeat(32)}`,
+        disputeProofNonce: 7,
+      },
     };
 
     const result = await applyAccountInput(env, accountMachine, {
@@ -3563,10 +3632,10 @@ describe('audit fail-fast regressions', () => {
     expect(result.success).toBe(true);
     expect(result.response?.kind).toBe('ack');
     expect(result.response?.height).toBe(10);
-    expect(result.response?.prevHanko).toBe(accountMachine.lastOutboundFrameAck.prevHanko);
+    expect(result.response).toEqual(accountMachine.lastOutboundFrameAck.response);
   });
 
-  test('applyAccountInput rebuilds duplicate committed ACK when ACK cache was lost', async () => {
+  test('applyAccountInput fails loud when the full duplicate ACK cache was lost', async () => {
     const seed = 'account-frame-duplicate-reack-cache-miss';
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
@@ -3596,18 +3665,8 @@ describe('audit fail-fast regressions', () => {
       newHanko: `0x${'56'.repeat(65)}`,
     });
 
-    expect(result.success).toBe(true);
-    expect(result.response?.kind).toBe('ack');
-    expect(result.response?.height).toBe(10);
-    expect(result.response?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.prevHanko);
-    expect(result.events).toContain('↩️ Rebuilt ACK for duplicate committed frame 10');
-    const verified = await verifyHankoForHash(
-      result.response?.prevHanko || '',
-      accountMachine.currentFrame.stateHash,
-      left.entityId,
-      env,
-    );
-    expect(verified.valid).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('DUPLICATE_ACK_CACHE_MISSING: height=10');
   });
 
   test('applyAccountInput ignores obsolete ACK after dispute freeze clears pending frame', async () => {
@@ -3703,6 +3762,7 @@ describe('audit fail-fast regressions', () => {
       jHeight: 0,
       accountTxs: [tx],
       prevFrameHash: 'genesis',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: '',
       byLeft: false,
       deltas: [{
@@ -3763,6 +3823,7 @@ describe('audit fail-fast regressions', () => {
       jHeight: 0,
       accountTxs: [tx],
       prevFrameHash: 'genesis',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: '',
       byLeft: true,
       deltas: [{
@@ -3814,6 +3875,8 @@ describe('audit fail-fast regressions', () => {
     const lateTx: AccountTx = { type: 'add_delta', data: { tokenId: 2 } };
     const accountMachine = makeProposalAccount([firstTx], left.entityId, right.entityId);
     attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
+    const signingReplica = Array.from(env.eReplicas.values()).find(replica => replica.entityId === left.entityId);
+    if (signingReplica?.state.config) delete signingReplica.state.config.jurisdiction;
 
     queueMicrotask(() => {
       accountMachine.mempool.push(lateTx);
@@ -3822,7 +3885,7 @@ describe('audit fail-fast regressions', () => {
     const result = await proposeAccountFrame(env, accountMachine);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('MISSING_DEPOSITORY_ADDRESS');
+    expect(result.error).toContain('ACCOUNT_STATE_ROOT_BUILD_FAILED');
     expect(accountMachine.pendingFrame).toBeUndefined();
     expect(accountMachine.mempool).toHaveLength(2);
     expect(accountMachine.mempool).toEqual([firstTx, lateTx]);
@@ -4730,13 +4793,38 @@ describe('audit fail-fast regressions', () => {
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;
     const lot = SWAP_LOT_SCALE;
-    const sourceHub = `0x${'20'.repeat(32)}`;
-    const bookOwnerHub = `0x${'30'.repeat(32)}`;
+    const sourceHubIdentity = registerLazySigner('cross-book-owner-fill-notice', '1');
+    const bookOwnerIdentity = registerLazySigner('cross-book-owner-fill-notice', '2');
+    const sourceHub = sourceHubIdentity.entityId;
+    const bookOwnerHub = bookOwnerIdentity.entityId;
     const remoteMaker = `0x${'31'.repeat(32)}`;
     const remoteTargetUser = `0x${'32'.repeat(32)}`;
     const localTaker = `0x${'33'.repeat(32)}`;
     const localTargetUser = `0x${'34'.repeat(32)}`;
     const pairId = 'cross:base:2/tron:1';
+    const sourceHubSigner = sourceHubIdentity.signerId;
+    const bookOwnerSigner = bookOwnerIdentity.signerId;
+    const collisionSigner = '3';
+    const makeCanonicalAccount = (selfId: string, counterpartyId: string): AccountMachine => {
+      const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
+        ? [selfId, counterpartyId]
+        : [counterpartyId, selfId];
+      const account = makeProposalAccount([], leftEntity, rightEntity);
+      account.proofHeader = { fromEntity: selfId, toEntity: counterpartyId, nonce: 0 };
+      return account;
+    };
+    env.gossip = {
+      getProfiles: () => [
+        {
+          entityId: localTaker,
+          metadata: { board: { validators: [{ signerId: 'local-taker-cross-source-signer' }] } },
+        },
+        {
+          entityId: remoteMaker,
+          metadata: { board: { validators: [{ signerId: 'remote-maker-cross-source-signer' }] } },
+        },
+      ],
+    } as Env['gossip'];
 
     const buildRoute = (
       orderId: string,
@@ -4758,10 +4846,10 @@ describe('audit fail-fast regressions', () => {
         bookOwnerEntityId: bookOwnerHub,
         venueId: pairId,
         sourceSignerId: `${orderId}-source-signer`,
-        sourceHubSignerId: sourceHubId === sourceHub ? 'source-hub-signer' : 'book-owner-signer',
-        targetHubSignerId: targetHubId === bookOwnerHub ? 'book-owner-signer' : 'target-hub-signer',
+        sourceHubSignerId: sourceHubId === sourceHub ? sourceHubSigner : bookOwnerSigner,
+        targetHubSignerId: targetHubId === bookOwnerHub ? bookOwnerSigner : 'target-hub-signer',
         targetSignerId: `${orderId}-target-signer`,
-        bookHubSignerId: 'book-owner-signer',
+        bookHubSignerId: bookOwnerSigner,
         source: {
           jurisdiction: sourceJurisdiction,
           entityId: sourceEntityId,
@@ -4834,14 +4922,14 @@ describe('audit fail-fast regressions', () => {
     };
 
     const sourceState = makeEntityState(sourceHub);
-    sourceState.config = makeSingleSignerConfigFor('source-hub-signer');
+    sourceState.config = makeSingleSignerConfigFor(sourceHubSigner);
     sourceState.config = {
       ...sourceState.config,
-      validators: ['source-primary-signer', 'source-hub-signer'],
-      shares: { 'source-primary-signer': 1n, 'source-hub-signer': 1n },
+      validators: [sourceHubSigner],
+      shares: { [sourceHubSigner]: 1n },
     };
     sourceState.crossJurisdictionSwaps = new Map([[makerRoute.orderId, makerRoute]]);
-    const makerSourceAccount = makeProposalAccount([], sourceHub, remoteMaker);
+    const makerSourceAccount = makeCanonicalAccount(sourceHub, remoteMaker);
     makerSourceAccount.swapOffers.set(makerRoute.orderId, {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
@@ -4858,7 +4946,7 @@ describe('audit fail-fast regressions', () => {
     sourceState.accounts.set(remoteMaker, makerSourceAccount);
 
     const bookOwnerState = makeEntityState(bookOwnerHub);
-    bookOwnerState.config = makeSingleSignerConfigFor('book-owner-signer');
+    bookOwnerState.config = makeSingleSignerConfigFor(bookOwnerSigner);
     mergeCrossJurisdictionBookAdmission(bookOwnerState, makerRoute, env.timestamp, receipt(makerRoute, 'source'));
     const makerAdmission = mergeCrossJurisdictionBookAdmission(
       bookOwnerState,
@@ -4912,7 +5000,7 @@ describe('audit fail-fast regressions', () => {
       },
     } satisfies OrderbookExtState;
 
-    const takerAccount = makeProposalAccount([], bookOwnerHub, localTaker);
+    const takerAccount = makeCanonicalAccount(bookOwnerHub, localTaker);
     takerAccount.swapOffers.set(takerRoute.orderId, {
       offerId: takerRoute.orderId,
       giveTokenId: takerRoute.source.tokenId,
@@ -4930,8 +5018,8 @@ describe('audit fail-fast regressions', () => {
 
     const collisionOwner = `0x${'35'.repeat(32)}`;
     const collisionState = makeEntityState(collisionOwner);
-    collisionState.config = makeSingleSignerConfigFor('collision-signer');
-    const collisionAccount = makeProposalAccount([], collisionOwner, remoteMaker);
+    collisionState.config = makeSingleSignerConfigFor(collisionSigner);
+    const collisionAccount = makeCanonicalAccount(collisionOwner, remoteMaker);
     collisionAccount.swapOffers.set(makerRoute.orderId, {
       offerId: makerRoute.orderId,
       giveTokenId: makerRoute.source.tokenId,
@@ -4946,23 +5034,23 @@ describe('audit fail-fast regressions', () => {
       crossJurisdiction: makerRoute,
     });
     collisionState.accounts.set(remoteMaker, collisionAccount);
-    env.eReplicas.set(`${collisionOwner}:collision-signer`, {
+    env.eReplicas.set(`${collisionOwner}:${collisionSigner}`, {
       entityId: collisionOwner,
-      signerId: 'collision-signer',
+      signerId: collisionSigner,
       mempool: [],
       isProposer: true,
       state: collisionState,
     } satisfies EntityReplica);
-    env.eReplicas.set(`${sourceHub}:source-hub-signer`, {
+    env.eReplicas.set(`${sourceHub}:${sourceHubSigner}`, {
       entityId: sourceHub,
-      signerId: 'source-hub-signer',
+      signerId: sourceHubSigner,
       mempool: [],
       isProposer: true,
       state: sourceState,
     } satisfies EntityReplica);
-    env.eReplicas.set(`${bookOwnerHub}:book-owner-signer`, {
+    env.eReplicas.set(`${bookOwnerHub}:${bookOwnerSigner}`, {
       entityId: bookOwnerHub,
-      signerId: 'book-owner-signer',
+      signerId: bookOwnerSigner,
       mempool: [],
       isProposer: true,
       state: bookOwnerState,
@@ -4979,7 +5067,7 @@ describe('audit fail-fast regressions', () => {
         data: { route: takerRoute, receipt: receipt(takerRoute, 'target'), reason: 'target_pull_committed' },
       },
     ])).rejects.toThrow(/CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISMATCH/);
-    makerAdmission.route.sourceHubSignerId = 'source-hub-signer';
+    makerAdmission.route.sourceHubSignerId = sourceHubSigner;
 
     const matched = await applyEntityFrame(env, bookOwnerState, [
       {
@@ -4996,7 +5084,7 @@ describe('audit fail-fast regressions', () => {
       output.entityId.toLowerCase() === sourceHub.toLowerCase() &&
       output.entityTxs?.[0]?.type === 'crossJurisdictionFillNotice'
     );
-    expect(sourceNotice?.signerId).toBe('source-hub-signer');
+    expect(sourceNotice?.signerId).toBe(sourceHubSigner);
     expect(sourceNotice?.entityTxs?.[0]).toMatchObject({
       type: 'crossJurisdictionFillNotice',
       data: {

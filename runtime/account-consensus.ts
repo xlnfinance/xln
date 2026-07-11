@@ -33,6 +33,7 @@ import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
   getAccountDepositoryAddress,
+  getAccountStateDomain,
   isAddress20,
   kickHubRebalanceAfterFrameFinalize,
   prependUniqueMempoolTxs,
@@ -52,6 +53,7 @@ import type {
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from './proof-builder';
 import { signEntityHashes, verifyHankoForHash } from './hanko/signing';
 import { getReplicaByEntityId } from './replica-utils';
+import { computeAccountStateRoot } from './account-state-root';
 export { proposeAccountFrame } from './account-consensus/propose';
 export type {
   AccountConsensusFrameResult,
@@ -154,6 +156,22 @@ function storeCounterpartyDisputeSeal(
   accountMachine.disputeProofNoncesByHash[seal.proofBodyHash] = seal.nonce;
 }
 
+const disputeSealRequirementError = (
+  expectedProofBodyHash: string | undefined,
+  previousCounterpartyProofBodyHash: string | undefined,
+  seal: ValidatedCounterpartyDisputeSeal | undefined,
+): string | undefined => {
+  if (!expectedProofBodyHash) return seal ? 'DISPUTE_SEAL_UNEXPECTED_WITHOUT_LOCAL_PROOF' : undefined;
+  if (seal && seal.proofBodyHash.toLowerCase() !== expectedProofBodyHash.toLowerCase()) {
+    return `DISPUTE_SEAL_PROOFBODY_MISMATCH: expected=${expectedProofBodyHash} received=${seal.proofBodyHash}`;
+  }
+  const proofChanged = expectedProofBodyHash.toLowerCase() !== previousCounterpartyProofBodyHash?.toLowerCase();
+  if (proofChanged && !seal) {
+    return `DISPUTE_SEAL_REQUIRED: proofBodyHash=${expectedProofBodyHash}`;
+  }
+  return undefined;
+};
+
 type AccountInputHeightNormalization =
   | { normalizedInputHeight: number | undefined; error?: undefined }
   | { normalizedInputHeight?: undefined; error: string };
@@ -239,7 +257,6 @@ function classifyAccountInputReplay(
 }
 
 async function buildDuplicateCommittedFrameAck(
-  env: Env,
   accountMachine: AccountMachine,
   input: AccountInput,
   events: string[],
@@ -264,56 +281,18 @@ async function buildDuplicateCommittedFrameAck(
     );
     return {
       success: true,
-      response: {
-        kind: 'ack',
-        fromEntityId: accountMachine.proofHeader.fromEntity,
-        toEntityId: input.fromEntityId,
-        height: cachedAck.height,
-        prevHanko: cachedAck.prevHanko,
-      },
+      response: structuredClone(cachedAck.response),
       events,
     };
   }
-
-  const ackEntityId = accountMachine.proofHeader.fromEntity;
-  const ackReplica = getReplicaByEntityId(env, ackEntityId);
-  const ackSignerId = ackReplica?.state.config.validators[0];
-  if (!ackSignerId) {
-    return {
-      success: false,
-      error: `Cannot rebuild duplicate ACK signer for ${ackEntityId.slice(-4)}`,
-      events,
-    };
-  }
-  const [rebuiltHanko] = await signEntityHashes(env, ackEntityId, ackSignerId, [
-    receivedFrame.stateHash,
-  ]);
-  if (!rebuiltHanko) {
-    return { success: false, error: 'Failed to rebuild duplicate ACK hanko', events };
-  }
-  accountMachine.lastOutboundFrameAck = {
-    height: receivedHeight,
-    counterpartyEntityId: input.fromEntityId,
-    prevHanko: rebuiltHanko,
-  };
-  events.push(
-    `↩️ Rebuilt ACK for duplicate committed frame ${String(receivedHeight)}`,
-  );
   return {
-    success: true,
-    response: {
-      kind: 'ack',
-      fromEntityId: accountMachine.proofHeader.fromEntity,
-      toEntityId: input.fromEntityId,
-      height: receivedHeight,
-      prevHanko: rebuiltHanko,
-    },
+    success: false,
+    error: `DUPLICATE_ACK_CACHE_MISSING: height=${receivedHeight}`,
     events,
   };
 }
 
 async function handleReplayOrObsoleteAccountInput(
-  env: Env,
   accountMachine: AccountMachine,
   input: AccountInput,
   replay: AccountInputReplayClassification,
@@ -324,7 +303,6 @@ async function handleReplayOrObsoleteAccountInput(
     // committed frame because our ACK was lost, re-ACK before the generic stale
     // guards. The safety gate is exact: same height and same committed stateHash.
     const duplicateAck = await buildDuplicateCommittedFrameAck(
-      env,
       accountMachine,
       input,
       events,
@@ -396,6 +374,14 @@ async function handlePendingFrameAck(
 ): Promise<PendingFrameAckResult> {
   if (!(accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && input.prevHanko)) {
     return { kind: 'not_applicable' };
+  }
+  const ackSealError = disputeSealRequirementError(
+    accountMachine.currentDisputeProofBodyHash,
+    accountMachine.counterpartyDisputeProofBodyHash,
+    validatedCounterpartyDisputeSeal,
+  );
+  if (ackSealError) {
+    return { kind: 'return', result: { success: false, error: ackSealError, events } };
   }
   if (HEAVY_LOGS) accountLog.debug('ack.debug', { from: shortId(input.fromEntityId), to: shortId(input.toEntityId) });
 
@@ -839,7 +825,6 @@ async function preflightIncomingAccountFrame(
 
   if (Number(receivedFrame.height) <= Number(accountMachine.currentHeight ?? 0)) {
     const duplicateAck = await buildDuplicateCommittedFrameAck(
-      env,
       accountMachine,
       input,
       events,
@@ -853,7 +838,18 @@ async function preflightIncomingAccountFrame(
     return { kind: 'return', result: { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) } };
   }
 
-  const expectedFrameByLeft = isLeft(input.fromEntityId, input.toEntityId);
+  const proposer = input.fromEntityId.toLowerCase();
+  const expectedFrameByLeft = proposer === accountMachine.leftEntity.toLowerCase();
+  if (!expectedFrameByLeft && proposer !== accountMachine.rightEntity.toLowerCase()) {
+    return {
+      kind: 'return',
+      result: {
+        success: false,
+        error: `Frame proposer is not an account party: ${input.fromEntityId.slice(-8)}`,
+        events,
+      },
+    };
+  }
   if (receivedFrame.byLeft !== expectedFrameByLeft) {
     return {
       kind: 'return',
@@ -976,84 +972,6 @@ function collectReceiverValidationDeltas(clonedMachine: AccountMachine): {
   return { tokenIds, deltas };
 }
 
-function verifyReceiverStateMatchesFrame(
-  receivedFrame: AccountFrame,
-  ourFinalTokenIds: number[],
-  ourFinalDeltas: Delta[],
-  events: string[],
-): HandleAccountInputResult | undefined {
-  const ourOffdeltas = deriveAccountFrameOffdeltas(ourFinalDeltas);
-  const theirOffdeltas = deriveAccountFrameOffdeltas(receivedFrame);
-
-  const ourComputedState = Buffer.from(ourOffdeltas.map(d => d.toString()).join(',')).toString('hex');
-  const theirClaimedState = Buffer.from(theirOffdeltas.map(d => d.toString()).join(',')).toString('hex');
-
-  accountLog.debug('frame.state_verify', {
-    height: receivedFrame.height,
-    ourTokens: ourFinalTokenIds.length,
-    theirTokens: deriveAccountFrameTokenIds(receivedFrame).length,
-    our: shortHash(ourComputedState),
-    their: shortHash(theirClaimedState),
-  });
-  if (shouldLogFullPayloads()) {
-    accountLog.trace('frame.state_verify_payload', {
-      height: receivedFrame.height,
-      ourTokenIds: ourFinalTokenIds,
-      ourOffdeltas: ourOffdeltas.map(d => d.toString()),
-      theirTokenIds: deriveAccountFrameTokenIds(receivedFrame),
-      theirOffdeltas: theirOffdeltas.map(d => d.toString()),
-    });
-  }
-
-  if (ourComputedState !== theirClaimedState) {
-    accountLog.warn('frame.state_mismatch', {
-      height: receivedFrame.height,
-      our: shortHash(ourComputedState),
-      their: shortHash(theirClaimedState),
-    });
-    return { success: false, error: `Bilateral consensus failure - states don't match`, events };
-  }
-  return undefined;
-}
-
-function verifyReceiverBilateralDeltas(
-  receivedFrame: AccountFrame,
-  ourFinalDeltas: Delta[],
-  events: string[],
-): HandleAccountInputResult | undefined {
-  const theirDeltas = receivedFrame.deltas;
-  if (ourFinalDeltas.length !== theirDeltas.length) {
-    accountLog.warn('frame.delta_count_mismatch', { ours: ourFinalDeltas.length, theirs: theirDeltas.length });
-    return { success: false, error: `Bilateral state injection detected - delta count mismatch`, events };
-  }
-
-  for (let i = 0; i < ourFinalDeltas.length; i++) {
-    const ours = ourFinalDeltas[i]!;
-    const theirs = theirDeltas[i]!;
-    const bilateralMismatch =
-      ours.offdelta !== theirs.offdelta ||
-      ours.leftCreditLimit !== theirs.leftCreditLimit ||
-      ours.rightCreditLimit !== theirs.rightCreditLimit ||
-      ours.leftAllowance !== theirs.leftAllowance ||
-      ours.rightAllowance !== theirs.rightAllowance ||
-      (ours.leftHold ?? 0n) !== (theirs.leftHold ?? 0n) ||
-      (ours.rightHold ?? 0n) !== (theirs.rightHold ?? 0n);
-
-    if (bilateralMismatch) {
-      accountLog.warn('frame.bilateral_delta_mismatch', {
-        tokenId: ours.tokenId,
-        offdelta: { ours: ours.offdelta.toString(), theirs: theirs.offdelta.toString() },
-        leftCreditLimit: { ours: ours.leftCreditLimit.toString(), theirs: theirs.leftCreditLimit.toString() },
-        rightCreditLimit: { ours: ours.rightCreditLimit.toString(), theirs: theirs.rightCreditLimit.toString() },
-        leftHold: { ours: String(ours.leftHold ?? 0n), theirs: String(theirs.leftHold ?? 0n) },
-        rightHold: { ours: String(ours.rightHold ?? 0n), theirs: String(theirs.rightHold ?? 0n) },
-      });
-      return { success: false, error: `Bilateral state injection detected - credit/allowance mismatch`, events };
-    }
-  }
-  return undefined;
-}
-
 async function verifySenderFrameHash(
   receivedFrame: AccountFrame,
   events: string[],
@@ -1065,6 +983,7 @@ async function verifySenderFrameHash(
     jHeight: receivedFrame.jHeight,
     accountTxs: receivedFrame.accountTxs,
     prevFrameHash: receivedFrame.prevFrameHash,
+    accountStateRoot: receivedFrame.accountStateRoot,
     deltas: receivedFrame.deltas,
     stateHash: '', // Computed by createFrameHash
     ...(receivedFrame.byLeft === undefined ? {} : { byLeft: receivedFrame.byLeft }),
@@ -1089,6 +1008,7 @@ async function validateIncomingFrameOnClone(
   frameJHeight: number,
   events: string[],
   timedOutHashlocks: string[],
+  validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
 ): Promise<IncomingFrameValidationResult> {
   const clonedMachine = cloneAccountMachine(accountMachine);
   const processEvents: string[] = [];
@@ -1146,15 +1066,34 @@ async function validateIncomingFrameOnClone(
     }
   }
 
-  const { tokenIds: ourFinalTokenIds, deltas: ourFinalDeltas } = collectReceiverValidationDeltas(clonedMachine);
-  const stateMismatch = verifyReceiverStateMatchesFrame(receivedFrame, ourFinalTokenIds, ourFinalDeltas, events);
-  if (stateMismatch) return { kind: 'return', result: stateMismatch };
-
-  const bilateralMismatch = verifyReceiverBilateralDeltas(receivedFrame, ourFinalDeltas, events);
-  if (bilateralMismatch) return { kind: 'return', result: bilateralMismatch };
-
   const frameHashMismatch = await verifySenderFrameHash(receivedFrame, events);
   if (frameHashMismatch) return { kind: 'return', result: frameHashMismatch };
+
+  const { deltas: ourFinalDeltas } = collectReceiverValidationDeltas(clonedMachine);
+  const localFrame: AccountFrame = {
+    ...receivedFrame,
+    accountStateRoot: computeAccountStateRoot(clonedMachine, getAccountStateDomain(env, accountMachine)),
+    deltas: ourFinalDeltas,
+    stateHash: '',
+  };
+  const localStateHash = await createFrameHash(localFrame);
+  if (localStateHash !== receivedFrame.stateHash) {
+    accountLog.warn('frame.state_root_mismatch', {
+      height: receivedFrame.height,
+      local: shortHash(localStateHash),
+      received: shortHash(receivedFrame.stateHash),
+    });
+    return { kind: 'return', result: { success: false, error: 'Bilateral account state root mismatch', events } };
+  }
+  const localProofBodyHash = buildAccountProofBody(clonedMachine).proofBodyHash;
+  const frameSealError = disputeSealRequirementError(
+    localProofBodyHash,
+    accountMachine.counterpartyDisputeProofBodyHash,
+    validatedCounterpartyDisputeSeal,
+  );
+  if (frameSealError) {
+    return { kind: 'return', result: { success: false, error: frameSealError, events } };
+  }
 
   accountLog.debug('frame.accept', {
     height: receivedFrame.height,
@@ -1316,12 +1255,13 @@ type IncomingFrameAckMaterial = {
   outboundAck: {
     height: number;
     counterpartyEntityId: string;
-    prevHanko: string;
+    response: Extract<AccountInput, { kind: 'ack' }>;
   };
-  ackDisputeHash: string;
+  ackDisputeHash?: string;
   ackDisputeHanko: string | undefined;
   ackProofBodyHash: string;
   ackSignedNonce: number;
+  proofChanged: boolean;
 };
 
 type IncomingFrameAckMaterialResult =
@@ -1349,35 +1289,50 @@ async function buildIncomingFrameAckMaterial(
     return { kind: 'return', result: { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events } };
   }
   const ackProofResult = buildAccountProofBody(accountMachine);
-  const ackDisputeHash = createDisputeProofHashWithNonce(
-    accountMachine,
-    ackProofResult.proofBodyHash,
-    ackDepositoryAddress,
-    accountMachine.proofHeader.nonce,
-  );
+  const proofChanged = ackProofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase();
+  const ackDisputeHash = proofChanged
+    ? createDisputeProofHashWithNonce(
+      accountMachine,
+      ackProofResult.proofBodyHash,
+      ackDepositoryAddress,
+      accountMachine.proofHeader.nonce,
+    )
+    : undefined;
   const [confirmationHanko, ackDisputeHanko] = await signEntityHashes(env, ackEntityId, ackSignerId, [
     receivedFrame.stateHash,
-    ackDisputeHash,
+    ...(ackDisputeHash ? [ackDisputeHash] : []),
   ]);
   if (!confirmationHanko) {
     return { kind: 'return', result: { success: false, error: 'Failed to build ACK hanko', events } };
   }
 
   const ackSignedNonce = accountMachine.proofHeader.nonce;
-  accountMachine.disputeProofNoncesByHash ??= {};
-  accountMachine.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedNonce;
-  accountMachine.disputeProofBodiesByHash ??= {};
-  accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
-  storeDisputeArgumentSnapshot(
-    accountMachine,
-    captureDisputeArgumentSnapshot(
+  if (proofChanged) {
+    if (!ackDisputeHanko || !ackDisputeHash) {
+      return { kind: 'return', result: { success: false, error: 'Failed to build ACK dispute hanko', events } };
+    }
+    accountMachine.disputeProofNoncesByHash ??= {};
+    accountMachine.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedNonce;
+    accountMachine.disputeProofBodiesByHash ??= {};
+    accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
+    storeDisputeArgumentSnapshot(
       accountMachine,
-      ackProofResult.proofBodyHash,
-      ackSignedNonce,
-      ackProofResult.proofBodyStruct,
-      { appliedAccountTxs: receivedFrame.accountTxs, appliedFrameHeight: receivedFrame.height },
-    ),
-  );
+      captureDisputeArgumentSnapshot(
+        accountMachine,
+        ackProofResult.proofBodyHash,
+        ackSignedNonce,
+        ackProofResult.proofBodyStruct,
+        { appliedAccountTxs: receivedFrame.accountTxs, appliedFrameHeight: receivedFrame.height },
+      ),
+    );
+  }
+
+  const ackDisputeSeal = proofChanged && ackDisputeHanko && ackDisputeHash ? {
+    newDisputeHanko: ackDisputeHanko,
+    newDisputeHash: ackDisputeHash,
+    newDisputeProofBodyHash: ackProofResult.proofBodyHash,
+    disputeProofNonce: ackSignedNonce,
+  } : {};
 
   return {
     kind: 'continue',
@@ -1389,20 +1344,26 @@ async function buildIncomingFrameAckMaterial(
         watchSeed: accountMachine.watchSeed,
         height: receivedFrame.height,
         prevHanko: confirmationHanko,
-        ...(ackDisputeHanko && { newDisputeHanko: ackDisputeHanko }),
-        newDisputeHash: ackDisputeHash,
-        newDisputeProofBodyHash: ackProofResult.proofBodyHash,
-        disputeProofNonce: ackSignedNonce,
+        ...ackDisputeSeal,
       } as AccountInput,
       outboundAck: {
         height: receivedFrame.height,
         counterpartyEntityId: input.fromEntityId,
-        prevHanko: confirmationHanko,
+        response: {
+          kind: 'ack',
+          fromEntityId: accountMachine.proofHeader.fromEntity,
+          toEntityId: input.fromEntityId,
+          watchSeed: accountMachine.watchSeed,
+          height: receivedFrame.height,
+          prevHanko: confirmationHanko,
+          ...ackDisputeSeal,
+        },
       },
-      ackDisputeHash,
+      ...(ackDisputeHash ? { ackDisputeHash } : {}),
       ackDisputeHanko,
       ackProofBodyHash: ackProofResult.proofBodyHash,
       ackSignedNonce,
+      proofChanged,
     },
   };
 }
@@ -1444,7 +1405,7 @@ function storeAckResponseState(
 ): void {
   if (!batchedWithNewFrame) {
     accountMachine.lastOutboundFrameAck = material.outboundAck;
-    if (material.ackDisputeHanko) {
+    if (material.proofChanged && material.ackDisputeHanko && material.ackDisputeHash) {
       accountMachine.currentDisputeProofHanko = material.ackDisputeHanko;
       accountMachine.currentDisputeProofNonce = material.ackSignedNonce;
       accountMachine.currentDisputeProofBodyHash = material.ackProofBodyHash;
@@ -1462,7 +1423,7 @@ function buildIncomingFrameReturnPayload(
   validation: IncomingFrameValidation,
   proposeResult: ProposeAccountFrameResult | undefined,
   batchedWithNewFrame: boolean,
-  ackDisputeHash: string,
+  ackDisputeHash: string | undefined,
   events: string[],
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
@@ -1480,7 +1441,7 @@ function buildIncomingFrameReturnPayload(
       type: 'accountFrame',
       context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}`,
     },
-    ...(!batchedWithNewFrame
+    ...(!batchedWithNewFrame && ackDisputeHash
       ? [{ hash: ackDisputeHash, type: 'dispute' as const, context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` }]
       : []),
     ...(proposeResult?.hashesToSign || []),
@@ -1529,7 +1490,7 @@ async function buildAckResponseForIncomingFrame(
   );
 
   storeAckResponseState(accountMachine, material, batchedWithNewFrame);
-  ++accountMachine.proofHeader.nonce;
+  if (material.proofChanged) ++accountMachine.proofHeader.nonce;
   return buildIncomingFrameReturnPayload(
     input,
     receivedFrame,
@@ -1579,6 +1540,7 @@ async function handleIncomingAccountFrame(
     preflight.frameJHeight,
     events,
     timedOutHashlocks,
+    validatedCounterpartyDisputeSeal,
   );
   if (validationResult.kind === 'return') return validationResult;
 
@@ -1646,7 +1608,6 @@ export async function applyAccountInput(
   const replay = classifyAccountInputReplay(accountMachine, input);
 
   const replayGateResult = await handleReplayOrObsoleteAccountInput(
-    env,
     accountMachine,
     input,
     replay,

@@ -4,6 +4,7 @@ import { txFingerprint } from './state-helpers';
 import { getJurisdictionConfigName } from './jurisdiction-runtime';
 import { getReplicaByEntityId } from './replica-utils';
 import { checkAutoRebalance } from './account-tx/handlers/request-collateral';
+import type { AccountStateDomain } from './account-state-root';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
@@ -136,6 +137,34 @@ export function getAccountDepositoryAddress(env: Env, accountMachine: AccountMac
     fallback: shortHash(fallback),
   });
   return fallback;
+}
+
+export function getAccountStateDomain(env: Env, accountMachine: AccountMachine): AccountStateDomain {
+  const local = findEntityJurisdiction(env, accountMachine.proofHeader.fromEntity);
+  const counterparty = findEntityJurisdiction(env, accountMachine.proofHeader.toEntity);
+  const jurisdiction = local ?? counterparty;
+  const depositoryAddress = String(jurisdiction?.depositoryAddress || getAccountDepositoryAddress(env, accountMachine));
+  const matchingReplica = Array.from(env.jReplicas.values()).find((replica) => {
+    const address = replica.jadapter?.addresses?.depository || replica.depositoryAddress || '';
+    return address.toLowerCase() === depositoryAddress.toLowerCase();
+  });
+  const browserVm = env.browserVM as (typeof env.browserVM & {
+    getChainId?: () => bigint | number;
+    browserVM?: { getChainId?: () => bigint | number };
+  }) | undefined;
+  const chainId = Number(
+    jurisdiction?.chainId ??
+    matchingReplica?.jadapter?.chainId ??
+    matchingReplica?.chainId ??
+    browserVm?.getChainId?.() ??
+    browserVm?.browserVM?.getChainId?.(),
+  );
+  if (!Number.isSafeInteger(chainId) || chainId <= 0 || !isAddress20(depositoryAddress)) {
+    throw new Error(
+      `ACCOUNT_STATE_DOMAIN_MISSING: chainId=${String(jurisdiction?.chainId)} depository=${depositoryAddress || 'missing'}`,
+    );
+  }
+  return { chainId, depositoryAddress };
 }
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {

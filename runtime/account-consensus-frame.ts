@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 
 import type { AccountFrame, AccountTx } from './types';
 import { assertAccountFrameDeltaIntegrity } from './account-frame';
-import { safeStringify } from './serialization-utils';
+import { computeCanonicalMerkleRoot } from './account-state-root';
 import { canonicalJurisdictionEventsHash } from './j-event-observation';
 import { normalizeJurisdictionEvents } from './j-event-normalization';
 
@@ -29,6 +29,9 @@ export function getAccountFrameValidationError(
   }
   if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) {
     return `tx count ${frame.accountTxs.length} > ${MAX_ACCOUNT_FRAME_TXS}`;
+  }
+  if (!ethers.isHexString(frame.accountStateRoot, 32)) {
+    return `accountStateRoot ${String(frame.accountStateRoot)} is invalid`;
   }
   try {
     assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
@@ -88,29 +91,18 @@ export const canonicalAccountTxForFrameHash = (tx: AccountTx): Record<string, un
 
 export async function createFrameHash(frame: AccountFrame): Promise<string> {
   assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
-
-  const frameData = {
-    height: frame.height,
-    timestamp: frame.timestamp,
-    jHeight: frame.jHeight,
-    prevFrameHash: frame.prevFrameHash,
-    accountTxs: frame.accountTxs.map(canonicalAccountTxForFrameHash),
-    deltas: frame.deltas.map(delta => ({
-      tokenId: delta.tokenId,
-      collateral: delta.collateral.toString(),
-      ondelta: delta.ondelta.toString(),
-      offdelta: delta.offdelta.toString(),
-      leftCreditLimit: delta.leftCreditLimit.toString(),
-      rightCreditLimit: delta.rightCreditLimit.toString(),
-      leftAllowance: delta.leftAllowance.toString(),
-      rightAllowance: delta.rightAllowance.toString(),
-      leftHold: (delta.leftHold || 0n).toString(),
-      rightHold: (delta.rightHold || 0n).toString(),
-    })),
-  };
-
-  const encoded = safeStringify(frameData);
-  return ethers.keccak256(ethers.toUtf8Bytes(encoded));
+  return computeCanonicalMerkleRoot('account.frame', [
+    ['transition', {
+      height: frame.height,
+      timestamp: frame.timestamp,
+      jHeight: frame.jHeight,
+      prevFrameHash: frame.prevFrameHash,
+      byLeft: frame.byLeft,
+    }],
+    ['transactions', frame.accountTxs.map(canonicalAccountTxForFrameHash)],
+    ['deltas', frame.deltas],
+    ['accountStateRoot', frame.accountStateRoot],
+  ]);
 }
 
 export async function computeFrameHash(frame: AccountFrame): Promise<string> {

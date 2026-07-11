@@ -40,9 +40,17 @@ export interface RuntimeProofBody {
 /**
  * Runtime-friendly TransformerClause
  */
-export interface RuntimeTransformerClause {
+export type RuntimeTransformerClause = RuntimeTypedTransformerClause | RuntimeEncodedTransformerClause;
+
+export interface RuntimeTypedTransformerClause {
   transformerAddress: string;    // DeltaTransformer contract address
   batch: RuntimeBatch;           // Decoded batch (not encoded bytes)
+  allowances: RuntimeAllowance[];
+}
+
+export interface RuntimeEncodedTransformerClause {
+  transformerAddress: string;
+  encodedBatch: string;          // Opaque bytes for custom transformer deployments
   allowances: RuntimeAllowance[];
 }
 

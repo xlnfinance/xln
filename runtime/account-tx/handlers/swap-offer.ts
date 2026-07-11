@@ -115,6 +115,17 @@ export async function handleSwapOffer(
   // 3. Determine maker perspective (Channel.ts: byLeft = frame proposer = maker)
   const { leftEntity, rightEntity } = accountMachine;
   const makerIsLeft = byLeft;
+  const makerEntityId = makerIsLeft ? leftEntity : rightEntity;
+  if (
+    crossJurisdiction &&
+    crossJurisdiction.makerEntityId.toLowerCase() !== makerEntityId.toLowerCase()
+  ) {
+    return {
+      success: false,
+      error: `Cross-j swap maker must match the frame proposer`,
+      events,
+    };
+  }
 
   // 4. Quantize order to orderbook lot granularity at source.
   // This keeps account holds, swap state, and orderbook matching deterministic.

@@ -63,6 +63,11 @@ export const handlePlaceSwapOfferRequest = (
     : undefined;
   if (publicCrossJurisdiction) {
     const route = publicCrossJurisdiction;
+    if (route.makerEntityId.toLowerCase() !== newState.entityId.toLowerCase()) {
+      throw new Error(
+        `CROSS_J_SWAP_MAKER_NOT_PROPOSER: maker=${route.makerEntityId} proposer=${newState.entityId}`,
+      );
+    }
     const existing = newState.crossJurisdictionSwaps?.get(route.orderId);
     const transitionError = validateCrossJurisdictionRouteTransition(existing, route);
     if (transitionError || isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(newState, env))) {

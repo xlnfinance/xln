@@ -236,6 +236,7 @@ const makeAccount = (leftEntity: string, rightEntity: string, height: number, ti
     jHeight: 0,
     accountTxs: [],
     prevFrameHash: 'genesis',
+    accountStateRoot: `0x${'00'.repeat(32)}`,
     stateHash: `0x${'00'.repeat(32)}`,
     deltas: [],
   },

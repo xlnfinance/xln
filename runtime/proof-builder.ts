@@ -233,6 +233,16 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
       allowances: buildTransformerAllowances(batch),
     });
   }
+  for (const [subcontractId, subcontract] of Array.from(accountMachine.subcontracts ?? []).sort(([left], [right]) => left.localeCompare(right))) {
+    const transformerAddress = requireContractAddress(`subcontract_${subcontractId}`, subcontract.transformerAddress);
+    if (!ethers.isHexString(subcontract.encodedBatch)) {
+      throw new Error(`SUBCONTRACT_ENCODED_BATCH_INVALID:${subcontractId}`);
+    }
+    const allowances = subcontract.allowances
+      .map((allowance) => ({ ...allowance }))
+      .sort((left, right) => left.deltaIndex - right.deltaIndex);
+    transformers.push({ transformerAddress, encodedBatch: subcontract.encodedBatch, allowances });
+  }
 
   const runtimeProofBody: RuntimeProofBody = {
     watchSeed,
@@ -273,8 +283,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
  */
 function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
   const transformers: TransformerClauseStruct[] = runtime.transformers.map(t => {
-    // Encode batch to bytes
-    const batchStruct: DeltaTransformer.BatchStruct = {
+    const batchStruct: DeltaTransformer.BatchStruct | null = 'batch' in t ? {
       payment: t.batch.payments.map(p => ({
         deltaIndex: BigInt(p.deltaIndex),
         amount: p.amount,
@@ -299,9 +308,11 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
         fullHash: p.fullHash,
         partialRoot: p.partialRoot,
       })),
-    };
+    } : null;
 
-    const encodedBatch = ABI_CODER.encode([DELTA_BATCH_PARAM], [batchStruct]);
+    const encodedBatch = 'encodedBatch' in t
+      ? t.encodedBatch
+      : ABI_CODER.encode([DELTA_BATCH_PARAM], [batchStruct!]);
 
     return {
       transformerAddress: t.transformerAddress,

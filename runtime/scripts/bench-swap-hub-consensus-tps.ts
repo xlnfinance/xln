@@ -258,6 +258,7 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => 
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
+      accountStateRoot: `0x${'00'.repeat(32)}`,
       stateHash: '',
       deltas: [],
       byLeft: true,

@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { sanitizeChildProcessEnv } from '../child-process-env';
@@ -14,6 +15,9 @@ export const TEST_ARTIFACT_CLEANUP_DONE_ENV = 'XLN_TEST_ARTIFACT_CLEANUP_DONE';
 export const KEEP_TEST_ARTIFACTS_ENV = 'XLN_KEEP_TEST_ARTIFACTS';
 export const TEST_WORKSPACE_MAX_BYTES_ENV = 'XLN_TEST_WORKSPACE_MAX_BYTES';
 export const DEFAULT_TEST_WORKSPACE_MAX_BYTES = 50 * 1024 * 1024 * 1024;
+export const FOUNDRY_HOME_ENV = 'XLN_FOUNDRY_HOME';
+export const FOUNDRY_MAX_BYTES_ENV = 'XLN_FOUNDRY_MAX_BYTES';
+export const DEFAULT_FOUNDRY_MAX_BYTES = 50 * 1024 * 1024 * 1024;
 
 const E2E_TEST_ARTIFACT_DIRS = [
   '.logs/e2e-parallel',
@@ -87,6 +91,15 @@ export type TestArtifactCleanupSummary = {
   estimatedBudgetedBytes: number;
   estimatedWorkspaceBytes: number;
   maxBytes: number;
+  foundry: FoundryCleanupSummary;
+};
+
+export type FoundryCleanupSummary = {
+  home: string;
+  maxBytes: number;
+  bytesBefore: number;
+  bytesAfter: number;
+  cleaned: boolean;
 };
 
 export const withoutTestArtifactCleanupDoneEnv = (
@@ -110,6 +123,11 @@ const parseMaxBytes = (env: Record<string, string | undefined>): number => {
   if (!raw) return DEFAULT_TEST_WORKSPACE_MAX_BYTES;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_TEST_WORKSPACE_MAX_BYTES;
+};
+
+const parsePositiveByteLimit = (raw: string | undefined, fallback: number): number => {
+  const parsed = Number(String(raw || '').trim());
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 };
 
 const pidIsAlive = (pid: number): boolean => {
@@ -145,6 +163,73 @@ const estimatePathBytes = (path: string): number => {
     total += estimatePathBytes(join(path, name));
   }
   return total;
+};
+
+const estimateFoundryBytes = (path: string, maxBytes: number): number => {
+  if (!existsSync(path)) return 0;
+  const result = spawnSync('du', ['-sk', path], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+    timeout: 5_000,
+  });
+  if (result.status === 0) {
+    const kb = Number(String(result.stdout || '').trim().split(/\s+/)[0]);
+    if (Number.isFinite(kb) && kb >= 0) return Math.floor(kb * 1024);
+  }
+  const errorCode = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  if (errorCode === 'ETIMEDOUT') {
+    // A normal Foundry install measures in milliseconds. If walking it exceeds
+    // the bounded gate budget, treat it as over-budget and clean only Anvil tmp.
+    return maxBytes + 1;
+  }
+  throw new Error(`FOUNDRY_SIZE_SCAN_FAILED: home=${path} status=${String(result.status)} error=${String(result.error || result.stderr || '')}`);
+};
+
+const activeAnvilPids = (): number[] => {
+  const result = spawnSync('ps', ['-ax', '-o', 'pid=', '-o', 'comm='], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(`FOUNDRY_ANVIL_PROCESS_SCAN_FAILED: ${String(result.stderr || '').trim()}`);
+  }
+  return String(result.stdout || '')
+    .split('\n')
+    .map(line => line.trim().match(/^(\d+)\s+(.+)$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
+    .filter(match => /(^|\/)anvil$/.test(match[2] || ''))
+    .map(match => Number(match[1]));
+};
+
+export const cleanupFoundryIfOverBudget = (
+  env: Record<string, string | undefined> = process.env,
+  log: (message: string) => void = message => console.log(message),
+): FoundryCleanupSummary => {
+  const foundryHome = resolve(env[FOUNDRY_HOME_ENV] || join(homedir(), '.foundry'));
+  const maxBytes = parsePositiveByteLimit(env[FOUNDRY_MAX_BYTES_ENV], DEFAULT_FOUNDRY_MAX_BYTES);
+  const bytesBefore = estimateFoundryBytes(foundryHome, maxBytes);
+  if (bytesBefore <= maxBytes) {
+    return { home: foundryHome, maxBytes, bytesBefore, bytesAfter: bytesBefore, cleaned: false };
+  }
+
+  const anvilTmp = join(foundryHome, 'anvil', 'tmp');
+  if (!existsSync(anvilTmp)) {
+    throw new Error(`FOUNDRY_BUDGET_EXCEEDED_NO_SAFE_TARGET: home=${foundryHome} bytes>${maxBytes}`);
+  }
+  const livePids = activeAnvilPids();
+  if (livePids.length > 0) {
+    throw new Error(`FOUNDRY_ANVIL_TMP_CLEANUP_BLOCKED: activeAnvilPids=${livePids.join(',')}`);
+  }
+
+  for (const child of readdirSync(anvilTmp)) {
+    rmSync(join(anvilTmp, child), { recursive: true, force: true });
+  }
+  const bytesAfter = estimateFoundryBytes(foundryHome, maxBytes);
+  if (bytesAfter > maxBytes) {
+    throw new Error(`FOUNDRY_BUDGET_STILL_EXCEEDED: home=${foundryHome} bytes>${maxBytes}`);
+  }
+  log(`foundry cleanup: removed stale anvil state; ${(bytesBefore / (1024 ** 3)).toFixed(2)}GiB+ -> ${(bytesAfter / (1024 ** 3)).toFixed(2)}GiB`);
+  return { home: foundryHome, maxBytes, bytesBefore, bytesAfter, cleaned: true };
 };
 
 const estimateBudgetedWorkspaceBytes = (cwd: string): number =>
@@ -196,18 +281,23 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
   const env = options.env || process.env;
   const log = options.log || ((message: string) => console.log(message));
   const maxBytes = parseMaxBytes(env);
+  // Explicit test environments without XLN_FOUNDRY_HOME are isolated fixtures;
+  // never let a unit test unexpectedly inspect or mutate the developer's home.
+  const foundry = options.env && !(FOUNDRY_HOME_ENV in env)
+    ? { home: '', maxBytes: DEFAULT_FOUNDRY_MAX_BYTES, bytesBefore: 0, bytesAfter: 0, cleaned: false }
+    : cleanupFoundryIfOverBudget(env, log);
 
   if (options.skipIfAlreadyDone !== false && env[TEST_ARTIFACT_CLEANUP_DONE_ENV] === '1') {
     const { estimatedBudgetedBytes, estimatedWorkspaceBytes } = assertWorkspaceBudget(cwd, maxBytes, options.reason);
     log(`test artifact cleanup (${options.reason}): already completed by parent runner`);
     logWorkspaceBudget(options.reason, maxBytes, estimatedBudgetedBytes, estimatedWorkspaceBytes, log);
-    return { skipped: true, removed: [], estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes };
+    return { skipped: true, removed: [], estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes, foundry };
   }
   if (shouldKeepArtifacts(argv, env)) {
     const { estimatedBudgetedBytes, estimatedWorkspaceBytes } = assertWorkspaceBudget(cwd, maxBytes, options.reason);
     log(`test artifact cleanup (${options.reason}): preserving existing artifacts`);
     logWorkspaceBudget(options.reason, maxBytes, estimatedBudgetedBytes, estimatedWorkspaceBytes, log);
-    return { skipped: true, removed: [], estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes };
+    return { skipped: true, removed: [], estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes, foundry };
   }
 
   assertNoLiveE2eRunnerLock(cwd);
@@ -228,7 +318,7 @@ export const cleanupTestArtifactsBeforeRun = (options: CleanupOptions): TestArti
     log(`test artifact cleanup (${options.reason}): removed ${removed.join(', ')}`);
   }
   logWorkspaceBudget(options.reason, maxBytes, estimatedBudgetedBytes, estimatedWorkspaceBytes, log);
-  return { skipped: false, removed, estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes };
+  return { skipped: false, removed, estimatedBudgetedBytes, estimatedWorkspaceBytes, maxBytes, foundry };
 };
 
 const cliFlagValue = (argv: string[], name: string): string | undefined => {

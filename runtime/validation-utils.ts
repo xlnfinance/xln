@@ -579,6 +579,10 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
     typeof stateHashRaw === 'string' && (stateHashRaw.length > 0 || height === 0)
       ? stateHashRaw
       : validateString(stateHashRaw, `${context}.stateHash`);
+  const accountStateRoot = validateString(obj['accountStateRoot'], `${context}.accountStateRoot`);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(accountStateRoot)) {
+    throw new FinancialDataCorruptionError(`${context}.accountStateRoot must be bytes32 hex`);
+  }
 
   const validated: AccountFrame = {
     height,
@@ -586,6 +590,7 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
     jHeight: validateNumber(obj['jHeight'], `${context}.jHeight`),
     accountTxs: validateArray(obj['accountTxs'], `${context}.accountTxs`),
     prevFrameHash,
+    accountStateRoot,
     stateHash,
     deltas: validateArray(obj['deltas'] || [], `${context}.deltas`).map((deltaState, index) =>
       validateDelta(deltaState, `${context}.deltas[${index}]`),

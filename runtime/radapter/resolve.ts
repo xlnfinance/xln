@@ -743,6 +743,7 @@ const compactAccountFrameForView = (
   jHeight: frame.jHeight,
   accountTxs: compactArrayTail(frame.accountTxs, txLimit) ?? [],
   prevFrameHash: frame.prevFrameHash,
+  accountStateRoot: frame.accountStateRoot,
   stateHash: frame.stateHash,
   ...withDefinedProp('byLeft', frame.byLeft),
   deltas: Array.isArray(frame.deltas) ? frame.deltas.slice(0, deltaLimit) : [],

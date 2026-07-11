@@ -3,6 +3,11 @@ import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-event
 import { applyAccountInput as applyConsensusAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
 import { createStructuredLogger, shortId } from '../../logger';
+import {
+  accountStateDomainFromJurisdiction,
+  computeAccountStateRoot,
+  EMPTY_ACCOUNT_STATE_ROOT,
+} from '../../account-state-root';
 import { isLeftEntity } from '../../entity-id-utils';
 import { scheduleHook as scheduleCrontabHook } from '../../entity-crontab';
 import { upsertSortedStringMapEntry } from '../../sorted-index';
@@ -78,6 +83,14 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
 
   // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
   const newState: EntityState = state;  // Use state directly
+  if (normalizeEntityRef(input.toEntityId) !== normalizeEntityRef(newState.entityId)) {
+    throw new Error(
+      `ACCOUNT_INPUT_WRONG_TARGET: expected=${shortId(newState.entityId)} got=${shortId(input.toEntityId)}`,
+    );
+  }
+  if (normalizeEntityRef(input.fromEntityId) === normalizeEntityRef(newState.entityId)) {
+    throw new Error(`ACCOUNT_INPUT_SELF_SENDER: entity=${shortId(newState.entityId)}`);
+  }
   const outputs: EntityInput[] = [];
 
   // Collect events for entity-level orchestration (pure - no direct mempool mutation)
@@ -141,6 +154,7 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
         jHeight: 0,
         accountTxs: [],
         prevFrameHash: '',
+        accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
         deltas: [],
         stateHash: '',
         byLeft: state.entityId === leftEntity, // Am I left entity?
@@ -184,6 +198,15 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       },
       onChainSettlementNonce: 0,
     };
+    const jurisdiction = state.config?.jurisdiction;
+    if (!jurisdiction) {
+      throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${shortId(state.entityId)}`);
+    }
+    accountMachine.currentFrame.accountStateRoot = computeAccountStateRoot(
+      accountMachine,
+      accountStateDomainFromJurisdiction(jurisdiction),
+    );
+    accountMachine.currentFrame.stateHash = accountMachine.currentFrame.accountStateRoot;
 
     // Store with counterparty ID as key (simpler than canonical)
     // Type assertion safe: accountMachine was just created above in this block

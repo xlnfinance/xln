@@ -1111,7 +1111,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceHub = entity('c2');
     const targetHub = entity('c3');
     const targetUser = entity('c4');
-    const sourceHubState = makeState(sourceHub, addr('c5'), eth, sourceUser);
+    const sourceUserState = makeState(sourceUser, addr('c5'), eth, sourceHub);
     const route = {
       ...buildPreparedCrossJurisdictionRoute({
         orderId: 'cross-public-account-tx',
@@ -1127,10 +1127,10 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
     };
 
-    const result = await applyEntityTx(env, sourceHubState, {
+    const result = await applyEntityTx(env, sourceUserState, {
       type: 'placeSwapOffer',
       data: {
-        counterpartyEntityId: sourceUser,
+        counterpartyEntityId: sourceHub,
         offerId: route.orderId,
         giveTokenId: route.source.tokenId,
         giveAmount: route.source.amount,
@@ -1145,6 +1145,45 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(accountTx?.type).toBe('swap_offer');
     expect(accountTx.data.crossJurisdiction).toEqual(route);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)).toEqual(route);
+  });
+
+  test('cross-j offer maker is always the entity/frame proposer', async () => {
+    const env = createEmptyEnv('cross-maker-authority');
+    env.scenarioMode = true;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('c6');
+    const sourceHub = entity('c7');
+    const targetHub = entity('c8');
+    const targetUser = entity('c9');
+    const sourceUserState = makeState(sourceUser, addr('ca'), eth, sourceHub);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-forged-maker',
+      makerEntityId: sourceHub,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-forged-maker', sourceDisputeDelayMs: 5_000, now: 1_000 });
+
+    await expect(applyEntityTx(env, sourceUserState, {
+      type: 'placeSwapOffer',
+      data: {
+        counterpartyEntityId: sourceHub,
+        offerId: route.orderId,
+        giveTokenId: route.source.tokenId,
+        giveAmount: route.source.amount,
+        wantTokenId: route.target.tokenId,
+        wantAmount: route.target.amount,
+        minFillRatio: 0,
+        crossJurisdiction: route,
+      },
+    })).rejects.toThrow('CROSS_J_SWAP_MAKER_NOT_PROPOSER');
   });
 
     test('swap_offer created event carries only public cross-j route', async () => {

@@ -19,6 +19,7 @@ async function makeHashedFrame(): Promise<AccountFrame> {
     jHeight: 0,
     accountTxs: [],
     prevFrameHash: 'genesis',
+    accountStateRoot: `0x${'00'.repeat(32)}`,
     stateHash: '',
     byLeft: true,
     deltas: [{ ...delta }],
@@ -76,5 +77,23 @@ describe('direct payment frame integrity', () => {
     expect(JSON.stringify(account.currentFrame, (_key, value) =>
       typeof value === 'bigint' ? value.toString() : value,
     )).toBe(frameJsonBefore);
+  });
+
+  test('derives payer from frame proposer and rejects forged direction fields', async () => {
+    const account = await makeAccount();
+    const forged: Extract<AccountTx, { type: 'direct_payment' }> = {
+      type: 'direct_payment',
+      data: {
+        tokenId: 1,
+        amount: 100n,
+        fromEntityId: LEFT,
+        toEntityId: RIGHT,
+      },
+    };
+
+    const result = handleDirectPayment(account, forged, false);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('must match the frame proposer');
+    expect(account.deltas.get(1)?.offdelta).toBe(0n);
   });
 });

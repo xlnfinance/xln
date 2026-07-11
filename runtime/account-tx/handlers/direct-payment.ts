@@ -46,15 +46,20 @@ export function handleDirectPayment(
     ? accountMachine.proofHeader.toEntity
     : accountMachine.proofHeader.fromEntity;
 
-  // CRITICAL: Payment direction MUST be explicit - NO HEURISTICS (Channel.ts pattern)
-  const paymentFromEntity = accountTx.data.fromEntityId;
-  const paymentToEntity = accountTx.data.toEntityId;
-
-  if (!paymentFromEntity || !paymentToEntity) {
-    directPaymentLog.debug('missing_direction', { tokenId, amount: amount.toString() });
+  // The frame proposer is always the payer. Optional wire fields are assertions,
+  // never authority: accepting a different payer would let a proposer spend the
+  // counterparty's capacity merely by naming it in an AccountTx.
+  const paymentFromEntity = byLeft ? leftEntity : rightEntity;
+  const paymentToEntity = byLeft ? rightEntity : leftEntity;
+  const assertedFrom = accountTx.data.fromEntityId?.toLowerCase();
+  const assertedTo = accountTx.data.toEntityId?.toLowerCase();
+  if (
+    (assertedFrom && assertedFrom !== paymentFromEntity.toLowerCase()) ||
+    (assertedTo && assertedTo !== paymentToEntity.toLowerCase())
+  ) {
     return {
       success: false,
-      error: 'FATAL: Payment must have explicit fromEntityId/toEntityId',
+      error: 'FATAL: Payment direction must match the frame proposer',
       events,
     };
   }

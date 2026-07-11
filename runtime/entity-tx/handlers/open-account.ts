@@ -11,6 +11,11 @@ import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../default-account-tokens';
 import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../account-watch-seed';
 import { createStructuredLogger, shortId } from '../../logger';
+import {
+  accountStateDomainFromJurisdiction,
+  computeAccountStateRoot,
+  EMPTY_ACCOUNT_STATE_ROOT,
+} from '../../account-state-root';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -116,6 +121,7 @@ export const handleOpenAccountEntityTx = (
         jHeight: 0,
         accountTxs: [],
         prevFrameHash: '',
+        accountStateRoot: EMPTY_ACCOUNT_STATE_ROOT,
         deltas: [],
         stateHash: '',
         byLeft: isLeft,
@@ -161,6 +167,15 @@ export const handleOpenAccountEntityTx = (
   if (!localAccount) {
     throw new Error(`CRITICAL: Account machine not found after creation`);
   }
+  const jurisdiction = entityState.config?.jurisdiction;
+  if (!jurisdiction) {
+    throw new Error(`ACCOUNT_STATE_DOMAIN_MISSING: entity=${formatEntityId(entityState.entityId)}`);
+  }
+  localAccount.currentFrame.accountStateRoot = computeAccountStateRoot(
+    localAccount,
+    accountStateDomainFromJurisdiction(jurisdiction),
+  );
+  localAccount.currentFrame.stateHash = localAccount.currentFrame.accountStateRoot;
 
   const tokenId = entityTx.data.tokenId ?? 1;
   const defaultTokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))

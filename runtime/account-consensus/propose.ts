@@ -19,6 +19,7 @@ import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
   getAccountDepositoryAddress,
+  getAccountStateDomain,
   isAddress20,
   isEntityId32,
   shouldIncludeToken,
@@ -27,6 +28,7 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
 import { getReplicaByEntityId } from '../replica-utils';
+import { computeAccountStateRoot } from '../account-state-root';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =
@@ -334,6 +336,16 @@ export async function proposeAccountFrame(
   }
 
   const accountTxsCopy = structuredClone([...validTxs]);
+  let accountStateRoot: string;
+  try {
+    accountStateRoot = computeAccountStateRoot(clonedMachine, getAccountStateDomain(env, accountMachine));
+  } catch (error) {
+    return {
+      success: false,
+      error: `ACCOUNT_STATE_ROOT_BUILD_FAILED: ${(error as Error).message}`,
+      events,
+    };
+  }
   const frameData = {
     height: accountMachine.currentHeight + 1,
     timestamp: frameTimestamp, // MONOTONIC: max(env.timestamp, prev+1) for multi-runtime safety
@@ -341,6 +353,7 @@ export async function proposeAccountFrame(
     accountTxs: accountTxsCopy,
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
     prevFrameHash: accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '',
+    accountStateRoot,
     stateHash: '', // Will be filled after hash calculation
     byLeft: weAreLeft, // Who proposed this frame
     deltas: finalDeltas,
@@ -384,8 +397,9 @@ export async function proposeAccountFrame(
 
   if (!quiet) accountLog.debug('hanko.sign', { entity: shortId(signingEntityId), signer: shortId(signingSignerId) });
 
-  // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
-  // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
+  // Build the on-chain projection from NEW state. Credit-limit and other
+  // off-chain-only changes alter accountStateRoot but intentionally reuse the
+  // last dispute proof when the Solidity ProofBody projection is unchanged.
   if (!isEntityId32(clonedMachine.leftEntity) || !isEntityId32(clonedMachine.rightEntity)) {
     const left = String(clonedMachine.leftEntity);
     const right = String(clonedMachine.rightEntity);
@@ -406,15 +420,17 @@ export async function proposeAccountFrame(
   }
 
   let proofResult: ReturnType<typeof buildAccountProofBody>;
-  let disputeHash: string;
+  let disputeHash: string | undefined;
   try {
     proofResult = buildAccountProofBody(clonedMachine);
-    disputeHash = createDisputeProofHashWithNonce(
-      clonedMachine,
-      proofResult.proofBodyHash,
-      depositoryAddress,
-      clonedMachine.proofHeader.nonce,
-    );
+    if (proofResult.proofBodyHash.toLowerCase() !== accountMachine.currentDisputeProofBodyHash?.toLowerCase()) {
+      disputeHash = createDisputeProofHashWithNonce(
+        clonedMachine,
+        proofResult.proofBodyHash,
+        depositoryAddress,
+        clonedMachine.proofHeader.nonce,
+      );
+    }
   } catch (error) {
     return {
       success: false,
@@ -423,42 +439,40 @@ export async function proposeAccountFrame(
     };
   }
 
-  // Build both hankos in one signer-key/precheck pass. They remain separate
-  // hankos over separate hashes; batching here only removes duplicated local
-  // lookup/guard work from the hot account-consensus path.
-  const [frameHanko, disputeHanko] = await signEntityHashes(env, signingEntityId, signingSignerId, [
-    newFrame.stateHash,
-    disputeHash,
-  ]);
+  const proofChanged = disputeHash !== undefined;
+  const [frameHanko, disputeHanko] = await signEntityHashes(
+    env,
+    signingEntityId,
+    signingSignerId,
+    [newFrame.stateHash, ...(disputeHash ? [disputeHash] : [])],
+  );
   if (!frameHanko) {
     return { success: false, error: 'Failed to build frame hanko', events };
   }
-  if (!disputeHanko) {
+  if (proofChanged && !disputeHanko) {
     return { success: false, error: 'Failed to build dispute hanko', events };
   }
   accountMachine.currentFrameHanko = frameHanko;
-  accountMachine.currentDisputeProofHanko = disputeHanko;
-  accountMachine.currentDisputeProofNonce = clonedMachine.proofHeader.nonce;
-  accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
-  accountMachine.currentDisputeHash = disputeHash;
-  if (!accountMachine.disputeProofNoncesByHash) {
-    accountMachine.disputeProofNoncesByHash = {};
+  if (proofChanged && disputeHanko && disputeHash) {
+    accountMachine.currentDisputeProofHanko = disputeHanko;
+    accountMachine.currentDisputeProofNonce = clonedMachine.proofHeader.nonce;
+    accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
+    accountMachine.currentDisputeHash = disputeHash;
+    accountMachine.disputeProofNoncesByHash ??= {};
+    accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = clonedMachine.proofHeader.nonce;
+    accountMachine.disputeProofBodiesByHash ??= {};
+    accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
+    storeDisputeArgumentSnapshot(
+      accountMachine,
+      captureDisputeArgumentSnapshot(
+        clonedMachine,
+        proofResult.proofBodyHash,
+        clonedMachine.proofHeader.nonce,
+        proofResult.proofBodyStruct,
+        { appliedAccountTxs: validTxs, appliedFrameHeight: newFrame.height },
+      ),
+    );
   }
-  accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = clonedMachine.proofHeader.nonce;
-  if (!accountMachine.disputeProofBodiesByHash) {
-    accountMachine.disputeProofBodiesByHash = {};
-  }
-  accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
-  storeDisputeArgumentSnapshot(
-    accountMachine,
-    captureDisputeArgumentSnapshot(
-      clonedMachine,
-      proofResult.proofBodyHash,
-	      clonedMachine.proofHeader.nonce,
-	      proofResult.proofBodyStruct,
-	      { appliedAccountTxs: validTxs, appliedFrameHeight: newFrame.height },
-	    ),
-	  );
 
   // Settlements are handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts).
 
@@ -480,19 +494,22 @@ export async function proposeAccountFrame(
     reusableAck.counterpartyEntityId.toLowerCase() === accountMachine.proofHeader.toEntity.toLowerCase() &&
     Number(reusableAck.height) === Number(newFrame.height) - 1 &&
     Number(accountMachine.currentHeight) === Number(reusableAck.height);
+  const disputeSeal = proofChanged && disputeHanko && disputeHash ? {
+    newDisputeHanko: disputeHanko,
+    newDisputeHash: disputeHash,
+    newDisputeProofBodyHash: proofResult.proofBodyHash,
+    disputeProofNonce: accountMachine.proofHeader.nonce,
+  } : {};
   const accountInput: AccountInput = shouldBundlePreviousAck ? {
     kind: 'frame_ack',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
     watchSeed: accountMachine.watchSeed,
     height: reusableAck.height,
-    prevHanko: reusableAck.prevHanko,
+    prevHanko: reusableAck!.response.prevHanko,
     newAccountFrame: outboundFrame,
     newHanko: frameHanko,
-    newDisputeHanko: disputeHanko,
-    newDisputeHash: disputeHash,
-    newDisputeProofBodyHash: proofResult.proofBodyHash,
-    disputeProofNonce: accountMachine.proofHeader.nonce,
+    ...disputeSeal,
   } : {
     kind: 'frame',
     fromEntityId: accountMachine.proofHeader.fromEntity,
@@ -501,16 +518,12 @@ export async function proposeAccountFrame(
     height: newFrame.height,
     newAccountFrame: outboundFrame,
     newHanko: frameHanko, // Hanko on frame stateHash
-    newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
-    newDisputeHash: disputeHash, // Full dispute hash (key in hankoWitness for quorum lookup)
-    newDisputeProofBodyHash: proofResult.proofBodyHash, // ProofBodyHash that disputeHanko signs
-    // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
-    disputeProofNonce: accountMachine.proofHeader.nonce, // nonce at which dispute proof was signed (before increment)
+    ...disputeSeal,
   };
   if (!shouldBundlePreviousAck && reusableAck && Number(reusableAck.height) < Number(accountMachine.currentHeight)) {
     delete accountMachine.lastOutboundFrameAck;
   }
-  if (!skipNonceIncrement) ++accountMachine.proofHeader.nonce;
+  if (proofChanged && !skipNonceIncrement) ++accountMachine.proofHeader.nonce;
   accountMachine.pendingAccountInput = structuredClone(accountInput);
 
   // Collect hashes for entity-quorum signing (multi-signer support)
@@ -520,7 +533,7 @@ export async function proposeAccountFrame(
       type: 'accountFrame',
       context: `account:${counterparty.slice(-8)}:frame:${newFrame.height}`,
     },
-    { hash: disputeHash, type: 'dispute', context: `account:${counterparty.slice(-8)}:dispute` },
+    ...(disputeHash ? [{ hash: disputeHash, type: 'dispute' as const, context: `account:${counterparty.slice(-8)}:dispute` }] : []),
   ];
 
   const finalResult: ProposeAccountFrameResult = {
