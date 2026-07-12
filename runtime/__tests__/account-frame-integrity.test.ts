@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../account-frame';
+import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from '../account/frame';
 import type { AccountFrame, Delta } from '../types';
 import { validateAccountFrame } from '../validation-utils';
 

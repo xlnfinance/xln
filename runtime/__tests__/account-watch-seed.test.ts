@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveAccountWatchSeed } from '../account-watch-seed';
+import { deriveAccountWatchSeed } from '../account/watch-seed';
 
 const ENTITY_A = `0x${'11'.repeat(32)}`;
 const ENTITY_B = `0x${'22'.repeat(32)}`;

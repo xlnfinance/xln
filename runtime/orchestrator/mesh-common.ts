@@ -3,7 +3,7 @@ import { deriveDelta } from '../account-utils';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText } from '../serialization-utils';
 import { getBootstrapTokenAmount } from '../bootstrap-economy';
-export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
+export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 export {
   BOOTSTRAP_USD_NOTIONAL,
   BOOTSTRAP_WETH_USD_RATE,

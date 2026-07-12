@@ -27,7 +27,7 @@ import type { ProofBodyStruct, TransformerClauseStruct } from '../jurisdictions/
 import type { DeltaTransformer } from '../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.ts';
 import { sortTransformerEntries } from './transformer-ordering.ts';
-import { normalizeAccountWatchSeed } from './account-watch-seed.ts';
+import { normalizeAccountWatchSeed } from './account/watch-seed.ts';
 import { HASHLADDER_MAX_FILL_RATIO } from './hashladder.ts';
 
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;

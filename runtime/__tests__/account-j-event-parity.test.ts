@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { computeAccountStateRoot } from '../account-state-root';
+import { computeAccountStateRoot } from '../account/state-root';
 import { handleJEventClaim } from '../account/tx/handlers/j-event-claim';
 import type { AccountMachine, AccountTx, JurisdictionEvent } from '../types';
 import { createDefaultDelta } from '../validation-utils';

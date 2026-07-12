@@ -12,7 +12,7 @@ import type {
   TowerEncryptedPayloadV1,
   TowerModeV1,
 } from './types';
-import { normalizeAccountWatchSeed } from '../account-watch-seed';
+import { normalizeAccountWatchSeed } from '../account/watch-seed';
 
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
 const RECOVERY_ACTION_LOOKUP_DOMAIN = 'xln:recovery:action-lookup:v1';

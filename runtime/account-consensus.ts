@@ -22,13 +22,13 @@ import { HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { applyAccountTx } from './account/tx/apply';
 import { appendAccountFrameHistoryView, getAccountFrameHistoryView, markStorageAccountDirty, recordAccountFrameHistory } from './env-events';
-import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
+import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account/frame';
 import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from './logger';
 import {
   createFrameHash,
   getAccountFrameValidationError,
-} from './account-consensus-frame';
-import { normalizeAccountWatchSeed } from './account-watch-seed';
+} from './account/consensus/frame';
+import { normalizeAccountWatchSeed } from './account/watch-seed';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
@@ -40,7 +40,7 @@ import {
   runPostFrameAutoRebalanceCheck,
   shouldIncludeToken,
   summarizeDeltasForLog,
-} from './account-consensus-helpers';
+} from './account/consensus/helpers';
 import { MEMPOOL_LIMIT } from './account/consensus/constants';
 import { proposeAccountFrame } from './account/consensus/propose';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from './dispute-arguments';
@@ -53,7 +53,7 @@ import type {
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from './proof-builder';
 import { signEntityHashes, verifyHankoForHash } from './hanko/signing';
 import { getReplicaByEntityId } from './replica-utils';
-import { computeAccountStateRoot } from './account-state-root';
+import { computeAccountStateRoot } from './account/state-root';
 import {
   getIncomingAccountDeadlineViolation,
   HTLC_ENFORCEMENT_RESERVE_MS,
@@ -85,7 +85,7 @@ export {
 };
 export type { AccountInputSecurityContext };
 
-export { computeFrameHash, validateAccountFrame } from './account-consensus-frame';
+export { computeFrameHash, validateAccountFrame } from './account/consensus/frame';
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.

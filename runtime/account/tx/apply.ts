@@ -21,7 +21,7 @@ import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
 import { handleLendingAccountTx } from './handlers/lending';
-import { canProcessAccountTxForDisputeStatus } from '../../account-dispute-policy';
+import { canProcessAccountTxForDisputeStatus } from '../consensus/dispute-policy';
 import { createStructuredLogger } from '../../logger';
 
 const accountTxLog = createStructuredLogger('account.tx');

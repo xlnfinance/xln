@@ -42,7 +42,7 @@ import {
   isArgumentChangingAccountTx,
   isDisputeStartedByLeft,
   isDisputeEvidenceAccountTx,
-} from '../../account-dispute-policy';
+} from '../../account/consensus/dispute-policy';
 
 const disputeLog = createStructuredLogger('entity.dispute');
 

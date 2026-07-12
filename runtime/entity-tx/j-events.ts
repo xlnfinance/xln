@@ -45,7 +45,7 @@ import {
 import type { JEventApplyResult, JEventMempoolOp } from './j-events-types';
 import { appendBatchHistory, emptyOpBreakdown } from './j-events-history';
 import { applyHankoBatchProcessedEvent } from './j-events-batch';
-import { isDisputeStartedByLeft } from '../account-dispute-policy';
+import { isDisputeStartedByLeft } from '../account/consensus/dispute-policy';
 import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,

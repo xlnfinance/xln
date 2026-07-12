@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { handleDirectPayment } from '../account/tx/handlers/direct-payment';
-import { computeFrameHash } from '../account-consensus-frame';
+import { computeFrameHash } from '../account/consensus/frame';
 import type { AccountFrame, AccountMachine, AccountTx } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 

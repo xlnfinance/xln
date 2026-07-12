@@ -1,4 +1,4 @@
-import { deriveAccountWatchSeed } from '../../account-watch-seed';
+import { deriveAccountWatchSeed } from '../../account/watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../account-crypto';
 import { buildCrossJurisdictionPullBinding } from '../../cross-jurisdiction';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../../cross-jurisdiction-orderbook';

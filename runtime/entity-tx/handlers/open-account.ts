@@ -8,14 +8,14 @@ import { upsertSortedStringMapEntry } from '../../sorted-index';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { assertSameJurisdictionAccount } from '../../jurisdiction/jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../default-account-tokens';
-import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../account-watch-seed';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../account/default-tokens';
+import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../account/watch-seed';
 import { createStructuredLogger, shortId } from '../../logger';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
   EMPTY_ACCOUNT_STATE_ROOT,
-} from '../../account-state-root';
+} from '../../account/state-root';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 

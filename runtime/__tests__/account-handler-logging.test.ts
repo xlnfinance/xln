@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { deriveAccountWatchSeed } from '../account-watch-seed';
+import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { applyAccountInput } from '../entity-tx/handlers/account';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, EntityState, JurisdictionConfig } from '../types';

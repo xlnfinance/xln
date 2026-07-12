@@ -7,12 +7,12 @@ import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
   EMPTY_ACCOUNT_STATE_ROOT,
-} from '../../account-state-root';
+} from '../../account/state-root';
 import { isLeftEntity } from '../../entity-id-utils';
 import { scheduleHook as scheduleCrontabHook } from '../../entity-crontab';
 import { upsertSortedStringMapEntry } from '../../sorted-index';
 import { assertSameJurisdictionAccount } from '../../jurisdiction/jurisdiction-runtime';
-import { normalizeAccountWatchSeed } from '../../account-watch-seed';
+import { normalizeAccountWatchSeed } from '../../account/watch-seed';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
 import { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 import {
@@ -28,7 +28,7 @@ import type {
   SwapCancelRequestEvent,
   SwapOfferEvent,
 } from './account/orderbook-offers';
-import { canProcessAccountTxForDisputeStatus } from '../../account-dispute-policy';
+import { canProcessAccountTxForDisputeStatus } from '../../account/consensus/dispute-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { handleDisputeStart, handlePrepareDispute } from './dispute';
 

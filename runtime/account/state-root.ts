@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
-import type { AccountMachine, JurisdictionConfig, SettlementWorkspace } from './types';
-import { buildHexKeyedMerkle } from './storage/merkle';
+import type { AccountMachine, JurisdictionConfig, SettlementWorkspace } from '../types';
+import { buildHexKeyedMerkle } from '../storage/merkle';
 
 export type AccountStateDomain = {
   chainId: number;

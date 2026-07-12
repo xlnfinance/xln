@@ -1,4 +1,4 @@
-import type { AccountTx } from './types';
+import type { AccountTx } from '../../types';
 
 /**
  * Account dispute freeze policy.

@@ -10,7 +10,7 @@
 
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
-import { assertAccountFrameDeltaIntegrity } from './account-frame';
+import { assertAccountFrameDeltaIntegrity } from './account/frame';
 import type {
   ConsensusConfig,
   Delta,

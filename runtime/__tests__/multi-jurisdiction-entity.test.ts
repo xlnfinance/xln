@@ -10,7 +10,7 @@ import {
 } from '../jurisdiction/jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
-import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../networking/gossip';
 import type { ConsensusConfig, Env, JReplica, JurisdictionConfig } from '../types';

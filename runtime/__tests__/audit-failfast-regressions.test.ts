@@ -9,9 +9,9 @@ import {
   proposeAccountFrame,
   validateAccountFrame,
 } from '../account-consensus';
-import { computeAccountStateRoot } from '../account-state-root';
+import { computeAccountStateRoot } from '../account/state-root';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
-import { deriveAccountWatchSeed } from '../account-watch-seed';
+import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { applyAccountTx } from '../account/tx/apply';
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
@@ -19,7 +19,7 @@ import { hashHtlcSecret } from '../htlc-utils';
 import { buildHashLadderProof, revealHashLadder } from '../hashladder';
 import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
-import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account-consensus-frame';
+import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
 import { generateLazyEntityId, generateNumberedEntityId } from '../entity-factory';

@@ -3,7 +3,7 @@ import { createStructuredLogger, shortId } from '../../logger';
 import { normalizeRebalanceMatchingStrategy } from '../../rebalance-policy';
 import { announceLocalEntityProfile } from '../../networking/gossip-helper';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { resolveAutoRebalanceFeePolicy } from '../../account-consensus-helpers';
+import { resolveAutoRebalanceFeePolicy } from '../../account/consensus/helpers';
 import { checkAutoRebalance } from '../../account/tx/handlers/request-collateral';
 import type { MempoolOp } from './account';
 

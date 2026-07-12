@@ -36,11 +36,11 @@ Scores are `importance / complexity` out of 100.
 | --- | ---: | --- | --- |
 | Core types and validation | 100 / 70 | `runtime/types.ts`, `runtime/types/account.ts`, `runtime/validation-utils.ts` | Defines Env/E/J/A objects, account frames, deltas, and fail-fast decode boundaries. |
 | Runtime loop | 100 / 90 | `runtime/runtime.ts`, `runtime/state-helpers.ts` | Owns RJEA processing, input admission, frame progression, side effects, cloning, and history snapshots. |
-| Account consensus | 100 / 95 | `runtime/account-consensus.ts`, `runtime/account/consensus/propose.ts`, `runtime/account-consensus-frame.ts` | Bilateral propose/validate/commit and account frame hash rules. This is the most important protocol code after types. |
+| Account consensus | 100 / 95 | `runtime/account-consensus.ts`, `runtime/account/consensus/propose.ts`, `runtime/account/consensus/frame.ts` | Bilateral propose/validate/commit and account frame hash rules. This is the most important protocol code after types. |
 | Account tx handlers | 95 / 85 | `runtime/account/tx/apply.ts`, `runtime/account/tx/handlers/*` | Applies payment, HTLC, pull, swap, settlement, dispute-control, and credit actions inside account consensus. |
 | Entity consensus | 96 / 85 | `runtime/entity-consensus.ts`, `runtime/entity-consensus-frame.ts`, `runtime/entity-tx/apply.ts` | Entity-level BFT/proposer flow, E-frame hash, entity mempool, and tx dispatch. |
 | Entity tx handlers | 95 / 85 | `runtime/entity-tx/handlers/*`, `runtime/entity-tx/j-events.ts` | Opens accounts, routes payments, handles disputes, J-batches, mints, debt, and external wallet/reserve actions. |
-| Money math | 100 / 60 | `runtime/account-utils.ts`, `runtime/account-frame.ts`, `runtime/serialization-utils.ts` | `deriveDelta()` is the source of truth for bilateral capacity/economics; frame delta integrity and BigInt serialization live here. |
+| Money math | 100 / 60 | `runtime/account-utils.ts`, `runtime/account/frame.ts`, `runtime/serialization-utils.ts` | `deriveDelta()` is the source of truth for bilateral capacity/economics; frame delta integrity and BigInt serialization live here. |
 | Hanko and proof path | 100 / 90 | `runtime/hanko/core.ts`, `runtime/hanko/signing.ts`, `runtime/proof-builder.ts`, `runtime/dispute-arguments.ts` | Signature aggregation, proof-body hashing, dispute arguments, and Solidity-compatible signing checks. |
 | Solidity contracts | 100 / 90 | `jurisdictions/contracts/EntityProvider.sol`, `Depository.sol`, `Account.sol`, `DeltaTransformer.sol`, `Types.sol` | On-chain enforcement boundary. Compare Hanko, dispute, settlement, and transformer semantics against runtime. |
 | J-layer bridge | 90 / 75 | `runtime/jadapter/*`, `runtime/j-batch.ts`, `runtime/j-height.ts` | Chain adapters, batch construction, J-event ingestion, and J-height safety. |
@@ -61,7 +61,7 @@ Scores are `importance / complexity` out of 100.
 - `runtime/runtime.ts`
 - `runtime/account-consensus.ts`
 - `runtime/account/consensus/propose.ts`
-- `runtime/account-consensus-frame.ts`
+- `runtime/account/consensus/frame.ts`
 - `runtime/entity-consensus.ts`
 - `runtime/entity-consensus-frame.ts`
 - `runtime/account-utils.ts`

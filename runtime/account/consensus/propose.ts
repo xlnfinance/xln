@@ -12,7 +12,7 @@ import { validateAccountFrame as validateAccountFrameStrict } from '../../valida
 import { applyAccountTx } from '../tx/apply';
 import { markStorageAccountDirty } from '../../env-events';
 import { createStructuredLogger, shortHash, shortId } from '../../logger';
-import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from '../../account-consensus-frame';
+import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from './frame';
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../proof-builder';
 import { signEntityHashes } from '../../hanko/signing';
 import {
@@ -23,12 +23,12 @@ import {
   isAddress20,
   isEntityId32,
   shouldIncludeToken,
-} from '../../account-consensus-helpers';
+} from './helpers';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../dispute-arguments';
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
 import { getReplicaByEntityId } from '../../replica-utils';
-import { computeAccountStateRoot } from '../../account-state-root';
+import { computeAccountStateRoot } from '../state-root';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =

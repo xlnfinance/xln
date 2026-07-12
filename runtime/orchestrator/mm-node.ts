@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
-import { deriveAccountWatchSeed } from '../account-watch-seed';
+import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account-crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';

@@ -3,7 +3,7 @@ import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { basename, dirname, join } from 'path';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { deriveAccountWatchSeed } from '../account-watch-seed';
+import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { generateLazyEntityId } from '../entity-factory';
 import { hashHtlcSecret } from '../htlc-utils';
 import { converge } from '../scenarios/helpers';
