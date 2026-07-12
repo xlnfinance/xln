@@ -469,11 +469,26 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       }
     } else if (result.disputeRequired) {
       for (const { hashlock, secret } of result.disputeRequired.evidenceSecrets) {
+        const lock = [...accountMachine.locks.values()].find(
+          candidate => candidate.hashlock.toLowerCase() === hashlock.toLowerCase(),
+        );
+        if (!lock) {
+          throw new Error(`HTLC_DISPUTE_EVIDENCE_LOCK_MISSING:${hashlock}`);
+        }
+        const localIsLeft = accountMachine.leftEntity === newState.entityId;
+        const localSentLock = lock.senderIsLeft === localIsLeft;
         const route = newState.htlcRoutes.get(hashlock) ?? {
           hashlock,
           createdTimestamp: newState.timestamp,
         };
         route.secret = secret;
+        if (localSentLock) {
+          route.outboundEntity ??= counterpartyId;
+          route.outboundLockId ??= lock.lockId;
+        } else {
+          route.inboundEntity ??= counterpartyId;
+          route.inboundLockId ??= lock.lockId;
+        }
         newState.htlcRoutes.set(hashlock, route);
       }
       markStorageEntityDirty(env, newState.entityId);

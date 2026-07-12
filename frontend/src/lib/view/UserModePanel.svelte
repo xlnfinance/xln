@@ -773,8 +773,13 @@
   });
 
   const hasSigner = $derived(isRemoteRuntime || !!signer?.address);
+  const activeVaultLocked = $derived(
+    !isRemoteRuntime
+    && Boolean($activeRuntimeStore?.protectedSecrets)
+    && !$activeRuntimeStore?.seed,
+  );
   const onboardingRequiredForRuntime = $derived(!isRemoteRuntime && $activeRuntimeStore?.requiresOnboarding !== false);
-  const showVaultGate = $derived(!isRemoteRuntime && !hasSigner);
+  const showVaultGate = $derived(!isRemoteRuntime && (!hasSigner || activeVaultLocked));
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
   const remoteWorkspaceAvailable = $derived(
     isRemoteRuntime && $runtimeControllerHandle.status === 'connected',

@@ -76,7 +76,11 @@ import { submitRuntimeJOutbox } from '../runtime-j-submit';
 import { safeStringify } from '../serialization-utils';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
+import {
+  buildDisputeArgumentsForSnapshot,
+  captureDisputeArgumentSnapshot,
+  storeDisputeArgumentSnapshot,
+} from '../dispute-arguments';
 import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';
 import { buildRealHanko } from '../hanko/core';
 import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
@@ -2044,10 +2048,34 @@ describe('audit fail-fast regressions', () => {
       data: proposal.accountInput,
     });
 
-    expect(applied.newState.accounts.get(left.entityId)?.currentHeight).toBe(0);
-    expect(applied.newState.accounts.get(left.entityId)?.status).toBe('dispute_preparing');
-    expect(applied.newState.accounts.get(left.entityId)?.counterpartyFrameHanko).toBeUndefined();
-    expect(applied.newState.htlcRoutes.get(hashlock)?.secret).toBe(secret);
+    const rejectedAccount = applied.newState.accounts.get(left.entityId)!;
+    expect(rejectedAccount.currentHeight).toBe(0);
+    expect(rejectedAccount.status).toBe('dispute_preparing');
+    expect(rejectedAccount.counterpartyFrameHanko).toBeUndefined();
+    expect(applied.newState.htlcRoutes.get(hashlock)).toMatchObject({
+      secret,
+      inboundEntity: left.entityId,
+      inboundLockId: lockId,
+    });
+
+    const proofbodyHash = `0x${'ab'.repeat(32)}`;
+    storeDisputeArgumentSnapshot(
+      rejectedAccount,
+      captureDisputeArgumentSnapshot(rejectedAccount, proofbodyHash, 0, makeEmptyProofBody()),
+    );
+    const { leftArguments } = buildDisputeArgumentsForSnapshot(
+      rejectedAccount,
+      applied.newState,
+      left.entityId,
+      proofbodyHash,
+      { secretsSide: 'left' },
+    );
+    const [wrapped] = ethers.AbiCoder.defaultAbiCoder().decode(['bytes[]'], leftArguments);
+    const [transformerArguments] = ethers.AbiCoder.defaultAbiCoder().decode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      wrapped[0],
+    );
+    expect(Array.from(transformerArguments.secrets)).toEqual([secret]);
   });
 
   test('receiver-local preflight rejects stale creation of unenforceable HTLC and pull locks', () => {

@@ -65,4 +65,29 @@ describe('vault runtime creation lock', () => {
     expect(restoreSource).not.toContain("normalizeJurisdictionKey(preferredJurisdictionName) === 'testnet'");
     expect(restoreSource).not.toContain('signer.jurisdiction = primaryJurisdictionName');
   });
+
+  test('timed lock is scoped to the protection lease that scheduled it', () => {
+    const source = read('frontend/src/lib/stores/vaultStore.ts');
+    const scheduleStart = source.indexOf('const scheduleVaultLock = (runtime: Runtime)');
+    const lockStart = source.indexOf('async lockRuntime(runtimeId: string');
+    const selectStart = source.indexOf('\n  // Select runtime', lockStart);
+    const scheduleSource = source.slice(scheduleStart, lockStart);
+    const lockSource = source.slice(lockStart, selectStart);
+
+    expect(scheduleSource).toContain('vaultOperations.lockRuntime(runtimeId, expectedProtection)');
+    expect(lockSource).toContain('readPersistedVaultProtection(normalizedRuntimeId)');
+    expect(lockSource).toContain('!sameVaultProtectionLease(expectedProtection, persistedProtection)');
+    expect(lockSource).toContain('return;');
+    expect(lockSource).toContain('deleteVaultDeviceKey(normalizedRuntimeId, protectionToDelete)');
+  });
+
+  test('locked runtimes cannot derive signer keys and render the vault gate', () => {
+    const store = read('frontend/src/lib/stores/vaultStore.ts');
+    const panel = read('frontend/src/lib/view/UserModePanel.svelte');
+
+    expect(store).toContain('if (!runtime?.seed) return null;');
+    expect(store).toContain('if (!runtime?.seed || signerIndex >= runtime.signers.length) return null;');
+    expect(panel).toContain('const activeVaultLocked = $derived(');
+    expect(panel).toContain('(!hasSigner || activeVaultLocked)');
+  });
 });

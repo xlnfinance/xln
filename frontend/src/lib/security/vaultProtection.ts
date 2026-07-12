@@ -1,11 +1,21 @@
 export type VaultUnlockDurationMs = 600_000 | 86_400_000 | null;
 
-export type ProtectedVaultSecrets = {
+export type ProtectedVaultSecretsV1 = {
   version: 1;
   iv: string;
   ciphertext: string;
   unlockUntil: number | null;
 };
+
+export type ProtectedVaultSecretsV2 = {
+  version: 2;
+  keyId: string;
+  iv: string;
+  ciphertext: string;
+  unlockUntil: number | null;
+};
+
+export type ProtectedVaultSecrets = ProtectedVaultSecretsV1 | ProtectedVaultSecretsV2;
 
 export type VaultSecrets = {
   seed: string;
@@ -64,16 +74,38 @@ const withKeyStore = async <T>(
   }
 };
 
-const keyId = (runtimeId: string): string => runtimeId.trim().toLowerCase();
+const legacyKeyId = (runtimeId: string): string => runtimeId.trim().toLowerCase();
 
-const putDeviceKey = (runtimeId: string, key: CryptoKey): Promise<IDBValidKey> =>
-  withKeyStore('readwrite', store => store.put(key, keyId(runtimeId)));
+const randomKeyId = (): string => {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+};
 
-const getDeviceKey = (runtimeId: string): Promise<CryptoKey | undefined> =>
-  withKeyStore('readonly', store => store.get(keyId(runtimeId)));
+const deviceKeyId = (runtimeId: string, protectedSecrets: ProtectedVaultSecrets): string =>
+  protectedSecrets.version === 2
+    ? `${legacyKeyId(runtimeId)}:${protectedSecrets.keyId}`
+    : legacyKeyId(runtimeId);
 
-export const deleteVaultDeviceKey = (runtimeId: string): Promise<undefined> =>
-  withKeyStore('readwrite', store => store.delete(keyId(runtimeId))) as Promise<undefined>;
+const putDeviceKey = (runtimeId: string, protectedSecrets: ProtectedVaultSecretsV2, key: CryptoKey): Promise<IDBValidKey> =>
+  withKeyStore('readwrite', store => store.put(key, deviceKeyId(runtimeId, protectedSecrets)));
+
+const getDeviceKey = (runtimeId: string, protectedSecrets: ProtectedVaultSecrets): Promise<CryptoKey | undefined> =>
+  withKeyStore('readonly', store => store.get(deviceKeyId(runtimeId, protectedSecrets)));
+
+export const deleteVaultDeviceKey = (
+  runtimeId: string,
+  protectedSecrets: ProtectedVaultSecrets,
+): Promise<undefined> =>
+  withKeyStore('readwrite', store => store.delete(deviceKeyId(runtimeId, protectedSecrets))) as Promise<undefined>;
+
+export const sameVaultProtectionLease = (
+  left: ProtectedVaultSecrets | null | undefined,
+  right: ProtectedVaultSecrets | null | undefined,
+): boolean => {
+  if (!left || !right || left.version !== right.version) return false;
+  if (left.version === 2 && right.version === 2) return left.keyId === right.keyId;
+  return left.iv === right.iv && left.ciphertext === right.ciphertext;
+};
 
 export const protectVaultSecrets = async (
   runtimeId: string,
@@ -91,25 +123,28 @@ export const protectVaultSecrets = async (
     key,
     asArrayBuffer(plaintext),
   );
-  await putDeviceKey(runtimeId, key);
-  return {
-    version: 1,
+  const protectedSecrets: ProtectedVaultSecretsV2 = {
+    version: 2,
+    keyId: randomKeyId(),
     iv: bytesToBase64(iv),
     ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
     unlockUntil: durationMs === null ? null : Date.now() + durationMs,
   };
+  await putDeviceKey(runtimeId, protectedSecrets, key);
+  return protectedSecrets;
 };
 
 export const unprotectVaultSecrets = async (
   runtimeId: string,
   protectedSecrets: ProtectedVaultSecrets,
 ): Promise<VaultSecrets | null> => {
-  if (protectedSecrets.version !== 1) throw new Error('VAULT_PROTECTION_VERSION_UNSUPPORTED');
+  if (protectedSecrets.version !== 1 && protectedSecrets.version !== 2) {
+    throw new Error('VAULT_PROTECTION_VERSION_UNSUPPORTED');
+  }
   if (protectedSecrets.unlockUntil !== null && protectedSecrets.unlockUntil <= Date.now()) {
-    await deleteVaultDeviceKey(runtimeId);
     return null;
   }
-  const key = await getDeviceKey(runtimeId);
+  const key = await getDeviceKey(runtimeId, protectedSecrets);
   if (!key) return null;
   try {
     const plaintext = await crypto.subtle.decrypt(

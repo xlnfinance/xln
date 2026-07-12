@@ -40,6 +40,7 @@ import {
   deleteVaultDeviceKey,
   protectVaultSecrets,
   redactVaultRuntimeForPersistence,
+  sameVaultProtectionLease,
   unprotectVaultSecrets,
   type ProtectedVaultSecrets,
   type VaultUnlockDurationMs,
@@ -1197,18 +1198,36 @@ const persistRuntimeMetadataSnapshot = (): void => {
   }
 };
 
+const persistVaultStateOrThrow = (): void => {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(get(runtimesState)));
+};
+
+const readPersistedVaultProtection = (runtimeId: string): ProtectedVaultSecrets | undefined => {
+  if (typeof localStorage === 'undefined') return undefined;
+  const serialized = localStorage.getItem(VAULT_STORAGE_KEY);
+  if (!serialized) return undefined;
+  const parsed = JSON.parse(serialized) as Partial<RuntimesState>;
+  for (const [storedId, runtime] of Object.entries(parsed.runtimes || {})) {
+    if (normalizeRuntimeId(runtime?.id || storedId) !== runtimeId) continue;
+    return runtime?.protectedSecrets;
+  }
+  return undefined;
+};
+
 const scheduleVaultLock = (runtime: Runtime): void => {
   const runtimeId = normalizeRuntimeId(runtime.id);
   if (!runtimeId) return;
   const previous = vaultLockTimers.get(runtimeId);
   if (previous) clearTimeout(previous);
   vaultLockTimers.delete(runtimeId);
-  const unlockUntil = runtime.protectedSecrets?.unlockUntil;
+  const expectedProtection = runtime.protectedSecrets;
+  const unlockUntil = expectedProtection?.unlockUntil;
   if (unlockUntil === null || unlockUntil === undefined) return;
   const delay = Math.max(0, unlockUntil - Date.now());
   vaultLockTimers.set(runtimeId, setTimeout(() => {
     vaultLockTimers.delete(runtimeId);
-    void vaultOperations.lockRuntime(runtimeId).catch(error => {
+    void vaultOperations.lockRuntime(runtimeId, expectedProtection).catch(error => {
       errorLog.log('Timed wallet lock failed', 'Runtime Security', { runtimeId, error });
     });
   }, delay));
@@ -1217,13 +1236,31 @@ const scheduleVaultLock = (runtime: Runtime): void => {
 const protectRuntimeForDevice = async (
   runtime: Runtime,
   durationMs: VaultUnlockDurationMs,
+  persist: () => void,
 ): Promise<void> => {
   if (!runtime.seed) throw new Error(`RUNTIME_LOCKED:${runtime.id}`);
-  runtime.protectedSecrets = await protectVaultSecrets(runtime.id, {
+  const previousProtection = runtime.protectedSecrets;
+  const nextProtection = await protectVaultSecrets(runtime.id, {
     seed: runtime.seed,
     ...(runtime.mnemonic12 ? { mnemonic12: runtime.mnemonic12 } : {}),
   }, durationMs);
+  runtime.protectedSecrets = nextProtection;
   delete runtime.devicePassphrase;
+  try {
+    persist();
+  } catch (error) {
+    if (previousProtection) runtime.protectedSecrets = previousProtection;
+    else delete runtime.protectedSecrets;
+    await deleteVaultDeviceKey(runtime.id, nextProtection);
+    throw error;
+  }
+  if (previousProtection && !sameVaultProtectionLease(previousProtection, nextProtection)) {
+    try {
+      await deleteVaultDeviceKey(runtime.id, previousProtection);
+    } catch (error) {
+      errorLog.log('Previous wallet key cleanup failed', 'Runtime Security', { runtimeId: runtime.id, error });
+    }
+  }
   scheduleVaultLock(runtime);
 };
 
@@ -3480,13 +3517,18 @@ export const vaultOperations = {
           );
         }
       }
-      await protectRuntimeForDevice(runtime, options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS);
-      runtimesState.update(state => ({
-        ...state,
-        runtimes: { ...state.runtimes, [id]: runtime },
-        activeRuntimeId: id,
-      }));
-      this.saveToStorage();
+      await protectRuntimeForDevice(
+        runtime,
+        options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS,
+        () => {
+          runtimesState.update(state => ({
+            ...state,
+            runtimes: { ...state.runtimes, [id]: runtime },
+            activeRuntimeId: id,
+          }));
+          persistVaultStateOrThrow();
+        },
+      );
       markPerf('persist_runtime_state');
 
       // Add to runtimes store
@@ -3580,18 +3622,33 @@ export const vaultOperations = {
     if (normalizeRuntimeId(deriveAddress(seed, 0)) !== normalizedRuntimeId) {
       throw new Error('RUNTIME_UNLOCK_SEED_MISMATCH');
     }
+    const previousSeed = resolved.runtime.seed;
     resolved.runtime.seed = seed;
-    await protectRuntimeForDevice(resolved.runtime, durationMs);
-    this.saveToStorage();
+    try {
+      await protectRuntimeForDevice(resolved.runtime, durationMs, persistVaultStateOrThrow);
+    } catch (error) {
+      resolved.runtime.seed = previousSeed;
+      throw error;
+    }
     await this.selectRuntime(normalizedRuntimeId);
   },
 
-  async lockRuntime(runtimeId: string): Promise<void> {
+  async lockRuntime(runtimeId: string, expectedProtection?: ProtectedVaultSecrets): Promise<void> {
     const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
     if (!normalizedRuntimeId) throw new Error('Invalid runtimeId');
     const current = get(runtimesState);
     const runtime = current.runtimes[normalizedRuntimeId];
     if (!runtime) return;
+    const persistedProtection = readPersistedVaultProtection(normalizedRuntimeId);
+    if (expectedProtection && !sameVaultProtectionLease(expectedProtection, persistedProtection)) {
+      if (persistedProtection) {
+        runtime.protectedSecrets = persistedProtection;
+        scheduleVaultLock(runtime);
+      }
+      return;
+    }
+    const protectionToDelete = persistedProtection || runtime.protectedSecrets;
+    if (persistedProtection) runtime.protectedSecrets = persistedProtection;
     const timer = vaultLockTimers.get(normalizedRuntimeId);
     if (timer) clearTimeout(timer);
     vaultLockTimers.delete(normalizedRuntimeId);
@@ -3601,7 +3658,9 @@ export const vaultOperations = {
       : null;
     let lockError: unknown;
     try {
-      await deleteVaultDeviceKey(normalizedRuntimeId);
+      if (protectionToDelete) {
+        await deleteVaultDeviceKey(normalizedRuntimeId, protectionToDelete);
+      }
     } catch (error) {
       lockError = error;
     }
@@ -3627,7 +3686,7 @@ export const vaultOperations = {
       for (const candidate of Object.values(get(runtimesState).runtimes)) {
         if (candidate.seed) await registerRuntimeSignerKeys(candidate, xln);
       }
-      this.saveToStorage();
+      persistVaultStateOrThrow();
       if (normalizeRuntimeId(get(activeRuntimeId) || '') === normalizedRuntimeId) {
         setXlnEnvironment(null);
         this.syncRuntime(null);
@@ -3708,7 +3767,7 @@ export const vaultOperations = {
     if (!current.activeRuntimeId) return null;
 
     const runtime = current.runtimes[current.activeRuntimeId];
-    if (!runtime) return null;
+    if (!runtime?.seed) return null;
 
     const jurisdictionKey = normalizeJurisdictionKey(jurisdiction);
     if (jurisdictionKey) {
@@ -3885,7 +3944,7 @@ export const vaultOperations = {
     if (!current.activeRuntimeId) return null;
 
     const runtime = current.runtimes[current.activeRuntimeId];
-    if (!runtime) return null;
+    if (!runtime?.seed) return null;
 
     const signer = runtime.signers[runtime.activeSignerIndex];
     if (!signer) return null;
@@ -3898,7 +3957,7 @@ export const vaultOperations = {
     if (!current.activeRuntimeId) return null;
 
     const runtime = current.runtimes[current.activeRuntimeId];
-    if (!runtime || signerIndex >= runtime.signers.length) return null;
+    if (!runtime?.seed || signerIndex >= runtime.signers.length) return null;
 
     return derivePrivateKey(runtime.seed, getSignerDerivationIndex(runtime.signers[signerIndex]));
   },
@@ -3925,7 +3984,11 @@ export const vaultOperations = {
       for (const runtime of Object.values(loaded.runtimes)) {
         if (runtime.seed) {
           if (!runtime.protectedSecrets) {
-            await protectRuntimeForDevice(runtime, DEFAULT_VAULT_UNLOCK_DURATION_MS);
+            await protectRuntimeForDevice(
+              runtime,
+              DEFAULT_VAULT_UNLOCK_DURATION_MS,
+              persistVaultStateOrThrow,
+            );
             migratedPlaintext = true;
           } else {
             scheduleVaultLock(runtime);

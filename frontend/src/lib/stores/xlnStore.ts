@@ -38,6 +38,7 @@ import { assertNetworkMachineIsLive, networkMachineRuntime } from './networkMach
 import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import {
+  deleteVaultDeviceKey,
   protectVaultSecrets,
   unprotectVaultSecrets,
   type ProtectedVaultSecrets,
@@ -498,13 +499,24 @@ const generateEmbeddedRuntimeSeed = (): string => {
   return `xln-browser-runtime:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 };
 
+const persistEmbeddedRuntimeSeed = async (
+  protectedSecrets: ProtectedVaultSecrets,
+): Promise<void> => {
+  try {
+    localStorage.setItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY, JSON.stringify(protectedSecrets));
+  } catch (error) {
+    await deleteVaultDeviceKey('embedded-runtime', protectedSecrets);
+    throw error;
+  }
+};
+
 const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefined> => {
   if (typeof window === 'undefined') return undefined;
   const stored = localStorage.getItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY)?.trim();
   if (stored) {
     if (stored.startsWith('xln-browser-runtime:')) {
       const protectedSecrets = await protectVaultSecrets('embedded-runtime', { seed: stored }, null);
-      localStorage.setItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY, JSON.stringify(protectedSecrets));
+      await persistEmbeddedRuntimeSeed(protectedSecrets);
       return stored;
     }
     const protectedSecrets = JSON.parse(stored) as ProtectedVaultSecrets;
@@ -513,7 +525,7 @@ const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefined> =>
   }
   const seed = generateEmbeddedRuntimeSeed();
   const protectedSecrets = await protectVaultSecrets('embedded-runtime', { seed }, null);
-  localStorage.setItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY, JSON.stringify(protectedSecrets));
+  await persistEmbeddedRuntimeSeed(protectedSecrets);
   return seed;
 };
 
