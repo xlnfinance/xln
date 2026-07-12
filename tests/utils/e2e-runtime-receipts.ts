@@ -51,43 +51,24 @@ async function readRuntimeDbMeta(page: Page): Promise<PersistedDbMeta> {
     const env = view.isolatedEnv;
     const XLN = (window as any).XLN
       || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.getPersistedLatestHeight) {
-      return {
-        latestHeight: 0,
-        runtimeHeight,
-        checkpointHeight: 0,
-        hasLatestFrame: false,
-        hasLatestSnapshot: false,
-        hasCheckpointSnapshot: false,
-      };
-    }
+    if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
+    if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
 
-    try {
-      const latestHeight = Number(await XLN.getPersistedLatestHeight(env) || 0);
-      const checkpointList = await XLN.listPersistedCheckpointHeights(env);
-      const checkpointHeights = Array.isArray(checkpointList) ? checkpointList : [];
-      const checkpointHeight = Number(checkpointHeights.at(-1) || 0);
-      const latestFrame = latestHeight > 0 ? await XLN.readPersistedFrameJournal(env, latestHeight) : null;
-      const latestSnapshot = latestHeight > 0 ? await XLN.readPersistedCheckpointSnapshot(env, latestHeight) : null;
-      const checkpointSnapshot = checkpointHeight > 0 ? await XLN.readPersistedCheckpointSnapshot(env, checkpointHeight) : null;
-      return {
-        latestHeight,
-        runtimeHeight,
-        checkpointHeight,
-        hasLatestFrame: latestFrame !== null,
-        hasLatestSnapshot: latestSnapshot !== null,
-        hasCheckpointSnapshot: checkpointSnapshot !== null,
-      };
-    } catch {
-      return {
-        latestHeight: 0,
-        runtimeHeight,
-        checkpointHeight: 0,
-        hasLatestFrame: false,
-        hasLatestSnapshot: false,
-        hasCheckpointSnapshot: false,
-      };
-    }
+    const latestHeight = Number(await XLN.getPersistedLatestHeight(env) || 0);
+    const checkpointList = await XLN.listPersistedCheckpointHeights(env);
+    const checkpointHeights = Array.isArray(checkpointList) ? checkpointList : [];
+    const checkpointHeight = Number(checkpointHeights.at(-1) || 0);
+    const latestFrame = latestHeight > 0 ? await XLN.readPersistedFrameJournal(env, latestHeight) : null;
+    const latestSnapshot = latestHeight > 0 ? await XLN.readPersistedCheckpointSnapshot(env, latestHeight) : null;
+    const checkpointSnapshot = checkpointHeight > 0 ? await XLN.readPersistedCheckpointSnapshot(env, checkpointHeight) : null;
+    return {
+      latestHeight,
+      runtimeHeight,
+      checkpointHeight,
+      hasLatestFrame: latestFrame !== null,
+      hasLatestSnapshot: latestSnapshot !== null,
+      hasCheckpointSnapshot: checkpointSnapshot !== null,
+    };
   });
 }
 
@@ -112,42 +93,37 @@ async function readPersistedFrameEvents(
 
     const XLN = (window as any).XLN
       || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.getPersistedLatestHeight) {
-      return { cursor: { nextHeight }, events, runtimeHeight };
-    }
+    if (!env) throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE');
+    if (!XLN?.getPersistedLatestHeight) throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE');
 
-    try {
-      const latestHeight = Number(await XLN.getPersistedLatestHeight(env) || 0);
+    const latestHeight = Number(await XLN.getPersistedLatestHeight(env) || 0);
 
-      for (let height = Math.max(1, nextHeight); height <= latestHeight; height += 1) {
-        const frame = await XLN.readPersistedFrameJournal(env, height) as PersistedFrameJournalView;
-        const logs = Array.isArray(frame?.logs) ? frame.logs : [];
-        for (const entry of logs) {
-          const message = typeof entry?.message === 'string' ? entry.message : '';
-          if (!message) continue;
-          const entityId =
-            typeof entry?.entityId === 'string'
-              ? entry.entityId
-              : typeof entry?.data?.entityId === 'string'
-                ? entry.data.entityId
-                : undefined;
-          const data = entry?.data && typeof entry.data === 'object' ? entry.data : undefined;
-          events.push({
-            frameHeight: height,
-            message,
-            ...(entityId ? { entityId } : {}),
-            ...(data ? { data } : {}),
-          });
-        }
+    for (let height = Math.max(1, nextHeight); height <= latestHeight; height += 1) {
+      const frame = await XLN.readPersistedFrameJournal(env, height) as PersistedFrameJournalView;
+      const logs = Array.isArray(frame?.logs) ? frame.logs : [];
+      for (const entry of logs) {
+        const message = typeof entry?.message === 'string' ? entry.message : '';
+        if (!message) continue;
+        const entityId =
+          typeof entry?.entityId === 'string'
+            ? entry.entityId
+            : typeof entry?.data?.entityId === 'string'
+              ? entry.data.entityId
+              : undefined;
+        const data = entry?.data && typeof entry.data === 'object' ? entry.data : undefined;
+        events.push({
+          frameHeight: height,
+          message,
+          ...(entityId ? { entityId } : {}),
+          ...(data ? { data } : {}),
+        });
       }
-      return {
-        cursor: { nextHeight: latestHeight + 1 },
-        events,
-        runtimeHeight,
-      };
-    } catch {
-      return { cursor: { nextHeight }, events, runtimeHeight };
     }
+    return {
+      cursor: { nextHeight: latestHeight + 1 },
+      events,
+      runtimeHeight,
+    };
   }, cursor);
 }
 

@@ -620,11 +620,11 @@ describe('remote runtime import manager utilities', () => {
 
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImports()');
     expect(xlnStore).toContain("new URL('/api/runtime-import', resolveConfiguredApiBase(window.location.origin))");
-    expect(xlnStore).toContain("importSource.searchParams.set('access', 'admin')");
-    expect(xlnStore).not.toContain("importSource.searchParams.set('access', 'read')");
-    expect(xlnStore).toContain("importSource.searchParams.set('allowPartial', '1')");
+    expect(xlnStore).toContain("importSource.searchParams.set('access', 'read')");
+    expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
     expect(xlnStore).toContain('runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true })');
-    expect(runtimeCreation).toContain("url.searchParams.set('allowPartial', '1')");
+    expect(runtimeCreation).toContain("url.searchParams.set('access', 'read')");
+    expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
     expect(runtimeCreation).toContain('await runtimeOperations.hydrateRemoteRuntimeImportSource(url.toString(), { optional: silent })');
     expect(runtimeCreation.match(/runtimeOperations\.hydrateRemoteRuntimeImportSource\(url\.toString\(\), \{ optional: silent \}\)/g))
       .toHaveLength(1);

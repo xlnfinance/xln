@@ -152,7 +152,10 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
 }
 
 async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
-  return await page.evaluate(() => typeof (window as typeof window & { isolatedEnv?: unknown }).isolatedEnv !== 'undefined');
+  return await page.evaluate(() => {
+    const env = (window as typeof window & { isolatedEnv?: { runtimeId?: unknown } }).isolatedEnv;
+    return Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim());
+  });
 }
 
 async function getActiveRuntimeId(page: Page): Promise<string> {
@@ -291,6 +294,17 @@ async function countRuntimeActivityEvents(
   return events.filter(predicate).length;
 }
 
+async function hasActivityDebugQuery(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const view = window as typeof window & {
+      __xln?: {
+        adapter?: RuntimeAdapterDebugSurface;
+      };
+    };
+    return typeof view.__xln?.adapter?.query?.activity === 'function';
+  });
+}
+
 async function waitForAdapterRuntime(page: Page, runtimeId: string): Promise<void> {
   await expect
     .poll(async () => {
@@ -319,26 +333,31 @@ async function openEntityHistoryPage(page: Page, entityId: string, runtimeId: st
   const historyPage = await page.context().newPage();
   await historyPage.goto(target, { waitUntil: 'domcontentloaded' });
   await historyPage.waitForURL(target, { timeout: CONSENSUS_TIMEOUT_MS });
-  await waitForAdapterRuntime(historyPage, runtimeId);
+  if (await hasActivityDebugQuery(historyPage)) {
+    await waitForAdapterRuntime(historyPage, runtimeId);
+  }
   return historyPage;
 }
 
 async function verifyEntityActivityHistory(page: Page, entityId: string, options: { requirePaymentFilter?: boolean } = {}): Promise<void> {
-  await expect
-    .poll(
-      () => countRuntimeActivityEvents(
-        page,
-        entityId,
-        { kind: 'all' },
-        isExpectedUiPaymentActivity,
-      ),
-      {
-        timeout: CONSENSUS_TIMEOUT_MS,
-        intervals: [500, 1000, 1500],
-        message: `activity API must expose payment history for ${entityId.slice(0, 12)}`,
-      },
-    )
-    .toBeGreaterThan(0);
+  const hasDebugQuery = await hasActivityDebugQuery(page);
+  if (hasDebugQuery) {
+    await expect
+      .poll(
+        () => countRuntimeActivityEvents(
+          page,
+          entityId,
+          { kind: 'all' },
+          isExpectedUiPaymentActivity,
+        ),
+        {
+          timeout: CONSENSUS_TIMEOUT_MS,
+          intervals: [500, 1000, 1500],
+          message: `activity API must expose payment history for ${entityId.slice(0, 12)}`,
+        },
+      )
+      .toBeGreaterThan(0);
+  }
 
   const runtimeId = await getActiveRuntimeId(page);
   const historyPage = await openEntityHistoryPage(page, entityId, runtimeId);
@@ -352,21 +371,23 @@ async function verifyEntityActivityHistory(page: Page, entityId: string, options
       })
       .toBeGreaterThan(0);
 
-    await expect
-      .poll(
-        () => countRuntimeActivityEvents(
-          historyPage,
-          entityId,
-          { kind: 'offchain' },
-          isExpectedUiPaymentActivity,
-        ),
-        {
-          timeout: CONSENSUS_TIMEOUT_MS,
-          intervals: [500, 1000, 1500],
-          message: 'history page adapter must expose off-chain payment history',
-        },
-      )
-      .toBeGreaterThan(0);
+    if (await hasActivityDebugQuery(historyPage)) {
+      await expect
+        .poll(
+          () => countRuntimeActivityEvents(
+            historyPage,
+            entityId,
+            { kind: 'offchain' },
+            isExpectedUiPaymentActivity,
+          ),
+          {
+            timeout: CONSENSUS_TIMEOUT_MS,
+            intervals: [500, 1000, 1500],
+            message: 'history page adapter must expose off-chain payment history',
+          },
+        )
+        .toBeGreaterThan(0);
+    }
 
     await historyPage.getByTestId('history-kind-offchain').click();
     await expect

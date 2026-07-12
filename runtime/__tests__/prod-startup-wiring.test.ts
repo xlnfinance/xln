@@ -33,6 +33,39 @@ describe('production startup wiring', () => {
     expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
   });
 
+  test('production public discovery, recovery, and faucet routes are operational by default', () => {
+    const runtimeCreation = readFileSync(
+      join(repoRoot, 'frontend/src/lib/components/Views/RuntimeCreation.svelte'),
+      'utf8',
+    );
+    const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
+    const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+
+    expect(runtimeCreation).toContain("url.searchParams.set('access', 'read')");
+    expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
+    expect(xlnStore).toContain("importSource.searchParams.set('access', 'read')");
+    expect(xlnStore).not.toContain("importSource.searchParams.set('allowPartial', '1')");
+    expect(deploy).toContain("location /api/recovery/");
+    expect(deploy).toContain('proxy_pass http://127.0.0.1:9100;');
+    expect(hubNode).toContain(
+      "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
+    );
+  });
+
+  test('production payment smoke only reads persisted receipts from a real debug runtime env', () => {
+    const paymentSmoke = readFileSync(join(repoRoot, 'tests/e2e-payment-smoke.spec.ts'), 'utf8');
+    const receiptHelper = readFileSync(join(repoRoot, 'tests/utils/e2e-runtime-receipts.ts'), 'utf8');
+
+    expect(paymentSmoke).toContain("Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim())");
+    expect(paymentSmoke).toContain('if (await hasActivityDebugQuery(historyPage))');
+    expect(paymentSmoke).toContain("historyPage.getByTestId('entity-history-event').count()");
+    expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_ENV_UNAVAILABLE')");
+    expect(receiptHelper).toContain("throw new Error('PERSISTED_RUNTIME_API_UNAVAILABLE')");
+    expect(receiptHelper).not.toContain('catch {\n      return { cursor: { nextHeight }');
+  });
+
+
   test('fresh browser runtimes observe deployed jurisdictions from their creation tip', () => {
     const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
     const freshRuntimeBootstrap = extractSourceBlock(
@@ -1467,7 +1500,7 @@ describe('production startup wiring', () => {
     expect(reserveBootstrap).not.toContain('catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)');
   });
 
-  test('hub mesh bootstrap uses live entity jurisdiction and does not auto-provision faucet by default', () => {
+  test('hub mesh bootstrap uses live entity jurisdiction and provisions the external faucet by default', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const driveStart = hubNode.indexOf('const driveMeshBootstrap = async (): Promise<void> => {');
     const driveEnd = hubNode.indexOf('let meshLoopFatal = false;', driveStart);
@@ -1482,7 +1515,7 @@ describe('production startup wiring', () => {
     expect(driveMeshBootstrap).toContain('peerReservesReady = allPeerProfiles.length >= expectedPeerProfiles;');
     expect(driveMeshBootstrap).toContain('reserveReadyMarked = reserveHealth.targetMet === true && peerReservesReady;');
     expect(driveMeshBootstrap).toContain('MESH_BOOTSTRAP_TICK_TIMEOUT');
-    expect(hubNode).toContain("const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] === '1';");
+    expect(hubNode).toContain("const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';");
     expect(hubNode).toContain('if (!resolvedArgs.deployTokens || !AUTO_PROVISION_EXTERNAL_FAUCET) return;');
     expect(hubNode).toContain('await ensureExternalFaucetProvisionReady();');
     expect(hubNode).not.toContain('if (resolvedArgs.deployTokens) {\n    void externalWalletApi.provisionFaucetWallet()');

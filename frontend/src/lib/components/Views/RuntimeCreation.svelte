@@ -187,8 +187,7 @@
     try {
       const apiBase = resolveConfiguredApiBase(window.location.origin);
       const url = new URL('/api/runtime-import', apiBase);
-      url.searchParams.set('access', 'admin');
-      url.searchParams.set('allowPartial', '1');
+      url.searchParams.set('access', 'read');
       url.searchParams.set('ts', String(Date.now()));
       const res = await fetch(url.toString(), { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

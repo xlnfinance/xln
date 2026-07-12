@@ -408,6 +408,31 @@ if marker in text and "location /api/tower/" not in text:
 PY
   fi
 
+  if ! grep -q 'location /api/recovery/' "$available"; then
+    python3 - "$available" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = "    location /api/ {\n"
+block = """    location /api/recovery/ {
+        proxy_pass http://127.0.0.1:9100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+
+"""
+if marker in text and "location /api/recovery/" not in text:
+    text = text.replace(marker, block + marker, 1)
+    path.write_text(text)
+PY
+  fi
+
   python3 - "$available" <<'PY'
 from pathlib import Path
 import re

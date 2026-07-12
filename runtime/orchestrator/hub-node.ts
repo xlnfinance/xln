@@ -487,7 +487,7 @@ const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
 if (!directWsUrl) {
   throw new Error(`[MESH-HUB] Missing required --direct-ws-url for ${resolvedArgs.name}`);
 }
-const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] === '1';
+const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';
 const MESH_BOOTSTRAP_TICK_TIMEOUT_MS = Math.max(
   5_000,
   Math.floor(Number(process.env['XLN_MESH_BOOTSTRAP_TICK_TIMEOUT_MS'] || '30000')),

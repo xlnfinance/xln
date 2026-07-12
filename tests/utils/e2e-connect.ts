@@ -1337,7 +1337,10 @@ async function waitForHubAccountReady(
 }
 
 async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
-  return await page.evaluate(() => typeof (window as typeof window & { isolatedEnv?: unknown }).isolatedEnv !== 'undefined');
+  return await page.evaluate(() => {
+    const env = (window as typeof window & { isolatedEnv?: { runtimeId?: unknown } }).isolatedEnv;
+    return Boolean(env && typeof env === 'object' && String(env.runtimeId || '').trim());
+  });
 }
 
 async function hasExportedRuntimeP2P(page: Page): Promise<boolean> {
