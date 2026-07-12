@@ -21,6 +21,18 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('production frontend deploy builds off-host and uploads a complete artifact', () => {
+    const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+
+    expect(deploy).toContain('build_remote_frontend_archive');
+    expect(deploy).toContain('tar -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build');
+    expect(deploy).toContain('scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"');
+    expect(deploy).toContain("tar -xzf '$remote_frontend_archive' -C frontend");
+    expect(deploy).toContain('remote_cmd="$remote_cmd ./deploy.sh --runtime-only"');
+    expect(deploy).toContain('PRODUCTION_FRONTEND_BUILD_FORBIDDEN');
+    expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
+  });
+
   test('fresh browser runtimes observe deployed jurisdictions from their creation tip', () => {
     const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
     const freshRuntimeBootstrap = extractSourceBlock(

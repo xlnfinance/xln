@@ -10,6 +10,15 @@ FRESH=0
 BUILD_FRONTEND=1
 PRODUCTION=0
 RESET_PRODUCTION_MESH=0
+PREBUILT_FRONTEND_ARCHIVE=""
+
+cleanup_local_deploy_artifacts() {
+  if [ -n "$PREBUILT_FRONTEND_ARCHIVE" ]; then
+    rm -f "$PREBUILT_FRONTEND_ARCHIVE"
+  fi
+}
+
+trap cleanup_local_deploy_artifacts EXIT
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -71,6 +80,22 @@ ensure_clean_worktree_for_push() {
     echo "Refusing --push with untracked files. Commit, ignore, or remove them first." >&2
     exit 1
   fi
+}
+
+build_remote_frontend_archive() {
+  local deploy_build_number
+  deploy_build_number="$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+  echo "[deploy] building production frontend locally: $deploy_build_number"
+  bun install --frozen-lockfile
+  ./scripts/sync-contract-artifacts.sh
+  ./scripts/build-runtime.sh
+  (
+    cd frontend
+    bun install --frozen-lockfile
+    XLN_BUILD_NUMBER="$deploy_build_number" bun run build
+  )
+  PREBUILT_FRONTEND_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/xln-frontend-build.XXXXXX.tar.gz")"
+  tar -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build
 }
 
 wait_for_rpc_chain() {
@@ -990,19 +1015,27 @@ if [ -n "$REMOTE_HOST" ]; then
       ORIGIN_URL="https://github.com/${ORIGIN_URL#ssh://git@github.com/}"
       ;;
   esac
-  # Remote deploy is the canonical rebuild path for production. Keep it self-healing:
+  remote_frontend_archive=""
+  if [ "$BUILD_FRONTEND" = "1" ]; then
+    build_remote_frontend_archive
+    remote_frontend_archive="/tmp/$(basename "$PREBUILT_FRONTEND_ARCHIVE")"
+    echo "[deploy] uploading prebuilt frontend to $REMOTE_HOST"
+    scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"
+  fi
+
+  # Remote deploy keeps the checkout self-healing. Frontend compilation happens on the
+  # caller so Vite cannot OOM-kill live Anvil processes on the production host.
   # some servers may retain /root/xln but lose .git metadata after disk cleanup or
   # manual recovery. In that case we must re-bootstrap the checkout before rebuilding
   # frontend/runtime. The first rollout preserves legacy checkout state for migration;
   # later rollouts clean it because production persistence lives in /var/lib/xln.
-  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git reset --hard; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; git checkout -B main origin/main; git reset --hard origin/main; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; ./deploy.sh"
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git reset --hard; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi; git checkout -B main origin/main; git reset --hard origin/main; if [ -f /var/lib/xln/.checkout-state-migrated ]; then git clean -fd; else git clean -fd -e data/ -e db/ -e db-tmp/; fi;"
+  if [ -n "$remote_frontend_archive" ]; then
+    remote_cmd="$remote_cmd rm -rf frontend/build; tar -xzf '$remote_frontend_archive' -C frontend; rm -f '$remote_frontend_archive';"
+  fi
+  remote_cmd="$remote_cmd ./deploy.sh --runtime-only"
   if [ "$FRESH" = "1" ]; then
     remote_cmd="$remote_cmd --fresh"
-  fi
-  if [ "$BUILD_FRONTEND" = "1" ]; then
-    remote_cmd="$remote_cmd --frontend"
-  else
-    remote_cmd="$remote_cmd --runtime-only"
   fi
   if [ "$PRODUCTION" = "1" ]; then
     remote_cmd="$remote_cmd --production"
@@ -1016,6 +1049,11 @@ if [ -n "$REMOTE_HOST" ]; then
   echo "[deploy] running remote deploy on $REMOTE_HOST"
   ssh "$REMOTE_HOST" "$remote_cmd"
   exit 0
+fi
+
+if [ "$PRODUCTION" = "1" ] && [ "$BUILD_FRONTEND" = "1" ] && [ "${XLN_ALLOW_IN_PLACE_PRODUCTION_FRONTEND_BUILD:-0}" != "1" ]; then
+  echo "PRODUCTION_FRONTEND_BUILD_FORBIDDEN: deploy from another host with --remote" >&2
+  exit 1
 fi
 
 run_local_deploy
