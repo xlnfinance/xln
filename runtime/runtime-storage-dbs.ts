@@ -133,6 +133,102 @@ const storageWriterPidIsAlive = (pid: number | undefined): boolean => {
   }
 };
 
+let staleStorageLockSequence = 0;
+
+const readStorageWriterLock = async (
+  lockPath: string,
+  fs: typeof import('fs/promises'),
+): Promise<StorageWriterLockBody | null> => {
+  const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
+  return raw ? parseStorageWriterLock(raw) : null;
+};
+
+const storageWriterLockIsReclaimable = (lock: StorageWriterLockBody | null): lock is StorageWriterLockBody => (
+  lock !== null && lock.expiresAt <= Date.now() && !storageWriterPidIsAlive(lock.pid)
+);
+
+const removeStorageLockIfOwned = async (
+  lockPath: string,
+  expectedOwner: string,
+  action: 'release' | 'stale',
+  fs: typeof import('fs/promises'),
+): Promise<boolean> => {
+  staleStorageLockSequence += 1;
+  const movedPath = `${lockPath}.${action}-${nodeProcess?.pid ?? 'unknown'}-${Date.now()}-${staleStorageLockSequence}`;
+  try {
+    await fs.rename(lockPath, movedPath);
+  } catch (error) {
+    if (storageWriterErrorCode(error) === 'ENOENT') return false;
+    throw error;
+  }
+
+  const moved = await readStorageWriterLock(movedPath, fs);
+  if (moved?.owner !== expectedOwner) {
+    // Another contender replaced the path after our observation. Restore its
+    // inode only if the canonical path is still empty, then fail closed.
+    await fs.link(movedPath, lockPath).catch((error) => {
+      if (storageWriterErrorCode(error) !== 'EEXIST') throw error;
+    });
+  }
+  await fs.unlink(movedPath).catch(() => undefined);
+  return moved?.owner === expectedOwner;
+};
+
+const tryReclaimExpiredStorageLock = async (
+  lockPath: string,
+  fs: typeof import('fs/promises'),
+): Promise<boolean> => {
+  const observed = await readStorageWriterLock(lockPath, fs);
+  if (!storageWriterLockIsReclaimable(observed)) return false;
+  return removeStorageLockIfOwned(lockPath, observed.owner, 'stale', fs);
+};
+
+const acquireStorageRecoveryLock = async (
+  env: Env,
+  recoveryPath: string,
+  fs: typeof import('fs/promises'),
+  path: typeof import('path'),
+): Promise<StorageWriterLockBody> => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await tryAcquireStorageWriterLock(env, recoveryPath, fs, path);
+    } catch (error) {
+      if (storageWriterErrorCode(error) !== 'EEXIST') throw error;
+      if (!await tryReclaimExpiredStorageLock(recoveryPath, fs)) {
+        throw storageWriterLockHeldError(recoveryPath, await readStorageWriterLock(recoveryPath, fs));
+      }
+    }
+  }
+  throw storageWriterLockHeldError(recoveryPath, await readStorageWriterLock(recoveryPath, fs));
+};
+
+const assertStorageLockOwnership = async (
+  lockPath: string,
+  owner: StorageWriterLockBody,
+  fs: typeof import('fs/promises'),
+): Promise<void> => {
+  const current = await readStorageWriterLock(lockPath, fs);
+  if (current?.owner !== owner.owner) {
+    throw new Error(
+      `STORAGE_WRITER_LOCK_OWNERSHIP_LOST: path=${lockPath} expected=${owner.owner} actual=${current?.owner ?? 'missing'}`,
+    );
+  }
+};
+
+const storageLockIsOwnedBy = async (
+  lockPath: string,
+  owner: StorageWriterLockBody,
+  fs: typeof import('fs/promises'),
+): Promise<boolean> => (await readStorageWriterLock(lockPath, fs))?.owner === owner.owner;
+
+const releaseStorageRecoveryLock = async (
+  lockPath: string,
+  owner: StorageWriterLockBody,
+  fs: typeof import('fs/promises'),
+): Promise<void> => {
+  await removeStorageLockIfOwned(lockPath, owner.owner, 'release', fs);
+};
+
 const tryAcquireStorageWriterLock = async (
   env: Env,
   lockPath: string,
@@ -168,13 +264,7 @@ const releaseStorageWriterLock = async (
   owner: StorageWriterLockBody,
   fs: typeof import('fs/promises'),
 ): Promise<void> => {
-  const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
-  const current = raw ? parseStorageWriterLock(raw) : null;
-  if (current?.owner !== owner.owner) {
-    throw new Error(
-      `STORAGE_WRITER_LOCK_OWNERSHIP_LOST: path=${lockPath} expected=${owner.owner} actual=${current?.owner ?? 'missing'}`,
-    );
-  }
+  await assertStorageLockOwnership(lockPath, owner, fs);
   await fs.unlink(lockPath);
 };
 
@@ -199,17 +289,14 @@ export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): 
       const recoveryPath = `${lockPath}.recovery`;
       let recoveryOwner: StorageWriterLockBody | null = null;
       try {
-        try {
-          recoveryOwner = await tryAcquireStorageWriterLock(env, recoveryPath, fs, path);
-        } catch (recoveryError) {
-          if (storageWriterErrorCode(recoveryError) !== 'EEXIST') throw recoveryError;
-          throw storageWriterLockHeldError(lockPath, null);
-        }
+        recoveryOwner = await acquireStorageRecoveryLock(env, recoveryPath, fs, path);
 
-        const raw = await fs.readFile(lockPath, 'utf8').catch(() => '');
-        const existing = raw ? parseStorageWriterLock(raw) : null;
-        if (!existing || existing.expiresAt > Date.now() || storageWriterPidIsAlive(existing.pid)) {
+        const existing = await readStorageWriterLock(lockPath, fs);
+        if (!storageWriterLockIsReclaimable(existing)) {
           throw storageWriterLockHeldError(lockPath, existing);
+        }
+        if (!await storageLockIsOwnedBy(recoveryPath, recoveryOwner, fs)) {
+          throw storageWriterLockHeldError(recoveryPath, await readStorageWriterLock(recoveryPath, fs));
         }
         await fs.unlink(lockPath);
         try {
@@ -224,7 +311,7 @@ export const withStorageWriterLock = async <T>(env: Env, fn: () => Promise<T>): 
         }
       } finally {
         if (recoveryOwner) {
-          await releaseStorageWriterLock(recoveryPath, recoveryOwner, fs);
+          await releaseStorageRecoveryLock(recoveryPath, recoveryOwner, fs);
         }
       }
     }

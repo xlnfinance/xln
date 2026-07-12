@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { dirname } from 'path';
 
 import {
   resolveStorageWriterLockPath,
   STORAGE_WRITER_LOCK_TTL_MS,
+  withStorageWriterLock,
 } from '../runtime-storage-dbs';
 import type { Env } from '../types';
 
@@ -84,6 +86,13 @@ test('concurrent processes cannot both reclaim the same expired writer lock', as
     await waitForReadyWorkers(readyPath, workerCount);
     writeFileSync(goPath, 'go', 'utf8');
     const exitCodes = await Promise.all(workers.map((worker) => worker.exited));
+    const workerErrors = await Promise.all(workers.map((worker) => new Response(worker.stderr).text()));
+    const failedWorkers = exitCodes.flatMap((code, index) => (
+      code === 0 ? [] : [`worker=${index} exit=${code} stderr=${workerErrors[index]}`]
+    ));
+    if (failedWorkers.length > 0) {
+      throw new Error(`STORAGE_WRITER_LOCK_WORKER_FAILURE:\n${failedWorkers.join('\n')}`);
+    }
     expect(exitCodes).toEqual(Array(workerCount).fill(0));
     expect(readdirSync(acquiredPath)).toHaveLength(1);
     expect(existsSync(violationPath)).toBe(false);
@@ -91,5 +100,34 @@ test('concurrent processes cannot both reclaim the same expired writer lock', as
     for (const worker of workers) worker.kill();
     rmSync(controlPath, { recursive: true, force: true });
     rmSync(lockPath, { force: true });
+  }
+});
+
+test('a new writer reclaims expired writer and recovery locks after a crash', async () => {
+  const namespace = `storage-writer-recovery-${process.pid}-${Date.now()}`;
+  const env = { dbNamespace: namespace, runtimeId: namespace, height: 7 } as Env;
+  const lockPath = resolveStorageWriterLockPath(env);
+  const recoveryPath = `${lockPath}.recovery`;
+  const expired = {
+    pid: 999_997,
+    runtimeId: namespace,
+    frameHeight: 6,
+    acquiredAt: Date.now() - STORAGE_WRITER_LOCK_TTL_MS - 1_000,
+    expiresAt: Date.now() - 1_000,
+  };
+
+  mkdirSync(dirname(lockPath), { recursive: true });
+  writeFileSync(lockPath, `${JSON.stringify({ ...expired, owner: 'expired-dead-writer' })}\n`, 'utf8');
+  writeFileSync(recoveryPath, `${JSON.stringify({ ...expired, owner: 'expired-dead-recovery' })}\n`, 'utf8');
+
+  let calls = 0;
+  try {
+    await withStorageWriterLock(env, async () => { calls += 1; });
+    expect(calls).toBe(1);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(recoveryPath)).toBe(false);
+  } finally {
+    rmSync(lockPath, { force: true });
+    rmSync(recoveryPath, { force: true });
   }
 });
