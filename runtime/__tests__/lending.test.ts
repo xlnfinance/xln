@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyAccountTx } from '../account/tx/apply';
-import { createEntityFrameHash } from '../entity-consensus-frame';
+import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyCommittedAccountFrameFollowups, type MempoolOp } from '../entity/tx/handlers/account';
 import type { AccountFrame, AccountMachine, AccountTx, ConsensusConfig, EntityState } from '../types';
 import { createDefaultDelta } from '../validation-utils';

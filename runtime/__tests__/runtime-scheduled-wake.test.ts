@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { initCrontab, scheduleHook } from '../entity-crontab';
+import { initCrontab, scheduleHook } from '../entity/scheduler';
 import { applyEntityFrame } from '../entity-consensus';
 import { createEmptyEnv } from '../runtime';
 import {

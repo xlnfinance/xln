@@ -12,7 +12,7 @@ import { clearSignerKeys } from '../account-crypto';
 import { createGossipLayer } from '../networking/gossip';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 import { assertRuntimeIdle } from './helpers';
-import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../entity-consensus-frame';
+import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../entity/consensus/frame';
 import { stopManagedScenarioAnvil } from './boot';
 import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';
 

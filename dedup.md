@@ -38,8 +38,8 @@ Top 100 simplification targets:
 26. `runtime/entity/tx/j-events.ts` — extract dispute event application into `j-events-dispute.ts`.
 27. `runtime/entity/tx/j-events.ts` — extract reserve event application into `j-events-reserve.ts`.
 28. `runtime/entity/tx/j-events.ts` — extract settlement event application into `j-events-settlement.ts`.
-29. `runtime/entity-crontab.ts` — split periodic tasks and one-shot hooks into separate modules.
-30. `runtime/entity-crontab.ts` — extract dispute hook logic from rebalance and HTLC hook logic.
+29. `runtime/entity/scheduler.ts` — split periodic tasks and one-shot hooks into separate modules.
+30. `runtime/entity/scheduler.ts` — extract dispute hook logic from rebalance and HTLC hook logic.
 31. `runtime/runtime.ts` — split storage replay loop from validation and debug/read helpers.
 32. `runtime/storage/index.ts` — split persistence API from DB-open/close plumbing.
 33. `runtime/wal/snapshot.ts` — separate env snapshot building from BrowserVM state inclusion.

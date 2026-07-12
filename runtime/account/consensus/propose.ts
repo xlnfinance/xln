@@ -27,7 +27,7 @@ import {
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../dispute-arguments';
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
-import { getReplicaByEntityId } from '../../replica-utils';
+import { getReplicaByEntityId } from '../../entity/replica';
 import { computeAccountStateRoot } from '../state-root';
 
 const accountLog = createStructuredLogger('account');

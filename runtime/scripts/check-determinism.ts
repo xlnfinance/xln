@@ -17,7 +17,7 @@ const SCAN_ROOTS = [
 const SCAN_FILES = [
   'runtime/account-consensus.ts',
   'runtime/entity-consensus.ts',
-  'runtime/entity-crontab.ts',
+  'runtime/entity/scheduler.ts',
   'runtime/lending.ts',
 ];
 const EXCLUDE_PARTS = [

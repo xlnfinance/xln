@@ -16,7 +16,7 @@ import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../../routing/fees';
 import { getTokenCapacity } from '../../../../routing/capacity';
 import { markStorageEntityDirty } from '../../../../env-events';
-import { scheduleHook as scheduleCrontabHook, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../../entity-crontab';
+import { scheduleHook as scheduleCrontabHook, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../scheduler';
 import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
 import { CROSS_J_MAX_FILL_RATIO } from '../../../../cross-jurisdiction';
 import {

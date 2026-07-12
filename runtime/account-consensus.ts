@@ -52,7 +52,7 @@ import type {
 } from './account/consensus/types';
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from './proof-builder';
 import { signEntityHashes, verifyHankoForHash } from './hanko/signing';
-import { getReplicaByEntityId } from './replica-utils';
+import { getReplicaByEntityId } from './entity/replica';
 import { computeAccountStateRoot } from './account/state-root';
 import {
   getIncomingAccountDeadlineViolation,

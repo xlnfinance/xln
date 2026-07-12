@@ -1,6 +1,6 @@
 import type { EntityInput, HankoString, HashToSign, HashType, JInput, ProposedEntityFrame } from '../../types';
 import { compareCanonicalText } from '../../swap-execution';
-import { normalizeSignatureMap } from '../../consensus-signatures';
+import { normalizeSignatureMap } from '../../protocol/signatures';
 import { accountInputAck, accountInputDisputeSeal, accountInputProposal } from '../../account/consensus/flush';
 
 export type HankoWitnessEntry = {

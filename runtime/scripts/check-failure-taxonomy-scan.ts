@@ -325,7 +325,7 @@ for (const [path, markers] of [
   ['runtime/runtime-input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
   ['runtime/runtime-p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
   ['runtime/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
-  ['runtime/entity-input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
+  ['runtime/entity/consensus/input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
   ['runtime/entity/tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity/tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
   ['runtime/entity/tx/handlers/account/committed-frame-followups.ts', ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx']],
@@ -484,7 +484,7 @@ const entityFactoryPath = 'runtime/entity-factory.ts';
 const entityFactory = readText(entityFactoryPath);
 assertNotIncludes(entityFactory, 'console.', entityFactoryPath);
 
-const entityInputMergePath = 'runtime/entity-input-merge.ts';
+const entityInputMergePath = 'runtime/entity/consensus/input-merge.ts';
 const entityInputMerge = readText(entityInputMergePath);
 assertNotIncludes(entityInputMerge, 'console.', entityInputMergePath);
 

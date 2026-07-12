@@ -1,4 +1,4 @@
-import type { EntityState, JurisdictionEvent } from './types';
+import type { EntityState, JurisdictionEvent } from '../types';
 
 type ExternalWalletSnapshotEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletSnapshot' }>;
 type ExternalWalletDeltaEvent = Extract<JurisdictionEvent, { type: 'ExternalWalletDelta' }>;

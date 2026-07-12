@@ -2,7 +2,7 @@ import type { AccountMachine, AccountTx, Delta, Env, JurisdictionConfig } from '
 import { createStructuredLogger, shortHash, shortId } from '../../logger';
 import { txFingerprint } from '../../state-helpers';
 import { getJurisdictionConfigName } from '../../jurisdiction/jurisdiction-runtime';
-import { getReplicaByEntityId } from '../../replica-utils';
+import { getReplicaByEntityId } from '../../entity/replica';
 import { checkAutoRebalance } from '../tx/handlers/request-collateral';
 import type { AccountStateDomain } from '../state-root';
 

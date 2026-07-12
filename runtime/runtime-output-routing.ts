@@ -1,5 +1,5 @@
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from './types';
-import { signatureMapSize } from './consensus-signatures';
+import { signatureMapSize } from './protocol/signatures';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,

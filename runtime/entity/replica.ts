@@ -1,4 +1,4 @@
-import type { EntityReplica, Env } from './types';
+import type { EntityReplica, Env } from '../types';
 
 export function getReplicaByEntityId(env: Pick<Env, 'eReplicas'>, entityId: string): EntityReplica | undefined {
   const target = String(entityId).toLowerCase();

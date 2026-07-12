@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { clearSignerKeys, deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { assertLocalEntityCryptoKeys, deriveLocalEntityCryptoKeys } from '../runtime-entity-crypto';
+import { assertLocalEntityCryptoKeys, deriveLocalEntityCryptoKeys } from '../entity/crypto';
 import { createEmptyEnv, generateLazyEntityId } from '../runtime';
 import { applyRuntimeTx } from '../runtime-tx-handlers';
 

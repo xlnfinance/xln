@@ -8,7 +8,7 @@ import { markStorageEntityDirty } from './env-events';
 import {
   canonicalizeLocalEntityCryptoKeys,
   resolveReplicaEntityCryptoKeys,
-} from './runtime-entity-crypto';
+} from './entity/crypto';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import {
   backfillEntityJurisdictionBinding,

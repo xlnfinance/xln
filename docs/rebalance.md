@@ -467,7 +467,7 @@ Both sides compute identically because the feeAmount comes from the stored quote
 | `runtime/account/tx/handlers/rebalance-quote.ts` | refactored from quote-response |
 | `runtime/account/tx/handlers/rebalance-accept.ts` | refactored from fee-payment |
 | `runtime/entity/tx/handlers/deposit-collateral.ts` | enhanced with fee collection |
-| `runtime/entity-crontab.ts` | execution logic: quote→deposit flow |
+| `runtime/entity/scheduler.ts` | execution logic: quote→deposit flow |
 
 ---
 

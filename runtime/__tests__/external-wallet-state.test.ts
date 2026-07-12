@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
-import { createEntityFrameHash } from '../entity-consensus-frame';
+import { createEntityFrameHash } from '../entity/consensus/frame';
 import { applyJEvent, type JEventEntityTxData } from '../entity/tx/j-events';
 import { buildJEventsRuntimeInput } from '../jadapter/watcher';
 import {
@@ -10,7 +10,7 @@ import {
   createEmptyEnv,
   generateLazyEntityId,
 } from '../runtime';
-import { applySignerEntityExternalWalletSnapshot } from '../signer-entity-wallet';
+import { applySignerEntityExternalWalletSnapshot } from '../entity/signer-wallet';
 import { cloneEntityState } from '../state-helpers';
 import { hydrateEntityStateFromStorage, projectEntityCoreDoc } from '../storage/projections';
 import type { ConsensusConfig, EntityReplica, EntityState, JurisdictionEvent } from '../types';

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mergeEntityInputs } from '../entity-input-merge';
+import { mergeEntityInputs } from '../entity/consensus/input-merge';
 import type { RoutedEntityInput } from '../types';
 
 const entityId = (suffix: string): string => `0x${suffix.padStart(64, '0')}`;
@@ -73,7 +73,7 @@ describe('mergeEntityInputs', () => {
   });
 
   test('uses structured logging without direct console output', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/entity-input-merge.ts'), 'utf8');
+    const source = readFileSync(join(process.cwd(), 'runtime/entity/consensus/input-merge.ts'), 'utf8');
 
     expect(source).toContain("createStructuredLogger('entity.input.merge')");
     expect(source).toContain("entityInputMergeLog.warn('frame.conflict'");

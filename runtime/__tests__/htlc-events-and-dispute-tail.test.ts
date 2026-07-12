@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { executeCrontab, initCrontab, scheduleHook } from '../entity-crontab';
+import { executeCrontab, initCrontab, scheduleHook } from '../entity/scheduler';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,

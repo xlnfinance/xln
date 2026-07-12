@@ -1,7 +1,7 @@
-import { getSignerPrivateKey } from './account-crypto';
-import { extractSignerId } from './ids';
-import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
-import type { Env } from './types';
+import { getSignerPrivateKey } from '../account-crypto';
+import { extractSignerId } from '../ids';
+import { deriveEncryptionKeyPair, pubKeyToHex } from '../networking/p2p-crypto';
+import type { Env } from '../types';
 
 const bytesToHex = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes).map(byte => byte.toString(16).padStart(2, '0')).join('')}`;

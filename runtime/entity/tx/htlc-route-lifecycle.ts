@@ -1,5 +1,5 @@
 import type { AccountTx, EntityState } from '../../types';
-import { cancelHook as cancelScheduledHook } from '../../entity-crontab';
+import { cancelHook as cancelScheduledHook } from '../scheduler';
 
 export function terminateHtlcRoute(
   state: EntityState,

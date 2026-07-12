@@ -22,7 +22,7 @@ import {
   usd,
   enableStrictScenario,
 } from './helpers';
-import { cancelHook as cancelCrontabHook } from '../entity-crontab';
+import { cancelHook as cancelCrontabHook } from '../entity/scheduler';
 
 const USDC = 1;
 

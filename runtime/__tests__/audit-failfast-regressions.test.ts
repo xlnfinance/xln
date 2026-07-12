@@ -21,7 +21,7 @@ import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handl
 import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { LIMITS } from '../constants';
-import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
+import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity/scheduler';
 import { generateLazyEntityId, generateNumberedEntityId } from '../entity-factory';
 import { isLeftEntity } from '../entity-id-utils';
 import {
@@ -30,7 +30,7 @@ import {
   applyEntityFrame,
   applyEntityInput,
 } from '../entity-consensus';
-import { createEntityFrameHash } from '../entity-consensus-frame';
+import { createEntityFrameHash } from '../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import {
   assertCrossJurisdictionOrderAdmissible,

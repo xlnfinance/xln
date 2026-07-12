@@ -36,7 +36,7 @@ import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { swapKey } from '../../../swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../cross-jurisdiction-orderbook';
 import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../../logger';
-import { getFirstSignerForEntity } from '../../../replica-utils';
+import { getFirstSignerForEntity } from '../../replica';
 import {
   isAccountControlTx,
   isArgumentChangingAccountTx,

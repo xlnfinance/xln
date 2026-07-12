@@ -9,7 +9,7 @@ import {
   EMPTY_ACCOUNT_STATE_ROOT,
 } from '../../../account/state-root';
 import { isLeftEntity } from '../../../entity-id-utils';
-import { scheduleHook as scheduleCrontabHook } from '../../../entity-crontab';
+import { scheduleHook as scheduleCrontabHook } from '../../scheduler';
 import { upsertSortedStringMapEntry } from '../../../sorted-index';
 import { assertSameJurisdictionAccount } from '../../../jurisdiction/jurisdiction-runtime';
 import { normalizeAccountWatchSeed } from '../../../account/watch-seed';

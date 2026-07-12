@@ -12,7 +12,7 @@ import { cloneEntityState, addMessage } from '../../state-helpers';
 import { getTokenInfo } from '../../account-utils';
 import { CANONICAL_J_EVENTS } from '../../jadapter/helpers';
 import { hashHtlcSecret } from '../../htlc-utils';
-import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../../entity-crontab';
+import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../scheduler';
 import { getRuntimeJurisdictionDefaultDisputeDelayBlocks } from '../../j-height';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
 import {
@@ -49,7 +49,7 @@ import { isDisputeStartedByLeft } from '../../account/consensus/dispute-policy';
 import {
   applySignerEntityExternalWalletDelta,
   applySignerEntityExternalWalletSnapshot,
-} from '../../signer-entity-wallet';
+} from '../signer-wallet';
 
 const jEventLog = createStructuredLogger('j.event');
 

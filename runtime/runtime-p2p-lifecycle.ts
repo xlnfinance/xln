@@ -2,7 +2,7 @@ import type { Env, RoutedEntityInput } from './types';
 import { createStructuredLogger, shortId } from './logger';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import { isRuntimeId } from './networking/runtime-id';
-import { assertLocalEntityCryptoKeys } from './runtime-entity-crypto';
+import { assertLocalEntityCryptoKeys } from './entity/crypto';
 
 export type { P2PConfig } from './networking/p2p';
 

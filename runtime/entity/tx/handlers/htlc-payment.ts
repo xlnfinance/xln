@@ -21,7 +21,7 @@ import { createOnionEnvelopes, type HtlcEnvelope } from '../../../htlc-envelope-
 import { getRuntimeJurisdictionHeight } from '../../../j-height';
 import { compareStableText, safeStringify } from '../../../serialization-utils';
 import { resolvePaymentDeadlineWindow } from '../../../payment-delivery';
-import { getReplicaByEntityId } from '../../../replica-utils';
+import { getReplicaByEntityId } from '../../replica';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../logger';
 
 const formatEntityId = (id: string) => id.slice(-4);

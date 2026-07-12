@@ -1,16 +1,16 @@
 import { ethers } from 'ethers';
-import type { AccountTx, EntityState, EntityTx } from './types';
-import { HEAVY_LOGS } from './utils';
-import { createStructuredLogger, shortHash, shortId } from './logger';
-import { safeStringify } from './serialization-utils';
-import { compareCanonicalText } from './swap-execution';
+import type { AccountTx, EntityState, EntityTx } from '../../types';
+import { HEAVY_LOGS } from '../../utils';
+import { createStructuredLogger, shortHash, shortId } from '../../logger';
+import { safeStringify } from '../../serialization-utils';
+import { compareCanonicalText } from '../../swap-execution';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
-} from './j-event-observation';
-import { normalizeJurisdictionEvents } from './j-event-normalization';
-import { canonicalAccountTxForFrameHash } from './account/consensus/frame';
-import { computeAccountShadowRoot } from './account/state-root';
+} from '../../j-event-observation';
+import { normalizeJurisdictionEvents } from '../../j-event-normalization';
+import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
+import { computeAccountShadowRoot } from '../../account/state-root';
 
 export type EntityFrameHashDebugRecord = {
   entityId: string;

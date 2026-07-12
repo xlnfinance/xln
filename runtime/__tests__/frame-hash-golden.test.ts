@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createFrameHash } from '../account/consensus/frame';
-import { createEntityFrameHash } from '../entity-consensus-frame';
+import { createEntityFrameHash } from '../entity/consensus/frame';
 import type { AccountFrame, EntityState, EntityTx } from '../types';
 
 const ACCOUNT_FRAME_GOLDEN_HASH = '0x24608c6f58a8ad49080c316a4e1d04fe272704cec4b6e091deadf5929e83ff79';

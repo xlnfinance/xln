@@ -55,7 +55,7 @@ import {
   initCrontab,
   scheduleHook as scheduleCrontabHook,
   cancelHook as cancelCrontabHook,
-} from './entity-crontab';
+} from './entity/scheduler';
 import {
   applyCommittedSwapCancelsToOrderbook,
   crossJurisdictionBookOwnerRef,
@@ -69,7 +69,7 @@ import {
   normalizeEntityRef,
 } from './orderbook/cross-j-orderbook';
 import { markCrossJurisdictionBookAdmissionResolving } from './cross-jurisdiction-orderbook';
-import { createEntityFrameHash } from './entity-consensus-frame';
+import { createEntityFrameHash } from './entity/consensus/frame';
 import { buildQuorumHanko, signEntityHashes } from './hanko/signing';
 import { proposeAccountFrame } from './account/consensus/propose';
 import {
@@ -83,7 +83,7 @@ import {
 import { cloneCrossJurisdictionAccountTxRoute } from './cross-jurisdiction';
 import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
 import { pruneSettledOriginatedHtlcRoutes } from './entity/tx/htlc-route-lifecycle';
-export { mergeEntityInputs } from './entity-input-merge';
+export { mergeEntityInputs } from './entity/consensus/input-merge';
 
 export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;
 
@@ -95,7 +95,7 @@ const ENTITY_FRAME_SLOW_MS = Math.max(
   0,
   Number(nodeProcess?.env?.['XLN_ENTITY_FRAME_SLOW_MS'] || '1000'),
 );
-export { createEntityFrameHash } from './entity-consensus-frame';
+export { createEntityFrameHash } from './entity/consensus/frame';
 export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
 const entityLog = createStructuredLogger('entity');
 

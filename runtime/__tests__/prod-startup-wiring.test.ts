@@ -634,7 +634,7 @@ describe('production startup wiring', () => {
   });
 
   test('prod runtime child keeps merge debug output structured and gated', () => {
-    const mergeSource = readFileSync(join(repoRoot, 'runtime/entity-input-merge.ts'), 'utf8');
+    const mergeSource = readFileSync(join(repoRoot, 'runtime/entity/consensus/input-merge.ts'), 'utf8');
     expect(mergeSource).toContain("const entityInputMergeLog = createStructuredLogger('entity.input.merge');");
     expect(mergeSource).toContain("entityInputMergeLog.debug('precommits.merge'");
     expect(mergeSource).toContain("entityInputMergeLog.debug('input.merged'");
