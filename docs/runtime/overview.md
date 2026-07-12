@@ -52,13 +52,14 @@ If you only have 1-2 hours, read files in this order:
 
 ## Folder Readmes
 
-- [account/tx/README.md](/Users/zigota/xln/runtime/account/tx/README.md)
-- [entity/tx/README.md](/Users/zigota/xln/runtime/entity/tx/README.md)
-- [storage/README.md](/Users/zigota/xln/runtime/storage/README.md)
-- [networking/README.md](/Users/zigota/xln/runtime/networking/README.md)
-- [server/README.md](/Users/zigota/xln/runtime/server/README.md)
-- [jadapter/README.md](/Users/zigota/xln/runtime/jadapter/README.md)
-- [recovery/README.md](/Users/zigota/xln/runtime/recovery/README.md)
+- [Account transactions](./account-transactions.md)
+- [Entity transactions](./entity-transactions.md)
+- [Storage](./storage.md)
+- [Networking](./networking.md)
+- [Server](./server.md)
+- [Jurisdiction adapter](./jadapter.md)
+- [Recovery](./recovery.md)
+- [Watchtower](./watchtower.md)
 
 ## Surface Classification
 

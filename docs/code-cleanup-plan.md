@@ -26,7 +26,7 @@ They should still be done in small patches with targeted tests.
 ### Runtime
 
 1. Keep the current top-level split and document boundaries in
-   [runtime/README.md](../runtime/README.md).
+   [runtime overview](runtime/overview.md).
 2. Keep `relay`, `routing`, `orderbook`, `networking`, `orchestrator`,
    `scripts`, `account-tx`, and `entity-tx` as the canonical buckets.
 3. Deduplicate recovery/watchtower normalizers only when tests cover the exact

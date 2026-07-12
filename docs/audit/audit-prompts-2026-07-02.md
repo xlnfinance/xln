@@ -379,7 +379,7 @@ Answer:
 
 Evidence:
 
-- Storage README notes schema drift risk: `runtime/storage/README.md`.
+- Storage documentation notes schema drift risk: `docs/runtime/storage.md`.
 - Canonical hash implementation: `runtime/storage/canonical-hash.ts`.
 - Save path append invariant and frame hash: `runtime/storage/index.ts:342-440`.
 - Restore canonical mismatch check: `runtime/runtime.ts:3375-3395`.
