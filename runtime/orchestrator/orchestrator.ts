@@ -99,6 +99,10 @@ import {
   type OrchestratorJurisdictionsConfig,
 } from './jurisdictions';
 import { createOrchestratorProxyHandlers, resolveRpcProxyIndex } from './proxy';
+import {
+  findMissingRpcContractCode,
+  type RpcContractAddresses,
+} from './contract-readiness';
 import { maybeHandleOrchestratorDebugApi } from './debug-api';
 import {
   HUB_MESH_CREDIT_AMOUNT,
@@ -693,20 +697,6 @@ const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> =
     }
     if (!response.ok) return null;
     return await response.json() as T;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-};
-
-const fetchText = async (url: string, timeoutMs = 2_000): Promise<string | null> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) return null;
-    return await response.text();
   } catch {
     return null;
   } finally {
@@ -2175,22 +2165,45 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
 };
 
 const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + HUB_SELF_READY_TIMEOUT_MS;
+  let lastStatus: Record<string, unknown> = {};
   while (Date.now() < deadline) {
-    if (hasShardRpc2Jurisdiction(jurisdictionsConfig)) {
+    const hasRpc2 = hasShardRpc2Jurisdiction(jurisdictionsConfig);
+    const primary = resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig);
+    let contracts: RpcContractAddresses | null = null;
+    if (primary) {
+      try {
+        const payload = JSON.parse(readShardJurisdictions(jurisdictionsConfig)) as {
+          jurisdictions?: Record<string, { contracts?: RpcContractAddresses }>;
+        };
+        contracts = payload.jurisdictions?.[primary.key]?.contracts ?? null;
+      } catch {
+        contracts = null;
+      }
+    }
+    let missingCode: string[] = ['primary:unavailable'];
+    let probeError = '';
+    if (contracts) {
+      try {
+        missingCode = await findMissingRpcContractCode(args.rpcUrl, contracts);
+      } catch (error) {
+        probeError = serializeError(error);
+      }
+    }
+    lastStatus = { hasRpc2, primary: primary?.key ?? null, missingCode, probeError };
+    if (hasRpc2 && missingCode.length === 0 && !probeError) {
       return;
     }
-    const payload = await fetchText(`http://${args.host}:${child.apiPort}/api/jurisdictions`);
-    if (payload) {
-      writeFileSync(shardJurisdictionsPath, payload, 'utf8');
-      if (hasShardRpc2Jurisdiction(jurisdictionsConfig)) return;
-    }
     if (child.proc?.exitCode !== null) {
-      throw new Error(`${child.name}_EXITED_BEFORE_JURISDICTIONS code=${String(child.proc?.exitCode)}`);
+      throw new Error(
+        `${child.name}_EXITED_BEFORE_JURISDICTIONS code=${String(child.proc?.exitCode)} status=${safeStringify(lastStatus)}`,
+      );
     }
-    await delay(150);
+    await delay(250);
   }
-  throw new Error(`${child.name}_JURISDICTIONS_TIMEOUT path=${shardJurisdictionsPath}`);
+  throw new Error(
+    `${child.name}_JURISDICTIONS_TIMEOUT path=${shardJurisdictionsPath} status=${safeStringify(lastStatus)}`,
+  );
 };
 
 const persistHubReadySnapshots = async (): Promise<void> => {

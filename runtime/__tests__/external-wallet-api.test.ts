@@ -98,6 +98,11 @@ describe('external wallet API faucet transaction gate', () => {
     expect(source).toContain("externalWalletLog.error('faucet.erc20.failed'");
     expect(source).toContain("externalWalletLog.error('snapshot.failed'");
     expect(source).toContain("externalWalletLog.error('faucet.gas.failed'");
+    expect(source).toContain("waitForFaucetTx(transferTx, 'user-token-transfer'");
+    expect(source).toContain("waitForFaucetTx(topupTx, 'user-gas-topup'");
+    expect(source.indexOf("externalWalletLog.debug('faucet.erc20.gas_topup_tx'")).toBeLessThan(
+      source.indexOf("waitForFaucetTx(transferTx, 'user-token-transfer'"),
+    );
     expect(source).not.toContain('console.log');
     expect(source).not.toContain('console.warn');
     expect(source).not.toContain('console.error');

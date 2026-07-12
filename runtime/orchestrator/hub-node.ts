@@ -10,7 +10,6 @@ import type {
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { prewarmSignerLabels } from '../account-crypto';
-import { createXlnJsonRpcProvider } from '../jadapter';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
@@ -38,6 +37,7 @@ import { createRelayStore } from '../relay-store';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
+import { findMissingRpcContractCode } from './contract-readiness';
 import { getTokenIdsForJurisdiction } from '../account-utils';
 import { isLocalOperatorRequest, publicLocalHubHealth } from '../health-redaction';
 import {
@@ -613,27 +613,6 @@ const startedAtFor = (stage: keyof typeof timings): number | null => {
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
   resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
-
-const REQUIRED_RPC_CONTRACT_KEYS = ['account', 'depository', 'entityProvider', 'deltaTransformer'] as const;
-
-const findMissingRpcContractCode = async (
-  rpcUrl: string,
-  contracts: JurisdictionConfig['contracts'],
-): Promise<string[]> => {
-  if (!contracts) return ['contracts'];
-  const provider = createXlnJsonRpcProvider(rpcUrl);
-  const missing: string[] = [];
-  for (const key of REQUIRED_RPC_CONTRACT_KEYS) {
-    const address = String(contracts[key] || '').trim();
-    if (!address) {
-      missing.push(`${key}:missing`);
-      continue;
-    }
-    const code = await provider.getCode(address);
-    if (!code || code === '0x') missing.push(`${key}:${address}`);
-  }
-  return missing;
-};
 
 const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): Promise<JurisdictionConfig> => {
   jurisdictionImportDiagnostics = {

@@ -1522,6 +1522,19 @@ describe('production startup wiring', () => {
     expect(hubNode).not.toContain('void externalWalletApi.provisionFaucetWallet()');
   });
 
+  test('secondary hubs wait until every primary contract address has deployed bytecode', () => {
+    const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
+    const readiness = extractSourceBlock(
+      orchestrator,
+      'const waitForShardJurisdictions = async (child: HubChild): Promise<void> =>',
+      'const persistHubReadySnapshots = async (): Promise<void> =>',
+    );
+
+    expect(readiness).toContain('await findMissingRpcContractCode(args.rpcUrl, contracts)');
+    expect(readiness).toContain('if (hasRpc2 && missingCode.length === 0 && !probeError)');
+    expect(readiness).not.toContain('if (hasShardRpc2Jurisdiction(jurisdictionsConfig)) {\n      return;');
+  });
+
   test('custody bootstrap waits until market maker readiness completes', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const custodyBootstrapSource = readFileSync(join(repoRoot, 'runtime/orchestrator/custody-bootstrap.ts'), 'utf8');

@@ -285,7 +285,7 @@ const withFaucetWalletLock = async <T>(
   }
 };
 
-const waitForFaucetProvisionTx = async (
+const waitForFaucetTx = async (
   tx: WaitableTransaction,
   label: string,
   details: Record<string, unknown>,
@@ -297,7 +297,7 @@ const waitForFaucetProvisionTx = async (
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`FAUCET_PROVISION_TX_WAIT_FAILED:${safeStringify({
+    throw new Error(`FAUCET_TX_WAIT_FAILED:${safeStringify({
       label,
       hash: tx.hash,
       timeoutMs: FAUCET_TX_WAIT_TIMEOUT_MS,
@@ -363,7 +363,7 @@ const provisionFaucetWalletFunding = async (
           token: token.symbol,
           txHash: refillTx.hash,
         });
-        await waitForFaucetProvisionTx(refillTx, 'token-transfer', {
+        await waitForFaucetTx(refillTx, 'token-transfer', {
           token: token.symbol,
           tokenAddress: token.address,
           faucetAddress,
@@ -397,7 +397,7 @@ const provisionFaucetWalletFunding = async (
           value: context.faucetWalletEthTarget - currentEth,
         });
         externalWalletLog.debug('faucet.provision.eth_topup_tx', { txHash: topupTx.hash });
-        await waitForFaucetProvisionTx(topupTx, 'eth-topup', {
+        await waitForFaucetTx(topupTx, 'eth-topup', {
           faucetAddress,
           deployerAddress,
           currentEth: currentEth.toString(),
@@ -557,21 +557,28 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         );
         const transferTx = await tokenContract.transfer(userAddress, amountWei);
         externalWalletLog.debug('faucet.erc20.transfer_tx', { requestId, txHash: transferTx.hash });
-        await transferTx.wait();
-        externalWalletLog.debug('faucet.erc20.transfer_mined', { requestId, txHash: transferTx.hash });
-
+        let topupTx: WaitableTransaction | null = null;
         if (userEth < minBalance) {
           externalWalletLog.debug('faucet.erc20.gas_topup_start', {
             requestId,
             currentEth: userEth.toString(),
           });
-          const topupTx = await faucetWallet.sendTransaction({
+          topupTx = await faucetWallet.sendTransaction({
             to: userAddress,
             value: targetBalance - userEth,
           });
           externalWalletLog.debug('faucet.erc20.gas_topup_tx', { requestId, txHash: topupTx.hash });
-          await topupTx.wait();
           ethTxHash = topupTx.hash;
+        }
+
+        await Promise.all([
+          waitForFaucetTx(transferTx, 'user-token-transfer', { requestId, userAddress, tokenSymbol }),
+          ...(topupTx
+            ? [waitForFaucetTx(topupTx, 'user-gas-topup', { requestId, userAddress })]
+            : []),
+        ]);
+        externalWalletLog.debug('faucet.erc20.transfer_mined', { requestId, txHash: transferTx.hash });
+        if (topupTx) {
           externalWalletLog.debug('faucet.erc20.gas_topup_mined', { requestId, txHash: topupTx.hash });
         }
 
