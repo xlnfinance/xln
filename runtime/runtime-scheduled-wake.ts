@@ -1,5 +1,5 @@
 import type { EntityReplica, EntityState, EntityTx, Env } from './types';
-import type { CrontabTaskMethod } from './crontab-types';
+import type { CrontabTaskMethod } from './entity/scheduler-types';
 import { compareStableText, safeStringify } from './serialization-utils';
 
 export type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;

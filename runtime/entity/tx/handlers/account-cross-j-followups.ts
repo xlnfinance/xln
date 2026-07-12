@@ -15,7 +15,7 @@ import {
   getCrossJurisdictionBookReceiptError,
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../../extensions/cross-j/orderbook';
-import { decodeHashLadderBinary } from '../../../hashladder';
+import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
 import { resolveEntityProposerId } from '../../../state-helpers';

@@ -10,7 +10,7 @@ import {
   requireDeliveryDelivered,
   requireDeliveryResult,
   shouldRetryDelivery,
-} from '../delivery-result';
+} from '../protocol/payments/delivery-result';
 
 test('delivery result helpers validate the shared delivery contract', () => {
   const delivered = deliveryAccepted('DELIVERED');

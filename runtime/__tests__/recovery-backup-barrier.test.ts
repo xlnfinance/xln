@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { createEmptyEnv, process as processRuntime, registerRecoveryBackupBarrier, sendEntityInput } from '../runtime.ts';
-import { deliveryAccepted } from '../delivery-result';
+import { deliveryAccepted } from '../protocol/payments/delivery-result';
 
 test('persisted pending network outputs retry after backup recovery', async () => {
   const env = createEmptyEnv('recovery-barrier-seed');

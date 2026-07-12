@@ -8,7 +8,7 @@ import { computeSwapPriceTicks, type BookState } from '../../../../orderbook';
 import {
   compareCanonicalText,
   type NormalizedOrderbookOffer,
-} from '../../../../swap-execution';
+} from '../../../../orderbook/swap-execution';
 import type { CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
 import type { MempoolOp } from './orderbook-queue';
 

@@ -30,7 +30,7 @@ import {
   sameWsUrl,
   uniqueTransportValues,
 } from './p2p-endpoints';
-import { deliveryAccepted, deliveryFailure, isDeliveryDelivered, type DeliveryResult } from '../delivery-result';
+import { deliveryAccepted, deliveryFailure, isDeliveryDelivered, type DeliveryResult } from '../protocol/payments/delivery-result';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');

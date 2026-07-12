@@ -10,7 +10,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../../types';
-import { hashHtlcSecret } from '../../../htlc-utils';
+import { hashHtlcSecret } from '../../../protocol/htlc/utils';
 import { createStructuredLogger, shortHash } from '../../../logger';
 import { releaseHold } from '../hold-utils';
 

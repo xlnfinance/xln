@@ -11,7 +11,7 @@
  */
 
 import type { Env, SettlementDiff, SettlementOp } from '../types';
-import { compileOps } from '../settlement-ops';
+import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled } from './helpers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';

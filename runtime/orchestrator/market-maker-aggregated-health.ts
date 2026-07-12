@@ -1,5 +1,5 @@
 import type { AggregatedHealth, MarketMakerHealthPayload } from './orchestrator-types';
-import { classifyRuntimeMarketMakerFailure, type RuntimeFailureSignal } from '../failure-taxonomy';
+import { classifyRuntimeMarketMakerFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 
 type AggregatedMarketMakerHealth = AggregatedHealth['marketMaker'];
 

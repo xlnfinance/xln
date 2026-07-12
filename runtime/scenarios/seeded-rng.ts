@@ -12,7 +12,7 @@
  */
 
 import { ethers } from 'ethers';
-import { hashHtlcSecret } from '../htlc-utils';
+import { hashHtlcSecret } from '../protocol/htlc/utils';
 
 export interface ScenarioRng {
   /** Get current counter value */

@@ -8,7 +8,7 @@
 import { logDebug } from '../logger';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
-import { compareCanonicalText } from '../swap-keys';
+import { compareCanonicalText } from '../orderbook/swap-keys';
 import { UINT16_MAX } from '../constants';
 import type { PaymentRoute } from '../routing/pathfinding';
 

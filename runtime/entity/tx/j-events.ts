@@ -11,7 +11,7 @@ import type {
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { getTokenInfo } from '../../account-utils';
 import { CANONICAL_J_EVENTS } from '../../jadapter/helpers';
-import { hashHtlcSecret } from '../../htlc-utils';
+import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../scheduler';
 import { getRuntimeJurisdictionDefaultDisputeDelayBlocks } from '../../jurisdiction/height';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';

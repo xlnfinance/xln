@@ -1,5 +1,5 @@
 import type { AccountTx, EntityState } from '../../../../types';
-import { swapKey } from '../../../../swap-execution';
+import { swapKey } from '../../../../orderbook/swap-execution';
 
 export interface MempoolOp {
   accountId: string;

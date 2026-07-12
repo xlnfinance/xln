@@ -4,7 +4,7 @@ import { isBatchEmpty } from './jurisdiction/batch';
 import { rememberRecentJEvents } from './jurisdiction/event-evidence';
 import { getEntityReplicaById } from './orchestrator/mesh-common';
 import { ensureLiveJAdapterForReplica } from './runtime-infra';
-import { classifyRuntimeJBatchFailure } from './failure-taxonomy';
+import { classifyRuntimeJBatchFailure } from './protocol/failure-taxonomy';
 import { createStructuredLogger, shortId } from './logger';
 
 const jSubmitLog = createStructuredLogger('runtime.jsubmit');

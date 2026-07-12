@@ -8,7 +8,7 @@ import {
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
 } from '../../../cross-jurisdiction';
-import { verifyHashLadderBinary } from '../../../hashladder';
+import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { formatEntityId } from '../../../utils';

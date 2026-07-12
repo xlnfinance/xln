@@ -3,8 +3,8 @@ import { expect } from "chai";
 import hre from "hardhat";
 import type { DeltaTransformer } from "../typechain-types/index.js";
 import { buildAccountProofBody, setDeltaTransformerAddress } from "../../runtime/proof-builder.ts";
-import { buildPositionalSwapFillRatioBuckets } from "../../runtime/transformer-ordering.ts";
-import { asOfferId } from "../../runtime/swap-keys.ts";
+import { buildPositionalSwapFillRatioBuckets } from "../../runtime/protocol/transformer-ordering.ts";
+import { asOfferId } from "../../runtime/orderbook/swap-keys.ts";
 import type { AccountMachine, SwapOffer } from "../../runtime/types.ts";
 
 const { ethers } = hre;

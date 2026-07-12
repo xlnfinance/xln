@@ -25,7 +25,7 @@ import type { AccountMachine, AccountTx } from '../../../types';
 import { deriveDelta } from '../../../account-utils';
 import { createDefaultDelta } from '../../../validation-utils';
 import { FINANCIAL } from '../../../constants';
-import { deriveExactSwapFillRatio, exactFillRatioToUint16, MAX_SWAP_FILL_RATIO } from '../../../swap-execution';
+import { deriveExactSwapFillRatio, exactFillRatioToUint16, MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import {
   computeSwapPriceTicks,
   requantizeRemainingSwapAtPrice,

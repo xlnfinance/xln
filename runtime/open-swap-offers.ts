@@ -1,5 +1,5 @@
 import type { EntityState, SwapBookEntry } from './types';
-import { compareCanonicalText, swapKey } from './swap-execution';
+import { compareCanonicalText, swapKey } from './orderbook/swap-execution';
 
 export function listOpenSwapOffers(state: Pick<EntityState, 'accounts'>): SwapBookEntry[] {
   const offers: SwapBookEntry[] = [];

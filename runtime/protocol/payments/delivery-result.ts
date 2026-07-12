@@ -3,7 +3,7 @@ import {
   isRuntimeFailureSignal,
   type RuntimeFailureCategory,
   type RuntimeFailureSignal,
-} from './failure-taxonomy';
+} from '../failure-taxonomy';
 
 export type DeliveryOutcome = 'delivered' | 'queued' | 'deferred' | 'failed';
 

@@ -10,7 +10,7 @@
  * Reference: types.ts SettlementOp / SettlementDiff
  */
 
-import type { SettlementOp, SettlementDiff } from './types';
+import type { SettlementOp, SettlementDiff } from '../../types';
 
 /**
  * Compile typed settlement operations into canonical diffs.

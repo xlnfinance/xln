@@ -121,7 +121,7 @@ import {
 import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
-import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../failure-taxonomy';
+import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../protocol/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../runtime-storage-dbs';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {

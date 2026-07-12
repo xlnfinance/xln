@@ -13,7 +13,7 @@ import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
-import { hashHtlcSecret } from '../htlc-utils';
+import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountMachine, Delta, EntityInput, Env, JurisdictionConfig } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import type { Profile } from '../networking/gossip';

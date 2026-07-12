@@ -36,7 +36,7 @@ import {
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
 } from './cross-jurisdiction';
-import type { CrontabState, ScheduledHook } from './crontab-types';
+import type { CrontabState, ScheduledHook } from './entity/scheduler-types';
 import type { Profile } from './networking/gossip';
 import { createStructuredLogger } from './logger';
 

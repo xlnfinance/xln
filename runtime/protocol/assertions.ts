@@ -1,7 +1,7 @@
-import type { AccountFrame, AccountMachine, Env } from './types';
-import { validateEntityState } from './validation-utils';
-import { computeFrameHash } from './account-consensus';
-import { assertAccountFrameDeltaIntegrity } from './account/frame';
+import type { AccountFrame, AccountMachine, Env } from '../types';
+import { validateEntityState } from '../validation-utils';
+import { computeFrameHash } from '../account-consensus';
+import { assertAccountFrameDeltaIntegrity } from '../account/frame';
 
 const formatAccountLabel = (replicaKey: string, counterpartyId: string): string =>
   `${replicaKey.slice(-4)}↔${counterpartyId.slice(-4)}`;

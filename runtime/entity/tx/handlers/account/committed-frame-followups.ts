@@ -1,9 +1,9 @@
 import type { AccountFrame, AccountTx, EntityState, Env, HtlcNoteKey, HtlcRoute } from '../../../../types';
 import { HEAVY_LOGS } from '../../../../utils';
-import { swapKey } from '../../../../swap-execution';
+import { swapKey } from '../../../../orderbook/swap-execution';
 import { cancelHook as cancelScheduledHook } from '../../../scheduler';
 import { pruneSettledOriginatedHtlcRoutes, terminateHtlcRoute } from '../../htlc-route-lifecycle';
-import { buildHtlcFinalizedEventPayload } from '../../../../htlc-events';
+import { buildHtlcFinalizedEventPayload } from '../../../../protocol/htlc/events';
 import {
   buildLendingLoanId,
   ensureLendingState,

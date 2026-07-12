@@ -63,7 +63,7 @@ const IGNORED_FILES = new Set([
 
 const ORDERBOOK_MARKERS = [
   'runtime/orderbook',
-  'runtime/swap-execution.ts',
+  'runtime/orderbook/swap-execution.ts',
   'runtime/account/tx/handlers/swap-resolve.ts',
   'runtime/entity/tx/handlers/account.ts',
   'runtime/storage/index.ts',
@@ -235,7 +235,7 @@ function scanRehydrateContinues(files: string[]): Finding | null {
 function scanManualSwapKeys(files: string[]): Finding | null {
   const matches: Finding['matches'] = [];
   for (const file of files) {
-    if (file.endsWith('runtime/swap-execution.ts')) continue;
+    if (file.endsWith('runtime/orderbook/swap-execution.ts')) continue;
     const lines = readLines(file);
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]!;

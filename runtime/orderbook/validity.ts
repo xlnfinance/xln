@@ -10,7 +10,7 @@ import {
   type OrderbookExtState,
   type PriceBucketState,
 } from './types';
-import { compareCanonicalText, swapKey, type SwapKey } from '../swap-execution';
+import { compareCanonicalText, swapKey, type SwapKey } from './swap-execution';
 import type { AccountMachine, EntityState, SwapOffer } from '../types';
 
 export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId' | 'pairIndex';

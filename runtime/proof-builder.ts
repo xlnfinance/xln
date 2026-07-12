@@ -22,13 +22,13 @@ import type {
   RuntimeAllowance,
   ProofBodyResult,
   DisputeConfig,
-} from './proof-body-types.ts';
+} from './protocol/dispute/proof-body.ts';
 import type { ProofBodyStruct, TransformerClauseStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
 import type { DeltaTransformer } from '../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
-import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.ts';
-import { sortTransformerEntries } from './transformer-ordering.ts';
+import { PROOF_BODY_ABI, BATCH_ABI } from './protocol/dispute/proof-body.ts';
+import { sortTransformerEntries } from './protocol/transformer-ordering.ts';
 import { normalizeAccountWatchSeed } from './account/watch-seed.ts';
-import { HASHLADDER_MAX_FILL_RATIO } from './hashladder.ts';
+import { HASHLADDER_MAX_FILL_RATIO } from './protocol/htlc/hash-ladder.ts';
 
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader' | 'watchSeed'>;
 

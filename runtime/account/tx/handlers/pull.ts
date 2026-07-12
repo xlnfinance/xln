@@ -10,7 +10,7 @@ import {
 import {
   HASHLADDER_MAX_FILL_RATIO,
   verifyHashLadderBinary,
-} from '../../../hashladder';
+} from '../../../protocol/htlc/hash-ladder';
 import { addHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
 

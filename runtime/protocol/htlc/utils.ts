@@ -4,7 +4,7 @@
  */
 
 import { ethers } from 'ethers';
-import { HTLC } from './constants';
+import { HTLC } from '../../constants';
 
 const DEFAULT_FEE_PPM = Number((HTLC.FEE_RATE_UBP * 1_000_000n) / HTLC.FEE_DENOMINATOR);
 

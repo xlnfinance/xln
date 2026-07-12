@@ -25,7 +25,7 @@ import {
   type NormalizedOrderbookOffer,
   type SameJurisdictionWorkingOrderbookOffer,
   type WorkingOrderbookOffer,
-} from '../../../../swap-execution';
+} from '../../../../orderbook/swap-execution';
 import {
   buildCrossJurisdictionMarketOffer,
   crossJurisdictionBookAdmissionKeyFor,

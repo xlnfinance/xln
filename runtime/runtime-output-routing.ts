@@ -19,7 +19,7 @@ import {
   requireDeliveryResult,
   shouldRetryDelivery,
   type DeliveryResult,
-} from './delivery-result';
+} from './protocol/payments/delivery-result';
 
 const routeLog = createStructuredLogger('network.route');
 

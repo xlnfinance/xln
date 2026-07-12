@@ -1136,7 +1136,7 @@ xln/
 
     swap/cross-j/orderbook:
       runtime-swap-pairs.ts       ${fileSizes['runtime/runtime-swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
-      swap-execution.ts           ${fileSizes['runtime/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
+      swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
       cross-jurisdiction.ts       ${fileSizes['runtime/cross-jurisdiction.ts'] || '?'} lines - Cross-j route hashes and fill progress
       cross-jurisdiction-market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
       cross-jurisdiction-orderbook.ts ${fileSizes['runtime/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules

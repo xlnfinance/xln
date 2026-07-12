@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   classifyRuntimeImportReadinessReason,
   classifyRuntimeMarketMakerFailure,
-} from '../failure-taxonomy';
+} from '../protocol/failure-taxonomy';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 import type { AggregatedHealth } from '../orchestrator/orchestrator-types';
 

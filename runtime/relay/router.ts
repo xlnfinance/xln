@@ -31,7 +31,7 @@ import {
 import type { Profile } from '../networking/gossip';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../networking/profile-signing';
 import { verifyHelloAuth } from '../networking/hello-auth';
-import { isDeliveryDelivered, type DeliveryResult } from '../delivery-result';
+import { isDeliveryDelivered, type DeliveryResult } from '../protocol/payments/delivery-result';
 import { createStructuredLogger } from '../logger';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');

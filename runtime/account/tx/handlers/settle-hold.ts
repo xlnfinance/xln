@@ -13,7 +13,7 @@
  */
 
 import type { AccountMachine, AccountTx, SettlementDiff } from '../../../types';
-import { compileOps } from '../../../settlement-ops';
+import { compileOps } from '../../../protocol/settlement/operations';
 import { deriveDelta } from '../../../account-utils';
 import { createStructuredLogger } from '../../../logger';
 import { addHold, ensureHoldAdd, ensureHoldRelease, getHold, releaseHold } from '../hold-utils';

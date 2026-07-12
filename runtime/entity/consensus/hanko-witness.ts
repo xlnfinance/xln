@@ -1,5 +1,5 @@
 import type { EntityInput, HankoString, HashToSign, HashType, JInput, ProposedEntityFrame } from '../../types';
-import { compareCanonicalText } from '../../swap-execution';
+import { compareCanonicalText } from '../../orderbook/swap-execution';
 import { normalizeSignatureMap } from '../../protocol/signatures';
 import { accountInputAck, accountInputDisputeSeal, accountInputProposal } from '../../account/consensus/flush';
 

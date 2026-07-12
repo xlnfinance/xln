@@ -3025,7 +3025,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     state.lastFrameAt = getWallClockMs();
 
     if (env.strictScenario) {
-      const { assertRuntimeStateStrict } = await import('./strict-assertions');
+      const { assertRuntimeStateStrict } = await import('./protocol/assertions');
       await assertRuntimeStateStrict(env);
       markProcessProfile('strict');
     }

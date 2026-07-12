@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildAccountProofBody, setDeltaTransformerAddress } from '../proof-builder';
-import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../transformer-ordering';
-import { asOfferId } from '../swap-keys';
+import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../protocol/transformer-ordering';
+import { asOfferId } from '../orderbook/swap-keys';
 import type { AccountMachine, SwapOffer } from '../types';
 
 const MAX_FILL_RATIO = 65535n;

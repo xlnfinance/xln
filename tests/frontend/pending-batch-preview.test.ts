@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { JBatch } from '../../runtime/j-batch';
+import type { JBatch } from '../../runtime/jurisdiction/batch';
 import {
   buildPendingBatchActionTxs,
   buildPendingBatchState,

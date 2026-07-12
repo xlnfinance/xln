@@ -88,7 +88,7 @@ export type {
   MppReceipt,
 } from './agent-payments/mpp';
 export type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
-export type { DeliveryOutcome, DeliveryResult } from './delivery-result';
+export type { DeliveryOutcome, DeliveryResult } from './protocol/payments/delivery-result';
 export type { RuntimeEntityInputRoutingResult } from './runtime-output-routing';
 export type {
   RuntimeAdapter,

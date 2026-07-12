@@ -426,7 +426,7 @@ test('entity panel debt enforcement submits RuntimeInput instead of calling JAda
   const enforceSource = source.slice(enforceIndex, source.indexOf('async function addTokenToAccount', enforceIndex));
 
   expect(existsSync('frontend/src/lib/components/Entity/debt-enforcement-command.ts')).toBe(false);
-  expect(source).toContain("import { buildDebtEnforcementRuntimeInputFromProjection } from '@xln/runtime/debt-enforcement-command';");
+  expect(source).toContain("import { buildDebtEnforcementRuntimeInputFromProjection } from '@xln/runtime/protocol/payments/debt-enforcement';");
   expect(enforceSource).toContain('buildDebtEnforcementRuntimeInputFromProjection');
   expect(enforceSource).toContain('jurisdictionName');
   expect(enforceSource).toContain("timestamp: requirePanelRuntimeTimestamp('debt-enforcement')");

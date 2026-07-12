@@ -17,7 +17,7 @@ import {
   deriveCanonicalSwapFillRatio,
   markWorkingOrderbookOffer,
   type NormalizedOrderbookOffer,
-} from '../swap-execution';
+} from '../orderbook/swap-execution';
 import type { AccountMachine, AccountTx, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 

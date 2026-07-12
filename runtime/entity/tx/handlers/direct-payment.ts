@@ -5,7 +5,7 @@ import { formatEntityId } from '../../../utils';
 import { createStructuredLogger, logError, shortId } from '../../../logger';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import type { MempoolOp } from './account';
-import { requireTrustedPaymentGateway } from '../../../payment-delivery';
+import { requireTrustedPaymentGateway } from '../../../protocol/payments/delivery';
 
 type DirectPaymentEntityTx = Extract<EntityTx, { type: 'directPayment' }>;
 

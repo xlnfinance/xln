@@ -1,4 +1,4 @@
-import { asOfferId, compareCanonicalText, type OfferId } from './swap-keys.ts';
+import { asOfferId, compareCanonicalText, type OfferId } from '../orderbook/swap-keys.ts';
 
 export interface SwapOwnerSideLike {
   makerIsLeft: boolean;

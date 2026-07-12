@@ -12,7 +12,7 @@ import {
   submitCrossJurisdictionSwap,
 } from '../runtime';
 import { buildCrossJurisdictionSwapSubmission } from '../runtime-jurisdiction-api';
-import { hashHtlcSecret } from '../htlc-utils';
+import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountTx, EntityInput, EntityReplica, JurisdictionEvent } from '../types';
 import { generateLazyEntityId } from '../entity-factory';
 import { createDefaultDelta } from '../validation-utils';
@@ -47,7 +47,7 @@ import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../extensions/cross-j/market';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
 import { normalizeEntitySwapTradingPairs } from '../runtime-swap-pairs';
-import { verifyHashLadderBinary } from '../hashladder';
+import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
 import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';

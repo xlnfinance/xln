@@ -3,7 +3,7 @@ import type { AccountTx, EntityState, EntityTx } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
 import { createStructuredLogger, shortHash, shortId } from '../../logger';
 import { safeStringify } from '../../serialization-utils';
-import { compareCanonicalText } from '../../swap-execution';
+import { compareCanonicalText } from '../../orderbook/swap-execution';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,

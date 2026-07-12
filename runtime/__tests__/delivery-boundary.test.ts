@@ -28,11 +28,11 @@ const rawEntityInputSendAllowedFiles = new Set([
 ]);
 
 const deliveryOutcomeComparisonAllowedFiles = new Set([
-  'runtime/delivery-result.ts',
+  'runtime/protocol/payments/delivery-result.ts',
 ]);
 
 const deliveryFlagDecisionAllowedFiles = new Set([
-  'runtime/delivery-result.ts',
+  'runtime/protocol/payments/delivery-result.ts',
 ]);
 
 test('raw entity input websocket send stays behind the P2P delivery adapter', () => {

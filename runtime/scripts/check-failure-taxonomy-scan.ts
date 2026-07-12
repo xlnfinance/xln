@@ -2,7 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 
-import { deliveryFailure, isDeliveryResult } from '../delivery-result';
+import { deliveryFailure, isDeliveryResult } from '../protocol/payments/delivery-result';
 import {
   buildRuntimeFailureSignal,
   classifyRuntimeFaucetFailure,
@@ -11,7 +11,7 @@ import {
   classifyRuntimeTransportFailure,
   isRuntimeFailureSignal,
   type RuntimeFailureSignal,
-} from '../failure-taxonomy';
+} from '../protocol/failure-taxonomy';
 import { publicAggregatedHealth } from '../health-redaction';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 
@@ -174,7 +174,7 @@ assertNotIncludes(publicHealthText, 'secret timeline reason', 'publicAggregatedH
 assertIncludes(publicHealthText, '"code":"OPERATOR_CONFIG_INVALID"', 'publicAggregatedHealth');
 assertIncludes(publicHealthText, '"fatal":true', 'publicAggregatedHealth');
 
-const taxonomyPath = 'runtime/failure-taxonomy.ts';
+const taxonomyPath = 'runtime/protocol/failure-taxonomy.ts';
 const taxonomy = readText(taxonomyPath);
 for (const marker of [
   "export type RuntimeFailureCategory = 'ExpectedEmpty' | 'TransientRace' | 'Contradiction';",
@@ -364,7 +364,7 @@ for (const [path, markers] of [
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
-  ['runtime/delivery-result.ts', ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure']],
+  ['runtime/protocol/payments/delivery-result.ts', ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure']],
 ] as const) {
   const text = readText(path);
   for (const marker of markers) assertIncludes(text, marker, path);
@@ -527,7 +527,7 @@ const sameOrderbookMatchingPath = 'runtime/entity/tx/handlers/account/orderbook-
 const sameOrderbookMatching = readText(sameOrderbookMatchingPath);
 assertNotIncludes(sameOrderbookMatching, 'console.', sameOrderbookMatchingPath);
 
-const settlementOpsPath = 'runtime/settlement-ops.ts';
+const settlementOpsPath = 'runtime/protocol/settlement/operations.ts';
 const settlementOps = readText(settlementOpsPath);
 assertIncludes(settlementOps, 'SETTLEMENT_UNKNOWN_OP_TYPE', settlementOpsPath);
 assertNotIncludes(settlementOps, 'console.', settlementOpsPath);

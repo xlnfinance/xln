@@ -11,8 +11,8 @@ import {
   withCrossJurisdictionClaimProgress,
 } from '../cross-jurisdiction';
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
-import { HASHLADDER_MAX_FILL_RATIO } from '../hashladder';
-import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../swap-execution';
+import { HASHLADDER_MAX_FILL_RATIO } from '../protocol/htlc/hash-ladder';
+import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../orderbook/swap-execution';
 import { UINT16_MAX } from '../constants';
 import type { AccountTx, CrossJurisdictionSwapRoute } from '../types';
 

@@ -26,14 +26,14 @@ import {
   createDisputeProofHashWithNonce,
 } from '../../../proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../../hanko/signing';
-import { decodeHashLadderBinary } from '../../../hashladder';
+import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import {
   buildDisputeArgumentsForSnapshot,
   requireDisputeArgumentSnapshot,
   type DisputeArgumentSide,
 } from '../../../dispute-arguments';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
-import { swapKey } from '../../../swap-keys';
+import { swapKey } from '../../../orderbook/swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
 import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../../logger';
 import { getFirstSignerForEntity } from '../../replica';

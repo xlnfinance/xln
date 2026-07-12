@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createOnionEnvelopes, validateEnvelope } from '../htlc-envelope-types';
+import { createOnionEnvelopes, validateEnvelope } from '../protocol/htlc/envelope';
 
 describe('htlc envelope validation', () => {
   test('rejects oversized final recipient envelope payload', () => {

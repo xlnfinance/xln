@@ -15,7 +15,7 @@ import {
   deliveryAccepted,
   deliveryDeferred,
   type DeliveryResult,
-} from '../delivery-result';
+} from '../protocol/payments/delivery-result';
 
 export type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 export type RelaySocket = ServerWebSocket<RelaySocketData>;

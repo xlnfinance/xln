@@ -753,7 +753,7 @@ export async function lockAhb(env: Env): Promise<void> {
     }
 
     // Verify deltas updated (recipient-exact HTLC semantics)
-    const { calculateRequiredInboundForDesiredForward } = await import('../htlc-utils');
+    const { calculateRequiredInboundForDesiredForward } = await import('../protocol/htlc/utils');
     const hubProfile = env.gossip?.getProfiles?.().find((p) => p?.entityId === hub.id);
     const hubFeePpm = Number.isFinite(Number(hubProfile?.metadata?.routingFeePPM))
       ? Math.max(0, Math.floor(Number(hubProfile?.metadata?.routingFeePPM)))
@@ -1277,7 +1277,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`📋 Hub creates HTLC to Charlie (no secret), expires at height ${shortExpiry}\n`);
 
     // Generate hashlock without sharing secret with Charlie (timeout test)
-    const { generateLockId } = await import('../htlc-utils');
+    const { generateLockId } = await import('../protocol/htlc/utils');
     const { hashlock: testHashlock } = rng.nextHashlock();
     const testLockId = generateLockId(testHashlock, shortExpiry, 0, env.timestamp);
 

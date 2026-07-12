@@ -6,8 +6,8 @@ import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from '
 import { resolveEntityProposerId } from './state-helpers';
 import type { CrossJurisdictionSwapRoute, EntityState, Env, RuntimeInput } from './types';
 import { getWallClockMs } from './utils';
-import { buildDebtEnforcementRuntimeInputFromProjection } from './debt-enforcement-command';
-import type { DebtEnforcementProjectionRuntimeInputParams } from './debt-enforcement-command';
+import { buildDebtEnforcementRuntimeInputFromProjection } from './protocol/payments/debt-enforcement';
+import type { DebtEnforcementProjectionRuntimeInputParams } from './protocol/payments/debt-enforcement';
 
 export function getActiveJAdapter(env: Env): JAdapter | null {
   if (!env.activeJurisdiction) return null;

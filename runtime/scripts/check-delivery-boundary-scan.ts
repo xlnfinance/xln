@@ -11,7 +11,7 @@ import {
   isDeliveryDelivered,
   isDeliveryResult,
   shouldRetryDelivery,
-} from '../delivery-result';
+} from '../protocol/payments/delivery-result';
 import {
   classifyRelayDeliveryEvent,
   isRelaySendResultFailure,
@@ -154,7 +154,7 @@ const rawEntityInputSendAllowedFiles = new Set([
   'runtime/networking/ws-client.ts',
 ]);
 const deliveryDecisionAllowedFiles = new Set([
-  'runtime/delivery-result.ts',
+  'runtime/protocol/payments/delivery-result.ts',
 ]);
 
 for (const file of runtimeSources) {
@@ -180,7 +180,7 @@ for (const file of runtimeSources) {
 }
 
 for (const [path, markers] of [
-  ['runtime/delivery-result.ts', [
+  ['runtime/protocol/payments/delivery-result.ts', [
     "export type DeliveryOutcome = 'delivered' | 'queued' | 'deferred' | 'failed';",
     'export type DeliveryResult = {',
     'export const requireDeliveryResult',

@@ -18,9 +18,9 @@
  * PHASE 3 (Future): Upgrade to post-quantum (Kyber) when available
  */
 
-import type { CryptoProvider } from './crypto-provider';
-import { HTLC } from './constants';
-import { safeStringify } from './serialization-utils';
+import type { CryptoProvider } from '../../crypto-provider';
+import { HTLC } from '../../constants';
+import { safeStringify } from '../../serialization-utils';
 
 const MAX_ENVELOPE_SERIALIZED_BYTES = 10_000;
 

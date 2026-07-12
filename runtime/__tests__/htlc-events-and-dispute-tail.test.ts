@@ -4,7 +4,7 @@ import { executeCrontab, initCrontab, scheduleHook } from '../entity/scheduler';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
-} from '../htlc-events';
+} from '../protocol/htlc/events';
 import { applyCommittedAccountFrameFollowups } from '../entity/tx/handlers/account';
 import { pruneSettledOriginatedHtlcRoutes } from '../entity/tx/htlc-route-lifecycle';
 import { createEmptyEnv } from '../runtime';

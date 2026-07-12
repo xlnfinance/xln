@@ -4,7 +4,7 @@ import {
   type OrderbookExtState,
 } from '../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../logger';
-import { type WorkingOrderbookOffer, swapKey } from '../../../../swap-execution';
+import { type WorkingOrderbookOffer, swapKey } from '../../../../orderbook/swap-execution';
 import { type CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
 import {
   queueUniqueSwapResolveForEntityState,

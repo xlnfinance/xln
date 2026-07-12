@@ -11,7 +11,7 @@ import type {
 import { HTLC } from '../../../../constants';
 import { HEAVY_LOGS } from '../../../../utils';
 import { NobleCryptoProvider } from '../../../../crypto-noble';
-import { unwrapEnvelope, validateEnvelope } from '../../../../htlc-envelope-types';
+import { unwrapEnvelope, validateEnvelope } from '../../../../protocol/htlc/envelope';
 import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../../routing/fees';
 import { getTokenCapacity } from '../../../../routing/capacity';
@@ -22,7 +22,7 @@ import { CROSS_J_MAX_FILL_RATIO } from '../../../../cross-jurisdiction';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
-} from '../../../../htlc-events';
+} from '../../../../protocol/htlc/events';
 import { createStructuredLogger } from '../../../../logger';
 import type { MempoolOp } from './orderbook-queue';
 

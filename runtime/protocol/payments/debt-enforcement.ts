@@ -1,4 +1,4 @@
-import type { RuntimeInput } from './types';
+import type { RuntimeInput } from '../../types';
 
 export type DebtEnforcementProjectionRuntimeInputParams = {
   entityId: string;

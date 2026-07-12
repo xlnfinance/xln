@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
 import { handleSettleRelease } from '../account/tx/handlers/settle-hold';
-import { hashHtlcSecret } from '../htlc-utils';
+import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { createDefaultDelta } from '../validation-utils';
 
 describe('hold underflow guards', () => {

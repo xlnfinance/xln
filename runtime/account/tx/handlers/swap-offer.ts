@@ -22,7 +22,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../cross-jurisdiction';
 import { getCrossJurisdictionBookReceiptError } from '../../../extensions/cross-j/orderbook';
-import { MAX_SWAP_FILL_RATIO } from '../../../swap-execution';
+import { MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 

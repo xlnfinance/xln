@@ -11,14 +11,14 @@ import { safeStringify } from '../serialization-utils';
 import {
   normalizeRuntimeFailureCode,
   type RuntimeFailureCategory,
-} from '../failure-taxonomy';
+} from '../protocol/failure-taxonomy';
 import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryFailure,
   type DeliveryOutcome,
   type DeliveryResult,
-} from '../delivery-result';
+} from '../protocol/payments/delivery-result';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,

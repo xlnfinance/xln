@@ -1,5 +1,5 @@
 import type { OrderbookExtState } from './orderbook';
-import type { SwapKey } from './swap-keys';
+import type { SwapKey } from './orderbook/swap-keys';
 import type { Level } from 'level';
 import type { RuntimeP2P } from './networking/p2p';
 import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from './types/cross-jurisdiction';
@@ -130,7 +130,7 @@ export type {
 
 import type { GossipLayer, Profile } from './networking/gossip';
 import type { CompletedBatch, JBatchState } from './jurisdiction/batch';
-import type { CrontabState } from './crontab-types';
+import type { CrontabState } from './entity/scheduler-types';
 
 export type { Profile } from './networking/gossip';
 

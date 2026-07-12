@@ -46,7 +46,7 @@ export interface HtlcLock {
   createdTimestamp: number;    // When lock was added (for logging)
 
   // Onion routing envelope (cleartext JSON in Phase 2, encrypted in Phase 3)
-  envelope?: import('../htlc-envelope-types').HtlcEnvelope | string;
+  envelope?: import('../protocol/htlc/envelope').HtlcEnvelope | string;
 }
 
 export interface PullCommitment {
@@ -708,7 +708,7 @@ export type AccountTx =
         amount: bigint;
         tokenId: number;
         deliveryMode?: Exclude<PaymentDeliveryMode, 'trusted'>;
-        envelope?: import('../htlc-envelope-types').HtlcEnvelope | string | undefined; // Onion routing envelope (string when encrypted)
+        envelope?: import('../protocol/htlc/envelope').HtlcEnvelope | string | undefined; // Onion routing envelope (string when encrypted)
       };
     }
   | {

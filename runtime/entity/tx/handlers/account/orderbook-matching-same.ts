@@ -16,7 +16,7 @@ import { HEAVY_LOGS } from '../../../../utils';
 import {
   type NormalizedOrderbookOffer,
   type SameJurisdictionWorkingOrderbookOffer,
-} from '../../../../swap-execution';
+} from '../../../../orderbook/swap-execution';
 import {
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,

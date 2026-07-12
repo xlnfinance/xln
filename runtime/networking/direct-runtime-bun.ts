@@ -3,8 +3,8 @@ import {
   deliveryAccepted,
   deliveryDeferred,
   type DeliveryResult,
-} from '../delivery-result';
-import { compareCanonicalText } from '../swap-keys';
+} from '../protocol/payments/delivery-result';
+import { compareCanonicalText } from '../orderbook/swap-keys';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './p2p-crypto';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';

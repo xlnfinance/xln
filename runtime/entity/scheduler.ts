@@ -48,7 +48,7 @@
  */
 
 import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx, AccountInput } from '../types';
-import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from '../crontab-types';
+import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './scheduler-types';
 import { isLeftEntity } from '../entity-id-utils';
 import { deriveDelta } from '../account-utils';
 import { resolveEntityProposerId } from '../state-helpers';

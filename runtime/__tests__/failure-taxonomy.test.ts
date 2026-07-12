@@ -10,7 +10,7 @@ import {
   classifyRuntimeMarketMakerFailure,
   classifyRuntimeTransportFailure,
   isRuntimeFailureSignal,
-} from '../failure-taxonomy';
+} from '../protocol/failure-taxonomy';
 
 describe('runtime failure taxonomy', () => {
   test('validates runtime failure signal shape', () => {

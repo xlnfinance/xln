@@ -3,7 +3,7 @@ import type { Delta, DerivedDelta } from '@xln/runtime/types';
 import {
   deriveDisputeTokenFinalization,
   type DisputeTokenFinalization,
-} from '@xln/runtime/dispute-finalization';
+} from '@xln/runtime/protocol/dispute/finalization';
 import type { RcpanTimelineState } from './microscope-timeline';
 import type { RcpanMicroscopeToken } from './microscope-tokens';
 

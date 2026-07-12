@@ -6,7 +6,7 @@ import type {
   Env,
 } from '../../types';
 import { addMessage } from '../../state-helpers';
-import { decodeHashLadderBinary } from '../../hashladder';
+import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../cross-jurisdiction';
 import { createStructuredLogger, shortHash, shortId, shortOrder } from '../../logger';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';

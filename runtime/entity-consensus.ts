@@ -48,7 +48,7 @@ import {
   swapKey,
   type NormalizedOrderbookOffer,
   type WorkingOrderbookOffer,
-} from './swap-execution';
+} from './orderbook/swap-execution';
 import { assertScheduledWakeFrameOrder } from './runtime-scheduled-wake';
 import { replaceOrderbookPair, type OrderbookExtState } from './orderbook';
 import {

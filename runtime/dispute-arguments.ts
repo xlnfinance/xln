@@ -1,10 +1,10 @@
 import { ethers } from 'ethers';
 import type { AccountMachine, AccountTx, EntityState } from './types';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { asOfferId, type OfferId } from './swap-keys';
-import { exactFillRatioToUint16, reduceExactFillRatio } from './swap-execution';
-import { sortTransformerEntries } from './transformer-ordering';
-import { decodeHashLadderBinary } from './hashladder';
+import { asOfferId, type OfferId } from './orderbook/swap-keys';
+import { exactFillRatioToUint16, reduceExactFillRatio } from './orderbook/swap-execution';
+import { sortTransformerEntries } from './protocol/transformer-ordering';
+import { decodeHashLadderBinary } from './protocol/htlc/hash-ladder';
 
 const MAX_FILL_RATIO = 0xffff;
 

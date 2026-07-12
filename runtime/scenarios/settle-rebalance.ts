@@ -26,7 +26,7 @@ import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
 import { userAutoApprove } from '../entity/tx/handlers/settle';
 import { deriveDelta } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
-import { hashHtlcSecret } from '../htlc-utils';
+import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { ethers } from 'ethers';
 
 const USDC = 1;

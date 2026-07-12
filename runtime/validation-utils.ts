@@ -22,7 +22,7 @@ import type {
   AccountFrame,
   ProposedEntityFrame,
 } from './types';
-import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook, ScheduledHookType } from './crontab-types';
+import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook, ScheduledHookType } from './entity/scheduler-types';
 
 /**
  * Strict validation for Delta objects - financial data must be complete

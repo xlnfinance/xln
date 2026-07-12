@@ -11,7 +11,7 @@
 import type { Env, EntityState, AccountMachine } from './types';
 import { getWallClockMs } from './utils';
 import { listOpenSwapOffers } from './open-swap-offers';
-import { MAX_SWAP_FILL_RATIO } from './swap-execution';
+import { MAX_SWAP_FILL_RATIO } from './orderbook/swap-execution';
 
 export interface FormatOptions {
   maxAccounts?: number;

@@ -1,9 +1,9 @@
-import { HTLC } from './constants';
+import { HTLC } from '../../constants';
 import {
   ASYNC_PAYMENT_EXPIRY_BLOCKS,
   ASYNC_PAYMENT_EXPIRY_MS,
   type PaymentDeliveryMode,
-} from './types/payment';
+} from '../../types/payment';
 
 export type ConditionalPaymentMode = Exclude<PaymentDeliveryMode, 'trusted'>;
 

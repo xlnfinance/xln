@@ -24,12 +24,12 @@ import {
   buildHashLadderProof,
   revealHashLadder,
   type HashLadderReveal,
-} from './hashladder';
+} from './protocol/htlc/hash-ladder';
 import {
   deriveCanonicalCrossJurisdictionBookOwner,
   deriveCanonicalCrossJurisdictionVenueId,
 } from './extensions/cross-j/market';
-import { exactFillRatioToUint16 } from './swap-execution';
+import { exactFillRatioToUint16 } from './orderbook/swap-execution';
 
 export {
   deriveCanonicalCrossJurisdictionBookOwner,

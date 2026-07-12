@@ -1,4 +1,4 @@
-import { classifyRuntimeFaucetFailure, type RuntimeFailureSignal } from '../failure-taxonomy';
+import { classifyRuntimeFaucetFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 
 export const faucetFailureBody = (input: {
   code: string;

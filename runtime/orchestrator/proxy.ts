@@ -1,5 +1,5 @@
 import { isLocalOperatorRequest } from '../health-redaction';
-import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../failure-taxonomy';
+import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import { safeStringify } from '../serialization-utils';
 import type { HubChild } from './orchestrator-types';
 

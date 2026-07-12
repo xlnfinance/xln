@@ -4,7 +4,7 @@ import {
   deriveDisputeFinalization,
   deriveDisputeTokenFinalization,
   type DisputeTokenFinalizationInput,
-} from '../dispute-finalization';
+} from '../protocol/dispute/finalization';
 
 const token = (
   partial: Partial<DisputeTokenFinalizationInput> = {},

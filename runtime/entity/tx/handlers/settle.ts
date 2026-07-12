@@ -18,7 +18,7 @@ import { isLeftEntity } from '../../../entity-id-utils';
 import type { Env, HankoString } from '../../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../../proof-builder';
 import { signEntityHashes } from '../../../hanko/signing';
-import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../../settlement-ops';
+import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../../protocol/settlement/operations';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../../dispute-arguments';
 import { createStructuredLogger, shortId } from '../../../logger';
 

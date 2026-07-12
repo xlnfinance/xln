@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   requireTrustedPaymentGateway,
   resolvePaymentDeadlineWindow,
-} from '../payment-delivery';
+} from '../protocol/payments/delivery';
 import { ASYNC_PAYMENT_EXPIRY_BLOCKS, ASYNC_PAYMENT_EXPIRY_MS } from '../types/payment';
 
 describe('payment delivery modes', () => {

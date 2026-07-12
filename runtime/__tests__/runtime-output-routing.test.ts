@@ -8,7 +8,7 @@ import {
   sendEntityInputWithRouting,
   splitPendingOutputsByRetryWindow,
 } from '../runtime-output-routing';
-import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../delivery-result';
+import { deliveryAccepted, deliveryDeferred, deliveryFailure } from '../protocol/payments/delivery-result';
 import type { DeliverableEntityInput, Env, RoutedEntityInput } from '../types';
 
 const runtimeId = (byte: string): string => `0x${byte.repeat(20)}`;

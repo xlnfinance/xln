@@ -1,4 +1,4 @@
-import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../hashladder';
+import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../protocol/htlc/hash-ladder';
 import type { AccountFrame, AccountMachine, HtlcLock } from '../../types';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 

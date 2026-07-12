@@ -11,16 +11,16 @@
 
 import type { EntityState, EntityInput, AccountTx, Env, EntityTx, HtlcNoteKey } from '../../../types';
 import { cloneEntityState } from '../../../state-helpers';
-import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../../htlc-utils';
-import { calculateRequiredInboundForDesiredForward } from '../../../htlc-utils';
+import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../../protocol/htlc/utils';
+import { calculateRequiredInboundForDesiredForward } from '../../../protocol/htlc/utils';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
 import { getTokenCapacity } from '../../../routing/capacity';
 import { deriveDelta } from '../../../account-utils';
 import { NobleCryptoProvider } from '../../../crypto-noble';
-import { createOnionEnvelopes, type HtlcEnvelope } from '../../../htlc-envelope-types';
+import { createOnionEnvelopes, type HtlcEnvelope } from '../../../protocol/htlc/envelope';
 import { getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
 import { compareStableText, safeStringify } from '../../../serialization-utils';
-import { resolvePaymentDeadlineWindow } from '../../../payment-delivery';
+import { resolvePaymentDeadlineWindow } from '../../../protocol/payments/delivery';
 import { getReplicaByEntityId } from '../../replica';
 import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../logger';
 

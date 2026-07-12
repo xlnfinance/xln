@@ -15,7 +15,7 @@ import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,
   type NormalizedOrderbookOffer,
-} from '../../swap-execution';
+} from '../../orderbook/swap-execution';
 import type {
   AccountTx,
   CrossJurisdictionBookAdmission,

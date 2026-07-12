@@ -26,7 +26,7 @@ import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
-import { swapKey } from '../swap-execution';
+import { swapKey } from '../orderbook/swap-execution';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
