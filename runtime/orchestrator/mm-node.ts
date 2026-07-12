@@ -97,6 +97,7 @@ import {
 } from './mesh-jurisdictions';
 import { areMarketMakerHubTransportsReady } from './mm-transport';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import { MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS } from './orchestrator-config';
 
 type Args = {
   name: string;
@@ -271,10 +272,6 @@ const MARKET_MAKER_HEALTH_REFRESH_MS = Math.max(
   Number(process.env['MARKET_MAKER_HEALTH_REFRESH_MS'] || '1000'),
 );
 const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(1, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'));
-const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
-  10_000,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'),
-);
 const MARKET_MAKER_BOOTSTRAP_START_DELAY_MS = Math.max(
   0,
   Number(process.env['MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'),

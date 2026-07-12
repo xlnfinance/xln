@@ -323,7 +323,11 @@ describe('production startup wiring', () => {
     expect(mmNode).toContain('const entityInputsByEntitySigner = new Map<string, EntityInput>();');
     expect(mmNode).toContain('const waitForActiveJAdapter = async (env: Env, jurisdictionName: string, rounds = 1200)');
     expect(mmNode).toContain('ACTIVE_JADAPTER_NOT_READY name=${jurisdictionName}');
-    expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '1500000'");
+    expect(orchestratorConfig).toContain(
+      "readPositiveIntEnv('MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS', 1_500_000)",
+    );
+    expect(orchestratorConfig).toContain('Math.max(MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS, STARTUP_TIMEOUT_MS)');
+    expect(mmNode).toContain("import { MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS } from './orchestrator-config';");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1'");
     expect(mmNode).toContain("MARKET_MAKER_BOOTSTRAP_START_DELAY_MS'] || '0'");
     expect(mmNode).toContain("MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '1000'");
