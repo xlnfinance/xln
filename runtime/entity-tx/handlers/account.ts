@@ -30,6 +30,7 @@ import type {
 } from './account/orderbook-offers';
 import { canProcessAccountTxForDisputeStatus } from '../../account-dispute-policy';
 import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account-consensus/flush';
+import { handleDisputeStart, handlePrepareDispute } from './dispute';
 
 export type { MempoolOp } from './account/orderbook-queue';
 export {
@@ -301,7 +302,10 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
       pending: accountMachine.pendingFrame ? accountMachine.pendingFrame.height : null,
     });
 
-    const result = await applyConsensusAccountInput(env, accountMachine, input);
+    const result = await applyConsensusAccountInput(env, accountMachine, input, {
+      entityTimestamp: newState.timestamp,
+      finalizedJHeight: newState.lastFinalizedJHeight ?? 0,
+    });
     const touchesCrossFillAck =
       pendingBeforeTxs.includes('cross_swap_fill_ack') ||
       inputFrameTxs.includes('cross_swap_fill_ack') ||
@@ -463,6 +467,57 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
           prevHanko: Boolean(accountInputAck(result.response)),
         });
       }
+    } else if (result.disputeRequired) {
+      for (const { hashlock, secret } of result.disputeRequired.evidenceSecrets) {
+        const route = newState.htlcRoutes.get(hashlock) ?? {
+          hashlock,
+          createdTimestamp: newState.timestamp,
+        };
+        route.secret = secret;
+        newState.htlcRoutes.set(hashlock, route);
+      }
+      markStorageEntityDirty(env, newState.entityId);
+      const prepared = await handlePrepareDispute(
+        newState,
+        {
+          type: 'prepareDispute',
+          data: {
+            counterpartyEntityId: counterpartyId,
+            description: result.disputeRequired.reason,
+          },
+        },
+        env,
+      );
+      const startsBefore = prepared.newState.jBatchState?.batch.disputeStarts.length ?? 0;
+      const started = await handleDisputeStart(
+        prepared.newState,
+        {
+          type: 'disputeStart',
+          data: {
+            counterpartyEntityId: counterpartyId,
+            description: 'late-htlc-secret-enforcement',
+          },
+        },
+        env,
+      );
+      const startsAfter = started.newState.jBatchState?.batch.disputeStarts.length ?? 0;
+      const disputeOutputs = startsAfter > startsBefore
+        ? [{
+            entityId: started.newState.entityId,
+            signerId: started.newState.config.validators[0]!,
+            entityTxs: [{ type: 'j_broadcast' as const, data: {} }],
+          }]
+        : [];
+      addMessage(started.newState, `⚠️ Late HTLC secret rejected; dispute escalation started`);
+      return {
+        newState: started.newState,
+        outputs: [...outputs, ...prepared.outputs, ...started.outputs, ...disputeOutputs],
+        mempoolOps,
+        swapOffersCreated: allSwapOffersCreated,
+        swapCancelRequests: allSwapCancelRequests,
+        swapOffersCancelled: allSwapOffersCancelled,
+        ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
+      };
     } else {
       accountHandlerLog.error('frame.consensus_failed', {
         from: shortId(input.fromEntityId),

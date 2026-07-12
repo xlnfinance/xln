@@ -223,7 +223,7 @@ export class RuntimeP2P {
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
   private directClientErrors = new Map<string, { at: number; error: string }>();
-  private verifiedProfileRoutes = new Map<string, { runtimeId: string; lastUpdated: number }>();
+  private verifiedProfileRoutes: Map<string, { runtimeId: string; lastUpdated: number }>;
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityHandler: (() => void) | null = null;
   private focusHandler: (() => void) | null = null;
@@ -247,6 +247,9 @@ export class RuntimeP2P {
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
+    if (!this.env.runtimeState) this.env.runtimeState = {};
+    this.verifiedProfileRoutes = this.env.runtimeState.verifiedProfileRoutes ?? new Map();
+    this.env.runtimeState.verifiedProfileRoutes = this.verifiedProfileRoutes;
     const seed = this.env.runtimeSeed;
     if (!seed) {
       throw new Error('P2P_INIT_ERROR: runtimeSeed is required for encryption keypair');
@@ -466,6 +469,8 @@ export class RuntimeP2P {
       runtimeId: normalizeRuntimeId(profile.runtimeId),
       lastUpdated: profile.lastUpdated,
     });
+    if (!this.env.runtimeState) this.env.runtimeState = {};
+    this.env.runtimeState.verifiedProfileRoutes = this.verifiedProfileRoutes;
   }
 
   getReconnectState(): { attempt: number; nextAt: number } | null {
@@ -1037,6 +1042,21 @@ export class RuntimeP2P {
       const existingProfiles = this.env.gossip?.getProfiles?.() || [];
       const existing = existingProfiles.find((existingProfile) => existingProfile.entityId === sanitized.entityId);
       const verifiedRoute = this.getVerifiedRuntimeRoute(sanitized.entityId);
+      if (verifiedRoute && verifiedRoute.lastUpdated >= sanitized.lastUpdated) {
+        if (
+          verifiedRoute.lastUpdated === sanitized.lastUpdated &&
+          normalizeRuntimeId(verifiedRoute.runtimeId) !== normalizeRuntimeId(sanitized.runtimeId)
+        ) {
+          p2pLog.warn('profile.dropped_equal_version_route_conflict', {
+            from: shortId(from),
+            entity: shortId(sanitized.entityId),
+            acceptedRuntime: shortId(verifiedRoute.runtimeId),
+            rejectedRuntime: shortId(sanitized.runtimeId),
+            lastUpdated: sanitized.lastUpdated,
+          });
+        }
+        continue;
+      }
       if (
         existing &&
         existing.lastUpdated >= sanitized.lastUpdated &&

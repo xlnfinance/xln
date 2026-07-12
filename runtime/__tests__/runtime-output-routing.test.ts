@@ -1112,6 +1112,7 @@ describe('runtime output routing', () => {
     })).toThrow(/INBOUND_ENTITY_RUNTIME_HALTED/);
     expect(errors).toContain('INBOUND_ENTITY_RUNTIME_HALTED');
     expect(enqueued).toHaveLength(0);
+    expect(env.runtimeState.entityRuntimeHints.size).toBe(0);
   });
 
   test('fails fast before enqueueing inbound P2P input during persistence quiesce', () => {
@@ -1160,5 +1161,6 @@ describe('runtime output routing', () => {
     expect(errors).toContain('INBOUND_ENTITY_RUNTIME_QUIESCING');
     expect(enqueued).toHaveLength(0);
     expect(startCalls).toBe(0);
+    expect(env.runtimeState.entityRuntimeHints.size).toBe(0);
   });
 });

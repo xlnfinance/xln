@@ -88,6 +88,9 @@ export const classifyUndeliveredDelivery = (
 };
 
 export const deliveryAccepted = (code = 'DELIVERY_ACCEPTED'): DeliveryResult => ({
+  // `delivered` is the terminal result of this delivery adapter, not an
+  // application receipt. Account frames remain pending until their A-frame ACK;
+  // all other entity traffic is explicitly best-effort after transport handoff.
   outcome: 'delivered',
   code,
   retryable: false,

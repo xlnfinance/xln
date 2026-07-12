@@ -10,9 +10,11 @@
     parseRuntimeRecoveryCandidateFile,
     vaultOperations,
     allRuntimes,
+    DEFAULT_VAULT_UNLOCK_DURATION_MS,
     type RuntimeRecoveryCandidate,
     type RuntimeRecoveryDiscoveryFailure,
   } from '$lib/stores/vaultStore';
+  import type { VaultUnlockDurationMs } from '$lib/security/vaultProtection';
   import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { writeRuntimeRecoveryDiscoveryStatus } from '$lib/utils/recoveryDiscoveryStatus';
@@ -94,6 +96,14 @@
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
+  let unlockDurationChoice: '10m' | '1d' | 'forever' = '10m';
+  $: unlockDurationMs = (
+    unlockDurationChoice === 'forever'
+      ? null
+      : unlockDurationChoice === '1d'
+        ? 86_400_000
+        : DEFAULT_VAULT_UNLOCK_DURATION_MS
+  ) satisfies VaultUnlockDurationMs;
 
   function selectInputMode(next: InputMode): void {
     if (phase !== 'input') return;
@@ -522,7 +532,7 @@
       const label = (labelOverride || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
 
       if (options.openLocal || (!options.forceFresh && !options.recoveryCandidate && vaultOperations.runtimeExists(runtimeId))) {
-        await vaultOperations.selectRuntime(runtimeId);
+        await vaultOperations.unlockRuntime(runtimeId, mnemonic24, unlockDurationMs);
       } else {
         const runtime = await vaultOperations.createRuntime(label, mnemonic24, {
           loginType: createLoginType,
@@ -531,6 +541,7 @@
           devicePassphrase: devicePassphrase || undefined,
           recoveryCandidate: options.recoveryCandidate,
           skipRecoveryRestore: !options.recoveryCandidate,
+          unlockDurationMs,
         });
         entityId = runtime.signers[0]?.entityId || entityId;
       }
@@ -1520,6 +1531,17 @@
 
         <!-- Derive Button - only visible in input phase -->
         {#if inputMode !== 'testnet'}
+          <div class="unlock-duration-row">
+            <label for="unlock-duration">Keep unlocked for</label>
+            <select id="unlock-duration" bind:value={unlockDurationChoice}>
+              <option value="10m">10 minutes</option>
+              <option value="1d">1 day</option>
+              <option value="forever">Forever on this device</option>
+            </select>
+            {#if unlockDurationChoice === 'forever'}
+              <span class="unlock-warning">Convenient, but weaker against malicious scripts or browser extensions.</span>
+            {/if}
+          </div>
           <button
             class="derive-btn"
             disabled={!canDerive}
@@ -2896,6 +2918,32 @@
     color: rgba(255, 255, 255, 0.4);
     text-align: center;
     margin: 16px 0 24px;
+  }
+
+  .unlock-duration-row {
+    display: grid;
+    grid-template-columns: auto minmax(150px, 1fr);
+    align-items: center;
+    gap: 8px 14px;
+    margin: 16px 0;
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+  }
+
+  .unlock-duration-row select {
+    width: 100%;
+    min-height: 38px;
+    padding: 0 10px;
+    color: rgba(245, 215, 160, 0.96);
+    background: rgba(10, 10, 12, 0.9);
+    border: 1px solid rgba(180, 140, 80, 0.35);
+    border-radius: 4px;
+  }
+
+  .unlock-warning {
+    grid-column: 1 / -1;
+    color: rgba(255, 183, 120, 0.9);
+    line-height: 1.4;
   }
 
   /* Derive Button - Sacred Gate */

@@ -89,6 +89,10 @@ describe('WAL binary codec', () => {
     env.runtimeState = {
       clockPrimed: true,
       pendingCommittedJOutbox: [{ jurisdictionName: 'Testnet', jTxs: [] }],
+      verifiedProfileRoutes: new Map([[
+        `0x${'44'.repeat(32)}`,
+        { runtimeId: `0x${'55'.repeat(20)}`, lastUpdated: 123 },
+      ]]),
     };
     const checkpoint = buildRuntimeCheckpointSnapshot(env);
     const restored = createEmptyEnv('wal-durable-runtime');
@@ -100,5 +104,6 @@ describe('WAL binary codec', () => {
     expect(restored.runtimeConfig).toEqual(env.runtimeConfig);
     expect(restored.pendingOutputs).toEqual(env.pendingOutputs);
     expect(restored.runtimeState?.pendingCommittedJOutbox).toEqual(env.runtimeState.pendingCommittedJOutbox);
+    expect(restored.runtimeState?.verifiedProfileRoutes).toEqual(env.runtimeState.verifiedProfileRoutes);
   });
 });

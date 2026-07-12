@@ -36,6 +36,14 @@ import { isInactiveTabStandby } from '../utils/activeTabLock';
 import { unwrapLiveRuntimeEnv } from '../utils/liveRuntimeEnv';
 import { registerDebugSurface } from '../utils/debugSurface';
 import { generateLazyEntityIdPreview } from '../utils/lazyEntityId';
+import {
+  deleteVaultDeviceKey,
+  protectVaultSecrets,
+  redactVaultRuntimeForPersistence,
+  unprotectVaultSecrets,
+  type ProtectedVaultSecrets,
+  type VaultUnlockDurationMs,
+} from '../security/vaultProtection';
 
 // Types
 export interface Signer {
@@ -94,6 +102,7 @@ export interface Runtime {
   seed: string; // canonical 24-word mnemonic
   mnemonic12?: string; // optional 12-word compatibility mnemonic
   devicePassphrase?: string; // optional BrainVault device passphrase (if available)
+  protectedSecrets?: ProtectedVaultSecrets;
   signers: Signer[];
   activeSignerIndex: number;
   loginType?: 'manual' | 'demo';
@@ -113,6 +122,7 @@ type CreateRuntimeOptions = {
   recovery?: RuntimeRecoveryConfig | undefined;
   skipRecoveryRestore?: boolean | undefined;
   recoveryCandidate?: RuntimeRecoveryCandidate | undefined;
+  unlockDurationMs?: VaultUnlockDurationMs | undefined;
 };
 
 export type RecoveryTowerSetupMode = 'official' | 'backup_only' | 'local_only';
@@ -168,6 +178,8 @@ const defaultState: RuntimesState = {
 
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
+export const DEFAULT_VAULT_UNLOCK_DURATION_MS: VaultUnlockDurationMs = 600_000;
+const vaultLockTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const BROWSER_GOSSIP_POLL_MS = 250;
 const loggedLiveJAdapterReimports = new Set<string>();
 const normalizeRuntimeId = (value: string | null | undefined): string => {
@@ -181,6 +193,16 @@ const normalizeRuntimeId = (value: string | null | undefined): string => {
 };
 
 const normalizeEntityId = (value: string | null | undefined): string => String(value || '').trim().toLowerCase();
+
+const serializeVaultState = (state: RuntimesState): string => JSON.stringify({
+  activeRuntimeId: state.activeRuntimeId,
+  runtimes: Object.fromEntries(
+    Object.entries(state.runtimes).map(([runtimeId, runtime]) => [
+      runtimeId,
+      redactVaultRuntimeForPersistence(runtime as unknown as Record<string, unknown>),
+    ]),
+  ),
+});
 
 // Main store
 export const runtimesState = writable<RuntimesState>(defaultState);
@@ -1169,10 +1191,51 @@ const applyRecoveryBundleMetadata = (runtime: Runtime, bundle: RuntimeRecoveryBu
 const persistRuntimeMetadataSnapshot = (): void => {
   try {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(get(runtimesState)));
+    localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(get(runtimesState)));
   } catch (error) {
     errorLog.log('Runtime metadata snapshot persistence failed', 'Runtime Recovery', error);
   }
+};
+
+const scheduleVaultLock = (runtime: Runtime): void => {
+  const runtimeId = normalizeRuntimeId(runtime.id);
+  if (!runtimeId) return;
+  const previous = vaultLockTimers.get(runtimeId);
+  if (previous) clearTimeout(previous);
+  vaultLockTimers.delete(runtimeId);
+  const unlockUntil = runtime.protectedSecrets?.unlockUntil;
+  if (unlockUntil === null || unlockUntil === undefined) return;
+  const delay = Math.max(0, unlockUntil - Date.now());
+  vaultLockTimers.set(runtimeId, setTimeout(() => {
+    vaultLockTimers.delete(runtimeId);
+    void vaultOperations.lockRuntime(runtimeId).catch(error => {
+      errorLog.log('Timed wallet lock failed', 'Runtime Security', { runtimeId, error });
+    });
+  }, delay));
+};
+
+const protectRuntimeForDevice = async (
+  runtime: Runtime,
+  durationMs: VaultUnlockDurationMs,
+): Promise<void> => {
+  if (!runtime.seed) throw new Error(`RUNTIME_LOCKED:${runtime.id}`);
+  runtime.protectedSecrets = await protectVaultSecrets(runtime.id, {
+    seed: runtime.seed,
+    ...(runtime.mnemonic12 ? { mnemonic12: runtime.mnemonic12 } : {}),
+  }, durationMs);
+  delete runtime.devicePassphrase;
+  scheduleVaultLock(runtime);
+};
+
+const restoreRuntimeFromDevice = async (runtime: Runtime): Promise<boolean> => {
+  if (runtime.seed) return true;
+  if (!runtime.protectedSecrets) return false;
+  const secrets = await unprotectVaultSecrets(runtime.id, runtime.protectedSecrets);
+  if (!secrets) return false;
+  runtime.seed = secrets.seed;
+  if (secrets.mnemonic12) runtime.mnemonic12 = secrets.mnemonic12;
+  scheduleVaultLock(runtime);
+  return true;
 };
 
 const updateRuntimeRecoveryMetadata = (
@@ -3032,6 +3095,7 @@ export const vaultOperations = {
           normalizedRuntimes[normalizedId] = {
             ...runtime,
             id: normalizedId,
+            seed: typeof runtime.seed === 'string' ? runtime.seed : '',
           };
         }
         const normalizedActiveId = normalizeRuntimeId(parsed?.activeRuntimeId || '');
@@ -3057,7 +3121,7 @@ export const vaultOperations = {
       if (typeof localStorage === 'undefined') return;
 
       const current = get(runtimesState);
-      localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(current));
+      localStorage.setItem(VAULT_STORAGE_KEY, serializeVaultState(current));
     } catch (error) {
       errorLog.log('Failed to save runtimes', 'Runtime Storage', error);
     }
@@ -3416,6 +3480,7 @@ export const vaultOperations = {
           );
         }
       }
+      await protectRuntimeForDevice(runtime, options.unlockDurationMs ?? DEFAULT_VAULT_UNLOCK_DURATION_MS);
       runtimesState.update(state => ({
         ...state,
         runtimes: { ...state.runtimes, [id]: runtime },
@@ -3503,6 +3568,74 @@ export const vaultOperations = {
     }
   },
 
+  async unlockRuntime(
+    runtimeId: string,
+    seed: string,
+    durationMs: VaultUnlockDurationMs = DEFAULT_VAULT_UNLOCK_DURATION_MS,
+  ): Promise<void> {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!normalizedRuntimeId) throw new Error('Invalid runtimeId');
+    const resolved = findRuntimeByIdCaseInsensitive(get(runtimesState).runtimes, normalizedRuntimeId);
+    if (!resolved) throw new Error(`Runtime not found: ${normalizedRuntimeId}`);
+    if (normalizeRuntimeId(deriveAddress(seed, 0)) !== normalizedRuntimeId) {
+      throw new Error('RUNTIME_UNLOCK_SEED_MISMATCH');
+    }
+    resolved.runtime.seed = seed;
+    await protectRuntimeForDevice(resolved.runtime, durationMs);
+    this.saveToStorage();
+    await this.selectRuntime(normalizedRuntimeId);
+  },
+
+  async lockRuntime(runtimeId: string): Promise<void> {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+    if (!normalizedRuntimeId) throw new Error('Invalid runtimeId');
+    const current = get(runtimesState);
+    const runtime = current.runtimes[normalizedRuntimeId];
+    if (!runtime) return;
+    const timer = vaultLockTimers.get(normalizedRuntimeId);
+    if (timer) clearTimeout(timer);
+    vaultLockTimers.delete(normalizedRuntimeId);
+    const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
+    const runtimeEnv = runtimeEntry?.env
+      ? (unwrapLiveRuntimeEnv(runtimeEntry.env) ?? runtimeEntry.env)
+      : null;
+    let lockError: unknown;
+    try {
+      await deleteVaultDeviceKey(normalizedRuntimeId);
+    } catch (error) {
+      lockError = error;
+    }
+    try {
+      if (runtimeEnv) {
+        unregisterRuntimeEnvChange(normalizedRuntimeId);
+        await stopRuntimeEnv(runtimeEnv);
+      }
+    } catch (error) {
+      lockError ??= error;
+    } finally {
+      runtimes.update(entries => {
+        const updated = new Map(entries);
+        updated.delete(normalizedRuntimeId);
+        return updated;
+      });
+      if (runtimeEnv) runtimeEnv.runtimeSeed = undefined;
+      runtime.seed = '';
+      delete runtime.mnemonic12;
+      delete runtime.devicePassphrase;
+      const xln = await getXLN();
+      xln.clearSignerKeys();
+      for (const candidate of Object.values(get(runtimesState).runtimes)) {
+        if (candidate.seed) await registerRuntimeSignerKeys(candidate, xln);
+      }
+      this.saveToStorage();
+      if (normalizeRuntimeId(get(activeRuntimeId) || '') === normalizedRuntimeId) {
+        setXlnEnvironment(null);
+        this.syncRuntime(null);
+      }
+    }
+    if (lockError) throw lockError;
+  },
+
   // Select runtime
   async selectRuntime(runtimeId: string) {
     // If restore is still in progress after reload, wait for it to settle first.
@@ -3533,6 +3666,7 @@ export const vaultOperations = {
     const runtime = current.runtimes[resolvedRuntimeId];
 
     if (runtime) {
+      if (!runtime.seed) throw new Error(`RUNTIME_LOCKED:${resolvedRuntimeId}`);
       // CRITICAL: Re-register ALL signer private keys when switching runtimes
       // Keys are stored in memory (signerKeys Map), lost on page refresh
       // Must re-register from HD derivation to enable signing
@@ -3786,6 +3920,22 @@ export const vaultOperations = {
 
     initializePromise = (async () => {
       this.loadFromStorage();
+      const loaded = get(runtimesState);
+      let migratedPlaintext = false;
+      for (const runtime of Object.values(loaded.runtimes)) {
+        if (runtime.seed) {
+          if (!runtime.protectedSecrets) {
+            await protectRuntimeForDevice(runtime, DEFAULT_VAULT_UNLOCK_DURATION_MS);
+            migratedPlaintext = true;
+          } else {
+            scheduleVaultLock(runtime);
+          }
+          delete runtime.devicePassphrase;
+          continue;
+        }
+        await restoreRuntimeFromDevice(runtime);
+      }
+      if (migratedPlaintext) this.saveToStorage();
       const current = get(runtimesState);
       const all = Object.values(current.runtimes);
       let xln: XLNModule | null = null;
@@ -3794,6 +3944,7 @@ export const vaultOperations = {
         xln = await getXLN();
 
         for (const runtime of all) {
+          if (!runtime.seed) continue;
           const runtimeId = normalizeRuntimeId(runtime.id);
           if (!runtimeId) continue;
           const existing = get(runtimes).get(runtimeId);
@@ -3844,12 +3995,13 @@ export const vaultOperations = {
           `[VaultStore.initialize] Active runtime env mismatch: active=${activeId} env.runtimeId=${String(runtimeToSync.env.runtimeId || 'none')}`
         );
       }
-      if (runtimeToSync) {
+      if (runtimeToSync?.seed) {
         const activeXln = xln ?? await getXLN();
         await ensureRuntimePipelineAlive(runtimeToSync as Runtime, activeXln);
         await runtimeOperations.selectRuntime(activeId);
       }
-      if (runtimeToSync) this.syncRuntime(runtimeToSync);
+      if (runtimeToSync?.seed) this.syncRuntime(runtimeToSync);
+      else if (runtimeToSync) this.syncRuntime(null);
       else if (!activeId) this.syncRuntime(null);
       initialized = true;
     })();

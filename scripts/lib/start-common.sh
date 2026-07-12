@@ -40,3 +40,20 @@ xln_ensure_jurisdictions_path() {
     cp "$source_jurisdictions" "$jurisdictions_path"
   fi
 }
+
+xln_read_or_create_operator_seed() {
+  local seed_path="$1"
+  mkdir -p "$(dirname "$seed_path")"
+  if [ ! -f "$seed_path" ]; then
+    umask 077
+    openssl rand -hex 32 > "$seed_path"
+  fi
+  chmod 600 "$seed_path"
+  local seed
+  seed="$(tr -d '\r\n' < "$seed_path")"
+  if [ "${#seed}" -ne 64 ] || [[ ! "$seed" =~ ^[0-9a-fA-F]{64}$ ]]; then
+    echo "operator seed file is invalid: $seed_path" >&2
+    return 1
+  fi
+  printf '%s' "$seed"
+}

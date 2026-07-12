@@ -1,13 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { x25519 } from '@noble/curves/ed25519.js';
 
-import { applyAccountInput, proposeAccountFrame } from '../account-consensus';
+import {
+  applyAccountInput,
+  HTLC_ENFORCEMENT_RESERVE_MS,
+  isHtlcSecretEnforcementWindowClosed,
+  proposeAccountFrame,
+} from '../account-consensus';
 import { computeAccountStateRoot } from '../account-state-root';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { deriveAccountWatchSeed } from '../account-watch-seed';
 import { applyAccountTx } from '../account-tx/apply';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
+import { hashHtlcSecret } from '../htlc-utils';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account-consensus-frame';
@@ -1906,6 +1912,109 @@ describe('audit fail-fast regressions', () => {
     expect(account.deltas.get(1)?.leftHold).toBe(0n);
   });
 
+  test('signed account frame can arrive after the receiver watcher advances', async () => {
+    const seed = 'account-frame-watcher-lag';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+    const proposer = makeProposalAccount([
+      { type: 'set_credit_limit', data: { tokenId: 1, amount: 100n } },
+    ], left.entityId, right.entityId);
+    const receiver = cloneAccountMachine(proposer);
+    receiver.mempool = [];
+    receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+
+    const proposal = await proposeAccountFrame(env, proposer, 9);
+    if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
+    const result = await applyAccountInput(env, receiver, proposal.accountInput, {
+      entityTimestamp: env.timestamp,
+      finalizedJHeight: 10,
+    });
+
+    expect(result.success).toBe(true);
+    expect(receiver.currentHeight).toBe(1);
+  });
+
+  test('HTLC secret enforcement reserve closes on either entity time or finalized J-height', () => {
+    const lock = { timelock: 100_000n, revealBeforeHeight: 20 };
+    expect(isHtlcSecretEnforcementWindowClosed(lock, {
+      entityTimestamp: 70_000,
+      finalizedJHeight: 20,
+    })).toBe(false);
+    expect(isHtlcSecretEnforcementWindowClosed(lock, {
+      entityTimestamp: 70_001,
+      finalizedJHeight: 20,
+    })).toBe(true);
+    expect(isHtlcSecretEnforcementWindowClosed(lock, {
+      entityTimestamp: 1,
+      finalizedJHeight: 21,
+    })).toBe(true);
+  });
+
+  test('late signed HTLC secret is retained as evidence and prepares a dispute', async () => {
+    const seed = 'late-htlc-secret-dispute';
+    const env = createEmptyEnv(seed);
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+    const secret = `0x${'91'.repeat(32)}`;
+    const hashlock = hashHtlcSecret(secret);
+    const lockId = 'late-secret-lock';
+    const amount = 7n;
+    const timelock = BigInt(env.timestamp + HTLC_ENFORCEMENT_RESERVE_MS - 1);
+    const resolveTx: AccountTx = {
+      type: 'htlc_resolve',
+      data: { lockId, outcome: 'secret', secret },
+    };
+    const proposer = makeProposalAccount([resolveTx], left.entityId, right.entityId);
+    const receiver = cloneAccountMachine(proposer);
+    receiver.mempool = [];
+    receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+    for (const account of [proposer, receiver]) {
+      const delta = createDefaultDelta(1);
+      delta.leftHold = amount;
+      account.deltas.set(1, delta);
+      account.locks.set(lockId, {
+        lockId,
+        hashlock,
+        timelock,
+        revealBeforeHeight: 100,
+        amount,
+        tokenId: 1,
+        senderIsLeft: true,
+        createdHeight: 0,
+        createdTimestamp: 0,
+      });
+    }
+    const proposal = await proposeAccountFrame(env, proposer, 1);
+    if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
+
+    const receiverState = makeEntityState(right.entityId);
+    receiverState.config = makeSingleSignerConfigFor(right.signerId);
+    receiverState.timestamp = env.timestamp;
+    receiverState.lastFinalizedJHeight = 1;
+    receiverState.accounts.set(left.entityId, receiver);
+    const applied = await applyEntityTx(env, receiverState, {
+      type: 'accountInput',
+      data: proposal.accountInput,
+    });
+
+    expect(applied.newState.accounts.get(left.entityId)?.currentHeight).toBe(0);
+    expect(applied.newState.accounts.get(left.entityId)?.status).toBe('dispute_preparing');
+    expect(applied.newState.htlcRoutes.get(hashlock)?.secret).toBe(secret);
+  });
+
   test('failed account tx mutations do not leak into later valid txs in the same proposal', async () => {
     const env = createEmptyEnv('account-tx-atomicity');
     env.scenarioMode = true;
@@ -3779,6 +3888,16 @@ describe('audit fail-fast regressions', () => {
     expect(receiver.currentHeight).toBe(1);
     expect(receiver.pendingFrame?.height).toBe(2);
     expect(receiver.lastOutboundFrameAck?.height).toBe(1);
+    if (!accepted.response || accepted.response.kind !== 'frame_ack') {
+      throw new Error('BUNDLED_ACK_RESPONSE_MISSING');
+    }
+    const proposalSeal = accepted.response.proposal.disputeSeal;
+    expect(proposalSeal).toBeDefined();
+    const committedBundled = await applyAccountInput(env, proposer, accepted.response);
+    expect(committedBundled.success).toBe(true);
+    expect(proposer.currentHeight).toBe(2);
+    expect(proposer.counterpartyDisputeProofBodyHash).toBe(proposalSeal?.proofBodyHash);
+    expect(proposer.counterpartyDisputeProofHanko).toBe(proposalSeal?.hanko);
     const retainedAck = structuredClone(receiver.lastOutboundFrameAck?.response);
 
     // The new proposal can be discarded independently (for example by the

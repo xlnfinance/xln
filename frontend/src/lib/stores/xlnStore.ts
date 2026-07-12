@@ -38,6 +38,11 @@ import { assertNetworkMachineIsLive, networkMachineRuntime } from './networkMach
 import { normalizeWsConnectUrl, normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import {
+  protectVaultSecrets,
+  unprotectVaultSecrets,
+  type ProtectedVaultSecrets,
+} from '$lib/security/vaultProtection';
+import {
   readRemoteRuntimeTokenAccess,
   readRemoteRuntimeTokenAudience,
   resolveStoredRemoteRuntimeAuthKey,
@@ -493,16 +498,26 @@ const generateEmbeddedRuntimeSeed = (): string => {
   return `xln-browser-runtime:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
 };
 
-const readOrCreateEmbeddedRuntimeSeed = (): string | undefined => {
+const readOrCreateEmbeddedRuntimeSeed = async (): Promise<string | undefined> => {
   if (typeof window === 'undefined') return undefined;
   const stored = localStorage.getItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY)?.trim();
-  if (stored) return stored;
+  if (stored) {
+    if (stored.startsWith('xln-browser-runtime:')) {
+      const protectedSecrets = await protectVaultSecrets('embedded-runtime', { seed: stored }, null);
+      localStorage.setItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY, JSON.stringify(protectedSecrets));
+      return stored;
+    }
+    const protectedSecrets = JSON.parse(stored) as ProtectedVaultSecrets;
+    const restored = await unprotectVaultSecrets('embedded-runtime', protectedSecrets);
+    if (restored?.seed) return restored.seed;
+  }
   const seed = generateEmbeddedRuntimeSeed();
-  localStorage.setItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY, seed);
+  const protectedSecrets = await protectVaultSecrets('embedded-runtime', { seed }, null);
+  localStorage.setItem(EMBEDDED_RUNTIME_SEED_STORAGE_KEY, JSON.stringify(protectedSecrets));
   return seed;
 };
 
-const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
+const resolveAppRuntimeAdapterConfig = async (): Promise<RuntimeAdapterConfig> => {
   if (typeof window === 'undefined') return { mode: 'embedded' };
   const params = new URLSearchParams(window.location.search);
   const rawMode = (
@@ -513,7 +528,7 @@ const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
   ).trim().toLowerCase();
   const remoteRequested = rawMode === 'remote' || rawMode === 'ws' || params.has('ws') || params.has('runtimeWs');
   if (!remoteRequested) {
-    const seed = readOrCreateEmbeddedRuntimeSeed();
+    const seed = await readOrCreateEmbeddedRuntimeSeed();
     return seed ? { mode: 'embedded', seed } : { mode: 'embedded' };
   }
 
@@ -981,7 +996,7 @@ export async function initializeXLN(): Promise<Env | null> {
       void runtimeOperations.hydrateRemoteRuntimeImportSource(importSource.toString(), { optional: true });
     }
 
-    const adapterConfig = resolveAppRuntimeAdapterConfig();
+    const adapterConfig = await resolveAppRuntimeAdapterConfig();
     if (adapterConfig.mode === 'remote') {
       return await switchAppRuntimeAdapter(adapterConfig);
     }

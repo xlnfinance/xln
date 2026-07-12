@@ -698,6 +698,10 @@ export interface Env {
       attempts: number;
       nextRetryAt: number;
     }>;
+    verifiedProfileRoutes?: Map<string, {
+      runtimeId: string;
+      lastUpdated: number;
+    }>;
     entityRuntimeHints?: Map<string, {
       runtimeId: string;
       seenAt: number;

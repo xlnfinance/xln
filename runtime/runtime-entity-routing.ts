@@ -119,19 +119,6 @@ export const registerEntityRuntimeHint = (
   });
 };
 
-const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
-  const hints = new Set<string>();
-  for (const tx of input.entityTxs || []) {
-    const data = tx.data as Record<string, unknown> | undefined;
-    if (!data || typeof data !== 'object') continue;
-    const fromEntityId = data['fromEntityId'];
-    if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
-      hints.add(fromEntityId);
-    }
-  }
-  return [...hints];
-};
-
 export const collectCrossJurisdictionRemoteEntityHints = (
   env: Env,
   input: RoutedEntityInput,
@@ -222,13 +209,8 @@ export const handleInboundP2PEntityInput = (
     return;
   }
 
-  for (const hintedEntityId of collectSenderEntityHints(input)) {
-    registerEntityRuntimeHint(env, hintedEntityId, from, deps);
-  }
-
-  // Do not learn cross-j sibling topology at raw network ingress. The route may
-  // still be untrusted here; applyRuntimeInput registers these hints only after
-  // the strict two-runtime topology check passes.
+  // Never learn sender routes from raw payload fields. The authenticated
+  // account/entity transition registers them only after successful apply.
 
   const runtimeState = deps.ensureRuntimeState(env);
   if (runtimeState.halted && !env.scenarioMode) {

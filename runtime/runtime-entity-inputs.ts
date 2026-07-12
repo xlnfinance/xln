@@ -37,6 +37,19 @@ export interface RuntimeEntityInputApplyOptions {
   routingDeps: RuntimeEntityRoutingDeps;
 }
 
+const collectAppliedAccountSenderHints = (input: RoutedEntityInput): string[] => {
+  const localEntityId = String(input.entityId || '').toLowerCase();
+  const hints = new Set<string>();
+  for (const tx of input.entityTxs ?? []) {
+    if (tx.type !== 'accountInput') continue;
+    const data = tx.data as { fromEntityId?: unknown; toEntityId?: unknown };
+    const fromEntityId = typeof data.fromEntityId === 'string' ? data.fromEntityId.toLowerCase() : '';
+    const toEntityId = typeof data.toEntityId === 'string' ? data.toEntityId.toLowerCase() : '';
+    if (fromEntityId && toEntityId === localEntityId && fromEntityId !== localEntityId) hints.add(fromEntityId);
+  }
+  return [...hints];
+};
+
 const assertRuntimeIngress: (
   condition: unknown,
   code: string,
@@ -99,17 +112,6 @@ export const applyMergedEntityInputs = async (
         'Cross-j system inputs must stay inside their two-runtime route topology',
         dropDetails,
       );
-    }
-
-    if (entityInput.from) {
-      for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(
-        env,
-        entityInput,
-        entityInput.from,
-        routingDeps,
-      )) {
-        registerEntityRuntimeHint(env, hintedEntityId, entityInput.from, routingDeps);
-      }
     }
 
     const localEntityReplicaKey = findReplicaKeyInsensitive(env, entityInput.entityId, null);
@@ -185,6 +187,15 @@ export const applyMergedEntityInputs = async (
     }
 
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
+    if (entityInput.from) {
+      const appliedRouteHints = new Set([
+        ...collectAppliedAccountSenderHints(entityInput),
+        ...collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, routingDeps),
+      ]);
+      for (const hintedEntityId of appliedRouteHints) {
+        registerEntityRuntimeHint(env, hintedEntityId, entityInput.from, routingDeps);
+      }
+    }
     const inputElapsedMs = Math.round(getPerfMs() - inputProfileStartedAt);
     if (ENTITY_INPUT_PROFILE || inputElapsedMs >= ENTITY_INPUT_SLOW_MS) {
       profiledInputs.push({

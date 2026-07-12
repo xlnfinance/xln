@@ -8,6 +8,7 @@ export const handleScheduledWakeEntityTx = async (
   env: Env,
   state: EntityState,
   tx: ScheduledWakeTx,
+  manualBroadcastInInput: boolean,
 ) => {
   assertScheduledWakeMatchesState(state, tx);
   if (!state.crontabState) throw new Error('SCHEDULED_WAKE_CRONTAB_MISSING');
@@ -19,7 +20,7 @@ export const handleScheduledWakeEntityTx = async (
     isProposer: true,
   };
   const outputs = await executeCrontab(env, replica, state.crontabState, {
-    manualBroadcastInInput: false,
+    manualBroadcastInInput,
   });
   return { newState: replica.state, outputs };
 };

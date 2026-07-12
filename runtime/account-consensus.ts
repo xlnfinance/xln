@@ -11,6 +11,7 @@ import type {
   Env,
   EntityState,
   Delta,
+  HtlcLock,
 } from './types';
 import {
   cloneAccountFrame,
@@ -70,6 +71,22 @@ export type {
 } from './account-consensus/types';
 
 const accountLog = createStructuredLogger('account');
+export const HTLC_ENFORCEMENT_RESERVE_MS = 30_000;
+
+export type AccountInputSecurityContext = {
+  entityTimestamp: number;
+  finalizedJHeight: number;
+};
+
+export function isHtlcSecretEnforcementWindowClosed(
+  lock: Pick<HtlcLock, 'timelock' | 'revealBeforeHeight'>,
+  securityContext: AccountInputSecurityContext,
+): boolean {
+  const timestampTooLate =
+    BigInt(securityContext.entityTimestamp) + BigInt(HTLC_ENFORCEMENT_RESERVE_MS) > lock.timelock;
+  const finalizedHeightTooLate = securityContext.finalizedJHeight > lock.revealBeforeHeight;
+  return timestampTooLate || finalizedHeightTooLate;
+}
 
 export { computeFrameHash, validateAccountFrame } from './account-consensus-frame';
 
@@ -855,6 +872,7 @@ async function preflightIncomingAccountFrame(
   replayCurrentHeight: number,
   events: string[],
   committedFrames: AccountCommittedFrame[],
+  securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFramePreflightResult> {
   const receivedFrame = accountInputProposal(input)?.frame;
   if (!receivedFrame) {
@@ -902,7 +920,11 @@ async function preflightIncomingAccountFrame(
   }
 
   const previousTimestamp = accountMachine.currentFrame?.timestamp;
-  const frameValidationError = getAccountFrameValidationError(receivedFrame, env.timestamp, previousTimestamp);
+  const frameValidationError = getAccountFrameValidationError(
+    receivedFrame,
+    securityContext.entityTimestamp,
+    previousTimestamp,
+  );
   if (frameValidationError) {
     return { kind: 'return', result: { success: false, error: `Invalid frame structure: ${frameValidationError}`, events } };
   }
@@ -974,6 +996,27 @@ async function preflightIncomingAccountFrame(
   const hankoError = await verifyIncomingFrameHanko(env, accountMachine, input, receivedFrame, events);
   if (hankoError) {
     return { kind: 'return', result: hankoError };
+  }
+
+  const lateSecrets = receivedFrame.accountTxs.flatMap((tx) => {
+    if (tx.type !== 'htlc_resolve' || tx.data.outcome !== 'secret' || !tx.data.secret) return [];
+    const lock = accountMachine.locks.get(tx.data.lockId);
+    if (!lock || !isHtlcSecretEnforcementWindowClosed(lock, securityContext)) return [];
+    return [{ hashlock: lock.hashlock, secret: tx.data.secret }];
+  });
+  if (lateSecrets.length > 0) {
+    const reason =
+      `HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT: reserve=${HTLC_ENFORCEMENT_RESERVE_MS}ms ` +
+      `entityTimestamp=${securityContext.entityTimestamp}`;
+    return {
+      kind: 'return',
+      result: {
+        success: false,
+        error: reason,
+        events,
+        disputeRequired: { reason, evidenceSecrets: lateSecrets },
+      },
+    };
   }
 
   const ourEntityId = accountMachine.proofHeader.fromEntity;
@@ -1163,7 +1206,6 @@ async function commitIncomingFrameOnRealState(
   validation: IncomingFrameValidation,
   ourEntityId: string,
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
-  ackProcessed: boolean,
   events: string[],
   committedFrames: AccountCommittedFrame[],
 ): Promise<void> {
@@ -1217,7 +1259,7 @@ async function commitIncomingFrameOnRealState(
 
   accountMachine.currentFrame = structuredClone(receivedFrame);
   accountMachine.currentHeight = receivedFrame.height;
-  if (accountInputProposal(input)?.disputeSeal && !ackProcessed) {
+  if (accountInputProposal(input)?.disputeSeal) {
     storeCounterpartyDisputeSeal(accountMachine, validatedCounterpartyDisputeSeal);
     accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
   }
@@ -1543,10 +1585,10 @@ async function handleIncomingAccountFrame(
   normalizedInputHeight: number | undefined,
   replayCurrentHeight: number,
   validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined,
-  ackProcessed: boolean,
   events: string[],
   timedOutHashlocks: string[],
   committedFrames: AccountCommittedFrame[],
+  securityContext: AccountInputSecurityContext,
 ): Promise<IncomingFrameResult> {
   if (!accountInputProposal(input)) {
     return { kind: 'not_applicable' };
@@ -1560,6 +1602,7 @@ async function handleIncomingAccountFrame(
     replayCurrentHeight,
     events,
     committedFrames,
+    securityContext,
   );
   if (preflight.kind === 'return') return preflight;
 
@@ -1584,7 +1627,6 @@ async function handleIncomingAccountFrame(
     validationResult.validation,
     preflight.ourEntityId,
     validatedCounterpartyDisputeSeal,
-    ackProcessed,
     events,
     committedFrames,
   );
@@ -1611,6 +1653,12 @@ export async function applyAccountInput(
   env: Env,
   accountMachine: AccountMachine,
   input: AccountInput,
+  securityContext: AccountInputSecurityContext = {
+    entityTimestamp: env.timestamp,
+    finalizedJHeight: getReplicaByEntityId(env, accountMachine.proofHeader.fromEntity)?.state.lastFinalizedJHeight
+      ?? accountMachine.lastFinalizedJHeight
+      ?? 0,
+  },
 ): Promise<HandleAccountInputResult> {
   if (input.watchSeed !== undefined) {
     const inputWatchSeed = normalizeAccountWatchSeed(input.watchSeed, 'ACCOUNT_INPUT');
@@ -1725,10 +1773,10 @@ export async function applyAccountInput(
     normalizedInputHeight,
     replay.currentHeight,
     validatedCounterpartyProposalDisputeSeal,
-    ackProcessed,
     events,
     timedOutHashlocks,
     committedFrames,
+    securityContext,
   );
   if (incomingFrameResult.kind === 'return') return incomingFrameResult.result;
 

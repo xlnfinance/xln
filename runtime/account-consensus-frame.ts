@@ -7,7 +7,9 @@ import { canonicalJurisdictionEventsHash } from './j-event-observation';
 import { normalizeJurisdictionEvents } from './j-event-normalization';
 
 export const MAX_ACCOUNT_FRAME_TXS = 1000;
-export const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300_000;
+// A peer controls its proposed timestamp. Keep the allowance large enough for
+// normal networking, but smaller than the minimum HTLC enforcement reserve.
+export const MAX_FRAME_TIMESTAMP_DRIFT_MS = 30_000;
 export const MAX_FRAME_SIZE_BYTES = 10_000_000;
 
 export function validateAccountFrame(
@@ -23,8 +25,8 @@ export function getAccountFrameValidationError(
   currentTimestamp?: number,
   previousFrameTimestamp?: number,
 ): string {
-  if (frame.height < 0) return `height ${frame.height} < 0`;
-  if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) {
+  if (!Number.isSafeInteger(frame.height) || frame.height < 0) return `height ${frame.height} is invalid`;
+  if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0) {
     return `jHeight ${String(frame.jHeight)} is invalid`;
   }
   if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) {

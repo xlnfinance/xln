@@ -7,11 +7,13 @@ import {
   assertScheduledWakeTxAuthorized,
   createDueScheduledWakeInputs,
   getNextScheduledWakeTimestamp,
+  MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   refreshScheduledWakeIndex,
   type ScheduledWakeTx,
 } from '../runtime-scheduled-wake';
 import { safeStringify } from '../serialization-utils';
 import type { EntityReplica, EntityState } from '../types';
+import { buildCanonicalRuntimeStateSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 
 const entityId = (byte: string): string => `0x${byte.repeat(32)}`;
 const signerId = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -238,6 +240,96 @@ describe('runtime scheduled wake', () => {
     env.eReplicas.clear();
     refreshScheduledWakeIndex(env, new Set());
     expect(getNextScheduledWakeTimestamp(env)).toBeNull();
+  });
+
+  test('does not revive stale heap entries when a replica is removed and re-added', () => {
+    const env = createEmptyEnv('scheduled-wake-generation-tombstone-test');
+    env.timestamp = 10_000;
+    const id = entityId('73');
+    const proposer = signerId('74');
+    const firstState = makeState(id, proposer, env.timestamp);
+    scheduleHook(firstState.crontabState!, {
+      id: 'first:due',
+      triggerAt: 9_000,
+      type: 'watchdog',
+      data: {},
+    });
+    env.eReplicas.set(`${id}:${proposer}`, makeReplica(firstState, proposer, true));
+    refreshScheduledWakeIndex(env, new Set());
+
+    env.eReplicas.clear();
+    refreshScheduledWakeIndex(env, new Set());
+
+    const replacementState = makeState(id, proposer, env.timestamp);
+    scheduleHook(replacementState.crontabState!, {
+      id: 'replacement:due',
+      triggerAt: 9_000,
+      type: 'watchdog',
+      data: {},
+    });
+    env.eReplicas.set(`${id}:${proposer}`, makeReplica(replacementState, proposer, true));
+    refreshScheduledWakeIndex(env, new Set());
+
+    const inputs = createDueScheduledWakeInputs(env, env.timestamp);
+    expect(inputs).toHaveLength(1);
+    expect(inputs[0]?.entityTxs[0]?.data.jobs).toEqual([
+      { kind: 'hook', id: 'replacement:due', dueAt: 9_000 },
+    ]);
+  });
+
+  test('bounds advisory jobs while draining every due hook from canonical state', async () => {
+    const env = createEmptyEnv('scheduled-wake-bounded-diagnostics-test');
+    env.timestamp = 10_000;
+    env.scenarioMode = true;
+    const id = entityId('75');
+    const proposer = signerId('76');
+    const state = makeState(id, proposer, env.timestamp);
+    for (let index = 0; index < MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS + 1; index += 1) {
+      scheduleHook(state.crontabState!, {
+        id: `due:${String(index).padStart(4, '0')}`,
+        triggerAt: 9_000,
+        type: 'watchdog',
+        data: {},
+      });
+    }
+    env.eReplicas.set(`${id}:${proposer}`, makeReplica(state, proposer, true));
+
+    const [input] = createDueScheduledWakeInputs(env, env.timestamp);
+    expect(input?.entityTxs[0]?.data.jobs).toHaveLength(MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS);
+
+    const result = await applyEntityFrame(env, state, input!.entityTxs, env.timestamp);
+    expect(result.newState.crontabState?.hooks.size).toBe(0);
+  });
+
+  test('history records wake diagnostics while restart restore discards ephemeral wake work', () => {
+    const env = createEmptyEnv('scheduled-wake-snapshot-filter-test');
+    const id = entityId('77');
+    const proposer = signerId('78');
+    const wake: ScheduledWakeTx = {
+      type: 'scheduledWake',
+      data: {
+        version: 1,
+        proposerSignerId: proposer,
+        dueAt: 9_000,
+        jobs: [{ kind: 'hook', id: 'snapshot:due', dueAt: 9_000 }],
+      },
+    };
+    env.runtimeMempool = {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: id,
+        signerId: proposer,
+        entityTxs: [wake, { type: 'chatMessage', data: { message: 'keep', timestamp: 9_000 } }],
+      }],
+    };
+
+    const snapshot = buildCanonicalRuntimeStateSnapshot(env);
+    const persistedInput = snapshot['runtimeInput'] as typeof env.runtimeMempool;
+    expect(persistedInput?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['scheduledWake', 'chatMessage']);
+
+    const restored = createEmptyEnv('scheduled-wake-snapshot-filter-restored');
+    restoreDurableRuntimeSnapshot(restored, snapshot);
+    expect(restored.runtimeMempool?.entityInputs[0]?.entityTxs?.map(tx => tx.type)).toEqual(['chatMessage']);
   });
 
   test('does not enqueue another wake while one is awaiting entity consensus', () => {

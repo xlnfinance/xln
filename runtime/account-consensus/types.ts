@@ -42,4 +42,8 @@ export type HandleAccountInputResult = AccountConsensusFrameResult & {
   approvalNeeded?: AccountTx;
   timedOutHashlocks?: string[];
   committedFrames?: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>;
+  disputeRequired?: {
+    reason: string;
+    evidenceSecrets: Array<{ hashlock: string; secret: string }>;
+  };
 };

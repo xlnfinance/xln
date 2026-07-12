@@ -4,6 +4,7 @@ import { compareStableText, safeStringify } from './serialization-utils';
 
 export type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 export type ScheduledWakeJob = ScheduledWakeTx['data']['jobs'][number];
+export const MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS = 1_000;
 
 type DeadlineEntry = {
   dueAt: number;
@@ -173,7 +174,10 @@ export const refreshScheduledWakeIndex = (env: Env, entityIds?: ReadonlySet<stri
   for (const key of index.replicas.keys()) {
     if (liveKeys.has(key)) continue;
     index.replicas.delete(key);
-    index.generations.delete(key);
+    // Advance and retain the tombstone. Deleting or merely retaining the old
+    // generation lets a detached replica's heap entry remain valid until the
+    // same signer/entity pair is imported again.
+    index.generations.set(key, (index.generations.get(key) ?? 0) + 1);
   }
 };
 
@@ -215,11 +219,14 @@ export const createDueScheduledWakeInputs = (env: Env, now: number): Array<{
     const key = replicaKey(entry.entityId, entry.signerId);
     const replica = index.replicas.get(key);
     if (!replica?.isProposer || queued.has(key)) continue;
-    const jobs = collectDueScheduledWakeJobs(replica.state, now, entityNeedsPeriodicWake(replica));
-    if (jobs.length === 0) {
+    const dueJobs = collectDueScheduledWakeJobs(replica.state, now, entityNeedsPeriodicWake(replica));
+    if (dueJobs.length === 0) {
       refreshReplica(env, replica);
       continue;
     }
+    // Jobs are advisory diagnostics. Execution recomputes and drains the full
+    // canonical due set from EntityState at frame timestamp.
+    const jobs = dueJobs.slice(0, MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS);
     const tx: ScheduledWakeTx = {
       type: 'scheduledWake',
       data: {
@@ -231,6 +238,7 @@ export const createDueScheduledWakeInputs = (env: Env, now: number): Array<{
     };
     Object.defineProperty(tx, LOCAL_SCHEDULED_WAKE, { value: true, enumerable: false });
     inputs.push({ entityId: replica.entityId, signerId: replica.signerId, entityTxs: [tx] });
+    queued.add(key);
   }
   return inputs;
 };
@@ -259,7 +267,7 @@ export const assertScheduledWakeMatchesState = (
     tx.data.dueAt > state.timestamp ||
     !Array.isArray(tx.data.jobs) ||
     tx.data.jobs.length === 0 ||
-    tx.data.jobs.length > 1_000
+    tx.data.jobs.length > MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS
   ) {
     throw new Error('SCHEDULED_WAKE_INVALID_PAYLOAD');
   }

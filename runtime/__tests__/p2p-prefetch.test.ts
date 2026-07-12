@@ -426,6 +426,7 @@ test('getQueueState reports the runtime-owned durable outbox', () => {
 
 test('verified profile routes advance monotonically and never replay backward', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
+  p2p.env = { runtimeState: {} };
   p2p.verifiedProfileRoutes = new Map();
   const profile = (runtimeId: string, lastUpdated: number) => ({
     entityId: SOURCE_ENTITY_ID,
@@ -440,4 +441,5 @@ test('verified profile routes advance monotonically and never replay backward', 
     runtimeId: TARGET_RUNTIME_ID,
     lastUpdated: 20,
   });
+  expect(p2p.env.runtimeState.verifiedProfileRoutes).toBe(p2p.verifiedProfileRoutes);
 });

@@ -5,7 +5,7 @@
  * here via a callback so the router itself stays transport/crypto-agnostic.
  */
 
-import { enqueueRuntimeInput, registerEntityRuntimeHint } from './runtime.ts';
+import { enqueueRuntimeInput } from './runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
 import type { Env, EntityInput, EntityReplica, RoutedEntityInput } from './types';
 import { validateDeliverableEntityInput } from './validation-utils';
@@ -87,38 +87,6 @@ export const createLocalDeliveryHandler = (
         },
       });
       throw new Error(`NO_LOCAL_REPLICA: entityId=${entityId || 'unknown'} runtimeId=${toKey}`);
-    }
-
-    // Register sender runtime hint BEFORE processing so ACK/response can route back.
-    if (from && input.entityTxs) {
-      const localEntityId = String(input.entityId || '').toLowerCase();
-      for (const tx of input.entityTxs) {
-        const data = tx.data as Record<string, unknown> | undefined;
-        if (!data) continue;
-        if (tx.type !== 'accountInput') continue;
-
-        const fromEntityId =
-          typeof data['fromEntityId'] === 'string' ? String(data['fromEntityId']).toLowerCase() : '';
-        const toEntityId =
-          typeof data['toEntityId'] === 'string' ? String(data['toEntityId']).toLowerCase() : '';
-
-        let senderEntityId = '';
-        if (fromEntityId && toEntityId) {
-          if (toEntityId === localEntityId && fromEntityId !== localEntityId) {
-            senderEntityId = fromEntityId;
-          } else if (fromEntityId === localEntityId && toEntityId !== localEntityId) {
-            senderEntityId = toEntityId;
-          } else {
-            senderEntityId = fromEntityId;
-          }
-        } else {
-          senderEntityId = fromEntityId;
-        }
-
-        if (senderEntityId) {
-          registerEntityRuntimeHint(env, senderEntityId, from);
-        }
-      }
     }
 
     // Enqueue to runtime

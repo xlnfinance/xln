@@ -478,9 +478,11 @@ const parseArgs = (): Args => {
     throw new Error(`Invalid --api-port: ${String(apiPort)}`);
   }
   const rpcUrls = readRpcUrls();
+  const seed = getArg('--seed', process.env['XLN_RUNTIME_SEED'] || '').trim();
+  if (!seed) throw new Error('Market-maker seed is required via --seed or XLN_RUNTIME_SEED');
   return {
     name: getArg('--name', 'MM'),
-    seed: getArg('--seed', 'xln-mesh-mm'),
+    seed,
     signerLabel: getArg('--signer-label', 'mm-1'),
     relayUrl: getArg('--relay-url', 'ws://127.0.0.1:20002/relay'),
     apiHost: getArg('--api-host', '127.0.0.1'),

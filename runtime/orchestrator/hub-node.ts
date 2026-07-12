@@ -372,10 +372,12 @@ const parseArgs = (): Args => {
   }
   const rpcUrls = readRpcUrls();
 
+  const seed = getArg('--seed', process.env['XLN_RUNTIME_SEED'] || '').trim();
+  if (!seed) throw new Error('Hub seed is required via --seed or XLN_RUNTIME_SEED');
   return {
     name: getArg('--name', 'H1'),
     region: getArg('--region', 'global'),
-    seed: getArg('--seed', 'xln-e2e-hub'),
+    seed,
     signerLabel: getArg('--signer-label', 'hub-1'),
     relayUrl: getArg('--relay-url', 'ws://127.0.0.1:20002/relay'),
     apiHost: getArg('--api-host', '127.0.0.1'),

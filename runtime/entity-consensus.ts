@@ -1451,6 +1451,7 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
     frameProfileTxTotals,
   } = context;
   let currentEntityState = context.currentEntityState;
+  const manualBroadcastInInput = entityTxs.some(tx => tx.type === 'j_broadcast');
 
   // Preserve WAL transaction order exactly during live processing and replay.
   // Reordering batched txs can change bilateral account state transitions
@@ -1468,7 +1469,10 @@ async function applyEntityTxsInOrder(context: ApplyEntityTxsInOrderContext): Pro
       swapCancelRequests,
       swapOffersCancelled,
       skippedError,
-    } = await applyEntityTx(env, currentEntityState, entityTx, { mutableFrameState: true });
+    } = await applyEntityTx(env, currentEntityState, entityTx, {
+      mutableFrameState: true,
+      manualBroadcastInInput,
+    });
     if (skippedError) {
       throw new Error(`ENTITY_FRAME_TX_FAILED: type=${String(entityTx.type)} error=${skippedError}`);
     }

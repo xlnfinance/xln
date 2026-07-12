@@ -195,6 +195,7 @@
 
   @media (max-width: 520px) {
     .mascot-layer { z-index: 9000; }
+    :global(body:has(.brainvault-wrapper)) .mascot-layer { display: none; }
     .mascot-root {
       display: flex;
       align-items: center;

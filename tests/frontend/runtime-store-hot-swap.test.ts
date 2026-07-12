@@ -548,7 +548,7 @@ test('embedded env initialization publishes active runtime snapshot before app s
   const updateSlice = xlnStoreSource.slice(updateStart, callbackStart);
 
   expect(xlnStoreSource).toContain("const EMBEDDED_RUNTIME_SEED_STORAGE_KEY = 'xln-embedded-runtime-seed-v1';");
-  expect(xlnStoreSource).toContain('const seed = readOrCreateEmbeddedRuntimeSeed();');
+  expect(xlnStoreSource).toContain('const seed = await readOrCreateEmbeddedRuntimeSeed();');
   expect(xlnStoreSource).toContain("return seed ? { mode: 'embedded', seed } : { mode: 'embedded' };");
   expect(xlnStoreSource).toContain('env = await xln.main(adapterConfig.seed ?? null);');
   expect(xlnStoreSource).toContain('env = await xln.main(normalizedConfig.seed ?? null);');
@@ -793,7 +793,8 @@ test('vault initialization preserves active shared runtime selection', () => {
   expect(initSource).toContain("currentSharedRuntime?.type === 'remote'");
   expect(initSource).not.toContain('latest.runtimes[currentSelected] || sharedRuntimes.has(currentSelected)');
   expect(initSource).toContain('const runtimeEntry = activeId ? sharedRuntimes.get(activeId) : null;');
-  expect(initSource).toContain('if (runtimeToSync) this.syncRuntime(runtimeToSync);');
+  expect(initSource).toContain('if (runtimeToSync?.seed) this.syncRuntime(runtimeToSync);');
+  expect(initSource).toContain('else if (runtimeToSync) this.syncRuntime(null);');
   expect(initSource).toContain('else if (!activeId) this.syncRuntime(null);');
   expect(initSource).not.toContain('this.syncRuntime(runtimeToSync ?? null);');
 });

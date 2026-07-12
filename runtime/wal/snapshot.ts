@@ -122,6 +122,23 @@ const cloneEntityInput = <T extends RoutedEntityInput>(input: T): T => ({
     : {}),
 }) as T;
 
+const withoutEphemeralScheduledWake = (runtimeInput?: RuntimeInput): RuntimeInput => ({
+  ...runtimeInput,
+  runtimeTxs: [...(runtimeInput?.runtimeTxs ?? [])],
+  entityInputs: (runtimeInput?.entityInputs ?? [])
+    .map(input => ({
+      ...cloneEntityInput(input),
+      entityTxs: (input.entityTxs ?? []).filter(tx => tx.type !== 'scheduledWake'),
+    }))
+    .filter(input =>
+      (input.entityTxs?.length ?? 0) > 0 ||
+      input.proposedFrame !== undefined ||
+      (input.hashPrecommits?.size ?? 0) > 0),
+  ...(runtimeInput?.jInputs
+    ? { jInputs: runtimeInput.jInputs.map(input => ({ ...input, jTxs: [...input.jTxs] })) }
+    : {}),
+});
+
 const cloneRuntimeInput = (runtimeInput?: RuntimeInput): RuntimeInput => ({
   ...runtimeInput,
   runtimeTxs: [...(runtimeInput?.runtimeTxs ?? [])],
@@ -147,6 +164,7 @@ const buildDurableRuntimeStateSnapshot = (env: Env): Record<string, unknown> | u
     ...(state.quarantinedRuntimeInputs ? { quarantinedRuntimeInputs: structuredClone(state.quarantinedRuntimeInputs) } : {}),
     ...(state.pendingFrameDbRecords ? { pendingFrameDbRecords: structuredClone(state.pendingFrameDbRecords) } : {}),
     ...(state.deferredNetworkMeta ? { deferredNetworkMeta: structuredClone(state.deferredNetworkMeta) } : {}),
+    ...(state.verifiedProfileRoutes ? { verifiedProfileRoutes: structuredClone(state.verifiedProfileRoutes) } : {}),
     ...(state.pendingCommittedJOutbox ? { pendingCommittedJOutbox: structuredClone(state.pendingCommittedJOutbox) } : {}),
   };
   return Object.keys(durable).length > 0 ? durable : undefined;
@@ -214,7 +232,7 @@ export const restoreDurableRuntimeSnapshot = (
 ): void => {
   const runtimeInput = snapshot['runtimeInput'];
   if (runtimeInput && typeof runtimeInput === 'object') {
-    const restoredInput = structuredClone(runtimeInput) as RuntimeInput;
+    const restoredInput = withoutEphemeralScheduledWake(structuredClone(runtimeInput) as RuntimeInput);
     env.runtimeInput = restoredInput;
     env.runtimeMempool = restoredInput;
   }
