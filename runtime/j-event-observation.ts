@@ -4,7 +4,7 @@ import type { DisputeFinalizationEvidence } from './types/jurisdiction-events';
 import {
   canonicalJurisdictionEventKey,
   normalizeJurisdictionEvents,
-} from './j-event-normalization';
+} from './jurisdiction/event-normalization';
 
 export type JEventObservationDigestInput = {
   entityId: string;

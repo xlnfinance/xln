@@ -1,6 +1,6 @@
 import type { AccountMachine, AccountTx, Env } from '../../../types';
 import { getAccountPerspective } from '../../../state-helpers';
-import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../../j-event-normalization';
+import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../../jurisdiction/event-normalization';
 import { tryFinalizeAccountJEvents } from '../../../entity/tx/j-events-account';
 import { createStructuredLogger, shortHash } from '../../../logger';
 

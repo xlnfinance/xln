@@ -12,7 +12,7 @@ import type { JAdapter } from './jadapter';
 import { createXlnJsonRpcProvider } from './jadapter';
 import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-utils';
-import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './j-batch';
+import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './jurisdiction/batch';
 import { loadCliJurisdiction, type CliJurisdiction } from './jurisdiction/cli-jurisdiction';
 
 const REMOTE_RPC = process.env['XLN_CLI_REMOTE_RPC'] || 'https://xln.finance/rpc';

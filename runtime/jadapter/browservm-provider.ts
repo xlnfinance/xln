@@ -27,7 +27,7 @@ import {
 import { safeStringify } from '../serialization-utils.js';
 import { getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
-import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../j-batch';
+import { batchAddSettlement, createEmptyBatch, decodeJBatch, summarizeBatch } from '../jurisdiction/batch';
 import { setDeltaTransformerAddress } from '../proof-builder.js';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
@@ -1285,7 +1285,7 @@ export class BrowserVMProvider {
 
   async processEntityBatch(
     entityId: string,
-    batch: import('../j-batch').JBatch,
+    batch: import('../jurisdiction/batch').JBatch,
     hankoPrivKey: Uint8Array,
     txPrivKey: Uint8Array = this.deployerPrivKey,
   ): Promise<EVMEvent[]> {

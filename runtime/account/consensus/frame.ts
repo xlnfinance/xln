@@ -4,7 +4,7 @@ import type { AccountFrame, AccountTx } from '../../types';
 import { assertAccountFrameDeltaIntegrity } from '../frame';
 import { computeCanonicalMerkleRoot } from '../state-root';
 import { canonicalJurisdictionEventsHash } from '../../j-event-observation';
-import { normalizeJurisdictionEvents } from '../../j-event-normalization';
+import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 
 export const MAX_ACCOUNT_FRAME_TXS = 1000;

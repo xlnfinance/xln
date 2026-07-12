@@ -56,10 +56,10 @@ import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 import { TIMING } from '../constants';
 import { DEFAULT_SOFT_LIMIT } from '../types';
 import { terminateHtlcRoute } from './tx/htlc-route-lifecycle';
-import { getRuntimeJurisdictionHeight } from '../j-height';
+import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
 import { createStructuredLogger, shortHash, shortId } from '../logger';
-import { batchAddReserveToCollateral, initJBatch } from '../j-batch';
+import { batchAddReserveToCollateral, initJBatch } from '../jurisdiction/batch';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
 
 const crontabLog = createStructuredLogger('entity.crontab');

@@ -1,6 +1,6 @@
 import type { BookState, BookOrderState, PriceBucketState, PriceLevelState } from '../orderbook';
 import type { AccountTx, EntityReplica, EntityState, Env, ExternalWalletState } from '../types';
-import type { JBatch, JBatchState, SentJBatch } from '../j-batch';
+import type { JBatch, JBatchState, SentJBatch } from '../jurisdiction/batch';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,

@@ -18,7 +18,7 @@
 
 import type { Env } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { createEmptyBatch, batchAddReserveToReserve } from '../j-batch';
+import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batch';
 import {
   ensureJAdapter,
   getScenarioJAdapter,

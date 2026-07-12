@@ -1,9 +1,9 @@
-import type { Env } from './types';
+import type { Env } from '../types';
 import {
   getJReplicaByJurisdictionRef,
   getJReplicaByName,
   isJurisdictionStackRef,
-} from './jurisdiction/jurisdiction-runtime';
+} from './jurisdiction-runtime';
 
 export const PRODUCTION_DISPUTE_DELAY_BLOCKS = 5_760;
 

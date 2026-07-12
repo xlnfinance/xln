@@ -22,7 +22,7 @@ import {
   resolveCommittedWatcherCursor,
   updateWatcherJurisdictionCursor,
 } from '../jadapter/watcher';
-import { findRecentReserveUpdatedEvent } from '../j-event-evidence';
+import { findRecentReserveUpdatedEvent } from '../jurisdiction/event-evidence';
 import { createEmptyEnv } from '../runtime';
 import type { EntityReplica, Env, JReplica, JurisdictionConfig } from '../types';
 

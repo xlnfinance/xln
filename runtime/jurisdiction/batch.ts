@@ -12,12 +12,12 @@
  */
 
 import { ethers } from 'ethers';
-import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
-import type { JurisdictionConfig } from './types';
-import type { RuntimeFailureSignal } from './failure-taxonomy';
-import { normalizeEntityId, compareEntityIds } from './entity-id-utils';
-import { createStructuredLogger, shortHash, shortId } from './logger';
-import { PROOF_BODY_ABI } from './proof-body-types';
+import type { ProofBodyStruct } from '../../jurisdictions/typechain-types/contracts/Depository.sol/Depository.js';
+import type { JurisdictionConfig } from '../types';
+import type { RuntimeFailureSignal } from '../failure-taxonomy';
+import { normalizeEntityId, compareEntityIds } from '../entity-id-utils';
+import { createStructuredLogger, shortHash, shortId } from '../logger';
+import { PROOF_BODY_ABI } from '../proof-body-types';
 
 const jBatchLog = createStructuredLogger('j.batch');
 

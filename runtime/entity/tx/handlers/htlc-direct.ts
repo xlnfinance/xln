@@ -1,4 +1,4 @@
-import { getRuntimeJurisdictionHeight } from '../../../j-height';
+import { getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
 import { generateLockId, hashHtlcSecret } from '../../../htlc-utils';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { formatEntityId } from '../../../utils';

@@ -312,7 +312,7 @@ function _requireStarterArguments(
 
 ### Types and ABI
 
-- `runtime/j-batch.ts`
+- `runtime/jurisdiction/batch.ts`
   - Add `starterInitialArguments` and `starterIncrementedArguments` to `disputeStarts`.
   - Replace `finalArguments` and `initialArguments` in `disputeFinalizations` with
     `leftArguments`, `rightArguments`, `starterInitialArguments`,

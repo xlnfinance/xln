@@ -59,7 +59,7 @@ import {
   type RawJEventArgs,
 } from './watcher';
 import { DEV_CHAIN_IDS } from './index';
-import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../j-batch';
+import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../jurisdiction/batch';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
@@ -381,7 +381,7 @@ export async function createRpcAdapter(
 
   const processSignedBatch = async (
     entityId: string,
-    batch: import('../j-batch').JBatch,
+    batch: import('../jurisdiction/batch').JBatch,
     txSigner?: Signer,
     batchSignerPrivateKey?: string,
   ): Promise<JBatchReceipt> => {

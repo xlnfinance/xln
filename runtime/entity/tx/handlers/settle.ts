@@ -13,7 +13,7 @@
 
 import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, SettlementOp, AccountSettleAction } from '../../../types';
 import { cloneEntityState, addMessage, getAccountPerspective, resolveEntityProposerId } from '../../../state-helpers';
-import { initJBatch, batchAddSettlement } from '../../../j-batch';
+import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../../entity-id-utils';
 import type { Env, HankoString } from '../../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../../proof-builder';

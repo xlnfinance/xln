@@ -129,7 +129,7 @@ export type {
  */
 
 import type { GossipLayer, Profile } from './networking/gossip';
-import type { CompletedBatch, JBatchState } from './j-batch';
+import type { CompletedBatch, JBatchState } from './jurisdiction/batch';
 import type { CrontabState } from './crontab-types';
 
 export type { Profile } from './networking/gossip';

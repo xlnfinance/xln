@@ -47,9 +47,9 @@ Top 100 simplification targets:
 35. `runtime/wal/hash.ts` — centralize hash-input normalization with zero ad hoc field deletions outside this file.
 36. `runtime/state-helpers.ts` — split entity clone helpers, account clone helpers, and display/helpers.
 37. `runtime/state-helpers.ts` — replace ad hoc manual clone branches with smaller canonical clone functions.
-38. `runtime/j-batch.ts` — split encoding/hash/signing helpers from batch-mutation helpers.
-39. `runtime/j-batch.ts` — move submit-to-contract glue out, keep only batch structure logic.
-40. `runtime/j-batch.ts` — centralize batch op dedupe rules per op type instead of scattered checks.
+38. `runtime/jurisdiction/batch.ts` — split encoding/hash/signing helpers from batch-mutation helpers.
+39. `runtime/jurisdiction/batch.ts` — move submit-to-contract glue out, keep only batch structure logic.
+40. `runtime/jurisdiction/batch.ts` — centralize batch op dedupe rules per op type instead of scattered checks.
 41. `runtime/jadapter/rpc.ts` — extract shared batch submit flow into helper shared with BrowserVM adapter.
 42. `runtime/jadapter/rpc.ts` — extract watcher poll loop into `rpc-watcher.ts`.
 43. `runtime/jadapter/rpc.ts` — extract token allowance/deposit helpers into `rpc-erc20.ts`.

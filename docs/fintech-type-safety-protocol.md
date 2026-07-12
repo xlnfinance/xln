@@ -30,7 +30,7 @@ Fix these first when reducing type risk:
 
 1. `runtime/jadapter/*`
 2. `runtime/wal/*`
-3. `runtime/j-batch.ts`
+3. `runtime/jurisdiction/batch.ts`
 4. `runtime/proof-builder.ts`
 5. `runtime/account/tx/*`
 6. `runtime/entity/tx/*`

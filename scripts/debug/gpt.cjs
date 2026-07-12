@@ -1128,7 +1128,7 @@ xln/
     entity-consensus.ts          ${fileSizes['runtime/entity-consensus.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     account-consensus.ts         ${fileSizes['runtime/account-consensus.ts'] || '?'} lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   ${fileSizes['runtime/account-consensus-state.ts'] || '?'} lines - Bilateral state machine
-    j-batch.ts                   ${fileSizes['runtime/j-batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
+    j-batch.ts                   ${fileSizes['runtime/jurisdiction/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account-utils.ts             ${fileSizes['runtime/account-utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       ${fileSizes['runtime/serialization-utils.ts'] || '?'} lines - BigInt serialization
     account-crypto.ts            ${fileSizes['runtime/account-crypto.ts'] || '?'} lines - Signature verification

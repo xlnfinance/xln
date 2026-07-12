@@ -7,7 +7,7 @@
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
 import type { DisputeFinalizationEvidence, EntityInput, Env, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput } from '../types';
-import { createEmptyBatch, type JBatch } from '../j-batch';
+import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
 import { enqueueRuntimeInput } from '../runtime';
 import { signAccountFrame } from '../account-crypto';
 import { createStructuredLogger, shortId } from '../logger';
@@ -16,7 +16,7 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
-import { rememberRecentJEvents } from '../j-event-evidence';
+import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CANONICAL J-EVENTS (Single Source of Truth — must match Depository.sol)

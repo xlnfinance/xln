@@ -25,7 +25,7 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
 import { getCachedSignerPrivateKey } from './account-crypto';
-import { cloneJBatch, type CompletedBatch, type JBatchState } from './j-batch';
+import { cloneJBatch, type CompletedBatch, type JBatchState } from './jurisdiction/batch';
 import {
   cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,

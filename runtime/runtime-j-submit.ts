@@ -1,7 +1,7 @@
 import type { EntityInput, Env, JInput, JTx, RuntimeTx } from './types';
 import { getCachedSignerPrivateKey } from './account-crypto';
-import { isBatchEmpty } from './j-batch';
-import { rememberRecentJEvents } from './j-event-evidence';
+import { isBatchEmpty } from './jurisdiction/batch';
+import { rememberRecentJEvents } from './jurisdiction/event-evidence';
 import { getEntityReplicaById } from './orchestrator/mesh-common';
 import { ensureLiveJAdapterForReplica } from './runtime-infra';
 import { classifyRuntimeJBatchFailure } from './failure-taxonomy';

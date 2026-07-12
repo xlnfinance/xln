@@ -12,11 +12,11 @@ import { getFaucetHubProfiles } from './faucet-hubs';
 import {
   findRecentReserveUpdatedEvent,
   type RecentReserveUpdatedEvent,
-} from '../j-event-evidence';
+} from '../jurisdiction/event-evidence';
 
 export {
   findRecentReserveUpdatedEvent,
-} from '../j-event-evidence';
+} from '../jurisdiction/event-evidence';
 
 type TokenCatalogEntry = {
   tokenId?: number | string | null;

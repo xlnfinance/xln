@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ethers } from 'ethers';
 
 import { DEFAULT_PRIVATE_KEY, createJAdapter, createXlnJsonRpcProvider } from '../jadapter';
-import { createEmptyBatch } from '../j-batch';
+import { createEmptyBatch } from '../jurisdiction/batch';
 import { prepareSignedBatch } from '../hanko/batch';
 import { generateLazyEntityId } from '../entity-factory';
 import { canonicalJurisdictionEventsHash } from '../j-event-observation';

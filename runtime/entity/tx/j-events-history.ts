@@ -1,5 +1,5 @@
 import type { EntityState } from '../../types';
-import type { CompletedBatch } from '../../j-batch';
+import type { CompletedBatch } from '../../jurisdiction/batch';
 
 export function emptyOpBreakdown() {
   return {

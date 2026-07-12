@@ -67,8 +67,8 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
-import { getRuntimeJurisdictionHeight } from '../j-height';
-import { createEmptyBatch } from '../j-batch';
+import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
+import { createEmptyBatch } from '../jurisdiction/batch';
 import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
 import { applyMergedEntityInputs } from '../runtime-entity-inputs';

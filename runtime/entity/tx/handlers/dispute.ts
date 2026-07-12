@@ -18,9 +18,9 @@ import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, AccountTx
 import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import { initJBatch, batchAddRevealSecret, J_BATCH_CONTRACT_LIMITS, getBatchSize } from '../../../j-batch';
+import { initJBatch, batchAddRevealSecret, J_BATCH_CONTRACT_LIMITS, getBatchSize } from '../../../jurisdiction/batch';
 import { getDeltaTransformerAddress } from '../../../proof-builder';
-import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdictionHeight } from '../../../j-height';
+import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
 import {
   buildAccountProofBody,
   createDisputeProofHashWithNonce,

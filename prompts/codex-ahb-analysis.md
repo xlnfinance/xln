@@ -24,7 +24,7 @@ Perform **forensic-level analysis** of the Alice-Hub-Bob scenario and underlying
 6. `runtime/entity/tx/apply.ts` - Entity transaction dispatcher
 7. `runtime/account/tx/apply.ts` - Account transaction dispatcher
 8. `runtime/entity/tx/handlers/j-broadcast.ts` - E→J mempool queuing
-9. `runtime/j-batch.ts` (lines 1-150) - Batch accumulation system
+9. `runtime/jurisdiction/batch.ts` (lines 1-150) - Batch accumulation system
 
 ### Phase 3: J-Layer Integration (20 min)
 10. `runtime/runtime.ts` (lines 1565-1650) - J-machine block processor

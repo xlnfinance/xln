@@ -1,5 +1,5 @@
 import type { JAdapter } from '../jadapter/types';
-import type { JBatch } from '../j-batch';
+import type { JBatch } from '../jurisdiction/batch';
 
 /**
  * JReplica = Jurisdiction replica (J-Machine EVM state)

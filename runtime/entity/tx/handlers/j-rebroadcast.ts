@@ -1,7 +1,7 @@
 import type { EntityInput, EntityState, EntityTx, Env, HashType, JInput, JTx } from '../../../types';
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
-import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../../j-batch';
+import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../../jurisdiction/batch';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,

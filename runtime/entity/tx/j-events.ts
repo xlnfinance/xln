@@ -13,13 +13,13 @@ import { getTokenInfo } from '../../account-utils';
 import { CANONICAL_J_EVENTS } from '../../jadapter/helpers';
 import { hashHtlcSecret } from '../../htlc-utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../scheduler';
-import { getRuntimeJurisdictionDefaultDisputeDelayBlocks } from '../../j-height';
+import { getRuntimeJurisdictionDefaultDisputeDelayBlocks } from '../../jurisdiction/height';
 import { scrubDisputeFinalizationsForCounterparty } from './dispute-finalize-guards';
 import {
   canonicalJurisdictionEventKey,
   normalizeJurisdictionEvent,
   normalizeJurisdictionEvents,
-} from '../../j-event-normalization';
+} from '../../jurisdiction/event-normalization';
 import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,

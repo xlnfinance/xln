@@ -76,7 +76,7 @@ export type {
 
 export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
-export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
+export type { CompletedBatch, JBatch, JBatchState } from './jurisdiction/batch';
 export type { JAdapter, JEvent } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
 export type {

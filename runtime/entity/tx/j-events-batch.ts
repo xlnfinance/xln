@@ -6,7 +6,7 @@ import {
   isBatchEmpty,
   mergeBatchOps,
   type BatchOpBreakdown,
-} from '../../j-batch';
+} from '../../jurisdiction/batch';
 import { addMessage } from '../../state-helpers';
 import { filterActiveDisputeFinalizations } from './dispute-finalize-guards';
 import { appendBatchHistory } from './j-events-history';

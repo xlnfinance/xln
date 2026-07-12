@@ -1,5 +1,5 @@
 import type { EntityState } from '../../types';
-import type { JBatch } from '../../j-batch';
+import type { JBatch } from '../../jurisdiction/batch';
 
 const normalizeCounterpartyId = (value: unknown): string => String(value || '').trim().toLowerCase();
 

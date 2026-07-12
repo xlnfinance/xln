@@ -1,6 +1,6 @@
 import type { BookState, EntityReferral, HubProfile } from '../orderbook';
 import type { CrontabState } from '../crontab-types';
-import type { JBatchState } from '../j-batch';
+import type { JBatchState } from '../jurisdiction/batch';
 import type { SwapKey } from '../swap-keys';
 import type {
   AccountInput,

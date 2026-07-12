@@ -7,7 +7,7 @@ import {
   createEmptyBatch,
   getJBatchContractLimitIssue,
   initJBatch,
-} from '../j-batch';
+} from '../jurisdiction/batch';
 
 const transformer = `0x${'11'.repeat(20)}`;
 const secret = (index: number): string => `0x${index.toString(16).padStart(64, '0')}`;

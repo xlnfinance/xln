@@ -68,7 +68,7 @@ for (const [path, markers] of [
     '? getJReplicaByJurisdictionRef(env, configuredName)',
     ': getJReplicaByName(env, configuredName);',
   ]],
-  ['runtime/j-height.ts', [
+  ['runtime/jurisdiction/height.ts', [
     'const getJReplicaByJurisdictionNameOrRef =',
     'return isJurisdictionStackRef(raw)',
     '? getJReplicaByJurisdictionRef(env, raw)',

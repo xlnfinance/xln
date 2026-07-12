@@ -47,7 +47,7 @@ const makeEntityState = (): EntityState => ({
 });
 
 test('j-batch success-path logs stay behind structured debug logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/j-batch.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/batch.ts'), 'utf8');
 
   expect(source).toContain("const jBatchLog = createStructuredLogger('j.batch');");
   expect(source).not.toContain('console.log');

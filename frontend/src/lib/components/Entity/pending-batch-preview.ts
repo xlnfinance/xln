@@ -2,7 +2,7 @@ import type { EntityTx, JBatch } from '@xln/runtime/xln-api';
 import {
   simulateDraftBatchReserveAvailability,
   type DraftBatchReserveIssue,
-} from '@xln/runtime/j-batch';
+} from '@xln/runtime/jurisdiction/batch';
 import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
 import type { EntityReplica } from '$lib/types/ui';
 import { amountToUsd } from '$lib/utils/assetPricing';

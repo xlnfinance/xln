@@ -20,7 +20,7 @@ import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
   computeBatchHankoHash, batchOpCount, createEmptyBatch,
   assertJBatchWithinContractLimits,
-} from '../../../j-batch';
+} from '../../../jurisdiction/batch';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,

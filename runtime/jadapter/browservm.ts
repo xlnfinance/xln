@@ -17,7 +17,7 @@ import {
 } from '../../jurisdictions/typechain-types/index.ts';
 
 import { normalizeEntityId } from '../entity-id-utils';
-import { getBatchSize, isBatchEmpty } from '../j-batch';
+import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import type { BrowserVMState, Env, JTx } from '../types';
 import { normalizeAdapterEvents, processEventBatch, type EventBatchCounter, type RawJEvent } from './helpers';

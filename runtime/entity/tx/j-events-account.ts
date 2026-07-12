@@ -1,6 +1,6 @@
 import type { AccountMachine, JurisdictionEvent } from '../../types';
 import { getDefaultCreditLimit } from '../../account-utils';
-import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../j-event-normalization';
+import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { createStructuredLogger, shortHash } from '../../logger';
 import type { JEventClaimTx, JEventMempoolOp } from './j-events-types';
 

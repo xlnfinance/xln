@@ -18,7 +18,7 @@ import { getTokenCapacity } from '../../../routing/capacity';
 import { deriveDelta } from '../../../account-utils';
 import { NobleCryptoProvider } from '../../../crypto-noble';
 import { createOnionEnvelopes, type HtlcEnvelope } from '../../../htlc-envelope-types';
-import { getRuntimeJurisdictionHeight } from '../../../j-height';
+import { getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
 import { compareStableText, safeStringify } from '../../../serialization-utils';
 import { resolvePaymentDeadlineWindow } from '../../../payment-delivery';
 import { getReplicaByEntityId } from '../../replica';

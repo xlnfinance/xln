@@ -16,7 +16,7 @@ const DIRECT_EVM_ALLOWLIST = new Set<string>([
   'runtime/server.ts',
   'runtime/state-helpers.ts',
   'runtime/cli.ts',
-  'runtime/j-batch.ts',
+  'runtime/jurisdiction/batch.ts',
   'runtime/jadapter/index.ts',
   'runtime/entity-factory.ts',
   'runtime/entity/tx/j-events.ts',
@@ -96,7 +96,7 @@ function findViolations(text: string, fileRel: string): Violation[] {
   }
 
   // Batch submit path: should go through entity j_broadcast -> runtime jOutbox.
-  if (fileRel !== 'runtime/j-batch.ts') {
+  if (fileRel !== 'runtime/jurisdiction/batch.ts') {
     pushMatches(/\bbroadcastBatch\s*\(/g, 'runtime-no-direct-broadcastBatch-call');
   }
 

@@ -7,7 +7,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../cross-jurisdiction';
 import { getCrossJurisdictionBookReceiptError } from '../../../cross-jurisdiction-orderbook';
-import { requireRuntimeJurisdictionDisputeDelayMs } from '../../../j-height';
+import { requireRuntimeJurisdictionDisputeDelayMs } from '../../../jurisdiction/height';
 import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import {
   canonicalizeCrossJurisdictionRouteForKnownEntities,

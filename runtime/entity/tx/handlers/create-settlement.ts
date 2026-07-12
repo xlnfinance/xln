@@ -13,7 +13,7 @@
 
 import type { EntityState, EntityTx, EntityInput, JInput } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
-import { initJBatch, batchAddSettlement } from '../../../j-batch';
+import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { isLeftEntity } from '../../../entity-id-utils';
 import { createStructuredLogger, shortId } from '../../../logger';
 

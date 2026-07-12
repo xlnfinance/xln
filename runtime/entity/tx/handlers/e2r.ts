@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import type { EntityInput, EntityState, EntityTx } from '../../../types';
-import { initJBatch, batchAddExternalTokenToReserve } from '../../../j-batch';
+import { initJBatch, batchAddExternalTokenToReserve } from '../../../jurisdiction/batch';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 
 export async function handleE2R(

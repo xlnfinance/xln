@@ -8,7 +8,7 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../../j-event-observation';
-import { normalizeJurisdictionEvents } from '../../j-event-normalization';
+import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
 import { computeAccountShadowRoot } from '../../account/state-root';
 

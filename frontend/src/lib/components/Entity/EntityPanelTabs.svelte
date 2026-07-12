@@ -18,7 +18,7 @@
     RuntimeAdapterViewFrame,
   } from '@xln/runtime/xln-api';
   import { buildDebtEnforcementRuntimeInputFromProjection } from '@xln/runtime/debt-enforcement-command';
-  import { getDraftBatchReserveDelta } from '@xln/runtime/j-batch';
+  import { getDraftBatchReserveDelta } from '@xln/runtime/jurisdiction/batch';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { getXLN, resolveConfiguredApiBase } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';

@@ -23,7 +23,7 @@ import { formatRuntime } from '../runtime-ascii';
 import { isLeft } from '../account-utils';
 import { ethers } from 'ethers';
 import { createRngFromEnv } from './seeded-rng';
-import { createEmptyBatch } from '../j-batch';
+import { createEmptyBatch } from '../jurisdiction/batch';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);

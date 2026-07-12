@@ -8,7 +8,7 @@
 
 import type { EntityInput, EntityState, EntityTx } from '../../../types';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
-import { batchAddReserveToExternal, getEffectiveDraftReserveBalance, initJBatch } from '../../../j-batch';
+import { batchAddReserveToExternal, getEffectiveDraftReserveBalance, initJBatch } from '../../../jurisdiction/batch';
 
 export async function handleR2E(
   entityState: EntityState,
