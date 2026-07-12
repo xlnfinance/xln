@@ -15,6 +15,15 @@ import { assertRuntimeIdle } from './helpers';
 import { setEntityFrameHashDebugRecorder, type EntityFrameHashDebugRecord } from '../entity/consensus/frame';
 import { stopManagedScenarioAnvil } from './boot';
 import { buildCanonicalJReplicaSnapshot } from '../wal/snapshot';
+import {
+  setAccountStateRootDebugRecorder,
+  type AccountStateRootDebugRecord,
+} from '../account/state-root';
+import {
+  setJEventIngressTransform,
+  type JEventIngressBatch,
+  type RawJEvent,
+} from '../jadapter/watcher';
 
 const RUNS = 2;
 const SEED = 'determinism-test-seed-42';
@@ -38,6 +47,7 @@ type ScenarioOracle = {
   frameHashes: string[];
   frameValues: unknown[];
   frameHashTrace: unknown[];
+  accountStateRootTrace: unknown[];
   finalValue: unknown;
   finalHash: string;
   combinedHash: string;
@@ -49,6 +59,69 @@ type ScenarioResult = {
   success: boolean;
   runs: ScenarioOracle[];
   error?: string;
+};
+
+type JEventTraceMode = 'record' | 'replay';
+
+type JEventTrace = {
+  batches: JEventIngressBatch[];
+  cursor: number;
+};
+
+const cloneJEventTraceValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(cloneJEventTraceValue);
+  if (value instanceof Uint8Array) return value.slice();
+  if (value instanceof Map) {
+    return new Map(Array.from(value.entries()).map(([key, entry]) => [
+      cloneJEventTraceValue(key),
+      cloneJEventTraceValue(entry),
+    ]));
+  }
+  if (value instanceof Set) return new Set(Array.from(value.values()).map(cloneJEventTraceValue));
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+    key,
+    cloneJEventTraceValue(entry),
+  ]));
+};
+
+const cloneJEventIngressBatch = (batch: JEventIngressBatch): JEventIngressBatch =>
+  cloneJEventTraceValue(batch) as JEventIngressBatch;
+
+const jEventSemanticProjection = (events: RawJEvent[]): unknown => toDebugTraceValue(
+  events.map((event) => ({
+    name: event.name,
+    args: event.args,
+    ...(event.disputeFinalizationEvidence
+      ? { disputeFinalizationEvidence: event.disputeFinalizationEvidence }
+      : {}),
+  })),
+);
+
+const createJEventTraceTransform = (
+  mode: JEventTraceMode,
+  trace: JEventTrace,
+): ((batch: JEventIngressBatch) => JEventIngressBatch) => (batch) => {
+  if (mode === 'record') {
+    trace.batches.push(cloneJEventIngressBatch(batch));
+    return batch;
+  }
+
+  const expected = trace.batches[trace.cursor];
+  if (!expected) {
+    throw new Error(`J_EVENT_TRACE_UNEXPECTED_BATCH:index=${trace.cursor}`);
+  }
+  const expectedSemantics = jEventSemanticProjection(expected.rawEvents);
+  const actualSemantics = jEventSemanticProjection(batch.rawEvents);
+  const semanticDiff = findFirstDiff(expectedSemantics, actualSemantics);
+  if (semanticDiff) {
+    throw new Error(
+      `J_EVENT_TRACE_SEMANTIC_MISMATCH:index=${trace.cursor} path=${semanticDiff.path} ` +
+      `expected=${previewValue(semanticDiff.left)} actual=${previewValue(semanticDiff.right)}`,
+    );
+  }
+  trace.cursor += 1;
+  return cloneJEventIngressBatch(expected);
 };
 
 const isJEventObservationEnvelope = (value: Record<string, unknown>): boolean =>
@@ -218,15 +291,20 @@ const buildFrameHashTrace = (records: EntityFrameHashDebugRecord[]): unknown[] =
     payload: record.payload,
   }));
 
-const buildOracle = (env: Env, frameHashRecords: EntityFrameHashDebugRecord[]): ScenarioOracle => {
+const buildOracle = (
+  env: Env,
+  frameHashRecords: EntityFrameHashDebugRecord[],
+  accountStateRootRecords: AccountStateRootDebugRecord[],
+): ScenarioOracle => {
   const frameValues = (env.history ?? []).map((snapshot) => toOracleValue(snapshotProjection(snapshot)));
   const frameHashes = frameValues.map((snapshot) => hashOracleValue(snapshot, 24));
   const frameHashTrace = buildFrameHashTrace(frameHashRecords);
+  const accountStateRootTrace = accountStateRootRecords.map((record) => toDebugTraceValue(record));
   const finalValue = toOracleValue(snapshotEnvProjection(env));
   const finalHash = hashOracleValue(finalValue, 32);
   const frameCount = frameHashes.length;
   const combinedHash = hashOracleValue(toOracleValue({ frameCount, frameHashes, finalHash }), 32);
-  return { frameCount, frameHashes, frameValues, frameHashTrace, finalValue, finalHash, combinedHash };
+  return { frameCount, frameHashes, frameValues, frameHashTrace, accountStateRootTrace, finalValue, finalHash, combinedHash };
 };
 
 type DiffResult = {
@@ -272,6 +350,33 @@ const previewValue = (value: unknown): string => {
   return encoded.length > 700 ? `${encoded.slice(0, 700)}...` : encoded;
 };
 
+const DERIVED_DEBUG_FIELDS = new Set([
+  'accountStateRoot',
+  'counterpartyDisputeHanko',
+  'counterpartyFrameHanko',
+  'disputeHash',
+  'hanko',
+  'hankoWitness',
+  'leftHanko',
+  'prevFrameHash',
+  'proofbodyHash',
+  'rightHanko',
+  'signature',
+  'stateHash',
+]);
+
+const stripDerivedEvidenceForDebug = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stripDerivedEvidenceForDebug);
+  if (value === null || typeof value !== 'object') return value;
+  const source = value as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(source).map(([key, entry]) => [
+    key,
+    DERIVED_DEBUG_FIELDS.has(key) || key.toLowerCase().endsWith('hanko')
+      ? '<derived-evidence>'
+      : stripDerivedEvidenceForDebug(entry),
+  ]));
+};
+
 const findFirstMismatch = (left: string[], right: string[]): number => {
   const max = Math.max(left.length, right.length);
   for (let index = 0; index < max; index += 1) {
@@ -303,8 +408,23 @@ const assertMatchingOracles = (scenario: ScenarioEntry, runs: ScenarioOracle[]):
     const traceText = traceDiff
       ? ` frameHashInputDiff=${traceDiff.path} left=${previewValue(traceDiff.left)} right=${previewValue(traceDiff.right)}`
       : '';
+    const accountRootTraceDiff = findFirstDiff(expected.accountStateRootTrace, actual.accountStateRootTrace);
+    const accountRootTraceText = accountRootTraceDiff
+      ? ` accountRootInputDiff=${accountRootTraceDiff.path} left=${previewValue(accountRootTraceDiff.left)} right=${previewValue(accountRootTraceDiff.right)}`
+      : '';
+    const finalDiff = findFirstDiff(expected.finalValue, actual.finalValue);
+    const finalDiffText = finalDiff
+      ? ` finalDiff=${finalDiff.path} left=${previewValue(finalDiff.left)} right=${previewValue(finalDiff.right)}`
+      : '';
+    const finalStateDiff = findFirstDiff(
+      stripDerivedEvidenceForDebug(expected.finalValue),
+      stripDerivedEvidenceForDebug(actual.finalValue),
+    );
+    const finalStateDiffText = finalStateDiff
+      ? ` finalStateDiff=${finalStateDiff.path} left=${previewValue(finalStateDiff.left)} right=${previewValue(finalStateDiff.right)}`
+      : '';
     throw new Error(
-      `${scenario.key}: non-deterministic replay between run 1 and run ${index + 2}: ${mismatch}${diffText}${traceText}`,
+      `${scenario.key}: non-deterministic replay between run 1 and run ${index + 2}: ${mismatch}${diffText}${traceText}${accountRootTraceText}${finalDiffText}${finalStateDiffText}`,
     );
   }
 };
@@ -337,6 +457,8 @@ const runScenarioOnce = async (
   scenario: ScenarioEntry,
   runIndex: number,
   scenarioIndex: number,
+  jEventTraceMode: JEventTraceMode,
+  jEventTrace: JEventTrace,
 ): Promise<ScenarioOracle> => {
   const { createEmptyEnv } = await import('../runtime');
   const originalConsole = captureConsole();
@@ -346,9 +468,16 @@ const runScenarioOnce = async (
   let env: Env | null = null;
   let activeEnv: Env | null = null;
   const frameHashRecords: EntityFrameHashDebugRecord[] = [];
+  const accountStateRootRecords: AccountStateRootDebugRecord[] = [];
   const restoreFrameHashRecorder = setEntityFrameHashDebugRecorder((record) => {
     frameHashRecords.push(record);
   });
+  const restoreAccountStateRootRecorder = setAccountStateRootDebugRecorder((record) => {
+    accountStateRootRecords.push(record);
+  });
+  const restoreJEventIngressTransform = setJEventIngressTransform(
+    createJEventTraceTransform(jEventTraceMode, jEventTrace),
+  );
   try {
     const rpcUrl = rpcUrlForScenarioRun(scenarioIndex, runIndex);
     process.env['JADAPTER_MODE'] = 'rpc';
@@ -377,9 +506,16 @@ const runScenarioOnce = async (
     const returnedEnv = await run(env);
     if (returnedEnv) activeEnv = returnedEnv;
     assertRuntimeIdle(activeEnv, scenario.name);
-    return buildOracle(activeEnv, frameHashRecords);
+    if (jEventTraceMode === 'replay' && jEventTrace.cursor !== jEventTrace.batches.length) {
+      throw new Error(
+        `J_EVENT_TRACE_INCOMPLETE:consumed=${jEventTrace.cursor} total=${jEventTrace.batches.length}`,
+      );
+    }
+    return buildOracle(activeEnv, frameHashRecords, accountStateRootRecords);
   } finally {
     restoreFrameHashRecorder();
+    restoreAccountStateRootRecorder();
+    restoreJEventIngressTransform();
     restoreConsole(originalConsole);
     if (previousJAdapterMode === undefined) delete process.env['JADAPTER_MODE'];
     else process.env['JADAPTER_MODE'] = previousJAdapterMode;
@@ -400,9 +536,17 @@ const runScenarioOnce = async (
 
 async function verifyScenarioDeterminism(scenario: ScenarioEntry, scenarioIndex: number): Promise<ScenarioResult> {
   const runs: ScenarioOracle[] = [];
+  const jEventTrace: JEventTrace = { batches: [], cursor: 0 };
   try {
     for (let runIndex = 0; runIndex < RUNS; runIndex += 1) {
-      const oracle = await runScenarioOnce(scenario, runIndex + 1, scenarioIndex);
+      jEventTrace.cursor = 0;
+      const oracle = await runScenarioOnce(
+        scenario,
+        runIndex + 1,
+        scenarioIndex,
+        runIndex === 0 ? 'record' : 'replay',
+        jEventTrace,
+      );
       runs.push(oracle);
       console.log(
         `  ${scenario.key} run ${runIndex + 1}/${RUNS}: frames=${oracle.frameCount} hash=${oracle.combinedHash.slice(0, 12)}`,

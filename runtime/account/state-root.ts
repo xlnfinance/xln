@@ -10,6 +10,24 @@ export type AccountStateDomain = {
 
 export const EMPTY_ACCOUNT_STATE_ROOT = `0x${'00'.repeat(32)}`;
 
+export type AccountStateRootDebugRecord = {
+  accountId: string;
+  root: string;
+  entries: ReadonlyArray<readonly [path: string, value: unknown]>;
+};
+
+let accountStateRootDebugRecorder: ((record: AccountStateRootDebugRecord) => void) | null = null;
+
+export const setAccountStateRootDebugRecorder = (
+  recorder: ((record: AccountStateRootDebugRecord) => void) | null,
+): (() => void) => {
+  const previous = accountStateRootDebugRecorder;
+  accountStateRootDebugRecorder = recorder;
+  return () => {
+    accountStateRootDebugRecorder = previous;
+  };
+};
+
 export const accountStateDomainFromJurisdiction = (
   jurisdiction: JurisdictionConfig,
 ): AccountStateDomain => {
@@ -84,39 +102,50 @@ export const computeCanonicalMerkleRoot = (
 export const computeAccountStateRoot = (
   account: AccountMachine,
   domain: AccountStateDomain,
-): string => buildHexKeyedMerkle([
-  stateLeaf('identity', {
+): string => {
+  const entries = [
+    ['identity', {
     chainId: domain.chainId,
     depositoryAddress: domain.depositoryAddress.toLowerCase(),
     leftEntity: account.leftEntity.toLowerCase(),
     rightEntity: account.rightEntity.toLowerCase(),
     watchSeed: account.watchSeed.toLowerCase(),
-  }),
-  stateLeaf('financial', {
+    }],
+    ['financial', {
     deltas: account.deltas,
     globalCreditLimits: account.globalCreditLimits,
     jNonce: account.jNonce,
     disputeConfig: account.disputeConfig,
-  }),
-  stateLeaf('commitments', {
+    }],
+    ['commitments', {
     locks: account.locks,
     pulls: account.pulls,
     swapOffers: account.swapOffers,
     subcontracts: account.subcontracts,
     lendingIntents: account.lendingIntents ?? new Map(),
-  }),
-  stateLeaf('jurisdiction', {
+    }],
+    ['jurisdiction', {
     lastFinalizedJHeight: account.lastFinalizedJHeight,
     leftJObservations: account.leftJObservations,
     rightJObservations: account.rightJObservations,
     jEventChain: account.jEventChain,
-  }),
-  stateLeaf('rebalance', {
+    }],
+    ['rebalance', {
     requestedRebalance: account.requestedRebalance,
     requestedRebalanceFeeState: account.requestedRebalanceFeeState,
     counterpartyRebalanceFeePolicy: account.counterpartyRebalanceFeePolicy,
-  }),
-]).root;
+    }],
+  ] as const satisfies ReadonlyArray<readonly [path: string, value: unknown]>;
+  const root = buildHexKeyedMerkle(entries.map(([path, value]) => stateLeaf(path, value))).root;
+  if (accountStateRootDebugRecorder) {
+    accountStateRootDebugRecorder({
+      accountId: `${account.leftEntity.toLowerCase()}:${account.rightEntity.toLowerCase()}`,
+      root,
+      entries: structuredClone(entries),
+    });
+  }
+  return root;
+};
 
 const settlementOverlayState = (
   workspace: SettlementWorkspace | undefined,

@@ -143,7 +143,9 @@ const startManagedAnvil = async (rpcUrl: string, chainId: number): Promise<void>
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', String(chainId),
-    '--timestamp', '1700000000',
+    // Keep genesis ahead of wall clock so Anvil auto-mining advances by one
+    // deterministic second instead of jumping to the host's current time.
+    '--timestamp', '4102444800',
     '--block-gas-limit', '60000000',
     '--code-size-limit', '65536',
     '--prune-history', '256',

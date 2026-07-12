@@ -156,6 +156,24 @@ export type EventBatchCounter = {
 
 export type PendingWatcherJBlockMap = Map<number, Set<string>>;
 
+export type JEventIngressBatch = {
+  rawEvents: RawJEvent[];
+  blockNumber: number;
+  blockHash: string;
+};
+
+let jEventIngressTransform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null = null;
+
+export const setJEventIngressTransform = (
+  transform: ((batch: JEventIngressBatch) => JEventIngressBatch) | null,
+): (() => void) => {
+  const previous = jEventIngressTransform;
+  jEventIngressTransform = transform;
+  return () => {
+    jEventIngressTransform = previous;
+  };
+};
+
 const normalizeJurisdictionLabel = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
@@ -246,7 +264,11 @@ export function updateWatcherJurisdictionCursor(
   const replica = findWatcherJurisdictionReplica(env, depositoryAddress);
   if (!replica) return;
   if (!Number.isFinite(blockNumber) || blockNumber < 0) return;
-  replica.blockNumber = BigInt(Math.floor(blockNumber));
+  const nextBlock = Math.floor(blockNumber);
+  const currentBlock = Number(replica.blockNumber ?? 0n);
+  replica.blockNumber = BigInt(
+    Number.isFinite(currentBlock) ? Math.max(Math.floor(currentBlock), nextBlock) : nextBlock,
+  );
 }
 
 const assertJEventIngressOpen = (env: Env, label: string): void => {
@@ -973,9 +995,21 @@ export function processEventBatch(
   }
   if (deduped.length === 0) return;
 
-  enqueueRawJEventsToRuntime(env, deduped, {
-    blockNumber,
-    blockHash,
+  const ingressBatch = jEventIngressTransform
+    ? jEventIngressTransform({ rawEvents: deduped, blockNumber, blockHash })
+    : { rawEvents: deduped, blockNumber, blockHash };
+  if (
+    !Number.isSafeInteger(ingressBatch.blockNumber) ||
+    ingressBatch.blockNumber < 0 ||
+    typeof ingressBatch.blockHash !== 'string' ||
+    ingressBatch.rawEvents.length === 0
+  ) {
+    throw new Error(`J_EVENT_INGRESS_TRANSFORM_INVALID:${adapterLabel}`);
+  }
+
+  enqueueRawJEventsToRuntime(env, ingressBatch.rawEvents, {
+    blockNumber: ingressBatch.blockNumber,
+    blockHash: ingressBatch.blockHash,
     adapterLabel,
     txCounter,
     logBatch: !!env?.debugJWatcherBatches,

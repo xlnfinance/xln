@@ -20,6 +20,7 @@ import {
   rawEventToJEvents,
   rememberPendingWatcherJBlock,
   resolveCommittedWatcherCursor,
+  setJEventIngressTransform,
   updateWatcherJurisdictionCursor,
 } from '../jadapter/watcher';
 import { findRecentReserveUpdatedEvent } from '../jurisdiction/event-evidence';
@@ -287,6 +288,8 @@ describe('jadapter helper cursors', () => {
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(101);
     updateWatcherJurisdictionCursor(env, 120, '0xaaa');
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(121);
+    updateWatcherJurisdictionCursor(env, 30, '0xaaa');
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(121);
   });
 
   test('watcher start block is capped by committed signer j-blocks when present', () => {
@@ -305,7 +308,7 @@ describe('jadapter helper cursors', () => {
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(41);
 
     updateWatcherJurisdictionCursor(env, 30, '0xaaa');
-    expect(getWatcherStartBlock(env, '0xaaa')).toBe(31);
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(41);
 
     updateWatcherJurisdictionCursor(env, 200, '0xaaa');
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(41);
@@ -421,6 +424,48 @@ describe('jadapter helper cursors', () => {
     expect(queuedInputs.every((input) => input.entityTxs[0]?.type === 'j_event')).toBe(true);
     expect(queuedInputs.map((input) => input.entityTxs[0]?.data?.observedAt)).toEqual([7, 7]);
     expect(env.runtimeState?.wakeRequested).toBe(true);
+  });
+
+  test('J-event ingress transform replaces external block identity before signing', () => {
+    const env = createEmptyEnv('jadapter-helper-trace-transform');
+    const entityId = `0x${'46'.repeat(32)}`;
+    env.eReplicas.set(`${entityId}:1`, makeReplica(entityId, '1', true));
+    const recordedBlockHash = `0x${'88'.repeat(32)}`;
+    const restore = setJEventIngressTransform((batch) => ({
+      ...batch,
+      blockNumber: 70,
+      blockHash: recordedBlockHash,
+      rawEvents: batch.rawEvents.map((event) => ({
+        ...event,
+        blockNumber: 70,
+        blockHash: recordedBlockHash,
+      })),
+    }));
+
+    try {
+      processEventBatch(
+        [{
+          name: 'ReserveUpdated',
+          args: { entity: entityId, tokenId: 2, newBalance: 123n },
+          blockNumber: 7,
+          blockHash: `0x${'66'.repeat(32)}`,
+          transactionHash: `0x${'77'.repeat(32)}`,
+          logIndex: 0,
+        }],
+        env,
+        7,
+        `0x${'66'.repeat(32)}`,
+        { value: 0 },
+        'trace-test',
+      );
+    } finally {
+      restore();
+    }
+
+    const jEventData = env.runtimeMempool?.entityInputs?.[0]?.entityTxs?.[0]?.data;
+    expect(jEventData?.blockNumber).toBe(70);
+    expect(jEventData?.blockHash).toBe(recordedBlockHash);
+    expect(jEventData?.observedAt).toBe(70);
   });
 
   test('buildJEventsRuntimeInput returns j_event input without enqueueing into runtime mempool', () => {

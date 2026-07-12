@@ -1904,7 +1904,7 @@ export async function createRpcAdapter(
 
     // === J-Watcher integration (RPC polling — uses shared event conversion from watcher.ts) ===
     startWatching(env: Env): void {
-      if (watcherInterval) {
+      if (watcherEnv) {
         rpcLog.debug('watcher.already_running', { chainId: config.chainId });
         return;
       }
@@ -1924,6 +1924,7 @@ export async function createRpcAdapter(
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       const pendingWatcherJBlocks: PendingWatcherJBlockMap = new Map();
       const watchPollMs = BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
+      const manualPolling = env.scenarioMode === true;
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
       const startBlock = getWatcherStartBlock(env, addresses.depository);
       lastSyncedBlock = Math.max(0, startBlock - 1);
@@ -2488,12 +2489,18 @@ export async function createRpcAdapter(
       };
 
       pollNowHandler = doPoll;
-      watcherInterval = setInterval(() => {
+      if (!manualPolling) {
+        watcherInterval = setInterval(() => {
+          void doPoll();
+        }, watchPollMs);
         void doPoll();
-      }, watchPollMs);
-      void doPoll();
+      }
 
-      rpcLog.info('watcher.ready', { chainId: config.chainId, pollMs: watchPollMs });
+      rpcLog.info('watcher.ready', {
+        chainId: config.chainId,
+        mode: manualPolling ? 'manual' : 'interval',
+        pollMs: watchPollMs,
+      });
     },
 
     async pollNow(): Promise<void> {
@@ -2502,7 +2509,7 @@ export async function createRpcAdapter(
     },
 
     isWatching(): boolean {
-      return watcherInterval !== null;
+      return watcherEnv !== null;
     },
 
     stopWatching(): void {

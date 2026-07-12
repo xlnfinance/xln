@@ -86,4 +86,13 @@ describe('determinism cleanup lifecycle', () => {
     expect(projectSource).not.toContain('blockNumber: replica.blockNumber');
     expect(projectSource).not.toContain('lastBlockTimestamp: replica.lastBlockTimestamp');
   });
+
+  test('RPC scenarios use explicit polling and a wall-clock-independent chain', () => {
+    const rpcSource = readSource('runtime/jadapter/rpc.ts');
+    const bootSource = readSource('runtime/scenarios/boot.ts');
+
+    expect(rpcSource).toContain("const manualPolling = env.scenarioMode === true;");
+    expect(rpcSource).toContain("if (!manualPolling) {");
+    expect(bootSource).toContain("'--timestamp', '4102444800'");
+  });
 });

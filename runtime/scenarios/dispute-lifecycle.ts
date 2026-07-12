@@ -101,6 +101,9 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
       : {}),
   });
   env.quietRuntimeLogs = true;
+  const scenarioDebug = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.['XLN_SCENARIO_DEBUG'] === '1';
+  if (scenarioDebug) env.scenarioLogLevel = 'debug';
   const restoreStrict = enableStrictScenario(env, 'dispute-lifecycle');
 
   try {
@@ -349,7 +352,22 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
         break;
       }
     }
-    assert(autoFinalizeObserved, 'Auto dispute finalize did not complete after timeout', env);
+    if (!autoFinalizeObserved) {
+      const aliceState = findReplica(env, alice.id)[1].state;
+      const account = aliceState.accounts.get(hub.id);
+      const deadlineHook = aliceState.crontabState?.hooks?.get(`dispute-deadline:${hub.id.toLowerCase()}`);
+      throw new Error(
+        `ASSERTION FAILED: Auto dispute finalize did not complete after timeout ` +
+        `(runtimeTs=${env.timestamp} entityTs=${aliceState.timestamp} ` +
+        `jHeight=${String(env.jReplicas.values().next().value?.blockNumber ?? 'missing')} ` +
+        `timeout=${String(account?.activeDispute?.disputeTimeout ?? 'cleared')} ` +
+        `observed=${String(account?.activeDispute?.observedOnChain ?? false)} ` +
+        `finalizeQueued=${String(account?.activeDispute?.finalizeQueued ?? false)} ` +
+        `hookAt=${String(deadlineHook?.triggerAt ?? 'missing')} ` +
+        `draft=${aliceState.jBatchState?.batch?.disputeFinalizations?.length ?? 0} ` +
+        `sent=${aliceState.jBatchState?.sentBatch?.batch?.disputeFinalizations?.length ?? 0})`,
+      );
+    }
 
     const aliceAfterFinalize = findReplica(env, alice.id)[1].state.accounts.get(hub.id);
     const hubAfterFinalize = findReplica(env, hub.id)[1].state.accounts.get(alice.id);

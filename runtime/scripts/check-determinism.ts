@@ -11,8 +11,8 @@ type Violation = {
 
 const ROOT = process.cwd();
 const SCAN_ROOTS = [
-  'runtime/account-tx',
-  'runtime/entity-tx',
+  'runtime/account/tx',
+  'runtime/entity/tx',
 ];
 const SCAN_FILES = [
   'runtime/account/consensus/index.ts',
