@@ -11,7 +11,6 @@ import type {
   Env,
   EntityState,
   Delta,
-  HtlcLock,
 } from './types';
 import {
   cloneAccountFrame,
@@ -56,6 +55,12 @@ import { signEntityHashes, verifyHankoForHash } from './hanko/signing';
 import { getReplicaByEntityId } from './replica-utils';
 import { computeAccountStateRoot } from './account-state-root';
 import {
+  getIncomingAccountDeadlineViolation,
+  HTLC_ENFORCEMENT_RESERVE_MS,
+  isHtlcSecretEnforcementWindowClosed,
+  type AccountInputSecurityContext,
+} from './account-consensus/deadline-policy';
+import {
   accountInputAck,
   accountInputDisputeSeal,
   accountInputProposal,
@@ -71,22 +76,14 @@ export type {
 } from './account-consensus/types';
 
 const accountLog = createStructuredLogger('account');
-export const HTLC_ENFORCEMENT_RESERVE_MS = 30_000;
+const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;
 
-export type AccountInputSecurityContext = {
-  entityTimestamp: number;
-  finalizedJHeight: number;
+export {
+  getIncomingAccountDeadlineViolation,
+  HTLC_ENFORCEMENT_RESERVE_MS,
+  isHtlcSecretEnforcementWindowClosed,
 };
-
-export function isHtlcSecretEnforcementWindowClosed(
-  lock: Pick<HtlcLock, 'timelock' | 'revealBeforeHeight'>,
-  securityContext: AccountInputSecurityContext,
-): boolean {
-  const timestampTooLate =
-    BigInt(securityContext.entityTimestamp) + BigInt(HTLC_ENFORCEMENT_RESERVE_MS) > lock.timelock;
-  const finalizedHeightTooLate = securityContext.finalizedJHeight > lock.revealBeforeHeight;
-  return timestampTooLate || finalizedHeightTooLate;
-}
+export type { AccountInputSecurityContext };
 
 export { computeFrameHash, validateAccountFrame } from './account-consensus-frame';
 
@@ -835,7 +832,6 @@ function handleSameHeightIncomingFrame(
 
 async function verifyIncomingFrameHanko(
   env: Env,
-  accountMachine: AccountMachine,
   input: AccountInput,
   receivedFrame: AccountFrame,
   events: string[],
@@ -860,7 +856,6 @@ async function verifyIncomingFrameHanko(
   }
 
   accountLog.debug('hanko.frame.verified', { height: receivedFrame.height, from: shortId(recoveredEntityId) });
-  accountMachine.counterpartyFrameHanko = hankoToVerify;
   return undefined;
 }
 
@@ -993,28 +988,32 @@ async function preflightIncomingAccountFrame(
     };
   }
 
-  const hankoError = await verifyIncomingFrameHanko(env, accountMachine, input, receivedFrame, events);
+  const hankoError = await verifyIncomingFrameHanko(env, input, receivedFrame, events);
   if (hankoError) {
     return { kind: 'return', result: hankoError };
   }
 
-  const lateSecrets = receivedFrame.accountTxs.flatMap((tx) => {
-    if (tx.type !== 'htlc_resolve' || tx.data.outcome !== 'secret' || !tx.data.secret) return [];
-    const lock = accountMachine.locks.get(tx.data.lockId);
-    if (!lock || !isHtlcSecretEnforcementWindowClosed(lock, securityContext)) return [];
-    return [{ hashlock: lock.hashlock, secret: tx.data.secret }];
-  });
-  if (lateSecrets.length > 0) {
-    const reason =
-      `HTLC_SECRET_ENFORCEMENT_WINDOW_TOO_SHORT: reserve=${HTLC_ENFORCEMENT_RESERVE_MS}ms ` +
-      `entityTimestamp=${securityContext.entityTimestamp}`;
+  const staleByMs = securityContext.entityTimestamp - receivedFrame.timestamp;
+  const collateralPriorityRisk =
+    staleByMs > 0 && receivedFrame.accountTxs.some((tx) => tx.type === 'request_collateral');
+  if (staleByMs > STALE_ACCOUNT_FRAME_WARNING_MS || collateralPriorityRisk) {
+    accountLog.warn('frame.stale_accepted', {
+      height: receivedFrame.height,
+      staleByMs,
+      txs: receivedFrame.accountTxs.map((tx) => tx.type),
+      collateralPriorityRisk,
+    });
+  }
+
+  const deadlineViolation = getIncomingAccountDeadlineViolation(accountMachine, receivedFrame, securityContext);
+  if (deadlineViolation) {
     return {
       kind: 'return',
       result: {
         success: false,
-        error: reason,
+        error: deadlineViolation.reason,
         events,
-        disputeRequired: { reason, evidenceSecrets: lateSecrets },
+        disputeRequired: deadlineViolation,
       },
     };
   }
@@ -1259,6 +1258,9 @@ async function commitIncomingFrameOnRealState(
 
   accountMachine.currentFrame = structuredClone(receivedFrame);
   accountMachine.currentHeight = receivedFrame.height;
+  const acceptedFrameHanko = accountInputProposal(input)?.frameHanko;
+  if (!acceptedFrameHanko) throw new Error('ACCEPTED_ACCOUNT_FRAME_HANKO_MISSING');
+  accountMachine.counterpartyFrameHanko = acceptedFrameHanko;
   if (accountInputProposal(input)?.disputeSeal) {
     storeCounterpartyDisputeSeal(accountMachine, validatedCounterpartyDisputeSeal);
     accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });

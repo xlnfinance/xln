@@ -1,1 +1,2 @@
 export const MEMPOOL_LIMIT = 1000;
+export const ACCOUNT_NETWORK_ALLOWANCE_MS = 30_000;

@@ -3,9 +3,11 @@ import { x25519 } from '@noble/curves/ed25519.js';
 
 import {
   applyAccountInput,
+  getIncomingAccountDeadlineViolation,
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
+  validateAccountFrame,
 } from '../account-consensus';
 import { computeAccountStateRoot } from '../account-state-root';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
@@ -14,6 +16,7 @@ import { applyAccountTx } from '../account-tx/apply';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
 import { hashHtlcSecret } from '../htlc-utils';
+import { buildHashLadderProof, revealHashLadder } from '../hashladder';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account-consensus-frame';
@@ -67,6 +70,7 @@ import { getRuntimeJurisdictionHeight } from '../j-height';
 import { createEmptyBatch } from '../j-batch';
 import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
+import { applyMergedEntityInputs } from '../runtime-entity-inputs';
 import { submitRuntimeJOutbox } from '../runtime-j-submit';
 import { safeStringify } from '../serialization-utils';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
@@ -79,7 +83,7 @@ import { NobleCryptoProvider } from '../crypto-noble';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 import { cloneAccountMachine, resolveEntityProposerId } from '../state-helpers';
-import type { AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
+import type { AccountFrame, AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, DisputeFinalizationEvidence, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
 import { ethers } from 'ethers';
 
 const makeSingleSignerConfig = (): EntityState['config'] => ({
@@ -191,6 +195,21 @@ const makeProposalAccount = (
     jNonce: 0,
   } as AccountMachine;
 };
+
+const makeIncomingAccountFrame = (
+  account: AccountMachine,
+  tx: AccountTx,
+  byLeft: boolean,
+  timestamp = 10_000,
+  jHeight = 1,
+): AccountFrame => ({
+  ...account.currentFrame,
+  height: account.currentHeight + 1,
+  timestamp,
+  jHeight,
+  accountTxs: [tx],
+  byLeft,
+});
 
 const attachSigningReplica = (
   env: ReturnType<typeof createEmptyEnv>,
@@ -1912,7 +1931,7 @@ describe('audit fail-fast regressions', () => {
     expect(account.deltas.get(1)?.leftHold).toBe(0n);
   });
 
-  test('signed account frame can arrive after the receiver watcher advances', async () => {
+  test('signed non-deadline account frame remains valid after a ten-minute outage', async () => {
     const seed = 'account-frame-watcher-lag';
     const env = createEmptyEnv(seed);
     env.timestamp = 10_000;
@@ -1933,12 +1952,26 @@ describe('audit fail-fast regressions', () => {
     const proposal = await proposeAccountFrame(env, proposer, 9);
     if (!proposal.success || !proposal.accountInput) throw new Error(proposal.error || 'proposal failed');
     const result = await applyAccountInput(env, receiver, proposal.accountInput, {
-      entityTimestamp: env.timestamp,
+      entityTimestamp: env.timestamp + 10 * 60_000,
       finalizedJHeight: 10,
     });
 
     expect(result.success).toBe(true);
     expect(receiver.currentHeight).toBe(1);
+  });
+
+  test('account frame freshness rejects future skew but permits old retransmission', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    const oldFrame = makeIncomingAccountFrame(
+      account,
+      { type: 'set_credit_limit', data: { tokenId: 1, amount: 1n } },
+      true,
+      1_000,
+    );
+    const futureFrame = { ...oldFrame, timestamp: 130_001 };
+
+    expect(validateAccountFrame(oldFrame, 100_000, 0)).toBe(true);
+    expect(validateAccountFrame(futureFrame, 100_000, 0)).toBe(false);
   });
 
   test('HTLC secret enforcement reserve closes on either entity time or finalized J-height', () => {
@@ -2012,7 +2045,147 @@ describe('audit fail-fast regressions', () => {
 
     expect(applied.newState.accounts.get(left.entityId)?.currentHeight).toBe(0);
     expect(applied.newState.accounts.get(left.entityId)?.status).toBe('dispute_preparing');
+    expect(applied.newState.accounts.get(left.entityId)?.counterpartyFrameHanko).toBeUndefined();
     expect(applied.newState.htlcRoutes.get(hashlock)?.secret).toBe(secret);
+  });
+
+  test('receiver-local preflight rejects stale creation of unenforceable HTLC and pull locks', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    const context = { entityTimestamp: 100_000, finalizedJHeight: 50 };
+    const htlcTx: AccountTx = {
+      type: 'htlc_lock',
+      data: {
+        lockId: 'stale-lock',
+        hashlock: `0x${'31'.repeat(32)}`,
+        timelock: 120_000n,
+        revealBeforeHeight: 50,
+        amount: 1n,
+        tokenId: 1,
+      },
+    };
+    const pullProof = buildHashLadderProof('stale-pull-lock');
+    const pullTx: AccountTx = {
+      type: 'pull_lock',
+      data: {
+        pullId: 'stale-pull',
+        tokenId: 1,
+        amount: -1n,
+        revealedUntilTimestamp: 120_000,
+        fullHash: pullProof.fullHash,
+        partialRoot: pullProof.partialRoot,
+      },
+    };
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, htlcTx, true),
+      context,
+    )?.reason).toContain('HTLC_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, pullTx, true),
+      context,
+    )?.reason).toContain('PULL_LOCK_ENFORCEMENT_WINDOW_TOO_SHORT');
+  });
+
+  test('receiver-local preflight rejects incremental pull claims after local expiry', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    const proof = buildHashLadderProof('stale-pull-resolve');
+    const reveal = revealHashLadder(proof, 32_768);
+    account.pulls = new Map([['pull-1', {
+      pullId: 'pull-1',
+      tokenId: 1,
+      amount: -100n,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: 20_000,
+      fullHash: proof.fullHash,
+      partialRoot: proof.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    }]]);
+    const context = { entityTimestamp: 20_000, finalizedJHeight: 1 };
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'pull_resolve',
+        data: { pullId: 'pull-1', binary: reveal.binary },
+      }, false),
+      context,
+    )?.reason).toContain('PULL_CLAIM_AFTER_LOCAL_EXPIRY');
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'cross_pull_close',
+        data: {
+          pullId: 'pull-1',
+          binary: reveal.binary,
+          proof: {
+            orderId: 'order-1',
+            routeHash: `0x${'51'.repeat(32)}`,
+            sourcePullId: 'pull-1',
+            targetPullId: 'pull-2',
+            fillRatio: reveal.fillRatio,
+            cumulativeSourceAmount: 50n,
+            cumulativeTargetAmount: 50n,
+            binaryHash: `0x${'52'.repeat(32)}`,
+            closeMode: 'partial_cancel_remainder',
+          },
+        },
+      }, false),
+      context,
+    )?.reason).toContain('CROSS_PULL_CLAIM_AFTER_LOCAL_EXPIRY');
+  });
+
+  test('receiver-local preflight blocks payer pull cancellation before local expiry', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    const proof = buildHashLadderProof('early-pull-cancel');
+    account.pulls = new Map([['pull-1', {
+      pullId: 'pull-1',
+      tokenId: 1,
+      amount: -100n,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: 120_000,
+      fullHash: proof.fullHash,
+      partialRoot: proof.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    }]]);
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'pull_cancel',
+        data: { pullId: 'pull-1', reason: 'expired' },
+      }, true, 120_001),
+      { entityTimestamp: 100_000, finalizedJHeight: 1 },
+    )?.reason).toContain('PULL_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
+  });
+
+  test('receiver-local preflight blocks payer HTLC timeout using future peer J-height', () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    account.locks.set('lock-1', {
+      lockId: 'lock-1',
+      hashlock: `0x${'41'.repeat(32)}`,
+      timelock: 120_000n,
+      revealBeforeHeight: 10,
+      amount: 100n,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+
+    expect(getIncomingAccountDeadlineViolation(
+      account,
+      makeIncomingAccountFrame(account, {
+        type: 'htlc_resolve',
+        data: { lockId: 'lock-1', outcome: 'error', reason: 'timeout' },
+      }, true, 100_000, 11),
+      { entityTimestamp: 100_000, finalizedJHeight: 5 },
+    )?.reason).toContain('HTLC_PAYER_CANCEL_BEFORE_LOCAL_EXPIRY');
   });
 
   test('failed account tx mutations do not leak into later valid txs in the same proposal', async () => {
@@ -3346,10 +3519,49 @@ describe('audit fail-fast regressions', () => {
       }],
     });
 
+    expect(result.accepted).toBe(false);
     expect(result.workingReplica).toBe(replica);
     expect(result.outputs).toEqual([]);
     expect(result.jOutputs).toEqual([]);
     expect(replica.mempool).toHaveLength(LIMITS.MEMPOOL_SIZE);
+  });
+
+  test('rejected remote entity input creates neither applied receipt nor route hint', async () => {
+    const env = createEmptyEnv('entity-input-rejected-route-hint');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.runtimeId = `0x${'51'.repeat(20)}`;
+    env.runtimeState ??= {};
+    env.runtimeState.entityRuntimeHints = new Map();
+    const replica = makeReplicaMissingPrevFrameHash();
+    const queuedTx: EntityTx = { type: 'chatMessage', data: { message: 'full' } };
+    replica.mempool = Array.from({ length: LIMITS.MEMPOOL_SIZE }, () => queuedTx);
+    env.eReplicas.set(`${replica.entityId}:${replica.signerId}`, replica);
+    const remoteEntityId = `0x${'52'.repeat(32)}`;
+
+    const result = await applyMergedEntityInputs(env, [{
+      from: `0x${'53'.repeat(20)}`,
+      entityId: replica.entityId,
+      signerId: replica.signerId,
+      entityTxs: [{
+        type: 'accountInput',
+        data: { fromEntityId: remoteEntityId, toEntityId: replica.entityId },
+      } as never],
+    }], [], {
+      isReplay: false,
+      routingDeps: {
+        ensureRuntimeState: (targetEnv) => targetEnv.runtimeState!,
+        enqueueRuntimeInputs: () => {},
+        extractEntityId: (replicaKey) => replicaKey.split(':')[0] ?? '',
+        hasLocalSignerForEntity: () => true,
+        hasLocalSignerForEntitySigner: () => true,
+        resolveSoleLocalSignerForEntity: () => replica.signerId,
+        getP2P: () => null,
+      },
+    });
+
+    expect(result.appliedEntityInputs).toEqual([]);
+    expect(env.runtimeState.entityRuntimeHints.has(remoteEntityId)).toBe(false);
   });
 
   test('entity commit catch-up does not apply unsigned proposed newState mutations', async () => {

@@ -1293,7 +1293,9 @@ export async function lockAhb(env: Env): Promise<void> {
           counterpartyId: charlie.id,
           lockId: testLockId,
           hashlock: testHashlock,
-          timelock: BigInt(env.timestamp + 20000), // 20 seconds (will expire during test)
+          // This fixture tests J-height expiry. Keep the independent wall-clock
+          // deadline beyond the receiver enforcement reserve so admission is valid.
+          timelock: BigInt(env.timestamp + 60_000),
           revealBeforeHeight: shortExpiry,
           amount: usd(10_000),
           tokenId: USDC_TOKEN_ID

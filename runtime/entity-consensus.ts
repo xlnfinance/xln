@@ -680,6 +680,7 @@ const validateVotingPower = (power: bigint): boolean => {
 // === CORE ENTITY PROCESSING ===
 
 type ApplyEntityInputResult = {
+  accepted: boolean;
   newState: EntityState;
   outputs: EntityInput[];
   jOutputs: JInput[];
@@ -696,6 +697,7 @@ type ApplyEntityInputContext = {
 };
 
 const finishApplyEntityInput = (context: ApplyEntityInputContext): ApplyEntityInputResult => ({
+  accepted: true,
   newState: context.workingReplica.state,
   outputs: context.entityOutbox,
   jOutputs: context.jOutbox,
@@ -820,7 +822,7 @@ async function handleCommitNotification(
     frame: shortHash(proposedFrame.hash),
   });
 
-  return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+  return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
 }
 
 async function handleProposedFramePrecommit(
@@ -1088,7 +1090,7 @@ export const applyEntityInput = async (
   const admissionError = getEntityMempoolAdmissionError(entityReplica, entityInput);
   if (admissionError) {
     log.error(`❌ Entity mempool admission rejected for ${entityInput.entityId}: ${admissionError}`);
-    return { newState: entityReplica.state, outputs: [], jOutputs: [], workingReplica: entityReplica };
+    return { accepted: false, newState: entityReplica.state, outputs: [], jOutputs: [], workingReplica: entityReplica };
   }
 
   // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
@@ -1128,11 +1130,11 @@ export const applyEntityInput = async (
   if (!validateEntityInput(entityInput)) {
     const detail = `entityId=${entityInput.entityId} txs=${entityInput.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
     log.error(`❌ Invalid input for ${entityInput.entityId}: ${detail}`);
-    return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
+    return { accepted: false, newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
   if (!validateEntityReplica(workingReplica)) {
     log.error(`❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`);
-    return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
+    return { accepted: false, newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
 
   const entityOutbox: EntityInput[] = [];
@@ -1188,7 +1190,7 @@ export const applyEntityInput = async (
     const proposerId = workingReplica.state.config.validators[0];
     if (!proposerId) {
       logError('FRAME_CONSENSUS', `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
-      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+      return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
     }
 
     const txCount = workingReplica.mempool.length;
@@ -1313,7 +1315,7 @@ export const applyEntityInput = async (
     jOutbox.push(...frameJOutputs);
 
     workingReplica.mempool.length = 0;
-    return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+    return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
   }
 
   if (
@@ -1420,7 +1422,7 @@ export const applyEntityInput = async (
     });
   });
 
-  return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+  return { accepted: true, newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
 };
 
 type ApplyEntityTxsInOrderContext = {

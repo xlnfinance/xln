@@ -190,6 +190,9 @@ export const prepareStorageCanonicalStateHashes = (
 };
 
 export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
+  // Local WAL integrity intentionally covers the complete persisted record,
+  // including runtimeOutputs/transport state. Cross-replay state identity is
+  // canonicalStateHash, which commits to replayable Entity state instead.
   const stableRecord = { ...record };
   delete stableRecord.frameHash;
   return hashStable({

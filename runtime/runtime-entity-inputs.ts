@@ -187,7 +187,7 @@ export const applyMergedEntityInputs = async (
     }
 
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);
-    if (entityInput.from) {
+    if (result.accepted && entityInput.from) {
       const appliedRouteHints = new Set([
         ...collectAppliedAccountSenderHints(entityInput),
         ...collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, routingDeps),
@@ -210,7 +210,7 @@ export const applyMergedEntityInputs = async (
         jOutputs: result.jOutputs.length,
       });
     }
-    appliedEntityInputs.push(result.appliedInput);
+    if (result.accepted) appliedEntityInputs.push(result.appliedInput);
     env.eReplicas.set(replicaKey, result.nextReplica);
     entityOutbox.push(...result.outputs);
     if (result.jOutputs.length > 0) {
@@ -272,7 +272,7 @@ export const applyMergedEntityInputs = async (
           jOutputs: result.jOutputs.length,
         });
       }
-      appliedEntityInputs.push(result.appliedInput);
+      if (result.accepted) appliedEntityInputs.push(result.appliedInput);
       env.eReplicas.set(replicaKey, result.nextReplica);
       entityOutbox.push(...result.outputs);
       if (result.jOutputs.length > 0) {
@@ -311,6 +311,7 @@ const applyEntityInputToReplica = async (
   actualSignerId: string,
   isReplay: boolean,
 ): Promise<{
+  accepted: boolean;
   appliedInput: RoutedEntityInput;
   nextReplica: EntityReplica;
   outputs: RoutedEntityInput[];
@@ -343,7 +344,7 @@ const applyEntityInputToReplica = async (
     });
   }
 
-  const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
+  const { accepted, newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
     env,
     entityReplica,
     normalizedInput,
@@ -355,15 +356,15 @@ const applyEntityInputToReplica = async (
     validatorComputedState: _oldValidatorComputedState,
     ...replicaBase
   } = entityReplica;
-  const nextReplica: EntityReplica = {
+  const nextReplica: EntityReplica = accepted ? {
     ...replicaBase,
     state: newState,
     mempool: workingReplica.mempool,
-  };
-  if (workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
-  if (workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
-  if (workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
-  if (workingReplica.validatorComputedState !== undefined) {
+  } : entityReplica;
+  if (accepted && workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
+  if (accepted && workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
+  if (accepted && workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
+  if (accepted && workingReplica.validatorComputedState !== undefined) {
     nextReplica.validatorComputedState = workingReplica.validatorComputedState;
   }
 
@@ -380,7 +381,7 @@ const applyEntityInputToReplica = async (
     }
   });
 
-  return { appliedInput, nextReplica, outputs: routedOutputs, jOutputs: jOutputs || [] };
+  return { accepted, appliedInput, nextReplica, outputs: routedOutputs, jOutputs: jOutputs || [] };
 };
 
 const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string | null): string | null => {

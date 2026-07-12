@@ -5,11 +5,15 @@ import { assertAccountFrameDeltaIntegrity } from './account-frame';
 import { computeCanonicalMerkleRoot } from './account-state-root';
 import { canonicalJurisdictionEventsHash } from './j-event-observation';
 import { normalizeJurisdictionEvents } from './j-event-normalization';
+import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './account-consensus/constants';
 
 export const MAX_ACCOUNT_FRAME_TXS = 1000;
-// A peer controls its proposed timestamp. Keep the allowance large enough for
-// normal networking, but smaller than the minimum HTLC enforcement reserve.
-export const MAX_FRAME_TIMESTAMP_DRIFT_MS = 30_000;
+// A peer controls its proposed timestamp. Reject future time because it could
+// prematurely satisfy payer-side deadlines. Do not reject old signed frames:
+// exact retransmission must remain available after an arbitrary outage.
+// Financial expiry decisions are separately checked against receiver-local
+// Entity time/J-height before an incoming frame is applied.
+export const MAX_FRAME_FUTURE_SKEW_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;
 export const MAX_FRAME_SIZE_BYTES = 10_000_000;
 
 export function validateAccountFrame(
@@ -29,6 +33,9 @@ export function getAccountFrameValidationError(
   if (!Number.isSafeInteger(frame.jHeight) || frame.jHeight < 0) {
     return `jHeight ${String(frame.jHeight)} is invalid`;
   }
+  if (!Number.isSafeInteger(frame.timestamp) || frame.timestamp < 0) {
+    return `timestamp ${String(frame.timestamp)} is invalid`;
+  }
   if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) {
     return `tx count ${frame.accountTxs.length} > ${MAX_ACCOUNT_FRAME_TXS}`;
   }
@@ -42,8 +49,9 @@ export function getAccountFrameValidationError(
   }
 
   if (currentTimestamp !== undefined) {
-    if (Math.abs(frame.timestamp - currentTimestamp) > MAX_FRAME_TIMESTAMP_DRIFT_MS) {
-      return `timestamp drift ${Math.abs(frame.timestamp - currentTimestamp)}ms > ${MAX_FRAME_TIMESTAMP_DRIFT_MS}ms`;
+    const futureSkewMs = frame.timestamp - currentTimestamp;
+    if (futureSkewMs > MAX_FRAME_FUTURE_SKEW_MS) {
+      return `timestamp future skew ${futureSkewMs}ms > ${MAX_FRAME_FUTURE_SKEW_MS}ms`;
     }
 
     if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp) {

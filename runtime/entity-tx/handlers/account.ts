@@ -508,7 +508,13 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
             entityTxs: [{ type: 'j_broadcast' as const, data: {} }],
           }]
         : [];
-      addMessage(started.newState, `⚠️ Late HTLC secret rejected; dispute escalation started`);
+      const disputeStarted = startsAfter > startsBefore;
+      addMessage(
+        started.newState,
+        disputeStarted
+          ? `⚠️ Unsafe account frame rejected; dispute start queued`
+          : `⚠️ Unsafe account frame rejected; dispute preparation awaits Hanko`,
+      );
       return {
         newState: started.newState,
         outputs: [...outputs, ...prepared.outputs, ...started.outputs, ...disputeOutputs],
