@@ -1,6 +1,6 @@
-import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../types';
-import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
-import { SWAP_LOT_SCALE } from '../../orderbook';
+import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../../types';
+import type { SwapOfferEvent } from '../../../entity-tx/handlers/account';
+import { SWAP_LOT_SCALE } from '../../../orderbook';
 import {
   CROSS_J_MAX_FILL_RATIO,
   buildCommittedCrossJurisdictionPullBinding,
@@ -9,7 +9,7 @@ import {
   requireCrossJurisdictionFillProgress,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionFillProgress,
-} from '../../cross-jurisdiction';
+} from '../../../cross-jurisdiction';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;

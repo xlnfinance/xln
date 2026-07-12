@@ -3,8 +3,8 @@ import type {
   SwapOffer,
   SwapOrderHistoryEntry,
   SwapOrderResolveHistoryEntry,
-} from '../../types';
-import { cloneCrossJurisdictionRoute } from '../../cross-jurisdiction';
+} from '../../../types';
+import { cloneCrossJurisdictionRoute } from '../../../cross-jurisdiction';
 
 function ensureSwapOrderHistory(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
   if (!(accountMachine.swapOrderHistory instanceof Map)) {

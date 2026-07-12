@@ -9,9 +9,9 @@
  * Pattern: 2019 DeleteLockNew with outcomeType (secret/NoCapacity/invalid/fail)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
-import { hashHtlcSecret } from '../../htlc-utils';
-import { createStructuredLogger, shortHash } from '../../logger';
+import type { AccountMachine, AccountTx } from '../../../types';
+import { hashHtlcSecret } from '../../../htlc-utils';
+import { createStructuredLogger, shortHash } from '../../../logger';
 import { releaseHold } from '../hold-utils';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');

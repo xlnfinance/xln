@@ -10,7 +10,7 @@ import {
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
 import { processOrderbookCancels, processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { applyCrossJurisdictionBookProgressToState } from '../entity-tx/handlers/cross-j-book-order';
-import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
+import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { createEmptyEnv } from '../runtime';
 import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../cross-jurisdiction-fill-ack';
 import {

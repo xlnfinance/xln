@@ -20,7 +20,7 @@ import {
 import { isLeft } from './account-utils';
 import { HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
-import { applyAccountTx } from './account-tx/apply';
+import { applyAccountTx } from './account/tx/apply';
 import { appendAccountFrameHistoryView, getAccountFrameHistoryView, markStorageAccountDirty, recordAccountFrameHistory } from './env-events';
 import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
 import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from './logger';
@@ -41,15 +41,15 @@ import {
   shouldIncludeToken,
   summarizeDeltasForLog,
 } from './account-consensus-helpers';
-import { MEMPOOL_LIMIT } from './account-consensus/constants';
-import { proposeAccountFrame } from './account-consensus/propose';
+import { MEMPOOL_LIMIT } from './account/consensus/constants';
+import { proposeAccountFrame } from './account/consensus/propose';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from './dispute-arguments';
 import type {
   AccountConsensusHashToSign,
   AccountSwapOfferCreated,
   HandleAccountInputResult,
   ProposeAccountFrameResult,
-} from './account-consensus/types';
+} from './account/consensus/types';
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from './proof-builder';
 import { signEntityHashes, verifyHankoForHash } from './hanko/signing';
 import { getReplicaByEntityId } from './replica-utils';
@@ -59,21 +59,21 @@ import {
   HTLC_ENFORCEMENT_RESERVE_MS,
   isHtlcSecretEnforcementWindowClosed,
   type AccountInputSecurityContext,
-} from './account-consensus/deadline-policy';
+} from './account/consensus/deadline-policy';
 import {
   accountInputAck,
   accountInputDisputeSeal,
   accountInputProposal,
   accountInputReferenceHeight,
-} from './account-consensus/flush';
-export { proposeAccountFrame } from './account-consensus/propose';
+} from './account/consensus/flush';
+export { proposeAccountFrame } from './account/consensus/propose';
 export type {
   AccountConsensusFrameResult,
   AccountConsensusHashToSign,
   AccountSwapOfferCreated,
   HandleAccountInputResult,
   ProposeAccountFrameResult,
-} from './account-consensus/types';
+} from './account/consensus/types';
 
 const accountLog = createStructuredLogger('account');
 const STALE_ACCOUNT_FRAME_WARNING_MS = 5 * 60_000;

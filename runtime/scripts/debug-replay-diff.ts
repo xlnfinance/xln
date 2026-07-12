@@ -14,7 +14,7 @@ import { generateLazyEntityId } from '../entity-factory';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 import { serializeTaggedJson } from '../serialization-utils';
 import type { BrowserVMState, EntityReplica, JReplica } from '../types';
-import { accountInputProposal } from '../account-consensus/flush';
+import { accountInputProposal } from '../account/consensus/flush';
 
 type RuntimeCheckpointSnapshot = {
   height?: number;

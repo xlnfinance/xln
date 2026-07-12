@@ -289,9 +289,9 @@ Example: route $100 payment
 ## files
 
 ```
-runtime/account-tx/handlers/custody-deposit.ts
-runtime/account-tx/handlers/custody-withdraw.ts
-runtime/account-tx/handlers/custody-debit.ts
+runtime/account/tx/handlers/custody-deposit.ts
+runtime/account/tx/handlers/custody-withdraw.ts
+runtime/account/tx/handlers/custody-debit.ts
 runtime/types.ts                    (add custody to AccountMachine)
 runtime/entity-crontab.ts           (check custody before R→C)
 frontend/src/lib/components/Entity/CustodyPanel.svelte

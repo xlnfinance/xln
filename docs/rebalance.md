@@ -461,11 +461,11 @@ Both sides compute identically because the feeAmount comes from the stored quote
 | file | change |
 |------|--------|
 | `runtime/types.ts` | RebalancePolicy, RebalanceQuote, AccountMachine fields, accountTx types |
-| `runtime/account-tx/apply.ts` | wire 4 new handlers |
-| `runtime/account-tx/handlers/set-rebalance-policy.ts` | new handler |
-| `runtime/account-tx/handlers/rebalance-request.ts` | refactored from request-quote |
-| `runtime/account-tx/handlers/rebalance-quote.ts` | refactored from quote-response |
-| `runtime/account-tx/handlers/rebalance-accept.ts` | refactored from fee-payment |
+| `runtime/account/tx/apply.ts` | wire 4 new handlers |
+| `runtime/account/tx/handlers/set-rebalance-policy.ts` | new handler |
+| `runtime/account/tx/handlers/rebalance-request.ts` | refactored from request-quote |
+| `runtime/account/tx/handlers/rebalance-quote.ts` | refactored from quote-response |
+| `runtime/account/tx/handlers/rebalance-accept.ts` | refactored from fee-payment |
 | `runtime/entity-tx/handlers/deposit-collateral.ts` | enhanced with fee collection |
 | `runtime/entity-crontab.ts` | execution logic: quote→deposit flow |
 

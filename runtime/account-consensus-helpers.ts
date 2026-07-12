@@ -3,7 +3,7 @@ import { createStructuredLogger, shortHash, shortId } from './logger';
 import { txFingerprint } from './state-helpers';
 import { getJurisdictionConfigName } from './jurisdiction/jurisdiction-runtime';
 import { getReplicaByEntityId } from './replica-utils';
-import { checkAutoRebalance } from './account-tx/handlers/request-collateral';
+import { checkAutoRebalance } from './account/tx/handlers/request-collateral';
 import type { AccountStateDomain } from './account-state-root';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');

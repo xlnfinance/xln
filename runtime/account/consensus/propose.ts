@@ -3,18 +3,18 @@
  * frame construction, frame hanko signing, and dispute-proof signing.
  */
 
-import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../types';
-import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCommittedTxsFromMempool } from '../state-helpers';
-import { isLeft } from '../account-utils';
-import { getPerfMs, HEAVY_LOGS } from '../utils';
-import { safeStringify } from '../serialization-utils';
-import { validateAccountFrame as validateAccountFrameStrict } from '../validation-utils';
-import { applyAccountTx } from '../account-tx/apply';
-import { markStorageAccountDirty } from '../env-events';
-import { createStructuredLogger, shortHash, shortId } from '../logger';
-import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from '../account-consensus-frame';
-import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../proof-builder';
-import { signEntityHashes } from '../hanko/signing';
+import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../../types';
+import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCommittedTxsFromMempool } from '../../state-helpers';
+import { isLeft } from '../../account-utils';
+import { getPerfMs, HEAVY_LOGS } from '../../utils';
+import { safeStringify } from '../../serialization-utils';
+import { validateAccountFrame as validateAccountFrameStrict } from '../../validation-utils';
+import { applyAccountTx } from '../tx/apply';
+import { markStorageAccountDirty } from '../../env-events';
+import { createStructuredLogger, shortHash, shortId } from '../../logger';
+import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from '../../account-consensus-frame';
+import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../proof-builder';
+import { signEntityHashes } from '../../hanko/signing';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
@@ -23,12 +23,12 @@ import {
   isAddress20,
   isEntityId32,
   shouldIncludeToken,
-} from '../account-consensus-helpers';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
+} from '../../account-consensus-helpers';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../dispute-arguments';
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
-import { getReplicaByEntityId } from '../replica-utils';
-import { computeAccountStateRoot } from '../account-state-root';
+import { getReplicaByEntityId } from '../../replica-utils';
+import { computeAccountStateRoot } from '../../account-state-root';
 
 const accountLog = createStructuredLogger('account');
 const ACCOUNT_PROPOSAL_PROFILE =

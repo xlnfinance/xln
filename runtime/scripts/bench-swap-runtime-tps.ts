@@ -1,4 +1,4 @@
-import { applyAccountTx } from '../account-tx/apply';
+import { applyAccountTx } from '../account/tx/apply';
 import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   recordSwapOfferLifecycle,
   recordSwapResolveLifecycle,
-} from '../account-tx/handlers/swap-history';
+} from '../account/tx/handlers/swap-history';
 import type { AccountMachine, SwapOffer } from '../types';
 
 const makeAccount = (): AccountMachine => ({

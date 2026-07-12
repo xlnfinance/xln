@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
-import { applyAccountTx } from '../account-tx/apply';
+import { applyAccountTx } from '../account/tx/apply';
 import { applyEntityTx } from '../entity-tx/apply';
 import {
   buildCrossJurisdictionPullBinding,

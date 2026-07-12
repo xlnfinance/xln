@@ -11,9 +11,9 @@
  * - Enforces revealBeforeHeight for griefing protection
  */
 
-import type { AccountMachine, AccountTx, HtlcLock } from '../../types';
-import { deriveDelta } from '../../account-utils';
-import { FINANCIAL, LIMITS } from '../../constants';
+import type { AccountMachine, AccountTx, HtlcLock } from '../../../types';
+import { deriveDelta } from '../../../account-utils';
+import { FINANCIAL, LIMITS } from '../../../constants';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';
 

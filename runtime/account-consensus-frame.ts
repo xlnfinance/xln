@@ -5,7 +5,7 @@ import { assertAccountFrameDeltaIntegrity } from './account-frame';
 import { computeCanonicalMerkleRoot } from './account-state-root';
 import { canonicalJurisdictionEventsHash } from './j-event-observation';
 import { normalizeJurisdictionEvents } from './j-event-normalization';
-import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './account-consensus/constants';
+import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './account/consensus/constants';
 
 export const MAX_ACCOUNT_FRAME_TXS = 1000;
 // A peer controls its proposed timestamp. Reject future time because it could

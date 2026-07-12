@@ -29,7 +29,7 @@ import type {
   SwapOfferEvent,
 } from './account/orderbook-offers';
 import { canProcessAccountTxForDisputeStatus } from '../../account-dispute-policy';
-import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account-consensus/flush';
+import { accountInputAck, accountInputProposal, accountInputReferenceHeight } from '../../account/consensus/flush';
 import { handleDisputeStart, handlePrepareDispute } from './dispute';
 
 export type { MempoolOp } from './account/orderbook-queue';
@@ -229,7 +229,7 @@ export async function applyAccountInput(state: EntityState, input: AccountInput,
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
   }
 
-  // Dispute freeze: this mirrors account-tx/apply.ts through
+  // Dispute freeze: this mirrors account/tx/apply.ts through
   // canProcessAccountTxForDisputeStatus. During dispute_preparing we still allow
   // evidence-only frames (pull_resolve/swap_resolve) to settle argument data.
   // After disputeStart is queued/observed, only control traffic is allowed; the

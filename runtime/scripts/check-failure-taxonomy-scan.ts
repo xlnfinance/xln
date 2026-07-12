@@ -331,8 +331,8 @@ for (const [path, markers] of [
   ['runtime/entity-tx/handlers/account/committed-frame-followups.ts', ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx']],
   ['runtime/entity-tx/handlers/account/committed-htlc-followups.ts', ["createStructuredLogger('account.followup')", 'htlc.secret_check']],
   ['runtime/account-consensus.ts', ["createStructuredLogger('account')", 'frame.prev_hash_mismatch', 'frame.state_root_mismatch']],
-  ['runtime/account-consensus/propose.ts', ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile']],
-  ['runtime/account-tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
+  ['runtime/account/consensus/propose.ts', ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile']],
+  ['runtime/account/tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
   ['runtime/entity-tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
   ['runtime/runtime-tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'jurisdiction.import_failed', 'replica.wallet_registration_skipped']],
   ['runtime/entity-tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -511,7 +511,7 @@ for (const accountFollowupPath of [
   assertNotIncludes(readText(accountFollowupPath), 'console.', accountFollowupPath);
 }
 
-const accountTxApplyPath = 'runtime/account-tx/apply.ts';
+const accountTxApplyPath = 'runtime/account/tx/apply.ts';
 const accountTxApply = readText(accountTxApplyPath);
 assertNotIncludes(accountTxApply, 'console.', accountTxApplyPath);
 
@@ -519,7 +519,7 @@ const accountConsensusPath = 'runtime/account-consensus.ts';
 const accountConsensus = readText(accountConsensusPath);
 assertNotIncludes(accountConsensus, 'console.', accountConsensusPath);
 
-const accountProposePath = 'runtime/account-consensus/propose.ts';
+const accountProposePath = 'runtime/account/consensus/propose.ts';
 const accountPropose = readText(accountProposePath);
 assertNotIncludes(accountPropose, 'console.', accountProposePath);
 

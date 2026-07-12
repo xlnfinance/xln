@@ -30,7 +30,7 @@ This folder owns entity-layer transaction application.
 
 ## Calls into
 
-- `account-tx/`
+- `account/tx/`
 - `cross-jurisdiction.ts`
 - `j-batch.ts`
 - `storage/` indirectly through persistence after frame commit

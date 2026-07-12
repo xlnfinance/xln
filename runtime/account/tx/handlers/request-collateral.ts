@@ -17,10 +17,10 @@
  * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
-import { DEFAULT_SOFT_LIMIT } from '../../types';
-import { isLeftEntity } from '../../entity-id-utils';
-import { deriveDelta } from '../../account-utils';
+import type { AccountMachine, AccountTx } from '../../../types';
+import { DEFAULT_SOFT_LIMIT } from '../../../types';
+import { isLeftEntity } from '../../../entity-id-utils';
+import { deriveDelta } from '../../../account-utils';
 
 export function handleRequestCollateral(
   accountMachine: AccountMachine,

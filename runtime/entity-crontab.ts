@@ -60,7 +60,7 @@ import { getRuntimeJurisdictionHeight } from './j-height';
 import { markStorageAccountDirty, markStorageEntityDirty } from './env-events';
 import { createStructuredLogger, shortHash, shortId } from './logger';
 import { batchAddReserveToCollateral, initJBatch } from './j-batch';
-import { accountInputProposal, accountInputReferenceHeight } from './account-consensus/flush';
+import { accountInputProposal, accountInputReferenceHeight } from './account/consensus/flush';
 
 const crontabLog = createStructuredLogger('entity.crontab');
 

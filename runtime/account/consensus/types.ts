@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx } from '../types';
+import type { AccountFrame, AccountInput, AccountTx } from '../../types';
 
 export type AccountConsensusHashToSign = {
   hash: string;

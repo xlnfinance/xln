@@ -3,8 +3,8 @@
  * Routes AccountTx to the handler that mutates one bilateral account clone/state.
  */
 
-import type { AccountMachine, AccountTx, Env } from '../types';
-import { getAccountPerspective } from '../state-helpers';
+import type { AccountMachine, AccountTx, Env } from '../../types';
+import { getAccountPerspective } from '../../state-helpers';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
 import { handleDirectPayment } from './handlers/direct-payment';
@@ -21,8 +21,8 @@ import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
 import { handleLendingAccountTx } from './handlers/lending';
-import { canProcessAccountTxForDisputeStatus } from '../account-dispute-policy';
-import { createStructuredLogger } from '../logger';
+import { canProcessAccountTxForDisputeStatus } from '../../account-dispute-policy';
+import { createStructuredLogger } from '../../logger';
 
 const accountTxLog = createStructuredLogger('account.tx');
 

@@ -3,7 +3,7 @@ import type {
   AccountFrameAck,
   AccountFrameProposal,
   AccountInput,
-} from '../types';
+} from '../../types';
 
 export const accountInputAck = (input: AccountInput): AccountFrameAck | undefined =>
   input.kind === 'ack' || input.kind === 'frame_ack' ? input.ack : undefined;

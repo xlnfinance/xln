@@ -3,7 +3,7 @@
  * Creates a new token delta with zero balances (Channel.ts AddDelta pattern)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../../types';
 
 export function handleAddDelta(
   accountMachine: AccountMachine,

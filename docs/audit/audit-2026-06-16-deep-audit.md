@@ -132,10 +132,10 @@ Documented as legacy/reserved; removing them shrinks dispute/batch calldata:
 ### R1 — Superseded HTLC handlers (delete; ~298 lines)
 `htlc-resolve.ts` unified reveal/timeout/cancel (its own header says
 "Replaces: htlc_reveal, htlc_timeout, htlc_cancel"). Production dispatch
-(`account-tx/apply.ts`) only routes `htlc_lock` and `htlc_resolve`:
-- `account-tx/handlers/htlc-cancel.ts` (64) — **zero callers anywhere**. Delete.
-- `account-tx/handlers/htlc-reveal.ts` (145) — only `hold-underflow-guards.test.ts`. Migrate test → delete.
-- `account-tx/handlers/htlc-timeout.ts` (89) — only `hold-underflow-guards.test.ts`. Migrate test → delete.
+(`account/tx/apply.ts`) only routes `htlc_lock` and `htlc_resolve`:
+- `account/tx/handlers/htlc-cancel.ts` (64) — **zero callers anywhere**. Delete.
+- `account/tx/handlers/htlc-reveal.ts` (145) — only `hold-underflow-guards.test.ts`. Migrate test → delete.
+- `account/tx/handlers/htlc-timeout.ts` (89) — only `hold-underflow-guards.test.ts`. Migrate test → delete.
 
 ### R2 — Other dead runtime files (~384 lines, verify-then-delete)
 - `crypto-webcrypto.ts` (104) — zero references.
@@ -312,7 +312,7 @@ encoding artifact that would coincidentally block the bad signature earlier:
 - Dispute nonce model (strictly-greater, set-not-increment) is consistent across
   `Account.sol` and `Depository.sol`.
 - **Collateral / "God Mode" defense is robust.** Direct `reserve_to_collateral` txs are
-  hard-blocked (`account-tx/handlers/reserve-to-collateral.ts`). The only collateral
+  hard-blocked (`account/tx/handlers/reserve-to-collateral.ts`). The only collateral
   path is `j_event_claim` → `tryFinalizeAccountJEvents` (`entity-tx/j-events-account.ts:123,147`),
   which finalizes a collateral change ONLY when **both** sides independently observed the
   same `(jHeight, jBlockHash)` AND the event multisets match. A single party cannot forge

@@ -23,7 +23,7 @@ const assertOrder = (text: string, path: string, markers: string[]): void => {
 };
 
 const accountConsensusPath = 'runtime/account-consensus.ts';
-const accountProposePath = 'runtime/account-consensus/propose.ts';
+const accountProposePath = 'runtime/account/consensus/propose.ts';
 const accountFramePath = 'runtime/account-consensus-frame.ts';
 const entityConsensusPath = 'runtime/entity-consensus.ts';
 const entityFramePath = 'runtime/entity-consensus-frame.ts';

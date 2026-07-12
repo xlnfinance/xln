@@ -209,7 +209,7 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     assert(hubAfterStart?.status === 'disputed', 'Hub status must be disputed after start', env);
 
     // Business txs must be blocked while disputed (only j_event_claim/reopen_disputed allowed).
-    // Keep this in sync with runtime/account-tx/apply.ts disputed gate.
+    // Keep this in sync with runtime/account/tx/apply.ts disputed gate.
     const frameBeforeBlockedTraffic = Number(aliceAfterStart?.currentHeight || 0);
     await process(env, [{
       entityId: alice.id,

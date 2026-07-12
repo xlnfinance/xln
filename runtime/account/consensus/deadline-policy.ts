@@ -1,5 +1,5 @@
-import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../hashladder';
-import type { AccountFrame, AccountMachine, HtlcLock } from '../types';
+import { HASHLADDER_MAX_FILL_RATIO, verifyHashLadderBinary } from '../../hashladder';
+import type { AccountFrame, AccountMachine, HtlcLock } from '../../types';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 
 export const HTLC_ENFORCEMENT_RESERVE_MS = ACCOUNT_NETWORK_ALLOWANCE_MS;

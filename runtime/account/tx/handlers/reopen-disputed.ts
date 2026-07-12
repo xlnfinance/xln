@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../../types';
 
 export function handleReopenDisputed(
   accountMachine: AccountMachine,

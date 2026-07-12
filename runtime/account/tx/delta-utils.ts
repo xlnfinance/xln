@@ -1,5 +1,5 @@
-import type { AccountMachine, Delta } from '../types';
-import { createDefaultDelta } from '../validation-utils';
+import type { AccountMachine, Delta } from '../../types';
+import { createDefaultDelta } from '../../validation-utils';
 
 export function ensureDelta(accountMachine: AccountMachine, tokenId: number): Delta {
   let delta = accountMachine.deltas.get(tokenId);

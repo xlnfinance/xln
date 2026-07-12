@@ -64,7 +64,7 @@ const IGNORED_FILES = new Set([
 const ORDERBOOK_MARKERS = [
   'runtime/orderbook',
   'runtime/swap-execution.ts',
-  'runtime/account-tx/handlers/swap-resolve.ts',
+  'runtime/account/tx/handlers/swap-resolve.ts',
   'runtime/entity-tx/handlers/account.ts',
   'runtime/storage/index.ts',
   'runtime/entity-consensus.ts',

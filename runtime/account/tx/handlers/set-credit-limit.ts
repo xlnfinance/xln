@@ -4,8 +4,8 @@
  * Uses byLeft (frame property, same on both sides) — NOT perspective-dependent.
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
-import { FINANCIAL } from '../../constants';
+import type { AccountMachine, AccountTx } from '../../../types';
+import { FINANCIAL } from '../../../constants';
 import { ensureDelta } from '../delta-utils';
 
 // Maximum credit limit (prevents overflow attacks)

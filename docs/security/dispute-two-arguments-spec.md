@@ -74,8 +74,8 @@ Why swaps and pulls are affected:
   position.
 - `runtime/proof-builder.ts:165` orders swaps by active `offerId`.
 - `runtime/proof-builder.ts:186` orders pulls by active `pullId`.
-- `runtime/account-tx/handlers/swap-resolve.ts:392` can delete terminal swaps.
-- `runtime/account-tx/handlers/pull.ts:258` and `runtime/account-tx/handlers/pull.ts:325`
+- `runtime/account/tx/handlers/swap-resolve.ts:392` can delete terminal swaps.
+- `runtime/account/tx/handlers/pull.ts:258` and `runtime/account/tx/handlers/pull.ts:325`
   can delete pulls.
 
 Impact:
@@ -381,7 +381,7 @@ Rules:
 
 ### Consensus metadata
 
-- `runtime/account-consensus/propose.ts`
+- `runtime/account/consensus/propose.ts`
   - When creating `currentDisputeProofBodyHash`, also store the local side argument
     snapshot for that proof.
 

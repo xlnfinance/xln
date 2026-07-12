@@ -24,8 +24,8 @@ const SCAN_ROOTS = [
   'tests',
   'runtime/scenarios',
   'frontend/src/lib/components/Entity',
-  'runtime/account-tx/handlers/request-withdrawal.ts',
-  'runtime/account-tx/handlers/settle-hold.ts',
+  'runtime/account/tx/handlers/request-withdrawal.ts',
+  'runtime/account/tx/handlers/settle-hold.ts',
 ];
 
 const EXCLUDE_PATH_PARTS = [

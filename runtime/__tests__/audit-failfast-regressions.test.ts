@@ -12,13 +12,13 @@ import {
 import { computeAccountStateRoot } from '../account-state-root';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { deriveAccountWatchSeed } from '../account-watch-seed';
-import { applyAccountTx } from '../account-tx/apply';
-import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
-import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
+import { applyAccountTx } from '../account/tx/apply';
+import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
+import { handleHtlcResolve } from '../account/tx/handlers/htlc-resolve';
 import { hashHtlcSecret } from '../htlc-utils';
 import { buildHashLadderProof, revealHashLadder } from '../hashladder';
-import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
-import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
+import { checkAutoRebalance, handleRequestCollateral } from '../account/tx/handlers/request-collateral';
+import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account-consensus-frame';
 import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
@@ -3584,7 +3584,10 @@ describe('audit fail-fast regressions', () => {
 
     const honestBaseState = makeEntityState(entityId);
     honestBaseState.config = makeSingleSignerConfigFor(signerId);
-    const { newState: honestFrameState } = await applyEntityFrame(
+    const {
+      newState: honestFrameState,
+      collectedHashes = [],
+    } = await applyEntityFrame(
       env,
       honestBaseState,
       frameTxs,
@@ -3603,7 +3606,8 @@ describe('audit fail-fast regressions', () => {
       frameTxs,
       honestNewState,
     );
-    const frameSig = signAccountFrame(env, signerId, frameHash);
+    const hashesToSign = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
+    const frameSignatures = hashesToSign.map(({ hash }) => signAccountFrame(env, signerId, hash));
     const tamperedNewState: EntityState = {
       ...honestNewState,
       profile: {
@@ -3628,7 +3632,8 @@ describe('audit fail-fast regressions', () => {
         txs: frameTxs,
         hash: frameHash,
         newState: tamperedNewState,
-        collectedSigs: new Map([[signerId, [frameSig]]]),
+        hashesToSign,
+        collectedSigs: new Map([[signerId, frameSignatures]]),
       },
     });
 

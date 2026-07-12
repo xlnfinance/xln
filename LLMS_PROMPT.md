@@ -21,7 +21,7 @@ Read first:
 4. runtime/cross-jurisdiction*.ts, runtime/orderbook/cross-j-orderbook.ts.
 5. runtime/entity-tx/handlers/cross-j-*.ts, swap-requests.ts, dispute.ts.
 6. runtime/entity-tx/handlers/account/orderbook-matching-*.ts.
-7. runtime/account-tx/handlers/swap-*.ts and cross-swap-fill-ack.ts.
+7. runtime/account/tx/handlers/swap-*.ts and cross-swap-fill-ack.ts.
 8. runtime/orchestrator/mm-node.ts, runtime/server/market-maker-health.ts, runtime/relay/market-subscriptions.ts.
 9. frontend SwapPanel.svelte, OrderbookPanel.svelte, routed-swap-planner.ts, routed-swap-execution.ts.
 10. tests/e2e-swap.spec.ts, tests/e2e-cross-j-swap.spec.ts, runtime cross-j/orderbook tests.
@@ -189,7 +189,7 @@ OUTPUT: Step-by-step walkthrough with code snippets and line numbers.
 **Multi-pass strategy:**
 1. **First pass** (30min budget): Critical path docs only (emc2.md → 12_invariant.md → JEA.md → Depository.sol)
 2. **Second pass** (45min budget): Implementation files (types.ts → consensus files → tx handlers)
-3. **Third pass** (specific question): "Show me how HTLC timeout enforcement works" → search account-tx/
+3. **Third pass** (specific question): "Show me how HTLC timeout enforcement works" → search account/tx/
 
 **Token management:**
 - llms.txt is ~150k tokens (full context)

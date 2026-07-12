@@ -18,7 +18,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createBook, applyCommand, type BookState, type BookEvent } from '../orderbook/core';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, computeSwapPriceTicks, deriveSide } from '../orderbook/types';
-import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
+import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { deriveCanonicalSwapFillRatio } from '../swap-execution';
 import type { AccountMachine, AccountTx, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';

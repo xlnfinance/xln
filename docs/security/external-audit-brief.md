@@ -101,8 +101,8 @@ operational evidence for restart/load stability, not unit-test substitutes.
 - `runtime/entity-tx/j-events.ts`
 - `runtime/entity-tx/handlers/account.ts`
 - `runtime/entity-tx/handlers/account-cross-j-followups.ts`
-- `runtime/account-tx/handlers/pull.ts`
-- `runtime/account-tx/handlers/swap-resolve.ts`
+- `runtime/account/tx/handlers/pull.ts`
+- `runtime/account/tx/handlers/swap-resolve.ts`
 - `runtime/cross-jurisdiction.ts`
 - `runtime/cross-jurisdiction-orderbook.ts`
 - `runtime/storage/read.ts`

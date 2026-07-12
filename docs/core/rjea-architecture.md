@@ -425,7 +425,7 @@ STEP 5: Both sides have identical delta.collateral, delta.ondelta
 
 ### Key Implementation Details
 
-**Observation Attribution (account-tx/apply.ts:97):**
+**Observation Attribution (account/tx/apply.ts:97):**
 ```typescript
 const claimIsFromLeft = isOurFrame ? iAmLeft : !iAmLeft;
 

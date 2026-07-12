@@ -21,17 +21,17 @@
  * - Right gives -> offdelta increases (positive)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
-import { deriveDelta } from '../../account-utils';
-import { createDefaultDelta } from '../../validation-utils';
-import { FINANCIAL } from '../../constants';
-import { deriveExactSwapFillRatio, exactFillRatioToUint16, MAX_SWAP_FILL_RATIO } from '../../swap-execution';
+import type { AccountMachine, AccountTx } from '../../../types';
+import { deriveDelta } from '../../../account-utils';
+import { createDefaultDelta } from '../../../validation-utils';
+import { FINANCIAL } from '../../../constants';
+import { deriveExactSwapFillRatio, exactFillRatioToUint16, MAX_SWAP_FILL_RATIO } from '../../../swap-execution';
 import {
   computeSwapPriceTicks,
   requantizeRemainingSwapAtPrice,
-} from '../../orderbook/types';
+} from '../../../orderbook/types';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
-import { createStructuredLogger, shortOrder } from '../../logger';
+import { createStructuredLogger, shortOrder } from '../../../logger';
 import { getHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
 

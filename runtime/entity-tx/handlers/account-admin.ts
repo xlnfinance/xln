@@ -4,7 +4,7 @@ import { normalizeRebalanceMatchingStrategy } from '../../rebalance-policy';
 import { announceLocalEntityProfile } from '../../networking/gossip-helper';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { resolveAutoRebalanceFeePolicy } from '../../account-consensus-helpers';
-import { checkAutoRebalance } from '../../account-tx/handlers/request-collateral';
+import { checkAutoRebalance } from '../../account/tx/handlers/request-collateral';
 import type { MempoolOp } from './account';
 
 type EntityTxOf<T extends EntityTx['type']> = Extract<EntityTx, { type: T }>;

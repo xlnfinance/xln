@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../entity-tx/apply';
-import { applyAccountTx } from '../account-tx/apply';
-import { handlePullCancel } from '../account-tx/handlers/pull';
+import { applyAccountTx } from '../account/tx/apply';
+import { handlePullCancel } from '../account/tx/handlers/pull';
 import { processOrderbookCancels } from '../entity-tx/handlers/account';
 import { applyEntityInput } from '../entity-consensus';
 import {

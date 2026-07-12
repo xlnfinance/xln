@@ -1,4 +1,4 @@
-import type { Delta } from '../types';
+import type { Delta } from '../../types';
 
 export type HoldSide = 'left' | 'right';
 

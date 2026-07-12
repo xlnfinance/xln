@@ -21,7 +21,7 @@ import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from './utils'
 import { compareStableText, safeStringify } from './serialization-utils';
 import { nodeProcess } from './runtime-platform';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
-import { accountInputReferenceHeight } from './account-consensus/flush';
+import { accountInputReferenceHeight } from './account/consensus/flush';
 import {
   addMessages,
   cloneEntityReplica,
@@ -71,7 +71,7 @@ import {
 import { markCrossJurisdictionBookAdmissionResolving } from './cross-jurisdiction-orderbook';
 import { createEntityFrameHash } from './entity-consensus-frame';
 import { buildQuorumHanko, signEntityHashes } from './hanko/signing';
-import { proposeAccountFrame } from './account-consensus/propose';
+import { proposeAccountFrame } from './account/consensus/propose';
 import {
   attachHankoWitnessToOutputs,
   buildEntityHashesToSign,

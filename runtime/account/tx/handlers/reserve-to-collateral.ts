@@ -24,8 +24,8 @@
  * Reference: 2019src.txt lines 233-239 (reserveToCollateral pattern)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
-import { createStructuredLogger } from '../../logger';
+import type { AccountMachine, AccountTx } from '../../../types';
+import { createStructuredLogger } from '../../../logger';
 
 const reserveToCollateralLog = createStructuredLogger('account.reserve');
 

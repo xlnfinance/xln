@@ -4,13 +4,13 @@
  * Reference: Channel.ts DirectPayment transition (2024_src/app/Transition.ts:321-344)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
-import { deriveDelta } from '../../account-utils';
-import { FINANCIAL } from '../../constants';
-import { isLeftEntity } from '../../entity-id-utils';
-import { createStructuredLogger, shortId } from '../../logger';
-import { getAccountPerspective } from '../../state-helpers';
-import { decodeRebalancePolicyMemo } from '../../rebalance-policy';
+import type { AccountMachine, AccountTx } from '../../../types';
+import { deriveDelta } from '../../../account-utils';
+import { FINANCIAL } from '../../../constants';
+import { isLeftEntity } from '../../../entity-id-utils';
+import { createStructuredLogger, shortId } from '../../../logger';
+import { getAccountPerspective } from '../../../state-helpers';
+import { decodeRebalancePolicyMemo } from '../../../rebalance-policy';
 import { ensureDelta } from '../delta-utils';
 
 const directPaymentLog = createStructuredLogger('account.payment');
