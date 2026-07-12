@@ -3,6 +3,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { getAvailableJurisdictions } from '../jurisdiction-config';
+import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
+
+test('canonical jurisdiction path follows the repository contract config', () => {
+  const normalized = resolveJurisdictionsJsonPath().replaceAll('\\', '/');
+  expect(normalized).toEndWith('/jurisdictions/jurisdictions.json');
+  expect(normalized).not.toContain('/runtime/jurisdictions/');
+});
 
 test('jurisdiction config loader uses structured logging without direct console output', () => {
   const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction-config.ts'), 'utf8');
