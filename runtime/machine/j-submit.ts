@@ -60,6 +60,64 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
   }
 };
 
+const normalizedEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const getDisputeFinalizeCounterparties = (jTx: JTx): Set<string> => {
+  if (jTx.type !== 'batch') return new Set();
+  return new Set(
+    (jTx.data.batch.disputeFinalizations || [])
+      .map((op) => normalizedEntityId(op.counterentity))
+      .filter(Boolean),
+  );
+};
+
+const hasMatchingDisputeFinalizedEvent = (
+  inputs: EntityInput[],
+  entityId: string,
+  counterparties: Set<string>,
+): boolean => inputs.some((input) => (input.entityTxs || []).some((tx) => {
+  if (tx.type !== 'j_event') return false;
+  const events = Array.isArray(tx.data.events) ? tx.data.events : [tx.data.event];
+  return events.some((event) => {
+    if (event?.type !== 'DisputeFinalized') return false;
+    const sender = normalizedEntityId(event.data.sender);
+    const counterentity = normalizedEntityId(event.data.counterentity);
+    return (sender === entityId && counterparties.has(counterentity))
+      || (counterentity === entityId && counterparties.has(sender));
+  });
+}));
+
+const reconcileFinalizedDisputeBeforeSubmit = async (
+  env: Env,
+  jAdapter: { pollNow?: () => Promise<void> },
+  jTx: JTx,
+  deps: RuntimeJSubmitDeps,
+): Promise<boolean> => {
+  if (jTx.type !== 'batch') return false;
+  const counterparties = getDisputeFinalizeCounterparties(jTx);
+  if (counterparties.size === 0 || typeof jAdapter.pollNow !== 'function') return false;
+  await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
+  const entityId = normalizedEntityId(jTx.entityId);
+  if (!hasMatchingDisputeFinalizedEvent(captureQueuedEntityInputs(env), entityId, counterparties)) return false;
+
+  const replica = getEntityReplicaById(env, jTx.entityId);
+  const signerId = normalizedEntityId(jTx.data.signerId || replica?.signerId);
+  if (!signerId) throw new Error(`J_SUBMIT_FATAL: STALE_DISPUTE_FINALIZE_SIGNER_MISSING:${jTx.entityId}`);
+  deps.enqueueRuntimeInputs(env, [{
+    entityId: jTx.entityId,
+    signerId,
+    entityTxs: [{
+      type: 'j_abort_sent_batch',
+      data: { reason: 'counterparty-finalized-before-submit', requeueToCurrent: true },
+    }],
+  }], undefined, undefined, env.timestamp);
+  jSubmitLog.warn('dispute_finalize.stale_reconciled', {
+    entityId: shortId(jTx.entityId),
+    counterparties: [...counterparties].map((id) => shortId(id)),
+  });
+  return true;
+};
+
 const validateSealedBatchJTx = (jTx: JTx): void => {
   if (jTx.type !== 'batch') return;
   if (isBatchEmpty(jTx.data.batch)) return;
@@ -201,7 +259,7 @@ const shouldSubmitFromThisRuntime = (env: Env, jTx: JTx): boolean => {
 export async function submitRuntimeJOutbox(
   env: Env,
   jOutbox: JInput[],
-  _deps: RuntimeJSubmitDeps,
+  deps: RuntimeJSubmitDeps,
 ): Promise<void> {
   if (jOutbox.length === 0) return;
 
@@ -236,6 +294,9 @@ export async function submitRuntimeJOutbox(
       }
       if (await skipAlreadyConsumedSealedBatch(env, jAdapter, jTx)) {
         continue;
+      }
+      if (await reconcileFinalizedDisputeBeforeSubmit(env, jAdapter, jTx, deps)) {
+        return;
       }
 
       const submitData = jTx.data as { signerId?: unknown } | undefined;

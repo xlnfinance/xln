@@ -20,7 +20,7 @@ import {
   startDisputeFromManageUi,
 } from './utils/e2e-account-workspace';
 import { capturePageScreenshot } from './utils/e2e-screenshots';
-import { getJurisdictionStackId } from '../runtime/jurisdiction-stack';
+import { getJurisdictionStackId } from '../runtime/jurisdiction/jurisdiction-stack';
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';

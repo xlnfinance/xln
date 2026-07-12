@@ -1806,17 +1806,13 @@ export async function createRpcAdapter(
                   } catch { }
                 }
                 errDetail = `${errName}${decoded}`;
-                console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail} data=${typeof revertData === 'string' ? revertData.slice(0, 40) : revertData}...`);
               } else {
                 errDetail = String(revertSource?.reason ?? revertSource?.message ?? simErr);
                 localSnapshotRaceAfterGasEstimate =
                   !gasEstimate.usedFallback && isLocalLatestStateStaticCallRace(simErr);
-                if (!localSnapshotRaceAfterGasEstimate) {
-                  console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail}`);
-                }
               }
               if (!localSnapshotRaceAfterGasEstimate && disputeStartDebug.length > 0) {
-                console.error(`🧾 [JAdapter:rpc] disputeStart.batch.revert ${JSON.stringify(disputeStartDebug)}`);
+                errDetail += ` disputeStart=${JSON.stringify(disputeStartDebug)}`;
               }
               if (localSnapshotRaceAfterGasEstimate) {
                 console.warn(

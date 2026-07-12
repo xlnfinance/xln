@@ -2989,6 +2989,162 @@ describe('audit fail-fast regressions', () => {
     expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
   });
 
+  test('submitRuntimeJOutbox reconciles a finalized dispute before submitting its stale batch', async () => {
+    const entityId = `0x${'ac'.repeat(32)}`;
+    const counterpartyId = `0x${'bd'.repeat(32)}`;
+    const signerId = `0x${'ce'.repeat(20)}`;
+    const batchHash = `0x${'13'.repeat(32)}`;
+    const disputeFinalize = {
+      counterentity: counterpartyId,
+      initialNonce: 3,
+      finalNonce: 3,
+      initialProofbodyHash: `0x${'14'.repeat(32)}`,
+      finalProofbody: makeEmptyProofBody(),
+      leftArguments: '0x',
+      rightArguments: '0x',
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+      sig: '0x',
+      startedByLeft: true,
+      disputeUntilBlock: 123,
+      cooperative: false,
+    };
+    const batch = { ...createEmptyBatch(), disputeFinalizations: [disputeFinalize] };
+    const env = createEmptyEnv('j-submit-stale-dispute-finalize');
+    env.runtimeId = signerId;
+    env.timestamp = 125;
+    const state = makeEntityState(entityId);
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch,
+        batchHash,
+        encodedBatch: '0x1234',
+        entityNonce: 1,
+        firstSubmittedAt: 125,
+        lastSubmittedAt: 125,
+        submitAttempts: 1,
+      },
+    };
+    env.eReplicas.set(`${entityId}:1`, {
+      entityId,
+      signerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    } as EntityReplica);
+    let submitCalls = 0;
+    env.jReplicas = new Map([['Testnet', {
+      jadapter: {
+        submitTx: async () => {
+          submitCalls += 1;
+          return { success: false, error: 'staticCall revert: E5()' };
+        },
+        pollNow: async () => {
+          const event: JurisdictionEvent = {
+            type: 'DisputeFinalized',
+            data: {
+              sender: counterpartyId,
+              counterentity: entityId,
+              initialNonce: '3',
+              initialProofbodyHash: disputeFinalize.initialProofbodyHash,
+              finalProofbodyHash: `0x${'15'.repeat(32)}`,
+            },
+          };
+          const mempool = env.runtimeMempool ?? env.runtimeInput;
+          mempool.entityInputs.push({
+            entityId,
+            signerId,
+            entityTxs: [{ type: 'j_event', data: {
+              from: signerId,
+              observedAt: env.timestamp,
+              blockNumber: 99,
+              blockHash: `0x${'16'.repeat(32)}`,
+              transactionHash: `0x${'17'.repeat(32)}`,
+              event,
+              events: [event],
+            } } as any],
+          });
+          env.runtimeMempool = mempool;
+          env.runtimeInput = mempool;
+        },
+      },
+    } as any]]);
+    const queuedInputs: EntityInput[] = [];
+
+    await submitRuntimeJOutbox(env, [{
+      jurisdictionName: 'Testnet',
+      jTxs: [{
+        type: 'batch',
+        entityId,
+        data: {
+          batch,
+          batchHash,
+          encodedBatch: '0x1234',
+          entityNonce: 1,
+          hankoSignature: '0x1234',
+          batchSize: 1,
+          signerId,
+        },
+        timestamp: env.timestamp,
+      } as any],
+    }], {
+      enqueueRuntimeInputs: (_env, inputs) => queuedInputs.push(...(inputs ?? [])),
+    });
+
+    expect(submitCalls).toBe(0);
+    expect(state.jBatchState?.sentBatch).toBeDefined();
+    expect(queuedInputs).toEqual([{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'j_abort_sent_batch',
+        data: { reason: 'counterparty-finalized-before-submit', requeueToCurrent: true },
+      }],
+    }]);
+  });
+
+  test('submitRuntimeJOutbox keeps E5 fatal without matching finalized-dispute evidence', async () => {
+    const entityId = `0x${'ae'.repeat(32)}`;
+    const signerId = `0x${'cf'.repeat(20)}`;
+    const env = createEmptyEnv('j-submit-unproven-e5');
+    env.runtimeId = signerId;
+    env.timestamp = 126;
+    env.jReplicas = new Map([['Testnet', {
+      jadapter: {
+        submitTx: async () => ({ success: false, error: 'staticCall revert: E5()' }),
+        pollNow: async () => {},
+      },
+    } as any]]);
+
+    await expect(submitRuntimeJOutbox(env, [{
+      jurisdictionName: 'Testnet',
+      jTxs: [{
+        type: 'batch',
+        entityId,
+        data: {
+          batch: { ...createEmptyBatch(), reserveToReserve: [{
+            receivingEntity: `0x${'ef'.repeat(32)}`,
+            tokenId: 1,
+            amount: 10n,
+          }] },
+          batchHash: `0x${'18'.repeat(32)}`,
+          encodedBatch: '0x1234',
+          entityNonce: 1,
+          hankoSignature: '0x1234',
+          batchSize: 1,
+          signerId,
+        },
+        timestamp: env.timestamp,
+      } as any],
+    }], { enqueueRuntimeInputs: () => {} })).rejects.toThrow(/J_SUBMIT_FATAL: staticCall revert: E5\(\)/);
+  });
+
   test('submitRuntimeJOutbox marks staticCall revert as terminal before halting', async () => {
     const entityId = `0x${'ad'.repeat(32)}`;
     const signerId = `0x${'cd'.repeat(20)}`;
