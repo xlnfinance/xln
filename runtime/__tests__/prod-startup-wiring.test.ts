@@ -23,6 +23,9 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 describe('production startup wiring', () => {
   test('production frontend deploy builds off-host and uploads a complete artifact', () => {
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
+    const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
 
     expect(deploy).toContain('build_remote_frontend_archive');
     expect(deploy).toContain('tar -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build');
@@ -31,6 +34,8 @@ describe('production startup wiring', () => {
     expect(deploy).toContain('remote_cmd="$remote_cmd ./deploy.sh --runtime-only"');
     expect(deploy).toContain('PRODUCTION_FRONTEND_BUILD_FORBIDDEN');
     expect(deploy).not.toContain('remote_cmd="$remote_cmd --frontend"');
+    expect(deploy).toContain("frontend artifact installed without runtime restart");
+    expect(packageJson.scripts['deploy:prod:frontend']).toContain('--frontend-only');
   });
 
   test('production public discovery, recovery, and faucet routes are operational by default', () => {
@@ -41,6 +46,7 @@ describe('production startup wiring', () => {
     const xlnStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/xlnStore.ts'), 'utf8');
     const deploy = readFileSync(join(repoRoot, 'deploy.sh'), 'utf8');
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
+    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
 
     expect(runtimeCreation).toContain("url.searchParams.set('access', 'read')");
     expect(runtimeCreation).not.toContain("url.searchParams.set('allowPartial', '1')");
@@ -51,6 +57,9 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain(
       "const AUTO_PROVISION_EXTERNAL_FAUCET = process.env['XLN_AUTO_PROVISION_EXTERNAL_FAUCET'] !== '0';",
     );
+    expect(vaultStore).toContain('await fundSignerWalletViaFaucet(signerAddress);');
+    expect(vaultStore).not.toContain('void fundSignerWalletViaFaucet(signerAddress);');
+    expect(vaultStore).not.toContain('fundSignerWalletViaFaucet(secondaryAddress)');
   });
 
   test('production payment smoke only reads persisted receipts from a real debug runtime env', () => {

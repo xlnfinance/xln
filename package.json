@@ -129,7 +129,7 @@
     "deploy:full": "./deploy.sh --frontend",
     "deploy:fresh": "./deploy.sh --fresh",
     "deploy:prod": "./deploy.sh --remote root@xln.finance --push --frontend --production --code-only",
-    "deploy:prod:frontend": "./deploy.sh --remote root@xln.finance --push --frontend --production --code-only",
+    "deploy:prod:frontend": "./deploy.sh --remote root@xln.finance --push --frontend-only --production",
     "deploy:prod:runtime": "./deploy.sh --runtime-only --remote root@xln.finance --push --production --code-only",
     "deploy:prod:runtime:code": "./deploy.sh --runtime-only --remote root@xln.finance --push --production --code-only",
     "deploy:prod:runtime:reset": "./deploy.sh --runtime-only --remote root@xln.finance --push --production --reset-mesh",

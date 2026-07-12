@@ -3348,10 +3348,10 @@ export const vaultOperations = {
         );
         markPerf('import_entity_replica');
 
-      // Store entityId in signer
+        // Store entityId in signer
         runtime.signers[0]!.entityId = entityId;
         runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
-        void fundSignerWalletViaFaucet(signerAddress);
+        await fundSignerWalletViaFaucet(signerAddress);
 
         for (const secondary of secondaryJurisdictionImports) {
         const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);
@@ -3398,7 +3398,6 @@ export const vaultOperations = {
           jurisdiction: secondary.name,
           entityId: secondaryEntityId,
         });
-        void fundSignerWalletViaFaucet(secondaryAddress);
         }
         if (!requiresOnboarding) {
           writeSavedCollateralPolicy({

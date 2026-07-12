@@ -8,6 +8,7 @@ REMOTE_HOST=""
 PUSH=0
 FRESH=0
 BUILD_FRONTEND=1
+FRONTEND_ONLY=0
 PRODUCTION=0
 RESET_PRODUCTION_MESH=0
 PREBUILT_FRONTEND_ARCHIVE=""
@@ -38,6 +39,11 @@ while [ $# -gt 0 ]; do
       BUILD_FRONTEND=1
       shift
       ;;
+    --frontend-only)
+      BUILD_FRONTEND=1
+      FRONTEND_ONLY=1
+      shift
+      ;;
     --runtime-only)
       BUILD_FRONTEND=0
       shift
@@ -56,11 +62,16 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend] [--runtime-only] [--production] [--code-only|--reset-mesh]" >&2
+      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend|--frontend-only|--runtime-only] [--production] [--code-only|--reset-mesh]" >&2
       exit 1
       ;;
   esac
 done
+
+if [ "$FRONTEND_ONLY" = "1" ] && [ -z "$REMOTE_HOST" ]; then
+  echo "FRONTEND_ONLY_REQUIRES_REMOTE" >&2
+  exit 1
+fi
 
 ensure_main_branch_for_push() {
   local branch
@@ -1058,17 +1069,21 @@ if [ -n "$REMOTE_HOST" ]; then
   if [ -n "$remote_frontend_archive" ]; then
     remote_cmd="$remote_cmd rm -rf frontend/build; tar -xzf '$remote_frontend_archive' -C frontend; rm -f '$remote_frontend_archive';"
   fi
-  remote_cmd="$remote_cmd ./deploy.sh --runtime-only"
-  if [ "$FRESH" = "1" ]; then
-    remote_cmd="$remote_cmd --fresh"
-  fi
-  if [ "$PRODUCTION" = "1" ]; then
-    remote_cmd="$remote_cmd --production"
-  fi
-  if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
-    remote_cmd="$remote_cmd --reset-mesh"
+  if [ "$FRONTEND_ONLY" = "1" ]; then
+    remote_cmd="$remote_cmd test -s frontend/build/index.html; echo '[deploy] frontend artifact installed without runtime restart';"
   else
-    remote_cmd="$remote_cmd --code-only"
+    remote_cmd="$remote_cmd ./deploy.sh --runtime-only"
+    if [ "$FRESH" = "1" ]; then
+      remote_cmd="$remote_cmd --fresh"
+    fi
+    if [ "$PRODUCTION" = "1" ]; then
+      remote_cmd="$remote_cmd --production"
+    fi
+    if [ "$RESET_PRODUCTION_MESH" = "1" ]; then
+      remote_cmd="$remote_cmd --reset-mesh"
+    else
+      remote_cmd="$remote_cmd --code-only"
+    fi
   fi
 
   echo "[deploy] running remote deploy on $REMOTE_HOST"
