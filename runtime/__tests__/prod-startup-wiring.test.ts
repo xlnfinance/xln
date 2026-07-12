@@ -21,6 +21,23 @@ const extractSourceBlock = (source: string, marker: string, nextMarker: string):
 };
 
 describe('production startup wiring', () => {
+  test('fresh browser runtimes observe deployed jurisdictions from their creation tip', () => {
+    const vaultStore = readFileSync(join(repoRoot, 'frontend/src/lib/stores/vaultStore.ts'), 'utf8');
+    const freshRuntimeBootstrap = extractSourceBlock(
+      vaultStore,
+      '// Import the same primary jurisdiction name that hub profiles advertise.',
+      "markPerf('import_j_testnet');",
+    );
+    const secondaryJurisdictionBootstrap = extractSourceBlock(
+      vaultStore,
+      'for (const secondary of secondaryJurisdictionImports)',
+      '// === MVP: Create entity ===',
+    );
+
+    expect(freshRuntimeBootstrap).toContain('startAtCurrentBlock: true');
+    expect(secondaryJurisdictionBootstrap).toContain('startAtCurrentBlock: true');
+  });
+
   test('quick and smoke gates rebuild after their own artifact cleanup', () => {
     const packageJson = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;

@@ -6,6 +6,7 @@ import {
   isTransientRpcUnavailableError,
   readOptionalRpcBatchBigInt,
   readRequiredRpcBatchBigInt,
+  resolveWatcherPollToBlock,
   shouldEmitExternalWalletAllowanceDelta,
   shouldEmitExternalWalletBalanceDelta,
 } from '../jadapter/rpc';
@@ -167,6 +168,16 @@ describe('jadapter helper cursors', () => {
     ))).toBe(true);
     expect(isTransientRpcUnavailableError(new Error('EXTERNAL_WALLET_BASELINE_MISSING'))).toBe(false);
     expect(isTransientRpcUnavailableError(new Error('execution reverted: INSUFFICIENT_RESERVE'))).toBe(false);
+  });
+
+  test('RPC watcher bounds historical catch-up without skipping the safe tip', () => {
+    expect(resolveWatcherPollToBlock(1, 10_000, 256)).toBe(256);
+    expect(resolveWatcherPollToBlock(257, 10_000, 256)).toBe(512);
+    expect(resolveWatcherPollToBlock(9_900, 10_000, 256)).toBe(10_000);
+    expect(resolveWatcherPollToBlock(10_000, 10_000, 256)).toBe(10_000);
+    expect(() => resolveWatcherPollToBlock(0, 10_000, 256)).toThrow(/J_WATCHER_FROM_BLOCK_INVALID/);
+    expect(() => resolveWatcherPollToBlock(2, 1, 256)).toThrow(/J_WATCHER_SAFE_TO_BLOCK_INVALID/);
+    expect(() => resolveWatcherPollToBlock(1, 10_000, 0)).toThrow(/J_WATCHER_BLOCK_RANGE_INVALID/);
   });
 
   test('j-event ingress rejects during persistence quiesce before cursor or dedup mutation', () => {

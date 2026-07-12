@@ -3219,6 +3219,7 @@ export const vaultOperations = {
               rpcs: [rpcUrl],
               blockTimeMs: 1_000,
               contracts: primaryConfig.contracts,
+              startAtCurrentBlock: true,
             }
           }],
           entityInputs: []
@@ -3260,6 +3261,7 @@ export const vaultOperations = {
                 rpcs: [secondaryRpcUrl],
                 blockTimeMs: secondary.config.blockTimeMs ?? 1_000,
                 contracts: secondary.config.contracts,
+                startAtCurrentBlock: true,
               },
             }],
             entityInputs: [],

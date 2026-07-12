@@ -172,6 +172,9 @@ export const BLOCKCHAIN = {
   /** J-watcher polling interval (milliseconds) */
   J_WATCHER_POLL_INTERVAL_MS: 1_000, // One simple canonical poll per second
 
+  /** Maximum finalized block range fetched by one J-watcher poll. */
+  J_WATCHER_MAX_BLOCKS_PER_POLL: 256,
+
   /** Maximum gas price willing to pay (in gwei) */
   MAX_GAS_PRICE_GWEI: 300,
 } as const;

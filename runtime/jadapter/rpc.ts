@@ -84,6 +84,23 @@ const rpcLog = createStructuredLogger('jadapter.rpc');
 
 const isTronChainId = (chainId: number): boolean => TRON_CHAIN_IDS.has(chainId);
 
+export const resolveWatcherPollToBlock = (
+  fromBlock: number,
+  safeToBlock: number,
+  maxBlocksPerPoll = BLOCKCHAIN.J_WATCHER_MAX_BLOCKS_PER_POLL,
+): number => {
+  if (!Number.isSafeInteger(fromBlock) || fromBlock < 1) {
+    throw new Error(`J_WATCHER_FROM_BLOCK_INVALID:${String(fromBlock)}`);
+  }
+  if (!Number.isSafeInteger(safeToBlock) || safeToBlock < fromBlock) {
+    throw new Error(`J_WATCHER_SAFE_TO_BLOCK_INVALID:${String(safeToBlock)}`);
+  }
+  if (!Number.isSafeInteger(maxBlocksPerPoll) || maxBlocksPerPoll < 1) {
+    throw new Error(`J_WATCHER_BLOCK_RANGE_INVALID:${String(maxBlocksPerPoll)}`);
+  }
+  return Math.min(safeToBlock, fromBlock + maxBlocksPerPoll - 1);
+};
+
 export const readRequiredRpcBatchBigInt = (
   responses: Map<number, RpcBatchResponse>,
   id: number,
@@ -2189,13 +2206,14 @@ export async function createRpcAdapter(
           if (lastSyncedBlock >= safeToBlock) return;
 
           const fromBlock = lastSyncedBlock + 1;
+          const toBlock = resolveWatcherPollToBlock(fromBlock, safeToBlock);
           pollFromBlock = fromBlock;
-          pollToBlock = safeToBlock;
+          pollToBlock = toBlock;
           // Commit the watcher cursor only after a successful poll+apply.
           // Advancing it before getLogs()/event processing can persist a speculative
           // blockNumber into WAL snapshots and permanently skip finalized J events.
           pollStep = 'resolveDepository';
-          const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock: safeToBlock };
+          const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock };
           pollStep = 'eth_getLogs';
           const depositoryLogs = await provider.getLogs(filter);
           pollStep = 'eth_getLogs:erc20';
@@ -2204,7 +2222,7 @@ export async function createRpcAdapter(
             ? await provider.getLogs({
                 address: watchedTokens.map(token => token.address),
                 fromBlock,
-                toBlock: safeToBlock,
+                toBlock,
               })
             : [];
           if (watcherPollCancelled()) return;
@@ -2325,7 +2343,7 @@ export async function createRpcAdapter(
                   rpcUrl: config.rpcUrl,
                   step: 'before-process-event-batch',
                   fromBlock,
-                  toBlock: safeToBlock,
+                  toBlock,
                   lastSyncedBlock,
                 });
                 return;
@@ -2334,7 +2352,7 @@ export async function createRpcAdapter(
                 pauseJEventWatcherForQuiesce({
                   step: 'before-process-event-batch',
                   fromBlock,
-                  toBlock: safeToBlock,
+                  toBlock,
                   rawEventCount: rawEvents.length,
                 });
                 return;
@@ -2361,7 +2379,7 @@ export async function createRpcAdapter(
               emitWatcherDebug({
                 event: 'j_watch_batch',
                 fromBlock,
-                toBlock: safeToBlock,
+                toBlock,
                 chainTip: currentBlock,
                 confirmationDepth,
                 blockCount: byBlock.size,
@@ -2369,7 +2387,7 @@ export async function createRpcAdapter(
                 eventCounts,
               });
             }
-            lastSyncedBlock = safeToBlock;
+            lastSyncedBlock = toBlock;
             consecutiveTransientWatcherFailures = 0;
             commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
             return;
@@ -2385,7 +2403,7 @@ export async function createRpcAdapter(
             return;
           }
 
-          lastSyncedBlock = safeToBlock;
+          lastSyncedBlock = toBlock;
           consecutiveTransientWatcherFailures = 0;
           commitScannedWatcherCursor(activeEnv, lastSyncedBlock);
         })().catch((error: unknown) => {
