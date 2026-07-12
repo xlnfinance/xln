@@ -6,7 +6,7 @@ import { formatEntityId } from '../../utils';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { upsertSortedStringMapEntry } from '../../sorted-index';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
+import { assertSameJurisdictionAccount } from '../../jurisdiction/jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../default-account-tokens';
 import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../account-watch-seed';

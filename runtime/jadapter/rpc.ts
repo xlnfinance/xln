@@ -60,7 +60,7 @@ import {
 } from './watcher';
 import { DEV_CHAIN_IDS } from './index';
 import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../j-batch';
-import { requireUsableContractAddress } from '../contract-address';
+import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
 import { resolveEntityProposerId } from '../state-helpers';

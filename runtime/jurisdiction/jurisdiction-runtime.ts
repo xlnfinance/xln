@@ -1,6 +1,6 @@
-import type { ConsensusConfig, Env, EntityReplica, JReplica, JurisdictionConfig } from './types';
+import type { ConsensusConfig, Env, EntityReplica, JReplica, JurisdictionConfig } from '../types';
 import { firstUsableContractAddress } from './contract-address';
-import { formatEntityId } from './utils';
+import { formatEntityId } from '../utils';
 import {
   getJurisdictionStackId,
   isJurisdictionStackRef,

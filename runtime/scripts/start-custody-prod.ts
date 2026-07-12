@@ -5,7 +5,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../orchestrator/daemon-control';
-import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
+import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import {
   spawnBunChild,

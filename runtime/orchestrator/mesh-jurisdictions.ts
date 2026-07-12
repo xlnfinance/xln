@@ -1,4 +1,4 @@
-import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
+import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 
 export type MeshJurisdictionConfig = {

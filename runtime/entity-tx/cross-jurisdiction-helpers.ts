@@ -7,7 +7,7 @@ import {
   getJurisdictionStackId,
   isJurisdictionStackRef,
   requireRuntimeJurisdictionConfigByName,
-} from '../jurisdiction-runtime';
+} from '../jurisdiction/jurisdiction-runtime';
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityState, Env } from '../types';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();

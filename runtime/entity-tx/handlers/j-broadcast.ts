@@ -14,7 +14,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, Env, JTx, JInput, HashType } from '../../types';
-import { requireUsableContractAddress } from '../../contract-address';
+import { requireUsableContractAddress } from '../../jurisdiction/contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
@@ -24,7 +24,7 @@ import {
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
-} from '../../jurisdiction-runtime';
+} from '../../jurisdiction/jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
 import { createStructuredLogger, shortHash, shortId } from '../../logger';
 

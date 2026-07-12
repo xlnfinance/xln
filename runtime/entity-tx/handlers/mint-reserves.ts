@@ -15,7 +15,7 @@ import { cloneEntityState, addMessage } from '../../state-helpers';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
-} from '../../jurisdiction-runtime';
+} from '../../jurisdiction/jurisdiction-runtime';
 import { createStructuredLogger, shortId } from '../../logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');

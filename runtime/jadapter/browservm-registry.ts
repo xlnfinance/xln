@@ -1,5 +1,5 @@
 import type { Env, JurisdictionConfig } from '../types';
-import { requireUsableContractAddress } from '../contract-address';
+import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import type { BrowserVMProvider } from './types';
 
 let registeredBrowserVMJurisdiction: JurisdictionConfig | null = null;

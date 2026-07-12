@@ -49,7 +49,7 @@ import {
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './relay-router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from './networking/ws-protocol';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
-import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
+import { resolveJurisdictionsJsonPath } from './jurisdiction/jurisdictions-path';
 import { createStructuredLogger, shortId } from './logger';
 import {
   buildMarketSnapshotForReplica,

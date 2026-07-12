@@ -1,4 +1,4 @@
-import { requireUsableContractAddress } from '../../contract-address';
+import { requireUsableContractAddress } from '../../jurisdiction/contract-address';
 import { isLeftEntity } from '../../entity-id-utils';
 import { createStructuredLogger, shortId } from '../../logger';
 import { initJBatch, batchAddSettlement } from '../../j-batch';

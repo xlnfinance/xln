@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { selectCliJurisdiction } from '../cli-jurisdiction';
+import { selectCliJurisdiction } from '../jurisdiction/cli-jurisdiction';
 
 const payload = {
   jurisdictions: {

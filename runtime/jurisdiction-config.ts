@@ -10,8 +10,8 @@
  */
 
 import type { JurisdictionConfig } from './types';
-import { isUsableContractAddress } from './contract-address';
-import { loadJurisdictions } from './jurisdiction-loader';
+import { isUsableContractAddress } from './jurisdiction/contract-address';
+import { loadJurisdictions } from './jurisdiction/jurisdiction-loader';
 import { createStructuredLogger } from './logger';
 import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
 import { isBrowser } from './utils';

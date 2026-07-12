@@ -2,7 +2,7 @@ import { deriveAccountWatchSeed } from '../../account-watch-seed';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../account-crypto';
 import { buildCrossJurisdictionPullBinding } from '../../cross-jurisdiction';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../../cross-jurisdiction-orderbook';
-import { getJurisdictionStackId } from '../../jurisdiction-runtime';
+import { getJurisdictionStackId } from '../../jurisdiction/jurisdiction-runtime';
 import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,

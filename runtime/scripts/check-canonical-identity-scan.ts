@@ -6,7 +6,7 @@ import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
-} from '../jurisdiction-runtime';
+} from '../jurisdiction/jurisdiction-runtime';
 import type { Env, JReplica } from '../types';
 
 const readText = (path: string): string => readFileSync(path, 'utf8');
@@ -60,7 +60,7 @@ requireCondition(getJReplicaByJurisdictionRef(env, canonicalRef)?.name === 'Cano
 requireCondition(getJReplicaByJurisdictionRef(env, 'Canonical') === undefined, 'stack ref lookup accepted display name');
 
 for (const [path, markers] of [
-  ['runtime/jurisdiction-runtime.ts', [
+  ['runtime/jurisdiction/jurisdiction-runtime.ts', [
     'export const sameJurisdictionIdentity = (left: unknown, right: unknown): boolean => {',
     'return Boolean(leftRef && rightRef && leftRef === rightRef);',
     'if (!isJurisdictionStackRef(raw)) return undefined;',
@@ -101,7 +101,7 @@ for (const [path, markers] of [
 }
 
 for (const [path, forbidden] of [
-  ['runtime/jurisdiction-runtime.ts', [
+  ['runtime/jurisdiction/jurisdiction-runtime.ts', [
     'if (!isJurisdictionStackRef(raw)) return getJReplicaByName(env, raw);',
     'sameJurisdictionIdentityOrNameOnlyFallback',
   ]],

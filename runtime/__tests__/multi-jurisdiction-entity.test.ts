@@ -7,7 +7,7 @@ import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
-} from '../jurisdiction-runtime';
+} from '../jurisdiction/jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';

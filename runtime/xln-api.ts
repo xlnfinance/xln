@@ -119,7 +119,7 @@ export {
 export {
   getJurisdictionStackId,
   isJurisdictionStackRef,
-} from './jurisdiction-stack';
+} from './jurisdiction/jurisdiction-stack';
 
 // Re-export identity functions types
 export {

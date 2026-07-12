@@ -359,7 +359,7 @@ for (const [path, markers] of [
   ['runtime/orchestrator/managed-runtime-leases.ts', ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored']],
   ['runtime/orchestrator/parent-watch.ts', ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing']],
   ['runtime/jurisdiction-config.ts', ["createStructuredLogger('runtime.jurisdiction_config')", 'browser_api_unavailable', 'JURISDICTIONS_BROWSER_CONFIG_INVALID']],
-  ['runtime/jurisdiction-loader.ts', ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED']],
+  ['runtime/jurisdiction/jurisdiction-loader.ts', ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED']],
   ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
   ['runtime/runtime-j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
@@ -441,7 +441,7 @@ const jurisdictionConfigPath = 'runtime/jurisdiction-config.ts';
 const jurisdictionConfig = readText(jurisdictionConfigPath);
 assertNotIncludes(jurisdictionConfig, 'console.', jurisdictionConfigPath);
 
-const jurisdictionLoaderPath = 'runtime/jurisdiction-loader.ts';
+const jurisdictionLoaderPath = 'runtime/jurisdiction/jurisdiction-loader.ts';
 const jurisdictionLoader = readText(jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'console.', jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'new Date()', jurisdictionLoaderPath);

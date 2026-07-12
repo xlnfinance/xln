@@ -5,9 +5,9 @@
  */
 
 // Browser-compatible: Use isBrowser check instead of fs
-import { isBrowser } from './utils';
+import { isBrowser } from '../utils';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
-import { createStructuredLogger } from './logger';
+import { createStructuredLogger } from '../logger';
 
 const jurisdictionLoaderLog = createStructuredLogger('runtime.jurisdiction_loader');
 const DEFAULT_LAST_UPDATED = '1970-01-01T00:00:00.000Z';

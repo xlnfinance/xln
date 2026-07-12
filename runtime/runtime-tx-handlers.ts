@@ -13,7 +13,7 @@ import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import {
   backfillEntityJurisdictionBinding,
   requireBoundEntityConfig,
-} from './jurisdiction-runtime';
+} from './jurisdiction/jurisdiction-runtime';
 import { announceLocalEntityProfile } from './networking/gossip-helper';
 import { normalizeRuntimeId } from './networking/runtime-id';
 import type { EntityReplica, Env, JReplica, RuntimeTx } from './types';

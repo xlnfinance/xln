@@ -16,7 +16,7 @@
 import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, AccountTx, SwapOffer } from '../../types';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { isUsableContractAddress } from '../../contract-address';
+import { isUsableContractAddress } from '../../jurisdiction/contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret, J_BATCH_CONTRACT_LIMITS, getBatchSize } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';

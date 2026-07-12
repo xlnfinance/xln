@@ -19,8 +19,8 @@ import {
   normalizeJurisdictionKey as normalizePublicJurisdictionKey,
   selectWritableJurisdictionKey,
   type WritableJurisdictionEntry,
-} from '../jurisdiction-key';
-import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
+} from '../jurisdiction/jurisdiction-key';
+import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
   buildMarketSnapshotForReplica,
@@ -50,7 +50,7 @@ import {
   getJReplicaByJurisdictionRef,
   getJurisdictionIdentityRef,
   isJurisdictionStackRef,
-} from '../jurisdiction-runtime';
+} from '../jurisdiction/jurisdiction-runtime';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,

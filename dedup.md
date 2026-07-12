@@ -73,7 +73,7 @@ Top 100 simplification targets:
 61. `runtime/relay-router.ts` — split websocket transport from pending-message persistence.
 62. `runtime/relay-store.ts` — merge tiny helpers or make it the only relay persistence layer.
 63. `runtime/entity-factory.ts` — split entity-id encoding from on-chain registration helpers.
-64. `runtime/jurisdiction-loader.ts` — merge with `jurisdiction-config` or split cleanly by responsibility.
+64. `runtime/jurisdiction/jurisdiction-loader.ts` — merge with `jurisdiction-config` or split cleanly by responsibility.
 65. `runtime/jurisdiction-factory.ts` — remove direct BrowserVM knowledge once `jadapter` fully owns backend construction.
 66. `runtime/types.ts` — split runtime, entity, account, batch, event, and adapter types into separate files.
 67. `runtime/types.ts` — move BrowserVM-only comments and deprecated fields out of core type file.

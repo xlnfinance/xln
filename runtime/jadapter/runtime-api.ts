@@ -1,4 +1,4 @@
-import { requireUsableContractAddress } from '../contract-address';
+import { requireUsableContractAddress } from '../jurisdiction/contract-address';
 import { detectEntityType, extractNumberFromEntityId } from '../entity-factory';
 import { encodeJBatch, computeBatchHankoHash, type JBatch } from '../j-batch';
 import { normalizeEntityId } from '../entity-id-utils';

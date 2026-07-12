@@ -11,7 +11,7 @@ import {
 import { isLeftEntity } from '../../entity-id-utils';
 import { scheduleHook as scheduleCrontabHook } from '../../entity-crontab';
 import { upsertSortedStringMapEntry } from '../../sorted-index';
-import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
+import { assertSameJurisdictionAccount } from '../../jurisdiction/jurisdiction-runtime';
 import { normalizeAccountWatchSeed } from '../../account-watch-seed';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
 import { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';

@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 
 import type { JAdapter } from './jadapter';
 import { withCanonicalCrossJurisdictionRouteHash } from './cross-jurisdiction';
-import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from './jurisdiction-runtime';
+import { getJurisdictionStackId, requireEntityRuntimeJurisdictionConfig } from './jurisdiction/jurisdiction-runtime';
 import { resolveEntityProposerId } from './state-helpers';
 import type { CrossJurisdictionSwapRoute, EntityState, Env, RuntimeInput } from './types';
 import { getWallClockMs } from './utils';

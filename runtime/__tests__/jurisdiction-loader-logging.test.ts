@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
+import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 
 const tempRoots: string[] = [];
 
@@ -48,7 +48,7 @@ afterEach(() => {
 
 describe('jurisdiction loader diagnostics', () => {
   test('uses structured logging without direct console output', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction-loader.ts'), 'utf8');
+    const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/jurisdiction-loader.ts'), 'utf8');
 
     expect(source).toContain("const jurisdictionLoaderLog = createStructuredLogger('runtime.jurisdiction_loader');");
     expect(source).toContain("logJurisdictionLoaderDebug('config_missing_using_defaults'");

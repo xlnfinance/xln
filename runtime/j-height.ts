@@ -3,7 +3,7 @@ import {
   getJReplicaByJurisdictionRef,
   getJReplicaByName,
   isJurisdictionStackRef,
-} from './jurisdiction-runtime';
+} from './jurisdiction/jurisdiction-runtime';
 
 export const PRODUCTION_DISPUTE_DELAY_BLOCKS = 5_760;
 

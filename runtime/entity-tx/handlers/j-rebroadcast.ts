@@ -1,11 +1,11 @@
 import type { EntityInput, EntityState, EntityTx, Env, HashType, JInput, JTx } from '../../types';
-import { requireUsableContractAddress } from '../../contract-address';
+import { requireUsableContractAddress } from '../../jurisdiction/contract-address';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../j-batch';
 import {
   getJurisdictionConfigName,
   requireRuntimeJurisdictionConfigByName,
-} from '../../jurisdiction-runtime';
+} from '../../jurisdiction/jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
 
 const MIN_GAS_BUMP_BPS = 0;

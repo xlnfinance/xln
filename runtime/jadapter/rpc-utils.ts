@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import type { Provider } from 'ethers';
-import { firstUsableContractAddress } from '../contract-address';
+import { firstUsableContractAddress } from '../jurisdiction/contract-address';
 
 export type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
