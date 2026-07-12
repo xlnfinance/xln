@@ -18,7 +18,7 @@ import {
   isCrossJurisdictionBookAdmissionPending,
   markCrossJurisdictionBookAdmissionClosed,
   mergeCrossJurisdictionBookAdmission,
-} from '../../../cross-jurisdiction-orderbook';
+} from '../../../extensions/cross-j/orderbook';
 import type { EntityState, EntityTx, Env } from '../../../types';
 import { SWAP_LOT_SCALE } from '../../../orderbook';
 import {

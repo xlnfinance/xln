@@ -9,12 +9,12 @@ import {
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionClaimProgress,
 } from '../../../cross-jurisdiction';
-import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../cross-jurisdiction-market';
+import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
   getCrossJurisdictionBookReceiptError,
   markCrossJurisdictionBookAdmissionClosed,
-} from '../../../cross-jurisdiction-orderbook';
+} from '../../../extensions/cross-j/orderbook';
 import { decodeHashLadderBinary } from '../../../hashladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../../logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';

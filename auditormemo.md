@@ -48,7 +48,7 @@ Scores are `importance / complexity` out of 100.
 | Networking and delivery | 85 / 80 | `runtime/networking/*`, `runtime/relay/*`, `runtime/relay/router.ts`, `runtime/delivery-result.ts` | Relay/direct/P2P delivery semantics, retries, TTLs, and freshness/liveness boundaries. |
 | RAdapter and server | 85 / 80 | `runtime/radapter/*`, `runtime/server/*`, `runtime/server.ts` | Remote runtime query/control surface used by browser app and external operators. |
 | Orchestrator | 75 / 85 | `runtime/orchestrator/*` | Dev/prod process supervision, hub/MM/custody/watchtower wiring. Large operational surface, not the core consensus root. |
-| Orderbook and swaps | 82 / 85 | `runtime/orderbook/*`, `runtime/cross-jurisdiction.ts`, `runtime/cross-jurisdiction-orderbook.ts`, `runtime/account/tx/handlers/swap-*` | Same-j and cross-j swap lifecycle, fills, cancels, exact amount accounting, hash-ladder proof ratio boundaries. |
+| Orderbook and swaps | 82 / 85 | `runtime/orderbook/*`, `runtime/cross-jurisdiction.ts`, `runtime/extensions/cross-j/orderbook.ts`, `runtime/account/tx/handlers/swap-*` | Same-j and cross-j swap lifecycle, fills, cancels, exact amount accounting, hash-ladder proof ratio boundaries. |
 | Routing | 85 / 75 | `runtime/routing/*`, payment/HTLC handlers | Payment path selection, route metadata, hub compatibility, and route-capacity assumptions. |
 | Scenarios and tests | 80 / 70 | `runtime/scenarios/*`, `runtime/__tests__/*`, `tests/e2e-*` | Executable examples and regression evidence. Use them to understand expected system flows. |
 | Frontend stores | 75 / 80 | `frontend/src/lib/stores/xlnStore.ts`, `vaultStore.ts`, `runtimeStore.ts` | Browser runtime ownership, remote runtime hydration, persistence, error logs, and user-facing command flow. |

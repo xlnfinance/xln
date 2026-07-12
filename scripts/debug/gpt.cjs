@@ -1018,9 +1018,9 @@ requestCrossJurisdictionSwap
 
 Read these together:
 - \`runtime/cross-jurisdiction.ts\`
-- \`runtime/cross-jurisdiction-market.ts\`
-- \`runtime/cross-jurisdiction-orderbook.ts\`
-- \`runtime/cross-jurisdiction-boundary.ts\`
+- \`runtime/extensions/cross-j/market.ts\`
+- \`runtime/extensions/cross-j/orderbook.ts\`
+- \`runtime/extensions/cross-j/boundary.ts\`
 - \`runtime/orderbook/cross-j-orderbook.ts\`
 - \`runtime/entity/tx/handlers/cross-j-*.ts\`
 - \`runtime/account/tx/handlers/cross-swap-fill-ack.ts\`
@@ -1138,8 +1138,8 @@ xln/
       runtime-swap-pairs.ts       ${fileSizes['runtime/runtime-swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
       swap-execution.ts           ${fileSizes['runtime/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
       cross-jurisdiction.ts       ${fileSizes['runtime/cross-jurisdiction.ts'] || '?'} lines - Cross-j route hashes and fill progress
-      cross-jurisdiction-market.ts ${fileSizes['runtime/cross-jurisdiction-market.ts'] || '?'} lines - Cross-j market derivation
-      cross-jurisdiction-orderbook.ts ${fileSizes['runtime/cross-jurisdiction-orderbook.ts'] || '?'} lines - Cross-j book owner rules
+      cross-jurisdiction-market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
+      cross-jurisdiction-orderbook.ts ${fileSizes['runtime/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
       orderbook/cross-j-orderbook.ts ${fileSizes['runtime/orderbook/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
       entity/tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
       entity/tx/handlers/account/orderbook-matching-*.ts - Same/cross matching

@@ -1,6 +1,6 @@
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { resolveEntityProposerId } from '../../state-helpers';
-import { deriveCanonicalCrossJurisdictionBookOwner } from '../../cross-jurisdiction-market';
+import { deriveCanonicalCrossJurisdictionBookOwner } from '../../extensions/cross-j/market';
 
 const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
 

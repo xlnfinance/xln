@@ -12,7 +12,7 @@ import { processOrderbookCancels, processOrderbookSwaps } from '../entity/tx/han
 import { applyCrossJurisdictionBookProgressToState } from '../entity/tx/handlers/cross-j-book-order';
 import { handleSwapResolve } from '../account/tx/handlers/swap-resolve';
 import { createEmptyEnv } from '../runtime';
-import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../cross-jurisdiction-fill-ack';
+import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from '../extensions/cross-j/fill-ack';
 import {
   deriveCanonicalSwapFillRatio,
   markWorkingOrderbookOffer,

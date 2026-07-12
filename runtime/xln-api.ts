@@ -115,7 +115,7 @@ export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
-} from './cross-jurisdiction-market';
+} from './extensions/cross-j/market';
 export {
   getJurisdictionStackId,
   isJurisdictionStackRef,

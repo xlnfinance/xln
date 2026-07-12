@@ -42,9 +42,9 @@ import {
   buildCrossJurisdictionFillAck,
   buildCrossJurisdictionMarketOffer,
   getCrossJurisdictionRouteRemainingAmounts,
-} from '../cross-jurisdiction-orderbook';
-import { buildCrossJurisdictionPendingFillFromAck } from '../cross-jurisdiction-fill-ack';
-import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../cross-jurisdiction-market';
+} from '../extensions/cross-j/orderbook';
+import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
+import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../extensions/cross-j/market';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
 import { normalizeEntitySwapTradingPairs } from '../runtime-swap-pairs';
 import { verifyHashLadderBinary } from '../hashladder';

@@ -10,7 +10,7 @@ import {
   validateCrossJurisdictionFillProgress,
   withCrossJurisdictionClaimProgress,
 } from '../cross-jurisdiction';
-import { buildCrossJurisdictionPendingFillFromAck } from '../cross-jurisdiction-fill-ack';
+import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 import { HASHLADDER_MAX_FILL_RATIO } from '../hashladder';
 import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../swap-execution';
 import { UINT16_MAX } from '../constants';
@@ -170,11 +170,11 @@ for (const [path, markers] of [
     'Runtime order progress is exact.',
     'uint16 projection used by hash-ladder/dispute plumbing',
   ]],
-  ['runtime/cross-jurisdiction-fill-ack.ts', [
+  ['runtime/extensions/cross-j/fill-ack.ts', [
     'getCrossJurisdictionCommittedProofRatio',
     'const getCrossJurisdictionFillAckProofRatio',
   ]],
-  ['runtime/cross-jurisdiction-orderbook.ts', [
+  ['runtime/extensions/cross-j/orderbook.ts', [
     'getCrossJurisdictionCommittedFillAmounts',
     'exactFillRatioToUint16',
     'Keep settlement amounts exact.',

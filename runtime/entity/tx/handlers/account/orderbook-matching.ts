@@ -5,7 +5,7 @@ import {
 } from '../../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../../logger';
 import { type WorkingOrderbookOffer, swapKey } from '../../../../swap-execution';
-import { type CrossJurisdictionFillInstruction } from '../../../../cross-jurisdiction-orderbook';
+import { type CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
 import {
   queueUniqueSwapResolveForEntityState,
   type MempoolOp,

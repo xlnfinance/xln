@@ -7,7 +7,7 @@ import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
-import { buildCrossJurisdictionBookAdmissionReceipt } from '../cross-jurisdiction-orderbook';
+import { buildCrossJurisdictionBookAdmissionReceipt } from '../extensions/cross-j/orderbook';
 import { generateLazyEntityId } from '../entity-factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';

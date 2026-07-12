@@ -1,7 +1,7 @@
 import type { EntityInput, Env, JInput, RoutedEntityInput, RuntimeTx } from './types';
 import type { Profile } from './networking/gossip';
 import type { RuntimeOutputRoutingDeps } from './runtime-output-routing';
-import { extractCrossJurisdictionRouteFromTx } from './cross-jurisdiction-boundary';
+import { extractCrossJurisdictionRouteFromTx } from './extensions/cross-j/boundary';
 import { normalizeRuntimeId } from './networking/runtime-id';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;

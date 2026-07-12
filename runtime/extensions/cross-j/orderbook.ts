@@ -9,13 +9,13 @@ import {
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
-} from './cross-jurisdiction';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from './orderbook';
+} from '../../cross-jurisdiction';
+import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../orderbook';
 import {
   deriveExactSwapFillRatio,
   exactFillRatioToUint16,
   type NormalizedOrderbookOffer,
-} from './swap-execution';
+} from '../../swap-execution';
 import type {
   AccountTx,
   CrossJurisdictionBookAdmission,
@@ -24,7 +24,7 @@ import type {
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapRoute,
   EntityState,
-} from './types';
+} from '../../types';
 
 const mergeAdmissionRoute = (
   existing: CrossJurisdictionSwapRoute | undefined,

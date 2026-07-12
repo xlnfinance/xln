@@ -81,8 +81,8 @@ import {
   deriveCanonicalCrossJurisdictionMarketForLegs,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
-import { resolveCrossJurisdictionRuntimeTopology } from '../cross-jurisdiction-boundary';
-import { crossJurisdictionBookOwnerRef } from '../cross-jurisdiction-orderbook';
+import { resolveCrossJurisdictionRuntimeTopology } from '../extensions/cross-j/boundary';
+import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { getJurisdictionStackId } from '../jurisdiction/jurisdiction-stack';
 import { getJurisdictionIdentityRef } from '../jurisdiction/jurisdiction-runtime';
 import { startParentLivenessWatch } from './parent-watch';

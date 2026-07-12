@@ -16,11 +16,11 @@ import {
   crossJurisdictionBookAdmissionKeyFor,
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
-} from '../../../../cross-jurisdiction-orderbook';
+} from '../../../../extensions/cross-j/orderbook';
 import {
   buildCrossJurisdictionPendingFillFromAck,
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
-} from '../../../../cross-jurisdiction-fill-ack';
+} from '../../../../extensions/cross-j/fill-ack';
 import {
   findQueuedCrossSwapAckForEntityState,
   hasQueuedCrossSwapAckForEntityState,

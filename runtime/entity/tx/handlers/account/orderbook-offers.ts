@@ -9,7 +9,7 @@ import {
   compareCanonicalText,
   type NormalizedOrderbookOffer,
 } from '../../../../swap-execution';
-import type { CrossJurisdictionFillInstruction } from '../../../../cross-jurisdiction-orderbook';
+import type { CrossJurisdictionFillInstruction } from '../../../../extensions/cross-j/orderbook';
 import type { MempoolOp } from './orderbook-queue';
 
 type StoredOfferEntityRefs = {

@@ -2,7 +2,7 @@ import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
-} from './cross-jurisdiction-boundary';
+} from './extensions/cross-j/boundary';
 import {
   collectCrossJurisdictionRemoteEntityHints,
   registerEntityRuntimeHint,

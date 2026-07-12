@@ -41,7 +41,7 @@ import {
   buildCrossJurisdictionMarketOffer,
   getCrossJurisdictionBookAdmissionError,
   mergeCrossJurisdictionBookAdmission,
-} from '../cross-jurisdiction-orderbook';
+} from '../extensions/cross-j/orderbook';
 import {
   buildCrossJurisdictionPullBinding,
   buildCrossJurisdictionCloseProof,

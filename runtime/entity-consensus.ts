@@ -68,7 +68,7 @@ import {
   isCrossJurisdictionBookAdmissionPending,
   normalizeEntityRef,
 } from './orderbook/cross-j-orderbook';
-import { markCrossJurisdictionBookAdmissionResolving } from './cross-jurisdiction-orderbook';
+import { markCrossJurisdictionBookAdmissionResolving } from './extensions/cross-j/orderbook';
 import { createEntityFrameHash } from './entity/consensus/frame';
 import { buildQuorumHanko, signEntityHashes } from './hanko/signing';
 import { proposeAccountFrame } from './account/consensus/propose';
@@ -81,7 +81,7 @@ import {
   type HankoWitnessEntry,
 } from './entity/consensus/hanko-witness';
 import { cloneCrossJurisdictionAccountTxRoute } from './cross-jurisdiction';
-import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
+import { buildCrossJurisdictionFillId, CROSS_J_PENDING_FILL_ACK_TTL_MS } from './extensions/cross-j/fill-ack';
 import { pruneSettledOriginatedHtlcRoutes } from './entity/tx/htlc-route-lifecycle';
 export { mergeEntityInputs } from './entity/consensus/input-merge';
 
@@ -96,7 +96,7 @@ const ENTITY_FRAME_SLOW_MS = Math.max(
   Number(nodeProcess?.env?.['XLN_ENTITY_FRAME_SLOW_MS'] || '1000'),
 );
 export { createEntityFrameHash } from './entity/consensus/frame';
-export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
+export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './extensions/cross-j/fill-ack';
 const entityLog = createStructuredLogger('entity');
 
 function queueUniqueAccountMempoolTx(

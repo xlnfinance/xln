@@ -1,4 +1,4 @@
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityTx } from './types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityTx } from '../../types';
 
 /**
  * Cross-j swaps are a two-runtime system protocol.

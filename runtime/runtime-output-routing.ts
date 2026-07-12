@@ -3,7 +3,7 @@ import { signatureMapSize } from './protocol/signatures';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
-} from './cross-jurisdiction-boundary';
+} from './extensions/cross-j/boundary';
 import { createStructuredLogger, shortId } from './logger';
 import { normalizeRuntimeId } from './networking/runtime-id';
 import { txFingerprint } from './state-helpers';

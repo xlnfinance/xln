@@ -11,7 +11,7 @@ import {
   buildCrossJurisdictionCancelAck,
   markCrossJurisdictionBookAdmissionClosed,
   type CrossJurisdictionFillInstruction,
-} from '../../../../cross-jurisdiction-orderbook';
+} from '../../../../extensions/cross-j/orderbook';
 import {
   queueUniqueSwapResolveForEntityState,
   type MempoolOp,

@@ -31,7 +31,7 @@ import {
   crossJurisdictionBookAdmissionKeyFor,
   getCrossJurisdictionRouteRemainingAmounts,
   type CrossMarketOffer,
-} from '../../../../cross-jurisdiction-orderbook';
+} from '../../../../extensions/cross-j/orderbook';
 import type { EntityState } from '../../../../types';
 import { normalizeSwapOfferForOrderbook, resolveStoredOfferEntityRefs } from './orderbook-offers';
 import type { SwapResolveEnqueueData } from './orderbook-queue';

@@ -9,7 +9,7 @@ import {
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../cross-jurisdiction';
-import { buildCrossJurisdictionCancelAck } from '../../../cross-jurisdiction-orderbook';
+import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../../types';

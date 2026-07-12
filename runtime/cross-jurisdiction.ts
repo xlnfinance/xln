@@ -28,7 +28,7 @@ import {
 import {
   deriveCanonicalCrossJurisdictionBookOwner,
   deriveCanonicalCrossJurisdictionVenueId,
-} from './cross-jurisdiction-market';
+} from './extensions/cross-j/market';
 import { exactFillRatioToUint16 } from './swap-execution';
 
 export {
@@ -39,7 +39,7 @@ export {
   deriveCanonicalCrossJurisdictionVenueId,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
   type CanonicalCrossJurisdictionMarket,
-} from './cross-jurisdiction-market';
+} from './extensions/cross-j/market';
 
 export const CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS = 60_000;
 export const CROSS_J_TARGET_REVEAL_SAFETY_MS = 60_000;

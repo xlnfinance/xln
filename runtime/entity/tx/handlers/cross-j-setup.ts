@@ -6,7 +6,7 @@ import {
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../cross-jurisdiction';
-import { getCrossJurisdictionBookReceiptError } from '../../../cross-jurisdiction-orderbook';
+import { getCrossJurisdictionBookReceiptError } from '../../../extensions/cross-j/orderbook';
 import { requireRuntimeJurisdictionDisputeDelayMs } from '../../../jurisdiction/height';
 import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import {

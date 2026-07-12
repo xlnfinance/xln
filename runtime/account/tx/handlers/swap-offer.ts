@@ -21,7 +21,7 @@ import {
   deriveCanonicalCrossJurisdictionMarket,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../../cross-jurisdiction';
-import { getCrossJurisdictionBookReceiptError } from '../../../cross-jurisdiction-orderbook';
+import { getCrossJurisdictionBookReceiptError } from '../../../extensions/cross-j/orderbook';
 import { MAX_SWAP_FILL_RATIO } from '../../../swap-execution';
 import { ensureDelta } from '../delta-utils';
 import { addHold } from '../hold-utils';

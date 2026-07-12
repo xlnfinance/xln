@@ -3,7 +3,7 @@ import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
-import { buildCrossJurisdictionBookAdmissionReceipt } from '../cross-jurisdiction-orderbook';
+import { buildCrossJurisdictionBookAdmissionReceipt } from '../extensions/cross-j/orderbook';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';
 import { getPerfMs } from '../utils';

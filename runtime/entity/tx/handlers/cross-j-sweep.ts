@@ -10,7 +10,7 @@ import {
 import {
   buildCrossJurisdictionCancelAck,
   markCrossJurisdictionBookAdmissionClosed,
-} from '../../../cross-jurisdiction-orderbook';
+} from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../../types';
