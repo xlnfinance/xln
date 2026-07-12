@@ -1,8 +1,15 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 import { expect, test, type Page } from './global-setup';
 
-import { APP_BASE_URL, createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import {
+  APP_BASE_URL,
+  createRuntimeIdentity,
+  deriveSignerAddressFromMnemonic,
+  gotoApp,
+  selectDemoMnemonic,
+} from './utils/e2e-demo-users';
 
 type BrainvaultCliOutput = {
   mnemonic24: string;
@@ -10,6 +17,7 @@ type BrainvaultCliOutput = {
 };
 
 type StoredRuntime = {
+  id?: string;
   label?: string;
   seed?: string;
   mnemonic12?: string;
@@ -79,8 +87,11 @@ async function expectPostCreateBrainvaultRecovery(page: Page): Promise<void> {
   await expect(recoveryDetails).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('brainvault-onboarding-recovery-toggle')).toContainText(/Seed safety/i);
   await expect(page.getByRole('heading', { name: /Encrypted backup and last-resort dispute protection/i })).toBeVisible();
-  await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
-  await expect(page.getByRole('button', { name: /Download sheet/i })).toBeVisible({ timeout: 5_000 });
+  const downloadButton = page.getByRole('button', { name: /Download sheet/i });
+  if (!await downloadButton.isVisible().catch(() => false)) {
+    await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
+  }
+  await expect(downloadButton).toBeVisible({ timeout: 5_000 });
   await expect(page.getByRole('link', { name: /Read safety notes/i })).toBeVisible({ timeout: 5_000 });
 }
 
@@ -115,41 +126,52 @@ async function openAddRuntimePanel(page: Page): Promise<void> {
   await waitForBrainvaultCreateForm(page);
 }
 
-async function waitForRuntimeWithSeed(page: Page, seed: string): Promise<StoredRuntime> {
-  const handle = await page.waitForFunction((expectedSeed: string) => {
+async function waitForRuntimeMetadata(page: Page, expectedRuntimeId: string): Promise<StoredRuntime> {
+  const handle = await page.waitForFunction((runtimeId: string) => {
     try {
       const raw = localStorage.getItem('xln-vaults');
       if (!raw) return null;
       const parsed = JSON.parse(raw) as {
         activeRuntimeId?: string;
-        runtimes?: Record<string, { label?: string; seed?: string; mnemonic12?: string }>;
+        runtimes?: Record<string, StoredRuntime>;
       };
       const runtime = parsed.activeRuntimeId ? parsed.runtimes?.[parsed.activeRuntimeId] : null;
-      if (!runtime?.seed || runtime.seed.trim().split(/\s+/).join(' ') !== expectedSeed) return null;
+      if (!runtime || String(runtime.id || '').toLowerCase() !== runtimeId.toLowerCase()) return null;
       return runtime;
     } catch {
       return null;
     }
-  }, seed, { timeout: 90_000 });
+  }, expectedRuntimeId, { timeout: 90_000 });
   return await handle.jsonValue() as StoredRuntime;
 }
 
-async function waitForRuntimeWithLabel(page: Page, label: string): Promise<StoredRuntime> {
-  const handle = await page.waitForFunction((expectedLabel: string) => {
-    try {
-      const raw = localStorage.getItem('xln-vaults');
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as {
-        activeRuntimeId?: string;
-        runtimes?: Record<string, { label?: string; seed?: string; mnemonic12?: string }>;
-      };
-      const runtimes = Object.values(parsed.runtimes ?? {});
-      return runtimes.find((runtime) => runtime.label === expectedLabel && runtime.seed) ?? null;
-    } catch {
-      return null;
-    }
-  }, label, { timeout: 120_000 });
-  return await handle.jsonValue() as StoredRuntime;
+const phraseAfter = (sheet: string, heading: string): string => {
+  const lines = sheet.split(/\r?\n/);
+  const index = lines.findIndex(line => line.trim() === heading);
+  if (index < 0) throw new Error(`BRAINVAULT_SHEET_HEADING_MISSING:${heading}`);
+  return normalizeMnemonic(lines[index + 1] || '');
+};
+
+async function readBrainvaultRecoverySheet(page: Page): Promise<BrainvaultCliOutput & { runtimeId: string }> {
+  const recoveryDetails = page.getByTestId('brainvault-onboarding-recovery');
+  await expect(recoveryDetails).toBeVisible({ timeout: 30_000 });
+  const downloadButton = page.getByRole('button', { name: /Download sheet/i });
+  if (!await downloadButton.isVisible().catch(() => false)) {
+    await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
+  }
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    downloadButton.click(),
+  ]);
+  const downloadPath = await download.path();
+  if (!downloadPath) throw new Error('BRAINVAULT_SHEET_DOWNLOAD_PATH_MISSING');
+  const sheet = readFileSync(downloadPath, 'utf8');
+  const runtimeIdLine = sheet.split(/\r?\n/).find(line => line.startsWith('Runtime ID:')) || '';
+  return {
+    mnemonic24: phraseAfter(sheet, '24-word recovery phrase:'),
+    mnemonic12: phraseAfter(sheet, '12-word compatibility phrase:'),
+    runtimeId: runtimeIdLine.slice('Runtime ID:'.length).trim().toLowerCase(),
+  };
 }
 
 async function createFreshWalletWhenNoBackupExists(page: Page): Promise<void> {
@@ -178,11 +200,14 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   await openVaultButton.click();
   await createFreshWalletWhenNoBackupExists(page);
 
-  const runtime = await waitForRuntimeWithLabel(page, name);
-  const mnemonic24 = normalizeMnemonic(runtime.seed || '');
-  const mnemonic12 = normalizeMnemonic(runtime.mnemonic12 || '');
-
-  return { mnemonic12, mnemonic24 };
+  const recovery = await readBrainvaultRecoverySheet(page);
+  const expectedRuntimeId = deriveSignerAddressFromMnemonic(recovery.mnemonic24);
+  const runtime = await waitForRuntimeMetadata(page, expectedRuntimeId);
+  expect(runtime.label).toBe(name);
+  expect(runtime.seed).toBeUndefined();
+  expect(runtime.mnemonic12).toBeUndefined();
+  expect(recovery.runtimeId).toBe(expectedRuntimeId);
+  return recovery;
 }
 
 test.describe('brainvault parity', () => {
@@ -218,9 +243,15 @@ test.describe('brainvault parity', () => {
     await openVaultButton.click();
     await createFreshWalletWhenNoBackupExists(page);
 
-    const runtime = await waitForRuntimeWithSeed(page, cli.mnemonic24);
+    const expectedRuntimeId = deriveSignerAddressFromMnemonic(cli.mnemonic24);
+    const runtime = await waitForRuntimeMetadata(page, expectedRuntimeId);
+    const recovery = await readBrainvaultRecoverySheet(page);
     expect(runtime.label).toBe('standalone vault');
-    expect(normalizeMnemonic(runtime.mnemonic12 || '')).toBe(cli.mnemonic12);
+    expect(runtime.seed).toBeUndefined();
+    expect(runtime.mnemonic12).toBeUndefined();
+    expect(recovery.mnemonic24).toBe(cli.mnemonic24);
+    expect(recovery.mnemonic12).toBe(cli.mnemonic12);
+    expect(recovery.runtimeId).toBe(expectedRuntimeId);
     expect(await readRuntimeCount(page)).toBe(1);
     await expectPostCreateBrainvaultRecovery(page);
   });
@@ -238,9 +269,10 @@ test.describe('brainvault parity', () => {
     await openAddRuntimePanel(page);
     const derived = await deriveBrainvaultInUi(page, 'embedded add runtime', 'ced-add-runtime-42', 1);
 
-    const runtime = await waitForRuntimeWithSeed(page, derived.mnemonic24);
+    const runtime = await waitForRuntimeMetadata(page, deriveSignerAddressFromMnemonic(derived.mnemonic24));
     expect(runtime.label).toBe('embedded add runtime');
-    expect(normalizeMnemonic(runtime.mnemonic12 || '')).toBe(derived.mnemonic12);
+    expect(runtime.seed).toBeUndefined();
+    expect(runtime.mnemonic12).toBeUndefined();
     expect(await readActiveRuntimeId(page)).not.toBe(oldRuntime.runtimeId);
     expect(await readRuntimeCount(page)).toBe(2);
   });

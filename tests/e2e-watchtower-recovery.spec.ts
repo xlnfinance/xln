@@ -57,28 +57,32 @@ function deriveRuntimeRecoveryLookupKey(runtimeId: string, runtimeSeed: string):
   return keccak256(toUtf8Bytes(`${RECOVERY_LOOKUP_DOMAIN}|${String(runtimeId).toLowerCase()}|${runtimeSeed}`));
 }
 
-async function readPersistedRuntimeSeed(page: Page, runtimeId: string): Promise<string> {
-  const seed = await page.evaluate((targetRuntimeId) => {
+async function expectPersistedRuntimeSeedProtected(page: Page, runtimeId: string): Promise<void> {
+  const persisted = await page.evaluate((targetRuntimeId) => {
     try {
       const raw = localStorage.getItem('xln-vaults');
-      if (!raw) return '';
+      if (!raw) return null;
       const parsed = JSON.parse(raw) as {
-        runtimes?: Record<string, { id?: string; seed?: string }>;
+        runtimes?: Record<string, { id?: string; seed?: string; mnemonic12?: string }>;
       };
       for (const runtime of Object.values(parsed.runtimes || {})) {
         if (String(runtime?.id || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()) {
-          return String(runtime?.seed || '');
+          return {
+            found: true,
+            hasSeed: typeof runtime.seed === 'string' && runtime.seed.length > 0,
+            hasMnemonic12: typeof runtime.mnemonic12 === 'string' && runtime.mnemonic12.length > 0,
+          };
         }
       }
-      return '';
+      return { found: false, hasSeed: false, hasMnemonic12: false };
     } catch {
-      return '';
+      return null;
     }
   }, runtimeId);
-  if (!seed) {
-    throw new Error(`persisted runtime seed missing for ${runtimeId.slice(0, 12)}`);
-  }
-  return seed;
+  expect(persisted, `persisted runtime metadata missing for ${runtimeId.slice(0, 12)}`).not.toBeNull();
+  expect(persisted?.found, `persisted runtime metadata missing for ${runtimeId.slice(0, 12)}`).toBe(true);
+  expect(persisted?.hasSeed, 'runtime seed must not be persisted in plaintext').toBe(false);
+  expect(persisted?.hasMnemonic12, 'compatibility mnemonic must not be persisted in plaintext').toBe(false);
 }
 
 async function getFreePort(): Promise<number> {
@@ -470,21 +474,19 @@ async function waitForSenderSpend(
 async function createRuntimeViaUi(
   page: Page,
   label: string,
-  secret: string,
+  mnemonic: string,
   options: { requireOnline?: boolean } = {},
 ): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
   const displayNameInput = page.locator('#name').first();
   await expect(displayNameInput).toBeVisible({ timeout: 20_000 });
   await displayNameInput.fill(label);
 
-  const passphraseInput = page.locator('#passphrase').first();
+  const mnemonicTab = page.getByRole('tab', { name: 'Mnemonic', exact: true }).first();
+  await expect(mnemonicTab).toBeVisible({ timeout: 15_000 });
+  await mnemonicTab.click();
   const mnemonicInput = page.locator('#mnemonic').first();
-  if (await passphraseInput.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await passphraseInput.fill(secret);
-  } else {
-    await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
-    await mnemonicInput.fill(secret);
-  }
+  await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
+  await mnemonicInput.fill(mnemonic);
 
   let factorOneButton = page.getByRole('button', { name: /^1\s+/i }).first();
   if (!await factorOneButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
@@ -500,7 +502,7 @@ async function createRuntimeViaUi(
   }
 
   const createButton = page.getByRole('button', {
-    name: /Derive wallet|Create XLN wallet|Open XLN wallet|Open \/ restore wallet/i,
+    name: /Derive wallet|Continue with seed|Create XLN wallet|Open XLN wallet|Open \/ restore wallet/i,
   }).first();
   await expect(createButton).toBeEnabled({ timeout: 15_000 });
   await createButton.click({ force: true });
@@ -824,7 +826,8 @@ test.describe('watchtower runtime recovery', () => {
         75_000,
         async () => await readRecoveryUiDiagnostics(page),
       );
-      const runtimeSeed = await readPersistedRuntimeSeed(page, runtime.runtimeId);
+      await expectPersistedRuntimeSeedProtected(page, runtime.runtimeId);
+      const runtimeSeed = mnemonic;
 
       const lookupKey = deriveRuntimeRecoveryLookupKey(runtime.runtimeId, runtimeSeed);
       const preWipe = await waitForCommittedPrimaryLocalAccountState(page);
