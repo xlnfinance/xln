@@ -9,7 +9,7 @@ import {
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 export const TEST_ARTIFACT_CLEANUP_DONE_ENV = 'XLN_TEST_ARTIFACT_CLEANUP_DONE';
 export const KEEP_TEST_ARTIFACTS_ENV = 'XLN_KEEP_TEST_ARTIFACTS';

@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { createJAdapter } from '../jadapter';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../jurisdiction/jurisdictions-version';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
 import {
   isRpc2Jurisdiction,
   selectPrimaryHubJurisdiction,

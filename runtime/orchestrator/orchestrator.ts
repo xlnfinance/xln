@@ -11,7 +11,7 @@ import { REMOTE_RUNTIME } from '../constants';
 import { createStructuredLogger } from '../logger';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 import {
   startCustodySupport,
   stopManagedChild,
@@ -26,7 +26,7 @@ import {
 } from '../relay/store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
-import { type MarketSnapshotPayload } from '../market-snapshot';
+import { type MarketSnapshotPayload } from '../relay/market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';

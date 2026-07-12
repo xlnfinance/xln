@@ -1,7 +1,7 @@
 import { getTokenInfo } from '../account-utils';
 import type { Env } from '../types';
 import type { JTokenInfo } from '../jadapter/types';
-import { getBootstrapTokenAmount } from '../bootstrap-economy';
+import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
 import {
   getAccountMachine,
   getEntityOutCapacity,

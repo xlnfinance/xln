@@ -84,7 +84,7 @@ import {
 import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';
 import { buildRealHanko } from '../hanko/core';
 import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
-import { NobleCryptoProvider } from '../crypto-noble';
+import { NobleCryptoProvider } from '../protocol/crypto/noble';
 import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { fitCrossAmountsToOrderbook } from '../orchestrator/mm-node';
 import { cloneAccountMachine, resolveEntityProposerId } from '../state-helpers';

@@ -52,7 +52,7 @@ import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook }
 import { isLeftEntity } from '../entity-id-utils';
 import { deriveDelta } from '../account-utils';
 import { resolveEntityProposerId } from '../state-helpers';
-import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
+import { normalizeRebalanceMatchingStrategy } from '../extensions/rebalance/policy';
 import { TIMING } from '../constants';
 import { DEFAULT_SOFT_LIMIT } from '../types';
 import { terminateHtlcRoute } from './tx/htlc-route-lifecycle';

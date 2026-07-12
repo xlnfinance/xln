@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import { getCachedSignerPrivateKey } from '../account-crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
-import { isLoopbackUrl } from '../loopback-url';
+import { isLoopbackUrl } from '../networking/loopback-url';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';
 
 export type { JAdapterMode };

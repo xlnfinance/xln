@@ -16,7 +16,7 @@ import { calculateRequiredInboundForDesiredForward } from '../../../protocol/htl
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
 import { getTokenCapacity } from '../../../routing/capacity';
 import { deriveDelta } from '../../../account-utils';
-import { NobleCryptoProvider } from '../../../crypto-noble';
+import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 import { createOnionEnvelopes, type HtlcEnvelope } from '../../../protocol/htlc/envelope';
 import { getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
 import { compareStableText, safeStringify } from '../../../serialization-utils';

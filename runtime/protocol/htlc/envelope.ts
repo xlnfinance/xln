@@ -18,7 +18,7 @@
  * PHASE 3 (Future): Upgrade to post-quantum (Kyber) when available
  */
 
-import type { CryptoProvider } from '../../crypto-provider';
+import type { CryptoProvider } from '../crypto/provider';
 import { HTLC } from '../../constants';
 import { safeStringify } from '../../serialization-utils';
 

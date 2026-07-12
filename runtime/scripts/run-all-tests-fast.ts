@@ -17,7 +17,7 @@ import {
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
   withoutTestArtifactCleanupDoneEnv,
 } from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 type CliArgs = {
   scenarioWorkers: number;

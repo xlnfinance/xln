@@ -10,7 +10,7 @@ import { FINANCIAL } from '../../../constants';
 import { isLeftEntity } from '../../../entity-id-utils';
 import { createStructuredLogger, shortId } from '../../../logger';
 import { getAccountPerspective } from '../../../state-helpers';
-import { decodeRebalancePolicyMemo } from '../../../rebalance-policy';
+import { decodeRebalancePolicyMemo } from '../../../extensions/rebalance/policy';
 import { ensureDelta } from '../delta-utils';
 
 const directPaymentLog = createStructuredLogger('account.payment');

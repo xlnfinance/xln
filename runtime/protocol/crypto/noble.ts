@@ -9,7 +9,7 @@
  * Future: Upgrade to X25519+Kyber hybrid (post-quantum)
  */
 
-import type { CryptoProvider, CryptoKeyPair } from './crypto-provider';
+import type { CryptoProvider, CryptoKeyPair } from './provider';
 import { x25519 } from '@noble/curves/ed25519.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 

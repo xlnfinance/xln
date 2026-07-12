@@ -16,7 +16,7 @@ import type {
   StorageFrameRecord,
   StorageHead,
 } from '../storage/types';
-import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../sorted-index';
+import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../storage/sorted-index';
 import { RuntimeAdapterError } from './errors';
 import { encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';

@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { execFileSync, spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import { freemem, loadavg, totalmem } from 'node:os';
 import type { Readable } from 'node:stream';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 type SoakProfile = 'quick' | 'release' | 'swap' | 'mainnet';
 

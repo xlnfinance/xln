@@ -10,7 +10,7 @@ import type {
 } from '../../../../types';
 import { HTLC } from '../../../../constants';
 import { HEAVY_LOGS } from '../../../../utils';
-import { NobleCryptoProvider } from '../../../../crypto-noble';
+import { NobleCryptoProvider } from '../../../../protocol/crypto/noble';
 import { unwrapEnvelope, validateEnvelope } from '../../../../protocol/htlc/envelope';
 import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../../routing/fees';

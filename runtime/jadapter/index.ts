@@ -65,7 +65,7 @@ import type { JAdapter, JAdapterConfig } from './types';
 import { DEFAULT_PRIVATE_KEY } from './helpers';
 import { createBrowserVMAdapter } from './browservm';
 import { createRpcAdapter } from './rpc';
-import { normalizeLoopbackUrl } from '../loopback-url';
+import { normalizeLoopbackUrl } from '../networking/loopback-url';
 
 /**
  * NonceTrackingWallet - Wallet that tracks nonce locally to avoid race conditions

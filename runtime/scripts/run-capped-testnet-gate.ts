@@ -10,7 +10,7 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 const DEFAULT_POLICY_PATH = 'ops/capped-testnet-policy.json';
 

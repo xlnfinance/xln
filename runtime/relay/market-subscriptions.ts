@@ -5,8 +5,8 @@ import {
   RPC_MARKET_MAX_DEPTH,
   RPC_MARKET_PUBLISH_MS,
   type MarketSnapshotPayload,
-} from '../market-snapshot';
-import { MarketSubscriptionLimiter, type MarketSubscriptionLimiterSnapshot } from '../market-subscription-limiter';
+} from './market-snapshot';
+import { MarketSubscriptionLimiter, type MarketSubscriptionLimiterSnapshot } from './market-subscription-limiter';
 import { safeStringify } from '../serialization-utils';
 
 export type MarketSubscription = {

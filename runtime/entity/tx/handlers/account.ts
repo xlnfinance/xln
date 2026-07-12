@@ -10,7 +10,7 @@ import {
 } from '../../../account/state-root';
 import { isLeftEntity } from '../../../entity-id-utils';
 import { scheduleHook as scheduleCrontabHook } from '../../scheduler';
-import { upsertSortedStringMapEntry } from '../../../sorted-index';
+import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { assertSameJurisdictionAccount } from '../../../jurisdiction/jurisdiction-runtime';
 import { normalizeAccountWatchSeed } from '../../../account/watch-seed';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';

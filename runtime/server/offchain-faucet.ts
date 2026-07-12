@@ -4,7 +4,7 @@ import { safeStringify } from '../serialization-utils';
 import type { Profile } from '../networking/gossip';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';
 import { createStructuredLogger, shortId } from '../logger';
-import { encodeRebalancePolicyMemo } from '../rebalance-policy';
+import { encodeRebalancePolicyMemo } from '../extensions/rebalance/policy';
 import { resolveEntityProposerId } from '../state-helpers';
 import { getErrorMessage, isEntityId32 } from './utils';
 import { getAccountMachine, getEntityOutCapacity, getEntityReplicaById, hasAccount } from './entity-lookup';

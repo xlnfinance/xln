@@ -4,7 +4,7 @@ import { DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE, DEFAULT_SOFT_LIMIT } from '../../.
 import type { Delta, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { formatEntityId } from '../../../utils';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../../env-events';
-import { upsertSortedStringMapEntry } from '../../../sorted-index';
+import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { assertSameJurisdictionAccount } from '../../../jurisdiction/jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';

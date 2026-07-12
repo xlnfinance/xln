@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path';
-import { normalizeLoopbackUrl } from '../loopback-url';
+import { normalizeLoopbackUrl } from '../networking/loopback-url';
 import type { Args } from './orchestrator-types';
 
 const argsRaw = process.argv.slice(2);

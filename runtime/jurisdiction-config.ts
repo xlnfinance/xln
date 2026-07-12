@@ -13,7 +13,7 @@ import type { JurisdictionConfig } from './types';
 import { isUsableContractAddress } from './jurisdiction/contract-address';
 import { loadJurisdictions } from './jurisdiction/jurisdiction-loader';
 import { createStructuredLogger } from './logger';
-import { parseRebalancePolicyUsd } from './rebalance-policy-usd';
+import { parseRebalancePolicyUsd } from './extensions/rebalance/usd';
 import { isBrowser } from './utils';
 
 const jurisdictionConfigLog = createStructuredLogger('runtime.jurisdiction_config');

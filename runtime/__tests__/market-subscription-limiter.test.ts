@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { MarketSubscriptionLimiter } from '../market-subscription-limiter';
+import { MarketSubscriptionLimiter } from '../relay/market-subscription-limiter';
 
 test('market subscription limiter enforces global and per-ip caps', () => {
   const limiter = new MarketSubscriptionLimiter(3, 2, 64);

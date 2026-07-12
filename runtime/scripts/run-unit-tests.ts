@@ -8,7 +8,7 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 const DEFAULT_UNIT_TEST_TARGETS = [
   'runtime/__tests__',

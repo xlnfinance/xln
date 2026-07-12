@@ -5,7 +5,7 @@ import type { JAdapter } from '../jadapter';
 import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJurisdictionEntry } from '../jurisdiction/jurisdiction-key';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../jurisdiction/jurisdictions-version';
-import { toPublicRpcUrl } from '../loopback-url';
+import { toPublicRpcUrl } from '../networking/loopback-url';
 import { createStructuredLogger } from '../logger';
 import { isRecord } from './utils';
 

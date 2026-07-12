@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 const CORE_E2E_FILES = [
   'tests/e2e-payment-smoke.spec.ts',

@@ -1,5 +1,5 @@
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from '../networking/loopback-url';
 
 export type MeshJurisdictionConfig = {
   name: string;

@@ -1,4 +1,4 @@
-import { normalizeLoopbackUrl } from '../loopback-url';
+import { normalizeLoopbackUrl } from '../networking/loopback-url';
 
 export type HubJurisdictionEntry = Record<string, unknown> & {
   name?: string;

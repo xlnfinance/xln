@@ -28,8 +28,8 @@ import {
   normalizeMarketPairId,
   RPC_MARKET_DEFAULT_DEPTH,
   RPC_MARKET_MAX_DEPTH,
-} from '../market-snapshot';
-import { toPublicRpcUrl } from '../loopback-url';
+} from '../relay/market-snapshot';
+import { toPublicRpcUrl } from '../networking/loopback-url';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { applyJEventsToEnv } from '../jadapter/watcher';

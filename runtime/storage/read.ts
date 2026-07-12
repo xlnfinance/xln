@@ -34,7 +34,7 @@ import {
 } from './keys';
 import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
-import { compareAscii } from '../sorted-index';
+import { compareAscii } from './sorted-index';
 import {
   buildHexKeyedMerkle,
   computeRadixMerkleBranchHash,

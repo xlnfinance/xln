@@ -59,7 +59,7 @@ import type {
 } from '../qa/types';
 import { assertMinDiskFree } from '../orchestrator/storage-monitor';
 import { compareStableText } from '../serialization-utils';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 import { findFirstRuntimeFatalLogHit, findRuntimeFatalLogLines, tailLog } from './e2e-fatal-log-monitor';
 import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
 

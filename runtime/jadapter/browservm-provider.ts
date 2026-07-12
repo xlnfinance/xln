@@ -32,7 +32,7 @@ import { setDeltaTransformerAddress } from '../proof-builder.js';
 import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
 import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
-import { getBootstrapTokenAmountBySymbol } from '../bootstrap-economy';
+import { getBootstrapTokenAmountBySymbol } from '../jurisdiction/bootstrap-economy';
 import {
   decodeBrowserVmEvents,
   toBrowserVmReceiptLogs,

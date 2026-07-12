@@ -6,7 +6,7 @@ import {
   cleanupTestArtifactsBeforeRun,
   TEST_ARTIFACT_CLEANUP_DONE_ENV,
 } from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 const FAST_E2E_TARGETS = [
   {

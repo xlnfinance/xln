@@ -54,7 +54,7 @@ import { createStructuredLogger, shortId } from './logger';
 import {
   buildMarketSnapshotForReplica,
   type MarketSnapshotPayload,
-} from './market-snapshot';
+} from './relay/market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from './relay/market-subscriptions';
 import {
   JSON_HEADERS,
@@ -102,7 +102,7 @@ import {
   resolveAssistantDirectClientIp,
   resolveAssistantRateClientId,
 } from './server/assistant-proxy';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from './loopback-url';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from './networking/loopback-url';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;

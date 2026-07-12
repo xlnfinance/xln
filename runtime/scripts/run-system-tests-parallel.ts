@@ -18,7 +18,7 @@ import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { cleanupTestArtifactsBeforeRun } from './test-artifact-cleanup';
-import { sanitizeChildProcessEnv } from '../child-process-env';
+import { sanitizeChildProcessEnv } from '../server/child-process-env';
 
 type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
