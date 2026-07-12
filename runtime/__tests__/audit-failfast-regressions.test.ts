@@ -3746,6 +3746,53 @@ describe('audit fail-fast regressions', () => {
     expect(result.response).toEqual(accountMachine.lastOutboundFrameAck.response);
   });
 
+  test('applyAccountInput retains the ACK after a bundled proposal is lost', async () => {
+    const seed = 'account-frame-bundled-proposal-lost';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as typeof env.browserVM;
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const proposer = makeProposalAccount([
+      { type: 'add_delta', data: { tokenId: 1 } },
+    ], left.entityId, right.entityId);
+    const receiver = makeProposalAccount([
+      { type: 'add_delta', data: { tokenId: 2 } },
+    ], left.entityId, right.entityId);
+    receiver.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nextProofNonce: 0 };
+
+    const proposed = await proposeAccountFrame(env, proposer);
+    if (!proposed.success || !proposed.accountInput) {
+      throw new Error(`BUNDLED_ACK_SOURCE_PROPOSAL_FAILED:${proposed.error ?? 'missing input'}`);
+    }
+    const accepted = await applyAccountInput(env, receiver, proposed.accountInput);
+
+    expect(accepted.success).toBe(true);
+    expect(accepted.response?.kind).toBe('frame_ack');
+    expect(receiver.currentHeight).toBe(1);
+    expect(receiver.pendingFrame?.height).toBe(2);
+    expect(receiver.lastOutboundFrameAck?.height).toBe(1);
+    const retainedAck = structuredClone(receiver.lastOutboundFrameAck?.response);
+
+    // The new proposal can be discarded independently (for example by the
+    // simultaneous-frame tiebreaker). The ACK for committed height 1 remains.
+    delete receiver.pendingFrame;
+    delete receiver.pendingAccountInput;
+    const retried = await applyAccountInput(env, receiver, proposed.accountInput);
+
+    expect(retried.success).toBe(true);
+    expect(retried.response).toEqual(retainedAck);
+    expect(retried.response?.kind).toBe('ack');
+    expect(receiver.currentHeight).toBe(1);
+  });
+
   test('applyAccountInput re-sends bundled ACK plus frame when that response was lost', async () => {
     const seed = 'account-frame-duplicate-bundled-response';
     const env = createEmptyEnv(seed);

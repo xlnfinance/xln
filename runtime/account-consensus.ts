@@ -1518,8 +1518,10 @@ async function buildAckResponseForIncomingFrame(
     events,
   );
   const batchedWithNewFrame = response.kind === 'frame_ack';
-  if (batchedWithNewFrame) delete accountMachine.lastOutboundFrameAck;
-  else accountMachine.lastOutboundFrameAck = material.outboundAck;
+  // The bundled proposal is ephemeral, but its ACK answers the peer's current
+  // committed frame until this account advances. Keep that ACK independently
+  // so a rollback or lost bundled response cannot wedge at-least-once delivery.
+  accountMachine.lastOutboundFrameAck = material.outboundAck;
   return buildIncomingFrameReturnPayload(
     input,
     receivedFrame,
