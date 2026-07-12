@@ -8,6 +8,7 @@ import type {
 	  RuntimeAdapterRequest,
 	  RuntimeAdapterResponse,
 	  RuntimeAdapterSendResult,
+	  RuntimeAdapterSendOptions,
 	  RuntimeAdapterStatus,
 	  RuntimeAdapterPush,
 	} from './types';
@@ -25,7 +26,7 @@ type PendingRequest = {
 type RuntimeAdapterRequestBody =
   | { op: 'auth'; key?: string }
   | { op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
-  | { op: 'send'; input: RuntimeInput };
+  | { op: 'send'; commandId: string; input: RuntimeInput };
 
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));
@@ -118,8 +119,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     return this.request<T>({ op: 'read', path, ...(query ? { query } : {}) });
   }
 
-	  send(input: RuntimeInput): Promise<RuntimeAdapterSendResult> {
-	    return this.request<RuntimeAdapterSendResult>({ op: 'send', input });
+	  send(input: RuntimeInput, options: RuntimeAdapterSendOptions = {}): Promise<RuntimeAdapterSendResult> {
+	    const commandId = String(options.commandId || globalThis.crypto.randomUUID()).trim();
+	    return this.request<RuntimeAdapterSendResult>({ op: 'send', commandId, input });
 	  }
 
   onChange(cb: (height: number) => void): () => void {

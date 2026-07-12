@@ -737,6 +737,15 @@ export interface Env {
      * committed because the recovery backup barrier did not complete yet.
      */
     pendingCommittedJOutbox?: JInput[];
+    runtimeAdapterCommandResults?: Map<string, {
+      inputHash: string;
+      result: {
+        height: number;
+        receipt?: import('./server/ingress-receipts').RuntimeIngressReceipt;
+        statusUrl?: string;
+      };
+      recordedAt: number;
+    }>;
   } | undefined;
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: GossipLayer;

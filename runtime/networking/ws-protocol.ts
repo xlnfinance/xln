@@ -8,11 +8,9 @@
  * - Each accountFrame has monotonic height - can't replay height=5 after height=6 exists
  * - Entity transactions are signed and verified at consensus layer
  *
- * Hello auth exists only for basic connection authentication (proving runtimeId ownership),
- * not for transaction security. Even if hello is replayed, attacker gains nothing because:
- * 1. They can't forge entity transactions (need validator private keys)
- * 2. They can't replay old frames (height check fails)
- * 3. They can't spoof profiles (signature verification)
+ * Hello auth proves runtimeId ownership and binds the advertised encryption key
+ * to a server-issued, single-use challenge. This prevents a recorded hello from
+ * claiming a later socket or replacing the transport key after disconnect.
  *
  * Message IDs and nonces are for correlation/debugging, not cryptographic security.
  */
@@ -23,6 +21,7 @@ import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-code
 
 export type RuntimeWsMessageType =
   | 'hello'
+  | 'hello_challenge'
   | 'entity_input'
   | 'debug_event'
   | 'gossip_request'
@@ -55,6 +54,7 @@ export type RuntimeWsMessage = {
   entityId?: string;
   txs?: number;
   auth?: RuntimeWsAuth;
+  challenge?: string;
   inReplyTo?: string;
   error?: string;
 };
@@ -88,12 +88,17 @@ export const makeMessageId = (): string => {
 
 const HELLO_DOMAIN = 'xln-ws-hello';
 
-export const buildHelloMessage = (runtimeId: string, timestamp: number, nonce: string): string => {
-  return `${HELLO_DOMAIN}:${runtimeId}:${timestamp}:${nonce}`;
+export const buildHelloMessage = (
+  runtimeId: string,
+  encryptionPubKey: string,
+  timestamp: number,
+  nonce: string,
+): string => {
+  return `${HELLO_DOMAIN}:${runtimeId}:${encryptionPubKey.toLowerCase()}:${timestamp}:${nonce}`;
 };
 
-export const hashHelloMessage = (runtimeId: string, timestamp: number, nonce: string): string => {
-  return keccak256(toUtf8Bytes(buildHelloMessage(runtimeId, timestamp, nonce)));
+export const hashHelloMessage = (runtimeId: string, encryptionPubKey: string, timestamp: number, nonce: string): string => {
+  return keccak256(toUtf8Bytes(buildHelloMessage(runtimeId, encryptionPubKey, timestamp, nonce)));
 };
 
 export const makeHelloNonce = (): string => {

@@ -26,6 +26,7 @@ import {
 } from '../relay/store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
+import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { type MarketSnapshotPayload } from '../relay/market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
@@ -212,11 +213,13 @@ const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
 };
 
 const relayStore: RelayStore = createRelayStore('mesh-relay');
+const relayHelloChallenges = createHelloChallengeRegistry();
 const routerConfig: RelayRouterConfig = {
   store: relayStore,
   localRuntimeId: 'mesh-relay',
   localDeliver: async () => {},
   send: (ws, data) => ws.send(data),
+  consumeHelloChallenge: (ws, challenge) => relayHelloChallenges.consume(ws, challenge),
 };
 
 const timings: TimingMap = {
@@ -2793,7 +2796,8 @@ const server = Bun.serve({
     }
   },
   websocket: {
-    open(_ws) {
+    open(ws) {
+      relayHelloChallenges.issue(ws as OrchestratorWebSocket);
       pushDebugEvent(relayStore, {
         event: 'ws_open',
         details: { wsType: 'relay' },
@@ -2847,6 +2851,7 @@ const server = Bun.serve({
     },
     close(ws) {
       const relayWs = ws as OrchestratorWebSocket;
+      relayHelloChallenges.forget(relayWs);
       cleanupRpcMarketSubscription(relayWs);
       forgetRelaySocketRuntimeId(relayWs);
       removeClient(relayStore, relayWs);

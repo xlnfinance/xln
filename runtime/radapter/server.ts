@@ -8,6 +8,8 @@ import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import { createStructuredLogger } from '../infra/logger';
+import { safeStringify } from '../protocol/serialization';
+import { keccak256, toUtf8Bytes } from 'ethers';
 import type {
   RuntimeAdapterAuthLevel,
   RuntimeAdapterActivityPage,
@@ -71,6 +73,34 @@ let attachedEnv: Env | null = null;
 let detachEnvChange: (() => void) | null = null;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
 const runtimeAdapterLog = createStructuredLogger('runtime.radapter');
+const RUNTIME_ADAPTER_COMMAND_RESULT_LIMIT = 1_024;
+
+const normalizeCommandId = (value: unknown): string => {
+  const commandId = String(value || '').trim();
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(commandId)) {
+    throw new RuntimeAdapterError('E_BAD_QUERY', 'runtime adapter commandId must be 16-128 safe characters');
+  }
+  return commandId;
+};
+
+const runtimeInputHash = (input: RuntimeInput): string => keccak256(toUtf8Bytes(safeStringify(input)));
+
+const rememberCommandResult = (
+  env: Env,
+  commandId: string,
+  inputHash: string,
+  result: { height: number; receipt?: RuntimeIngressReceipt; statusUrl?: string },
+): void => {
+  env.runtimeState ??= {};
+  const results = env.runtimeState.runtimeAdapterCommandResults ?? new Map();
+  results.set(commandId, { inputHash, result: structuredClone(result), recordedAt: env.timestamp });
+  while (results.size > RUNTIME_ADAPTER_COMMAND_RESULT_LIMIT) {
+    const oldest = results.keys().next().value;
+    if (typeof oldest !== 'string') break;
+    results.delete(oldest);
+  }
+  env.runtimeState.runtimeAdapterCommandResults = results;
+};
 
 const readPositiveNumberEnv = (name: string, fallback: number): number => {
   const raw = typeof process !== 'undefined' ? process.env[name] : undefined;
@@ -398,6 +428,16 @@ export const handleRuntimeAdapterMessage = async (
 	    if (msg.op === 'send') {
 	      requireAuth(state, 'admin');
 	      requireBucket(state.sendBucket, 'send');
+	      const commandId = normalizeCommandId(msg.commandId);
+	      const inputHash = runtimeInputHash(msg.input);
+	      const prior = env.runtimeState?.runtimeAdapterCommandResults?.get(commandId);
+	      if (prior) {
+	        if (prior.inputHash !== inputHash) {
+	          throw new RuntimeAdapterError('E_BAD_QUERY', 'runtime adapter commandId was reused with a different payload');
+	        }
+	        sendOk(ws, msg.id, structuredClone(prior.result), diagnostic());
+	        return true;
+	      }
 	      deps.validateRuntimeInputAdmission?.(env, msg.input);
 	      const acceptedHeight = Math.max(0, Math.floor(Number(env.height ?? 0)));
 	      deps.enqueueRuntimeInput(env, msg.input);
@@ -408,11 +448,13 @@ export const handleRuntimeAdapterMessage = async (
 	        runtimeInput: msg.input,
 	        note: 'Runtime adapter command accepted into the runtime queue; poll account/entity projections for semantic commit details.',
 	      });
-	      sendOk(ws, msg.id, {
+	      const result = {
 	        height: acceptedHeight,
 	        ...(receipt ? { receipt } : {}),
 	        ...(receipt && deps.buildRuntimeInputStatusUrl ? { statusUrl: deps.buildRuntimeInputStatusUrl(receipt.id) } : {}),
-	      }, diagnostic());
+	      };
+	      rememberCommandResult(env, commandId, inputHash, result);
+	      sendOk(ws, msg.id, result, diagnostic());
 	      return true;
 	    }
 

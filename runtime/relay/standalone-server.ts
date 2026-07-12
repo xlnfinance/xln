@@ -7,6 +7,7 @@ import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { createStructuredLogger } from '../infra/logger';
+import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 
 type StandaloneRelayOptions = {
   host?: string;
@@ -42,6 +43,7 @@ const normalizeMessage = (raw: string | Buffer | ArrayBuffer): RuntimeWsMessage 
 export const startStandaloneRelayServer = (options: StandaloneRelayOptions): StandaloneRelayServer => {
   const store = createRelayStore(options.serverId);
   const localRuntimeId = normalizeRuntimeId(options.serverRuntimeId || options.serverId) || options.serverId;
+  const helloChallenges = createHelloChallengeRegistry();
   let serverRef: ReturnType<typeof Bun.serve> | null = null;
 
   const routerConfig: RelayRouterConfig = {
@@ -51,6 +53,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
       await options.onEntityInput?.(from, msg, store);
     },
     send: (ws, data) => ws.send(data),
+    consumeHelloChallenge: (ws, challenge) => helloChallenges.consume(ws, challenge),
   };
 
   const server = Bun.serve({
@@ -64,8 +67,9 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
       return new Response('WebSocket upgrade failed', { status: 400 });
     },
     websocket: {
-      open() {
+      open(ws) {
         store.wsCounter += 1;
+        helloChallenges.issue(ws);
       },
       message(ws, message) {
         let msg: RuntimeWsMessage;
@@ -80,6 +84,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
         });
       },
       close(ws) {
+        helloChallenges.forget(ws);
         forgetRelaySocketRuntimeId(ws);
         removeClient(store, ws);
       },

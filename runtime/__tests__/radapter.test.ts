@@ -2676,6 +2676,7 @@ test('runtime adapter binary codec preserves structured payloads', () => {
     v: 1,
     id: 'send-1',
     op: 'send',
+    commandId: 'binary-command-0001',
     input: {
       runtimeTxs: [],
       entityInputs: [{
@@ -2767,6 +2768,7 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
     v: 1,
     id: 'send-1',
     op: 'send',
+    commandId: 'inspect-command-0001',
     input: {
       runtimeTxs: [],
       entityInputs: [],
@@ -2782,6 +2784,47 @@ test('runtime adapter websocket handler rejects send under inspect auth', async 
   expect(denied.error.code).toBe('E_UNAUTHORIZED');
   expect(denied.error.message).toContain('admin auth required');
   expect(enqueued).toBe(0);
+});
+
+test('runtime adapter send commandId deduplicates retries and rejects payload changes', async () => {
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  let enqueued = 0;
+  const deps = {
+    enqueueRuntimeInput: () => { enqueued += 1; },
+  };
+  await handleRuntimeAdapterMessage(socket, {
+    v: 1,
+    id: 'auth-admin',
+    op: 'auth',
+    key: deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000),
+  }, env, deps);
+  messages.length = 0;
+  const command = {
+    v: 1 as const,
+    op: 'send' as const,
+    commandId: 'retry-command-0001',
+    input: { runtimeTxs: [], entityInputs: [] },
+  };
+
+  await handleRuntimeAdapterMessage(socket, { ...command, id: 'send-first' }, env, deps);
+  const first = decodeRuntimeAdapterMessage<{ ok: true; payload: { height: number } }>(messages.pop());
+  await handleRuntimeAdapterMessage(socket, { ...command, id: 'send-retry' }, env, deps);
+  const retried = decodeRuntimeAdapterMessage<{ ok: true; payload: { height: number } }>(messages.pop());
+  await handleRuntimeAdapterMessage(socket, {
+    ...command,
+    id: 'send-conflict',
+    input: { runtimeTxs: [{ type: 'importReplica', entityId: 'different' } as never], entityInputs: [] },
+  }, env, deps);
+  const conflict = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+
+  expect(first.ok).toBe(true);
+  expect(retried.payload).toEqual(first.payload);
+  expect(conflict.ok).toBe(false);
+  expect(conflict.error.code).toBe('E_BAD_QUERY');
+  expect(enqueued).toBe(1);
+  expect(env.runtimeState?.runtimeAdapterCommandResults?.size).toBe(1);
 });
 
 test('runtime adapter read rate limit is configurable', async () => {

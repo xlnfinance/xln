@@ -28,7 +28,12 @@ export const recoverHelloAddress = (digestHex: string, signatureHex: string): st
   return `0x${hash.slice(-40)}`.toLowerCase();
 };
 
-export const verifyHelloAuth = (runtimeId: string, auth: RuntimeWsAuth | undefined, maxSkewMs: number): string | null => {
+export const verifyHelloAuth = (
+  runtimeId: string,
+  encryptionPubKey: string,
+  auth: RuntimeWsAuth | undefined,
+  maxSkewMs: number,
+): string | null => {
   if (!auth?.nonce || !auth.signature || !auth.timestamp) {
     return 'Missing auth fields';
   }
@@ -36,7 +41,7 @@ export const verifyHelloAuth = (runtimeId: string, auth: RuntimeWsAuth | undefin
   if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
     return `Hello timestamp skew too large (${nowTs - auth.timestamp}ms)`;
   }
-  const digest = hashHelloMessage(runtimeId, auth.timestamp, auth.nonce);
+  const digest = hashHelloMessage(runtimeId, encryptionPubKey, auth.timestamp, auth.nonce);
   let recovered: string;
   try {
     recovered = recoverHelloAddress(digest, auth.signature);

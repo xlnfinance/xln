@@ -93,6 +93,8 @@ export type RuntimeAdapterSendResult = {
   statusUrl?: string;
 };
 
+export type RuntimeAdapterSendOptions = { commandId?: string };
+
 export interface RuntimeAdapter {
   readonly mode: RuntimeAdapterMode;
   readonly runtimeId: string;
@@ -104,7 +106,7 @@ export interface RuntimeAdapter {
   disconnect(): void;
 
   read<T = unknown>(path: string, query?: RuntimeAdapterReadQuery): Promise<T>;
-  send(input: RuntimeInput): Promise<RuntimeAdapterSendResult>;
+  send(input: RuntimeInput, options?: RuntimeAdapterSendOptions): Promise<RuntimeAdapterSendResult>;
   onChange(cb: (height: number) => void): () => void;
   onStatus(cb: (status: RuntimeAdapterStatus) => void): () => void;
 }
@@ -127,7 +129,7 @@ export type RuntimeAdapterErrorPayload = {
 export type RuntimeAdapterRequest =
   | { v: 1; id: string; op: 'auth'; key?: string }
   | { v: 1; id: string; op: 'read'; path: string; query?: RuntimeAdapterReadQuery }
-  | { v: 1; id: string; op: 'send'; input: RuntimeInput };
+  | { v: 1; id: string; op: 'send'; commandId: string; input: RuntimeInput };
 
 export type RuntimeAdapterResponse =
   | { v: 1; inReplyTo: string; ok: true; payload: unknown }

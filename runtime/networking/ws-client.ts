@@ -1,5 +1,5 @@
 import type { RoutedEntityInput } from '../types';
-import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
+import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account/crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
@@ -156,6 +156,7 @@ export class RuntimeWsClient {
   private reconnectAttempts = 0;
   private nextReconnectAt: number = 0;
   private suppressNextClose = false;
+  private helloSent = false;
   private readonly maxReconnectAttempts: number;
   private readonly pendingRecoveryBundleRequests = new Map<string, PendingRecoveryBundleRequest>();
 
@@ -189,6 +190,7 @@ export class RuntimeWsClient {
 
     this.closed = false;
     this.connecting = true;
+    this.helloSent = false;
 
     // Close any stale WS before creating new one
     if (this.ws) {
@@ -208,8 +210,10 @@ export class RuntimeWsClient {
           runtimeId: this.options.runtimeId,
           url: this.options.url,
         });
-        if (!this.sendHello()) return;
-        this.options.onOpen?.();
+        if (!this.options.useHelloAuth) {
+          if (!this.sendHello()) return;
+          this.options.onOpen?.();
+        }
       });
       this.ws.on('message', (data: Buffer) => this.handleMessage(data));
       this.ws.on('close', (code: number, reasonBuf: Buffer) => {
@@ -252,8 +256,10 @@ export class RuntimeWsClient {
           runtimeId: this.options.runtimeId,
           url: this.options.url,
         });
-        if (!this.sendHello()) return;
-        this.options.onOpen?.();
+        if (!this.options.useHelloAuth) {
+          if (!this.sendHello()) return;
+          this.options.onOpen?.();
+        }
       };
       this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
       this.ws.onclose = (event: CloseEvent) => {
@@ -380,7 +386,8 @@ export class RuntimeWsClient {
     return true;
   }
 
-  private sendHello(): boolean {
+  private sendHello(challenge?: string): boolean {
+    if (this.helloSent) return true;
     const encryptionKeyPair = this.options.encryptionKeyPair;
     if (!encryptionKeyPair) {
       throw new Error(`WS_HELLO_ENCRYPTION_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
@@ -392,19 +399,26 @@ export class RuntimeWsClient {
         this.ws?.close();
         return false;
       }
+      if (!challenge) {
+        this.options.onError?.(new Error('WS_HELLO_CHALLENGE_MISSING'));
+        this.ws?.close();
+        return false;
+      }
       // Relay routers require signed hello; direct test servers can still opt out.
       try {
         const timestamp = nextTimestamp();
-        const nonce = makeHelloNonce();
-        const digest = hashHelloMessage(this.options.runtimeId, timestamp, nonce);
+        const encryptionPubKey = pubKeyToHex(encryptionKeyPair.publicKey);
+        const nonce = challenge;
+        const digest = hashHelloMessage(this.options.runtimeId, encryptionPubKey, timestamp, nonce);
         const signature = signDigest(this.options.seed, this.options.signerId, digest);
         this.sendRaw({
           type: 'hello',
           from: this.options.runtimeId,
-          fromEncryptionPubKey: pubKeyToHex(encryptionKeyPair.publicKey),
+          fromEncryptionPubKey: encryptionPubKey,
           timestamp,
           auth: { nonce, signature, timestamp },
         });
+        this.helloSent = true;
         return true;
       } catch (error) {
         this.options.onError?.(error as Error);
@@ -418,6 +432,7 @@ export class RuntimeWsClient {
       fromEncryptionPubKey: pubKeyToHex(encryptionKeyPair.publicKey),
       timestamp: nextTimestamp(),
     });
+    this.helloSent = true;
     return true;
   }
 
@@ -434,6 +449,11 @@ export class RuntimeWsClient {
         failfast: asFailFastPayload(error),
       });
       this.options.onError?.(error as Error);
+      return;
+    }
+    if (msg.type === 'hello_challenge') {
+      if (!this.options.useHelloAuth || !msg.challenge || !this.sendHello(msg.challenge)) return;
+      this.options.onOpen?.();
       return;
     }
     if (msg.type === 'error') {

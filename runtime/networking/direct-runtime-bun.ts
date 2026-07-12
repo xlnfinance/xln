@@ -9,6 +9,7 @@ import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyT
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
 import { verifyHelloAuth } from './hello-auth';
+import { createHelloChallengeRegistry } from './hello-challenge';
 
 type DirectRuntimeWsOptions = {
   runtimeId: string;
@@ -94,6 +95,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
   const keyPair = deriveEncryptionKeyPair(options.runtimeSeed);
   const sessions = new Map<DirectWebSocket, DirectWsSession>();
   const sessionsByRuntime = new Map<string, DirectWsSession>();
+  const helloChallenges = createHelloChallengeRegistry();
 
   const ensureSession = (ws: DirectWebSocket): DirectWsSession => {
     const existing = sessions.get(ws);
@@ -111,6 +113,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
   };
 
   const forgetSession = (ws: DirectWebSocket): void => {
+    helloChallenges.forget(ws);
     const session = sessions.get(ws);
     if (!session) return;
     sessions.delete(ws);
@@ -231,6 +234,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     websocket: {
       open(ws: DirectWebSocket) {
         ensureSession(ws);
+        if (options.requireHelloAuth !== false) helloChallenges.issue(ws);
       },
       async message(ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer) {
         const session = ensureSession(ws);
@@ -267,7 +271,10 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
             return;
           }
           if (options.requireHelloAuth !== false) {
-            const authError = verifyHelloAuth(normalizedFrom, msg.auth, options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS);
+            const challengeAccepted = helloChallenges.consume(ws, msg.auth?.nonce);
+            const authError = challengeAccepted
+              ? verifyHelloAuth(normalizedFrom, peerKey, msg.auth, options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS)
+              : 'Hello challenge missing, expired, or already consumed';
             if (authError) {
               send(ws, { type: 'error', error: authError });
               ws.close();

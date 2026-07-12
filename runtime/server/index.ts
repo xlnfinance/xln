@@ -49,6 +49,7 @@ import {
 } from '../relay/store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
+import { createHelloChallengeRegistry } from '../networking/hello-challenge';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { createStructuredLogger, shortId } from '../infra/logger';
@@ -789,6 +790,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   let env: Env | null = null;
   let routerConfig: RelayRouterConfig | null = null;
+  const relayHelloChallenges = createHelloChallengeRegistry();
 
   const createHttpServer = () => Bun.serve({
     port: options.port,
@@ -860,6 +862,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         if (data.type === 'rpc' && env) {
           attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
         }
+        if (data.type === 'relay') relayHelloChallenges.issue(ws);
         pushDebugEvent(relayStore, {
           event: 'ws_open',
           details: { wsType: data.type },
@@ -970,6 +973,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       },
 
       close(ws: RelaySocket, code, reason) {
+        relayHelloChallenges.forget(ws);
         cleanupRpcMarketSubscription(ws);
         forgetRuntimeAdapterClient(ws);
         forgetRelaySocketRuntimeId(ws);
@@ -1264,6 +1268,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       localRuntimeId: String(env.runtimeId),
       localDeliver,
       send: (ws, data) => ws.send(data),
+      consumeHelloChallenge: (ws, challenge) => relayHelloChallenges.consume(ws, challenge),
       onGossipStore: profile => {
         try {
           runtimeEnv.gossip?.announce?.(profile);

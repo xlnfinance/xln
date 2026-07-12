@@ -113,6 +113,7 @@ export type RelayRouterConfig = {
   /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
+  consumeHelloChallenge?: (ws: object, challenge: unknown) => boolean;
   verifyProfile?: (profile: Profile) => Promise<ProfileVerifyResult> | ProfileVerifyResult;
 };
 
@@ -301,7 +302,10 @@ export const relayRoute = async (
       return;
     }
     if (config.requireHelloAuth !== false) {
-      const authError = verifyHelloAuth(fromKey, msg.auth, config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS);
+      const challengeAccepted = config.consumeHelloChallenge?.(ws as object, msg.auth?.nonce) ?? true;
+      const authError = challengeAccepted
+        ? verifyHelloAuth(fromKey, fromEncryptionPubKey!, msg.auth, config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS)
+        : 'Hello challenge missing, expired, or already consumed';
       if (authError) {
         pushDebugEvent(store, {
           event: 'hello',

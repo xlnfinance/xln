@@ -23,10 +23,10 @@ const ENTITY_C = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
 
 type FakeWs = { label: string; readyState?: number };
 
-const helloAuth = (runtimeId: string, seed: string, signerId = '1') => {
+const helloAuth = (runtimeId: string, seed: string, key: string, signerId = '1') => {
   const timestamp = Date.now();
   const nonce = makeHelloNonce();
-  const signature = signDigest(seed, signerId, hashHelloMessage(runtimeId, timestamp, nonce));
+  const signature = signDigest(seed, signerId, hashHelloMessage(runtimeId, key, timestamp, nonce));
   return { nonce, signature, timestamp };
 };
 
@@ -34,7 +34,7 @@ const signedHello = (runtimeId: string, seed: string, key: string, signerId = '1
   type: 'hello',
   from: runtimeId,
   fromEncryptionPubKey: key,
-  auth: helloAuth(runtimeId, seed, signerId),
+  auth: helloAuth(runtimeId, seed, key, signerId),
 });
 
 const buildProfile = (
