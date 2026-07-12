@@ -28,7 +28,7 @@ describe('production startup wiring', () => {
     };
 
     expect(deploy).toContain('build_remote_frontend_archive');
-    expect(deploy).toContain('tar -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build');
+    expect(deploy).toContain('COPYFILE_DISABLE=1 tar -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build');
     expect(deploy).toContain('scp "$PREBUILT_FRONTEND_ARCHIVE" "$REMOTE_HOST:$remote_frontend_archive"');
     expect(deploy).toContain("tar -xzf '$remote_frontend_archive' -C frontend");
     expect(deploy).toContain('remote_cmd="$remote_cmd ./deploy.sh --runtime-only"');
