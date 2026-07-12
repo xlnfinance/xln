@@ -106,7 +106,7 @@ build_remote_frontend_archive() {
     XLN_BUILD_NUMBER="$deploy_build_number" bun run build
   )
   PREBUILT_FRONTEND_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/xln-frontend-build.XXXXXX.tar.gz")"
-  COPYFILE_DISABLE=1 tar -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build
+  COPYFILE_DISABLE=1 tar --no-xattrs --no-mac-metadata -C frontend -czf "$PREBUILT_FRONTEND_ARCHIVE" build
 }
 
 wait_for_rpc_chain() {
