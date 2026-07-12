@@ -123,6 +123,11 @@ import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-heal
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../protocol/failure-taxonomy';
 import { STORAGE_WRITER_LOCK_TTL_MS } from '../runtime-storage-dbs';
+import {
+  deriveMeshChildSeed,
+  readMeshSeedOverrides,
+  requireMeshRootSeed,
+} from './mesh-seeds';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -235,29 +240,25 @@ const resetState: ResetState = {
   resolvedAt: null,
 };
 
-const readRadapterAuthSeeds = (): Record<string, string> => {
-  const raw = String(process.env['XLN_MESH_RADAPTER_AUTH_SEEDS_JSON'] || '').trim();
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: Record<string, string> = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      if (typeof value === 'string' && value.trim()) out[key.toUpperCase()] = value.trim();
-    }
-    return out;
-  } catch (error) {
-    throw new Error(`MESH_RADAPTER_AUTH_SEEDS_JSON_INVALID: ${(error as Error).message}`);
-  }
-};
-
-const radapterAuthSeeds = readRadapterAuthSeeds();
-const radapterAuthSeedFor = (name: string, fallback: string): string => radapterAuthSeeds[name.toUpperCase()] || fallback;
+const meshRootSeed = requireMeshRootSeed();
+const runtimeSeedOverrides = readMeshSeedOverrides(
+  process.env['XLN_MESH_RUNTIME_SEEDS_JSON'],
+  'XLN_MESH_RUNTIME_SEEDS_JSON',
+);
+const radapterAuthSeeds = readMeshSeedOverrides(
+  process.env['XLN_MESH_RADAPTER_AUTH_SEEDS_JSON'],
+  'XLN_MESH_RADAPTER_AUTH_SEEDS_JSON',
+);
+const runtimeSeedFor = (name: string): string =>
+  runtimeSeedOverrides[name.toUpperCase()] || deriveMeshChildSeed(meshRootSeed, `runtime:${name}`);
+const radapterAuthSeedFor = (name: string): string =>
+  radapterAuthSeeds[name.toUpperCase()] || deriveMeshChildSeed(meshRootSeed, `radapter:${name}`);
 
 const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
   name,
   region: 'global',
-  seed: `xln-e2e-${name.toLowerCase()}`,
-  authSeed: radapterAuthSeedFor(name, `xln-e2e-${name.toLowerCase()}`),
+  seed: runtimeSeedFor(name),
+  authSeed: radapterAuthSeedFor(name),
   signerLabel: `${name.toLowerCase()}-hub`,
   apiPort: args.nodeApiPortBase + index,
   publicPort: args.nodePublicPortBase + index,
@@ -277,8 +278,8 @@ const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
 
 const marketMakerChild: MarketMakerChild = {
   name: 'MM',
-  seed: 'xln-mesh-mm',
-  authSeed: radapterAuthSeedFor('MM', 'xln-mesh-mm'),
+  seed: runtimeSeedFor('MM'),
+  authSeed: radapterAuthSeedFor('MM'),
   signerLabel: 'mm-1',
   apiPort: args.nodeApiPortBase + 3,
   publicPort: args.nodePublicPortBase + 3,
@@ -2322,7 +2323,7 @@ const runReset = async (options: { enableMarketMaker: boolean } = { enableMarket
           rpcUrl: args.rpcUrl,
           walletUrl: args.walletUrl,
           dbRoot: args.custodyDbRoot,
-          seed: 'xln-mesh-custody-seed',
+          seed: runtimeSeedFor('CUSTODY'),
           signerLabel: 'custody-mesh-1',
           profileName: 'Custody',
           jurisdictionId: primaryJurisdiction.key,
