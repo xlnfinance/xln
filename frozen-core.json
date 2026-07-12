@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
   "algorithm": "sha256",
-  "rootHash": "0xa570b9295fa98e66be7dc9d178ca9f810c841cc0b8340314441c727e63cde2de",
+  "rootHash": "0x9f1afe94eef124b559c6b3881d2cc4ba6b6ce64e47e4bcb1ff48f84faa0fa44b",
   "files": [
     {
       "path": "runtime/runtime.ts",
       "mode": "100644",
-      "contentHash": "0x20b7353a830b1348eccd03cfea72ebc758d920fdb6035b5b29c4e18769acc6f0",
-      "leafHash": "0xb77645641db8174f90e624ccb1b3fe195b43964ab96b647ef7ed7d5445bf4e36",
+      "contentHash": "0x2a7419d382e90325293717a952683556c26a7b5fb0125aa5c97fee537ca6326d",
+      "leafHash": "0xf5a01fc5971efc28e893d2750a36793d126020fdc20a7c43cec75165966d346e",
       "frozenAtRelease": "0.1.7",
       "reason": "Primary runtime entrypoint frozen by the project owner."
     }
@@ -82,6 +82,16 @@
       "release": "0.1.8",
       "approvedAt": "2026-07-12T17:26:31.117Z",
       "comment": ""
+    },
+    {
+      "path": "runtime/runtime.ts",
+      "oldContentHash": "0x20b7353a830b1348eccd03cfea72ebc758d920fdb6035b5b29c4e18769acc6f0",
+      "newContentHash": "0x2a7419d382e90325293717a952683556c26a7b5fb0125aa5c97fee537ca6326d",
+      "oldLeafHash": "0xb77645641db8174f90e624ccb1b3fe195b43964ab96b647ef7ed7d5445bf4e36",
+      "newLeafHash": "0xf5a01fc5971efc28e893d2750a36793d126020fdc20a7c43cec75165966d346e",
+      "release": "0.1.8",
+      "approvedAt": "2026-07-12T17:54:46.445Z",
+      "comment": "Restore complete durable runtime and replica metadata for 0.1.8"
     }
   ]
 }

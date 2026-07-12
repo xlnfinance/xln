@@ -46,7 +46,7 @@ import {
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../extensions/cross-j/market';
 import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
-import { normalizeEntitySwapTradingPairs } from '../runtime-swap-pairs';
+import { normalizeEntitySwapTradingPairs } from '../machine/swap-pairs';
 import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
 import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';

@@ -76,7 +76,7 @@ import {
   type RpcBatchRequest,
   type RpcBatchResponse,
 } from './rpc-utils';
-import { nodeProcess, runtimeIsBrowser } from '../runtime-platform';
+import { nodeProcess, runtimeIsBrowser } from '../machine/platform';
 
 const TRON_CHAIN_IDS = new Set<number>([728126428, 3448148188]);
 const TRON_FINALITY_DEPTH = 19;

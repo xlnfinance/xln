@@ -8,7 +8,7 @@ import {
   isProductionRuntime,
   nodeProcess,
   runtimeIsBrowser,
-} from './runtime-platform';
+} from './machine/platform';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
@@ -178,7 +178,7 @@ import {
   type RuntimeEntityInputRoutingResult,
   type RuntimeOutputRoutingDeps,
 } from './runtime-output-routing';
-import { runtimeInputRequiresOutboxCapacity } from './runtime-admission';
+import { runtimeInputRequiresOutboxCapacity } from './machine/admission';
 import {
   createRuntimeOutputRoutingDeps,
   handleInboundP2PEntityInput as routeInboundP2PEntityInput,
@@ -192,7 +192,7 @@ import {
   getNextWallClockWakeTimestamp as getNextRuntimeWallClockWakeTimestamp,
   hasDueEntityHooks as hasDueRuntimeEntityHooks,
   type RuntimeWakeDeps,
-} from './runtime-wake';
+} from './machine/wake';
 import {
   assertScheduledWakeTxAuthorized,
   deleteScheduledWakeIndex,
@@ -202,7 +202,7 @@ import {
 import {
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
-} from './runtime-lifecycle';
+} from './machine/lifecycle';
 import {
   enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
@@ -214,7 +214,7 @@ import {
   copyRuntimeCleanLogs,
   getRuntimeCleanLogs,
   type RuntimeCleanLogDeps,
-} from './runtime-clean-logs';
+} from './machine/clean-logs';
 import { applyRuntimeTx } from './runtime-tx-handlers';
 import { applyMergedEntityInputs } from './runtime-entity-inputs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
@@ -4046,7 +4046,7 @@ export const clearDB = async (env?: Env): Promise<void> => {
   }
 };
 
-export { scenarios } from './runtime-scenarios';
+export { scenarios } from './machine/scenarios';
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
 export { executeScenario } from './scenarios/executor.js';
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';

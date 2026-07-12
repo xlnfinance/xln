@@ -19,7 +19,7 @@ import type {
 } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, getPerfMs, log } from './utils';
 import { compareStableText, safeStringify } from './serialization-utils';
-import { nodeProcess } from './runtime-platform';
+import { nodeProcess } from './machine/platform';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
 import { accountInputReferenceHeight } from './account/consensus/flush';
 import {

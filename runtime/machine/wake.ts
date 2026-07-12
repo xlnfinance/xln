@@ -1,10 +1,10 @@
-import type { Env, JInput, RoutedEntityInput, RuntimeInput, RuntimeTx } from './types';
-import { getWallClockMs } from './utils';
+import type { Env, JInput, RoutedEntityInput, RuntimeInput, RuntimeTx } from '../types';
+import { getWallClockMs } from '../utils';
 import {
   createDueScheduledWakeInputs,
   entityNeedsPeriodicWake,
   getNextScheduledWakeTimestamp,
-} from './runtime-scheduled-wake';
+} from '../runtime-scheduled-wake';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
 

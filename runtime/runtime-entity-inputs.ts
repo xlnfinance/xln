@@ -12,7 +12,7 @@ import {
 import { safeStringify } from './serialization-utils';
 import type { EntityInput, EntityReplica, Env, JInput, RoutedEntityInput } from './types';
 import { validateEntityOutput } from './validation-utils';
-import { nodeProcess } from './runtime-platform';
+import { nodeProcess } from './machine/platform';
 import { DEBUG, getPerfMs } from './utils';
 import { createStructuredLogger, logError, shortId } from './logger';
 

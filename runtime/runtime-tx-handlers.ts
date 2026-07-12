@@ -9,7 +9,7 @@ import {
   canonicalizeLocalEntityCryptoKeys,
   resolveReplicaEntityCryptoKeys,
 } from './entity/crypto';
-import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
+import { normalizeEntitySwapTradingPairs } from './machine/swap-pairs';
 import {
   backfillEntityJurisdictionBinding,
   requireBoundEntityConfig,

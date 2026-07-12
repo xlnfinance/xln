@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
-} from '../runtime-lifecycle';
+} from '../machine/lifecycle';
 import { createEmptyEnv, resumeRuntimeLoop, startRuntimeLoop, stopRuntimeLoopAndWait } from '../runtime';
 import type { Env } from '../types';
 
