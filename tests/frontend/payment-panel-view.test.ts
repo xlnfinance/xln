@@ -139,7 +139,8 @@ test('PaymentPanel consumes PaymentPanelView instead of owning full env reads', 
   expect(accountWorkspace).toContain('export let paymentView: PaymentPanelView');
   expect(accountWorkspace).toContain('{paymentView}');
   expect(accountWorkspace).toContain('{submitRuntimeInput}');
-  expect(tabs).toContain('paymentView = runtimeProjectionFrame');
+  expect(tabs).toContain('paymentView = displayProjectionFrame');
+  expect(tabs).toContain('frame: displayProjectionFrame');
   expect(tabs).toContain('buildPaymentPanelViewFromRuntimeView');
   expect(tabs).toContain('networkGraph: actionRuntimeEnv?.gossip?.getNetworkGraph?.() ?? null');
   expect(tabs).toContain('{paymentView}');

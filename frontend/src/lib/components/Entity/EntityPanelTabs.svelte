@@ -838,10 +838,10 @@ import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming
     entityJurisdictionKey: hubDiscoveryProjection.entityJurisdictionKey,
     localHubCount: hubDiscoveryProjection.localHubs.length,
   }));
-  $: paymentView = runtimeProjectionFrame
+  $: paymentView = displayProjectionFrame
     ? buildPaymentPanelViewFromRuntimeView({
         entityId: currentEntityValue || tab.entityId,
-        frame: runtimeProjectionFrame,
+        frame: displayProjectionFrame,
       })
     : buildPaymentPanelView({
         entityId: currentEntityValue || tab.entityId,
