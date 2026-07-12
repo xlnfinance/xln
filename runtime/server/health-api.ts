@@ -4,7 +4,7 @@ import type { JTokenInfo } from '../jadapter/types';
 import { getStorageHealthSnapshotSync } from '../orchestrator/storage-monitor';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
 import type { Profile } from '../networking/gossip';
-import { isLocalOperatorRequest, publicRuntimeHealthBody } from './health-redaction';
+import { publicRuntimeHealthBody } from './health-redaction';
 import { buildDiskSummary } from './utils';
 import { getReplicaAccountCount, getReplicaReserveSnapshot } from './entity-lookup';
 import {
@@ -45,12 +45,12 @@ export type RuntimeHealthDeps = {
 };
 
 export const handleRuntimeHealth = async (
-  req: Request,
+  _req: Request,
   headers: HeadersInit,
   deps: RuntimeHealthDeps,
+  includeOperatorHealth: boolean,
 ): Promise<Response> => {
   const now = Date.now();
-  const includeOperatorHealth = isLocalOperatorRequest(req);
   if (deps.cachedHealthResponse && deps.cachedHealthResponse.expiresAt > now) {
     return new Response(
       includeOperatorHealth ? deps.cachedHealthResponse.fullBody : deps.cachedHealthResponse.publicBody,

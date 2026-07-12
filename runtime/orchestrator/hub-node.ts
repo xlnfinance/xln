@@ -39,7 +39,7 @@ import { createStructuredLogger } from '../infra/logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import { findMissingRpcContractCode } from './contract-readiness';
 import { getTokenIdsForJurisdiction } from '../account/utils';
-import { isLocalOperatorRequest, publicLocalHubHealth } from '../server/health-redaction';
+import { isLocalOperatorRequest, publicLocalHubHealth, resolveSocketPeerAddress } from '../server/health-redaction';
 import {
   deriveRuntimeAdapterCapabilityToken,
   resolveRuntimeAdapterAuthAudience,
@@ -1582,6 +1582,7 @@ const run = async (): Promise<void> => {
 	      const url = new URL(request.url);
 	      const pathname = url.pathname;
 	      const headers = JSON_HEADERS;
+	      const operatorAuthorized = isLocalOperatorRequest(request, resolveSocketPeerAddress(serverRef, request));
 
 	      if (request.headers.get('upgrade') === 'websocket' && pathname === '/rpc') {
 	        const upgraded = serverRef.upgrade(request, { data: { type: 'rpc' } });
@@ -1609,7 +1610,7 @@ const run = async (): Promise<void> => {
 
       if (pathname === '/api/health') {
         const health = buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog, activeJAdapter, hubBootstraps);
-        return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicLocalHubHealth(health)), {
+        return new Response(safeStringify(operatorAuthorized ? health : publicLocalHubHealth(health)), {
           headers,
         });
       }

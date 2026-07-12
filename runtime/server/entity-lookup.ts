@@ -1,16 +1,7 @@
 import { deriveDelta } from '../account/utils';
-import type { AccountMachine, EntityReplica, Env } from '../types';
-
-export const getEntityReplicaById = (env: Env, entityId: string): EntityReplica | null => {
-  if (!env.eReplicas) return null;
-  const target = entityId.toLowerCase();
-  for (const [key, replica] of env.eReplicas.entries()) {
-    if (typeof key === 'string' && key.toLowerCase().startsWith(`${target}:`)) {
-      return replica;
-    }
-  }
-  return null;
-};
+import type { AccountMachine, Env } from '../types';
+import { getEntityReplicaById } from '../entity/replica-lookup';
+export { getEntityReplicaById } from '../entity/replica-lookup';
 
 const accountMatchesCounterparty = (
   account: AccountMachine | null | undefined,

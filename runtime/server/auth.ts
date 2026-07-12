@@ -19,7 +19,7 @@ const extractBearerAuth = (header: string | null): string => {
   return match ? match[1]!.trim() : '';
 };
 
-const verifyDaemonCapability = (
+export const verifyDaemonCapability = (
   env: Env | null,
   key: unknown,
   requiredLevel: RuntimeAdapterAuthLevel,
@@ -32,6 +32,16 @@ const verifyDaemonCapability = (
   return !!auth && authLevelRank(auth.level) >= authLevelRank(requiredLevel);
 };
 
+export const hasDaemonControlAuth = (
+  req: Request,
+  env: Env | null,
+  requiredLevel: RuntimeAdapterAuthLevel = 'admin',
+): boolean => env !== null && verifyDaemonCapability(
+  env,
+  extractBearerAuth(req.headers.get('authorization')),
+  requiredLevel,
+);
+
 export const requireDaemonControlAuth = (
   req: Request,
   env: Env | null,
@@ -40,7 +50,7 @@ export const requireDaemonControlAuth = (
   if (!env) {
     return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers: JSON_HEADERS });
   }
-  if (verifyDaemonCapability(env, extractBearerAuth(req.headers.get('authorization')), requiredLevel)) return null;
+  if (hasDaemonControlAuth(req, env, requiredLevel)) return null;
   return new Response(serializeTaggedJson({ ok: false, error: 'Unauthorized' }), { status: 401, headers: JSON_HEADERS });
 };
 

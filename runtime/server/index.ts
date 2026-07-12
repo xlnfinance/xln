@@ -34,7 +34,8 @@ import {
   resetMarketMakerServerState,
 } from './market-maker-health';
 import { serveRuntimeBundle, serveStatic } from './static-assets';
-import { parseTaggedControlBody, requireDaemonControlAuth } from './auth';
+import { hasDaemonControlAuth, parseTaggedControlBody, requireDaemonControlAuth } from './auth';
+import { isLocalOperatorRequest, resolveSocketPeerAddress } from './health-redaction';
 import { listLocalControlEntities } from './control-entities';
 import {
   getAccountMachine,
@@ -371,7 +372,13 @@ const handleRpcMessage = createServerRpcMessageHandler({
   buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
 });
 
-const handleApi = async (req: Request, pathname: string, env: Env | null, clientId: string): Promise<Response> => {
+const handleApi = async (
+  req: Request,
+  pathname: string,
+  env: Env | null,
+  clientId: string,
+  operatorAuthorized: boolean,
+): Promise<Response> => {
   const headers = JSON_HEADERS;
 
   if (req.method === 'OPTIONS') {
@@ -436,7 +443,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null, client
   // JSON-RPC proxy endpoint (single canonical path: /rpc).
   // Keep /api/rpc for compatibility with older clients.
   if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
-    return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers });
+    return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers, operatorAuthorized });
   }
 
   // Health check
@@ -459,14 +466,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null, client
       marketMakerState,
       getAccountMachine,
       ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
-    });
+    }, operatorAuthorized);
   }
 
   if (pathname === '/api/watchtower-proxy' && (req.method === 'GET' || req.method === 'POST' || req.method === 'PUT')) {
     return handleWatchtowerProxy(req);
   }
 
-  const qaResponse = await maybeHandleQaRequest(req, pathname, headers);
+  const qaResponse = await maybeHandleQaRequest(req, pathname, headers, { operatorAuthorized });
   if (qaResponse) return qaResponse;
 
   if (pathname === '/api/hubs') {
@@ -807,7 +814,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         try {
           const directClientIp = resolveAssistantDirectClientIp(server, req);
           const clientId = resolveAssistantRateClientId(req, directClientIp);
-          return await handleApi(req, pathname, env, clientId);
+          const peerAddress = resolveSocketPeerAddress(server, req);
+          const operatorAuthorized = isLocalOperatorRequest(req, peerAddress) || hasDaemonControlAuth(req, env);
+          return await handleApi(req, pathname, env, clientId, operatorAuthorized);
         } catch (error) {
           const message = (error as Error)?.message || 'API handler failed';
           serverLog.error('api.unhandled_route_error', { pathname, message });

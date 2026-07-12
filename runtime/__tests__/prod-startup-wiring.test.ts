@@ -237,7 +237,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const buildSecondaryRpcArgs = (): string[] => {');
     expect(orchestrator).toContain('const buildRpcChildEnv = (): Record<string, string> => {');
     expect(orchestrator).toContain('const rpcProxyIndex = resolveRpcProxyIndex(pathname);');
-    expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '');");
+    expect(orchestrator).toContain("return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);");
     expect(orchestrator).toContain("XLN_RUNTIME_EXIT_ON_FATAL: process.env['XLN_RUNTIME_EXIT_ON_FATAL'] ?? '1'");
     expect(orchestrator).toContain("XLN_STORAGE_WRITE_TIMEOUT_MS: process.env['XLN_STORAGE_WRITE_TIMEOUT_MS'] ?? '60000'");
     expect(orchestrator).toContain("const HUB_BOOTSTRAP_PAUSE_STORAGE = process.env['XLN_HUB_BOOTSTRAP_PAUSE_STORAGE'] ?? '1';");
@@ -844,7 +844,7 @@ describe('production startup wiring', () => {
     expect(orchestrator).toContain('const health = await buildAggregatedHealthResponse();');
     expect(orchestrator).toContain('const readiness = resolveRuntimeImportReadiness(health);');
     expect(orchestrator).toContain('if (!readiness.ok) {');
-    expect(orchestrator).toContain("const allowPartial = url.searchParams.get('allowPartial') === '1' && isLocalOperatorRequest(request);");
+    expect(orchestrator).toContain("const allowPartial = url.searchParams.get('allowPartial') === '1' && operatorAuthorized;");
     expect(orchestrator).toContain('partial: true,');
     expect(orchestrator).toContain('ready: false,');
     expect(orchestrator).toContain('category: readiness.category,');

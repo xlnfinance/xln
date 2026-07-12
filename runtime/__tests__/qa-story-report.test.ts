@@ -985,6 +985,7 @@ test('qa api without configured tokens is open only to local operator requests',
       new Request('http://127.0.0.1:8080/api/qa/catalog'),
       '/api/qa/catalog',
       JSON_HEADERS,
+      { operatorAuthorized: true },
     );
     expect(localResponse?.status).toBe(200);
     const payload = await localResponse!.json() as {
@@ -1002,6 +1003,7 @@ test('qa api without configured tokens is open only to local operator requests',
       new Request('https://xln.finance/api/qa/catalog'),
       '/api/qa/catalog',
       JSON_HEADERS,
+      { operatorAuthorized: false },
     );
     expect(publicResponse?.status).toBe(401);
     expect((await publicResponse!.json() as { error?: string }).error).toBe('QA_AUTH_REQUIRED');

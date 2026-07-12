@@ -1,4 +1,3 @@
-import { isLocalOperatorRequest } from '../server/health-redaction';
 import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
 import { safeStringify } from '../protocol/serialization';
 import type { HubChild } from './orchestrator-types';
@@ -170,7 +169,11 @@ const findForbiddenRpcProxyMethod = (bodyText: string): string | null => {
 };
 
 export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => {
-  const proxyRpc = async (request: Request, upstreamRpcUrl = deps.defaultRpcUrl): Promise<Response> => {
+  const proxyRpc = async (
+    request: Request,
+    upstreamRpcUrl = deps.defaultRpcUrl,
+    operatorAuthorized = false,
+  ): Promise<Response> => {
     if (!upstreamRpcUrl) {
       return new Response(
         safeStringify(proxyFailureBody({
@@ -182,7 +185,7 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
     }
     try {
       const bodyText = await request.text();
-      if (!isLocalOperatorRequest(request)) {
+      if (!operatorAuthorized) {
         const forbidden = findForbiddenRpcProxyMethod(bodyText);
         if (forbidden) {
           return new Response(

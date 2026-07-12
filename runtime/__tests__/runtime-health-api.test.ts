@@ -87,8 +87,8 @@ describe('runtime health API handler', () => {
     const req = new Request('http://127.0.0.1:8080/api/health');
 
     const [first, second] = await Promise.all([
-      handleRuntimeHealth(req, { 'Content-Type': 'application/json' }, deps),
-      handleRuntimeHealth(req, { 'Content-Type': 'application/json' }, deps),
+      handleRuntimeHealth(req, { 'Content-Type': 'application/json' }, deps, true),
+      handleRuntimeHealth(req, { 'Content-Type': 'application/json' }, deps, true),
     ]);
 
     const firstBody = await first.text();
@@ -105,7 +105,7 @@ describe('runtime health API handler', () => {
     const operatorReq = new Request('http://127.0.0.1:8080/api/health');
     const publicReq = new Request('https://xln.finance/api/health');
 
-    await handleRuntimeHealth(operatorReq, { 'Content-Type': 'application/json' }, deps);
+    await handleRuntimeHealth(operatorReq, { 'Content-Type': 'application/json' }, deps, true);
     expect(getCachedResponseSetCount()).toBe(1);
 
     relayStore.clients.set('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', {
@@ -115,7 +115,7 @@ describe('runtime health API handler', () => {
       ws: { send: () => true, readyState: 1 },
     });
 
-    const publicResponse = await handleRuntimeHealth(publicReq, { 'Content-Type': 'application/json' }, deps);
+    const publicResponse = await handleRuntimeHealth(publicReq, { 'Content-Type': 'application/json' }, deps, false);
     const publicBody = await publicResponse.text();
     const publicJson = JSON.parse(publicBody) as { relay?: { activeClientCount?: number }; boot?: { error?: string } };
 
@@ -136,6 +136,7 @@ describe('runtime health API handler', () => {
       new Request('http://127.0.0.1:8080/api/health'),
       { 'Content-Type': 'application/json' },
       deps,
+      true,
     );
     const body = JSON.parse(await response.text()) as {
       hubs?: unknown[];

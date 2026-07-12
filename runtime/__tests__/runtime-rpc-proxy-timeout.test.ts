@@ -24,6 +24,7 @@ describe('runtime RPC proxy timeouts', () => {
         env: null,
         relayStore: createRelayStore('test'),
         headers: { 'content-type': 'application/json' },
+        operatorAuthorized: true,
       });
       const body = await response.json() as { error?: string };
 

@@ -38,7 +38,8 @@ import {
   resolveAssistantRateClientId,
 } from '../server/assistant-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { isLocalOperatorRequest, publicAggregatedHealth } from '../server/health-redaction';
+import { publicAggregatedHealth, resolveSocketPeerAddress } from '../server/health-redaction';
+import { isOperatorRequest, loadOrCreateOperatorToken } from './operator-access';
 import {
   normalizeRuntimeImportAccess,
   resolveRuntimeImportAccessForRequest,
@@ -324,6 +325,12 @@ type RuntimeImportManifest = {
 };
 
 const runtimeImportAccess = normalizeRuntimeImportAccess(process.env['XLN_RUNTIME_IMPORT_ACCESS']);
+const orchestratorOperatorTokenPath = process.env['XLN_ORCHESTRATOR_OPERATOR_TOKEN_PATH']?.trim()
+  || join(args.dbRoot, 'operator-token');
+const orchestratorOperatorToken = loadOrCreateOperatorToken(
+  orchestratorOperatorTokenPath,
+  process.env['XLN_ORCHESTRATOR_OPERATOR_TOKEN'],
+);
 const runtimeImportTokenTtlMs = Math.max(
   60_000,
   Math.floor(Number(process.env['XLN_RUNTIME_IMPORT_TOKEN_TTL_MS'] || String(REMOTE_RUNTIME.IMPORT_TOKEN_TTL_MS))),
@@ -2398,6 +2405,11 @@ const server = Bun.serve({
     try {
     const url = new URL(request.url);
     const pathname = url.pathname;
+    const operatorAuthorized = isOperatorRequest(
+      request,
+      resolveSocketPeerAddress(serverRef, request),
+      orchestratorOperatorToken,
+    );
     const headers = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': '*',
@@ -2422,7 +2434,7 @@ const server = Bun.serve({
 
     const rpcProxyIndex = resolveRpcProxyIndex(pathname);
     if (rpcProxyIndex !== null && request.method === 'POST') {
-      return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '');
+      return await proxyRpc(request, args.rpcUrls[rpcProxyIndex] || '', operatorAuthorized);
     }
 
     const hubRuntimeInputStatusMatch = pathname.match(/^\/api\/hub\/runtime-input\/([^/]+)\/status$/);
@@ -2537,14 +2549,14 @@ const server = Bun.serve({
         marketMakerHealthOverride,
         includeMarketSnapshots: url.searchParams.get('marketSnapshots') === '1',
       });
-      return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicAggregatedHealth(health)), { headers });
+      return new Response(safeStringify(operatorAuthorized ? health : publicAggregatedHealth(health)), { headers });
     }
 
     if (pathname === '/api/health') {
       void getStorageHealth().catch(() => {});
       await refreshChildHealthForResponse();
       const health = await buildAggregatedHealthResponse();
-      return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicAggregatedHealth(health)), { headers });
+      return new Response(safeStringify(operatorAuthorized ? health : publicAggregatedHealth(health)), { headers });
     }
 
     if (pathname === '/api/runtime-import' && request.method === 'GET') {
@@ -2553,12 +2565,12 @@ const server = Bun.serve({
       const health = await buildAggregatedHealthResponse();
       const readiness = resolveRuntimeImportReadiness(health);
       if (!readiness.ok) {
-        const allowPartial = url.searchParams.get('allowPartial') === '1' && isLocalOperatorRequest(request);
+        const allowPartial = url.searchParams.get('allowPartial') === '1' && operatorAuthorized;
         if (allowPartial) {
           const access = resolveRuntimeImportAccessForRequest(
-            request,
             url.searchParams.get('access'),
             runtimeImportAccess,
+            operatorAuthorized,
           );
           if (!access.ok) {
             return new Response(safeStringify({ error: access.error }), { status: access.status, headers });
@@ -2601,9 +2613,9 @@ const server = Bun.serve({
         }), { headers: { ...headers, 'Retry-After': '2' } });
       }
       const access = resolveRuntimeImportAccessForRequest(
-        request,
         url.searchParams.get('access'),
         runtimeImportAccess,
+        operatorAuthorized,
       );
       if (!access.ok) {
         return new Response(safeStringify({ error: access.error }), { status: access.status, headers });
@@ -2636,7 +2648,7 @@ const server = Bun.serve({
       });
     }
 
-    const qaResponse = await maybeHandleQaRequest(request, pathname, headers);
+    const qaResponse = await maybeHandleQaRequest(request, pathname, headers, { operatorAuthorized });
     if (qaResponse) return qaResponse;
 
     if (pathname === '/api/hubs') {

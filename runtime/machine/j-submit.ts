@@ -2,7 +2,7 @@ import type { EntityInput, Env, JInput, JTx, RuntimeTx } from '../types';
 import { getCachedSignerPrivateKey } from '../account/crypto';
 import { isBatchEmpty } from '../jurisdiction/batch';
 import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
-import { getEntityReplicaById } from '../orchestrator/mesh-common';
+import { getEntityReplicaById } from '../entity/replica-lookup';
 import { ensureLiveJAdapterForReplica } from './infra';
 import { classifyRuntimeJBatchFailure } from '../protocol/failure-taxonomy';
 import { createStructuredLogger, shortId } from '../infra/logger';
@@ -62,19 +62,25 @@ const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow
 
 const normalizedEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
-const getDisputeFinalizeCounterparties = (jTx: JTx): Set<string> => {
-  if (jTx.type !== 'batch') return new Set();
-  return new Set(
-    (jTx.data.batch.disputeFinalizations || [])
-      .map((op) => normalizedEntityId(op.counterentity))
-      .filter(Boolean),
-  );
+type DisputeFinalizeClaim = {
+  counterparty: string;
+  initialNonce: string;
+  initialProofbodyHash: string;
+};
+
+const getDisputeFinalizeClaims = (jTx: JTx): DisputeFinalizeClaim[] => {
+  if (jTx.type !== 'batch') return [];
+  return (jTx.data.batch.disputeFinalizations || []).map((op) => ({
+    counterparty: normalizedEntityId(op.counterentity),
+    initialNonce: String(op.initialNonce),
+    initialProofbodyHash: normalizedEntityId(op.initialProofbodyHash),
+  })).filter((claim) => claim.counterparty && claim.initialNonce && claim.initialProofbodyHash);
 };
 
 const hasMatchingDisputeFinalizedEvent = (
   inputs: EntityInput[],
   entityId: string,
-  counterparties: Set<string>,
+  claims: DisputeFinalizeClaim[],
 ): boolean => inputs.some((input) => (input.entityTxs || []).some((tx) => {
   if (tx.type !== 'j_event') return false;
   const events = Array.isArray(tx.data.events) ? tx.data.events : [tx.data.event];
@@ -82,23 +88,35 @@ const hasMatchingDisputeFinalizedEvent = (
     if (event?.type !== 'DisputeFinalized') return false;
     const sender = normalizedEntityId(event.data.sender);
     const counterentity = normalizedEntityId(event.data.counterentity);
-    return (sender === entityId && counterparties.has(counterentity))
-      || (counterentity === entityId && counterparties.has(sender));
+    const counterparty = sender === entityId
+      ? counterentity
+      : counterentity === entityId
+        ? sender
+        : '';
+    if (!counterparty) return false;
+    const initialNonce = String(event.data.initialNonce);
+    const initialProofbodyHash = normalizedEntityId(event.data.initialProofbodyHash);
+    return claims.some((claim) =>
+      claim.counterparty === counterparty &&
+      claim.initialNonce === initialNonce &&
+      claim.initialProofbodyHash === initialProofbodyHash
+    );
   });
 }));
 
-const reconcileFinalizedDisputeBeforeSubmit = async (
+const reconcileFinalizedDispute = async (
   env: Env,
   jAdapter: { pollNow?: () => Promise<void> },
   jTx: JTx,
   deps: RuntimeJSubmitDeps,
+  reason: 'counterparty-finalized-before-submit' | 'counterparty-finalized-after-submit-failure',
 ): Promise<boolean> => {
   if (jTx.type !== 'batch') return false;
-  const counterparties = getDisputeFinalizeCounterparties(jTx);
-  if (counterparties.size === 0 || typeof jAdapter.pollNow !== 'function') return false;
+  const claims = getDisputeFinalizeClaims(jTx);
+  if (claims.length === 0 || typeof jAdapter.pollNow !== 'function') return false;
   await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
   const entityId = normalizedEntityId(jTx.entityId);
-  if (!hasMatchingDisputeFinalizedEvent(captureQueuedEntityInputs(env), entityId, counterparties)) return false;
+  if (!hasMatchingDisputeFinalizedEvent(captureQueuedEntityInputs(env), entityId, claims)) return false;
 
   const replica = getEntityReplicaById(env, jTx.entityId);
   const signerId = normalizedEntityId(jTx.data.signerId || replica?.signerId);
@@ -108,15 +126,29 @@ const reconcileFinalizedDisputeBeforeSubmit = async (
     signerId,
     entityTxs: [{
       type: 'j_abort_sent_batch',
-      data: { reason: 'counterparty-finalized-before-submit', requeueToCurrent: true },
+      data: { reason, requeueToCurrent: true },
     }],
   }], undefined, undefined, env.timestamp);
   jSubmitLog.warn('dispute_finalize.stale_reconciled', {
     entityId: shortId(jTx.entityId),
-    counterparties: [...counterparties].map((id) => shortId(id)),
+    counterparties: claims.map(({ counterparty }) => shortId(counterparty)),
+    phase: reason,
   });
   return true;
 };
+
+const reconcilePermanentSubmitFailure = async (
+  env: Env,
+  jAdapter: { pollNow?: () => Promise<void> },
+  jTx: JTx,
+  deps: RuntimeJSubmitDeps,
+): Promise<boolean> => reconcileFinalizedDispute(
+  env,
+  jAdapter,
+  jTx,
+  deps,
+  'counterparty-finalized-after-submit-failure',
+);
 
 const validateSealedBatchJTx = (jTx: JTx): void => {
   if (jTx.type !== 'batch') return;
@@ -295,8 +327,14 @@ export async function submitRuntimeJOutbox(
       if (await skipAlreadyConsumedSealedBatch(env, jAdapter, jTx)) {
         continue;
       }
-      if (await reconcileFinalizedDisputeBeforeSubmit(env, jAdapter, jTx, deps)) {
-        return;
+      if (await reconcileFinalizedDispute(
+        env,
+        jAdapter,
+        jTx,
+        deps,
+        'counterparty-finalized-before-submit',
+      )) {
+        continue;
       }
 
       const submitData = jTx.data as { signerId?: unknown } | undefined;
@@ -322,6 +360,7 @@ export async function submitRuntimeJOutbox(
           markSentBatchTransientFailure(env, jTx, message);
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
         }
+        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) continue;
         markSentBatchTerminalFailure(env, jTx, message);
         throw error;
       }
@@ -348,6 +387,7 @@ export async function submitRuntimeJOutbox(
           markSentBatchTransientFailure(env, jTx, message);
           throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
         }
+        if (await reconcilePermanentSubmitFailure(env, jAdapter, jTx, deps)) continue;
         markSentBatchTerminalFailure(env, jTx, message);
         throw new Error(`J_SUBMIT_FATAL: ${message}`);
       }

@@ -1,5 +1,4 @@
 import type { Env } from '../types';
-import { isLocalOperatorRequest } from './health-redaction';
 import { isLoopbackUrl } from '../networking/loopback-url';
 import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
 import { pushDebugEvent, type RelayStore } from '../relay/store';
@@ -14,6 +13,7 @@ type RuntimeRpcProxyRequest = {
   env: Env | null;
   relayStore: RelayStore;
   headers: HeadersInit;
+  operatorAuthorized: boolean;
 };
 
 const readRpcProxyTimeoutMs = (): number => {
@@ -48,6 +48,7 @@ export const handleRuntimeRpcProxy = async ({
   env,
   relayStore,
   headers,
+  operatorAuthorized,
 }: RuntimeRpcProxyRequest): Promise<Response> => {
   const blockLocal = process.env['BLOCK_LOCAL_RPC_PROXY'] === 'true';
   const explicitUpstream = process.env['RPC_UPSTREAM_URL'] || process.env['PUBLIC_RPC_URL'] || process.env['ANVIL_RPC'];
@@ -81,7 +82,7 @@ export const handleRuntimeRpcProxy = async ({
 
   try {
     const bodyText = await req.text();
-    if (!(process.env['XLN_ALLOW_UNSAFE_RPC_PROXY'] === '1' || (!isProduction && isLocalOperatorRequest(req)))) {
+    if (!(process.env['XLN_ALLOW_UNSAFE_RPC_PROXY'] === '1' || (!isProduction && operatorAuthorized))) {
       const forbidden = findForbiddenRpcProxyMethod(bodyText);
       if (forbidden) {
         return new Response(

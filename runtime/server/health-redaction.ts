@@ -45,26 +45,33 @@ const publicFailureSignals = (record: PublicHealthRecord): Array<Record<string, 
 const readyCount = (record: PublicHealthRecord, key: string): number =>
   recordArrayOf(record, key).filter(item => valueOf(item, 'ready') === true).length;
 
-const normalizeHostName = (host: string | null): string => {
+const normalizePeerAddress = (host: string | null | undefined): string => {
   const raw = String(host || '').trim().toLowerCase();
   if (!raw) return '';
+  if (raw.startsWith('::ffff:')) return raw.slice('::ffff:'.length);
   if (raw.startsWith('[')) return raw.slice(1, raw.indexOf(']') > 0 ? raw.indexOf(']') : undefined);
   return raw.split(':')[0] || '';
 };
 
-const isLoopbackHostName = (host: string): boolean =>
-  host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0';
+const isLoopbackPeerAddress = (host: string): boolean =>
+  host === '127.0.0.1' || host === '::1';
 
-export const isLocalOperatorRequest = (request: Request): boolean => {
-  const host = normalizeHostName(request.headers.get('host') || new URL(request.url).host);
-  if (!isLoopbackHostName(host)) return false;
-  const forwardedFor = String(request.headers.get('x-forwarded-for') || '').trim();
-  if (!forwardedFor) return true;
-  return forwardedFor
-    .split(',')
-    .map(value => normalizeHostName(value))
-    .filter(Boolean)
-    .every(isLoopbackHostName);
+const hasProxyForwardingHeaders = (request: Request): boolean =>
+  ['forwarded', 'x-forwarded-for', 'x-real-ip', 'cf-connecting-ip']
+    .some((name) => Boolean(String(request.headers.get(name) || '').trim()));
+
+/**
+ * Local operator authority is bound to Bun's socket peer, never HTTP headers.
+ * Any forwarding header means the request crossed a proxy and therefore needs
+ * an explicit bearer capability even when the proxy itself is on loopback.
+ */
+export const isLocalOperatorRequest = (request: Request, peerAddress?: string | null): boolean =>
+  isLoopbackPeerAddress(normalizePeerAddress(peerAddress)) && !hasProxyForwardingHeaders(request);
+
+export const resolveSocketPeerAddress = (server: unknown, request: Request): string | null => {
+  const requestIp = (server as { requestIP?: (value: Request) => { address?: string } | null }).requestIP;
+  if (typeof requestIp !== 'function') return null;
+  return String(requestIp.call(server, request)?.address || '').trim() || null;
 };
 
 export const publicRuntimeHealthBody = (payload: unknown): string => JSON.stringify(publicRuntimeHealth(payload));

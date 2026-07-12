@@ -1,8 +1,10 @@
-import type { AccountMachine, Delta, EntityReplica, EntityTx, Env } from '../types';
+import type { AccountMachine, Delta, EntityTx, Env } from '../types';
 import { deriveDelta } from '../account/utils';
 import { encodeBoard, hashBoard } from '../entity/factory';
 import { compareStableText } from '../protocol/serialization';
 import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
+import { getEntityReplicaById } from '../entity/replica-lookup';
+export { getEntityReplicaById } from '../entity/replica-lookup';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 export {
   BOOTSTRAP_USD_NOTIONAL,
@@ -93,17 +95,6 @@ export const waitUntil = async (
     await sleep(stepMs);
   }
   return false;
-};
-
-export const getEntityReplicaById = (env: Env, entityId: string): EntityReplica | null => {
-  const target = String(entityId || '').toLowerCase();
-  if (!target || !env.eReplicas) return null;
-  for (const [key, replica] of env.eReplicas.entries()) {
-    if (typeof key === 'string' && key.toLowerCase().startsWith(`${target}:`)) {
-      return replica;
-    }
-  }
-  return null;
 };
 
 const accountMatchesCounterparty = (

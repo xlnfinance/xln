@@ -5,7 +5,6 @@ import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { compareStableText, safeStringify } from '../protocol/serialization';
 import { DISPLAY, QA } from '../constants';
-import { isLocalOperatorRequest } from '../server/health-redaction';
 import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,
@@ -70,6 +69,7 @@ type QaRestartIntent = {
 type QaApiDeps = {
   computeRestartFingerprint?: () => QaCodeFingerprint;
   spawnRestart?: typeof spawn;
+  operatorAuthorized?: boolean;
 };
 
 export type QaRestartAuditRecord = {
@@ -227,13 +227,13 @@ const qaAuthPayload = (auth: QaAuthContext): Record<string, unknown> => ({
   actorKeyId: auth.actorKeyId,
 });
 
-const authenticateQaRequest = (request: Request): QaAuthContext | Response => {
+const authenticateQaRequest = (request: Request, operatorAuthorized: boolean): QaAuthContext | Response => {
   if (qaAuthDisabled()) return { scope: 'admin', disabled: true, actorKeyId: 'auth-disabled' };
 
   const readTokens = splitTokenList(process.env['XLN_QA_READ_TOKEN']);
   const adminTokens = splitTokenList(process.env['XLN_QA_ADMIN_TOKEN']);
   if (readTokens.length === 0 && adminTokens.length === 0) {
-    if (isLocalOperatorRequest(request)) {
+    if (operatorAuthorized) {
       return { scope: 'admin', disabled: true, actorKeyId: 'qa-local-open' };
     }
     return jsonResponse({ ok: false, error: 'QA_AUTH_REQUIRED' }, 401, {});
@@ -254,8 +254,9 @@ const requireQaScope = (
   request: Request,
   requiredScope: QaAuthScope,
   headers: JsonHeaders,
+  operatorAuthorized: boolean,
 ): QaAuthContext | Response => {
-  const auth = authenticateQaRequest(request);
+  const auth = authenticateQaRequest(request, operatorAuthorized);
   if (auth instanceof Response) {
     return new Response(auth.body, {
       status: auth.status,
@@ -882,7 +883,7 @@ export async function maybeHandleQaRequest(
     ) && request.method === 'POST'
       ? 'admin'
       : 'read';
-  const auth = requireQaScope(request, requiredScope, headers);
+  const auth = requireQaScope(request, requiredScope, headers, deps.operatorAuthorized === true);
   if (auth instanceof Response) return auth;
   reconcileQaRestartAuditOnce();
   reapQaRestartState();

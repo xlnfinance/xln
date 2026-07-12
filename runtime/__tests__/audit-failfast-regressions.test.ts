@@ -3130,7 +3130,7 @@ describe('audit fail-fast regressions', () => {
       jadapter: {
         submitTx: async () => {
           submitCalls += 1;
-          return { success: false, error: 'staticCall revert: E5()' };
+          return { success: true, events: [], txHash: `0x${'18'.repeat(32)}` };
         },
         pollNow: async () => {
           const event: JurisdictionEvent = {
@@ -3179,12 +3179,17 @@ describe('audit fail-fast regressions', () => {
           signerId,
         },
         timestamp: env.timestamp,
+      } as any, {
+        type: 'batch',
+        entityId: `0x${'19'.repeat(32)}`,
+        data: { batch: createEmptyBatch(), batchSize: 0 },
+        timestamp: env.timestamp,
       } as any],
     }], {
       enqueueRuntimeInputs: (_env, inputs) => queuedInputs.push(...(inputs ?? [])),
     });
 
-    expect(submitCalls).toBe(0);
+    expect(submitCalls).toBe(1);
     expect(state.jBatchState?.sentBatch).toBeDefined();
     expect(queuedInputs).toEqual([{
       entityId,
@@ -3192,6 +3197,113 @@ describe('audit fail-fast regressions', () => {
       entityTxs: [{
         type: 'j_abort_sent_batch',
         data: { reason: 'counterparty-finalized-before-submit', requeueToCurrent: true },
+      }],
+    }]);
+  });
+
+  test('submitRuntimeJOutbox reconciles DisputeFinalized observed after a failed submit and continues', async () => {
+    const entityId = `0x${'ca'.repeat(32)}`;
+    const counterpartyId = `0x${'cb'.repeat(32)}`;
+    const signerId = `0x${'cc'.repeat(20)}`;
+    const initialProofbodyHash = `0x${'cd'.repeat(32)}`;
+    const env = createEmptyEnv('j-submit-post-failure-reconcile');
+    env.runtimeId = signerId;
+    env.timestamp = 126;
+    let pollCalls = 0;
+    let submitCalls = 0;
+    env.jReplicas = new Map([['Testnet', {
+      jadapter: {
+        submitTx: async () => {
+          submitCalls += 1;
+          return submitCalls === 1
+            ? { success: false, error: 'staticCall revert: E5()' }
+            : { success: true, events: [], txHash: `0x${'ce'.repeat(32)}` };
+        },
+        pollNow: async () => {
+          pollCalls += 1;
+          if (pollCalls !== 2) return;
+          const event: JurisdictionEvent = {
+            type: 'DisputeFinalized',
+            data: {
+              sender: counterpartyId,
+              counterentity: entityId,
+              initialNonce: '7',
+              initialProofbodyHash,
+              finalProofbodyHash: `0x${'cf'.repeat(32)}`,
+            },
+          };
+          const mempool = env.runtimeMempool ?? env.runtimeInput;
+          mempool.entityInputs.push({
+            entityId,
+            signerId,
+            entityTxs: [{ type: 'j_event', data: {
+              from: signerId,
+              observedAt: env.timestamp,
+              blockNumber: 100,
+              blockHash: `0x${'d0'.repeat(32)}`,
+              transactionHash: `0x${'d1'.repeat(32)}`,
+              event,
+              events: [event],
+            } } as any],
+          });
+          env.runtimeMempool = mempool;
+          env.runtimeInput = mempool;
+        },
+      },
+    } as any]]);
+    const queuedInputs: EntityInput[] = [];
+    const disputeBatch = {
+      ...createEmptyBatch(),
+      disputeFinalizations: [{
+        counterentity: counterpartyId,
+        initialNonce: 7,
+        finalNonce: 7,
+        initialProofbodyHash,
+        finalProofbody: makeEmptyProofBody(),
+        leftArguments: '0x',
+        rightArguments: '0x',
+        starterInitialArguments: '0x',
+        starterIncrementedArguments: '0x',
+        sig: '0x',
+        startedByLeft: true,
+        disputeUntilBlock: 123,
+        cooperative: false,
+      }],
+    };
+
+    await submitRuntimeJOutbox(env, [{
+      jurisdictionName: 'Testnet',
+      jTxs: [{
+        type: 'batch',
+        entityId,
+        data: {
+          batch: disputeBatch,
+          batchHash: `0x${'d2'.repeat(32)}`,
+          encodedBatch: '0x1234',
+          entityNonce: 7,
+          hankoSignature: '0x1234',
+          batchSize: 1,
+          signerId,
+        },
+        timestamp: env.timestamp,
+      } as any, {
+        type: 'batch',
+        entityId: `0x${'d3'.repeat(32)}`,
+        data: { batch: createEmptyBatch(), batchSize: 0 },
+        timestamp: env.timestamp,
+      } as any],
+    }], {
+      enqueueRuntimeInputs: (_env, inputs) => queuedInputs.push(...(inputs ?? [])),
+    });
+
+    expect(pollCalls).toBe(3);
+    expect(submitCalls).toBe(2);
+    expect(queuedInputs).toEqual([{
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'j_abort_sent_batch',
+        data: { reason: 'counterparty-finalized-after-submit-failure', requeueToCurrent: true },
       }],
     }]);
   });

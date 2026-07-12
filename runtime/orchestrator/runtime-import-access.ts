@@ -1,5 +1,3 @@
-import { isLocalOperatorRequest } from '../server/health-redaction';
-
 export type RuntimeImportAccess = 'read' | 'admin';
 
 export type RuntimeImportAccessDecision =
@@ -10,12 +8,12 @@ export const normalizeRuntimeImportAccess = (value: unknown): RuntimeImportAcces
   String(value || '').trim().toLowerCase() === 'admin' ? 'admin' : 'read';
 
 export const resolveRuntimeImportAccessForRequest = (
-  request: Request,
   requestedAccess: unknown,
   fallbackAccess: RuntimeImportAccess,
+  operatorAuthorized: boolean,
 ): RuntimeImportAccessDecision => {
   const access = normalizeRuntimeImportAccess(requestedAccess || fallbackAccess);
-  if (access === 'admin' && !isLocalOperatorRequest(request)) {
+  if (access === 'admin' && !operatorAuthorized) {
     return { ok: false, status: 403, error: 'RUNTIME_IMPORT_ADMIN_LOCAL_ONLY' };
   }
   return { ok: true, access };

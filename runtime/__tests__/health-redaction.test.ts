@@ -6,11 +6,17 @@ import {
 } from '../server/health-redaction';
 
 test('health redaction keeps local operator requests on loopback only', () => {
-  expect(isLocalOperatorRequest(new Request('http://127.0.0.1:8080/api/health'))).toBe(true);
-  expect(isLocalOperatorRequest(new Request('https://xln.finance/api/health'))).toBe(false);
+  expect(isLocalOperatorRequest(
+    new Request('http://127.0.0.1:8080/api/health'),
+    '127.0.0.1',
+  )).toBe(true);
+  expect(isLocalOperatorRequest(
+    new Request('http://127.0.0.1:8080/api/health', { headers: { host: '127.0.0.1' } }),
+    '203.0.113.9',
+  )).toBe(false);
   expect(isLocalOperatorRequest(new Request('http://127.0.0.1:8080/api/health', {
     headers: { 'x-forwarded-for': '203.0.113.9' },
-  }))).toBe(false);
+  }), '127.0.0.1')).toBe(false);
 });
 
 test('public runtime health strips operational identifiers and reserves', () => {
