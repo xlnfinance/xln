@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import type { Profile } from '../networking/gossip';
-import { getAllGossipProfiles } from '../relay-store';
-import { normalizeRuntimeKey, type RelayStore } from '../relay-store';
+import { getAllGossipProfiles } from '../relay/store';
+import { normalizeRuntimeKey, type RelayStore } from '../relay/store';
 import { compareStableText } from '../serialization-utils';
 
 export const buildHubDiscoveryPayload = (input: {

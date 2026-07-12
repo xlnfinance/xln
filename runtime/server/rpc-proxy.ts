@@ -2,9 +2,9 @@ import type { Env } from '../types';
 import { isLocalOperatorRequest } from '../health-redaction';
 import { isLoopbackUrl } from '../loopback-url';
 import { findForbiddenRpcProxyMethod } from '../rpc-proxy-safety';
-import { pushDebugEvent, type RelayStore } from '../relay-store';
+import { pushDebugEvent, type RelayStore } from '../relay/store';
 import { safeStringify } from '../serialization-utils';
-import { getErrorMessage } from '../server-utils';
+import { getErrorMessage } from '../server/utils';
 
 const DEFAULT_RPC_PROXY_TIMEOUT_MS = 5_000;
 

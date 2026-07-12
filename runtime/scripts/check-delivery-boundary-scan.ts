@@ -15,7 +15,7 @@ import {
 import {
   classifyRelayDeliveryEvent,
   isRelaySendResultFailure,
-} from '../relay-store';
+} from '../relay/store';
 
 const repoRoot = process.cwd();
 
@@ -217,13 +217,13 @@ for (const [path, markers] of [
     'ROUTE_DIRECT_MISS_FALLBACK',
     'ROUTE_DIRECT_SEND_FAILED',
   ]],
-  ['runtime/relay-store.ts', [
+  ['runtime/relay/store.ts', [
     'export const isRelaySendResultFailure',
     'export const classifyRelayDeliveryEvent',
     'deliveryFailure({',
     'deliverPendingMessages',
   ]],
-  ['runtime/relay-router.ts', [
+  ['runtime/relay/router.ts', [
     'const sendRelayDelivery = (',
     'isRelaySendResultFailure(result)',
     'delivery: relayDelivery',

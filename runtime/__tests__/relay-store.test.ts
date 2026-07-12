@@ -8,7 +8,7 @@ import {
   isRelaySendResultFailure,
   pushDebugEvent,
   storeVerifiedGossipProfile,
-} from '../relay-store';
+} from '../relay/store';
 import type { Profile } from '../networking/gossip';
 
 const asRecords = (items: unknown[]): Array<Record<string, unknown>> => items as Array<Record<string, unknown>>;

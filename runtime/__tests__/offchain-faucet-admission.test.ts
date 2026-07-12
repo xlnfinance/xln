@@ -6,7 +6,7 @@ import {
   describeOffchainFaucetAccountState,
   shouldRejectOffchainFaucetForSettledCapacity,
 } from '../server/offchain-faucet-admission';
-import { createRelayStore } from '../relay-store';
+import { createRelayStore } from '../relay/store';
 import type { AccountFrame, AccountMachine, Env, RuntimeInput } from '../types';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;

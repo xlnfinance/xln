@@ -23,8 +23,8 @@ import {
   pushDebugEvent,
   removeClient,
   type RelayStore,
-} from '../relay-store';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
+} from '../relay/store';
+import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { type MarketSnapshotPayload } from '../market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';

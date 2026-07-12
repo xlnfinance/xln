@@ -1,6 +1,6 @@
 import { mkdir } from 'fs/promises';
 import { join } from 'path';
-import type { StorageHealth } from './orchestrator/storage-monitor';
+import type { StorageHealth } from '../orchestrator/storage-monitor';
 
 export const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 

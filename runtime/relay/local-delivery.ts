@@ -5,16 +5,16 @@
  * here via a callback so the router itself stays transport/crypto-agnostic.
  */
 
-import { enqueueRuntimeInput } from './runtime.ts';
-import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
-import type { Env, EntityInput, EntityReplica, RoutedEntityInput } from './types';
-import { validateDeliverableEntityInput } from './validation-utils';
+import { enqueueRuntimeInput } from '../runtime.ts';
+import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from '../networking/p2p-crypto';
+import type { Env, EntityInput, EntityReplica, RoutedEntityInput } from '../types';
+import { validateDeliverableEntityInput } from '../validation-utils';
 import {
   type RelayStore,
   normalizeRuntimeKey,
   pushDebugEvent,
-} from './relay-store';
-import { createStructuredLogger } from './logger';
+} from './store';
+import { createStructuredLogger } from '../logger';
 
 const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'

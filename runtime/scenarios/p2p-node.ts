@@ -5,7 +5,7 @@
 
 import { startStandaloneRelayServer } from '../relay/standalone-server';
 import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
-import { createLocalDeliveryHandler } from '../relay-local-delivery';
+import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { getEntityReplicaById } from '../server/entity-lookup';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';

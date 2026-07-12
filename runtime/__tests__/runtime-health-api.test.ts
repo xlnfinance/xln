@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Profile } from '../networking/gossip';
-import { createRelayStore, storeVerifiedGossipProfile } from '../relay-store';
+import { createRelayStore, storeVerifiedGossipProfile } from '../relay/store';
 import { createEmptyEnv } from '../runtime';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry, type RuntimeHealthDeps } from '../server/health-api';
 import { createMarketMakerServerState } from '../server/market-maker-health';

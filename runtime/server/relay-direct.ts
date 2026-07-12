@@ -9,7 +9,7 @@ import {
   pushDebugEvent,
   resolveEncryptionPublicKeyHex,
   type RelayStore,
-} from '../relay-store';
+} from '../relay/store';
 import { serializeWsMessage } from '../networking/ws-protocol';
 import {
   deliveryAccepted,

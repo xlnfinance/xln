@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { deriveEncryptionKeyPair, decryptJSON, pubKeyToHex } from '../networking/p2p-crypto';
 import { deserializeWsMessage } from '../networking/ws-protocol';
-import { cacheEncryptionKey, createRelayStore, registerClient } from '../relay-store';
+import { cacheEncryptionKey, createRelayStore, registerClient } from '../relay/store';
 import {
   hasConnectedEncryptedRelayClient,
   sendEntityInputDirectViaRelaySocketDelivery,

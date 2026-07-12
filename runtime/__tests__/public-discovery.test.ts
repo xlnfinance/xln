@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildPublicHubDiscoveryPayload, getDebugEntityEntries } from '../orchestrator/public-discovery';
 import type { HubChild } from '../orchestrator/orchestrator-types';
-import { createRelayStore } from '../relay-store';
+import { createRelayStore } from '../relay/store';
 
 const RUNTIME_ID = '0x' + '11'.repeat(20);
 const TESTNET_HUB_ID = '0x' + 'aa'.repeat(32);

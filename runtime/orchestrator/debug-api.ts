@@ -1,5 +1,5 @@
 import { compareStableText, safeStringify } from '../serialization-utils';
-import { pushDebugEvent, type RelayStore } from '../relay-store';
+import { pushDebugEvent, type RelayStore } from '../relay/store';
 import { buildKnownProfileBundle } from '../server/gossip-profiles';
 import { getDebugEntityEntries } from './public-discovery';
 import type { HubChild, MarketMakerChild } from './orchestrator-types';

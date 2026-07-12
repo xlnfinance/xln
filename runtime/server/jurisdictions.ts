@@ -7,7 +7,7 @@ import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path
 import { computeJurisdictionsNetworkVersion } from '../jurisdiction/jurisdictions-version';
 import { toPublicRpcUrl } from '../loopback-url';
 import { createStructuredLogger } from '../logger';
-import { isRecord } from '../server-utils';
+import { isRecord } from '../server/utils';
 
 const serverLog = createStructuredLogger('server');
 

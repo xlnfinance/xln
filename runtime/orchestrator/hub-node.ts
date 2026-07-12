@@ -33,7 +33,7 @@ import { toPublicRpcUrl } from '../loopback-url';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { applyJEventsToEnv } from '../jadapter/watcher';
-import { createRelayStore } from '../relay-store';
+import { createRelayStore } from '../relay/store';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';

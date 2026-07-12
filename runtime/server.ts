@@ -45,10 +45,10 @@ import {
   createRelayStore,
   pushDebugEvent,
   removeClient,
-} from './relay-store';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './relay-router';
+} from './relay/store';
+import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './relay/router';
 import { deserializeWsMessage, serializeWsMessage, type RuntimeWsMessage } from './networking/ws-protocol';
-import { createLocalDeliveryHandler } from './relay-local-delivery';
+import { createLocalDeliveryHandler } from './relay/local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdiction/jurisdictions-path';
 import { createStructuredLogger, shortId } from './logger';
 import {
@@ -60,7 +60,7 @@ import {
   JSON_HEADERS,
   getErrorMessage,
   resolveRequiredAnvilRpc,
-} from './server-utils';
+} from './server/utils';
 import { ethers } from 'ethers';
 import {
   attachRuntimeAdapterTicker,

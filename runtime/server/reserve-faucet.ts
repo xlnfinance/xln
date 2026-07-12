@@ -5,7 +5,7 @@ import { DEV_CHAIN_IDS } from '../jadapter';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger, shortId } from '../logger';
 import { resolveEntityProposerId } from '../state-helpers';
-import { formatTimingMs, getErrorMessage } from '../server-utils';
+import { formatTimingMs, getErrorMessage } from '../server/utils';
 import { getEntityReplicaById } from './entity-lookup';
 import { faucetFailureBody } from './faucet-failure';
 import { getFaucetHubProfiles } from './faucet-hubs';

@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Profile } from '../networking/gossip';
-import { relayRoute } from '../relay-router';
-import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay-store';
+import { relayRoute } from '../relay/router';
+import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay/store';
 import { deserializeWsMessage, hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account-crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../networking/p2p-crypto';
-import { createLocalDeliveryHandler } from '../relay-local-delivery';
+import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { createEmptyEnv } from '../runtime';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
@@ -75,8 +75,8 @@ const buildProfile = (
 
 describe('relay-router gossip fanout', () => {
   test('relay router and local delivery verbose diagnostics use structured logging', () => {
-    const routerSource = readFileSync(join(process.cwd(), 'runtime/relay-router.ts'), 'utf8');
-    const localDeliverySource = readFileSync(join(process.cwd(), 'runtime/relay-local-delivery.ts'), 'utf8');
+    const routerSource = readFileSync(join(process.cwd(), 'runtime/relay/router.ts'), 'utf8');
+    const localDeliverySource = readFileSync(join(process.cwd(), 'runtime/relay/local-delivery.ts'), 'utf8');
 
     expect(routerSource).toContain("const relayRouterLog = createStructuredLogger('relay.router');");
     expect(routerSource).toContain("relayRouterLog.debug('verbose'");

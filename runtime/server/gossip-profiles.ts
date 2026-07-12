@@ -1,6 +1,6 @@
 import type { Env } from '../types';
 import type { Profile } from '../networking/gossip';
-import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay-store';
+import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
 
 const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
 

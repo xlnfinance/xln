@@ -1,11 +1,11 @@
 import { readdir, readFile, writeFile } from 'fs/promises';
 import { deserializeTaggedJson, safeStringify } from '../serialization-utils';
-import { pushDebugEvent, type RelayStore } from '../relay-store';
+import { pushDebugEvent, type RelayStore } from '../relay/store';
 import {
   DEBUG_DUMPS_DIR,
   buildDebugDumpFileName,
   ensureDebugDumpDir,
-} from '../server-utils';
+} from '../server/utils';
 
 const readDumpPayload = async (req: Request): Promise<Record<string, unknown>> => {
   const rawBody = await req.text().catch(() => '');

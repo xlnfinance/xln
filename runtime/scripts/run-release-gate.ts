@@ -59,7 +59,7 @@ const SOUNDCHECK_TARGETS = [
   'runtime/account-consensus.ts',
   'runtime/entity-tx/apply.ts',
   'runtime/storage',
-  'runtime/relay-router.ts',
+  'runtime/relay/router.ts',
   'runtime/networking/p2p.ts',
 ].join(' ');
 

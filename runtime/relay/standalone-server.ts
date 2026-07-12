@@ -2,8 +2,8 @@
  * Standalone relay process backed by the same relay router as runtime/server.ts.
  */
 
-import { createRelayStore, removeClient, type RelayStore } from '../relay-store';
-import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
+import { createRelayStore, removeClient, type RelayStore } from '../relay/store';
+import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay/router';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { createStructuredLogger } from '../logger';

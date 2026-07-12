@@ -1,7 +1,7 @@
 import type { Env } from '../types';
 import { summarizeLendingState } from '../lending';
 import { safeStringify } from '../serialization-utils';
-import { isEntityId32 } from '../server-utils';
+import { isEntityId32 } from '../server/utils';
 import { getEntityReplicaById } from './entity-lookup';
 
 const parseTokenId = (value: unknown): number | null => {

@@ -5,25 +5,25 @@
  * and debug events. No WebSocket API, no crypto, no Env.
  */
 
-import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
-import { canonicalizeProfile, type Profile } from './networking/gossip';
-import { safeStringify } from './serialization-utils';
+import { isRuntimeId, normalizeRuntimeId } from '../networking/runtime-id';
+import { canonicalizeProfile, type Profile } from '../networking/gossip';
+import { safeStringify } from '../serialization-utils';
 import {
   normalizeRuntimeFailureCode,
   type RuntimeFailureCategory,
-} from './failure-taxonomy';
+} from '../failure-taxonomy';
 import {
   deliveryAccepted,
   deliveryDeferred,
   deliveryFailure,
   type DeliveryOutcome,
   type DeliveryResult,
-} from './delivery-result';
+} from '../delivery-result';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
   type GossipProfileBatchRequest,
-} from './relay/profile-batch';
+} from './profile-batch';
 
 // ---------------------------------------------------------------------------
 // Types

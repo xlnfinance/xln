@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createRelayStore } from '../relay-store';
+import { createRelayStore } from '../relay/store';
 import { handleRuntimeRpcProxy } from '../server/rpc-proxy';
 
 describe('runtime RPC proxy timeouts', () => {
