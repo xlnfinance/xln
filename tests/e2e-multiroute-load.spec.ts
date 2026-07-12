@@ -55,6 +55,7 @@ import {
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
+import { HTLC_ENFORCEMENT_RESERVE_MS } from '../runtime/account/consensus/deadline-policy';
 
 const INIT_TIMEOUT = 30_000;
 
@@ -823,13 +824,16 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // ═══════════════════════════════════════════════════════════════
     console.log('\n[E2E] === PHASE J: HTLC TIMEOUT ===');
 
-    // TC19: Create a manual HTLC lock with short timelock, verify it expires and gets cleaned up
-    console.log('[E2E] TC19: Manual HTLC lock with 10s timeout');
+    // TC19: Create a manual HTLC lock beyond the mandatory enforcement reserve,
+    // then verify it expires and gets cleaned up.
+    const manualLockLifetimeMs = HTLC_ENFORCEMENT_RESERVE_MS + 5_000;
+    console.log(`[E2E] TC19: Manual HTLC lock with ${manualLockLifetimeMs}ms timeout`);
 
     const lockCountBefore = await getAccountLockCount(pageFor('alice'), users.alice!.entityId, h1!);
     console.log(`[E2E] Alice account locks before: ${lockCountBefore}`);
 
-    // Create manual lock with 10s timelock
+    // A shorter lock is correctly rejected because the receiver would not have
+    // enough time to enforce a revealed secret on-chain.
     const tcLockId = ethers.hexlify(ethers.randomBytes(32));
     const tcSecret = ethers.hexlify(ethers.randomBytes(32));
     const tcHashlock = ethers.keccak256(ethers.solidityPacked(['bytes32'], [tcSecret]));
@@ -840,7 +844,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
         counterpartyId: h1!,
         lockId: tcLockId,
         hashlock: tcHashlock,
-        timelock: String(BigInt(Date.now() + 10_000)),
+        timelock: String(BigInt(Date.now() + manualLockLifetimeMs)),
         revealBeforeHeight: '999999999',
         amount: String(BigInt(1) * BigInt(10) ** BigInt(18)),
         tokenId: 1,
@@ -878,9 +882,10 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     }, { entityId: users.alice!.entityId });
     console.log(`[E2E] TC19 hook diag after lock: ${JSON.stringify(hookDiag1)}`);
 
-    // Wait for timeout to expire (10s lock + buffer)
-    console.log('[E2E] Waiting 20s for HTLC timeout hook to fire...');
-    await pageFor('alice').waitForTimeout(20_000);
+    // Wait for timeout to expire with an additional scheduler/network buffer.
+    const timeoutWaitMs = manualLockLifetimeMs + 10_000;
+    console.log(`[E2E] Waiting ${timeoutWaitMs}ms for HTLC timeout hook to fire...`);
+    await pageFor('alice').waitForTimeout(timeoutWaitMs);
 
     // Check hook state and events after timeout period
     const hookDiag2 = await pageFor('alice').evaluate(({ entityId }) => {
