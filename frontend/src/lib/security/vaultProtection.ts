@@ -65,9 +65,30 @@ const withKeyStore = async <T>(
     return await new Promise<T>((resolve, reject) => {
       const transaction = db.transaction(STORE_NAME, mode);
       const request = operation(transaction.objectStore(STORE_NAME));
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new Error('VAULT_KEY_DB_OPERATION_FAILED'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('VAULT_KEY_DB_TRANSACTION_ABORTED'));
+      let requestCompleted = false;
+      let requestResult: T;
+      let settled = false;
+      const fail = (error: unknown): void => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
+      request.onsuccess = () => {
+        requestResult = request.result;
+        requestCompleted = true;
+      };
+      request.onerror = () => fail(request.error ?? new Error('VAULT_KEY_DB_OPERATION_FAILED'));
+      transaction.onerror = () => fail(transaction.error ?? new Error('VAULT_KEY_DB_TRANSACTION_FAILED'));
+      transaction.onabort = () => fail(transaction.error ?? new Error('VAULT_KEY_DB_TRANSACTION_ABORTED'));
+      transaction.oncomplete = () => {
+        if (settled) return;
+        if (!requestCompleted) {
+          fail(new Error('VAULT_KEY_DB_TRANSACTION_COMPLETED_BEFORE_REQUEST'));
+          return;
+        }
+        settled = true;
+        resolve(requestResult!);
+      };
     });
   } finally {
     db.close();

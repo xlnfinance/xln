@@ -1,10 +1,51 @@
 import { expect, test } from 'bun:test';
 
 import {
+  protectVaultSecrets,
   redactVaultRuntimeForPersistence,
   sameVaultProtectionLease,
   type ProtectedVaultSecrets,
 } from '../../frontend/src/lib/security/vaultProtection';
+
+test('vault key write resolves only after IndexedDB transaction commit', async () => {
+  const previousIndexedDb = globalThis.indexedDB;
+  const openRequest: Record<string, unknown> = {};
+  const keyRequest: Record<string, unknown> = {};
+  const transaction: Record<string, unknown> = {
+    error: new Error('simulated transaction abort'),
+    objectStore: () => ({
+      put: () => {
+        setTimeout(() => {
+          keyRequest['result'] = 'stored';
+          (keyRequest['onsuccess'] as (() => void) | undefined)?.();
+          (transaction['onabort'] as (() => void) | undefined)?.();
+        }, 0);
+        return keyRequest;
+      },
+    }),
+  };
+  const db = {
+    objectStoreNames: { contains: () => true },
+    transaction: () => transaction,
+    close: () => {},
+  };
+  globalThis.indexedDB = {
+    open: () => {
+      setTimeout(() => {
+        openRequest['result'] = db;
+        (openRequest['onsuccess'] as (() => void) | undefined)?.();
+      }, 0);
+      return openRequest;
+    },
+  } as unknown as IDBFactory;
+
+  try {
+    await expect(protectVaultSecrets('runtime-id', { seed: 'secret' }, null))
+      .rejects.toThrow('simulated transaction abort');
+  } finally {
+    globalThis.indexedDB = previousIndexedDb;
+  }
+});
 
 test('vault persistence excludes every raw signing and recovery secret', () => {
   const persisted = redactVaultRuntimeForPersistence({
