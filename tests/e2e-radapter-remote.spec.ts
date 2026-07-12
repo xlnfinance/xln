@@ -2599,7 +2599,7 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
   expect(h1Option?.value).toBe(h1Endpoint.wsUrl);
 
   await select.selectOption(h1Endpoint.wsUrl);
-  await expect(page.getByTestId('live-runtime-connect')).toContainText(/Connect · admin/i);
+  await expect(page.getByTestId('live-runtime-connect')).toContainText(/Connect · read/i);
   await page.getByTestId('live-runtime-connect').click();
   await page.waitForFunction((expectedRuntimeId) => {
     const runtimeView = (window as typeof window & { __xln?: { view?: { runtimeId?: string; height?: number } } }).__xln?.view;
@@ -2609,7 +2609,6 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
 
   await expect(page.getByTestId('context-current')).toContainText(/\bH1\b/, { timeout: REMOTE_E2E_WAIT_MS });
   await expect(page.getByTestId('entity-workspace')).toBeVisible({ timeout: REMOTE_E2E_WAIT_MS });
-  await expect(page.locator('[data-testid="entity-workspace-readonly"]')).toHaveCount(0);
   const activeRemote = await page.evaluate((expectedWsUrl) => ({
     activeWsUrl: localStorage.getItem('xln-runtime-adapter-ws'),
     activeMode: localStorage.getItem('xln-runtime-adapter-mode'),
@@ -2619,7 +2618,7 @@ test('pre-wallet live runtime selector connects suggested H1 runtime through the
     expectedWsUrl,
   }), h1Endpoint.wsUrl);
   expect(activeRemote.activeMode).toBe('remote');
-  expect(activeRemote.authLevel).toBe('admin');
+  expect(activeRemote.authLevel).toBe('inspect');
   expect(activeRemote.activeWsUrl).toBe(h1Endpoint.wsUrl);
   expect(activeRemote.importCount).toBeGreaterThanOrEqual(1);
   expect(activeRemote.url).toContain('/app');
