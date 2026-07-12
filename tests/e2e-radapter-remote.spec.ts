@@ -2419,7 +2419,7 @@ test('runtime dropdown switches app-imported remote runtimes without manager rou
   const importUrl = await resolveRuntimeImportAppUrl(page, {
     appBaseUrl: APP_BASE_URL,
     apiBaseUrl: API_BASE_URL,
-    access: 'read',
+    access: 'admin',
   });
   expect(importUrl).toContain('/app#runtime-import');
   expect(importUrl).not.toContain('/radapter/manage');
