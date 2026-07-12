@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 
 import { computeBatchHankoHash, encodeJBatch, type JBatch } from '../jurisdiction/batch';
-import { normalizeEntityId } from '../entity-id-utils';
+import { normalizeEntityId } from '../entity/id';
 
 const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
 

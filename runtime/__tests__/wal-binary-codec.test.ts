@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import {
   decodePersistedFrameJournal,
   encodePersistedFrameJournal,

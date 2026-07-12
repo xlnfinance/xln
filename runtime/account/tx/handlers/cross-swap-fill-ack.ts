@@ -9,7 +9,7 @@ import {
   requireCrossJurisdictionFillProgress,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionFillProgress,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;

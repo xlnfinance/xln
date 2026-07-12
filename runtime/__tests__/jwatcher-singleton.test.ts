@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getHealthStatus } from '../health';
+import { getHealthStatus } from '../server/health';
 import { startJurisdictionWatchers } from '../runtime';
 import type { Env, JReplica } from '../types';
 

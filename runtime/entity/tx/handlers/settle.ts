@@ -14,13 +14,13 @@
 import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, SettlementOp, AccountSettleAction } from '../../../types';
 import { cloneEntityState, addMessage, getAccountPerspective, resolveEntityProposerId } from '../../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
-import { isLeftEntity } from '../../../entity-id-utils';
+import { isLeftEntity } from '../../id';
 import type { Env, HankoString } from '../../../types';
-import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../../proof-builder';
+import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../../protocol/dispute/proof-builder';
 import { signEntityHashes } from '../../../hanko/signing';
 import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../../protocol/settlement/operations';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../../dispute-arguments';
-import { createStructuredLogger, shortId } from '../../../logger';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../../protocol/dispute/arguments';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 import type { AccountMachine } from '../../../types';
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('runtime entity input j-output collection logs stay behind structured debug logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime-entity-inputs.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/machine/entity-inputs.ts'), 'utf8');
 
   expect(source).toContain("const entityInputLog = createStructuredLogger('runtime.entity_inputs');");
   expect(source).not.toContain('[2/6] Collecting');

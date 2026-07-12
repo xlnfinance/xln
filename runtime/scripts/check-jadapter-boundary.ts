@@ -13,12 +13,12 @@ const RUNTIME_DIR = path.join(ROOT, 'runtime');
 
 const DIRECT_EVM_ALLOWLIST = new Set<string>([
   'runtime/runtime.ts',
-  'runtime/server.ts',
+  'runtime/server/index.ts',
   'runtime/state-helpers.ts',
-  'runtime/cli.ts',
+  'runtime/server/cli.ts',
   'runtime/jurisdiction/batch.ts',
   'runtime/jadapter/index.ts',
-  'runtime/entity-factory.ts',
+  'runtime/entity/factory.ts',
   'runtime/entity/tx/j-events.ts',
   'runtime/scenarios/boot.ts',
   'runtime/scripts/dev-anvil-stack.ts',

@@ -1,5 +1,5 @@
 import type { JurisdictionEvent } from '../types';
-import { compareStableText, safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../protocol/serialization';
 
 const BIGINT_WRAPPER_RE = /^BigInt\((-?\d+)\)$/;
 

@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createStructuredLogger } from '../logger';
-import { safeStringify } from '../serialization-utils';
+import { createStructuredLogger } from '../infra/logger';
+import { safeStringify } from '../protocol/serialization';
 import type { ManagedRuntimeLease, ManagedRuntimeSpec } from './orchestrator-types';
 
 export type ManagedProcessTableEntry = { pid: number; command: string };

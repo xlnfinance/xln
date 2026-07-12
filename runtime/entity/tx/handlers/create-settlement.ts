@@ -14,8 +14,8 @@
 import type { EntityState, EntityTx, EntityInput, JInput } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
-import { isLeftEntity } from '../../../entity-id-utils';
-import { createStructuredLogger, shortId } from '../../../logger';
+import { isLeftEntity } from '../../id';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 

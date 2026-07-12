@@ -9,8 +9,8 @@ import { ethers } from 'ethers';
 import { DEFAULT_PRIVATE_KEY, createJAdapter, createXlnJsonRpcProvider } from '../jadapter';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { prepareSignedBatch } from '../hanko/batch';
-import { generateLazyEntityId } from '../entity-factory';
-import { canonicalJurisdictionEventsHash } from '../j-event-observation';
+import { generateLazyEntityId } from '../entity/factory';
+import { canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
 import { parseReceiptLogsToJEvents, rawEventToJEvents, type RawJEventArgs } from '../jadapter/helpers';
 
 type Args = {

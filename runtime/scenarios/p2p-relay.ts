@@ -7,7 +7,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
-import { deriveSignerAddressSync } from '../account-crypto';
+import { deriveSignerAddressSync } from '../account/crypto';
 import { createJAdapter } from '../jadapter';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';

@@ -1,6 +1,6 @@
 import type { Env } from '../types';
-import { summarizeLendingState } from '../lending';
-import { safeStringify } from '../serialization-utils';
+import { summarizeLendingState } from '../extensions/lending';
+import { safeStringify } from '../protocol/serialization';
 import { isEntityId32 } from './utils';
 import { getEntityReplicaById } from './entity-lookup';
 

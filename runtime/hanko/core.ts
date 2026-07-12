@@ -18,7 +18,7 @@
 import { ethers } from 'ethers';
 
 import type { HankoBytes, HankoClaim } from '../types';
-import { signDigestBytesWithPrivateKey } from '../account-crypto';
+import { signDigestBytesWithPrivateKey } from '../account/crypto';
 import { createHash, randomBytes } from '../utils';
 
 const HANKO_DEBUG =

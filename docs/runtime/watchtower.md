@@ -4,7 +4,7 @@ This folder owns the standalone recovery/watchtower API service.
 
 ## What it does
 
-- stores encrypted recovery bundles outside runtime/server.ts
+- stores encrypted recovery bundles outside runtime/server/index.ts
 - enforces per-lookup retention and byte quotas
 - signs tower receipts
 - serves restore/discovery APIs
@@ -37,7 +37,7 @@ This folder owns the standalone recovery/watchtower API service.
 
 ## Boundary
 
-This service is intentionally not part of `runtime/server.ts`.
+This service is intentionally not part of `runtime/server/index.ts`.
 Runtime correctness stays in runtime/storage/consensus. Watchtower is cheap
 operator infrastructure layered on top.
 

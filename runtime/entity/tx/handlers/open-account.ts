@@ -1,16 +1,16 @@
-import { isLeftEntity } from '../../../entity-id-utils';
+import { isLeftEntity } from '../../id';
 import { announceLocalEntityProfile } from '../../../networking/gossip-helper';
 import { DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE, DEFAULT_SOFT_LIMIT } from '../../../types';
 import type { Delta, EntityInput, EntityState, EntityTx, Env } from '../../../types';
 import { formatEntityId } from '../../../utils';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../../../env-events';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../../../machine/env-events';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { assertSameJurisdictionAccount } from '../../../jurisdiction/jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../../account/default-tokens';
 import { deriveAccountWatchSeed, normalizeAccountWatchSeed } from '../../../account/watch-seed';
-import { createStructuredLogger, shortId } from '../../../logger';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,

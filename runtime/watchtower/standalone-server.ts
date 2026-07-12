@@ -1,6 +1,6 @@
 /**
  * Standalone watchtower service for blind backup recovery and future
- * last-resort dispute appointments. This stays outside runtime/server.ts so
+ * last-resort dispute appointments. This stays outside runtime/server/index.ts so
  * runtime logs and operator surface remain separated from tower storage.
  */
 
@@ -21,7 +21,7 @@ import { runDisputeWatchSweep } from './dispute-watch';
 import { createWatchtowerStore, type WatchtowerStore } from './store';
 import { createPushStore, type PushStore } from '../push/store';
 import { createPushSender, type PushSenderConfig } from '../push/sender';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 
 export type StandaloneWatchtowerOptions = {
   host?: string;

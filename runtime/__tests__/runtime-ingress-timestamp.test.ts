@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity/scheduler';
-import { generateLazyEntityId } from '../entity-factory';
+import { generateLazyEntityId } from '../entity/factory';
 import { processEventBatch } from '../jadapter/watcher';
 import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
 import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';

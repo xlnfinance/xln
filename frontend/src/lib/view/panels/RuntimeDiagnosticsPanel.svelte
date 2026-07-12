@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RuntimeAdapterTimelineIndexPage, StorageHead } from '@xln/runtime/xln-api';
-  import { safeStringify } from '@xln/runtime/serialization-utils';
+  import { safeStringify } from '@xln/runtime/protocol/serialization';
   import { runtimeControllerHandle } from '$lib/stores/runtimeControllerStore';
   import { runtimeQueryClient } from '$lib/stores/runtimeQueryClient';
   import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';

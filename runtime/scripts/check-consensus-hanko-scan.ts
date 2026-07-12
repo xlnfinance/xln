@@ -22,10 +22,10 @@ const assertOrder = (text: string, path: string, markers: string[]): void => {
   }
 };
 
-const accountConsensusPath = 'runtime/account-consensus.ts';
+const accountConsensusPath = 'runtime/account/consensus/index.ts';
 const accountProposePath = 'runtime/account/consensus/propose.ts';
 const accountFramePath = 'runtime/account/consensus/frame.ts';
-const entityConsensusPath = 'runtime/entity-consensus.ts';
+const entityConsensusPath = 'runtime/entity/consensus/index.ts';
 const entityFramePath = 'runtime/entity/consensus/frame.ts';
 const hankoSigningPath = 'runtime/hanko/signing.ts';
 const hankoBatchPath = 'runtime/hanko/batch.ts';

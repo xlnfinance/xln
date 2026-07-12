@@ -5,7 +5,7 @@
  * It manages entity profiles in a distributed network.
  */
 
-import { logDebug } from '../logger';
+import { logDebug } from '../infra/logger';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
 import { compareCanonicalText } from '../orderbook/swap-keys';

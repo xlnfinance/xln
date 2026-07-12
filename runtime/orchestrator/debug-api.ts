@@ -1,4 +1,4 @@
-import { compareStableText, safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../protocol/serialization';
 import { pushDebugEvent, type RelayStore } from '../relay/store';
 import { buildKnownProfileBundle } from '../server/gossip-profiles';
 import { getDebugEntityEntries } from './public-discovery';

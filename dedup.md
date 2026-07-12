@@ -13,15 +13,15 @@ Top 100 simplification targets:
 1. `runtime/runtime.ts` — split runtime loop orchestration from bootstrapping and exports.
 2. `runtime/runtime.ts` — isolate `process/apply/persist/dispatch` pipeline into one narrow module.
 3. `runtime/runtime.ts` — remove remaining BrowserVM registry plumbing from core runtime flow.
-4. `runtime/server.ts` — split API routes, runtime admin actions, and debug endpoints into separate modules.
-5. `runtime/server.ts` — move custody-specific handlers out of runtime server.
-6. `runtime/entity-consensus.ts` — extract single-signer path into its own helper file.
-7. `runtime/entity-consensus.ts` — extract multi-signer proposer flow into its own helper file.
-8. `runtime/entity-consensus.ts` — extract commit-time hanko attachment into one helper.
-9. `runtime/entity-consensus.ts` — collapse repeated output attachment loops for account and batch outputs.
-10. `runtime/account-consensus.ts` — split proposer commit, receiver commit, and ACK handling into separate modules.
-11. `runtime/account-consensus.ts` — centralize dispute-hanko verification instead of repeating it in multiple branches.
-12. `runtime/account-consensus.ts` — centralize frame-history append logic behind one canonical frame clone helper.
+4. `runtime/server/index.ts` — split API routes, runtime admin actions, and debug endpoints into separate modules.
+5. `runtime/server/index.ts` — move custody-specific handlers out of runtime server.
+6. `runtime/entity/consensus/index.ts` — extract single-signer path into its own helper file.
+7. `runtime/entity/consensus/index.ts` — extract multi-signer proposer flow into its own helper file.
+8. `runtime/entity/consensus/index.ts` — extract commit-time hanko attachment into one helper.
+9. `runtime/entity/consensus/index.ts` — collapse repeated output attachment loops for account and batch outputs.
+10. `runtime/account/consensus/index.ts` — split proposer commit, receiver commit, and ACK handling into separate modules.
+11. `runtime/account/consensus/index.ts` — centralize dispute-hanko verification instead of repeating it in multiple branches.
+12. `runtime/account/consensus/index.ts` — centralize frame-history append logic behind one canonical frame clone helper.
 13. `runtime/entity/tx/apply.ts` — reduce giant tx-type switch by moving branch tables into handler registry.
 14. `runtime/entity/tx/apply.ts` — move event emission collection out of handler switch scaffolding.
 15. `runtime/entity/tx/handlers/account.ts` — split HTLC resolve, direct payment, and swap-side delta logic.
@@ -66,13 +66,13 @@ Top 100 simplification targets:
 54. `runtime/jadapter/types.ts` — remove legacy/dead adapter methods and tighten surface to required production calls only.
 55. `runtime/jadapter/jurisdiction.ts` — merge or delete if it only proxies `jurisdiction-config` and adapter connect.
 56. `runtime/jadapter/browservm-registry.ts` — delete once runtime/browser no longer store BrowserVM instance directly.
-57. `runtime/runtime-infra.ts` — centralize all infra-only objects here and forbid them in state handlers.
-58. `runtime/account-crypto.ts` — split signer derivation, cache, and browser storage concerns.
+57. `runtime/machine/infra.ts` — centralize all infra-only objects here and forbid them in state handlers.
+58. `runtime/account/crypto.ts` — split signer derivation, cache, and browser storage concerns.
 59. `runtime/networking/p2p.ts` — split transport, profile propagation, and debug event paths.
 60. `runtime/networking/profile-signing.ts` — centralize profile hash building and hanko verification with other signing modules.
 61. `runtime/relay/router.ts` — split websocket transport from pending-message persistence.
 62. `runtime/relay/store.ts` — merge tiny helpers or make it the only relay persistence layer.
-63. `runtime/entity-factory.ts` — split entity-id encoding from on-chain registration helpers.
+63. `runtime/entity/factory.ts` — split entity-id encoding from on-chain registration helpers.
 64. `runtime/jurisdiction/jurisdiction-loader.ts` — merge with `jurisdiction-config` or split cleanly by responsibility.
 65. `runtime/jurisdiction-factory.ts` — remove direct BrowserVM knowledge once `jadapter` fully owns backend construction.
 66. `runtime/types.ts` — split runtime, entity, account, batch, event, and adapter types into separate files.

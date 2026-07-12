@@ -5,7 +5,7 @@ import {
   verifyRuntimeAdapterAuthCredential,
 } from '../radapter/auth';
 import type { RuntimeAdapterAuthLevel } from '../radapter/types';
-import { safeStringify, deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { safeStringify, deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type { Env } from '../types';
 
 type RpcSocket = { send(data: string): unknown };

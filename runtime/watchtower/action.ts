@@ -1,5 +1,5 @@
 import { Contract, Interface, JsonRpcProvider, Wallet, ethers } from 'ethers';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import type {
   TowerCounterDisputeRemedy,

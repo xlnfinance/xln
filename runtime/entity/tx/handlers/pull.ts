@@ -7,7 +7,7 @@ import {
   isCrossJurisdictionRouteTransitionAllowed,
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import { verifyHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../../types';

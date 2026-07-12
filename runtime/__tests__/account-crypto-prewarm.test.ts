@@ -7,7 +7,7 @@ import {
   prewarmSignerLabels,
   registerSignerKey,
   signDigest,
-} from '../account-crypto';
+} from '../account/crypto';
 
 describe('signer cache prewarm', () => {
   test('registers deterministic label-derived EOA signers for restored runtime signing', () => {

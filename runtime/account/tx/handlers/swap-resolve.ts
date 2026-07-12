@@ -22,7 +22,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../../types';
-import { deriveDelta } from '../../../account-utils';
+import { deriveDelta } from '../../utils';
 import { createDefaultDelta } from '../../../validation-utils';
 import { FINANCIAL } from '../../../constants';
 import { deriveExactSwapFillRatio, exactFillRatioToUint16, MAX_SWAP_FILL_RATIO } from '../../../orderbook/swap-execution';
@@ -31,7 +31,7 @@ import {
   requantizeRemainingSwapAtPrice,
 } from '../../../orderbook/types';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
-import { createStructuredLogger, shortOrder } from '../../../logger';
+import { createStructuredLogger, shortOrder } from '../../../infra/logger';
 import { getHold, releaseHold } from '../hold-utils';
 import { ensureDelta } from '../delta-utils';
 

@@ -36,9 +36,9 @@ Interpretation:
 
 ## Proof anchors (where to verify)
 - jurisdictions/contracts/Depository.sol: RCPAN enforcement + FIFO debt queue.
-- runtime/account-consensus.ts: ADD_TX -> PROPOSE -> SIGN -> COMMIT.
-- runtime/entity-consensus.ts: PBFT-style 3-phase commit.
-- runtime/account-utils.ts: deriveDelta() and invariant math.
+- runtime/account/consensus/index.ts: ADD_TX -> PROPOSE -> SIGN -> COMMIT.
+- runtime/entity/consensus/index.ts: PBFT-style 3-phase commit.
+- runtime/account/utils.ts: deriveDelta() and invariant math.
 
 ## XLN is not
 - Not a rollup or DA layer.

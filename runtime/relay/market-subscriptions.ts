@@ -7,7 +7,7 @@ import {
   type MarketSnapshotPayload,
 } from './market-snapshot';
 import { MarketSubscriptionLimiter, type MarketSubscriptionLimiterSnapshot } from './market-subscription-limiter';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 
 export type MarketSubscription = {
   hubIds: Set<string>;

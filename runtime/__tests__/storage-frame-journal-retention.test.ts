@@ -18,7 +18,7 @@ import {
   saveEnvToDB,
   verifyRuntimeChain,
 } from '../runtime.ts';
-import { markStorageEntityDirty } from '../env-events';
+import { markStorageEntityDirty } from '../machine/env-events';
 import {
   readFrameDbRuntimeActivity,
   readStorageFrameRecord,
@@ -31,11 +31,11 @@ import { getPerfMs } from '../utils';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
 import { KEY_HEAD, keyDiff, keyFrame, keyLiveReplicaMeta, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { generateLazyEntityId } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
 import type { JReplica, JurisdictionConfig } from '../types';
-import { resolveStorageWriterLockPath, STORAGE_WRITER_LOCK_TTL_MS } from '../runtime-storage-dbs';
+import { resolveStorageWriterLockPath, STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 
 describe('storage frame journal retention', () => {
   const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {

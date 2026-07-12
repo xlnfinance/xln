@@ -359,7 +359,7 @@ const renderIntegration = () => {
       <div class="integration-list">
         <div class="integration-step">
           <div class="step-title">1. Start the XLN daemon</div>
-          <pre class="activity-sub">bun runtime/server.ts --port 8080</pre>
+          <pre class="activity-sub">bun runtime/server/index.ts --port 8080</pre>
           <div class="activity-sub">Custody backend talks to <code>${escapeHtml(daemon)}</code> using the daemon's frame journal as source of truth.</div>
         </div>
         <div class="integration-step">

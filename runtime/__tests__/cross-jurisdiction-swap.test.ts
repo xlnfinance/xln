@@ -5,16 +5,16 @@ import { applyEntityTx } from '../entity/tx/apply';
 import { applyAccountTx } from '../account/tx/apply';
 import { handlePullCancel } from '../account/tx/handlers/pull';
 import { processOrderbookCancels } from '../entity/tx/handlers/account';
-import { applyEntityInput } from '../entity-consensus';
+import { applyEntityInput } from '../entity/consensus/index';
 import {
   createEmptyEnv,
   process,
   submitCrossJurisdictionSwap,
 } from '../runtime';
-import { buildCrossJurisdictionSwapSubmission } from '../runtime-jurisdiction-api';
+import { buildCrossJurisdictionSwapSubmission } from '../machine/jurisdiction-api';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import type { AccountTx, EntityInput, EntityReplica, JurisdictionEvent } from '../types';
-import { generateLazyEntityId } from '../entity-factory';
+import { generateLazyEntityId } from '../entity/factory';
 import { createDefaultDelta } from '../validation-utils';
 import { cloneEntityState } from '../state-helpers';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
@@ -35,7 +35,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
   withCrossJurisdictionClaimProgress,
   cloneCrossJurisdictionRoute,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
   buildCrossJurisdictionCancelAck,
@@ -45,12 +45,12 @@ import {
 } from '../extensions/cross-j/orderbook';
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 import { deriveCanonicalCrossJurisdictionBookOwnerForLegs, deriveCanonicalCrossJurisdictionMarketForLegs } from '../extensions/cross-j/market';
-import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
+import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account/utils';
 import { normalizeEntitySwapTradingPairs } from '../machine/swap-pairs';
 import { verifyHashLadderBinary } from '../protocol/htlc/hash-ladder';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
-import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
+import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../protocol/dispute/arguments';
 import { signEntityHashes } from '../hanko/signing';
 import {
   addReplica,

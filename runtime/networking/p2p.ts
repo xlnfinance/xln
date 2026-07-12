@@ -10,19 +10,19 @@ import { canonicalizeProfile, getBoardPrimaryPublicKey, parseProfile, type Profi
 import { RuntimeWsClient } from './ws-client';
 import { buildLocalEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
-import { getSignerPrivateKey, registerSignerPublicKey } from '../account-crypto';
+import { getSignerPrivateKey, registerSignerPublicKey } from '../account/crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
 import { inspectHankoForHash } from '../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
-import { compareStableText } from '../serialization-utils';
+import { compareStableText } from '../protocol/serialization';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
   type GossipProfileBatchRequest,
 } from '../relay/profile-batch';
-import { createStructuredLogger, shortId } from '../logger';
+import { createStructuredLogger, shortId } from '../infra/logger';
 import {
   isBrowserDirectWsEndpointAllowed,
   isSameWsUrlList,

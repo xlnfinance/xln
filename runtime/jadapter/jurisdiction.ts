@@ -1,5 +1,5 @@
 import type { JReplica, JurisdictionConfig } from '../types';
-import { getAvailableJurisdictions } from '../jurisdiction-config';
+import { getAvailableJurisdictions } from '../jurisdiction/config';
 import { createJAdapter } from './index';
 import type { JAdapter, JAdapterConfig } from './types';
 import { getRegisteredBrowserVMJurisdiction } from './browservm-registry';

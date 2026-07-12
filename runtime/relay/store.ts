@@ -7,7 +7,7 @@
 
 import { isRuntimeId, normalizeRuntimeId } from '../networking/runtime-id';
 import { canonicalizeProfile, type Profile } from '../networking/gossip';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 import {
   normalizeRuntimeFailureCode,
   type RuntimeFailureCategory,

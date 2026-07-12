@@ -6,7 +6,7 @@ import { normalizeJurisdictionKey, selectWritableJurisdictionKey, type WritableJ
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from '../jurisdiction/jurisdictions-version';
 import { toPublicRpcUrl } from '../networking/loopback-url';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 import { isRecord } from './utils';
 
 const serverLog = createStructuredLogger('server');

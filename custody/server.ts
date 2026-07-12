@@ -4,10 +4,10 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
-import { parseTokenAmount } from '../runtime/financial-utils';
+import { parseTokenAmount } from '../runtime/account/financial-utils';
 import { DEFAULT_TOKENS } from '../runtime/jadapter/default-tokens';
 import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
-import { serializeTaggedJson } from '../runtime/serialization-utils';
+import { serializeTaggedJson } from '../runtime/protocol/serialization';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
 

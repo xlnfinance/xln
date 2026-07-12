@@ -23,22 +23,22 @@ This endpoint must answer, for any incident:
 Single-source pipeline:
 
 1. Runtime code emits structured events through `env.warn`, `env.error`, `env.emit`.
-2. `runtime/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
+2. `runtime/machine/env-events.ts` forwards critical/high-signal events via P2P `debug_event`.
 3. WS client sends `debug_event` messages to relay.
 4. Relay stores all network and debug events in in-memory ring buffer.
 5. HTTP API serves filtered timeline at `/api/debug/events`.
 
 Core files:
 
-- `runtime/env-events.ts`
+- `runtime/machine/env-events.ts`
 - `runtime/networking/ws-client.ts`
 - `runtime/networking/p2p.ts`
 - `runtime/networking/ws-protocol.ts`
-- `runtime/server.ts`
+- `runtime/server/index.ts`
 
 ## Event Model
 
-Relay event shape (from `runtime/server.ts`):
+Relay event shape (from `runtime/server/index.ts`):
 
 - `id`, `ts`, `event`
 - optional: `runtimeId`, `from`, `to`, `msgType`, `status`, `reason`, `encrypted`, `size`, `queueSize`, `details`

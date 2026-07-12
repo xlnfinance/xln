@@ -17,14 +17,14 @@ import type {
   LendingState,
   LogCategory,
 } from './types';
-import type { DisputeArgumentSnapshot } from './dispute-arguments';
+import type { DisputeArgumentSnapshot } from './protocol/dispute/arguments';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { HEAVY_LOGS } from './utils';
 import { validateEntityReplica, validateEntityState } from './validation-utils';
-import { safeStringify } from './serialization-utils';
-import { isLeftEntity } from './entity-id-utils';
-import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
-import { getCachedSignerPrivateKey } from './account-crypto';
+import { safeStringify } from './protocol/serialization';
+import { isLeftEntity } from './entity/id';
+import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './machine/env-events';
+import { getCachedSignerPrivateKey } from './account/crypto';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './jurisdiction/batch';
 import {
   cloneCrossJurisdictionBookAdmission,
@@ -35,10 +35,10 @@ import {
   cloneCrossJurisdictionPullBinding,
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
-} from './cross-jurisdiction';
+} from './extensions/cross-j/index';
 import type { CrontabState, ScheduledHook } from './entity/scheduler-types';
 import type { Profile } from './networking/gossip';
-import { createStructuredLogger } from './logger';
+import { createStructuredLogger } from './infra/logger';
 
 const stateHelperLog = createStructuredLogger('state.helpers');
 import type {

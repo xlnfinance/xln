@@ -17,7 +17,7 @@
  * Message IDs and nonces are for correlation/debugging, not cryptographic security.
  */
 
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 

@@ -3,7 +3,7 @@ import {
   getCrossJurisdictionCommittedFillAmounts,
   getCrossJurisdictionCommittedProofRatio,
   requireCrossJurisdictionFillProgress,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx } from '../../../types';
 import { findAccountKey, normalizeEntityRef } from '../account-key';

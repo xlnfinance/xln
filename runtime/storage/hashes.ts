@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { compareStableText, serializeTaggedJson } from '../serialization-utils';
+import { compareStableText, serializeTaggedJson } from '../protocol/serialization';
 import type { Env } from '../types';
 import {
   computeCanonicalEntityHashesFromEnv,

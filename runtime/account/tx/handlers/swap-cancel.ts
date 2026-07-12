@@ -12,7 +12,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../../types';
-import { createStructuredLogger, shortOrder } from '../../../logger';
+import { createStructuredLogger, shortOrder } from '../../../infra/logger';
 import { recordSwapCancelRequested } from './swap-history';
 
 const swapCancelLog = createStructuredLogger('account.swap');

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { createEmptyEnv, enqueueRuntimeInput, process } from '../runtime';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { encodeBoard, hashBoard } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { encodeBoard, hashBoard } from '../entity/factory';
 import { buildLocalEntityProfile } from '../networking/gossip-helper';
 import type { ConsensusConfig, EntityState, HubRebalanceConfig } from '../types';
 

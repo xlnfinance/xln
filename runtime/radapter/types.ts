@@ -1,4 +1,4 @@
-import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../activity-history';
+import type { RuntimeActivityEvent, RuntimeActivityFilters } from '../api/activity-history';
 import type { RuntimeInput } from '../types';
 import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
 

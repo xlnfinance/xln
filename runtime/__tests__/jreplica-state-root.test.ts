@@ -5,7 +5,7 @@ import {
   buildCanonicalJReplicaSnapshot,
   normalizePersistedSnapshotInPlace,
 } from '../wal/snapshot';
-import { normalizeRestoredJReplicas } from '../runtime-infra';
+import { normalizeRestoredJReplicas } from '../machine/infra';
 
 const makeJReplica = (overrides: Partial<JReplica> = {}): JReplica => ({
   name: 'arrakis',

@@ -20,7 +20,7 @@
 
 import type { CryptoProvider } from '../crypto/provider';
 import { HTLC } from '../../constants';
-import { safeStringify } from '../../serialization-utils';
+import { safeStringify } from '../serialization';
 
 const MAX_ENVELOPE_SERIALIZED_BYTES = 10_000;
 

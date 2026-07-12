@@ -8,7 +8,7 @@ import {
   cloneCrossJurisdictionRoute,
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from './types';
 
 const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>

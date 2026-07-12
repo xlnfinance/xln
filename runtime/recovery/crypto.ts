@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { TextDecoder, TextEncoder } from 'util';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import {
   computeRuntimeRecoveryBundleHash,
   validateRuntimeRecoveryBundle,

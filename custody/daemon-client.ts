@@ -1,4 +1,4 @@
-import { deserializeTaggedJson, serializeTaggedJson } from '../runtime/serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../runtime/protocol/serialization';
 
 export type DaemonAuthKeyProvider = string | (() => string);
 

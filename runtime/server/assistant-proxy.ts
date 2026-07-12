@@ -1,4 +1,4 @@
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 import {
   AssistantInputError,
   parseAssistantChatRequest,

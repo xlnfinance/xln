@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { getStorageHealthSnapshotReadOnlySync, type StorageHealth } from '../orchestrator/storage-monitor';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 
 type DiskDebugPayload = {
   ok: boolean;

@@ -1,14 +1,14 @@
 import type { AccountInput, EntityState, Env, EntityInput, AccountMachine } from '../../../types';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../../../env-events';
-import { applyAccountInput as applyConsensusAccountInput } from '../../../account-consensus';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../../../machine/env-events';
+import { applyAccountInput as applyConsensusAccountInput } from '../../../account/consensus/index';
 import { addMessage, addMessages, emitScopedEvents, resolveEntityProposerId } from '../../../state-helpers';
-import { createStructuredLogger, shortId } from '../../../logger';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 import {
   accountStateDomainFromJurisdiction,
   computeAccountStateRoot,
   EMPTY_ACCOUNT_STATE_ROOT,
 } from '../../../account/state-root';
-import { isLeftEntity } from '../../../entity-id-utils';
+import { isLeftEntity } from '../../id';
 import { scheduleHook as scheduleCrontabHook } from '../../scheduler';
 import { upsertSortedStringMapEntry } from '../../../storage/sorted-index';
 import { assertSameJurisdictionAccount } from '../../../jurisdiction/jurisdiction-runtime';

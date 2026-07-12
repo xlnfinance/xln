@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createEmptyEnv, getPersistedLatestHeight, readPersistedFrameJournals } from '../runtime';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 
 type Args = {
   runtimeId?: string;

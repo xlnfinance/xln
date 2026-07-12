@@ -1,0 +1,366 @@
+import type { JAdapter, JAdapterConfig } from '../jadapter/types';
+import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
+import { setBrowserVMJurisdiction } from '../jadapter';
+import { createJAdapterWithRetry } from '../jadapter/retry';
+import { getSignerPrivateKey } from '../account/crypto';
+import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from '../account/utils';
+import { markStorageEntityDirty } from './env-events';
+import {
+  canonicalizeLocalEntityCryptoKeys,
+  resolveReplicaEntityCryptoKeys,
+} from '../entity/crypto';
+import { normalizeEntitySwapTradingPairs } from './swap-pairs';
+import {
+  backfillEntityJurisdictionBinding,
+  requireBoundEntityConfig,
+} from '../jurisdiction/jurisdiction-runtime';
+import { announceLocalEntityProfile } from '../networking/gossip-helper';
+import { normalizeRuntimeId } from '../networking/runtime-id';
+import type { EntityReplica, Env, JReplica, RuntimeTx } from '../types';
+import {
+  DEBUG,
+  formatEntityDisplay,
+  formatSignerDisplay,
+} from '../utils';
+import { createStructuredLogger } from '../infra/logger';
+
+const runtimeTxLog = createStructuredLogger('runtime.tx');
+
+type ImportJRuntimeTx = Extract<RuntimeTx, { type: 'importJ' }>;
+type ImportReplicaRuntimeTx = Extract<RuntimeTx, { type: 'importReplica' }>;
+
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
+
+export interface RuntimeTxHandlerDeps {
+  onJurisdictionImported?: (env: Env) => void;
+}
+
+export const applyRuntimeTx = async (
+  env: Env,
+  runtimeTx: RuntimeTx,
+  deps: RuntimeTxHandlerDeps = {},
+): Promise<void> => {
+  if (runtimeTx.type === 'importJ') {
+    await importJurisdictionRuntimeTx(env, runtimeTx, deps);
+    return;
+  }
+  if (runtimeTx.type === 'importReplica') {
+    importReplicaRuntimeTx(env, runtimeTx);
+    return;
+  }
+  const exhaustive: never = runtimeTx;
+  throw new Error(`RUNTIME_TX_UNKNOWN: ${(exhaustive as { type?: string }).type ?? 'unknown'}`);
+};
+
+const importJurisdictionRuntimeTx = async (
+  env: Env,
+  runtimeTx: ImportJRuntimeTx,
+  deps: RuntimeTxHandlerDeps,
+): Promise<void> => {
+  runtimeTxLog.info('jurisdiction.import_start', {
+    name: runtimeTx.data.name,
+    chainId: runtimeTx.data.chainId,
+  });
+
+  try {
+    const isBrowserVM = runtimeTx.data.rpcs.length === 0;
+    const fromReplica = runtimeTx.data.contracts
+      ? ({
+          depositoryAddress: runtimeTx.data.contracts.depository,
+          entityProviderAddress: runtimeTx.data.contracts.entityProvider,
+          contracts: runtimeTx.data.contracts,
+          chainId: runtimeTx.data.chainId,
+        } as JReplica)
+      : undefined;
+
+    const adapterConfig: JAdapterConfig = {
+      mode: isBrowserVM ? 'browservm' : 'rpc',
+      chainId: runtimeTx.data.chainId,
+    };
+    if (!isBrowserVM) {
+      const rpcUrl = runtimeTx.data.rpcs[0];
+      if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING: name=${runtimeTx.data.name}`);
+      adapterConfig.rpcUrl = rpcUrl;
+      if (!fromReplica) {
+        const deployerPrivateKey =
+          globalThis.process?.env?.['JADAPTER_DEPLOYER_PRIVATE_KEY'] ||
+          globalThis.process?.env?.['DEPLOYER_PRIVATE_KEY'];
+        if (deployerPrivateKey) adapterConfig.privateKey = deployerPrivateKey;
+      }
+    }
+    if (fromReplica) adapterConfig.fromReplica = fromReplica;
+
+    const jadapter = await createJAdapterWithRetry(adapterConfig, {
+      context: `importJ:${runtimeTx.data.name}`,
+      attempts: typeof window !== 'undefined' ? 5 : 3,
+      onRetry: (attempt, attempts, retryError) => {
+        runtimeTxLog.warn('jurisdiction.import_retry', {
+          name: runtimeTx.data.name,
+          chainId: runtimeTx.data.chainId,
+          attempt,
+          attempts,
+          error: errorMessage(retryError),
+        });
+      },
+    });
+    if (!fromReplica) {
+      await jadapter.deployStack();
+    }
+    const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, runtimeTx.data.name);
+
+    if (isBrowserVM) {
+      const browserVM = jadapter.getBrowserVM();
+      if (browserVM) {
+        setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
+      }
+    }
+
+    if (!env.jReplicas) {
+      env.jReplicas = new Map();
+    }
+
+    const resolvedDepositoryAddress = jadapter.addresses.depository || '';
+    const resolvedEntityProviderAddress = jadapter.addresses.entityProvider || '';
+    const resolvedAccountAddress =
+      jadapter.addresses.account || runtimeTx.data.contracts?.account || '';
+    const resolvedDeltaTransformerAddress =
+      jadapter.addresses.deltaTransformer || runtimeTx.data.contracts?.deltaTransformer || '';
+    const resolvedContracts = {
+      account: resolvedAccountAddress,
+      depository: resolvedDepositoryAddress,
+      entityProvider: resolvedEntityProviderAddress,
+      deltaTransformer: resolvedDeltaTransformerAddress,
+    };
+
+    if (!resolvedDepositoryAddress || !resolvedEntityProviderAddress) {
+      throw new Error(
+        `IMPORT_J_ADDRESSES_MISSING: name=${runtimeTx.data.name} ` +
+          `depository=${resolvedDepositoryAddress || 'none'} ` +
+          `entityProvider=${resolvedEntityProviderAddress || 'none'} ` +
+          `adapterAddresses=${JSON.stringify(jadapter.addresses || {})} ` +
+          `contracts=${JSON.stringify(runtimeTx.data.contracts || {})}`,
+      );
+    }
+
+    const stateRoot = await (jadapter.captureStateRoot?.() ?? Promise.resolve(null));
+    if (isBrowserVM && !(stateRoot instanceof Uint8Array && stateRoot.length === 32)) {
+      throw new Error(`IMPORT_J_STATE_ROOT_UNAVAILABLE: name=${runtimeTx.data.name} mode=browservm`);
+    }
+
+    const initialBlockNumber = await resolveInitialJBlockNumber(jadapter, runtimeTx);
+
+    const jReplica: JReplica = {
+      name: runtimeTx.data.name,
+      blockNumber: initialBlockNumber,
+      stateRoot,
+      mempool: [],
+      blockDelayMs: 300,
+      ...(runtimeTx.data.blockTimeMs ? { blockTimeMs: runtimeTx.data.blockTimeMs } : {}),
+      lastBlockTimestamp: env.timestamp,
+      position: { x: 0, y: 50, z: 0 },
+      depositoryAddress: resolvedDepositoryAddress,
+      entityProviderAddress: resolvedEntityProviderAddress,
+      contracts: resolvedContracts,
+      rpcs: runtimeTx.data.rpcs,
+      chainId: runtimeTx.data.chainId,
+      ...(defaultDisputeDelayBlocks ? { defaultDisputeDelayBlocks } : {}),
+      jadapter,
+    };
+    env.jReplicas.set(runtimeTx.data.name, jReplica);
+
+    if (!env.activeJurisdiction) {
+      env.activeJurisdiction = runtimeTx.data.name;
+    }
+
+    deps.onJurisdictionImported?.(env);
+    runtimeTxLog.info('jurisdiction.ready', {
+      name: runtimeTx.data.name,
+      chainId: runtimeTx.data.chainId,
+    });
+  } catch (error) {
+    runtimeTxLog.error('jurisdiction.import_failed', {
+      name: runtimeTx.data.name,
+      chainId: runtimeTx.data.chainId,
+      error: errorMessage(error),
+    });
+    throw error;
+  }
+};
+
+const resolveInitialJBlockNumber = async (
+  jadapter: JAdapter,
+  runtimeTx: ImportJRuntimeTx,
+): Promise<bigint> => {
+  if (!runtimeTx.data.startAtCurrentBlock) return 0n;
+  if (!jadapter.getCurrentBlockNumber) {
+    throw new Error(`IMPORT_J_CURRENT_BLOCK_UNAVAILABLE: name=${runtimeTx.data.name}`);
+  }
+  const currentBlock = await jadapter.getCurrentBlockNumber();
+  if (!Number.isFinite(currentBlock) || currentBlock < 0) {
+    throw new Error(`IMPORT_J_CURRENT_BLOCK_INVALID: name=${runtimeTx.data.name} block=${String(currentBlock)}`);
+  }
+  return BigInt(Math.floor(currentBlock));
+};
+
+const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): void => {
+  const importedEntityId = String(runtimeTx.entityId || '').toLowerCase();
+  const importedSignerId =
+    normalizeRuntimeId(String(runtimeTx.signerId || '')) ||
+    String(runtimeTx.signerId || '').trim().toLowerCase();
+  if (!importedEntityId || !importedSignerId) {
+    throw new Error(`IMPORT_REPLICA_INVALID_ID: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`);
+  }
+  if (DEBUG) {
+    runtimeTxLog.debug('replica.import_start', {
+      entity: formatEntityDisplay(importedEntityId),
+      signer: formatSignerDisplay(importedSignerId),
+      isProposer: runtimeTx.data.isProposer,
+    });
+  }
+
+  const replicaKey = `${importedEntityId}:${importedSignerId}`;
+  const existingMatch = findExistingReplicaCaseInsensitive(env, importedEntityId, importedSignerId);
+  const config = requireBoundEntityConfig(env, importedEntityId, runtimeTx.data.config);
+  backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
+
+  if (existingMatch) {
+    const { key: existingReplicaKey, replica: existingReplica } = existingMatch;
+    existingReplica.isProposer = runtimeTx.data.isProposer;
+    existingReplica.entityId = importedEntityId;
+    existingReplica.signerId = importedSignerId;
+    existingReplica.state.entityId = importedEntityId;
+    existingReplica.state.config = config;
+    canonicalizeLocalEntityCryptoKeys(env, importedEntityId, importedSignerId, existingReplica.state);
+    normalizeEntitySwapTradingPairs(existingReplica.state);
+    if (existingReplicaKey !== replicaKey) {
+      env.eReplicas.delete(existingReplicaKey);
+    }
+    env.eReplicas.set(replicaKey, existingReplica);
+    markStorageEntityDirty(env, existingReplica.state.entityId);
+    if (DEBUG) {
+      runtimeTxLog.debug('replica.restored_reused', {
+        entity: formatEntityDisplay(importedEntityId),
+        signer: formatSignerDisplay(importedSignerId),
+      });
+    }
+    return;
+  }
+
+  const replicaKeys = resolveReplicaEntityCryptoKeys(env, importedEntityId, importedSignerId);
+  const replica: EntityReplica = {
+    entityId: importedEntityId,
+    signerId: importedSignerId,
+    mempool: [],
+    isProposer: runtimeTx.data.isProposer,
+    state: {
+      entityId: importedEntityId,
+      height: 0,
+      timestamp: env.timestamp,
+      nonces: new Map(),
+      messages: [],
+      proposals: new Map(),
+      config,
+      reserves: new Map(),
+      accounts: new Map(),
+      deferredAccountProposals: new Map(),
+      lastFinalizedJHeight: 0,
+      jBlockObservations: [],
+      jBlockChain: [],
+      entityEncPubKey: replicaKeys.publicKey,
+      entityEncPrivKey: replicaKeys.privateKey,
+      profile: {
+        name:
+          typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
+            ? runtimeTx.data.profileName.trim()
+            : `Entity ${importedEntityId.slice(-4)}`,
+        isHub: false,
+        avatar: '',
+        bio: '',
+        website: '',
+      },
+      htlcRoutes: new Map(),
+      htlcFeesEarned: 0n,
+      htlcNotes: new Map(),
+      lockBook: new Map(),
+      swapTradingPairs: buildDefaultEntitySwapPairs(getTokenIdsForJurisdiction(config.jurisdiction)),
+      pendingSwapFillRatios: new Map(),
+      pendingCrossJurisdictionFillAcks: new Map(),
+      crossJurisdictionBookAdmissions: new Map(),
+    },
+  };
+  normalizeEntitySwapTradingPairs(replica.state);
+
+  if (runtimeTx.data.position) {
+    replica.position = {
+      ...runtimeTx.data.position,
+      jurisdiction:
+        runtimeTx.data.position.jurisdiction ||
+        runtimeTx.data.position.xlnomy ||
+        env.activeJurisdiction ||
+        'default',
+    };
+  }
+
+  env.eReplicas.set(replicaKey, replica);
+  markStorageEntityDirty(env, replica.state.entityId);
+  registerSingleSignerEntityWallet(env, runtimeTx, importedEntityId, importedSignerId);
+
+  const createdReplica = env.eReplicas.get(replicaKey);
+  const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
+  if (env.gossip && createdReplica && replicaKeys.isLocal) {
+    announceLocalEntityProfile(env, createdReplica.state, env.timestamp);
+  }
+
+  if (typeof actualJBlock !== 'number') {
+    throw new Error(
+      `ENTITY_CREATION_INVALID_J_HEIGHT: replica=${replicaKey} ` +
+        `expected=number actualType=${typeof actualJBlock} actual=${String(actualJBlock)}`,
+    );
+  }
+};
+
+const registerSingleSignerEntityWallet = (
+  env: Env,
+  runtimeTx: ImportReplicaRuntimeTx,
+  importedEntityId: string,
+  importedSignerId: string,
+): void => {
+  const validators = runtimeTx.data.config.validators;
+  const threshold = runtimeTx.data.config.threshold;
+  if (validators.length !== 1 || threshold !== 1n) return;
+
+  const signerId = normalizeRuntimeId(String(validators[0] || '')) || importedSignerId;
+  if (!signerId) return;
+  try {
+    const privateKey = getSignerPrivateKey(env, signerId);
+    const privateKeyHex = `0x${Array.from(privateKey)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')}`;
+    for (const jReplica of env.jReplicas?.values?.() ?? []) {
+      jReplica.jadapter?.registerEntityWallet?.(importedEntityId, privateKeyHex);
+    }
+  } catch (_error) {
+    runtimeTxLog.warn('replica.wallet_registration_skipped', {
+      signer: formatSignerDisplay(signerId),
+      reason: 'signer_private_key_unavailable',
+    });
+  }
+};
+
+const findExistingReplicaCaseInsensitive = (
+  env: Env,
+  entityId: string,
+  signerId: string,
+): { key: string; replica: EntityReplica } | null => {
+  const directKey = `${entityId}:${signerId}`;
+  const directReplica = env.eReplicas.get(directKey);
+  if (directReplica) return { key: directKey, replica: directReplica };
+
+  for (const [key, candidate] of env.eReplicas.entries()) {
+    const [candidateEntity, candidateSigner] = String(key).split(':');
+    if (String(candidateEntity || '').toLowerCase() !== entityId) continue;
+    if (String(candidateSigner || '').toLowerCase() !== signerId) continue;
+    return { key: String(key), replica: candidate };
+  }
+  return null;
+};

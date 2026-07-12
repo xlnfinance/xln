@@ -1,4 +1,4 @@
-import { calculateQuorumPower } from '../../../entity-consensus';
+import { calculateQuorumPower } from '../../consensus/index';
 import { createOrderbookExtState, validateSpreadDistribution } from '../../../orderbook';
 import type { EntityInput, EntityState, EntityTx, Env, Proposal } from '../../../types';
 import { formatEntityId, log } from '../../../utils';
@@ -7,7 +7,7 @@ import { announceLocalEntityProfile } from '../../../networking/gossip-helper';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { executeProposal, generateProposalId } from '../proposals';
 import { validateMessage } from '../validation';
-import { createStructuredLogger, shortHash, shortId } from '../../../logger';
+import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 
 const basicLog = createStructuredLogger('entity.basic');
 

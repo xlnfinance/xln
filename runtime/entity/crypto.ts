@@ -1,4 +1,4 @@
-import { getSignerPrivateKey } from '../account-crypto';
+import { getSignerPrivateKey } from '../account/crypto';
 import { extractSignerId } from '../ids';
 import { deriveEncryptionKeyPair, pubKeyToHex } from '../networking/p2p-crypto';
 import type { Env } from '../types';

@@ -1,8 +1,8 @@
 import type { Env, EntityInput, EntityReplica, Delta, FrameLogEntry } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
-import { deriveDelta, isLeft } from '../account-utils';
+import { deriveDelta, isLeft } from '../account/utils';
 import { createEmptyBatch, batchAddReserveToReserve } from '../jurisdiction/batch';
-import { formatRuntime } from '../runtime-ascii';
+import { formatRuntime } from '../qa/runtime-ascii';
 import { advanceScenarioTime } from './helpers';
 import { submitSignedScenarioBatch } from './j-batch-submit';
 

@@ -4,7 +4,7 @@ import type {
   SwapOrderHistoryEntry,
   SwapOrderResolveHistoryEntry,
 } from '../../../types';
-import { cloneCrossJurisdictionRoute } from '../../../cross-jurisdiction';
+import { cloneCrossJurisdictionRoute } from '../../../extensions/cross-j/index';
 
 function ensureSwapOrderHistory(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
   if (!(accountMachine.swapOrderHistory instanceof Map)) {

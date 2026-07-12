@@ -14,7 +14,7 @@ import {
   getSwapPairPolicyByBaseQuote,
   hasSwapPairPolicyByBaseQuote,
   type SwapPairPolicy,
-} from '../../../../account-utils';
+} from '../../../../account/utils';
 import {
   buildSwapResolveDataFromOrderbookFill,
   calculateSwapTakerFeeAmount,

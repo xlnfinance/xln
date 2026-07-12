@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import {
   becomeHub,
   DaemonControlClient,

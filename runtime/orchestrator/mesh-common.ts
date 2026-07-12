@@ -1,7 +1,7 @@
 import type { AccountMachine, Delta, EntityReplica, EntityTx, Env } from '../types';
-import { deriveDelta } from '../account-utils';
-import { encodeBoard, hashBoard } from '../entity-factory';
-import { compareStableText } from '../serialization-utils';
+import { deriveDelta } from '../account/utils';
+import { encodeBoard, hashBoard } from '../entity/factory';
+import { compareStableText } from '../protocol/serialization';
 import { getBootstrapTokenAmount } from '../jurisdiction/bootstrap-economy';
 export { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 export {

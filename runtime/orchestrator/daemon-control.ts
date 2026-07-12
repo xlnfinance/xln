@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
-import { deriveSignerAddressSync, deriveSignerKeySync } from '../account-crypto';
-import { encodeBoard, hashBoard } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../account/crypto';
+import { encodeBoard, hashBoard } from '../entity/factory';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type { RuntimeIngressReceipt } from '../server/ingress-receipts';
 import type { ConsensusConfig, RoutedEntityInput, RuntimeInput } from '../types';
 

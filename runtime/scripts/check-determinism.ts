@@ -15,10 +15,10 @@ const SCAN_ROOTS = [
   'runtime/entity-tx',
 ];
 const SCAN_FILES = [
-  'runtime/account-consensus.ts',
-  'runtime/entity-consensus.ts',
+  'runtime/account/consensus/index.ts',
+  'runtime/entity/consensus/index.ts',
   'runtime/entity/scheduler.ts',
-  'runtime/lending.ts',
+  'runtime/extensions/lending.ts',
 ];
 const EXCLUDE_PARTS = [
   '/__tests__/',

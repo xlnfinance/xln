@@ -7,8 +7,8 @@
 
 import type { Env } from '../types';
 import { createHash } from 'node:crypto';
-import { safeStringify } from '../serialization-utils';
-import { clearSignerKeys } from '../account-crypto';
+import { safeStringify } from '../protocol/serialization';
+import { clearSignerKeys } from '../account/crypto';
 import { createGossipLayer } from '../networking/gossip';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 import { assertRuntimeIdle } from './helpers';

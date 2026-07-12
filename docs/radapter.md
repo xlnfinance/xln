@@ -229,7 +229,7 @@ tracking is per-component, not in the adapter.
 
 ## server-side wiring
 
-Modify `runtime/server.ts` `/rpc` handler. ~250 LOC added.
+Modify `runtime/server/index.ts` `/rpc` handler. ~250 LOC added.
 
 ```
 on connection:
@@ -407,7 +407,7 @@ Components use `readStore`:
 ```
 
 `AccountRow` consumes `StorageAccountDoc` directly. Existing `deriveDelta`
-from `runtime/account-utils.ts:30` derives inbound/outbound/balance.
+from `runtime/account/utils.ts:30` derives inbound/outbound/balance.
 We do not introduce `AccountView` or any other intermediate type.
 
 Time machine slider: a single store `viewHeight` (defaults to live).

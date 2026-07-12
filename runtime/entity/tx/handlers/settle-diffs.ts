@@ -1,6 +1,6 @@
 import { requireUsableContractAddress } from '../../../jurisdiction/contract-address';
-import { isLeftEntity } from '../../../entity-id-utils';
-import { createStructuredLogger, shortId } from '../../../logger';
+import { isLeftEntity } from '../../id';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { initJBatch, batchAddSettlement } from '../../../jurisdiction/batch';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import type { EntityInput, EntityState, EntityTx } from '../../../types';

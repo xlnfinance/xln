@@ -3,7 +3,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { Wallet } from 'ethers';
 
-import { serializeTaggedJson, deserializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson, deserializeTaggedJson } from '../protocol/serialization';
 import {
   createEmptyEnv,
   enqueueRuntimeInput,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { generateLazyEntityIdPreview } from '../../frontend/src/lib/utils/lazyEntityId';
-import { generateLazyEntityId } from '../../runtime/entity-factory';
+import { generateLazyEntityId } from '../../runtime/entity/factory';
 
 describe('frontend lazy entity id preview', () => {
 	test('matches runtime board-hash generation for address validators', () => {

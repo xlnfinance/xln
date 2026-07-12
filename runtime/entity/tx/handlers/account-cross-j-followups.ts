@@ -8,7 +8,7 @@ import {
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionClaimProgress,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../../extensions/cross-j/market';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
@@ -16,7 +16,7 @@ import {
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../../extensions/cross-j/orderbook';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
-import { createStructuredLogger, shortId, shortOrder } from '../../../logger';
+import { createStructuredLogger, shortId, shortOrder } from '../../../infra/logger';
 import { removeCrossJurisdictionBookOrder } from '../../../orderbook/cross-j';
 import { resolveEntityProposerId } from '../../../state-helpers';
 import {

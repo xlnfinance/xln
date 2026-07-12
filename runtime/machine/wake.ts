@@ -4,7 +4,7 @@ import {
   createDueScheduledWakeInputs,
   entityNeedsPeriodicWake,
   getNextScheduledWakeTimestamp,
-} from '../runtime-scheduled-wake';
+} from './scheduled-wake';
 
 type RuntimeState = NonNullable<Env['runtimeState']>;
 

@@ -19,8 +19,8 @@ import type { Env, EntityInput } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput } from './helpers';
 import { ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter } from './boot';
-import { formatRuntime } from '../runtime-ascii';
-import { isLeft } from '../account-utils';
+import { formatRuntime } from '../qa/runtime-ascii';
+import { isLeft } from '../account/utils';
 import { ethers } from 'ethers';
 import { createRngFromEnv } from './seeded-rng';
 import { createEmptyBatch } from '../jurisdiction/batch';
@@ -70,7 +70,7 @@ export async function lockAhb(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC AHB');
   // Register signer keys for real signatures
   // 2-6 for entities (1 reserved for foundation)
-  const { lockRuntimeSeedUpdates } = await import('../account-crypto');
+  const { lockRuntimeSeedUpdates } = await import('../account/crypto');
   requireRuntimeSeed(env, 'HTLC AHB');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6'], 'HTLC AHB');
   lockRuntimeSeedUpdates(true);
@@ -154,7 +154,7 @@ export async function lockAhb(env: Env): Promise<void> {
     }
 
     // Signer wallet helper (for real ERC20 deposit flow)
-    const { getCachedSignerPrivateKey } = await import('../account-crypto');
+    const { getCachedSignerPrivateKey } = await import('../account/crypto');
     const signerWallets = new Map<string, { privateKey: Uint8Array; wallet: ethers.Wallet }>();
     const ensureSignerWallet = (signerId: string) => {
       const cached = signerWallets.get(signerId);
@@ -674,7 +674,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('\n⚡ FRAME 10: Off-Chain Payment A → H → B ($125K)');
     const payment1 = usd(125_000);
 
-    const { deriveDelta } = await import('../account-utils');
+    const { deriveDelta } = await import('../account/utils');
 
     // ============================================================================
     // PAYMENT 1: A → H → B ($125K) - HTLC VERSION

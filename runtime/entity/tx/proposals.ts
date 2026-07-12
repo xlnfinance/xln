@@ -1,7 +1,7 @@
 import type { EntityState, Proposal, ProposalAction } from '../../types';
 import { createHash } from '../../utils';
-import { safeStringify } from '../../serialization-utils';
-import { createStructuredLogger, shortHash } from '../../logger';
+import { safeStringify } from '../../protocol/serialization';
+import { createStructuredLogger, shortHash } from '../../infra/logger';
 
 const proposalLog = createStructuredLogger('entity.basic');
 

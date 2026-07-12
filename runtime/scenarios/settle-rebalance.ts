@@ -24,8 +24,8 @@ import {
 } from './helpers';
 import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
 import { userAutoApprove } from '../entity/tx/handlers/settle';
-import { deriveDelta } from '../account-utils';
-import { isLeftEntity } from '../entity-id-utils';
+import { deriveDelta } from '../account/utils';
+import { isLeftEntity } from '../entity/id';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { ethers } from 'ethers';
 
@@ -413,7 +413,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════
   // PHASE 6.5: HTLC RESOLVE -> AUTO-REBALANCE REQUEST
   // Keep this in sync with:
-  // - runtime/account-consensus.ts::runPostFrameAutoRebalanceCheck
+  // - runtime/account/consensus/index.ts::runPostFrameAutoRebalanceCheck
   // - tests/e2e-rebalance-bar.spec.ts cycle assertions
   // ══════════════════════════════════════════════════════════════════════════
   console.log = originalLog;

@@ -13,7 +13,7 @@ import {
   isCrossJurisdictionBookAdmissionPending,
   markCrossJurisdictionBookAdmissionClosed,
 } from '../extensions/cross-j/orderbook';
-import { createStructuredLogger, shortOrder } from '../logger';
+import { createStructuredLogger, shortOrder } from '../infra/logger';
 
 export type OrderbookOfferForMatch = ReturnType<typeof normalizeSwapOfferForOrderbook>;
 

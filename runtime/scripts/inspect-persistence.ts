@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { buildPersistenceInspection, type PersistenceInspectionSummary } from '../persistence-inspect';
-import { safeStringify } from '../serialization-utils';
+import { buildPersistenceInspection, type PersistenceInspectionSummary } from '../storage/persistence-inspect';
+import { safeStringify } from '../protocol/serialization';
 
 type Args = {
   runtimeId?: string;

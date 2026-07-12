@@ -18,10 +18,10 @@ import type { Env, EntityInput } from '../types';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
-import { formatRuntime } from '../runtime-ascii';
-import { deriveDelta, isLeft } from '../account-utils';
+import { formatRuntime } from '../qa/runtime-ascii';
+import { deriveDelta, isLeft } from '../account/utils';
 import { createGossipLayer } from '../networking/gossip';
-import { compareStableText, safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../protocol/serialization';
 import { ethers } from 'ethers';
 import {
   AHB_DEBUG,
@@ -64,7 +64,7 @@ export async function ahb(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'AHB');
 
   // Require real runtime seed and derive signer keys (no test keys)
-  const { lockRuntimeSeedUpdates, getCachedSignerPrivateKey } = await import('../account-crypto');
+  const { lockRuntimeSeedUpdates, getCachedSignerPrivateKey } = await import('../account/crypto');
   requireRuntimeSeed(env, 'AHB');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4'], 'AHB');
   lockRuntimeSeedUpdates(true);
@@ -190,7 +190,7 @@ export async function ahb(env: Env): Promise<void> {
     const createEntityTxs = [];
 
     // Import board hashing utilities
-    const { encodeBoard, hashBoard } = await import('../entity-factory');
+    const { encodeBoard, hashBoard } = await import('../entity/factory');
 
     for (let i = 0; i < 3; i++) {
       const name = entityNames[i]!;
@@ -245,7 +245,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // CRITICAL: Register public keys for signature validation
     // Without this, verifyAccountSignature will fail in browser
-    const { getCachedSignerPublicKey, registerSignerPublicKey, getCachedSignerPrivateKey } = await import('../account-crypto');
+    const { getCachedSignerPublicKey, registerSignerPublicKey, getCachedSignerPrivateKey } = await import('../account/crypto');
     const signerWallets = new Map<string, { privateKey: Uint8Array; wallet: ethers.Wallet }>();
     const ensureSignerWallet = (signerId: string) => {
       const cached = signerWallets.get(signerId);

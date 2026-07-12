@@ -1,7 +1,7 @@
 import type { AccountMachine, JurisdictionEvent } from '../../types';
-import { getDefaultCreditLimit } from '../../account-utils';
+import { getDefaultCreditLimit } from '../../account/utils';
 import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
-import { createStructuredLogger, shortHash } from '../../logger';
+import { createStructuredLogger, shortHash } from '../../infra/logger';
 import type { JEventClaimTx, JEventMempoolOp } from './j-events-types';
 
 const accountJEventLog = createStructuredLogger('j.event.account');

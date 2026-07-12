@@ -8,8 +8,8 @@ import {
   loadEnvFromDB,
   process as processRuntime,
 } from '../runtime.ts';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { generateLazyEntityId } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);

@@ -12,7 +12,7 @@ import {
   isRuntimeFailureSignal,
   type RuntimeFailureSignal,
 } from '../protocol/failure-taxonomy';
-import { publicAggregatedHealth } from '../health-redaction';
+import { publicAggregatedHealth } from '../server/health-redaction';
 import { resolveRuntimeImportReadiness } from '../orchestrator/runtime-import-readiness';
 
 const readText = (path: string): string => readFileSync(path, 'utf8');
@@ -268,7 +268,7 @@ assertNotIncludes(marketMakerNode, 'Runtime storage disabled for rebuildable mar
 assertNotIncludes(marketMakerNode, '[MESH-MM] RUNTIME_READY', marketMakerNodePath);
 assertNotIncludes(marketMakerNode, '[MESH-MM] OFFERS_READY', marketMakerNodePath);
 
-const healthRedactionPath = 'runtime/health-redaction.ts';
+const healthRedactionPath = 'runtime/server/health-redaction.ts';
 const healthRedaction = readText(healthRedactionPath);
 for (const marker of [
   'const publicFailureSignal = (value: unknown): Record<string, unknown> | null => {',
@@ -319,22 +319,22 @@ for (const [path, markers] of [
   ]],
   ['runtime/entity/tx/handlers/basic.ts', ["createStructuredLogger('entity.basic')"]],
   ['runtime/entity/tx/proposals.ts', ["createStructuredLogger('entity.basic')"]],
-  ['runtime/entity-factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed']],
-  ['runtime/entity-consensus.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
-  ['runtime/runtime-entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
-  ['runtime/runtime-input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
-  ['runtime/runtime-p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
+  ['runtime/entity/factory.ts', ["createStructuredLogger('entity.factory')", 'lazy.create', 'numbered.register_failed']],
+  ['runtime/entity/consensus/index.ts', ["createStructuredLogger('entity')", 'frame.profile', 'frame.apply']],
+  ['runtime/machine/entity-inputs.ts', ["createStructuredLogger('runtime.entity_inputs')", 'inputs.profile', 'replay.merged_input']],
+  ['runtime/machine/input-queue.ts', ["createStructuredLogger('runtime.input_queue')", 'interesting_entity_inputs']],
+  ['runtime/machine/p2p-lifecycle.ts', ["createStructuredLogger('p2p.lifecycle')", 'detach.close_failed']],
   ['runtime/relay/standalone-server.ts', ["createStructuredLogger('relay.standalone')", 'service.listen']],
   ['runtime/entity/consensus/input-merge.ts', ["createStructuredLogger('entity.input.merge')", 'frame.conflict', 'duplicates.deduped']],
   ['runtime/entity/tx/handlers/account.ts', ["createStructuredLogger('account.handler')", 'ACCOUNT_INPUT_EMPTY']],
   ['runtime/entity/tx/handlers/open-account.ts', ["createStructuredLogger('account.open')"]],
   ['runtime/entity/tx/handlers/account/committed-frame-followups.ts', ["createStructuredLogger('account.followup')", 'frame.commit', 'frame.tx']],
   ['runtime/entity/tx/handlers/account/committed-htlc-followups.ts', ["createStructuredLogger('account.followup')", 'htlc.secret_check']],
-  ['runtime/account-consensus.ts', ["createStructuredLogger('account')", 'frame.prev_hash_mismatch', 'frame.state_root_mismatch']],
+  ['runtime/account/consensus/index.ts', ["createStructuredLogger('account')", 'frame.prev_hash_mismatch', 'frame.state_root_mismatch']],
   ['runtime/account/consensus/propose.ts', ["createStructuredLogger('account')", 'frame.validation_failed', 'proposal.profile']],
   ['runtime/account/tx/apply.ts', ["createStructuredLogger('account.tx')", 'account_frame.rejected']],
   ['runtime/entity/tx/handlers/account/orderbook-matching-same.ts', ["createStructuredLogger('orderbook.same')"]],
-  ['runtime/runtime-tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'jurisdiction.import_failed', 'replica.wallet_registration_skipped']],
+  ['runtime/machine/tx-handlers.ts', ["createStructuredLogger('runtime.tx')", 'jurisdiction.import_failed', 'replica.wallet_registration_skipped']],
   ['runtime/entity/tx/handlers/r2r.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity/tx/handlers/create-settlement.ts', ["createStructuredLogger('entity.jbatch')"]],
   ['runtime/entity/tx/handlers/mint-reserves.ts', ["createStructuredLogger('entity.jbatch')"]],
@@ -346,23 +346,23 @@ for (const [path, markers] of [
   ['runtime/entity/tx/handlers/dispute.ts', ["createStructuredLogger('entity.dispute')"]],
   ['runtime/entity/tx/handlers/settle.ts', ["createStructuredLogger('entity.settle')"]],
   ['runtime/entity/tx/j-events-debt.ts', ["createStructuredLogger('entity.debt')", 'ledger.divergence']],
-  ['runtime/account-utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
+  ['runtime/account/utils.ts', ["logDebug('ACCOUNT_STATE'", 'deriveDelta.return']],
   ['runtime/validation-utils.ts', ['ACCOUNT_DELTAS_MISSING', 'ACCOUNT_DELTAS_INVALID_TOKEN_ID']],
   ['runtime/runtime.ts', ["createStructuredLogger('runtime')", 'apply.profile', 'process.profile', 'joutbox.incoming']],
-  ['runtime/runtime-infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'browservm.restore_failed']],
-  ['runtime/runtime-infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
-  ['runtime/runtime-storage-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'runtime_db.open_failed']],
+  ['runtime/machine/infra.ts', ["createStructuredLogger('runtime.infra')", 'jadapter.restore_retry', 'browservm.restore_failed']],
+  ['runtime/machine/infra-gossip-store.ts', ["createStructuredLogger('runtime.infra_gossip')", 'profile.restore_failed']],
+  ['runtime/storage/runtime-dbs.ts', ["createStructuredLogger('runtime.storage')", 'storage_db.blocked', 'runtime_db.open_failed']],
   ['runtime/storage/index.ts', ["createStructuredLogger('runtime.storage')", 'persist.frame']],
   ['runtime/watchtower/standalone-server.ts', ["createStructuredLogger('watchtower.standalone')", 'service.listen', 'sweep.failed', 'push_sweep.failed']],
   ['runtime/watchtower/dispute-watch.ts', ["createStructuredLogger('watchtower.dispute_watch')", 'target.failed']],
   ['runtime/orchestrator/graceful-server.ts', ["createStructuredLogger('orchestrator.lifecycle')", 'http.shutdown_timeout']],
   ['runtime/orchestrator/managed-runtime-leases.ts', ["createStructuredLogger('orchestrator.managed_leases')", 'stale_processes.kill', 'lease.unreadable_ignored']],
   ['runtime/orchestrator/parent-watch.ts', ["createStructuredLogger('orchestrator.parent_watch')", 'missing_parent_pid', 'parent_pid_missing']],
-  ['runtime/jurisdiction-config.ts', ["createStructuredLogger('runtime.jurisdiction_config')", 'browser_api_unavailable', 'JURISDICTIONS_BROWSER_CONFIG_INVALID']],
+  ['runtime/jurisdiction/config.ts', ["createStructuredLogger('runtime.jurisdiction_config')", 'browser_api_unavailable', 'JURISDICTIONS_BROWSER_CONFIG_INVALID']],
   ['runtime/jurisdiction/jurisdiction-loader.ts', ["createStructuredLogger('runtime.jurisdiction_loader')", 'config_missing_using_defaults', 'DEFAULT_LAST_UPDATED']],
   ['runtime/radapter/server.ts', ["createStructuredLogger('runtime.radapter')", 'response_too_large']],
   ['runtime/orchestrator/proxy.ts', ['classifyRuntimeTransportFailure', 'failure,']],
-  ['runtime/runtime-j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
+  ['runtime/machine/j-submit.ts', ["createStructuredLogger('runtime.jsubmit')", 'classifyRuntimeJBatchFailure', 'J_SUBMIT_TRANSIENT', 'J_SUBMIT_FATAL', 'tx.submit_failed']],
   ['runtime/orchestrator/market-maker-aggregated-health.ts', ['classifyRuntimeMarketMakerFailure', 'failure,']],
   ['runtime/protocol/payments/delivery-result.ts', ['export type DeliveryResult', 'failure?: RuntimeFailureSignal', 'deliveryFailure']],
 ] as const) {
@@ -389,26 +389,26 @@ for (const legacyRuntimeLogMarker of [
   assertNotIncludes(runtimeCore, legacyRuntimeLogMarker, runtimeCorePath);
 }
 
-const runtimeTxHandlersPath = 'runtime/runtime-tx-handlers.ts';
+const runtimeTxHandlersPath = 'runtime/machine/tx-handlers.ts';
 const runtimeTxHandlers = readText(runtimeTxHandlersPath);
 assertNotIncludes(runtimeTxHandlers, 'console.', runtimeTxHandlersPath);
 
-const runtimeJSubmitPath = 'runtime/runtime-j-submit.ts';
+const runtimeJSubmitPath = 'runtime/machine/j-submit.ts';
 const runtimeJSubmit = readText(runtimeJSubmitPath);
 assertNotIncludes(runtimeJSubmit, 'console.', runtimeJSubmitPath);
 assertNotIncludes(runtimeJSubmit, '[J-SUBMIT]', runtimeJSubmitPath);
 assertNotIncludes(runtimeJSubmit, '[SIDE-EFFECT]', runtimeJSubmitPath);
 
-const runtimeInfraPath = 'runtime/runtime-infra.ts';
+const runtimeInfraPath = 'runtime/machine/infra.ts';
 const runtimeInfra = readText(runtimeInfraPath);
 assertNotIncludes(runtimeInfra, 'console.', runtimeInfraPath);
 
-const runtimeInfraGossipPath = 'runtime/runtime-infra-gossip-store.ts';
+const runtimeInfraGossipPath = 'runtime/machine/infra-gossip-store.ts';
 const runtimeInfraGossip = readText(runtimeInfraGossipPath);
 assertNotIncludes(runtimeInfraGossip, 'console.', runtimeInfraGossipPath);
 assertNotIncludes(runtimeInfraGossip, '[infra-db]', runtimeInfraGossipPath);
 
-const runtimeStorageDbsPath = 'runtime/runtime-storage-dbs.ts';
+const runtimeStorageDbsPath = 'runtime/storage/runtime-dbs.ts';
 const runtimeStorageDbs = readText(runtimeStorageDbsPath);
 assertNotIncludes(runtimeStorageDbs, 'console.', runtimeStorageDbsPath);
 assertNotIncludes(runtimeStorageDbs, '[storage-epoch]', runtimeStorageDbsPath);
@@ -437,7 +437,7 @@ for (const orchestratorLifecyclePath of [
   assertNotIncludes(readText(orchestratorLifecyclePath), 'console.', orchestratorLifecyclePath);
 }
 
-const jurisdictionConfigPath = 'runtime/jurisdiction-config.ts';
+const jurisdictionConfigPath = 'runtime/jurisdiction/config.ts';
 const jurisdictionConfig = readText(jurisdictionConfigPath);
 assertNotIncludes(jurisdictionConfig, 'console.', jurisdictionConfigPath);
 
@@ -446,12 +446,12 @@ const jurisdictionLoader = readText(jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'console.', jurisdictionLoaderPath);
 assertNotIncludes(jurisdictionLoader, 'new Date()', jurisdictionLoaderPath);
 
-const runtimeInputQueuePath = 'runtime/runtime-input-queue.ts';
+const runtimeInputQueuePath = 'runtime/machine/input-queue.ts';
 const runtimeInputQueue = readText(runtimeInputQueuePath);
 assertNotIncludes(runtimeInputQueue, 'console.', runtimeInputQueuePath);
 assertNotIncludes(runtimeInputQueue, '[enqueueRuntimeInput]', runtimeInputQueuePath);
 
-const runtimeP2PLifecyclePath = 'runtime/runtime-p2p-lifecycle.ts';
+const runtimeP2PLifecyclePath = 'runtime/machine/p2p-lifecycle.ts';
 const runtimeP2PLifecycle = readText(runtimeP2PLifecyclePath);
 assertNotIncludes(runtimeP2PLifecycle, 'console.', runtimeP2PLifecyclePath);
 
@@ -464,7 +464,7 @@ for (const relayLoggingPath of [
 }
 assertNotIncludes(readText('runtime/relay/standalone-server.ts'), '[WS] Runtime relay', 'runtime/relay/standalone-server.ts');
 
-const solvencyPath = 'runtime/solvency.ts';
+const solvencyPath = 'runtime/account/solvency.ts';
 const solvency = readText(solvencyPath);
 assertNotIncludes(solvency, 'console.', solvencyPath);
 
@@ -480,7 +480,7 @@ const proposalHandlerPath = 'runtime/entity/tx/proposals.ts';
 const proposalHandler = readText(proposalHandlerPath);
 assertNotIncludes(proposalHandler, 'console.', proposalHandlerPath);
 
-const entityFactoryPath = 'runtime/entity-factory.ts';
+const entityFactoryPath = 'runtime/entity/factory.ts';
 const entityFactory = readText(entityFactoryPath);
 assertNotIncludes(entityFactory, 'console.', entityFactoryPath);
 
@@ -488,11 +488,11 @@ const entityInputMergePath = 'runtime/entity/consensus/input-merge.ts';
 const entityInputMerge = readText(entityInputMergePath);
 assertNotIncludes(entityInputMerge, 'console.', entityInputMergePath);
 
-const entityConsensusPath = 'runtime/entity-consensus.ts';
+const entityConsensusPath = 'runtime/entity/consensus/index.ts';
 const entityConsensus = readText(entityConsensusPath);
 assertNotIncludes(entityConsensus, 'console.', entityConsensusPath);
 
-const runtimeEntityInputsPath = 'runtime/runtime-entity-inputs.ts';
+const runtimeEntityInputsPath = 'runtime/machine/entity-inputs.ts';
 const runtimeEntityInputs = readText(runtimeEntityInputsPath);
 assertNotIncludes(runtimeEntityInputs, 'console.', runtimeEntityInputsPath);
 
@@ -515,7 +515,7 @@ const accountTxApplyPath = 'runtime/account/tx/apply.ts';
 const accountTxApply = readText(accountTxApplyPath);
 assertNotIncludes(accountTxApply, 'console.', accountTxApplyPath);
 
-const accountConsensusPath = 'runtime/account-consensus.ts';
+const accountConsensusPath = 'runtime/account/consensus/index.ts';
 const accountConsensus = readText(accountConsensusPath);
 assertNotIncludes(accountConsensus, 'console.', accountConsensusPath);
 

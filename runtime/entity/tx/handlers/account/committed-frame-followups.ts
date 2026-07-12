@@ -12,8 +12,8 @@ import {
   LENDING_TERM_MS,
   selectBestLendingPool,
   computeLendingInterest,
-} from '../../../../lending';
-import { createStructuredLogger } from '../../../../logger';
+} from '../../../../extensions/lending';
+import { createStructuredLogger } from '../../../../infra/logger';
 import type { MempoolOp } from './orderbook-queue';
 
 const accountFollowupLog = createStructuredLogger('account.followup');

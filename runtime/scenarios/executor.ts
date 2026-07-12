@@ -16,9 +16,9 @@ import type {
 } from './types.js';
 import { mergeAndSortEvents } from './parser.js';
 import { namedParamsToObject, getPositionalParams } from './types.js';
-import { createNumberedEntity } from '../entity-factory.js';
-import { getAvailableJurisdictions } from '../jurisdiction-config.js';
-import { safeStringify } from '../serialization-utils.js';
+import { createNumberedEntity } from '../entity/factory.js';
+import { getAvailableJurisdictions } from '../jurisdiction/config.js';
+import { safeStringify } from '../protocol/serialization.js';
 import { commitRuntimeInput, waitScenario } from './helpers';
 
 let payRandomCounter = 0;
@@ -257,7 +257,7 @@ async function handleImport(
   if (entitiesToRegister.length >= 10) {
     console.log(`  🚀 Batch registering ${entitiesToRegister.length} entities in ONE transaction...`);
 
-    const { createNumberedEntitiesBatch } = await import('../entity-factory.js');
+    const { createNumberedEntitiesBatch } = await import('../entity/factory.js');
     results = await createNumberedEntitiesBatch(
       entitiesToRegister.map(scenarioId => {
         const signerId = String(scenarioId);
@@ -435,7 +435,7 @@ async function handleGrid(
 
 
   // Batch create all entities
-  const { createNumberedEntitiesBatch } = await import('../entity-factory.js');
+  const { createNumberedEntitiesBatch } = await import('../entity/factory.js');
   const results = await createNumberedEntitiesBatch(entities, arrakis);
 
   // Store mappings and build runtimeTxs with positions

@@ -5,8 +5,8 @@ import {
   buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
-} from '../dispute-arguments';
-import { buildAccountProofBody, setDeltaTransformerAddress } from '../proof-builder';
+} from '../protocol/dispute/arguments';
+import { buildAccountProofBody, setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import type { AccountMachine, AccountTx, EntityState, SwapOffer } from '../types';
 
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';

@@ -5,7 +5,7 @@ import {
   createDisputeProofHash,
   createDisputeProofHashWithNonce,
   setDeltaTransformerAddress,
-} from '../proof-builder';
+} from '../protocol/dispute/proof-builder';
 
 const DEPOSITORY = '0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1';
 const PROOF_BODY_HASH = '0x216659016a52d3f9df41568d0c85bd6870ee46705ada7366c9f68d60e0a83548';

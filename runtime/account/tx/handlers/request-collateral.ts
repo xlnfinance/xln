@@ -19,8 +19,8 @@
 
 import type { AccountMachine, AccountTx } from '../../../types';
 import { DEFAULT_SOFT_LIMIT } from '../../../types';
-import { isLeftEntity } from '../../../entity-id-utils';
-import { deriveDelta } from '../../../account-utils';
+import { isLeftEntity } from '../../../entity/id';
+import { deriveDelta } from '../../utils';
 
 export function handleRequestCollateral(
   accountMachine: AccountMachine,

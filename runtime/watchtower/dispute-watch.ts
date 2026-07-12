@@ -13,7 +13,7 @@ import { Interface } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
 import { assertWatchtowerRpcUrlAllowed } from './action';
 import { buildDisputeWakeNotification, disputeWakeCollapseKey, selectWakeTargets } from '../push/dispute-wake';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 import type { DisputeWakeEvent, PushSender, StoredPushRegistration } from '../push/types';
 
 const DISPUTE_STARTED_ABI = [

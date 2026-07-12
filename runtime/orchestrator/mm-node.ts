@@ -3,11 +3,11 @@
 import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { compareStableText, safeStringify } from '../serialization-utils';
-import { createStructuredLogger } from '../logger';
+import { compareStableText, safeStringify } from '../protocol/serialization';
+import { createStructuredLogger } from '../infra/logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
-import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, prewarmSignerLabels, registerSignerKey } from '../account/crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import {
@@ -72,7 +72,7 @@ import {
   waitUntil,
   type MarketMakerEntityJurisdictionConfig,
 } from './mesh-common';
-import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
+import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account/utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
 import { MAX_ORDERBOOK_QTY_LOTS, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
@@ -80,7 +80,7 @@ import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
   withCanonicalCrossJurisdictionRouteHash,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import { resolveCrossJurisdictionRuntimeTopology } from '../extensions/cross-j/boundary';
 import { crossJurisdictionBookOwnerRef } from '../extensions/cross-j/orderbook';
 import { getJurisdictionStackId } from '../jurisdiction/jurisdiction-stack';

@@ -1,7 +1,7 @@
 import type { CrossJurisdictionSwapRoute, EntityState, Env } from '../types';
 import type { OrderbookExtState } from './index';
 import { applyCommand, getBookOrder, getOrderbookPairsForOrder, MAX_ORDERBOOK_QTY_LOTS, replaceOrderbookPair } from './index';
-import { markStorageEntityDirty, recordOrderbookPairUpdate } from '../env-events';
+import { markStorageEntityDirty, recordOrderbookPairUpdate } from '../machine/env-events';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 

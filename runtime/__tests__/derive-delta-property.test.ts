@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { deriveDelta } from '../account-utils';
+import { deriveDelta } from '../account/utils';
 import type { Delta, DerivedDelta } from '../types';
 
 const nonNegative = (value: bigint): bigint => value > 0n ? value : 0n;

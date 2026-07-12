@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 import type { AccountFrame, AccountTx } from '../../types';
 import { assertAccountFrameDeltaIntegrity } from '../frame';
 import { computeCanonicalMerkleRoot } from '../state-root';
-import { canonicalJurisdictionEventsHash } from '../../j-event-observation';
+import { canonicalJurisdictionEventsHash } from '../../jurisdiction/event-observation';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { ACCOUNT_NETWORK_ALLOWANCE_MS } from './constants';
 

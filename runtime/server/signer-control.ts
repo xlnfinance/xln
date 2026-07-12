@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
-import { registerSignerKey } from '../account-crypto';
-import { serializeTaggedJson } from '../serialization-utils';
+import { registerSignerKey } from '../account/crypto';
+import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
 

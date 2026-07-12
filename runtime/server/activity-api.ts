@@ -1,5 +1,5 @@
 import { readPersistedRuntimeActivityPage } from '../runtime';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 import type { Env } from '../types';
 
 const parseCsv = (value: string | null): string[] =>

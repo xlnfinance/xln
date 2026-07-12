@@ -36,19 +36,19 @@ Scores are `importance / complexity` out of 100.
 | --- | ---: | --- | --- |
 | Core types and validation | 100 / 70 | `runtime/types.ts`, `runtime/types/account.ts`, `runtime/validation-utils.ts` | Defines Env/E/J/A objects, account frames, deltas, and fail-fast decode boundaries. |
 | Runtime loop | 100 / 90 | `runtime/runtime.ts`, `runtime/state-helpers.ts` | Owns RJEA processing, input admission, frame progression, side effects, cloning, and history snapshots. |
-| Account consensus | 100 / 95 | `runtime/account-consensus.ts`, `runtime/account/consensus/propose.ts`, `runtime/account/consensus/frame.ts` | Bilateral propose/validate/commit and account frame hash rules. This is the most important protocol code after types. |
+| Account consensus | 100 / 95 | `runtime/account/consensus/index.ts`, `runtime/account/consensus/propose.ts`, `runtime/account/consensus/frame.ts` | Bilateral propose/validate/commit and account frame hash rules. This is the most important protocol code after types. |
 | Account tx handlers | 95 / 85 | `runtime/account/tx/apply.ts`, `runtime/account/tx/handlers/*` | Applies payment, HTLC, pull, swap, settlement, dispute-control, and credit actions inside account consensus. |
-| Entity consensus | 96 / 85 | `runtime/entity-consensus.ts`, `runtime/entity/consensus/frame.ts`, `runtime/entity/tx/apply.ts` | Entity-level BFT/proposer flow, E-frame hash, entity mempool, and tx dispatch. |
+| Entity consensus | 96 / 85 | `runtime/entity/consensus/index.ts`, `runtime/entity/consensus/frame.ts`, `runtime/entity/tx/apply.ts` | Entity-level BFT/proposer flow, E-frame hash, entity mempool, and tx dispatch. |
 | Entity tx handlers | 95 / 85 | `runtime/entity/tx/handlers/*`, `runtime/entity/tx/j-events.ts` | Opens accounts, routes payments, handles disputes, J-batches, mints, debt, and external wallet/reserve actions. |
-| Money math | 100 / 60 | `runtime/account-utils.ts`, `runtime/account/frame.ts`, `runtime/serialization-utils.ts` | `deriveDelta()` is the source of truth for bilateral capacity/economics; frame delta integrity and BigInt serialization live here. |
-| Hanko and proof path | 100 / 90 | `runtime/hanko/core.ts`, `runtime/hanko/signing.ts`, `runtime/proof-builder.ts`, `runtime/dispute-arguments.ts` | Signature aggregation, proof-body hashing, dispute arguments, and Solidity-compatible signing checks. |
+| Money math | 100 / 60 | `runtime/account/utils.ts`, `runtime/account/frame.ts`, `runtime/protocol/serialization.ts` | `deriveDelta()` is the source of truth for bilateral capacity/economics; frame delta integrity and BigInt serialization live here. |
+| Hanko and proof path | 100 / 90 | `runtime/hanko/core.ts`, `runtime/hanko/signing.ts`, `runtime/protocol/dispute/proof-builder.ts`, `runtime/protocol/dispute/arguments.ts` | Signature aggregation, proof-body hashing, dispute arguments, and Solidity-compatible signing checks. |
 | Solidity contracts | 100 / 90 | `jurisdictions/contracts/EntityProvider.sol`, `Depository.sol`, `Account.sol`, `DeltaTransformer.sol`, `Types.sol` | On-chain enforcement boundary. Compare Hanko, dispute, settlement, and transformer semantics against runtime. |
 | J-layer bridge | 90 / 75 | `runtime/jadapter/*`, `runtime/jurisdiction/batch.ts`, `runtime/jurisdiction/height.ts` | Chain adapters, batch construction, J-event ingestion, and J-height safety. |
 | Storage, WAL, recovery | 95 / 85 | `runtime/storage/*`, `runtime/wal/*`, `runtime/recovery/*`, `runtime/watchtower/*` | Persistence, restore, recovery bundles, tower receipts, and last-resort account safety. |
 | Networking and delivery | 85 / 80 | `runtime/networking/*`, `runtime/relay/*`, `runtime/relay/router.ts`, `runtime/protocol/payments/delivery-result.ts` | Relay/direct/P2P delivery semantics, retries, TTLs, and freshness/liveness boundaries. |
-| RAdapter and server | 85 / 80 | `runtime/radapter/*`, `runtime/server/*`, `runtime/server.ts` | Remote runtime query/control surface used by browser app and external operators. |
+| RAdapter and server | 85 / 80 | `runtime/radapter/*`, `runtime/server/*`, `runtime/server/index.ts` | Remote runtime query/control surface used by browser app and external operators. |
 | Orchestrator | 75 / 85 | `runtime/orchestrator/*` | Dev/prod process supervision, hub/MM/custody/watchtower wiring. Large operational surface, not the core consensus root. |
-| Orderbook and swaps | 82 / 85 | `runtime/orderbook/*`, `runtime/cross-jurisdiction.ts`, `runtime/extensions/cross-j/orderbook.ts`, `runtime/account/tx/handlers/swap-*` | Same-j and cross-j swap lifecycle, fills, cancels, exact amount accounting, hash-ladder proof ratio boundaries. |
+| Orderbook and swaps | 82 / 85 | `runtime/orderbook/*`, `runtime/extensions/cross-j/index.ts`, `runtime/extensions/cross-j/orderbook.ts`, `runtime/account/tx/handlers/swap-*` | Same-j and cross-j swap lifecycle, fills, cancels, exact amount accounting, hash-ladder proof ratio boundaries. |
 | Routing | 85 / 75 | `runtime/routing/*`, payment/HTLC handlers | Payment path selection, route metadata, hub compatibility, and route-capacity assumptions. |
 | Scenarios and tests | 80 / 70 | `runtime/scenarios/*`, `runtime/__tests__/*`, `tests/e2e-*` | Executable examples and regression evidence. Use them to understand expected system flows. |
 | Frontend stores | 75 / 80 | `frontend/src/lib/stores/xlnStore.ts`, `vaultStore.ts`, `runtimeStore.ts` | Browser runtime ownership, remote runtime hydration, persistence, error logs, and user-facing command flow. |
@@ -59,17 +59,17 @@ Scores are `importance / complexity` out of 100.
 - `runtime/types.ts`
 - `runtime/types/account.ts`
 - `runtime/runtime.ts`
-- `runtime/account-consensus.ts`
+- `runtime/account/consensus/index.ts`
 - `runtime/account/consensus/propose.ts`
 - `runtime/account/consensus/frame.ts`
-- `runtime/entity-consensus.ts`
+- `runtime/entity/consensus/index.ts`
 - `runtime/entity/consensus/frame.ts`
-- `runtime/account-utils.ts`
+- `runtime/account/utils.ts`
 - `runtime/account/tx/apply.ts`
 - `runtime/entity/tx/apply.ts`
 - `runtime/entity/tx/handlers/dispute.ts`
 - `runtime/hanko/signing.ts`
-- `runtime/proof-builder.ts`
+- `runtime/protocol/dispute/proof-builder.ts`
 - `jurisdictions/contracts/EntityProvider.sol`
 - `jurisdictions/contracts/Depository.sol`
 - `jurisdictions/contracts/Account.sol`

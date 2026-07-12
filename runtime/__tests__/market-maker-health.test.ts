@@ -4,7 +4,7 @@ import {
   createMarketMakerServerState,
   getMarketMakerHealth as getServerMarketMakerHealth,
 } from '../server/market-maker-health';
-import { buildDefaultEntitySwapPairs } from '../account-utils';
+import { buildDefaultEntitySwapPairs } from '../account/utils';
 import { buildMarketSnapshotForReplica } from '../relay/market-snapshot';
 import { applyCommand, createBook } from '../orderbook';
 import {

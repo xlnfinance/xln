@@ -12,8 +12,8 @@ import {
   process as processRuntime,
   verifyRuntimeChain,
 } from '../runtime.ts';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { generateLazyEntityId } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 import type { Env } from '../types';
 
 function hasPendingBilateralState(env: Env): boolean {

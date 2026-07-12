@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 
 const sortPairs = <T>(pairs: Array<[string, T]>): Array<[string, T]> =>
   pairs.sort((left, right) => {

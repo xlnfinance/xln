@@ -1,6 +1,6 @@
 import type { EntityReplica, EntityState, EntityTx, Env } from '../../../types';
 import { executeCrontab } from '../../scheduler';
-import { assertScheduledWakeMatchesState } from '../../../runtime-scheduled-wake';
+import { assertScheduledWakeMatchesState } from '../../../machine/scheduled-wake';
 
 type ScheduledWakeTx = Extract<EntityTx, { type: 'scheduledWake' }>;
 

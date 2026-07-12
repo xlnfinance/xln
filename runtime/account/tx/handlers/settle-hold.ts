@@ -14,8 +14,8 @@
 
 import type { AccountMachine, AccountTx, SettlementDiff } from '../../../types';
 import { compileOps } from '../../../protocol/settlement/operations';
-import { deriveDelta } from '../../../account-utils';
-import { createStructuredLogger } from '../../../logger';
+import { deriveDelta } from '../../utils';
+import { createStructuredLogger } from '../../../infra/logger';
 import { addHold, ensureHoldAdd, ensureHoldRelease, getHold, releaseHold } from '../hold-utils';
 
 type SettleHoldTx = Extract<AccountTx, { type: 'settle_hold' }>;

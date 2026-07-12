@@ -10,8 +10,8 @@ import {
   type OrderbookExtState,
 } from '../../../../orderbook';
 import { SWAP as SWAP_CONSTANTS } from '../../../../constants';
-import type { SwapPairPolicy } from '../../../../account-utils';
-import { createStructuredLogger, shortId, shortOrder, shouldLogFullPayloads } from '../../../../logger';
+import type { SwapPairPolicy } from '../../../../account/utils';
+import { createStructuredLogger, shortId, shortOrder, shouldLogFullPayloads } from '../../../../infra/logger';
 import { HEAVY_LOGS } from '../../../../utils';
 import {
   type NormalizedOrderbookOffer,

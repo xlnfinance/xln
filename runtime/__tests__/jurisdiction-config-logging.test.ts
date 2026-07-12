@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { getAvailableJurisdictions } from '../jurisdiction-config';
+import { getAvailableJurisdictions } from '../jurisdiction/config';
 import { resolveJurisdictionsJsonPath } from '../jurisdiction/jurisdictions-path';
 
 test('canonical jurisdiction path follows the repository contract config', () => {
@@ -12,7 +12,7 @@ test('canonical jurisdiction path follows the repository contract config', () =>
 });
 
 test('jurisdiction config loader uses structured logging without direct console output', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction-config.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/jurisdiction/config.ts'), 'utf8');
 
   expect(source).toContain("const jurisdictionConfigLog = createStructuredLogger('runtime.jurisdiction_config');");
   expect(source).toContain("jurisdictionConfigLog.debug('browser_api_unavailable'");

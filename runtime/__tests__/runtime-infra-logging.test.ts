@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('runtime infra restore diagnostics use structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime-infra.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/machine/infra.ts'), 'utf8');
 
   expect(source).toContain("const infraLog = createStructuredLogger('runtime.infra');");
   expect(source).toContain("infraLog.warn('jadapter.restore_retry'");

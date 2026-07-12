@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test';
-import { deriveDelta } from '../../runtime/account-utils';
+import { deriveDelta } from '../../runtime/account/utils';
 
 type DeltaSnapshot = {
   ondelta: string;

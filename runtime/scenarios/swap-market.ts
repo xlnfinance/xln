@@ -19,7 +19,7 @@ import type { Env, EntityInput } from '../types';
 import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
 import { commitRuntimeInput, findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
-import { getAccountFrameHistoryView } from '../env-events';
+import { getAccountFrameHistoryView } from '../machine/env-events';
 import { getBookOrders } from '../orderbook/core';
 
 type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };

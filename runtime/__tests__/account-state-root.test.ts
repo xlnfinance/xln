@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { computeAccountShadowRoot, computeAccountStateRoot } from '../account/state-root';
-import { buildAccountProofBody } from '../proof-builder';
+import { buildAccountProofBody } from '../protocol/dispute/proof-builder';
 import type { AccountMachine } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 

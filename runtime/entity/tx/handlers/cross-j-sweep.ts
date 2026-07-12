@@ -6,7 +6,7 @@ import {
   isCrossJurisdictionTerminalStatus,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import {
   buildCrossJurisdictionCancelAck,
   markCrossJurisdictionBookAdmissionClosed,

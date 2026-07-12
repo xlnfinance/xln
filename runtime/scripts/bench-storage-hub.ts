@@ -2,12 +2,12 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, rmSync, statSync } from 'fs';
 import { basename, dirname, join } from 'path';
 
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
-import { generateLazyEntityId } from '../entity-factory';
+import { generateLazyEntityId } from '../entity/factory';
 import { hashHtlcSecret } from '../protocol/htlc/utils';
 import { converge } from '../scenarios/helpers';
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import { buildAccountMerkleFromState } from '../storage';
 import { inspectStorageDb, loadEntityStateFromStorageDb } from '../runtime';
 import {

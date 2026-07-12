@@ -2,11 +2,11 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { detachRuntimeP2P } from '../runtime-p2p-lifecycle';
+import { detachRuntimeP2P } from '../machine/p2p-lifecycle';
 import type { Env } from '../types';
 
 test('runtime p2p lifecycle diagnostics use structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime-p2p-lifecycle.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/machine/p2p-lifecycle.ts'), 'utf8');
 
   expect(source).toContain("const p2pLifecycleLog = createStructuredLogger('p2p.lifecycle');");
   expect(source).toContain("p2pLifecycleLog.warn('detach.close_failed'");

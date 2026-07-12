@@ -5,15 +5,15 @@
 
 import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../../types';
 import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCommittedTxsFromMempool } from '../../state-helpers';
-import { isLeft } from '../../account-utils';
+import { isLeft } from '../utils';
 import { getPerfMs, HEAVY_LOGS } from '../../utils';
-import { safeStringify } from '../../serialization-utils';
+import { safeStringify } from '../../protocol/serialization';
 import { validateAccountFrame as validateAccountFrameStrict } from '../../validation-utils';
 import { applyAccountTx } from '../tx/apply';
-import { markStorageAccountDirty } from '../../env-events';
-import { createStructuredLogger, shortHash, shortId } from '../../logger';
+import { markStorageAccountDirty } from '../../machine/env-events';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from './frame';
-import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../proof-builder';
+import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../../protocol/dispute/proof-builder';
 import { signEntityHashes } from '../../hanko/signing';
 import {
   assertNoUnilateralSettlementMutation,
@@ -24,7 +24,7 @@ import {
   isEntityId32,
   shouldIncludeToken,
 } from './helpers';
-import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../dispute-arguments';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../protocol/dispute/arguments';
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
 import { getReplicaByEntityId } from '../../entity/replica';

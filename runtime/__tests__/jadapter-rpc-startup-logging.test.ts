@@ -33,7 +33,7 @@ test('runtime dev startup status logs stay structured', () => {
   const wsClient = readFileSync(join(process.cwd(), 'runtime/networking/ws-client.ts'), 'utf8');
   const bootstrapHub = readFileSync(join(process.cwd(), 'scripts/bootstrap-hub.ts'), 'utf8');
   const localConfig = readFileSync(join(process.cwd(), 'runtime/jadapter/local-config.ts'), 'utf8');
-  const logger = readFileSync(join(process.cwd(), 'runtime/logger.ts'), 'utf8');
+  const logger = readFileSync(join(process.cwd(), 'runtime/infra/logger.ts'), 'utf8');
   const devRunner = readFileSync(join(process.cwd(), 'scripts/dev/run-dev.sh'), 'utf8');
   const runtimeConsoleLines = runtime
     .split('\n')

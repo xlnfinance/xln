@@ -37,7 +37,7 @@ const silentLogger = {
 
 describe('assistant production proxy', () => {
   test('is wired into both production servers before generic API proxying', () => {
-    const standalone = readFileSync('runtime/server.ts', 'utf8');
+    const standalone = readFileSync('runtime/server/index.ts', 'utf8');
     const orchestrator = readFileSync('runtime/orchestrator/orchestrator.ts', 'utf8');
     expect(standalone).toContain('const assistantResponse = await assistantProxy.handle(req, pathname, clientId);');
     expect(orchestrator).toContain(

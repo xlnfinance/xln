@@ -15,11 +15,11 @@
 
 import type { Env, AccountMachine, JReplica } from '../types';
 import { commitRuntimeInput, getProcess, usd, ensureSignerKeysFromSeed, converge as _converge, findReplica } from './helpers';
-import { formatRuntime } from '../runtime-ascii';
-import { deriveDelta } from '../account-utils';
-import { isLeftEntity } from '../entity-id-utils';
+import { formatRuntime } from '../qa/runtime-ascii';
+import { deriveDelta } from '../account/utils';
+import { isLeftEntity } from '../entity/id';
 import { ensureJAdapter, getJAdapterMode } from './boot';
-import { encodeBoard, hashBoard } from '../entity-factory';
+import { encodeBoard, hashBoard } from '../entity/factory';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(200_000); // $200K

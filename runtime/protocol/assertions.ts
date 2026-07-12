@@ -1,6 +1,6 @@
 import type { AccountFrame, AccountMachine, Env } from '../types';
 import { validateEntityState } from '../validation-utils';
-import { computeFrameHash } from '../account-consensus';
+import { computeFrameHash } from '../account/consensus/index';
 import { assertAccountFrameDeltaIntegrity } from '../account/frame';
 
 const formatAccountLabel = (replicaKey: string, counterpartyId: string): string =>

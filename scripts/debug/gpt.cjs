@@ -1017,7 +1017,7 @@ requestCrossJurisdictionSwap
 \`\`\`
 
 Read these together:
-- \`runtime/cross-jurisdiction.ts\`
+- \`runtime/extensions/cross-j/index.ts\`
 - \`runtime/extensions/cross-j/market.ts\`
 - \`runtime/extensions/cross-j/orderbook.ts\`
 - \`runtime/extensions/cross-j/boundary.ts\`
@@ -1052,7 +1052,7 @@ repayment is a direct payment back to the hub, then pool/loan state closes.
 No-liquidity is an expected terminal product state, not a protocol fatal.
 
 Read these together:
-- \`runtime/lending.ts\`
+- \`runtime/extensions/lending.ts\`
 - \`runtime/types/lending.ts\`
 - \`runtime/entity/tx/handlers/lending.ts\`
 - \`runtime/server/lending.ts\`
@@ -1076,7 +1076,7 @@ The security argument depends on the on-chain exit actually working:
 - \`Depository.sol\` anchors reserves/collateral and FIFO debt enforcement
 - \`Account.sol\` verifies bilateral account settlement/dispute state
 - \`DeltaTransformer.sol\` verifies delta-transforming primitives
-- \`runtime/dispute-arguments.ts\` builds dispute arguments/evidence
+- \`runtime/protocol/dispute/arguments.ts\` builds dispute arguments/evidence
 - \`runtime/entity/tx/handlers/dispute.ts\` gates dispute starts
 - \`docs/security/dispute-two-arguments-spec.md\` explains the evidence model
 
@@ -1125,19 +1125,19 @@ xln/
     types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces (START HERE)
     ids.ts                       ${fileSizes['runtime/ids.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          ${fileSizes['runtime/entity-consensus.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         ${fileSizes['runtime/account-consensus.ts'] || '?'} lines - Bilateral consensus, left/right perspective
-    account-consensus-state.ts   ${fileSizes['runtime/account-consensus-state.ts'] || '?'} lines - Bilateral state machine
+    entity-consensus.ts          ${fileSizes['runtime/entity/consensus/index.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         ${fileSizes['runtime/account/consensus/index.ts'] || '?'} lines - Bilateral consensus, left/right perspective
+    account-consensus-state.ts   ${fileSizes['runtime/account/view-state.ts'] || '?'} lines - Bilateral state machine
     j-batch.ts                   ${fileSizes['runtime/jurisdiction/batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
-    account-utils.ts             ${fileSizes['runtime/account-utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
-    serialization-utils.ts       ${fileSizes['runtime/serialization-utils.ts'] || '?'} lines - BigInt serialization
-    account-crypto.ts            ${fileSizes['runtime/account-crypto.ts'] || '?'} lines - Signature verification
-    runtime-jurisdiction-api.ts  ${fileSizes['runtime/runtime-jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
+    account-utils.ts             ${fileSizes['runtime/account/utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
+    serialization-utils.ts       ${fileSizes['runtime/protocol/serialization.ts'] || '?'} lines - BigInt serialization
+    account-crypto.ts            ${fileSizes['runtime/account/crypto.ts'] || '?'} lines - Signature verification
+    runtime-jurisdiction-api.ts  ${fileSizes['runtime/machine/jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 
     swap/cross-j/orderbook:
       runtime-swap-pairs.ts       ${fileSizes['runtime/runtime-swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
       swap-execution.ts           ${fileSizes['runtime/orderbook/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
-      cross-jurisdiction.ts       ${fileSizes['runtime/cross-jurisdiction.ts'] || '?'} lines - Cross-j route hashes and fill progress
+      cross-jurisdiction.ts       ${fileSizes['runtime/extensions/cross-j/index.ts'] || '?'} lines - Cross-j route hashes and fill progress
       cross-jurisdiction-market.ts ${fileSizes['runtime/extensions/cross-j/market.ts'] || '?'} lines - Cross-j market derivation
       cross-jurisdiction-orderbook.ts ${fileSizes['runtime/extensions/cross-j/orderbook.ts'] || '?'} lines - Cross-j book owner rules
       orderbook/cross-j-orderbook.ts ${fileSizes['runtime/orderbook/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
@@ -1148,7 +1148,7 @@ xln/
       relay/market-subscriptions.ts ${fileSizes['runtime/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
       orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
       server/market-maker-health.ts ${fileSizes['runtime/server/market-maker-health.ts'] || '?'} lines - MM readiness health
-      lending.ts                  ${fileSizes['runtime/lending.ts'] || '?'} lines - Lending math and ids
+      lending.ts                  ${fileSizes['runtime/extensions/lending.ts'] || '?'} lines - Lending math and ids
       types/lending.ts            ${fileSizes['runtime/types/lending.ts'] || '?'} lines - Lending state types
       entity/tx/handlers/lending.ts ${fileSizes['runtime/entity/tx/handlers/lending.ts'] || '?'} lines - Lending tx handlers
       server/lending.ts           ${fileSizes['runtime/server/lending.ts'] || '?'} lines - Lending API handlers
@@ -1176,7 +1176,7 @@ xln/
       pathfinding.ts             ${fileSizes['runtime/routing/pathfinding.ts'] || '?'} lines - Dijkstra routing
 
     state-helpers.ts             ${fileSizes['runtime/state-helpers.ts'] || '?'} lines - Pure state management
-    snapshot-coder.ts            ${fileSizes['runtime/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
+    snapshot-coder.ts            ${fileSizes['runtime/storage/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
   docs/
     readme.md                           ${fileSizes['docs/readme.md'] || '?'} lines - Live docs index and reading path
     constraints.md                      ${fileSizes['docs/constraints.md'] || '?'} lines - Why bilateral provable-credit settlement is necessary

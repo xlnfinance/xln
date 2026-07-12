@@ -1,9 +1,9 @@
 import { ethers } from 'ethers';
 import type { EntityTx, Env, RuntimeInput } from '../types';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 import type { Profile } from '../networking/gossip';
 import { normalizeRuntimeKey, pushDebugEvent, type RelayStore } from '../relay/store';
-import { createStructuredLogger, shortId } from '../logger';
+import { createStructuredLogger, shortId } from '../infra/logger';
 import { encodeRebalancePolicyMemo } from '../extensions/rebalance/policy';
 import { resolveEntityProposerId } from '../state-helpers';
 import { getErrorMessage, isEntityId32 } from './utils';

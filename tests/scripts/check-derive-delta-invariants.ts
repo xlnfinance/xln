@@ -2,7 +2,7 @@
  * Guardrail: validate core deriveDelta invariants, especially hold accounting.
  */
 
-import { deriveDelta } from '../../runtime/account-utils';
+import { deriveDelta } from '../../runtime/account/utils';
 import type { Delta } from '../../runtime/types';
 
 function assert(condition: unknown, message: string): asserts condition {

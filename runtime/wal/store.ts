@@ -1,4 +1,4 @@
-import { deserializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson } from '../protocol/serialization';
 import type { FrameLogEntry, RoutedEntityInput, RuntimeInput } from '../types';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 

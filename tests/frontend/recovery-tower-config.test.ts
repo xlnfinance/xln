@@ -17,7 +17,7 @@ import {
 } from '../../frontend/src/lib/stores/vaultStore';
 import * as xln from '../../runtime/runtime';
 import { decryptTowerPayloadWithWatchSeed } from '../../runtime/recovery/crypto';
-import { deserializeTaggedJson } from '../../runtime/serialization-utils';
+import { deserializeTaggedJson } from '../../runtime/protocol/serialization';
 import type { EncryptedRuntimeRecoveryBundleV1, Env, XLNModule } from '../../runtime/xln-api';
 
 test('resolveDefaultRecoveryTowerUrls uses same-origin production tower by default', () => {

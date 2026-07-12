@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
-import { deserializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson } from '../protocol/serialization';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 120_000;
 const LOG_TAIL_LINES = 80;
@@ -585,7 +585,7 @@ export const startCustodySupport = async (
     const daemonAuthKey = deriveDaemonAdminKey();
     daemonChild = spawnBunChild(
       'custody-daemon',
-      ['runtime/server.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
+      ['runtime/server/index.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
       {
         USE_ANVIL: 'true',
         XLN_USE_PREDEPLOYED_ADDRESSES: 'true',

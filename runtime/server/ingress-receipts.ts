@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { RuntimeInput } from '../types';
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 
 export type RuntimeIngressReceiptStatus = 'pending' | 'observed' | 'expired';
 

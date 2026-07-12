@@ -8,7 +8,7 @@ import {
   getCrossJurisdictionPrivateSeed,
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import { buildCrossJurisdictionCancelAck } from '../../../extensions/cross-j/orderbook';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../../state-helpers';

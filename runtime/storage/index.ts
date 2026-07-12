@@ -51,7 +51,7 @@ import {
   keyLiveReplicaMeta,
   normalizeEntityId,
 } from './keys';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 import type { Env, RoutedEntityInput, RuntimeInput, RuntimeFrameDbRecord } from '../types';
 import type {
   PerfDeps,

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 test('runtime j-submit side-effect logs use structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime-j-submit.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/machine/j-submit.ts'), 'utf8');
 
   expect(source).toContain("const jSubmitLog = createStructuredLogger('runtime.jsubmit');");
   expect(source).toContain("jSubmitLog.debug('outbox.submit_start'");

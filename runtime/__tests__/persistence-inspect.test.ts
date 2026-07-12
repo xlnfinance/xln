@@ -10,7 +10,7 @@ import {
   type PersistenceBundleSummary,
   type PersistenceTowerSummary,
   type PersistenceWalTailSummary,
-} from '../persistence-inspect';
+} from '../storage/persistence-inspect';
 
 const walTail = (missingHeights: number[] = []): PersistenceWalTailSummary => ({
   fromHeight: 1,

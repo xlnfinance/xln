@@ -4,7 +4,7 @@
  */
 
 import type { Env } from '../types';
-import { isLeftEntity } from '../entity-id-utils';
+import { isLeftEntity } from '../entity/id';
 
 export function checkSolvency(env: Env, expected: bigint, label: string, optional: boolean = false): void {
   let reserves = 0n;

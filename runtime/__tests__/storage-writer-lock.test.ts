@@ -6,7 +6,7 @@ import {
   resolveStorageWriterLockPath,
   STORAGE_WRITER_LOCK_TTL_MS,
   withStorageWriterLock,
-} from '../runtime-storage-dbs';
+} from '../storage/runtime-dbs';
 import type { Env } from '../types';
 
 const waitForReadyWorkers = async (directory: string, count: number): Promise<void> => {
@@ -51,7 +51,7 @@ test('concurrent processes cannot both reclaim the same expired writer lock', as
 
   const workerSource = `
     import { existsSync, readdirSync, rmSync, writeFileSync } from 'fs';
-    import { withStorageWriterLock } from './runtime/runtime-storage-dbs.ts';
+    import { withStorageWriterLock } from './runtime/storage/runtime-dbs.ts';
     const env = ${JSON.stringify(env)};
     const readyPath = ${JSON.stringify(readyPath)};
     const activePath = ${JSON.stringify(activePath)};

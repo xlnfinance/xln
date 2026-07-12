@@ -72,8 +72,8 @@ Why swaps and pulls are affected:
   position.
 - `jurisdictions/contracts/DeltaTransformer.sol:144` consumes pull arguments by side
   position.
-- `runtime/proof-builder.ts:165` orders swaps by active `offerId`.
-- `runtime/proof-builder.ts:186` orders pulls by active `pullId`.
+- `runtime/protocol/dispute/proof-builder.ts:165` orders swaps by active `offerId`.
+- `runtime/protocol/dispute/proof-builder.ts:186` orders pulls by active `pullId`.
 - `runtime/account/tx/handlers/swap-resolve.ts:392` can delete terminal swaps.
 - `runtime/account/tx/handlers/pull.ts:258` and `runtime/account/tx/handlers/pull.ts:325`
   can delete pulls.
@@ -385,7 +385,7 @@ Rules:
   - When creating `currentDisputeProofBodyHash`, also store the local side argument
     snapshot for that proof.
 
-- `runtime/account-consensus.ts`
+- `runtime/account/consensus/index.ts`
   - When receiving `newDisputeProofBodyHash`, store the counterparty signed hash as today.
   - When sending ACK plus a newer frame, mark that newer local signed proof as
     `counter-dispute-capable` because the counterparty may later use it.

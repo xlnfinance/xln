@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import { buildRuntimeRecoveryCheckpointSnapshot } from '../wal';
 import type { Env } from '../types';
 import type {

@@ -23,8 +23,8 @@ import {
 } from '../../jurisdictions/typechain-types/index.ts';
 
 import type { BrowserVMState, DisputeFinalizationEvidence, JTx, Env } from '../types';
-import { normalizeEntityId } from '../entity-id-utils';
-import { compareStableText } from '../serialization-utils';
+import { normalizeEntityId } from '../entity/id';
+import { compareStableText } from '../protocol/serialization';
 import type {
   JAdapter,
   JAdapterAddresses,
@@ -61,12 +61,12 @@ import {
 import { DEV_CHAIN_IDS } from './index';
 import { decodeJBatch, getBatchSize, isBatchEmpty, preflightBatchForE2 } from '../jurisdiction/batch';
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
-import { setDeltaTransformerAddress } from '../proof-builder';
+import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
 import { resolveEntityProposerId } from '../state-helpers';
 import { BLOCKCHAIN } from '../constants';
 import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 import {
   firstAddress,
   isDebugEventEmitter,

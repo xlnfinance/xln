@@ -1,7 +1,7 @@
 import { requireUsableContractAddress } from '../jurisdiction/contract-address';
-import { detectEntityType, extractNumberFromEntityId } from '../entity-factory';
+import { detectEntityType, extractNumberFromEntityId } from '../entity/factory';
 import { encodeJBatch, computeBatchHankoHash, type JBatch } from '../jurisdiction/batch';
-import { normalizeEntityId } from '../entity-id-utils';
+import { normalizeEntityId } from '../entity/id';
 import { signEntityHashes } from '../hanko/signing';
 import type { Env, JurisdictionConfig } from '../types';
 import { connectJurisdictionAdapter, connectJurisdictionContracts } from './jurisdiction';

@@ -4,7 +4,7 @@ import {
   cloneCrossJurisdictionRoute,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import type { MempoolOp } from './account';
 import {
   mergeCrossJurisdictionRoute,

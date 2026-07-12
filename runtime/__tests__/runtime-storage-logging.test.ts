@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { normalizeDbNamespace, resolveDbNamespace } from '../runtime-storage-dbs';
+import { normalizeDbNamespace, resolveDbNamespace } from '../storage/runtime-dbs';
 
 test('runtime storage DB boundary uses structured logging without direct console output', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime-storage-dbs.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/storage/runtime-dbs.ts'), 'utf8');
 
   expect(source).toContain("const storageLog = createStructuredLogger('runtime.storage');");
   expect(source).toContain("storageLog.warn('storage_db.blocked'");

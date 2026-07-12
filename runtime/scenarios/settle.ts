@@ -15,7 +15,7 @@ import { compileOps } from '../protocol/settlement/operations';
 import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper, findReplica, setScenarioStorageEnabled } from './helpers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
-import { formatRuntime } from '../runtime-ascii';
+import { formatRuntime } from '../qa/runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
 import { userAutoApprove } from '../entity/tx/handlers/settle';
 

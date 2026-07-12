@@ -10,7 +10,7 @@ Extensions add products above the bilateral core. They may submit typed account/
 - [`runtime/orderbook/`](../../runtime/orderbook) - deterministic same-j matching and book state.
 - [`runtime/routing/`](../../runtime/routing) - payment graph and route selection.
 - [`runtime/agent-payments/`](../../runtime/agent-payments) - agent-to-agent payment integration.
-- [`runtime/lending.ts`](../../runtime/lending.ts) - lending projection pending final folder migration.
+- [`runtime/extensions/lending.ts`](../../runtime/extensions/lending.ts) - lending projection pending final folder migration.
 
 ## Main Methods
 

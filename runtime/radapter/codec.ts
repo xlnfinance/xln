@@ -1,4 +1,4 @@
-import { deserializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson } from '../protocol/serialization';
 import { decodeBinaryPayload, encodeBinaryPayload } from '../storage/binary-codec';
 
 const DEFAULT_MAX_MESSAGE_BYTES = 1_048_576;

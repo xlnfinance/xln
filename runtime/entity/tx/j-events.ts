@@ -9,7 +9,7 @@ import type {
   Env,
 } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { getTokenInfo } from '../../account-utils';
+import { getTokenInfo } from '../../account/utils';
 import { CANONICAL_J_EVENTS } from '../../jadapter/helpers';
 import { hashHtlcSecret } from '../../protocol/htlc/utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../scheduler';
@@ -25,12 +25,12 @@ import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalDisputeFinalizationEvidenceKey,
   canonicalJurisdictionEventsHash,
-} from '../../j-event-observation';
-import { verifyAccountSignature } from '../../account-crypto';
-import { markStorageEntityDirty } from '../../env-events';
-import { buildAccountProofBody } from '../../proof-builder';
+} from '../../jurisdiction/event-observation';
+import { verifyAccountSignature } from '../../account/crypto';
+import { markStorageEntityDirty } from '../../machine/env-events';
+import { buildAccountProofBody } from '../../protocol/dispute/proof-builder';
 import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-events-debt';
-import { createStructuredLogger, shortHash, shortId } from '../../logger';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import {
   applyKnownHtlcSecret,
   decodeDisputeStarterInitialSecrets,

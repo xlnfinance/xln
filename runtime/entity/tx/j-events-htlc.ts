@@ -7,8 +7,8 @@ import type {
 } from '../../types';
 import { addMessage } from '../../state-helpers';
 import { decodeHashLadderBinary } from '../../protocol/htlc/hash-ladder';
-import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../cross-jurisdiction';
-import { createStructuredLogger, shortHash, shortId, shortOrder } from '../../logger';
+import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus } from '../../extensions/cross-j/index';
+import { createStructuredLogger, shortHash, shortId, shortOrder } from '../../infra/logger';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import type { JEventMempoolOp } from './j-events-types';
 

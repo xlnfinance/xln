@@ -1,9 +1,9 @@
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
-import { deriveSignerKeySync } from '../account-crypto';
+import { deriveSignerKeySync } from '../account/crypto';
 import type { JAdapter, JEvent, JTokenInfo, JWalletAllowanceRead } from '../jadapter/types';
-import { createStructuredLogger } from '../logger';
-import { safeStringify } from '../serialization-utils';
+import { createStructuredLogger } from '../infra/logger';
+import { safeStringify } from '../protocol/serialization';
 
 type Erc20ContractRunner = NonNullable<Parameters<typeof ERC20Mock__factory.connect>[1]>;
 

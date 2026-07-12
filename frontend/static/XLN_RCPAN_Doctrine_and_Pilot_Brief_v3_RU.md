@@ -344,10 +344,10 @@ Not a nation-scale deployment. Start with one institutional bilateral pair, one 
 
 | Claim area | Internal proof anchor | External macro anchor |
 |---|---|---|
-| RCPAN invariant | `docs/core/12_invariant.md`, `docs/intro.md`, `runtime/account-utils.ts` | none needed; mathematical design claim |
-| Bilateral fast path | `runtime/account-consensus.ts`: account frames, signatures, commit path | none needed; implementation proof required |
+| RCPAN invariant | `docs/core/12_invariant.md`, `docs/intro.md`, `runtime/account/utils.ts` | none needed; mathematical design claim |
+| Bilateral fast path | `runtime/account/consensus/index.ts`: account frames, signatures, commit path | none needed; implementation proof required |
 | EVM as court/backstop | `Depository.sol`, `Account.sol`, `DeltaTransformer.sol`, dispute docs | CPMI-IOSCO principles for settlement risk context |
-| Recovery/evidence risk | `docs/recovery-watchtower-protocol.md`, `runtime/dispute-arguments.ts` | Lightning watchtower/disaster-recovery lessons as analogy |
+| Recovery/evidence risk | `docs/recovery-watchtower-protocol.md`, `runtime/protocol/dispute/arguments.ts` | Lightning watchtower/disaster-recovery lessons as analogy |
 | Mainnet status | `docs/status.md`, `docs/mainnet.md`, external audit brief | none; must be proven by current release gates |
 | Payment infrastructure importance | not XLN-specific | World Bank payment systems overview |
 | Remittance friction | not XLN-specific | World Bank Remittance Prices Worldwide, Q3 2025 |

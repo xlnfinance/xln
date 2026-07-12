@@ -9,10 +9,10 @@ import {
   closeInfraDb,
   readPersistedCheckpointSnapshot,
 } from '../runtime.ts';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { generateLazyEntityId } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import type { BrowserVMState, EntityReplica, JReplica } from '../types';
 import { accountInputProposal } from '../account/consensus/flush';
 

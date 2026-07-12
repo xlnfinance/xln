@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
-import { deriveDelta } from '../runtime/account-utils';
+import { deriveDelta } from '../runtime/account/utils';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
 import { selectPrimaryHubJurisdiction } from '../runtime/orchestrator/jurisdiction-select';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';

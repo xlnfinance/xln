@@ -2,7 +2,7 @@ import type { AccountMachine, AccountTx, Env } from '../../../types';
 import { getAccountPerspective } from '../../../state-helpers';
 import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../../jurisdiction/event-normalization';
 import { tryFinalizeAccountJEvents } from '../../../entity/tx/j-events-account';
-import { createStructuredLogger, shortHash } from '../../../logger';
+import { createStructuredLogger, shortHash } from '../../../infra/logger';
 
 const jEventClaimLog = createStructuredLogger('account.j_event');
 

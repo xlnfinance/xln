@@ -1,10 +1,10 @@
 import type { RoutedEntityInput } from '../types';
 import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
-import { signDigest } from '../account-crypto';
+import { signDigest } from '../account/crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 
 const NORMAL_CLOSE_CODES = new Set([1000, 1001]);
 const wsLog = createStructuredLogger('runtime.wsClient');

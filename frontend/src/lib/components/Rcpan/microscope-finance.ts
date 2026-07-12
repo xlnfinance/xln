@@ -1,4 +1,4 @@
-import { deriveDelta } from '@xln/runtime/account-utils';
+import { deriveDelta } from '@xln/runtime/account/utils';
 import type { Delta, DerivedDelta } from '@xln/runtime/types';
 import {
   deriveDisputeTokenFinalization,

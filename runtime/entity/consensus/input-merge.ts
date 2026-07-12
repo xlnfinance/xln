@@ -1,8 +1,8 @@
 import type { EntityTx, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from '../../types';
 import { signatureMapSize } from '../../protocol/signatures';
-import { compareStableText, safeStringify } from '../../serialization-utils';
+import { compareStableText, safeStringify } from '../../protocol/serialization';
 import { HEAVY_LOGS } from '../../utils';
-import { createStructuredLogger, shortHash, shortId } from '../../logger';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 
 const entityInputMergeLog = createStructuredLogger('entity.input.merge');
 

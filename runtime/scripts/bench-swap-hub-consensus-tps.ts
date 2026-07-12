@@ -1,17 +1,17 @@
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { applyAccountInput, proposeAccountFrame } from '../account-consensus';
-import { isLeft } from '../account-utils';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { applyAccountInput, proposeAccountFrame } from '../account/consensus/index';
+import { isLeft } from '../account/utils';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../extensions/cross-j/orderbook';
-import { generateLazyEntityId } from '../entity-factory';
+import { generateLazyEntityId } from '../entity/factory';
 import { MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
-import { setDeltaTransformerAddress } from '../proof-builder';
+import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import { createEmptyEnv } from '../runtime';
 import type {
   AccountInput,

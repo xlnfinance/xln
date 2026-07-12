@@ -11,7 +11,7 @@
 
 import type { AccountMachine, AccountTx } from '../../../types';
 import { hashHtlcSecret } from '../../../protocol/htlc/utils';
-import { createStructuredLogger, shortHash } from '../../../logger';
+import { createStructuredLogger, shortHash } from '../../../infra/logger';
 import { releaseHold } from '../hold-utils';
 
 const htlcResolveLog = createStructuredLogger('account.htlc');

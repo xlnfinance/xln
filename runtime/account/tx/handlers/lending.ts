@@ -1,5 +1,5 @@
 import type { AccountMachine, AccountTx } from '../../../types';
-import { normalizeInterestBps, normalizeLendingTerm } from '../../../lending';
+import { normalizeInterestBps, normalizeLendingTerm } from '../../../extensions/lending';
 import { handleDirectPayment } from './direct-payment';
 import { handleSetCreditLimit } from './set-credit-limit';
 

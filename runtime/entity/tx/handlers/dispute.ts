@@ -19,23 +19,23 @@ import type { ProofBodyStruct } from '../../../../jurisdictions/typechain-types/
 import { isUsableContractAddress } from '../../../jurisdiction/contract-address';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { initJBatch, batchAddRevealSecret, J_BATCH_CONTRACT_LIMITS, getBatchSize } from '../../../jurisdiction/batch';
-import { getDeltaTransformerAddress } from '../../../proof-builder';
+import { getDeltaTransformerAddress } from '../../../protocol/dispute/proof-builder';
 import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
 import {
   buildAccountProofBody,
   createDisputeProofHashWithNonce,
-} from '../../../proof-builder';
+} from '../../../protocol/dispute/proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../../hanko/signing';
 import { decodeHashLadderBinary } from '../../../protocol/htlc/hash-ladder';
 import {
   buildDisputeArgumentsForSnapshot,
   requireDisputeArgumentSnapshot,
   type DisputeArgumentSide,
-} from '../../../dispute-arguments';
+} from '../../../protocol/dispute/arguments';
 import { removeBookOrderById } from '../../../orderbook/cross-j';
 import { swapKey } from '../../../orderbook/swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../../extensions/cross-j/orderbook';
-import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../../logger';
+import { createStructuredLogger, shouldLogFullPayloads, shortHash, shortId } from '../../../infra/logger';
 import { getFirstSignerForEntity } from '../../replica';
 import {
   isAccountControlTx,

@@ -9,7 +9,7 @@ import {
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
-} from '../../cross-jurisdiction';
+} from './index';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../../orderbook';
 import {
   deriveExactSwapFillRatio,

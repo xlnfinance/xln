@@ -7,7 +7,7 @@ import { connectHub } from './utils/e2e-connect';
 import { getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
 import { startDisputeFromManageUi } from './utils/e2e-account-workspace';
 import { capturePageScreenshot } from './utils/e2e-screenshots';
-import { deriveDelta } from '../runtime/account-utils';
+import { deriveDelta } from '../runtime/account/utils';
 
 const TOKEN_ID_USDC = 1;
 const TOKEN_SCALE = 10n ** 18n;

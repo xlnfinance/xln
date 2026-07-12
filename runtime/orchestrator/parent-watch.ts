@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 
 const DEFAULT_PARENT_WATCH_MS = 5_000;
 const parentWatchLog = createStructuredLogger('orchestrator.parent_watch');

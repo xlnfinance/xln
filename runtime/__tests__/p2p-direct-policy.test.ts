@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deriveSignerAddressSync } from '../account-crypto';
+import { deriveSignerAddressSync } from '../account/crypto';
 import { RuntimeP2P } from '../networking/p2p';
 import type { Profile } from '../networking/gossip';
 import type { Env, RoutedEntityInput } from '../types';

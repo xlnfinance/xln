@@ -5,7 +5,7 @@ import type { Profile } from '../networking/gossip';
 import { relayRoute } from '../relay/router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay/store';
 import { deserializeWsMessage, hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';
-import { deriveSignerAddressSync, signDigest } from '../account-crypto';
+import { deriveSignerAddressSync, signDigest } from '../account/crypto';
 import { encryptJSON, deriveEncryptionKeyPair } from '../networking/p2p-crypto';
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { createEmptyEnv } from '../runtime';

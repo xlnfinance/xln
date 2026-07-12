@@ -13,9 +13,9 @@ import type {
   ProfileMirror,
   ProfileTokenCapacity,
 } from './gossip';
-import { deriveDelta, isLeft } from '../account-utils';
-import { compareStableText, safeStringify } from '../serialization-utils';
-import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKey, getSignerPublicKey } from '../account-crypto';
+import { deriveDelta, isLeft } from '../account/utils';
+import { compareStableText, safeStringify } from '../protocol/serialization';
+import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKey, getSignerPublicKey } from '../account/crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 import { UINT16_MAX } from '../constants';
 

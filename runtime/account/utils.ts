@@ -1,0 +1,433 @@
+/**
+ * Account utilities for calculating balances and derived states
+ * Based on old_src/app/Channel.ts deriveDelta logic
+ */
+
+import type { Delta, DerivedDelta } from '../types';
+import { PERFORMANCE } from '../constants';
+import { validateDelta } from '../validation-utils';
+import { isLeftEntity } from '../entity/id';
+import { defaultTokensForJurisdiction } from '../jadapter/default-tokens';
+import { logDebug } from '../infra/logger';
+
+/**
+ * Determine if an entity is the "left" party in a bilateral account (like old_src Channel.ts)
+ * @param myEntityId - Current entity ID
+ * @param counterpartyEntityId - Other entity ID
+ * @returns true if current entity is left (lexicographically smaller)
+ */
+export function isLeft(myEntityId: string, counterpartyEntityId: string): boolean {
+  return isLeftEntity(myEntityId, counterpartyEntityId);
+}
+
+// CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit
+const BASE_CREDIT_LIMIT = 0n;
+
+/**
+ * Derive account balance information for a specific token
+ *
+ * [---.*∆--][FOUNDATIONAL-MEMORY]
+ * deriveDelta() is the single source of truth for bilateral account math.
+ * All runtime/business logic (rebalance, routing, UI, tests) must interpret
+ * balances through this function instead of ad-hoc formulas.
+ *
+ * [---.*∆--][CORE-IDENTITY]
+ * delta == ondelta + offdelta
+ *
+ * [---.*∆--][PERSPECTIVE-RULE]
+ * This function computes values in LEFT perspective first, then flips to RIGHT
+ * perspective when isLeft=false.
+ *
+ * [---.*∆--][CAPACITY-DECOMPOSITION]
+ * outCapacity == outOwnCredit + outCollateral + outPeerCredit - outAllowance - outHolds
+ * inCapacity  == inOwnCredit  + inCollateral  + inPeerCredit  - inAllowance  - inHolds
+ *
+ * [---.*∆--][INTUITION]
+ * out* => what "we" can send now from current perspective
+ * in*  => what "we" can receive now from current perspective
+ *
+ * [---.*∆--][NO-ALTERNATE-MATH]
+ * If you need new semantics, add a helper that wraps deriveDelta fields.
+ * Do not introduce parallel balance models.
+ *
+ * @param delta - The delta structure for this token
+ * @param isLeft - Whether we are the left party in this account
+ * @returns Derived balance information including capacities and credits
+ */
+export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
+  // VALIDATE AT SOURCE: Financial data must be valid
+  validateDelta(delta, 'deriveDelta');
+
+  const nonNegative = (x: bigint): bigint => x < 0n ? 0n : x;
+
+  // [---.*∆--][INVARIANT-1]
+  // Canonical net state for this token pair.
+  const totalDelta = delta.ondelta + delta.offdelta;
+
+  const collateral = nonNegative(delta.collateral);
+
+  let ownCreditLimit = delta.leftCreditLimit;
+  let peerCreditLimit = delta.rightCreditLimit;
+
+  // [---.*∆--][INVARIANT-2][LEFT-PERSPECTIVE]
+  // When totalDelta > 0, peer owes left side; collateral is split into:
+  // - outCollateral: collateral we can use to send out (already secured for us)
+  // - inCollateral: residual collateral still counted on inbound side
+  let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
+  let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
+
+  // When delta > 0: peer owes us (peer is using OUR credit or we hold their collateral)
+  // When delta < 0: we owe peer (we're using PEER's credit or they hold our collateral)
+
+  // [---.*∆--][INVARIANT-3]
+  // inOwnCredit = how much we currently owe, bounded by the credit line peer granted us
+  let inOwnCredit = nonNegative(-totalDelta);
+  if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
+
+  // [---.*∆--][INVARIANT-4]
+  // outPeerCredit = how much peer owes us (bounded by peerCreditLimit)
+  let outPeerCredit = nonNegative(totalDelta - collateral);
+  if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
+
+  // [---.*∆--][INVARIANT-5][MIRROR]
+  // outOwnCredit = unused portion of our credit window
+  let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
+
+  // inPeerCredit = unused portion of peer credit window
+  let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
+
+  // Track used credit for reporting (not used in capacity calculation).
+  // LEFT perspective initialization:
+  // - peerCreditUsed: credit peer lent to left that left is currently using
+  // - ownCreditUsed:  credit left lent to peer that peer is currently using
+  let peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
+  let ownCreditUsed = totalDelta > 0n ? nonNegative(totalDelta - collateral) : 0n;
+
+  let inAllowance = delta.rightAllowance;
+  let outAllowance = delta.leftAllowance;
+  // Allowances are directional capacity locks/overrides used by transformer/final-proof
+  // settlement paths. They reduce immediate capacity, but do not change
+  // delta/collateral ownership semantics.
+
+  const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
+
+  // Unified per-side holds (single source of truth).
+  const leftHold = delta.leftHold || 0n;
+  const rightHold = delta.rightHold || 0n;
+
+  // [---.*∆--][INVARIANT-6][CAPACITY]
+  // Capacity is composition of credit+collateral slices minus allowances.
+  // Holds are subtracted after this base decomposition.
+  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
+  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
+
+  // [---.*∆--][INVARIANT-7][HOLD-SAFETY]
+  // Deduct holds from capacity in LEFT perspective (prevents double-spend).
+  // Always deduct leftHold from out, rightHold from in — the flip at line 101 handles RIGHT perspective
+  outCapacity = nonNegative(outCapacity - leftHold);
+  inCapacity = nonNegative(inCapacity - rightHold);
+
+  // Hold fields for UI (LEFT's perspective: out = left, in = right)
+  let outTotalHold = leftHold;
+  let inTotalHold = rightHold;
+
+  if (!isLeft) {
+    // [---.*∆--][INVARIANT-8][PERSPECTIVE-FLIP]
+    // Flip all directional fields for RIGHT perspective.
+    // This preserves semantic meaning:
+    // out* always means "my outbound capacity", in* means "my inbound capacity".
+    [inCollateral, inAllowance, inCapacity,
+     outCollateral, outAllowance, outCapacity] =
+    [outCollateral, outAllowance, outCapacity,
+     inCollateral, inAllowance, inCapacity];
+
+    [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
+    [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
+    [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
+    [peerCreditUsed, ownCreditUsed] = [ownCreditUsed, peerCreditUsed];
+
+    [outTotalHold, inTotalHold] = [inTotalHold, outTotalHold];
+  }
+
+  // [---.*∆--][DEBUG-VISUAL]
+  // ASCII visualization for deterministic debugging and quick human inspection.
+  const totalWidth = Number(totalCapacity);
+  const leftCreditWidth = Math.floor((Number(ownCreditLimit) / totalWidth) * 50);
+  const collateralWidth = Math.floor((Number(collateral) / totalWidth) * 50);
+  const rightCreditWidth = 50 - leftCreditWidth - collateralWidth;
+  const deltaPosition = Math.floor(((Number(totalDelta) + Number(ownCreditLimit)) / totalWidth) * 50);
+
+  // ASCII visualization - proper bar with position marker
+  // Build the full capacity bar first
+  const fullBar =
+    '-'.repeat(leftCreditWidth) +
+    '='.repeat(collateralWidth) +
+    '-'.repeat(rightCreditWidth);
+
+  // Insert position marker at deltaPosition
+  const clampedPosition = Math.max(0, Math.min(deltaPosition, fullBar.length));
+  const ascii =
+    '[' +
+    fullBar.substring(0, clampedPosition) +
+    '|' +
+    fullBar.substring(clampedPosition) +
+    ']';
+
+  if (PERFORMANCE.DEBUG_ACCOUNTS) {
+    logDebug('ACCOUNT_STATE', 'deriveDelta.return', {
+      isLeft,
+      inCapacity,
+      outCapacity,
+      capacitySum: inCapacity + outCapacity,
+    });
+  }
+
+  return {
+    delta: totalDelta,
+    collateral,
+    inCollateral,
+    outCollateral,
+    inOwnCredit,
+    outPeerCredit,
+    inAllowance,
+    outAllowance,
+    totalCapacity,
+    ownCreditLimit,
+    peerCreditLimit,
+    inCapacity,
+    outCapacity,
+    outOwnCredit,
+    inPeerCredit,
+    peerCreditUsed,  // HYBRID: credit peer lent that we're using
+    ownCreditUsed,   // HYBRID: credit we lent that peer is using
+    outTotalHold,
+    inTotalHold,
+    ascii,
+  };
+}
+
+/**
+ * Create a simple delta for demo purposes
+ * @param tokenId - Token ID
+ * @param collateral - Collateral amount
+ * @param delta - Delta amount
+ * @returns Delta object with reasonable defaults
+ */
+export function createDemoDelta(tokenId: number, collateral: bigint = 1000n, delta: bigint = 0n): Delta {
+  const creditLimit = getDefaultCreditLimit(tokenId);
+
+  const deltaData = {
+    tokenId,
+    collateral,
+    ondelta: delta,
+    offdelta: 0n,
+    leftCreditLimit: creditLimit,
+    rightCreditLimit: creditLimit,
+    leftAllowance: 0n,
+    rightAllowance: 0n,
+  };
+
+  // VALIDATE AT SOURCE: Guarantee type safety from this point forward
+  return validateDelta(deltaData, 'createDemoDelta');
+}
+
+/**
+ * Get token information for display
+ * USDC is primary token (1), ETH is secondary (2)
+ */
+export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; decimals: number; color: string }> = {
+  1: { symbol: 'USDC', name: 'USD Coin', decimals: 18, color: '#2775ca' },
+  2: { symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, color: '#627eea' },
+  3: { symbol: 'USDT', name: 'Tether USD', decimals: 18, color: '#26a17b' },
+  4: { symbol: 'TRX', name: 'Tron Native', decimals: 18, color: '#ef0027' },
+  5: { symbol: 'SUN', name: 'Sun Token', decimals: 18, color: '#f59e0b' },
+};
+
+const TOKEN_ID_BY_SYMBOL = new Map(
+  Object.entries(TOKEN_REGISTRY).map(([tokenId, info]) => [info.symbol.toUpperCase(), Number(tokenId)] as const),
+);
+
+export function getKnownTokenIds(): number[] {
+  return Object.keys(TOKEN_REGISTRY)
+    .map((tokenId) => Number(tokenId))
+    .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0)
+    .sort((a, b) => a - b);
+}
+
+export function getTokenIdsForJurisdiction(
+  input?: { name?: string | null; chainId?: number | null } | string | null,
+): number[] {
+  return defaultTokensForJurisdiction(input)
+    .map((token) => TOKEN_ID_BY_SYMBOL.get(String(token.symbol || '').toUpperCase()) ?? 0)
+    .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0);
+}
+
+// Canonical USD reference stables used for quote-side orientation in swap pairs.
+// Prices for volatile/non-reference assets are displayed and quoted as stable per 1 asset.
+export const REFERENCE_STABLE_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
+export const LIQUID_SWAP_TOKEN_IDS = REFERENCE_STABLE_TOKEN_IDS;
+export const DEFAULT_ENTITY_SWAP_PAIR_TOKENS = [1, 2, 3] as const;
+export type EntitySwapPairConfig = {
+  baseTokenId: number;
+  quoteTokenId: number;
+  pairId: string;
+};
+
+export function getTokenInfo(tokenId: number) {
+  return TOKEN_REGISTRY[tokenId] || { 
+    symbol: `TKN${tokenId}`, 
+    name: `Token ${tokenId}`, 
+    decimals: 18, 
+    color: '#999' 
+  };
+}
+
+export function isLiquidSwapToken(tokenId: number): boolean {
+  return REFERENCE_STABLE_TOKEN_IDS.has(tokenId);
+}
+
+export function getSwapPairOrientation(
+  tokenA: number,
+  tokenB: number,
+): { baseTokenId: number; quoteTokenId: number; pairId: string } {
+  const left = Math.min(tokenA, tokenB);
+  const right = Math.max(tokenA, tokenB);
+  const pairId = `${left}/${right}`;
+
+  const aLiquid = isLiquidSwapToken(tokenA);
+  const bLiquid = isLiquidSwapToken(tokenB);
+
+  if (aLiquid && !bLiquid) {
+    return { baseTokenId: tokenB, quoteTokenId: tokenA, pairId };
+  }
+  if (!aLiquid && bLiquid) {
+    return { baseTokenId: tokenA, quoteTokenId: tokenB, pairId };
+  }
+
+  return { baseTokenId: left, quoteTokenId: right, pairId };
+}
+
+export type SwapPairPolicy = {
+  // Price step in ORDERBOOK_PRICE_SCALE ticks (ORDERBOOK_PRICE_SCALE=10_000 => 0.0001 precision).
+  priceStepTicks: number;
+  // Outer bucket width for orderbook indexing (exact prices still remain exact inside buckets).
+  bookBucketWidthTicks: number;
+  // MM mid price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
+  mmMidPriceTicks: bigint;
+};
+
+const DEFAULT_SWAP_PAIR_POLICY: SwapPairPolicy = {
+  priceStepTicks: 1,   // 0.0001
+  bookBucketWidthTicks: 10_000, // 1.0000
+  mmMidPriceTicks: 10_000n, // 1.0000
+};
+
+const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
+  // WETH/USDC
+  '2/1': {
+    priceStepTicks: 1,    // 0.0001 USDC per WETH
+    bookBucketWidthTicks: 10_000, // 1.0000
+    mmMidPriceTicks: 25_000_000n, // 2500.0000
+  },
+  // WETH/USDT
+  '2/3': {
+    priceStepTicks: 1,    // 0.0001 USDT per WETH
+    bookBucketWidthTicks: 10_000, // 1.0000
+    mmMidPriceTicks: 25_000_000n, // 2500.0000
+  },
+  // USDC/USDT
+  '1/3': {
+    priceStepTicks: 1,      // 0.0001
+    bookBucketWidthTicks: 10_000, // 1.0000
+    mmMidPriceTicks: 10_000n, // 1.0000
+  },
+  // TRX/USDC
+  '4/1': {
+    priceStepTicks: 1, // 0.0001 USDC per TRX
+    bookBucketWidthTicks: 100, // 0.0100
+    mmMidPriceTicks: 1_200n, // 0.1200
+  },
+  // TRX/USDT
+  '4/3': {
+    priceStepTicks: 1, // 0.0001 USDT per TRX
+    bookBucketWidthTicks: 100, // 0.0100
+    mmMidPriceTicks: 1_200n, // 0.1200
+  },
+  // SUN/USDC
+  '5/1': {
+    priceStepTicks: 1, // 0.0001 USDC per SUN
+    bookBucketWidthTicks: 10, // 0.0010
+    mmMidPriceTicks: 200n, // 0.0200
+  },
+  // SUN/USDT
+  '5/3': {
+    priceStepTicks: 1, // 0.0001 USDT per SUN
+    bookBucketWidthTicks: 10, // 0.0010
+    mmMidPriceTicks: 200n, // 0.0200
+  },
+};
+
+export function getSwapPairPolicy(tokenA: number, tokenB: number): SwapPairPolicy {
+  const oriented = getSwapPairOrientation(tokenA, tokenB);
+  return getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
+}
+
+export function getSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): SwapPairPolicy {
+  const key = `${baseTokenId}/${quoteTokenId}`;
+  return SWAP_PAIR_POLICY_BY_BASE_QUOTE[key] ?? DEFAULT_SWAP_PAIR_POLICY;
+}
+
+export function hasSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): boolean {
+  const key = `${baseTokenId}/${quoteTokenId}`;
+  return Object.prototype.hasOwnProperty.call(SWAP_PAIR_POLICY_BY_BASE_QUOTE, key);
+}
+
+export function buildDefaultEntitySwapPairs(
+  tokenIds: readonly number[] = DEFAULT_ENTITY_SWAP_PAIR_TOKENS,
+): EntitySwapPairConfig[] {
+  const pairs: EntitySwapPairConfig[] = [];
+  const seen = new Set<string>();
+  const uniqueTokenIds = Array.from(new Set(tokenIds.filter((id) => Number.isFinite(id) && id > 0)));
+
+  for (let i = 0; i < uniqueTokenIds.length; i++) {
+    for (let j = i + 1; j < uniqueTokenIds.length; j++) {
+      const left = uniqueTokenIds[i]!;
+      const right = uniqueTokenIds[j]!;
+      if (left === right) continue;
+      const oriented = getSwapPairOrientation(left, right);
+      const key = `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({
+        baseTokenId: oriented.baseTokenId,
+        quoteTokenId: oriented.quoteTokenId,
+        pairId: oriented.pairId,
+      });
+    }
+  }
+
+  const primaryPair = getSwapPairOrientation(1, 2); // WETH/USDC orientation key
+  const primaryKey = `${primaryPair.baseTokenId}/${primaryPair.quoteTokenId}`;
+
+  return pairs.sort((a, b) => {
+    const aKey = `${a.baseTokenId}/${a.quoteTokenId}`;
+    const bKey = `${b.baseTokenId}/${b.quoteTokenId}`;
+    if (aKey === primaryKey && bKey !== primaryKey) return -1;
+    if (bKey === primaryKey && aKey !== primaryKey) return 1;
+    if (a.quoteTokenId !== b.quoteTokenId) return a.quoteTokenId - b.quoteTokenId;
+    return a.baseTokenId - b.baseTokenId;
+  });
+}
+
+export function getDefaultSwapTradingPairs(): EntitySwapPairConfig[] {
+  return buildDefaultEntitySwapPairs(DEFAULT_ENTITY_SWAP_PAIR_TOKENS);
+}
+
+/**
+ * Default per-token credit limit scaled to token decimals (matches old account behavior)
+ */
+export function getDefaultCreditLimit(tokenId: number): bigint {
+  const tokenInfo = getTokenInfo(tokenId);
+  const decimals = BigInt(tokenInfo.decimals ?? 18);
+  return BASE_CREDIT_LIMIT * 10n ** decimals;
+}

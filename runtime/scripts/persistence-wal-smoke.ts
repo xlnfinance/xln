@@ -11,8 +11,8 @@ import {
   verifyRuntimeChain,
   closeRuntimeDb,
 } from '../runtime.ts';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { generateLazyEntityId } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 import type { JReplica, JurisdictionConfig } from '../types';
 
 function assert(condition: unknown, message: string): asserts condition {

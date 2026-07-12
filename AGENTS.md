@@ -157,7 +157,7 @@ grep "HTLC.*Pending" /tmp/debug.log        # Find pending locks
 grep "Frame 65" /tmp/debug.log             # Find specific frame
 ```
 
-**ASCII functions** (runtime/runtime-ascii.ts):
+**ASCII functions** (runtime/qa/runtime-ascii.ts):
 - `formatRuntime(env)` - Full env with hierarchical boxes
 - `formatEntity(state)` - Single entity with accounts
 - `formatAccount(account, myId)` - Bilateral account detail

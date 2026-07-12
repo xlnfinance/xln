@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { deriveSignerAddressSync } from '../account-crypto';
+import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveEncryptionKeyPair } from '../networking/p2p-crypto';
 import { RuntimeWsClient } from '../networking/ws-client';
 import { startStandaloneRelayServer, type StandaloneRelayServer } from '../relay/standalone-server';

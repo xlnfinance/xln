@@ -2,7 +2,7 @@ import {
   cloneCrossJurisdictionRoute,
   isCrossJurisdictionRouteTransitionAllowed,
   isCrossJurisdictionTerminalStatus,
-} from '../../cross-jurisdiction';
+} from '../../extensions/cross-j/index';
 import {
   getJurisdictionStackId,
   isJurisdictionStackRef,

@@ -1,4 +1,4 @@
-import type { RuntimeActivityFilters } from '../activity-history';
+import type { RuntimeActivityFilters } from '../api/activity-history';
 import type { EntityState, Env, RuntimeInput } from '../types';
 import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage, runtimeAdapterMaxMessageBytes } from './codec';
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
@@ -7,7 +7,7 @@ import type { RegisterReceiptOptions, RuntimeIngressReceipt } from '../server/in
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 import type {
   RuntimeAdapterAuthLevel,
   RuntimeAdapterActivityPage,

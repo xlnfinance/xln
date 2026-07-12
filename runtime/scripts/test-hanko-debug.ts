@@ -6,8 +6,8 @@
 import { BrowserVMProvider } from '../jadapter/browservm-provider.js';
 import { ethers } from 'ethers';
 import { createAddressFromString } from '@ethereumjs/util';
-import { deriveSignerKeySync, registerSeededKeys, registerSignerKey } from '../account-crypto.js';
-import { isLeftEntity } from '../entity-id-utils';
+import { deriveSignerKeySync, registerSeededKeys, registerSignerKey } from '../account/crypto.js';
+import { isLeftEntity } from '../entity/id';
 import type { BrowserVmEthersProviderTarget } from '../jadapter/types';
 
 const errorMessage = (error: unknown): string =>
@@ -153,7 +153,7 @@ async function main() {
     console.log('\n🔍 Board hash verification...');
     {
       // What was registered (from browserVM.registerEntitiesWithSigners)
-      const { getCachedSignerPrivateKey } = await import('../account-crypto.js');
+      const { getCachedSignerPrivateKey } = await import('../account/crypto.js');
       const privKey = getCachedSignerPrivateKey('3')!;
       const wallet = new ethers.Wallet(ethers.hexlify(privKey));
       const validatorAddress = wallet.address;
@@ -189,7 +189,7 @@ async function main() {
     const testHash = ethers.keccak256(ethers.toUtf8Bytes('test'));
     try {
       // We need to sign this hash with the same signer
-      const privateKey = (await import('../account-crypto.js')).getCachedSignerPrivateKey('3');
+      const privateKey = (await import('../account/crypto.js')).getCachedSignerPrivateKey('3');
       const wallet = new ethers.Wallet(ethers.hexlify(privateKey!));
       const hashBytes = ethers.getBytes(testHash);
       const signature = wallet.signingKey.sign(hashBytes);

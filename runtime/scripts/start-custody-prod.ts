@@ -115,7 +115,7 @@ const findProcessIdsByPattern = async (pattern: string): Promise<number[]> => {
 };
 
 const killStaleCustodyDaemon = async (): Promise<void> => {
-  const pattern = `runtime/server.ts --port ${DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${DAEMON_PORT}`;
+  const pattern = `runtime/server/index.ts --port ${DAEMON_PORT} --host 127.0.0.1 --server-id custody-daemon-${DAEMON_PORT}`;
   const pids = await findProcessIdsByPattern(pattern);
   if (pids.length === 0) return;
 
@@ -257,7 +257,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
 
   const daemonChild = spawnBunChild(
     'custody-daemon',
-    ['runtime/server.ts', '--port', String(DAEMON_PORT), '--host', '127.0.0.1', '--server-id', `custody-daemon-${DAEMON_PORT}`],
+    ['runtime/server/index.ts', '--port', String(DAEMON_PORT), '--host', '127.0.0.1', '--server-id', `custody-daemon-${DAEMON_PORT}`],
     {
       USE_ANVIL: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',

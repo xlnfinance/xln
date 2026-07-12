@@ -15,15 +15,15 @@ import { unwrapEnvelope, validateEnvelope } from '../../../../protocol/htlc/enve
 import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../../routing/fees';
 import { getTokenCapacity } from '../../../../routing/capacity';
-import { markStorageEntityDirty } from '../../../../env-events';
+import { markStorageEntityDirty } from '../../../../machine/env-events';
 import { scheduleHook as scheduleCrontabHook, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../scheduler';
 import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
-import { CROSS_J_MAX_FILL_RATIO } from '../../../../cross-jurisdiction';
+import { CROSS_J_MAX_FILL_RATIO } from '../../../../extensions/cross-j/index';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../../../../protocol/htlc/events';
-import { createStructuredLogger } from '../../../../logger';
+import { createStructuredLogger } from '../../../../infra/logger';
 import type { MempoolOp } from './orderbook-queue';
 
 const accountFollowupLog = createStructuredLogger('account.followup');

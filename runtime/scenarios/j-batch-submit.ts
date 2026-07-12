@@ -2,7 +2,7 @@ import type { Env, JTx } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import type { JBatch } from '../jurisdiction/batch';
 import { getBatchSize } from '../jurisdiction/batch';
-import { getCachedSignerPrivateKey } from '../account-crypto';
+import { getCachedSignerPrivateKey } from '../account/crypto';
 import { prepareSignedBatch } from '../hanko/batch';
 
 export async function submitSignedScenarioBatch(

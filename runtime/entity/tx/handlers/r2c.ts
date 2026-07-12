@@ -20,7 +20,7 @@ import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../.
 import { QUOTE_EXPIRY_MS } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { batchAddReserveToCollateral, getEffectiveDraftReserveBalance, initJBatch } from '../../../jurisdiction/batch';
-import { createStructuredLogger, formatAmount, shortId } from '../../../logger';
+import { createStructuredLogger, formatAmount, shortId } from '../../../infra/logger';
 
 type MempoolOp = { accountId: string; tx: AccountTx };
 

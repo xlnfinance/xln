@@ -1,5 +1,5 @@
 import type { EntityState, EntityTx, Env, EntityInput, JInput, HashType } from '../../types';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../../machine/env-events';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   applyAccountInput,
@@ -10,7 +10,7 @@ import {
 } from './handlers/account';
 import { applyJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
-import { createStructuredLogger, logError } from '../../logger';
+import { createStructuredLogger, logError } from '../../infra/logger';
 import { handleR2E } from './handlers/r2e';
 import { handleHtlcPayment } from './handlers/htlc-payment';
 import { handleR2C } from './handlers/r2c';

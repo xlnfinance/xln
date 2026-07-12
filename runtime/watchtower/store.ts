@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Level } from 'level';
 import { Wallet, ethers } from 'ethers';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
   TowerLastResortPayloadV1,

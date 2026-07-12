@@ -8,8 +8,8 @@ import {
   getJurisdictionIdentityRef,
   sameJurisdictionIdentity,
 } from '../jurisdiction/jurisdiction-runtime';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { generateLazyEntityId } from '../entity-factory';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
+import { generateLazyEntityId } from '../entity/factory';
 import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../account/default-tokens';
 import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../networking/gossip';

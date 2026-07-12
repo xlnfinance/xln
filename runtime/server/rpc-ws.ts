@@ -16,7 +16,7 @@ import {
 import { handleRuntimeAdapterMessage } from '../radapter/server';
 import { isMarketMessageType } from '../relay/market-subscriptions';
 import type { RelayStore } from '../relay/store';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../state-helpers';
 import type { EntityTx, Env } from '../types';
 import { hashHtlcSecret } from '../protocol/htlc/utils';

@@ -9,13 +9,13 @@ import type { JEvent } from './types';
 import type { DisputeFinalizationEvidence, EntityInput, Env, JReplica, JurisdictionConfig, JurisdictionEvent, RuntimeInput } from '../types';
 import { createEmptyBatch, type JBatch } from '../jurisdiction/batch';
 import { enqueueRuntimeInput } from '../runtime';
-import { signAccountFrame } from '../account-crypto';
-import { createStructuredLogger, shortId } from '../logger';
+import { signAccountFrame } from '../account/crypto';
+import { createStructuredLogger, shortId } from '../infra/logger';
 import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
-} from '../j-event-observation';
+} from '../jurisdiction/event-observation';
 import { rememberRecentJEvents } from '../jurisdiction/event-evidence';
 
 // ═══════════════════════════════════════════════════════════════════════════

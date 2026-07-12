@@ -1,5 +1,5 @@
 import type { Profile } from '../networking/gossip';
-import { compareStableText } from '../serialization-utils';
+import { compareStableText } from '../protocol/serialization';
 
 export type GossipProfileBatchRequest = {
   ids?: string[];

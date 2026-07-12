@@ -15,14 +15,14 @@ import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtl
 import { calculateRequiredInboundForDesiredForward } from '../../../protocol/htlc/utils';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
 import { getTokenCapacity } from '../../../routing/capacity';
-import { deriveDelta } from '../../../account-utils';
+import { deriveDelta } from '../../../account/utils';
 import { NobleCryptoProvider } from '../../../protocol/crypto/noble';
 import { createOnionEnvelopes, type HtlcEnvelope } from '../../../protocol/htlc/envelope';
 import { getRuntimeJurisdictionHeight } from '../../../jurisdiction/height';
-import { compareStableText, safeStringify } from '../../../serialization-utils';
+import { compareStableText, safeStringify } from '../../../protocol/serialization';
 import { resolvePaymentDeadlineWindow } from '../../../protocol/payments/delivery';
 import { getReplicaByEntityId } from '../../replica';
-import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../logger';
+import { createStructuredLogger, formatAmount, shortHash, shortId } from '../../../infra/logger';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);

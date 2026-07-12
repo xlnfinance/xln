@@ -33,7 +33,7 @@ XLN already has most of the raw material:
 
 - `AccountMachine.currentFrame`, `pendingFrame`, `currentHeight`, `currentFrameHanko`, and `counterpartyFrameHanko` in `runtime/types.ts`.
 - Dispute proof state: `abiProofBody`, `currentDisputeProofHanko`, `counterpartyDisputeProofHanko`, `disputeProofNoncesByHash`, and `disputeProofBodiesByHash`.
-- `buildAccountProofBody()` and `createDisputeProofHash()` in `runtime/proof-builder.ts`.
+- `buildAccountProofBody()` and `createDisputeProofHash()` in `runtime/protocol/dispute/proof-builder.ts`.
 - durable account frame journal via `RuntimeFrameDbRecord` and `runtime/storage/frame-db.ts`.
 - storage Merkle roots used by `stateHash`, documented in `docs/merkle.md`.
 - `entity-crontab.ts` already handles pending-frame resend, stale pending-frame detection, HTLC timeouts, rollback suggestions, and rebalance automation.
@@ -670,7 +670,7 @@ Files/modules:
 - add `runtime/recovery/bundle.ts`;
 - add `runtime/recovery/verify.ts`;
 - add `runtime/recovery/peer-sync.ts`;
-- extend hub/direct relay surfaces in `runtime/server.ts`, `runtime/orchestrator/hub-node.ts`, and relay server modules;
+- extend hub/direct relay surfaces in `runtime/server/index.ts`, `runtime/orchestrator/hub-node.ts`, and relay server modules;
 - extend `entity-crontab.ts` to schedule PSR pings.
 
 Exit tests:

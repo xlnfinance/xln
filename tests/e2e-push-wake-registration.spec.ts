@@ -15,7 +15,7 @@ import {
 import { connectHub } from './utils/e2e-connect';
 import { startDisputeFromManageUi } from './utils/e2e-account-workspace';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
-import { deriveSignerAddressSync, deriveSignerKeySync } from '../runtime/account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync } from '../runtime/account/crypto';
 import {
   buildPushRegistrationMessage,
   buildPushUnregisterMessage,

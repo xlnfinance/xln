@@ -67,7 +67,7 @@ const ORDERBOOK_MARKERS = [
   'runtime/account/tx/handlers/swap-resolve.ts',
   'runtime/entity/tx/handlers/account.ts',
   'runtime/storage/index.ts',
-  'runtime/entity-consensus.ts',
+  'runtime/entity/consensus/index.ts',
   'runtime/entity/tx/handlers/dispute.ts',
   'runtime/scenarios/swap.ts',
   'runtime/types.ts',
@@ -179,7 +179,7 @@ function scanOrderbookWeakTypes(files: string[]): Finding | null {
       const line = lines[i]!;
       if (!weakTypeRegex.test(line)) continue;
       if (
-        (file.endsWith('runtime/types.ts') || file.endsWith('runtime/entity-consensus.ts')) &&
+        (file.endsWith('runtime/types.ts') || file.endsWith('runtime/entity/consensus/index.ts')) &&
         !orderbookContextRegex.test(line)
       ) {
         continue;

@@ -8,8 +8,8 @@ import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createL
 import { createLocalDeliveryHandler } from '../relay/local-delivery';
 import { getEntityReplicaById } from '../server/entity-lookup';
 import { processUntil, converge } from './helpers';
-import { isLeft, deriveDelta } from '../account-utils';
-import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
+import { isLeft, deriveDelta } from '../account/utils';
+import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account/crypto';
 import { loadJurisdictions } from '../jurisdiction/jurisdiction-loader';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';

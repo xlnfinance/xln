@@ -4,7 +4,7 @@
  */
 
 import type { Profile } from '../networking/gossip';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 import { getTokenCapacity } from './capacity';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from './fees';
 

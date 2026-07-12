@@ -5,8 +5,8 @@ const TARGETS = [
   'runtime/entity/tx/j-events.ts',
   'runtime/entity/tx/handlers/dispute.ts',
   'runtime/entity/tx/handlers/j-broadcast.ts',
-  'runtime/account-consensus.ts',
-  'runtime/entity-consensus.ts',
+  'runtime/account/consensus/index.ts',
+  'runtime/entity/consensus/index.ts',
 ];
 
 const BANNED_PATTERNS: Array<{ pattern: RegExp; label: string }> = [

@@ -1,5 +1,5 @@
 import type { Env } from '../types';
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
 import type { startP2P as startP2PType } from '../runtime';

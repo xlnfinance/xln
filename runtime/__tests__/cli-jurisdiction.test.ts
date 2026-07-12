@@ -61,7 +61,7 @@ describe('CLI jurisdiction selection', () => {
   });
 
   test('CLI source does not contain stale deployed contract constants', () => {
-    const source = readFileSync(join(process.cwd(), 'runtime/cli.ts'), 'utf8');
+    const source = readFileSync(join(process.cwd(), 'runtime/server/cli.ts'), 'utf8');
     expect(source).not.toContain('0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9');
     expect(source).not.toContain('0x5FC8d32690cc91D4c39d9d3abcBD16989F875707');
     expect(source).not.toContain('0x0165878A594ca255338adfa4d48449f69242Eb8F');

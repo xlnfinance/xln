@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../protocol/serialization';
 import type {
   TowerAppointmentV1,
   TowerDiscoverResponseV1,

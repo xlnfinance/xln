@@ -14,7 +14,7 @@ import {
   normalizeRuntimeKey,
   pushDebugEvent,
 } from './store';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 
 const relayLocalDeliveryLog = createStructuredLogger('relay.local_delivery');
 const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'

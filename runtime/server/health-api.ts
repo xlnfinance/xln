@@ -1,10 +1,10 @@
 import type { Env } from '../types';
-import { getHealthStatus, type HubHealth } from '../health';
+import { getHealthStatus, type HubHealth } from './health';
 import type { JTokenInfo } from '../jadapter/types';
 import { getStorageHealthSnapshotSync } from '../orchestrator/storage-monitor';
 import { getAllGossipProfiles, normalizeRuntimeKey, type RelayStore } from '../relay/store';
 import type { Profile } from '../networking/gossip';
-import { isLocalOperatorRequest, publicRuntimeHealthBody } from '../health-redaction';
+import { isLocalOperatorRequest, publicRuntimeHealthBody } from './health-redaction';
 import { buildDiskSummary } from './utils';
 import { getReplicaAccountCount, getReplicaReserveSnapshot } from './entity-lookup';
 import {

@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { compareStableText } from '../serialization-utils';
+import { compareStableText } from '../protocol/serialization';
 import type { EntityReplica, Env } from '../types';
 
 export type CanonicalFrameEntityHash = {

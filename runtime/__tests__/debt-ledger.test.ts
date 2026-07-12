@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import { signAccountFrame } from '../account-crypto';
-import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../j-event-observation';
-import { decode, encode } from '../snapshot-coder';
+import { signAccountFrame } from '../account/crypto';
+import { buildJEventObservationDigest, canonicalJurisdictionEventsHash } from '../jurisdiction/event-observation';
+import { decode, encode } from '../storage/snapshot-coder';
 import { cloneEntityState } from '../state-helpers';
 import { applyJEvent, type JEventEntityTxData } from '../entity/tx/j-events';
 import { applyDebtEnforced } from '../entity/tx/j-events-debt';

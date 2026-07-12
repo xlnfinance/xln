@@ -2,7 +2,7 @@ import { applyAccountTx } from '../account/tx/apply';
 import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../extensions/cross-j/orderbook';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute, Delta } from '../types';

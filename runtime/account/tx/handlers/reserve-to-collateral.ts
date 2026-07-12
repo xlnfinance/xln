@@ -25,7 +25,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../../types';
-import { createStructuredLogger } from '../../../logger';
+import { createStructuredLogger } from '../../../infra/logger';
 
 const reserveToCollateralLog = createStructuredLogger('account.reserve');
 

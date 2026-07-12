@@ -1,5 +1,5 @@
 import type { AccountTx, EntityInput, EntityState, EntityTx } from '../../../types';
-import { normalizeInterestBps, normalizeLendingTerm } from '../../../lending';
+import { normalizeInterestBps, normalizeLendingTerm } from '../../../extensions/lending';
 import { addMessage, cloneEntityState } from '../../../state-helpers';
 import type { MempoolOp } from './account';
 

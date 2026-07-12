@@ -5,10 +5,10 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../../types';
-import { deriveDelta } from '../../../account-utils';
+import { deriveDelta } from '../../utils';
 import { FINANCIAL } from '../../../constants';
-import { isLeftEntity } from '../../../entity-id-utils';
-import { createStructuredLogger, shortId } from '../../../logger';
+import { isLeftEntity } from '../../../entity/id';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 import { getAccountPerspective } from '../../../state-helpers';
 import { decodeRebalancePolicyMemo } from '../../../extensions/rebalance/policy';
 import { ensureDelta } from '../delta-utils';

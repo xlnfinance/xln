@@ -1,4 +1,4 @@
-import { deriveDelta } from '../account-utils';
+import { deriveDelta } from '../account/utils';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 
 export const getEntityReplicaById = (env: Env, entityId: string): EntityReplica | null => {

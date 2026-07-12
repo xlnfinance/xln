@@ -6,8 +6,8 @@
 import type { ConsensusConfig, Env, HankoString } from '../types';
 import { buildRealHanko } from './core';
 import { ethers } from 'ethers';
-import { detectEntityType, encodeBoard, generateLazyEntityId, hashBoard } from '../entity-factory';
-import { recoverAddressFromDigestSignature } from '../account-crypto';
+import { detectEntityType, encodeBoard, generateLazyEntityId, hashBoard } from '../entity/factory';
+import { recoverAddressFromDigestSignature } from '../account/crypto';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -238,7 +238,7 @@ export async function signEntityHashes(
   const hankos: HankoString[] = [];
 
   // Get private key for this signer (pass env for pure function)
-  const { getSignerPrivateKey, getSignerAddress } = await import('../account-crypto');
+  const { getSignerPrivateKey, getSignerAddress } = await import('../account/crypto');
   const privateKey = getSignerPrivateKey(env, signerId);
   const entityType = detectEntityType(entityId);
   const signerAddress = getSignerAddress(env, signerId);
@@ -327,7 +327,7 @@ export async function buildQuorumHanko(
 ): Promise<HankoString> {
   // Build quorum hanko from signatures
 
-  const { getSignerAddress } = await import('../account-crypto');
+  const { getSignerAddress } = await import('../account/crypto');
 
   // Step 1: Determine which validators signed and which didn't
   const signerSet = new Set(signatures.map(s => s.signerId));
@@ -616,7 +616,7 @@ export async function verifyHankoForHash(
       const validators = (localConsensusConfig.validators || []) as unknown[];
 
       // Convert validators to addresses (local entity: signerId derivation is allowed)
-      const { getSignerAddress } = await import('../account-crypto');
+      const { getSignerAddress } = await import('../account/crypto');
       expectedAddresses = validators.map((validator) => {
         if (typeof validator !== 'string' || !validator) return null;
         const v = validator.trim();

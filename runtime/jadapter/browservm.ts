@@ -16,9 +16,9 @@ import {
   EntityProvider__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 
-import { normalizeEntityId } from '../entity-id-utils';
+import { normalizeEntityId } from '../entity/id';
 import { getBatchSize, isBatchEmpty } from '../jurisdiction/batch';
-import { setDeltaTransformerAddress } from '../proof-builder';
+import { setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import type { BrowserVMState, Env, JTx } from '../types';
 import { normalizeAdapterEvents, processEventBatch, type EventBatchCounter, type RawJEvent } from './helpers';
 import type {

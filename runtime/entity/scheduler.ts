@@ -49,16 +49,16 @@
 
 import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx, AccountInput } from '../types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './scheduler-types';
-import { isLeftEntity } from '../entity-id-utils';
-import { deriveDelta } from '../account-utils';
+import { isLeftEntity } from './id';
+import { deriveDelta } from '../account/utils';
 import { resolveEntityProposerId } from '../state-helpers';
 import { normalizeRebalanceMatchingStrategy } from '../extensions/rebalance/policy';
 import { TIMING } from '../constants';
 import { DEFAULT_SOFT_LIMIT } from '../types';
 import { terminateHtlcRoute } from './tx/htlc-route-lifecycle';
 import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
-import { createStructuredLogger, shortHash, shortId } from '../logger';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../machine/env-events';
+import { createStructuredLogger, shortHash, shortId } from '../infra/logger';
 import { batchAddReserveToCollateral, initJBatch } from '../jurisdiction/batch';
 import { accountInputProposal, accountInputReferenceHeight } from '../account/consensus/flush';
 

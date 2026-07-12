@@ -1,5 +1,5 @@
 import { normalizeRuntimeKey, type RelayStore } from '../relay/store';
-import { compareStableText } from '../serialization-utils';
+import { compareStableText } from '../protocol/serialization';
 import type { HubChild } from './orchestrator-types';
 
 export type PublicHubJurisdiction = {

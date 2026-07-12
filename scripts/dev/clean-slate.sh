@@ -51,7 +51,7 @@ pkill -9 -f "anvil" 2>/dev/null || true
 pkill -9 -f "bash .*scripts/start-anvil.sh" 2>/dev/null || true
 pkill -9 -f "scripts/start-anvil.sh" 2>/dev/null || true
 pkill -9 -f "bun runtime/orchestrator/orchestrator.ts" 2>/dev/null || true
-pkill -9 -f "bun runtime/server.ts" 2>/dev/null || true
+pkill -9 -f "bun runtime/server/index.ts" 2>/dev/null || true
 pkill -9 -f "bun runtime/scripts/start-custody-dev.ts" 2>/dev/null || true
 pkill -9 -f "bun runtime/scripts/start-custody-prod.ts" 2>/dev/null || true
 pkill -9 -f "bun runtime/watchtower/standalone-server.ts" 2>/dev/null || true

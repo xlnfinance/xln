@@ -7,7 +7,7 @@ import {
   cloneCrossJurisdictionRoute,
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import { encodeBuffer } from './codec';
 import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from './keys';
 import { buildHexKeyedMerkle, type RadixMerkleRadix } from './merkle';

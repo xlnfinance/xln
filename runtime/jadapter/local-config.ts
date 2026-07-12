@@ -1,5 +1,5 @@
 import type { JAdapter } from './types';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 
 const DEFAULT_DISPUTE_DELAY_READ_TIMEOUT_MS = 5_000;
 const localConfigLog = createStructuredLogger('jadapter.localConfig');

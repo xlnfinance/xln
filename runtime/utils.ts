@@ -6,7 +6,7 @@
 import { toSvg } from 'jdenticon';
 import { Buffer as BufferPolyfill } from 'buffer';
 
-import { extractNumberFromEntityId } from './entity-factory';
+import { extractNumberFromEntityId } from './entity/factory';
 
 type RuntimePerformance = Pick<Performance, 'now' | 'timeOrigin'>;
 type RuntimeGlobal = typeof globalThis & {

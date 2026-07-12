@@ -7,8 +7,8 @@ import {
   type BookState,
   type OrderbookExtState,
 } from '../../../../orderbook';
-import { getSwapPairPolicyByBaseQuote } from '../../../../account-utils';
-import { createStructuredLogger, shortOrder } from '../../../../logger';
+import { getSwapPairPolicyByBaseQuote } from '../../../../account/utils';
+import { createStructuredLogger, shortOrder } from '../../../../infra/logger';
 import { compareCanonicalText, swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../../orderbook/swap-execution';
 import {
   buildCrossJurisdictionMarketOffer,

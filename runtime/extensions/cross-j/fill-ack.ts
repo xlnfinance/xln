@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { getCrossJurisdictionCommittedProofRatio } from '../../cross-jurisdiction';
+import { getCrossJurisdictionCommittedProofRatio } from './index';
 import type { AccountTx } from '../../types';
 import type { CrossJurisdictionPendingFill } from '../../types/cross-jurisdiction';
 

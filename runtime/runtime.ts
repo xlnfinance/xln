@@ -30,8 +30,8 @@ const RUNTIME_PROCESS_SLOW_MS = Math.max(
 );
 
 import { getPerfMs, getWallClockMs } from './utils';
-import { listOpenSwapOffers } from './open-swap-offers';
-import { setDeltaTransformerAddress } from './proof-builder';
+import { listOpenSwapOffers } from './orderbook/open-swap-offers';
+import { setDeltaTransformerAddress } from './protocol/dispute/proof-builder';
 import {
   buildCanonicalEnvSnapshot,
   buildRuntimeCheckpointSnapshot,
@@ -39,7 +39,7 @@ import {
   restoreDurableRuntimeSnapshot,
 } from './wal/snapshot';
 import { computePersistedEnvStateHash } from './wal/hash';
-import { mergeEntityInputs } from './entity-consensus';
+import { mergeEntityInputs } from './entity/consensus/index';
 import type { JAdapter } from './jadapter';
 import {
   createLazyEntity,
@@ -54,7 +54,7 @@ import {
   isEntityRegistered,
   requestNamedEntity,
   resolveEntityIdentifier,
-} from './entity-factory';
+} from './entity/factory';
 import {
   assignNameOnChain,
   getBrowserVMInstance,
@@ -65,7 +65,7 @@ import {
   submitProcessBatch,
   transferNameBetweenEntities,
 } from './jadapter';
-import { getAvailableJurisdictions } from './jurisdiction-config';
+import { getAvailableJurisdictions } from './jurisdiction/config';
 import { createGossipLayer } from './networking/gossip';
 import {
   attachEventEmitters,
@@ -75,12 +75,12 @@ import {
   flushPendingAuditEvents,
   peekPendingFrameDbRecords,
   setAccountFrameHistoryView,
-} from './env-events';
+} from './machine/env-events';
 import {
   deriveSignerAddressSync,
   getSignerPrivateKey,
   prewarmSignerKeyCache,
-} from './account-crypto';
+} from './account/crypto';
 import {
   buildEntityAdvertisedStateFingerprint,
   buildLocalEntityProfile,
@@ -100,7 +100,7 @@ import {
   type P2PConfig,
   type P2PConnectionState,
   type RuntimeP2PLifecycleDeps,
-} from './runtime-p2p-lifecycle';
+} from './machine/p2p-lifecycle';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -145,8 +145,8 @@ import {
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
   resolveEntityName as resolveEntityNameOriginal,
   searchEntityNames as searchEntityNamesOriginal,
-} from './name-resolution';
-import { decode, encode } from './snapshot-coder'; // encode used in exports
+} from './routing/name-resolution';
+import { decode, encode } from './storage/snapshot-coder'; // encode used in exports
 import {
   deriveDelta,
   isLeft,
@@ -158,13 +158,13 @@ import {
   getDefaultSwapTradingPairs,
   createDemoDelta,
   getDefaultCreditLimit,
-} from './account-utils';
+} from './account/utils';
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
   type CrossJurisdictionSwapSubmitResult,
-} from './runtime-jurisdiction-api';
+} from './machine/jurisdiction-api';
 import {
   buildPendingNetworkOutputs,
   dispatchEntityOutputs,
@@ -177,14 +177,14 @@ import {
   splitPendingOutputsByRetryWindow,
   type RuntimeEntityInputRoutingResult,
   type RuntimeOutputRoutingDeps,
-} from './runtime-output-routing';
+} from './machine/output-routing';
 import { runtimeInputRequiresOutboxCapacity } from './machine/admission';
 import {
   createRuntimeOutputRoutingDeps,
   handleInboundP2PEntityInput as routeInboundP2PEntityInput,
   registerEntityRuntimeHint as registerEntityRuntimeHintForRouting,
   type RuntimeEntityRoutingDeps,
-} from './runtime-entity-routing';
+} from './machine/entity-routing';
 import {
   entityNeedsPeriodicWake as entityNeedsPeriodicWakeForRuntime,
   generateHookPings as generateRuntimeHookPings,
@@ -198,7 +198,7 @@ import {
   deleteScheduledWakeIndex,
   rebuildScheduledWakeIndex,
   refreshScheduledWakeIndex,
-} from './runtime-scheduled-wake';
+} from './machine/scheduled-wake';
 import {
   inferRuntimeLifecyclePhase,
   transitionRuntimeLifecycle,
@@ -207,18 +207,18 @@ import {
   enqueueRuntimeInputs as enqueueRuntimeInputsWithDeps,
   ensureRuntimeMempool,
   type RuntimeInputQueueDeps,
-} from './runtime-input-queue';
-import { submitRuntimeJOutbox } from './runtime-j-submit';
+} from './machine/input-queue';
+import { submitRuntimeJOutbox } from './machine/j-submit';
 import {
   clearRuntimeCleanLogs,
   copyRuntimeCleanLogs,
   getRuntimeCleanLogs,
   type RuntimeCleanLogDeps,
 } from './machine/clean-logs';
-import { applyRuntimeTx } from './runtime-tx-handlers';
-import { applyMergedEntityInputs } from './runtime-entity-inputs';
-import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
-import { calculateSolvency, verifySolvency } from './solvency';
+import { applyRuntimeTx } from './machine/tx-handlers';
+import { applyMergedEntityInputs } from './machine/entity-inputs';
+import { classifyBilateralState, getAccountBarVisual } from './account/view-state';
+import { calculateSolvency, verifySolvency } from './account/solvency';
 import {
   formatTokenAmount,
   formatTokenAmount as formatTokenAmountEthers,
@@ -228,10 +228,10 @@ import {
   formatAssetAmount as formatAssetAmountEthers,
   BigIntMath,
   FINANCIAL_CONSTANTS,
-} from './financial-utils';
+} from './account/financial-utils';
 import { resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
-import { safeStringify } from './serialization-utils';
+import { safeStringify } from './protocol/serialization';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
 import { encodeBuffer, writeBatch } from './storage/codec';
 import { docValueKey, liveKeyForDoc } from './storage/doc-refs';
@@ -316,22 +316,22 @@ import {
   getSignerDisplayInfo,
   log,
 } from './utils';
-import { createStructuredLogger, logError } from './logger';
+import { createStructuredLogger, logError } from './infra/logger';
 import type { PersistedFrameJournal } from './wal/store';
 import {
   buildRuntimeActivityEvents,
   dedupeRuntimeActivityEvents,
   type RuntimeActivityEvent,
   type RuntimeActivityFilters,
-} from './activity-history';
+} from './api/activity-history';
 import { validateRuntimeRecoveryBundle as validateRecoveryBundle } from './recovery/bundle';
 import type { RuntimeRecoveryBundleV1 } from './recovery/types';
-import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
+import { rehydrateRestoredRuntimeInfra } from './machine/infra';
 import {
   clearInfraGossipProfiles,
   loadGossipProfilesFromInfraDb,
   persistGossipProfileToInfraDb,
-} from './runtime-infra-gossip-store';
+} from './machine/infra-gossip-store';
 import {
   closeFrameDb,
   closeInfraDb as closeInfraDbStorage,
@@ -351,7 +351,7 @@ import {
   withStorageWriterLock,
   type RuntimeStorageDbDeps,
   type StorageDbRole,
-} from './runtime-storage-dbs';
+} from './storage/runtime-dbs';
 
 const runtimeLog = createStructuredLogger('runtime');
 
@@ -2615,7 +2615,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
       console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
       console.log('═'.repeat(80));
-      const { formatRuntime } = await import('./runtime-ascii');
+      const { formatRuntime } = await import('./qa/runtime-ascii');
       console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));
       console.log('═'.repeat(80) + '\n');
       console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');
@@ -4062,11 +4062,11 @@ export {
   signAccountFrame,
   verifyAccountSignature,
   getSignerPublicKey,
-} from './account-crypto.js';
+} from './account/crypto.js';
 export {
   buildJEventObservationDigest,
   canonicalJurisdictionEventsHash,
-} from './j-event-observation';
+} from './jurisdiction/event-observation';
 export type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,
@@ -4100,8 +4100,8 @@ export { buildSingleSignerHanko } from './hanko/batch';
 export {
   buildCrossJurisdictionPullReveal,
   getCrossJurisdictionPrivateSeed,
-} from './cross-jurisdiction';
-export { buildDisputeArgumentsForSnapshot } from './dispute-arguments';
+} from './extensions/cross-j/index';
+export { buildDisputeArgumentsForSnapshot } from './protocol/dispute/arguments';
 export {
   buildMppChallengeHeader,
   buildMppCredentialHeader,
@@ -4141,13 +4141,13 @@ export {
   getEntityJAdapter,
   buildDebtEnforcementRuntimeInputFromProjection,
   buildDebtEnforcementRuntimeInput,
-} from './runtime-jurisdiction-api';
+} from './machine/jurisdiction-api';
 export type {
   CrossJurisdictionSwapSubmitParams,
   CrossJurisdictionSwapSubmitResult,
   DebtEnforcementProjectionRuntimeInputParams,
   DebtEnforcementRuntimeInputParams,
-} from './runtime-jurisdiction-api';
+} from './machine/jurisdiction-api';
 
 export async function submitCrossJurisdictionSwap(
   env: Env,
@@ -4158,7 +4158,7 @@ export async function submitCrossJurisdictionSwap(
   return { route };
 }
 
-export { setDeltaTransformerAddress } from './proof-builder';
+export { setDeltaTransformerAddress } from './protocol/dispute/proof-builder';
 
 // Entity ID utilities - universal parsing, provider-scoping, comparison
 export {
@@ -4171,8 +4171,8 @@ export {
   formatEntityIdDisplay,
   entityIdsEqual,
   extractProvider,
-} from './entity-id-utils';
-export type { ParsedEntityId } from './entity-id-utils';
+} from './entity/id';
+export type { ParsedEntityId } from './entity/id';
 
 // ASCII visualization exports
-export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
+export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './qa/runtime-ascii';

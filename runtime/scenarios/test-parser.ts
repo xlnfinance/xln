@@ -3,7 +3,7 @@
  */
 
 import { loadScenarioFromFile, validateScenario } from './loader.js';
-import { safeStringify } from '../serialization-utils.js';
+import { safeStringify } from '../protocol/serialization.js';
 
 async function main() {
   console.log('🧪 Testing Scenario Parser\n');

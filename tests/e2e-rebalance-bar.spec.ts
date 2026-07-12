@@ -12,7 +12,7 @@
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
 import { test, expect, type Browser, type BrowserContext, type Page } from './global-setup';
-import { deriveDelta } from '../runtime/account-utils';
+import { deriveDelta } from '../runtime/account/utils';
 import { ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { APP_BASE_URL, API_BASE_URL, resetProdServer, waitForNamedHubs } from './utils/e2e-baseline';

@@ -7,7 +7,7 @@ import type { Env, JReplica, JTx, JurisdictionConfig } from '../types';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
 import { createXlnJsonRpcProvider } from '../jadapter';
-import { getCachedSignerPrivateKey } from '../account-crypto';
+import { getCachedSignerPrivateKey } from '../account/crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 import { isLoopbackUrl } from '../networking/loopback-url';
 import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge, setScenarioStorageEnabled } from './helpers';

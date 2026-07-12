@@ -2,7 +2,7 @@ import {
   buildDefaultEntitySwapPairs,
   getTokenIdsForJurisdiction,
   getSwapPairOrientation,
-} from '../account-utils';
+} from '../account/utils';
 import type { JurisdictionConfig } from '../types';
 
 type RuntimeSwapTradingPairsState = {

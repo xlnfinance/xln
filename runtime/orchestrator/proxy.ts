@@ -1,6 +1,6 @@
-import { isLocalOperatorRequest } from '../health-redaction';
+import { isLocalOperatorRequest } from '../server/health-redaction';
 import { classifyRuntimeTransportFailure, type RuntimeFailureSignal } from '../protocol/failure-taxonomy';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 import type { HubChild } from './orchestrator-types';
 
 type ProxyHubEndpoint =

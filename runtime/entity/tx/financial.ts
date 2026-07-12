@@ -2,7 +2,7 @@ import type { AssetBalance } from '../../types';
 
 // Financial helpers: formatAssetAmount, addToReserves, subtractFromReserves
 // Use unified financial utilities with ethers.js
-export { formatAssetAmount } from '../../financial-utils';
+export { formatAssetAmount } from '../../account/financial-utils';
 
 export const addToReserves = (
   reserves: Map<string, AssetBalance>,

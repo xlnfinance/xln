@@ -11,9 +11,9 @@ import {
   deriveSignerKeySync,
   deriveSignerAddressSync,
   registerSignerKey,
-} from '../runtime/account-crypto';
-import { encodeBoard, hashBoard } from '../runtime/entity-factory';
-import { createStructuredLogger } from '../runtime/logger';
+} from '../runtime/account/crypto';
+import { encodeBoard, hashBoard } from '../runtime/entity/factory';
+import { createStructuredLogger } from '../runtime/infra/logger';
 import type { ConsensusConfig, Env } from '../runtime/types';
 
 const args = process.argv.slice(2);

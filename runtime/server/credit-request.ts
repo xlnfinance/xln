@@ -1,5 +1,5 @@
 import type { Env, RuntimeInput } from '../types';
-import { safeStringify } from '../serialization-utils';
+import { safeStringify } from '../protocol/serialization';
 import { resolveEntityProposerId } from '../state-helpers';
 import { getAccountMachine, getEntityOutCapacity, hasAccount } from './entity-lookup';
 import { getFaucetHubProfiles } from './faucet-hubs';

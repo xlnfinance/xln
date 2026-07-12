@@ -1,4 +1,4 @@
-import { isLocalOperatorRequest } from '../health-redaction';
+import { isLocalOperatorRequest } from '../server/health-redaction';
 
 export type RuntimeImportAccess = 'read' | 'admin';
 

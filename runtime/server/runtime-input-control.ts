@@ -1,5 +1,5 @@
 import type { Env, RuntimeInput } from '../types';
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import { getControlBodyErrorStatus } from './auth';
 import type { createRuntimeIngressReceiptStore } from './ingress-receipts';
 import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';

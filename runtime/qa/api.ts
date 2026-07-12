@@ -3,9 +3,9 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
-import { compareStableText, safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../protocol/serialization';
 import { DISPLAY, QA } from '../constants';
-import { isLocalOperatorRequest } from '../health-redaction';
+import { isLocalOperatorRequest } from '../server/health-redaction';
 import { makeQaSeveritySignal, type QaSeveritySignal } from './severity';
 import {
   QA_HISTORY_DB_PATH,

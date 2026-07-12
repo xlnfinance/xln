@@ -95,22 +95,22 @@ operational evidence for restart/load stability, not unit-test substitutes.
 ## High-Risk Files
 
 - `runtime/runtime.ts`
-- `runtime/entity-consensus.ts`
-- `runtime/account-consensus.ts`
+- `runtime/entity/consensus/index.ts`
+- `runtime/account/consensus/index.ts`
 - `runtime/entity/tx/apply.ts`
 - `runtime/entity/tx/j-events.ts`
 - `runtime/entity/tx/handlers/account.ts`
 - `runtime/entity/tx/handlers/account-cross-j-followups.ts`
 - `runtime/account/tx/handlers/pull.ts`
 - `runtime/account/tx/handlers/swap-resolve.ts`
-- `runtime/cross-jurisdiction.ts`
+- `runtime/extensions/cross-j/index.ts`
 - `runtime/extensions/cross-j/orderbook.ts`
 - `runtime/storage/read.ts`
 - `runtime/storage/projections.ts`
 - `runtime/storage/canonical-hash.ts`
 - `runtime/jadapter/rpc.ts`
 - `runtime/jadapter/helpers.ts`
-- `runtime/lending.ts`
+- `runtime/extensions/lending.ts`
 - `runtime/types/lending.ts`
 - `runtime/entity/tx/handlers/lending.ts`
 - `runtime/server/lending.ts`

@@ -8,8 +8,8 @@
  * - Zero tolerance for undefined/null in financial flows
  */
 
-import { safeStringify } from './serialization-utils';
-import { isLeftEntity } from './entity-id-utils';
+import { safeStringify } from './protocol/serialization';
+import { isLeftEntity } from './entity/id';
 import { assertAccountFrameDeltaIntegrity } from './account/frame';
 import type {
   ConsensusConfig,

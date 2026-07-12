@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { calculateSolvency, verifySolvency } from '../solvency';
+import { calculateSolvency, verifySolvency } from '../account/solvency';
 import type { Env } from '../types';
 
 const ENTITY_A = `0x${'11'.repeat(32)}`;
@@ -30,7 +30,7 @@ const makeEnv = (): Env => ({
 } as unknown as Env);
 
 test('solvency diagnostics use structured logging only', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/solvency.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/account/solvency.ts'), 'utf8');
 
   expect(source).toContain("const solvencyLog = createStructuredLogger('runtime.solvency');");
   expect(source).toContain("solvencyLog.error('violation'");

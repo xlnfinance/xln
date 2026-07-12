@@ -26,8 +26,8 @@ HankoClaim {
 |------|------|
 | `runtime/hanko/core.ts` | core primitives: sign, pack, unpack, recover, flashloan governance |
 | `runtime/hanko/signing.ts` | consensus integration: signEntityHashes, buildQuorumHanko, verifyHankoForHash |
-| `runtime/account-crypto.ts` | key derivation: BIP-39 + HMAC-SHA256, signDigest, verifyAccountSignature |
-| `runtime/entity-consensus.ts` | entity frame consensus: proposal, hashesToSign, commit with hanko attachment |
+| `runtime/account/crypto.ts` | key derivation: BIP-39 + HMAC-SHA256, signDigest, verifyAccountSignature |
+| `runtime/entity/consensus/index.ts` | entity frame consensus: proposal, hashesToSign, commit with hanko attachment |
 | `jurisdictions/contracts/EntityProvider.sol` | on-chain verification: verifyHankoSignature, ecrecover, board hash |
 | `jurisdictions/contracts/Types.sol` | solidity struct definitions |
 

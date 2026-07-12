@@ -1,5 +1,5 @@
 import type { CrossJurisdictionSwapRoute } from '../../types';
-import { isLiquidSwapToken } from '../../account-utils';
+import { isLiquidSwapToken } from '../../account/utils';
 
 const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();

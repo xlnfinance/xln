@@ -20,10 +20,10 @@
 import type { AccountMachine, Env, EntityInput } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
-import { getOpenSwapOfferEntries } from '../open-swap-offers';
+import { getOpenSwapOfferEntries } from '../orderbook/open-swap-offers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
-import { formatRuntime } from '../runtime-ascii';
+import { formatRuntime } from '../qa/runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput, findReplica } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 import { swapKey } from '../orderbook/swap-execution';
@@ -1123,7 +1123,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const hubAccountAfterStart = requireAccount(hubAfterStart.state.accounts.get(alice.id), 'hub/alice after dispute start');
   const hubActiveDispute = hubAccountAfterStart.activeDispute;
   if (!hubActiveDispute) throw new Error('SWAP_MISSING_HUB_ACTIVE_DISPUTE');
-  const { buildAccountProofBody } = await import('../proof-builder');
+  const { buildAccountProofBody } = await import('../protocol/dispute/proof-builder');
   const hubProofAfterStart = buildAccountProofBody(hubAccountAfterStart);
   assert(
     hubProofAfterStart.proofBodyHash === hubActiveDispute.initialProofbodyHash,

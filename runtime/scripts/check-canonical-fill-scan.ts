@@ -9,7 +9,7 @@ import {
   projectCrossJurisdictionQuantizedClaim,
   validateCrossJurisdictionFillProgress,
   withCrossJurisdictionClaimProgress,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import { buildCrossJurisdictionPendingFillFromAck } from '../extensions/cross-j/fill-ack';
 import { HASHLADDER_MAX_FILL_RATIO } from '../protocol/htlc/hash-ladder';
 import { MAX_SWAP_FILL_RATIO, exactFillRatioToUint16 } from '../orderbook/swap-execution';
@@ -153,7 +153,7 @@ requireCondition(
 );
 
 for (const [path, markers] of [
-  ['runtime/entity-consensus.ts', [
+  ['runtime/entity/consensus/index.ts', [
     'export const MAX_PENDING_CROSS_J_FILL_ACKS = 1024;',
     'const prunePendingCrossJurisdictionFillAcks =',
     'pending.size < MAX_PENDING_CROSS_J_FILL_ACKS',
@@ -163,7 +163,7 @@ for (const [path, markers] of [
     'preserveEvidence: true',
     'Do not delete this pending ack silently',
   ]],
-  ['runtime/cross-jurisdiction.ts', [
+  ['runtime/extensions/cross-j/index.ts', [
     'getCrossJurisdictionCommittedProofRatio',
     'getCrossJurisdictionCommittedFillAmounts',
     'readCrossJurisdictionExactFillRatio',
@@ -204,8 +204,8 @@ for (const [path, markers] of [
 }
 
 for (const path of [
-  'runtime/runtime-ascii.ts',
-  'runtime/proof-builder.ts',
+  'runtime/qa/runtime-ascii.ts',
+  'runtime/protocol/dispute/proof-builder.ts',
   'runtime/networking/gossip-helper.ts',
   'runtime/networking/gossip.ts',
 ] as const) {

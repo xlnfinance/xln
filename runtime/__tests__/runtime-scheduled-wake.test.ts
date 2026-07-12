@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { initCrontab, scheduleHook } from '../entity/scheduler';
-import { applyEntityFrame } from '../entity-consensus';
+import { applyEntityFrame } from '../entity/consensus/index';
 import { createEmptyEnv } from '../runtime';
 import {
   assertScheduledWakeTxAuthorized,
@@ -10,8 +10,8 @@ import {
   MAX_SCHEDULED_WAKE_DIAGNOSTIC_JOBS,
   refreshScheduledWakeIndex,
   type ScheduledWakeTx,
-} from '../runtime-scheduled-wake';
-import { safeStringify } from '../serialization-utils';
+} from '../machine/scheduled-wake';
+import { safeStringify } from '../protocol/serialization';
 import type { EntityReplica, EntityState } from '../types';
 import { buildCanonicalRuntimeStateSnapshot, restoreDurableRuntimeSnapshot } from '../wal/snapshot';
 

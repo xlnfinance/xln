@@ -4,9 +4,9 @@
 
 import type { Env, EntityInput, EntityReplica, Delta, RuntimeInput } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { formatRuntime } from '../runtime-ascii';
-import { setFailFastErrors } from '../logger';
-import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { formatRuntime } from '../qa/runtime-ascii';
+import { setFailFastErrors } from '../infra/logger';
+import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account/crypto';
 import { createGossipLayer } from '../networking/gossip';
 
 // Lazy-loaded process to avoid circular deps

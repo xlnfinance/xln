@@ -12,7 +12,7 @@
 import type { EntityState, EntityTx, EntityInput, Env, JInput } from '../../../types';
 import { cloneEntityState, addMessage } from '../../../state-helpers';
 import { createEmptyBatch, getBatchSize } from '../../../jurisdiction/batch';
-import { createStructuredLogger, shortId } from '../../../logger';
+import { createStructuredLogger, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 

@@ -9,7 +9,7 @@ import type {
 } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
-import { prewarmSignerLabels } from '../account-crypto';
+import { prewarmSignerLabels } from '../account/crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
@@ -34,12 +34,12 @@ import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import { createRelayStore } from '../relay/store';
-import { safeStringify } from '../serialization-utils';
-import { createStructuredLogger } from '../logger';
+import { safeStringify } from '../protocol/serialization';
+import { createStructuredLogger } from '../infra/logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import { findMissingRpcContractCode } from './contract-readiness';
-import { getTokenIdsForJurisdiction } from '../account-utils';
-import { isLocalOperatorRequest, publicLocalHubHealth } from '../health-redaction';
+import { getTokenIdsForJurisdiction } from '../account/utils';
+import { isLocalOperatorRequest, publicLocalHubHealth } from '../server/health-redaction';
 import {
   deriveRuntimeAdapterCapabilityToken,
   resolveRuntimeAdapterAuthAudience,

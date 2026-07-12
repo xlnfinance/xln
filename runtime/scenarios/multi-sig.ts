@@ -28,7 +28,7 @@ export async function multiSig(env: Env): Promise<void> {
   const prevScenarioMode = env.scenarioMode;
   try {
   env.scenarioMode = true; // Deterministic time control
-  const { clearSignerKeys } = await import('../account-crypto');
+  const { clearSignerKeys } = await import('../account/crypto');
   requireRuntimeSeed(env, 'Multi-Sig');
   const offlineSigners = new Set<string>();
 

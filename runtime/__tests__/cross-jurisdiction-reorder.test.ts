@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { buildPreparedCrossJurisdictionRoute } from '../cross-jurisdiction';
+import { buildPreparedCrossJurisdictionRoute } from '../extensions/cross-j/index';
 import { applyEntityTx } from '../entity/tx/apply';
 import { createEmptyEnv } from '../runtime';
 import type { CrossJurisdictionSwapRoute } from '../types';

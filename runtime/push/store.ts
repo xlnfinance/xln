@@ -9,7 +9,7 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Level } from 'level';
-import { serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../protocol/serialization';
 import type { StoredPushRegistration } from './types';
 
 const DEFAULT_REGISTRATION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 days

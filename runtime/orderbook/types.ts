@@ -32,7 +32,7 @@ export {
 
 // Import for local use
 import { MAX_FILL_RATIO } from './core';
-import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from '../account-utils';
+import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from '../account/utils';
 
 // Price tick precision used for ratio encoding in orderbook flows.
 // 10000 = 4 decimals (e.g. 1.2345)

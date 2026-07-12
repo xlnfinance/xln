@@ -1,5 +1,5 @@
 import type { AccountMachine, AccountTx, Delta, Env, JurisdictionConfig } from '../../types';
-import { createStructuredLogger, shortHash, shortId } from '../../logger';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
 import { txFingerprint } from '../../state-helpers';
 import { getJurisdictionConfigName } from '../../jurisdiction/jurisdiction-runtime';
 import { getReplicaByEntityId } from '../../entity/replica';

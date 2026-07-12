@@ -8,9 +8,9 @@ import {
   isHtlcSecretEnforcementWindowClosed,
   proposeAccountFrame,
   validateAccountFrame,
-} from '../account-consensus';
+} from '../account/consensus/index';
 import { computeAccountStateRoot } from '../account/state-root';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account/crypto';
 import { deriveAccountWatchSeed } from '../account/watch-seed';
 import { applyAccountTx } from '../account/tx/apply';
 import { handleHtlcLock } from '../account/tx/handlers/htlc-lock';
@@ -22,14 +22,14 @@ import { handleSwapOffer } from '../account/tx/handlers/swap-offer';
 import { createFrameHash, MAX_ACCOUNT_FRAME_TXS } from '../account/consensus/frame';
 import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity/scheduler';
-import { generateLazyEntityId, generateNumberedEntityId } from '../entity-factory';
-import { isLeftEntity } from '../entity-id-utils';
+import { generateLazyEntityId, generateNumberedEntityId } from '../entity/factory';
+import { isLeftEntity } from '../entity/id';
 import {
   CROSS_J_PENDING_FILL_ACK_TTL_MS,
   MAX_PENDING_CROSS_J_FILL_ACKS,
   applyEntityFrame,
   applyEntityInput,
-} from '../entity-consensus';
+} from '../entity/consensus/index';
 import { createEntityFrameHash } from '../entity/consensus/frame';
 import { buildEntityHashesToSign } from '../entity/consensus/hanko-witness';
 import {
@@ -49,7 +49,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
   withCanonicalCrossJurisdictionRouteHash,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import { applyEntityTx } from '../entity/tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity/tx/handlers/account-cross-j-followups';
 import { applyCommittedHtlcLockFollowup } from '../entity/tx/handlers/account/committed-htlc-followups';
@@ -66,22 +66,22 @@ import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
-} from '../j-event-observation';
+} from '../jurisdiction/event-observation';
 import { getRuntimeJurisdictionHeight } from '../jurisdiction/height';
 import { createEmptyBatch } from '../jurisdiction/batch';
 import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput, validateRuntimeInputAdmission } from '../runtime';
-import { applyMergedEntityInputs } from '../runtime-entity-inputs';
-import { submitRuntimeJOutbox } from '../runtime-j-submit';
-import { safeStringify } from '../serialization-utils';
+import { applyMergedEntityInputs } from '../machine/entity-inputs';
+import { submitRuntimeJOutbox } from '../machine/j-submit';
+import { safeStringify } from '../protocol/serialization';
 import { hydrateAccountDocFromStorage, projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
 import {
   buildDisputeArgumentsForSnapshot,
   captureDisputeArgumentSnapshot,
   storeDisputeArgumentSnapshot,
-} from '../dispute-arguments';
-import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../proof-builder';
+} from '../protocol/dispute/arguments';
+import { buildAccountProofBody, createDisputeProofHashWithNonce, setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import { buildRealHanko } from '../hanko/core';
 import { signEntityHashes, verifyHankoForHash } from '../hanko/signing';
 import { NobleCryptoProvider } from '../protocol/crypto/noble';

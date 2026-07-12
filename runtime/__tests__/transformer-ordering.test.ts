@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildAccountProofBody, setDeltaTransformerAddress } from '../proof-builder';
+import { buildAccountProofBody, setDeltaTransformerAddress } from '../protocol/dispute/proof-builder';
 import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../protocol/transformer-ordering';
 import { asOfferId } from '../orderbook/swap-keys';
 import type { AccountMachine, SwapOffer } from '../types';

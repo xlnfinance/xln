@@ -712,7 +712,7 @@ export interface Env {
       targetRuntimeId: string,
       input: DeliverableEntityInput,
       ingressTimestamp?: number,
-    ) => import('./runtime-output-routing').RuntimeDirectEntityInputDispatchResult) | null;
+    ) => import('./machine/output-routing').RuntimeDirectEntityInputDispatchResult) | null;
     /**
      * True only when the target runtime is already attached to this same
      * server/relay process with a cached encryption key. This is local socket

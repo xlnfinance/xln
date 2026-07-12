@@ -1,5 +1,5 @@
 import { resolveEntityProposerId } from '../state-helpers';
-import { compareStableText } from '../serialization-utils';
+import { compareStableText } from '../protocol/serialization';
 import type { Env } from '../types';
 
 export type ControlEntitySummary = {

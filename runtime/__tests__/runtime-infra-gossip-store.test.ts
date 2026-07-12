@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { loadGossipProfilesFromInfraDb } from '../runtime-infra-gossip-store';
-import { serializeTaggedJson } from '../serialization-utils';
+import { loadGossipProfilesFromInfraDb } from '../machine/infra-gossip-store';
+import { serializeTaggedJson } from '../protocol/serialization';
 import type { Env } from '../types';
 
 const keyText = (key: Buffer | string): string => Buffer.isBuffer(key) ? key.toString() : String(key);
@@ -43,7 +43,7 @@ class FakeInfraDb {
 }
 
 test('runtime infra gossip restore diagnostics use structured logging', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/runtime-infra-gossip-store.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/machine/infra-gossip-store.ts'), 'utf8');
 
   expect(source).toContain("const infraGossipLog = createStructuredLogger('runtime.infra_gossip');");
   expect(source).toContain("infraGossipLog.warn('profile.restore_failed'");

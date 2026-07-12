@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './global-setup';
-import { deriveDelta } from '../runtime/account-utils';
+import { deriveDelta } from '../runtime/account/utils';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import {

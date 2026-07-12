@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { buildRuntimeActivityEvents, dedupeRuntimeActivityEvents } from '../activity-history';
+import { buildRuntimeActivityEvents, dedupeRuntimeActivityEvents } from '../api/activity-history';
 
 const alice = `0x${'aa'.repeat(32)}`;
 const bob = `0x${'bb'.repeat(32)}`;

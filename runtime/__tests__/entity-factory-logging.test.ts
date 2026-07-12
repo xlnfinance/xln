@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createLazyEntity } from '../entity-factory';
+import { createLazyEntity } from '../entity/factory';
 
 test('createLazyEntity is silent when runtime DEBUG is disabled', () => {
   const originalLog = console.log;
@@ -25,7 +25,7 @@ test('createLazyEntity is silent when runtime DEBUG is disabled', () => {
 });
 
 test('entity factory uses structured logging without direct console output', () => {
-  const source = readFileSync(join(process.cwd(), 'runtime/entity-factory.ts'), 'utf8');
+  const source = readFileSync(join(process.cwd(), 'runtime/entity/factory.ts'), 'utf8');
 
   expect(source).toContain("const factoryLog = createStructuredLogger('entity.factory');");
   expect(source).toContain("factoryLog.debug('lazy.create'");

@@ -1,12 +1,12 @@
 import type { AccountMachine, AccountTx, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../../types';
-import { deriveDelta } from '../../../account-utils';
+import { deriveDelta } from '../../utils';
 import { FINANCIAL, LIMITS } from '../../../constants';
 import {
   buildCommittedCrossJurisdictionPullBinding,
   cloneCrossJurisdictionPullBinding,
   getCrossJurisdictionCommittedProofRatio,
   hashCrossJurisdictionCloseBinary,
-} from '../../../cross-jurisdiction';
+} from '../../../extensions/cross-j/index';
 import {
   HASHLADDER_MAX_FILL_RATIO,
   verifyHashLadderBinary,

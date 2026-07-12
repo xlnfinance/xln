@@ -6,7 +6,7 @@ The E-machine is replicated state owned by one entity board. The proposer builds
 
 ## Source
 
-- [`runtime/entity-consensus.ts`](../../runtime/entity-consensus.ts) - consensus facade and commit flow.
+- [`runtime/entity/consensus/index.ts`](../../runtime/entity/consensus/index.ts) - consensus facade and commit flow.
 - [`runtime/entity/consensus/`](../../runtime/entity/consensus) - frame hash, input merge, Hanko witness manifest.
 - [`runtime/entity/tx/apply.ts`](../../runtime/entity/tx/apply.ts) - entity transaction dispatcher.
 - [`runtime/entity/tx/handlers/`](../../runtime/entity/tx/handlers) - account, dispute, J-event, scheduler, and extension handlers.

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from './global-setup';
 import { Interface, MaxUint256, formatUnits, parseUnits } from 'ethers';
-import { deriveDelta } from '../runtime/account-utils';
+import { deriveDelta } from '../runtime/account/utils';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
 import { connectRuntimeToHub, connectRuntimeToHubWithCredit } from './utils/e2e-connect';

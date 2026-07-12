@@ -26,7 +26,7 @@ import {
   requireRuntimeJurisdictionConfigByName,
 } from '../../../jurisdiction/jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
-import { createStructuredLogger, shortHash, shortId } from '../../../logger';
+import { createStructuredLogger, shortHash, shortId } from '../../../infra/logger';
 
 const jBatchActionLog = createStructuredLogger('entity.jbatch');
 

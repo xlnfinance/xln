@@ -138,11 +138,11 @@ describe('production startup wiring', () => {
     const marketMakerPoller = readFileSync(join(repoRoot, 'runtime/orchestrator/market-maker-child-poll.ts'), 'utf8');
     const marketMakerAggregation = readFileSync(join(repoRoot, 'runtime/orchestrator/market-maker-aggregated-health.ts'), 'utf8');
     const orchestratorConfig = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-config.ts'), 'utf8');
-    const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/runtime-entity-routing.ts'), 'utf8');
+    const runtimeEntityRouting = readFileSync(join(repoRoot, 'runtime/machine/entity-routing.ts'), 'utf8');
     const runtimeMainSource = readFileSync(join(repoRoot, 'runtime/runtime.ts'), 'utf8');
-    const standaloneServer = readFileSync(join(repoRoot, 'runtime/server.ts'), 'utf8');
+    const standaloneServer = readFileSync(join(repoRoot, 'runtime/server/index.ts'), 'utf8');
     const startCustodyDev = readFileSync(join(repoRoot, 'runtime/scripts/start-custody-dev.ts'), 'utf8');
-    const cli = readFileSync(join(repoRoot, 'runtime/cli.ts'), 'utf8');
+    const cli = readFileSync(join(repoRoot, 'runtime/server/cli.ts'), 'utf8');
     expect(orchestratorConfig).toContain("relayUrl: normalizeWsUrl(getArg('--relay-url', process.env['RELAY_URL'] || '')");
     expect(orchestratorConfig).toContain("const RPC_PROXY_INDEXES = [1, 2, 3, 4, 5, 6, 7, 8] as const;");
     expect(orchestratorConfig).toContain("readPositiveIntEnv('XLN_CHILD_HEALTH_TIMEOUT_MS', 30_000)");
@@ -270,7 +270,7 @@ describe('production startup wiring', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
     const serverJurisdictions = readFileSync(join(repoRoot, 'runtime/server/jurisdictions.ts'), 'utf8');
     const mmNode = readFileSync(join(repoRoot, 'runtime/orchestrator/mm-node.ts'), 'utf8');
-    const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/runtime-tx-handlers.ts'), 'utf8');
+    const runtimeTxHandlers = readFileSync(join(repoRoot, 'runtime/machine/tx-handlers.ts'), 'utf8');
     const jadapterTypes = readFileSync(join(repoRoot, 'runtime/jadapter/types.ts'), 'utf8');
     const rpcAdapter = readFileSync(join(repoRoot, 'runtime/jadapter/rpc.ts'), 'utf8');
     expect(hubNode).toContain("nodeLog.info('jurisdiction_contracts.stale_dropped'");
@@ -347,7 +347,7 @@ describe('production startup wiring', () => {
     expect(hubNode).toContain('await persistRestoredEnvToDB(env);');
     expect(hubNode).toContain('startRuntimeLoop(env, {');
     expect(hubNode).toContain("nodeLog.info('bootstrap_ready_snapshot.persisted'");
-    expect(hubNode).toContain("import { prewarmSignerLabels } from '../account-crypto';");
+    expect(hubNode).toContain("import { prewarmSignerLabels } from '../account/crypto';");
     expect(hubNode).toContain('const buildLocalHubSignerLabels = (): string[] => {');
     expect(hubNode).toContain('const prewarmLocalHubSignerKeys = (): void => {');
     expect(hubNode).toContain('prewarmLocalHubSignerKeys();');
@@ -1381,7 +1381,7 @@ describe('production startup wiring', () => {
   test('bootstrap timeline stages expose typed failure metadata', () => {
     const orchestrator = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator.ts'), 'utf8');
     const types = readFileSync(join(repoRoot, 'runtime/orchestrator/orchestrator-types.ts'), 'utf8');
-    const healthRedaction = readFileSync(join(repoRoot, 'runtime/health-redaction.ts'), 'utf8');
+    const healthRedaction = readFileSync(join(repoRoot, 'runtime/server/health-redaction.ts'), 'utf8');
 
     expect(types).toContain('failure: RuntimeFailureSignal | null;');
     expect(orchestrator).toContain('classifyRuntimeBootstrapStageFailure');
@@ -1478,7 +1478,7 @@ describe('production startup wiring', () => {
 
   test('hub support-peer provisioning uses full jurisdiction token sets', () => {
     const hubNode = readFileSync(join(repoRoot, 'runtime/orchestrator/hub-node.ts'), 'utf8');
-    expect(hubNode).toContain("import { getTokenIdsForJurisdiction } from '../account-utils';");
+    expect(hubNode).toContain("import { getTokenIdsForJurisdiction } from '../account/utils';");
     expect(hubNode).toContain('const tokenIdsForHubJurisdiction = (');
     expect(hubNode).toContain('const tokenCatalogForHubJurisdiction = (');
 

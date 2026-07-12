@@ -32,7 +32,7 @@ import type { Profile } from '../networking/gossip';
 import { verifyProfileSignature, type ProfileVerifyResult } from '../networking/profile-signing';
 import { verifyHelloAuth } from '../networking/hello-auth';
 import { isDeliveryDelivered, type DeliveryResult } from '../protocol/payments/delivery-result';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 const SOCKET_DUPLICATE_CLOSING = Symbol.for('xln.relay.duplicateClosing');

@@ -73,13 +73,13 @@ Cross-Local Network enables entities to:
 ### E - Entity Layer (Off-Chain BFT Consensus)
 - **What:** Distributed organizations with threshold signatures
 - **Flow:** ADD_TX → PROPOSE → SIGN → COMMIT
-- **Source:** `/runtime/entity-consensus.ts`
+- **Source:** `/runtime/entity/consensus/index.ts`
 - **Deterministic:** Nonce-based ordering, Merkle state roots
 
 ### A - Account Layer (Bilateral Channels)
 - **What:** Payment channels between entity pairs
 - **Perspective:** Left/right with canonical ordering (entityA < entityB)
-- **Source:** `/runtime/account-consensus.ts`
+- **Source:** `/runtime/account/consensus/index.ts`
 - **Settlement:** Bilateral state verification with Merkle proofs
 
 ---

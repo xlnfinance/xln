@@ -8,7 +8,7 @@ import {
   buildCrossJurisdictionPullReveal,
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
-} from '../cross-jurisdiction';
+} from '../extensions/cross-j/index';
 import { validateCrossJurisdictionLocalBinding } from '../entity/tx/cross-jurisdiction-helpers';
 import { createEmptyEnv } from '../runtime';
 import type { CrossJurisdictionSwapRoute } from '../types';

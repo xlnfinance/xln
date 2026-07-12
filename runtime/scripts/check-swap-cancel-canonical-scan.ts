@@ -43,7 +43,7 @@ assertIncludes(frontend, "type: 'proposeCancelSwap'", frontendPath);
 assertNotIncludes(frontend, "type: 'cancelSwap'", frontendPath);
 assertNotIncludes(frontend, "type: 'cancelSwapOffer'", frontendPath);
 
-const activityPath = 'runtime/activity-history.ts';
+const activityPath = 'runtime/api/activity-history.ts';
 const activity = readText(activityPath);
 assertIncludes(activity, "case 'cancelSwap':", activityPath);
 assertIncludes(activity, "case 'cancelSwapOffer':", activityPath);

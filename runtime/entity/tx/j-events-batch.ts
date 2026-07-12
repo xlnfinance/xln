@@ -11,7 +11,7 @@ import { addMessage } from '../../state-helpers';
 import { filterActiveDisputeFinalizations } from './dispute-finalize-guards';
 import { appendBatchHistory } from './j-events-history';
 import { findAccountEntryByCounterparty } from './j-events-account-lookup';
-import { createStructuredLogger } from '../../logger';
+import { createStructuredLogger } from '../../infra/logger';
 
 const jEventBatchLog = createStructuredLogger('j.event.batch');
 

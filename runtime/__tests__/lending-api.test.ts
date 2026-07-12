@@ -28,7 +28,7 @@ describe('lending API boundary', () => {
   });
 
   test('unauthenticated POST mutation routes are absent', () => {
-    for (const path of ['runtime/server.ts', 'runtime/orchestrator/hub-node.ts', 'runtime/orchestrator/orchestrator.ts']) {
+    for (const path of ['runtime/server/index.ts', 'runtime/orchestrator/hub-node.ts', 'runtime/orchestrator/orchestrator.ts']) {
       const source = readFileSync(path, 'utf8');
       expect(source).not.toContain("pathname === '/api/lending/offer'");
       expect(source).not.toContain("pathname === '/api/lending/borrow'");

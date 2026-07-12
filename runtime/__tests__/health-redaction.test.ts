@@ -3,7 +3,7 @@ import {
   isLocalOperatorRequest,
   publicAggregatedHealth,
   publicRuntimeHealth,
-} from '../health-redaction';
+} from '../server/health-redaction';
 
 test('health redaction keeps local operator requests on loopback only', () => {
   expect(isLocalOperatorRequest(new Request('http://127.0.0.1:8080/api/health'))).toBe(true);

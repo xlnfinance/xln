@@ -1,12 +1,12 @@
 /**
- * Standalone relay process backed by the same relay router as runtime/server.ts.
+ * Standalone relay process backed by the same relay router as runtime/server/index.ts.
  */
 
 import { createRelayStore, removeClient, type RelayStore } from './store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './router';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { normalizeRuntimeId } from '../networking/runtime-id';
-import { createStructuredLogger } from '../logger';
+import { createStructuredLogger } from '../infra/logger';
 
 type StandaloneRelayOptions = {
   host?: string;

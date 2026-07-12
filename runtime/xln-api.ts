@@ -87,9 +87,9 @@ export type {
   MppJsonValue,
   MppReceipt,
 } from './agent-payments/mpp';
-export type { RuntimeActivityEvent, RuntimeActivityFilters } from './activity-history';
+export type { RuntimeActivityEvent, RuntimeActivityFilters } from './api/activity-history';
 export type { DeliveryOutcome, DeliveryResult } from './protocol/payments/delivery-result';
-export type { RuntimeEntityInputRoutingResult } from './runtime-output-routing';
+export type { RuntimeEntityInputRoutingResult } from './machine/output-routing';
 export type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -177,8 +177,8 @@ import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
-import type { RuntimeActivityFilters } from './activity-history';
-import type { RuntimeEntityInputRoutingResult } from './runtime-output-routing';
+import type { RuntimeActivityFilters } from './api/activity-history';
+import type { RuntimeEntityInputRoutingResult } from './machine/output-routing';
 import type {
   RuntimeAdapterAccountPage,
   RuntimeAdapterBookPage,
@@ -339,11 +339,11 @@ export interface XLNModule {
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   getEntityJAdapter: (env: Env, entityId: string, signerId?: string) => JAdapter | null;
   buildDebtEnforcementRuntimeInputFromProjection: (
-    params: import('./runtime-jurisdiction-api').DebtEnforcementProjectionRuntimeInputParams,
+    params: import('./machine/jurisdiction-api').DebtEnforcementProjectionRuntimeInputParams,
   ) => RuntimeInput;
   buildDebtEnforcementRuntimeInput: (
     env: Env,
-    params: import('./runtime-jurisdiction-api').DebtEnforcementRuntimeInputParams,
+    params: import('./machine/jurisdiction-api').DebtEnforcementRuntimeInputParams,
   ) => RuntimeInput;
   processJBlockEvents?: (env: Env) => Promise<void>;
   applyJEventsToEnv?: (env: Env, events: import('./jadapter/types').JEvent[], label?: string) => void;

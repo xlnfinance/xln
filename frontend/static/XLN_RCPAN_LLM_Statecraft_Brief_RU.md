@@ -128,8 +128,8 @@ Your task:
 | Claim | Files | What to verify |
 |---|---|---|
 | RCPAN invariant | docs/core/12_invariant.md, docs/intro.md | Формула −L_left ≤ Δ ≤ C + L_right; банки как C=0, Lightning как L=0. |
-| Fast path | runtime/account-consensus.ts | ADD_TX → PROPOSE → SIGN → COMMIT; двусторонние подписи кадров аккаунта. |
-| Entity/quorum authorization | EntityProvider.sol, runtime/entity-consensus.ts | Hanko, quorum signatures, hierarchical entity verification. |
+| Fast path | runtime/account/consensus/index.ts | ADD_TX → PROPOSE → SIGN → COMMIT; двусторонние подписи кадров аккаунта. |
+| Entity/quorum authorization | EntityProvider.sol, runtime/entity/consensus/index.ts | Hanko, quorum signatures, hierarchical entity verification. |
 | Jurisdiction enforcement | Depository.sol, Account.sol, DeltaTransformer.sol | Collateral, settlement diffs, disputes, FIFO debts, transformer verification. |
 | Mainnet caveats | docs/status.md, docs/mainnet.md, docs/recovery-watchtower-protocol.md | Production-demo/public-testnet grade; recovery/watchtower and external audit are launch gates. |
 

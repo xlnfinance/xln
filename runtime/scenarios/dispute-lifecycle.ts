@@ -10,7 +10,7 @@
 
 import type { AccountMachine, Env } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { getAccountFrameHistoryView } from '../env-events';
+import { getAccountFrameHistoryView } from '../machine/env-events';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {
   getProcess,

@@ -14,7 +14,7 @@ echo "=== Restarting XLN Server ==="
 echo "[1/4] Stopping existing processes..."
 pm2 delete xln-server 2>/dev/null || true
 pkill -f "bun.*runtime/orchestrator/orchestrator.ts" 2>/dev/null || true
-pkill -f "bun.*runtime/server.ts" 2>/dev/null || true
+pkill -f "bun.*runtime/server/index.ts" 2>/dev/null || true
 sleep 2
 
 # Set environment

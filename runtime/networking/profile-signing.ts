@@ -20,8 +20,8 @@ import { keccak256 } from 'ethers';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, type Profile } from './gossip';
 import type { Env, HankoString } from '../types';
 import { inspectHankoForHash, signEntityHashes, verifyHankoForHash } from '../hanko/signing';
-import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
-import { serializeTaggedJson } from '../serialization-utils';
+import { getSignerAddress, getSignerPublicKey } from '../account/crypto';
+import { serializeTaggedJson } from '../protocol/serialization';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 const bytesToHex = (bytes: Uint8Array): string =>

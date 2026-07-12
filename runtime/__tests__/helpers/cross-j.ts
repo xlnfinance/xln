@@ -1,13 +1,13 @@
 import { deriveAccountWatchSeed } from '../../account/watch-seed';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../account-crypto';
-import { buildCrossJurisdictionPullBinding } from '../../cross-jurisdiction';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../../account/crypto';
+import { buildCrossJurisdictionPullBinding } from '../../extensions/cross-j/index';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../../extensions/cross-j/orderbook';
 import { getJurisdictionStackId } from '../../jurisdiction/jurisdiction-runtime';
 import {
   buildJEventObservationDigest,
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
-} from '../../j-event-observation';
+} from '../../jurisdiction/event-observation';
 import type {
   AccountMachine,
   ConsensusConfig,

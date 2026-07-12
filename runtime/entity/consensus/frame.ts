@@ -1,13 +1,13 @@
 import { ethers } from 'ethers';
 import type { AccountTx, EntityState, EntityTx } from '../../types';
 import { HEAVY_LOGS } from '../../utils';
-import { createStructuredLogger, shortHash, shortId } from '../../logger';
-import { safeStringify } from '../../serialization-utils';
+import { createStructuredLogger, shortHash, shortId } from '../../infra/logger';
+import { safeStringify } from '../../protocol/serialization';
 import { compareCanonicalText } from '../../orderbook/swap-execution';
 import {
   canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
-} from '../../j-event-observation';
+} from '../../jurisdiction/event-observation';
 import { normalizeJurisdictionEvents } from '../../jurisdiction/event-normalization';
 import { canonicalAccountTxForFrameHash } from '../../account/consensus/frame';
 import { computeAccountShadowRoot } from '../../account/state-root';

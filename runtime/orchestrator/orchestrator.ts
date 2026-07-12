@@ -6,10 +6,10 @@ import { closeSync, existsSync, mkdirSync, openSync, readSync, rmSync, statSync,
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { compareStableText, safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../protocol/serialization';
 import { REMOTE_RUNTIME } from '../constants';
-import { createStructuredLogger } from '../logger';
-import { deriveSignerAddressSync } from '../account-crypto';
+import { createStructuredLogger } from '../infra/logger';
+import { deriveSignerAddressSync } from '../account/crypto';
 import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { sanitizeChildProcessEnv } from '../server/child-process-env';
 import {
@@ -38,7 +38,7 @@ import {
   resolveAssistantRateClientId,
 } from '../server/assistant-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
-import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
+import { isLocalOperatorRequest, publicAggregatedHealth } from '../server/health-redaction';
 import {
   normalizeRuntimeImportAccess,
   resolveRuntimeImportAccessForRequest,
@@ -122,7 +122,7 @@ import { createMarketMakerChildPoller } from './market-maker-child-poll';
 import { buildAggregatedMarketMakerHealth } from './market-maker-aggregated-health';
 import { resolveRuntimeImportReadiness } from './runtime-import-readiness';
 import { buildRuntimeHealthFailures, classifyRuntimeBootstrapStageFailure } from '../protocol/failure-taxonomy';
-import { STORAGE_WRITER_LOCK_TTL_MS } from '../runtime-storage-dbs';
+import { STORAGE_WRITER_LOCK_TTL_MS } from '../storage/runtime-dbs';
 import {
   deriveMeshChildSeed,
   readMeshSeedOverrides,
