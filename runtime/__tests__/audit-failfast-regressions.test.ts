@@ -31,6 +31,7 @@ import {
   applyEntityInput,
 } from '../entity-consensus';
 import { createEntityFrameHash } from '../entity-consensus-frame';
+import { buildEntityHashesToSign } from '../entity-consensus/hanko-witness';
 import {
   assertCrossJurisdictionOrderAdmissible,
   findCrossJurisdictionBookAdmissionForAck,
@@ -3635,7 +3636,106 @@ describe('audit fail-fast regressions', () => {
     expect(result.workingReplica.state.profile.name).toBe('Signed Profile');
   });
 
-  test('entity commit rejects invalid secondary hash signatures', async () => {
+  test('entity validator signs only the secondary hash manifest emitted by local replay', async () => {
+    const seed = 'entity-validator-local-secondary-manifest seed alpha beta gamma';
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 42_500;
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const entityId = generateLazyEntityId([first.signerId, second.signerId], 2n).toLowerCase();
+    const config: ConsensusConfig = {
+      ...makeSingleSignerConfigFor(first.signerId),
+      threshold: 2n,
+      validators: [first.signerId, second.signerId],
+      shares: { [first.signerId]: 1n, [second.signerId]: 1n },
+    };
+    const frameTxs: EntityTx[] = [{
+      type: 'profile-update',
+      data: { profile: { entityId, name: 'Manifest Bound' } },
+    } as any];
+    const baseState = makeEntityState(entityId);
+    baseState.config = config;
+    const { newState, deterministicState, collectedHashes = [] } = await applyEntityFrame(
+      env,
+      baseState,
+      frameTxs,
+      env.timestamp,
+    );
+    const proposedNewState = { ...newState, entityId, height: 1, timestamp: env.timestamp };
+    const frameHash = await createEntityFrameHash(
+      'genesis',
+      1,
+      env.timestamp,
+      frameTxs,
+      { ...deterministicState, entityId, height: 1, timestamp: env.timestamp },
+    );
+    const localManifest = buildEntityHashesToSign(entityId, 1, frameHash, collectedHashes);
+    const attackerHash = ethers.keccak256(ethers.toUtf8Bytes('attacker-selected-dispute-hash'));
+    const validatorReplica: EntityReplica = {
+      entityId,
+      signerId: second.signerId,
+      mempool: [],
+      isProposer: false,
+      state: baseState,
+    };
+
+    const forgedProposalResult = await applyEntityInput(env, validatorReplica, {
+      entityId,
+      signerId: second.signerId,
+      proposedFrame: {
+        height: 1,
+        txs: frameTxs,
+        hash: frameHash,
+        newState: proposedNewState,
+        hashesToSign: [
+          ...localManifest,
+          { hash: attackerHash, type: 'dispute', context: 'attacker-selected' },
+        ],
+      },
+    });
+
+    expect(forgedProposalResult.accepted).toBe(false);
+    expect(forgedProposalResult.outputs).toEqual([]);
+    expect(forgedProposalResult.workingReplica.lockedFrame).toBeUndefined();
+
+    const honestProposal = {
+      height: 1,
+      txs: frameTxs,
+      hash: frameHash,
+      newState: proposedNewState,
+      hashesToSign: localManifest,
+    };
+    const precommitResult = await applyEntityInput(env, validatorReplica, {
+      entityId,
+      signerId: second.signerId,
+      proposedFrame: honestProposal,
+    });
+    expect(precommitResult.workingReplica.lockedFrame?.hash).toBe(frameHash);
+
+    const signaturesBySigner = new Map([
+      [first.signerId, localManifest.map(({ hash }) => signAccountFrame(env, first.signerId, hash))],
+      [second.signerId, localManifest.map(({ hash }) => signAccountFrame(env, second.signerId, hash))],
+    ]);
+    const relabeledManifest = localManifest.map((entry, index) => index === 0
+      ? { ...entry, type: 'accountFrame' as const, context: 'relabeled-after-precommit' }
+      : entry);
+    const mutatedCommitResult = await applyEntityInput(env, precommitResult.workingReplica, {
+      entityId,
+      signerId: second.signerId,
+      proposedFrame: {
+        ...honestProposal,
+        hashesToSign: relabeledManifest,
+        collectedSigs: signaturesBySigner,
+      },
+    });
+
+    expect(mutatedCommitResult.accepted).toBe(false);
+    expect(mutatedCommitResult.workingReplica.state.height).toBe(0);
+  });
+
+  test('entity catch-up commit rejects a secondary hash not emitted by local replay', async () => {
     const seed = 'entity-commit-secondary-signature-binding seed alpha beta gamma';
     const env = createEmptyEnv(seed);
     env.scenarioMode = true;
@@ -3674,9 +3774,8 @@ describe('audit fail-fast regressions', () => {
       honestNewState,
     );
     const secondaryHash = ethers.keccak256(ethers.toUtf8Bytes('account-frame-secondary-hash'));
-    const wrongSecondaryHash = ethers.keccak256(ethers.toUtf8Bytes('wrong-secondary-hash'));
     const frameSig = signAccountFrame(env, signerId, frameHash);
-    const forgedSecondarySig = signAccountFrame(env, signerId, wrongSecondaryHash);
+    const secondarySig = signAccountFrame(env, signerId, secondaryHash);
     const replica = {
       entityId,
       signerId,
@@ -3698,7 +3797,7 @@ describe('audit fail-fast regressions', () => {
           { hash: frameHash, type: 'entityFrame', context: 'entity-frame' },
           { hash: secondaryHash, type: 'accountFrame', context: 'account-frame' },
         ],
-        collectedSigs: new Map([[signerId, [frameSig, forgedSecondarySig]]]),
+        collectedSigs: new Map([[signerId, [frameSig, secondarySig]]]),
       },
     });
 

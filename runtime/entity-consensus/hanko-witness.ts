@@ -102,3 +102,21 @@ export const buildEntityHashesToSign = (
     context: `entity:${entityId.slice(-4)}:frame:${height}`,
   }, ...additionalHashes];
 };
+
+export const getEntityHashManifestMismatch = (
+  expected: readonly HashToSign[],
+  received: readonly HashToSign[] | undefined,
+): string | null => {
+  if (!received) return 'manifest missing';
+  if (received.length !== expected.length) {
+    return `length ${received.length} != ${expected.length}`;
+  }
+  for (let index = 0; index < expected.length; index += 1) {
+    const local = expected[index]!;
+    const remote = received[index]!;
+    if (local.hash !== remote.hash || local.type !== remote.type || local.context !== remote.context) {
+      return `entry ${index} differs`;
+    }
+  }
+  return null;
+};

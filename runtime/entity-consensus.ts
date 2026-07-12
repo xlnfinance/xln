@@ -75,6 +75,7 @@ import { proposeAccountFrame } from './account-consensus/propose';
 import {
   attachHankoWitnessToOutputs,
   buildEntityHashesToSign,
+  getEntityHashManifestMismatch,
   isWitnessHashType,
   normalizeProposedFrameCollectedSigs,
   type HankoWitnessEntry,
@@ -704,6 +705,14 @@ const finishApplyEntityInput = (context: ApplyEntityInputContext): ApplyEntityIn
   workingReplica: context.workingReplica,
 });
 
+const rejectEntityConsensusInput = (context: ApplyEntityInputContext): ApplyEntityInputResult => ({
+  accepted: false,
+  newState: context.workingReplica.state,
+  outputs: [],
+  jOutputs: [],
+  workingReplica: context.workingReplica,
+});
+
 async function handleCommitNotification(
   context: ApplyEntityInputContext,
 ): Promise<ApplyEntityInputResult | null> {
@@ -720,6 +729,9 @@ async function handleCommitNotification(
     return null;
   }
 
+  let stateToApply = workingReplica.validatorComputedState;
+  let expectedHashesToSign = workingReplica.lockedFrame?.hashesToSign;
+
   if (workingReplica.lockedFrame) {
     if (workingReplica.lockedFrame.hash !== proposedFrame.hash) {
       logError('FRAME_CONSENSUS', `❌ BYZANTINE: Commit frame doesn't match locked frame!`);
@@ -730,30 +742,9 @@ async function handleCommitNotification(
     entityLog.debug('commit.locked_frame_verified', { frame: shortHash(workingReplica.lockedFrame.hash) });
   }
 
-  for (const [signerId, sigs] of frameCollectedSigs) {
-    if (!verifyHashPrecommitSignatures(
-      env,
-      signerId,
-      proposedFrame.hashesToSign,
-      proposedFrame.hash,
-      proposedFrame.height,
-      sigs,
-      'COMMIT_REJECTED',
-    )) {
-      logError('FRAME_CONSENSUS', `❌ BYZANTINE: Invalid hash signature bundle from ${signerId}`);
-      logError('FRAME_CONSENSUS', `   Frame hash: ${proposedFrame.hash.slice(0, 30)}...`);
-      return finishApplyEntityInput(context);
-    }
-  }
-  entityLog.debug('commit.signatures_verified', {
-    count: frameCollectedSigs.size,
-    frame: shortHash(proposedFrame.hash),
-  });
-
   // Normally use the validator-computed state. If this replica missed the proposal
   // but is exactly one frame behind, replay the signed txs locally.
-  let stateToApply = workingReplica.validatorComputedState;
-  if (!stateToApply) {
+  if (!stateToApply || !expectedHashesToSign) {
     const expectedPrevHeight = proposedFrame.height - 1;
     if (workingReplica.state.height !== expectedPrevHeight) {
       entityLog.warn('commit.catch_up_state_wait', {
@@ -765,7 +756,10 @@ async function handleCommitNotification(
       return finishApplyEntityInput(context);
     }
 
-    const { newState: replayedState } = await applyEntityFrame(
+    const {
+      newState: replayedState,
+      collectedHashes: replayedCollectedHashes = [],
+    } = await applyEntityFrame(
       env,
       workingReplica.state,
       proposedFrame.txs,
@@ -790,12 +784,52 @@ async function handleCommitNotification(
       logError('FRAME_CONSENSUS', `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
       return finishApplyEntityInput(context);
     }
+    expectedHashesToSign = buildEntityHashesToSign(
+      workingReplica.state.entityId,
+      proposedFrame.height,
+      replayedHash,
+      replayedCollectedHashes,
+    );
     stateToApply = replayedCommitState;
     entityLog.warn('commit.catch_up_state_replayed', {
       height: proposedFrame.height,
       frame: shortHash(proposedFrame.hash),
     });
   }
+
+  const manifestMismatch = getEntityHashManifestMismatch(expectedHashesToSign, proposedFrame.hashesToSign);
+  if (manifestMismatch) {
+    logError(
+      'FRAME_CONSENSUS',
+      `❌ BYZANTINE: Commit secondary hash manifest mismatch: ${manifestMismatch}`,
+      {
+        frame: proposedFrame.hash,
+        expected: expectedHashesToSign,
+        received: proposedFrame.hashesToSign ?? null,
+      },
+    );
+    return rejectEntityConsensusInput(context);
+  }
+
+  for (const [signerId, sigs] of frameCollectedSigs) {
+    if (!verifyHashPrecommitSignatures(
+      env,
+      signerId,
+      expectedHashesToSign,
+      proposedFrame.hash,
+      proposedFrame.height,
+      sigs,
+      'COMMIT_REJECTED',
+    )) {
+      logError('FRAME_CONSENSUS', `❌ BYZANTINE: Invalid hash signature bundle from ${signerId}`);
+      logError('FRAME_CONSENSUS', `   Frame hash: ${proposedFrame.hash.slice(0, 30)}...`);
+      return finishApplyEntityInput(context);
+    }
+  }
+  entityLog.debug('commit.signatures_verified', {
+    count: frameCollectedSigs.size,
+    frame: shortHash(proposedFrame.hash),
+  });
 
   workingReplica.state = {
     ...stateToApply,
@@ -849,7 +883,10 @@ async function handleProposedFramePrecommit(
     return null;
   }
 
-  const { newState: validatorComputedState } = await applyEntityFrame(
+  const {
+    newState: validatorComputedState,
+    collectedHashes: validatorCollectedHashes = [],
+  } = await applyEntityFrame(
     env,
     workingReplica.state,
     proposedFrame.txs,
@@ -881,13 +918,32 @@ async function handleProposedFramePrecommit(
 
   entityLog.debug('proposal.hash_verified', { frame: shortHash(proposedFrame.hash) });
 
-  const hashesToSign = proposedFrame.hashesToSign || [
-    { hash: proposedFrame.hash, type: 'entityFrame' as const, context: '' },
-  ];
-  const allSignatures = await Promise.all(hashesToSign.map(h => signFrame(env, workingReplica.signerId, h.hash)));
+  const hashesToSign = buildEntityHashesToSign(
+    workingReplica.state.entityId,
+    proposedFrame.height,
+    validatorComputedHash,
+    validatorCollectedHashes,
+  );
+  const manifestMismatch = getEntityHashManifestMismatch(hashesToSign, proposedFrame.hashesToSign);
+  if (manifestMismatch) {
+    logError(
+      'FRAME_CONSENSUS',
+      `❌ BYZANTINE: Secondary hash manifest mismatch: ${manifestMismatch}`,
+      {
+        frame: proposedFrame.hash,
+        expected: hashesToSign,
+        received: proposedFrame.hashesToSign ?? null,
+      },
+    );
+    return rejectEntityConsensusInput(context);
+  }
+
+  const allSignatures = await Promise.all(
+    hashesToSign.map(hashInfo => signFrame(env, workingReplica.signerId, hashInfo.hash)),
+  );
   entityLog.debug('proposal.hashes_signed', { count: allSignatures.length });
 
-  workingReplica.lockedFrame = proposedFrame;
+  workingReplica.lockedFrame = { ...proposedFrame, hashesToSign };
   workingReplica.validatorComputedState = validatorNewState;
 
   if (config.mode === 'gossip-based') {
